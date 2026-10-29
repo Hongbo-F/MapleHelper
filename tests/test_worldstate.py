@@ -165,8 +165,10 @@ def test_her_exp_gains_and_hits_come_as_events_at_their_frames(step):
         step.eyes.hp = 0.9 if k >= 40 else 1.0
     states = frames(step, 60, each=each)
     events = [(s.seq, e.kind) for s in states for e in s.events]
-    assert events == [(21, "exp_gain"), (41, "hp_drop")]
+    # (her HP dropping with no popup of hers told, these eyes reading none, is a touch too: perception.touches.HP)
+    assert events == [(21, "exp_gain"), (41, "hp_drop"), (41, "touch")]
     assert states[40].events[0].data == {"lost": 0.1, "hp": 0.9, "new": True}
+    assert states[40].events[1].data["how"] == "hp" and states[-1].touch["kind"] == "damage"
 
 
 def test_a_scene_from_a_state_is_the_look_it_stands_for(step):

@@ -43,22 +43,25 @@ Topics (map units; producers build the records, ui.state folds them):
             chance}], chose                                    trip's first, the ways it chose among: route.ROUTES)
   chain     why, text, legs [{kind, src, dst, spans, end}]     control.navigator, each key plan sent
   moved     moves [{kind, src, dst, x}], planned, landed, hit  control.navigator, after a chain or a move (from
-                                                               2026-10-21: the coverage report's)
+            (touched on the way: from 2026-10-28 any touch,    2026-10-21: the coverage report's)
+            MISS too), touch (its kind)
   monsters  list [{platform, x, vx, heading, reach}]           control.navigator (avoiding monsters)
   trip      dst, result                                        control.navigator, at every trip's end
   stance    act, text, aimed [{kind, x, y}]                    behavior.fight, each look of a fight
   tour      order, safe, grounds / stop, spot                  behavior.tour (stop, spot: also behavior.hunt)
   hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
             status, hers}]
-  event     kind, text; track (died, exp_gain, hp_drop,        behavior: kill, hit, potion, safety_stop,
-            victim, let_go); died's data cause, at, hurt,      exp (what a gain's size said), player (one
+  event     kind, text; track (died, exp_gain, hp_drop,        behavior: kill, touch (from 2026-10-28, where it
+            victim, let_go, touch); touch's touch (MISS,       was 'hit', her HP dropping: MISS or damage, when
+            damage, ?), at, how (popup, hp), number; died's    its popup showed), potion, safety_stop,
+            data cause, at, hurt,                              exp (what a gain's size said), player (one
             by, share, seen; victim's kind, x, platform,       coming or going), died (the feed's deaths
             gain, share; let_go's kind, gain, why; retold's    not hers), backstop, follow, probe, retold (a
             key, side                                          throw told again the way the frame showed her
                                                                facing), landing (a trip's last landing priced:
                                                                control.navigator); `watch` and the perception
                                                                service:
-                                                               died, exp_gain, hp_drop, victim (a gain bound to
+                                                               died, exp_gain, hp_drop, touch, victim (a gain bound to
                                                                the monster her attack took), let_go (not it:
                                                                why 'seen alive', 'retold' or 'another seen
                                                                dying'; from 2026-10-27; seen: its death seen)

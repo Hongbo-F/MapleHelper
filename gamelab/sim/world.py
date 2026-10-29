@@ -39,9 +39,11 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
   the box of the frame it shows then in the game data, walking, standing or flinching after a hit, turned
   the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of its walk.
-  A touch leaves her a second's invulnerability. She evades it (a thief's "MISS": nothing else happens)
-  with a chance inversely proportional to the monster's accuracy (game data: half a pig's touches, four
-  in five of a snail's); the others take a share of her HP by the monster's touch damage (game data:
+  A touch leaves her invulnerable for INVULNERABLE (1.45 s, as the frames have it; the sources 1.5), a MISS as much as
+  damage. She evades it (a thief's "MISS": nothing else happens) with a chance inversely proportional to the
+  monster's accuracy (game data: half a pig's touches, four in five of a snail's), or with her avoid known (Her.avoid)
+  by this game's own hit check (game_hit_chance: her level, the monster's accuracy and level); the others take a share
+  of her HP by the monster's touch damage (game data:
   about 1.6% for a pig, 0.3% for a snail, give or take 70%; or, her DEF known, by meowdb's formula: Her) and
   knock her back ~58 units (the median
   logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS). At 0% HP she dies, and the
@@ -133,6 +135,7 @@ from ..motion.physics import (CLIMB_SPEED, DROP_LAG, GRAB_SURE, JUMP_HEIGHT, JUM
                                WALK_SPEED)
 from ..perception import drops as drop_data
 from ..perception.kinds import kind_of
+from ..perception.touches import INVULNERABLE_S
 
 TICK_MS = 5              # the world's tick, which is also the engine's own step in the air (body.TICK)
 STEP_MS = round(body.STEP * 1000)  # the game's step: it acts on keys, and sets her speed on the ground, every
@@ -224,11 +227,30 @@ DEFENCE = 75.0
 # Seeded by the touch's tick, like Noise.
 EVADE_ACC = 27.0
 EVADE = 0.5              # ... a monster without game data
-INVULNERABLE = 1.0
-# ... and as measured live (Realism.invulnerable): of the 800 HP drops of the Tree Dungeon hunts of 2026-10-25 23:43 to
-# 10-26 23:47 none came within 1.25 s of the one before (45 at 1.25-1.5 s, 98 at 1.5-2.0: D:/MapleHelper-scratch/land/
-# diag-move-away/touches.py). The world `--world walkers` has it (sim.harness).
-INVULNERABLE_LIVE = 1.25
+# ... or, with her avoid known (Her.avoid), this game's own hit check (game_hit_chance: meowdb's page on this game's
+# damage taken, its 'incoming-hit' calculator, meowdb.com/msclassic/formulas/damage-taken, read 2026-10-28; the same in
+# a reading of this game's client binary, ohmi69/osms_datamine_dashboard tabs/formulas-mob-hit.js, "outcome routine
+# 0x140268140"; no job term): with her level L over the monster's G = max(0, L - its level), its accuracy as
+# A = acc x 100 / (5 (G + 51)) against her avoid as E = avoid / (1 + avoid / 80) / (1 + G / 40), a roll R uniform in
+# 1 +- f, f = 0.15 + 0.2 / (1 + exp((A - E) / 12)), hits where A R >= E (where E is past A (1 + f) a rescue roll of
+# 0.03 exp((A - E) / 18), within 0.02-0.03, instead), and one that failed hits 8% of the time all the same (a MISS at
+# most 90.2%). Her avoid isn't on her HUD (her stat window's): fitted to her MISS shares on the frames of 2026-10-24..28
+# (README, Touches: by eye, the popups over her) by most likelihood, one avoid for both kinds at a level, which the
+# formula fits within their counts' spread: at level 25 58.1 (one sd 55.9-60.4; Green Mushrooms MISS 36 of 71 touches,
+# 52.5% by the fit, Horny 13 of 46, 26.3%), at 28 70.6 (68.5-72.8; Green 109 of 152, 70.9%; Horny 35 of 83, 43.9%).
+# Where EVADE_ACC had a Green's touches MISS 34% and a Horny's 29% at any level.
+LEVEL_25_AVOID = 58.0
+# s a touch leaves her invulnerable, a MISS as much as damage, every touch starting it afresh (perception.touches.
+# INVULNERABLE_S: the frames' 1.45, the sources' 1.5; until 2026-10-28 1.0 coded, and 1.25 from the HP drops alone).
+INVULNERABLE = INVULNERABLE_S
+# ... and as measured live (Realism.invulnerable; the world `--world walkers` has it, sim.harness): first from the HP
+# drops alone (none of 800 within 1.25 s of the one before, 2026-10-25/26: D:/MapleHelper-scratch/land/diag-move-away/
+# touches.py), 1.25 until the popups were read (2026-10-28), now the same.
+INVULNERABLE_LIVE = INVULNERABLE_S
+# s a touch's popup over her shows (sim.fakes.FakeTouches reads it off the frame's Screen.popups): v83's 400 ms opaque
+# and 600 fading (RustMS DamageLayout.h:16-24); unconfirmed in this game. The stack tells a touch the frame it first
+# shows.
+POPUP_S = 1.0
 # Monsters walking at her (Realism.chase): (range, whole, hurt), a monster on the platform she's about within `range` of
 # her (middle to middle) walks its next stretch at her with chance `whole` (unhurt) or `hurt` (her stars have hurt it),
 # else as ever, for CHASE_STRETCH s at most; at her, it walks until its body is CHASE_OVERLAP into hers (a touch, unless
@@ -758,6 +780,8 @@ class Her:
                                  # share of her HP (PET_GAP); None: no pet
     evade: float = 0.0           # her evasion against a touch, as EVADE_ACC (her chance is this over the monster's
                                  # accuracy); 0: EVADE_ACC, as fitted
+    avoid: float | None = None   # her avoid (her stat window's): a touch MISSes by this game's hit check
+                                 # (game_hit_chance, against the monster's accuracy and level); None: `evade`
     potion: float | None = None  # HP a potion of hers heals (her key's and her pet's); None: POTION_HP of her HP
     stars: float = 1.0           # what one of her attacks does, in stars: 1 the regular attack (a swipe CLAW of one);
                                  # LUCKY_SEVEN, Lucky Seven as thrown live (a swipe's pick as much)
@@ -808,7 +832,7 @@ LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=60
 # (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP), her pet's MP potions Blue Potions (100) and its HP
 # potions as above.
 LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=623.0, pet_mp=PET_MP, potion=HP_POTION,
-               star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0, claw=(15, 24))
+               star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0, claw=(15, 24), avoid=LEVEL_25_AVOID)
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -950,11 +974,27 @@ def hits_of(kind: str, info: MobInfo | None) -> int:
     return max(1, round(stars_to_kill(info.hp, info.pdd)))
 
 
-def evade_chance(info: MobInfo | None, her: Her | None = None) -> float:
-    """The chance she evades a touch by a monster with `info`: EVADE_ACC (or her own, Her.evade) over its accuracy."""
+def evade_chance(info: MobInfo | None, her: Her | None = None, mob_level: float | None = None) -> float:
+    """The chance she evades a touch by a monster with `info` (of `mob_level`, the game data's): with her avoid known
+    (Her.avoid) and its level, 1 less this game's hit check (game_hit_chance); else EVADE_ACC (or her own, Her.evade)
+    over its accuracy."""
     if info is None or info.acc <= 0:
         return EVADE
+    if her is not None and her.avoid is not None and mob_level is not None:
+        return 1.0 - game_hit_chance(info.acc, mob_level, her.avoid, her.level)
     return min(1.0, (her.evade if her is not None and her.evade else EVADE_ACC) / info.acc)
+
+
+def game_hit_chance(acc: float, mob_level: float, avoid: float, level: float) -> float:
+    """The chance a touch by a monster of accuracy `acc` and level `mob_level` hits her (avoid `avoid`, level `level`):
+    this game's hit check (see LEVEL_25_AVOID)."""
+    gap = max(0.0, level - mob_level)
+    score = acc * 100 / ((gap + 51) * 5)
+    eff = avoid / (avoid / 80 + 1) / (gap / 40 + 1)
+    spread = 0.15 + 0.2 / (1 + math.exp((score - eff) / 12))
+    roll = 1.0 if eff <= 0 else min(1.0, max(0.0, (1 + spread - eff / score) / (2 * spread)))
+    rescue = min(0.03, max(0.02, 0.03 * math.exp((score - eff) / 18))) if eff > (1 + spread) * score else 0.0
+    return roll + (1 - roll) * (rescue + (1 - rescue) * 0.08)
 
 
 @functools.lru_cache(maxsize=None)
@@ -1306,6 +1346,8 @@ class World:
         self.attack_lock_ms = -10_000
         self.attack_key_at = -10_000.0  # when the key of the last attack the game took went out (clock time)
         self.invulnerable_ms = -10_000
+        # The game data's level of each kind on the map (MapModel.mob_level, by kind): her hit check's (evade_chance)
+        self._mob_levels = {kind_of(name): level for name, level in getattr(model, "mob_level", {}).items()}
         self.inventory_full = inventory_full
         self.kills: dict[str, int] = {}
         self.touches = 0                # monsters touching her (evaded ones too)
@@ -2002,8 +2044,8 @@ class World:
 
     def _hit_by(self, m: SimMonster, mx: float) -> None:
         self.touches += 1
-        self.invulnerable_ms = self.ms + int(self.realism.invulnerable * 1000)
-        evaded = self.chance("evade") < evade_chance(m.info, self.character)
+        self.invulnerable_ms = self.ms + int(round(self.realism.invulnerable * 1000))
+        evaded = self.chance("evade") < evade_chance(m.info, self.character, self._mob_levels.get(m.kind))
         damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"), self.character)
         self.touch_log.append((self.t, damage))
         if m.born is not None and self.t - m.born < FRESH_S:

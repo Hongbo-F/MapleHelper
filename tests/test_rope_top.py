@@ -476,4 +476,4 @@ def test_her_climb_on_after_a_touch_only_under_the_rope_s_top():
                                   play=lambda events, name: played.append((events, name)))
     nav._climb_on(top, top + 52)
     assert played == [([[0, "up", "down"], [750, "up", "up"]], "climb_on")]
-    assert nav.logged[-1] == "    hit on the rope 52 under its top: up again (750 ms)"
+    assert nav.logged[-1] == "    touched on the rope 52 under its top: up again (750 ms)"

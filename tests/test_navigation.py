@@ -1226,8 +1226,50 @@ def test_a_hit_cuts_the_running_chain_and_withdraws_the_one_queued_after_it(mode
     nav._sent_plans = ["running"]
     running = nv._Running("running", [walk], start, True, 0.2)
     cut, sent = nav._watch(running, 1.0, by_y(model, 300, 100).id, send=None, st=SimpleNamespace())
-    assert cut.startswith("hit") and sent == [walk]
+    assert cut.startswith("touched") and sent == [walk]
     assert calls["cancel"] == ["running", "queued"] and calls["wait"] == ["running"]  # the queued one withdrawn
+
+
+def test_a_miss_told_after_the_look_cuts_the_running_chain_as_a_hit_does(model, monkeypatch):
+    """Navigator._watch (navigator.TOUCH_CUTS): a touch of hers told after the look the chain was planned from
+    (Senses.touched_since: here a MISS, her HP the same) cuts it short as a hit does, every plan cancelled; one told
+    before that look doesn't, nor any with TOUCH_CUTS off."""
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    from gamelab.localization.pose import Localizer
+    from gamelab.motion.flow import Body, Leg, Span
+    from gamelab.motion.route import Move
+    from gamelab.perception.touches import MISS, Touch
+    c = by_y(model, 500, 400)
+    localizer = Localizer(model)
+    walk = Leg(Move("walk_off", c.id, c.id, 300, 300, "right"), Body(0.0, 100, c, run=1), Body(0.5, 175, c, run=1),
+               [Span(c.id, 0.0, 0.5, 100, 175)])
+    monkeypatch.setattr(nv.client, "cancel", lambda pid: True)
+    monkeypatch.setattr(nv.client, "wait", lambda pid, timeout=120: {})
+
+    def watched(told_at: float, since: float) -> str:
+        nav = _navigator(model)
+        nav.senses = _glancing(localizer, lambda: (localizer.to_dot(150, 500), 1.0))
+        touch = {**Touch(told_at, MISS, MISS).data(), "told": told_at}
+        nav.senses.touched_since = lambda t: touch if touch["told"] > t else None
+        nav.flow.expected = lambda legs, t: c.id
+        start = nv.time.monotonic()
+        done = {"n": 0}
+
+        def finished(pid):  # (the plan ends of itself after a few glances)
+            done["n"] += 1
+            return done["n"] > 5
+        monkeypatch.setattr(nv.client, "done", finished)
+        nav._sent_plans = ["running"]
+        cut, _ = nav._watch(nv._Running("running", [walk], start, False, 0.0, 0.5), 1.0, c.id, send=None,
+                            st=SimpleNamespace(), since=since)
+        return cut
+    now = nv.time.monotonic()
+    assert watched(now, now - 0.1) == "touched (MISS: HP 100% -> 100%)"
+    assert watched(now - 0.2, now - 0.1) == ""  # (told before the look it was planned from)
+    monkeypatch.setattr(nv, "TOUCH_CUTS", False)
+    assert watched(now, now - 0.1) == ""
 
 
 def test_a_running_chain_is_cut_when_her_glances_have_no_state_to_act_on(model, monkeypatch):

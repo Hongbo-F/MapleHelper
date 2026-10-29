@@ -56,7 +56,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
   fell_out_at      when she fell below the map's lowest floor (world.SimFellOut): the run ends there, and
                    counts against the bar as a death does; left_map_at, the same for up held at a portal
                    (world.SimLeftMap)
-  touches, hurt    monsters touching her, and those of the touches she didn't evade
+  touches, hurt    monsters touching her, and those of the touches she didn't evade; misses, those she did (her
+                   MISS: no HP, no knock), and touches_told, those the stack was told of (the hunter's 'touch'
+                   events: the feed's, from her popups, sim.fakes.FakeTouches, as live from 2026-10-28) and
+                   misses_told, the MISSes among them
   trip_s           the seconds she was on the move (from a chain's or a lone move's start, 'chain' or 'move' records,
                    to its 'moved' record), and trip_hurt, trip_hp_lost: the touches that hurt her then, and the HP
                    they took (what her trips cost, against her hunting where she stands)
@@ -99,7 +102,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    attacks the world refused on a rope
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
-                   path, replans, misses (landed elsewhere than planned) and falls among them, and her glances
+                   path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
+                   cuts for a hit, those for a touch (cut_touch: a MISS too, from 2026-10-28) and for a MISS (cut_miss)
   coverage         her moves, platforms and plans, for the coverage report (analysis.coverage.tally: what it
                    keeps of the run's telemetry, 3-7 KB a run as saved)
   turning          her throws and jump throws, those that tapped an arrow to turn her first (control.actions: 80 ms
@@ -490,11 +494,14 @@ def navigation(log: list[str], model) -> dict:
     the way, a landing elsewhere: once each, a cut and the landing after it once); misses, the landings elsewhere
     than planned (the trip's own count); and falls, those of them onto a platform more than 10 units lower than
     the one planned, or onto none."""
-    out = {"cut_hit": 0, "cut_off_path": 0, "replans": 0, "misses": 0, "falls": 0}
+    out = {"cut_hit": 0, "cut_off_path": 0, "replans": 0, "misses": 0, "falls": 0, "cut_touch": 0, "cut_miss": 0}
     cut = False  # the line before was a cut: the landing it logs next is the same replan
     for line in log:
         if "plan cut short" in line:
             out["cut_off_path" if "off the path" in line else "cut_hit"] += 1
+            if "touched (" in line:  # (navigator._touch_text)
+                out["cut_touch"] += 1
+                out["cut_miss"] += "touched (MISS" in line
             out["replans"] += 1
             cut = True
             continue
@@ -542,6 +549,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "hp_lost": round(sum(hp for _, hp in world.touch_log), 3),
         "touches": world.touches,
         "hurt": world.touches - world.evaded,
+        "misses": world.evaded,
+        "touches_told": sum(1 for r in events if r.get("kind") == "touch"),
+        "misses_told": sum(1 for r in events if r.get("kind") == "touch" and r.get("touch") == "MISS"),
         **_travelling(world, records, end),
         "hp_low": round(world.hp_low, 3),
         "potions": world.potions_used,

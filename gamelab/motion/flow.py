@@ -320,6 +320,10 @@ class Flow:
         self.model = model
         self.key_names = key_names
         self.rng = rng  # varies where moves start (None: always the same, e.g. in tests)
+        # Her invulnerability after a touch (perception.touches.INVULNERABLE_S): plan time (s from the chain's start)
+        # before which no monster's touch counts on a leg (`danger`); 0, none. Whoever plans or watches a chain sets it
+        # for that chain's time (control.navigator: Navigator._immunity).
+        self.immune = 0.0
 
     def pick(self, near: float, far: float) -> float:
         """A spot between `near` (the quickest) and `far`, usually close to `near`; `near` without rng."""
@@ -725,11 +729,13 @@ class Flow:
         """The first monster that could touch her on this leg (and, if `linger`, while she stands that long where it
         ends), and when: her box (motion.bodies) wherever her feet are (path), against each monster's box wherever
         it can be by then (MonsterTrack.reach: along its own platform, whichever that is). None if none could.
-        `after`: only from that plan time on (the leg's rest, for a plan running: Navigator._coming)."""
+        `after`: only from that plan time on (the leg's rest, for a plan running: Navigator._coming); and none before
+        `immune` (her invulnerability after a touch: a leg may pass a monster while it lasts)."""
         if not monsters:
             return None
         path = self.path(leg, linger)
-        if after is not None:
+        after = self.immune if after is None else max(after, self.immune)
+        if after > 0:
             path = [p for p in path if p[0] >= after]
         if not path:
             return None

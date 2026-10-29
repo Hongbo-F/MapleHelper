@@ -45,6 +45,7 @@ from ..perception.drops import items_for
 from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, band_rows, tag_below_feet
 from ..perception.framecheck import FIX_KINDS, LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
+from ..perception.touches import INVULNERABLE_S
 from ..screen import STRETCHED
 from .mapdata import MapModel
 from .monsters import Monster
@@ -158,6 +159,13 @@ class Senses:
         self._looked = -1e18  # the frame time of the last look
         self._usable = -1e18  # when the last state to act on came (a look's or a glance's: GLANCE_LOST_S)
         self._hp = 1.0        # the last HP a state read (a glance without one keeps it)
+        # The newest touch of hers a look or a glance has had (worldstate.WorldState.touch: what it was, `at` when its
+        # popup showed, `told` the frame that told it), for whatever goes by her being touched (touched_since) and by
+        # her invulnerability after it (invulnerable_until); None: none yet.
+        self.touch: dict | None = None
+        # Called with each touch of hers new to a look or glance (`touch`'s dict), at once: what listens for her being
+        # touched while it waits on glances (a hook: nothing does yet; control.navigator reads touched_since).
+        self.touch_listeners: list[Callable[[dict], None]] = []
         # What sets the game's client right with Alt+Enter twice (control.window_size.SizeFix, which the commands that
         # act give; None: the user sets it back): called with each look that has nothing to act on for a fault it
         # mends (FIX_KINDS), True if it did; `passed()` once a look passes again.
@@ -206,6 +214,7 @@ class Senses:
         self._passed()
         self.counts["looks"] += 1
         self._looked, self._usable, self._hp = max(self._looked, s.t), time.monotonic(), s.hp
+        self._saw_touch(getattr(s, "touch", None))
         self._learn(s)  # the feed placed her with its own camera; this one learns too (her name tag hidden)
         self.players.adopt(s.t, s.players)  # ... and the other players it follows
         if s.searched and not s.rows and s.tag is not None and s.where is not None:  # where it searched
@@ -298,6 +307,7 @@ class Senses:
             self._glanced = self.glanced_at = st.t
             self.glanced, self._usable, self._hp = st, time.monotonic(), st.hp
             self.counts["glances"] += 1
+            self._saw_touch(getattr(st, "touch", None))
             for check in self.glance_checks:
                 check(st)
             return st.dot, st.hp
@@ -310,6 +320,25 @@ class Senses:
     def wait_frame(self, timeout: float) -> None:
         """Until the feed's next frame comes, `timeout` s at most."""
         self.feed.wait_frame(timeout)
+
+    def _saw_touch(self, touch: dict | None) -> None:
+        """A state's newest touch (WorldState.touch): if it's newer than the last had, it's hers now (`touch`), and the
+        touch listeners hear of it."""
+        if touch is None or (self.touch is not None and touch["told"] <= self.touch["told"] + 1e-9):
+            return
+        self.touch = touch
+        for listener in self.touch_listeners:
+            listener(touch)
+
+    def touched_since(self, t: float) -> dict | None:
+        """The newest touch of hers a look or glance has had, if it was told in a frame shown after `t` (its popup may
+        have come before, a number waiting for her HP bar); else None."""
+        return self.touch if self.touch is not None and self.touch["told"] > t + 1e-9 else None
+
+    def invulnerable_until(self) -> float:
+        """When she can be touched again (time.monotonic's clock): perception.touches.INVULNERABLE_S after the popup of
+        the newest touch a look or glance has had showed (its `at`); -inf with none."""
+        return -1e18 if self.touch is None else self.touch["at"] + INVULNERABLE_S
 
     def place(self, obs: Observation) -> Scene:
         """A look placed on the map: where she is (see _place_her), and the other players (Players: a look that

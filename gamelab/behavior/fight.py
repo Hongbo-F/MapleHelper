@@ -130,11 +130,14 @@ class Report:
     exp_kills: int = 0         # times her EXP went up: every kill of hers, target or not
     lost: int = 0              # targets that vanished without her EXP going up (hidden, or killed by others)
     damage_taken: float = 0.0  # fraction of HP lost overall
+    touches: int = 0           # times a monster touched her (her popups: Hunter._touched) ...
+    misses: int = 0            # ... of them, her evasion's MISS (no HP lost)
     stop: str = ""
 
     def __str__(self):
         return (f"kills: {kills_text(self.kills)} (EXP gains: {self.exp_kills}, targets lost: {self.lost}); "
                 f"throws: {self.throws}; loot runs: {self.loot_runs}; potions: {self.potions}; "
+                f"touches: {self.touches} ({self.misses} MISS); "
                 f"HP lost: {self.damage_taken:.0%}; stopped because: {self.stop}")
 
     def count_kill(self, kind: str) -> None:
@@ -150,6 +153,8 @@ class Report:
         self.exp_kills += other.exp_kills
         self.lost += other.lost
         self.damage_taken += other.damage_taken
+        self.touches += other.touches
+        self.misses += other.misses
 
 
 @dataclass
@@ -725,8 +730,8 @@ def knocked_move(h: "Hunter", s: Scene, act: tuple) -> bool:
     so walks her on from where the knock leaves her: on 22, a snail's touch knocked her 40 units toward its end
     and a step back of 106 from where she'd been took her off it (fight_snail_short_platform, seed 4)."""
     if act[0] in MOVES and h.knocked(s):
-        if h.knock_waited != h.hit_at:  # logged once a knock
-            h.knock_waited = h.hit_at
+        if h.knock_waited != h.knock_at:  # logged once a knock
+            h.knock_waited = h.knock_at
             h.log(f"    hit: the {'jump' if act[0] in JUMPS else 'step'} waits for the knock to end")
         time.sleep(STEADY_WAIT_S)
         return True

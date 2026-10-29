@@ -10,8 +10,9 @@ A run (a harness seed, or a live telemetry file) is tallied once, from its telem
   the navigator's 'moved' record after each; before, its chains and log lines); missed: of those, the ones she
   ended elsewhere than on their platform after, not from a hit. Which move of a chain it was is read from where she
   was seen standing in between (`stood`: her looks and the glances at her dot, on a platform's surface twice in a
-  row), against the platforms the chain goes through; a hit's move (hit on the way, and ended elsewhere than the
-  chain was to: one that still got her there made every move) is counted apart ('hit');
+  row), against the platforms the chain goes through; a hit's move (touched on the way, a MISS too since 2026-10-28;
+  hit, before: her HP dropping; and ended elsewhere than the chain was to: one that still got her there made every
+  move) is counted apart ('hit');
 - per platform: visits (runs of looks on it) and seconds (from each look to the next, GAP_S at most), and
   'arrived': the moves that got her onto it (made, or missed or knocked onto it on the way: a hit's move that left her
   elsewhere than where it set off), which the regression test reads;
@@ -65,7 +66,7 @@ NAMES = {k: k for k in ("left", "right", "jump", "up", "down")}  # flow's key na
 _ALONE = re.compile(r"^\s+platform (\d+) \(.*\) at x (-?\d+) \(\w*\): (\w+) \w* -> platform (\d+)"
                     r"\s+\[\d+ moves to go\]$")
 _ELSEWHERE = re.compile(r"^\s+ended on (?:platform (\d+)|nothing|None).* instead of platform (\d+)")
-_CUT = re.compile(r"^\s+(?:hit on the way|hit \(.*plan cut short)")
+_CUT = re.compile(r"^\s+(?:hit on the way|hit \(.*plan cut short|touched \(.*(?: on the way|plan cut short))")
 
 
 def key_of(m: Move) -> str:

@@ -883,7 +883,7 @@ def test_a_short_tap_can_be_lost_turning_her_without_walking_her(model):
 
 
 def test_a_touch_takes_hp_by_the_monsters_touch_damage_and_is_evaded_by_its_accuracy(model, monkeypatch):
-    monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None: 0.0)
+    monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None, mob_level=None: 0.0)
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 420.0)]))
     w.monsters[0].info = world_mod.MobInfo(pad=15.0, acc=54.0)

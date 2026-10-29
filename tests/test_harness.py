@@ -373,9 +373,10 @@ def test_her_stays_for_drops_and_the_touches_then_are_counted_from_the_hunt_loop
     assert out["trip_hurt"] == 1 and out["stand_hurt"] == 3 and out["stand_hp_lost"] == pytest.approx(0.16)
 
 
-def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model):
+def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model, monkeypatch):
     """World.knock_log (sim.harness: knock_falls): a touch whose knock lands her on another platform more than
-    KNOCK_FALL_DY lower; one that leaves her on hers isn't one."""
+    KNOCK_FALL_DY lower; one that leaves her on hers isn't one. (Her touches all take HP here: a MISS knocks nothing.)"""
+    monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None, mob_level=None: 0.0)
     b = plat(model, 360, 300)
     w = world(model, b.id, 385.0, monsters=[("Snail", b.id, 360.0)])
     w.monsters[0].speed = 0.0
@@ -571,7 +572,8 @@ def test_her_trips_are_counted_from_the_stacks_log(model):
            f"  7.0     ended on {platform_text(a)} instead of platform {b.id}; replanning",  # up instead: a miss
            f"  8.0     ended on air/rope instead of platform {c.id}; replanning",                # a fall
            f"  9.0     hit on the way (80% -> 70%): on {platform_text(c)}; replanning"]
-    assert harness.navigation(log, model) == {"cut_hit": 1, "cut_off_path": 1, "replans": 5, "misses": 3, "falls": 2}
+    assert harness.navigation(log, model) == {"cut_hit": 1, "cut_off_path": 1, "replans": 5, "misses": 3, "falls": 2,
+                                              "cut_touch": 0, "cut_miss": 0}  # (the log's cut is a hit's of before)
 
 
 def test_a_world_drops_what_its_maps_monsters_drop(model):

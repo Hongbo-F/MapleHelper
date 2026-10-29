@@ -60,6 +60,8 @@ class Scene(Observation):
                                   # frame (tracking.Event: her EXP gains, hits, monsters' deaths); None: no feed
     players: list[Player] = field(default_factory=list)  # other players on the map, by their minimap dots
                                                           # (localization.players: confirmed over two looks)
+    touch: dict | None = None     # with a continuous feed, the newest touch of hers told as of this look's frame
+                                  # (worldstate.WorldState.touch: MISS or damage, when); None: none yet, or no feed
     tracks: list = field(default_factory=list)  # with a continuous feed, the monsters it follows as of this look's frame
                                                 # (tracking.Track: live, hidden on screen up to HIDE_S, or just dead):
                                                 # those it didn't find are about still (localization.unseen); [] without

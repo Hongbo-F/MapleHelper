@@ -37,7 +37,7 @@ import numpy as np
 
 from .. import native
 from ..character import THIEF_SHAPE
-from ..perception import deaths, exp_number, hp_number, lv_number
+from ..perception import deaths, exp_number, hp_number, lv_number, touches
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
@@ -80,10 +80,24 @@ HIT_MERGE_S = 0.2     # a drop this soon after the last is the same hit, if the 
 # Her HP number's `before` (an `hp_read` event's: the HP it said at the change before, a drop from it a touch, exactly) is
 # known only over frames all read: a frame not read (not visible, failing its checks) or a stretch over HP_GAP_S between
 # two frames read has the number forgotten (hp_number.Follow.see(None)), the next read's `before` None. Two touches can't
-# both come within it (live none within 1.25 s of the one before: sim.world.INVULNERABLE_LIVE); a potion between makes
-# a drop smaller, never larger. Without it a drop over 60 unread frames was kept as one touch of their two (the review of
-# 2026-10-28: D:/MapleHelper-scratch/safety3/review-evidence/demo/gap_demo.py).
+# both come within it (her invulnerability after one, perception.touches.INVULNERABLE_S: the frames' shortest gap
+# between two 1.435 s); a potion between makes a drop smaller, never larger. Without it a drop over 60 unread frames was
+# kept as one touch of their two (the review of 2026-10-28: D:/MapleHelper-scratch/safety3/review-evidence/demo/gap_demo.py).
 HP_GAP_S = 1.0
+# Whether the frame step reads her touches off every frame (perception.touches.TouchWatch: the violet popup born over
+# her name tag, MISS or the damage she took; 0.42 ms a frame at the median, p99 3.3, the sprites' reader 4.7 ms at the
+# median and 8 at the most on a touch's first frame alone; README, Touches), each a 'touch' event, and the newest in
+# every state (WorldState.touch): what the stack takes for her being touched. An HP drop no popup of hers was told for
+# (TOUCH_SAME_S) is one too, its `how` perception.touches.HP: her name tag not found, a window over her head. With real
+# eyes, the game's sprites read from the game data as the step is made (0.4 s; without it, MISS by width alone); the
+# simulator's eyes have their own (`touches`, sim.fakes.FakeTouches), or none: then her HP drops alone. The 'hp_drop'
+# event is told beside it as before.
+TOUCHES = True
+# s: a touch told this soon after the last (onset to onset) is the same one: none comes within perception.touches.
+# INVULNERABLE_S of the last (the frames' shortest gap 1.435 s), and a popup can show a frame or two after her bar
+# moved.
+TOUCH_SAME_S = 1.0
+HP_FLOOR = 0.02       # an HP drop to this or less isn't a touch by itself (a bar read empty: behavior.hunter's HP_ZERO)
 # A frame's re-finds run at once on a pool of this many threads (the real monster detector's: its masked matches, in C
 # or OpenCV, let go of Python's lock; a lone re-find on the frame loop's thread, the hand-off costing more), each with
 # its HP bar's read if that's due, and the frame loop places them in turn: the states are one thread's. In a crowd
@@ -204,6 +218,10 @@ class WorldState:
     level_of: int | None = None    # her level as the bottom bar's "LV." digits said at their last change, if they read
                                    # (perception.lv_number: read at every change of their pixels, an `lv_read` event
                                    # each); None: not known
+    # The newest touch of hers told as of this frame (perception.touches.Touch.data(), and `told`: the frame it was told
+    # in, which a number's is up to touches.HP_WAIT_S after its popup's `at`); None: none yet. Every state has it, so a
+    # glance at any state after it knows of it (the 'touch' event is the frame's that told it alone).
+    touch: dict | None = None
 
     @property
     def placed(self) -> bool:
@@ -437,11 +455,16 @@ class WorldStep:
         if real and (geo := getattr(self.eyes, "geo", None)) is not None:
             hp_number.warm(geo)  # (its cells made now: 190 ms, not at the first frame)
             lv_number.warm(geo)  # (... and theirs: 600 ms)
+        self.touch: dict | None = None  # the newest touch told (WorldState.touch) ...
+        self._touch_at = -1e9           # ... and its popup's onset (its `at`)
+        self._touch_of: tuple[float, touches.TouchWatch] | None = None  # (its look frame's scale, the watch)
+        if real and TOUCHES and (geo := getattr(self.eyes, "geo", None)) is not None:
+            self._touch_of = (geo.frame_scale, self._new_touch_watch(geo.frame_scale))  # (made now, not mid-hunt)
         self._cam: tuple | None = None   # the last frame placed's camera (her tag x, feet y, map x, y): AHEAD's
         self._ahead: int | None = None   # this frame's token, if its re-finds were sent ahead
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "re-finds": 0, "re-found": 0, "fallbacks": 0,
                        "band": 0, "wide": 0, "loot": 0, "loot wide": 0, "exp gains": 0, "exp read": 0, "hits": 0,
-                       "searches": 0}
+                       "searches": 0, "touches": 0, "misses": 0, "touches by HP": 0}
 
     def throw(self, t: float, side: str, attack: str | None = None) -> None:
         """She threw toward `side` at t (with `attack`: its id, if told)."""
@@ -463,7 +486,8 @@ class WorldStep:
             self.counts["not visible"] += 1
             self.owed = None  # whoever asked takes the look itself
             self.hp_number.see(None)  # (what her HP number did meanwhile isn't known: HP_GAP_S)
-            return WorldState(self.seq, t, False, why=why, bad=bad or Problem("window", why or "not visible"))
+            return WorldState(self.seq, t, False, why=why, bad=bad or Problem("window", why or "not visible"),
+                              touch=self.touch)
         if asks is not None and (asks.band or asks.wide or asks.loot or asks.loot_wide):
             self.owed = asks if self.owed is None else self.owed.merge(asks)
         sch = self.schedule
@@ -532,7 +556,7 @@ class WorldStep:
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo,
             bad=s.bad, hp_of=self.hp_number.of if s.bad is None else None,
-            level_of=self.lv_number.level if s.bad is None else None)
+            level_of=self.lv_number.level if s.bad is None else None, touch=self.touch)
         if job is not None:  # (its answer is merged only after this) the re-finds the tracker took, as inline
             job.known.update({tid: m for tid, m in refound.items() if tid in self.tracker.refound_seen})
             job.state = st
@@ -689,7 +713,8 @@ class WorldStep:
     def _vitals(self, s: Scene, t: float) -> list[Event]:
         """Her EXP number changed since the last frame (`exp_gain`, with the number as read: the kills its size was go
         to the tracker, which puts each on a monster), or was read unchanged (`exp_read`: to start from, or to confirm a
-        jump: ExpMeter.wants_reading); her HP dropped (a hit); her HP number changed and read (`hp_read`: her HP and
+        jump: ExpMeter.wants_reading); she was touched (`touch`: her popup, MISS or damage, or an HP drop no popup of
+        hers was told for: _touched); her HP dropped (`hp_drop`); her HP number changed and read (`hp_read`: her HP and
         max HP, and the HP it said at the change before if that read too, `before`: a drop between the two is a touch,
         exactly; None: not known); her level's digits changed and read (`lv_read`: her level)."""
         out = []
@@ -704,11 +729,15 @@ class WorldStep:
         self._told(self.meter.due(t))  # changes it couldn't read that no reading has explained: a kill each
         if s.exp is not None:
             self._exp = s.exp
+        out += self._touched(s, t)  # (before the drop: a number of hers is told as her bar moves)
         if self._hp is not None and s.hp < self._hp - HP_DROP:
             new = t - self._hit_at > HIT_MERGE_S
             out.append(Event("hp_drop", t, data={"lost": round(self._hp - s.hp, 4), "hp": round(s.hp, 3), "new": new}))
             self._hit_at = t
             self.counts["hits"] += new
+            if new and t - self._touch_at > TOUCH_SAME_S and s.hp > HP_FLOOR:  # no popup of hers told for it
+                self.counts["touches by HP"] += 1
+                out.append(self._tell(touches.Touch(t, touches.DAMAGE, how=touches.HP), t))
         self._hp = s.hp
         if self._hp_number_t is not None and t - self._hp_number_t > HP_GAP_S:
             self.hp_number.see(None)  # (a stretch with no frame: what it did meanwhile isn't known)
@@ -720,6 +749,43 @@ class WorldStep:
         if level is not None and level.level is not None:
             out.append(Event("lv_read", t, data={"level": level.level}))
         return out
+
+    def _touched(self, s: Scene, t: float) -> list[Event]:
+        """Her touches this frame tells (the touch watch's: `_touch_watch`), each a 'touch' event; one whose popup came
+        within TOUCH_SAME_S of the last told is that one (an HP drop told first, its popup a frame later), not told."""
+        watch = self._touch_watch(s)
+        if watch is None:
+            return []
+        out = []
+        for touch in watch.update(s.frame, s.tag, s.tag_seen, s.hp, t):
+            if touch.t - self._touch_at > TOUCH_SAME_S:
+                out.append(self._tell(touch, t))
+        return out
+
+    def _tell(self, touch: touches.Touch, t: float) -> Event:
+        """A touch of hers told in the frame shown at t: its event, and it's the state's newest (`touch`)."""
+        data = touch.data()
+        self.touch, self._touch_at = {**data, "told": round(t, 3)}, touch.t
+        self.counts["touches"] += 1
+        self.counts["misses"] += touch.kind == touches.MISS
+        return Event("touch", t, data=data)
+
+    def _touch_watch(self, s: Scene):
+        """The touch watch for look `s`'s frames: with real eyes, perception.touches.TouchWatch with the game's sprites
+        drawn at its frame's scale (made once); else the eyes' own (`touches`), if they have one."""
+        if not TOUCHES:
+            return None
+        if not self._real:
+            return getattr(self.eyes, "touches", None)
+        scale = s.geo.frame_scale
+        if self._touch_of is None or self._touch_of[0] != scale:
+            self._touch_of = (scale, self._new_touch_watch(scale))
+        return self._touch_of[1]
+
+    @staticmethod
+    def _new_touch_watch(scale: float) -> touches.TouchWatch:
+        """A touch watch for look frames of `scale`: the sprites' reader from the game data (0.4 s; none without it)."""
+        return touches.TouchWatch(touches.Reader.of(scale), scale)
 
     def _told(self, gains: list[Gain]) -> None:
         """Her kills these gains were, told to the tracker by kind, each at its time (and the gains kept: `gains`)."""
@@ -827,7 +893,7 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
     s = Scene(t=st.t, frame=st.frame if frame is None else frame, tag=st.tag, hp=st.hp, mp=st.mp, ground=st.ground,
               dot=st.dot, others=list(st.others), ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how,
               tag_seen=st.tag_seen, players=list(st.players), geo=st.geo, tracks=list(st.tracks),
-              hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None))
+              hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None), touch=getattr(st, "touch", None))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

@@ -60,11 +60,12 @@ from ..perception.match import suppress_overlaps
 from ..perception.minimap import OTHER_SHIFT, PICTURE_BASE, Marker
 from ..perception.mobs import REFIND_PAD, Mob
 from ..perception.terrain import ScreenRope
+from ..perception.touches import DAMAGE, MISS, Touch
 from ..screen import SCALE
 from ..screen import UNITS_PER_HALF_PX
 from ..screen import SCREEN_SCALE, STRETCHED
 from ..perception.kinds import kind_of
-from .world import DEATH_SEEN, DIE_LOST_S, HEADING_SPELL_S, LEVEL_19, POSE_SPELL_S, Noise, World, exp_pixels
+from .world import DEATH_SEEN, DIE_LOST_S, HEADING_SPELL_S, LEVEL_19, POPUP_S, POSE_SPELL_S, Noise, World, exp_pixels
 
 START = 10_000.0          # the fake clock's start (monotonic() is never near 0 in real runs)
 EPOCH = 1_800_000_000.0   # what time.time() reads at the start (a fixed date, for strftime)
@@ -233,6 +234,9 @@ class Screen:
     mobs: list[Mob] = field(default_factory=list)
     items: list[Item] = field(default_factory=list)
     heading: Reading = Reading(None, why="no pictures")  # which way she faces, as her picture shows it
+    # the popups over her of the touches within world.POPUP_S: (the touch's number in World.touch_log, MISS or the
+    # damage's number), as the game draws its violet MISS and numbers
+    popups: list[tuple[int, str]] = field(default_factory=list)
 
 
 class FakeDetector:
@@ -335,6 +339,28 @@ class FakeDeaths:
         return m is not None and w.chance(f"death:{m.idx}", int(round(m.died_at * 1000))) < DEATH_SEEN
 
 
+class FakeTouches:
+    """The touch watch on the world (perception.touches.TouchWatch's stand-in, the frame step's `touches` from
+    FakeEyes): each touch's popup is drawn into the frame as data (Screen.popups, from World.touch_log), and a new one
+    is told in the first frame that shows it, a MISS or the damage it took (its number, the HP the world took), as the
+    stack's own reads them live (a MISS in the frame it shows, a number as her bar moves, a median 0.04 s later: here at
+    once)."""
+
+    def __init__(self):
+        self.told = -1  # the last touch told (its number in the world's touch_log)
+        self.counts = {"touches": 0, "misses": 0}
+
+    def update(self, frame, tag, tag_seen: bool, hp: float | None, t: float) -> list[Touch]:
+        out = []
+        for i, said in getattr(getattr(frame, "screen", None), "popups", ()):
+            if i > self.told:
+                self.told = i
+                out.append(Touch(t, MISS if said == MISS else DAMAGE, said))
+                self.counts["touches"] += 1
+                self.counts["misses"] += said == MISS
+        return out
+
+
 class FakeEyes(Eyes):
     def __init__(self, world: World, clock: Clock, model: MapModel, guard: Callable[[], None] | None = None):
         """`guard`: called before every look; it raises when the fakes aren't in place (sim.scenarios.Sim)."""
@@ -353,6 +379,7 @@ class FakeEyes(Eyes):
         self._lv_drawn: tuple[int, np.ndarray] | None = None  # her level's box, for her level
         self._bars: dict[tuple, float | None] = {}  # what a bar's box read (`bar`), by its px
         self.deaths = FakeDeaths(world)  # the death watch on the world (perception.deaths' stand-in)
+        self.touches = FakeTouches()     # ... and the touch watch (perception.touches')
 
     @property
     def noise(self) -> Noise:
@@ -600,6 +627,7 @@ class FakeEyes(Eyes):
             screen.mobs.append(mob)
             if alive and (bar := self.world.drawn_bar(m)) is not None:  # (read empty with Realism.bars_empty: `bar`)
                 draw_hp_bar(frame, cx, mob.y - h // 2, bar, STRETCHED.frame_scale)
+        screen.popups = self._popups()
         for d in self.world.live_drops():
             iw, ih = ITEM_SIZE.get(d.kind, (18, 18))
             cx, bottom = round(her[0] + (d.x - x) / u), round(floor + (d.y - y) / u)
@@ -607,6 +635,16 @@ class FakeEyes(Eyes):
             if 0 <= cx - iw // 2 and cx + iw // 2 <= FRAME[1] and 0 <= item.y - ih // 2 and bottom <= PLAY_BOTTOM:
                 screen.items.append(item)
         return screen
+
+    def _popups(self) -> list[tuple[int, str]]:
+        """The popups over her now (Screen.popups): the touches of the last POPUP_S, MISS or the HP it took."""
+        w, out = self.world, []
+        for i in range(len(w.touch_log) - 1, -1, -1):
+            t, share = w.touch_log[i]
+            if w.t - t >= POPUP_S:
+                break
+            out.append((i, MISS if share <= 0 else str(max(1, round(share * w.character.max_hp)))))
+        return out[::-1]
 
     def _heading(self) -> Reading:
         """Which way she faces as perception.heading reads her picture now: the world's facing, matched as her

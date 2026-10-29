@@ -593,8 +593,8 @@ def nav_hop_pig(sim):
     return _nav(30)(sim)
 
 
-@scenario((34, -300.0), monsters="all", seed=2,
-          expects=(ends("arrived"), logs("looking for a way around"), logs("hit on the way")))
+@scenario((34, -300.0), monsters="all", seed=1,
+          expects=(ends("arrived"), logs("looking for a way around"), logs(") on the way: on")))
 def nav_monsters_staircase(sim):
     """Up the staircase (34 -> 19) among the map's monsters, not fighting: she looks for ways around the monster in her
     way, and is touched and knocked about a few times on the way up. (Seed 3 until her walks pressed pick-up: they last
@@ -619,7 +619,10 @@ def nav_monsters_staircase(sim):
     stops sooner for one in her way, by then too close to time a hop over it, and of seeds 1-24 none hops here
     (nav_hop_pig still does); on seed 24 no monster was in her way to go around. Over 24 seeds all arrive, 16 meeting
     the rest of this.) (Seed 2 since every look is perception's newest frame after her keys' effect (Senses.fresh_after,
-    the feed in every scenario): on seed 1 nothing hit her on the way; of seeds 1-16, 9 meet all of this.)"""
+    the feed in every scenario): on seed 1 nothing hit her on the way; of seeds 1-16, 9 meet all of this.) (Seed 1 since
+    a touch of hers is her popup, a MISS too, and her trips may pass a monster while her invulnerability after one lasts
+    (navigator.TOUCH_CUTS, IMMUNE; the world's 1.45 s, sim.world.INVULNERABLE): on seed 2 she went past the one she'd
+    have looked for a way around, still invulnerable; of seeds 1-16 all arrive, 9 meeting all of this.)"""
     return _nav(19)(sim)
 
 
@@ -2440,7 +2443,7 @@ def loop_tree_lie_detector(sim):
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=37, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=5, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2466,7 +2469,11 @@ def loop_tree_lie_detector_28(sim):
     (Seed 7 since 2026-10-27 on its own branch, her kill credited to the monster her attack took (localization.tracking's
     binding) and drawn alive until her star lands (sim.world Realism.dies_late): on seed 1 she didn't go back onto 28;
     of seeds 1-16 only 7 meets all of this, and on 13 and 14 she fell out of the map before 40 s.) (Seed 37 kept since
-    the rebase of her kill's monster onto clearance and slopes: of seeds 30-40, 33 and 37 meet all of this.)"""
+    the rebase of her kill's monster onto clearance and slopes: of seeds 30-40, 33 and 37 meet all of this.) (Seed 5
+    since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does: navigator.TOUCH_CUTS), the world's
+    invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.INVULNERABLE, LEVEL_25_AVOID): on seed 37
+    she went up the rope at 146 from 32, a rope as safe, as she does with the stack's reactions off in this world too;
+    of seeds 1-40, 5, 8, 9, 11, 29, 33 and 38 meet all of this.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2871,7 +2878,7 @@ def nav_tree_rope_top_15(sim):
 
 
 @tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=1, limit=120, **_LIVE,
-      expects=(ends("arrived"), logs("hit on the rope"), sends("climb_on"),
+      expects=(ends("arrived"), logs("touched on the rope"), sends("climb_on"),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_hit(sim):
     """From 19 up to 16 by the rope at x 111 (19 -> 18), a Green Mushroom walking on 18 by its top (as at 22:58:05

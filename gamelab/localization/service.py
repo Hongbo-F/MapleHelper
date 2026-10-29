@@ -126,10 +126,11 @@ SILENT_S = 10.0
 SCENE_S = 0.1
 TRACKS_S = 0.5
 # tracker events published as telemetry 'event' records (and hits, new ones): deaths, gains, and her kills' monsters as
-# the tracker binds them to her gains and lets them go (tracking: 'victim', 'let_go'); and her HP number read at each
+# the tracker binds them to her gains and lets them go (tracking: 'victim', 'let_go'); her HP number read at each
 # change of it ('hp_read': cur, max, before; perception.hp_number), and her level's digits at each change of theirs
-# ('lv_read': level; perception.lv_number), from 2026-10-28
-EVENTS = ("died", "exp_gain", "victim", "let_go", "hp_read", "lv_read")
+# ('lv_read': level; perception.lv_number), from 2026-10-28; and her touches (worldstate's 'touch': MISS or damage,
+# perception.touches), each also said in the service's log
+EVENTS = ("died", "exp_gain", "victim", "let_go", "hp_read", "lv_read", "touch")
 
 
 def pace(wide_s: float) -> None:
@@ -918,7 +919,11 @@ class Publisher:
             self.log("the game is on screen: watching" if st.visible else f"not watching: {st.why} (nothing is read)")
         if st.visible and st.bad is None:
             for e in st.events:
-                if e.kind in EVENTS or (e.kind == "hp_drop" and e.data.get("new")):
+                if e.kind == "touch":  # (what it was, when its popup showed, how it was seen: Touch.data)
+                    telemetry.emit("event", kind="touch", text=touch_line(e.data), touch=e.data.get("kind"),
+                                   at=e.data.get("at"), how=e.data.get("how"), number=e.data.get("text") or None,
+                                   late=e.data.get("late"), dx=e.data.get("dx"), dy=e.data.get("dy"))
+                elif e.kind in EVENTS or (e.kind == "hp_drop" and e.data.get("new")):
                     telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
                 if e.kind == "died":
                     by = e.data.get("by")
@@ -933,6 +938,8 @@ class Publisher:
                     why = {"retold": "her throw went the other way", "another seen dying": "another seen dying"}
                     self.log(f"  {e.data['kind']} #{e.track} not her kill: "
                              + why.get(e.data.get("why"), "seen alive"))
+                elif e.kind == "touch":
+                    self.log(f"  {touch_line(e.data, st.hp)}")
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked
             if now - w["scene"] >= SCENE_S:
@@ -972,13 +979,26 @@ class Publisher:
         exp = "" if meter.at is None else f"; EXP {meter.at[1]:,}" + (
             "" if per_minute is None else f", {per_minute:.0f} a minute")
         gpu = native.gpu_line()
+        n = step.counts
+        touched = f"; touches {n['touches']} ({n['misses']} MISS" + (
+            f", {n['touches by HP']} by her HP bar alone)" if n["touches by HP"] else ")")
         return (f"; {len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'"
-                f"{exp}" + (f"; gamelab's C pieces {self.native}" if self.slow else "")
+                f"{exp}{touched}" + (f"; gamelab's C pieces {self.native}" if self.slow else "")
                 + (f"; the monster search's noise bound broken {over} times" if over else "")
                 + (f"; {gpu}" if gpu else ""))
 
     def close(self) -> None:
         telemetry.stop()
+
+
+def touch_line(data: dict, hp: float | None = None) -> str:
+    """A touch event's data (perception.touches.Touch.data) as the service's log says it: MISS or the damage's number,
+    how it was seen and how late it was told, and her HP then."""
+    kind = data.get("kind")
+    what = "MISS" if kind == "MISS" else (f"damage {data['text']}" if data.get("text") else f"{kind}")
+    how = " (her HP bar alone: no popup of hers)" if data.get("how") == "hp" else (
+        f" ({data['late']:.2f} s after its popup)" if data.get("late") else "")
+    return f"touched: {what}{how}" + ("" if hp is None else f", HP {hp:.0%}")
 
 
 # --- the commands' side -----------------------------------------------------------------------------------------

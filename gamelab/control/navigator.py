@@ -14,8 +14,10 @@ Monsters, without an escort (the default): the look before each chain covers the
 chain stops before a leg a monster could touch her on (flow.danger: her body's box all along the way her
 feet go, on the ground, in the air and on a rope, against each monster's wherever it can be by then, on any
 platform); that move then costs extra in the route planner so a way around is taken if there is one, else she
-waits for the monster to move off (a few looks), and then goes anyway. A hit during a move shows as lost HP:
-she replans from wherever she was pushed to, without counting it as a missed move.
+waits for the monster to move off (a few looks), and then goes anyway. A touch during a move (the feed's: her popup,
+MISS or damage, perception.touches; else lost HP) cuts it short: she replans from wherever she was pushed to, without
+counting it as a missed move, and while her invulnerability after it lasts no touch counts on the legs she plans
+(IMMUNE: she may pass a monster then).
 
 With an escort (hunting tours: behavior.fight.FightOnTheWay), each trip has a mode (go(mode=...)):
 `hunt` (the default) shoots what's in reach before each chain and any monster in the way of a move along
@@ -56,6 +58,7 @@ from ..motion.flow import END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
+from ..perception.touches import MISS
 from ..motion.route import Move, Planner, keeping_off, route_record
 from . import client
 from .actions import Actions
@@ -135,7 +138,19 @@ RECOVER_STILL_S = 0.046  # s her dot stands still for `recover` to take it she's
 # while the plan had her running. (She speeds up from standing, so the plan's straight line runs ahead of her
 # by up to 15 units early on; her dot is read to whole minimap pixels.)
 OFF_SPAN = 30
-HIT = 0.004          # HP lost (fraction) that counts as a hit
+HIT = 0.004          # HP lost (fraction) that counts as a hit, where no touch was told (a feed's states without one)
+# A touch of hers (the feed's: Senses.touched_since, perception.touches, MISS or damage; README, Touches) told in a
+# frame after the look a chain was planned from cuts it short as a hit always has, every key let go, and she replans
+# from where she is: a MISS too, though it neither hurts nor moves her (it's where a monster's body met hers, and the
+# next touch takes HP as often as not). Before 2026-10-28 only her HP dropping did, so a MISS (half her touches live)
+# changed nothing and she went on into the same monster. Her HP dropping with no touch told (HIT) still does.
+TOUCH_CUTS = True
+# Her invulnerability after a touch (perception.touches.INVULNERABLE_S from its popup: Senses.invulnerable_until) in the
+# chains planned and watched (flow.Flow.immune: no touch counts on a leg before then), less IMMUNE_MARGIN_S (a popup's
+# frame comes up to a frame after the touch, a chain may start later than planned): a chain may pass a monster while it
+# lasts, and a monster coming into its way then isn't one. False: as before, every leg against every monster.
+IMMUNE = True
+IMMUNE_MARGIN_S = 0.15
 # A hit while she climbs a rope of a chain (_climbing) cuts the plan as any hit does, every key let go, up too, and the
 # game doesn't knock her off a rope (live on 2026-10-26 she stayed on after 11 of 11 hits on ropes, the dot by the rope
 # and still after each): she hung where it caught her. At 22:58:08.596 (Tree Dungeon, the rope at x 111 from 19 up to
@@ -215,6 +230,7 @@ STILL_VX = 15.0      # units/s: a followed monster slower than this stands (trac
 REACT_ROOM = 50.0    # units of platform ahead of her run she needs to stop on (her 149 units/s for AFTER_STILL_S's
                      # slide: 39, and a little)
 COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigator._watch, _carry_out_chain)
+TOUCHED = "touched"  # ... and a touch's (or her HP dropping): _touch_text
 # Landings with clearance (from 2026-10-27; the user: "the character should actively try to move away from the mob to
 # attack it"). With an escort that prices landings (Escort.landings: attack.stance.landing, what her first attack where a
 # leg lands surely takes, the monsters walked on to then), a chain's moves are done where they land the cheapest
@@ -563,7 +579,10 @@ class Navigator:
         if self._shoot_on_the_way(st, s):
             return None  # look again after the fight
 
-        # Plan the route, and chain as many of its moves as can be predicted.
+        # Plan the route, and chain as many of its moves as can be predicted (no touch counting on its legs while her
+        # invulnerability after a touch lasts: IMMUNE, from when the chain can start at the latest, her lock held back).
+        lock = max(getattr(self.actions, "lock_until", 0.0), getattr(self.actions, "arrow_until", 0.0))
+        self._immunity(max(time.monotonic(), lock) + PLAN_START_S)
         path, planned_at = self._plan(st, s, st.dst)
         if not path:
             return st.end(f"no route from platform {s.where.platform.id} to {st.dst}")
@@ -603,7 +622,7 @@ class Navigator:
         if still and ROPE_TOP:
             after = self._rope_top(st, s, after)
         self._made(st, moved, after.where.platform is not None and after.where.platform.id == planned.id)
-        if self._note_landing(st.trip, moved, planned, after, hp, st.stopped):  # a miss
+        if self._note_landing(st.trip, moved, planned, after, hp, st.stopped, since=s.t):  # a miss
             st.trip.misses += 1
             if st.trip.misses >= st.max_misses:
                 return st.end("too many misses")
@@ -1198,10 +1217,11 @@ class Navigator:
         """The chain in one plan, followed on by those planned on the move (follow). Returns the moves
         made, the platform she should have ended on, and a look once it's over. Cut short, she replans
         from a quick look."""
+        immune = self.flow.immune
         self.log(f"  {platform_text(s.where.platform)} at x {s.where.x:.0f} ({s.how}): "
-                 + _chain_text(legs, len(path), why))
+                 + _chain_text(legs, len(path), why) + (f" (invulnerable for {immune:.2f} s)" if immune else ""))
         t2 = time.monotonic()
-        cut, legs = self.follow(legs, keys, s.hp, dst, why, st.trip, st, path, monsters)
+        cut, legs = self.follow(legs, keys, s.hp, dst, why, st.trip, st, path, monsters, since=s.t)
         st.trip.time["move"] += time.monotonic() - t2
         st.moved_at = time.monotonic()
         self.actions.facing = None
@@ -1284,6 +1304,20 @@ class Navigator:
         st.fresh = None  # (the look after the chain, for the next pass: she's moved since)
         return self.mover.off_rope(after, rope, at=(x, y))
 
+    def _touch_since(self, since: float | None) -> dict | None:
+        """The newest touch of hers told in a frame shown after `since` (Senses.touched_since: MISS or damage), or None
+        (none, no `since`, or a stand-in for Senses without it)."""
+        touched = getattr(self.senses, "touched_since", None)
+        return None if since is None or touched is None else touched(since)
+
+    def _immunity(self, start: float) -> float:
+        """Her invulnerability after her last touch (Senses.invulnerable_until, less IMMUNE_MARGIN_S) as plan time of a
+        chain that starts at `start` (time.monotonic): set as flow.immune (no touch counts on its legs before then) and
+        returned; 0 once it's over by then, or without IMMUNE."""
+        until = getattr(self.senses, "invulnerable_until", None)
+        self.flow.immune = max(0.0, until() - IMMUNE_MARGIN_S - start) if IMMUNE and until is not None else 0.0
+        return self.flow.immune
+
     def _safe_to_stand(self, x: float, here: Platform, move: Move, monsters) -> bool:
         """Whether no monster can reach her standing at x for the next second (as a leg that stays put)."""
         return not self.flow.danger(
@@ -1308,17 +1342,20 @@ class Navigator:
         return after
 
     def _note_landing(self, trip: Trip, moved: list[Move], planned: Platform, after: Scene, hp: float,
-                      stopped: bool = False) -> bool:
-        """Record the moves made and where she landed in trip.moves (and a hit in trip.hits), and log
+                      stopped: bool = False, since: float | None = None) -> bool:
+        """Record the moves made and where she landed in trip.moves (and a touch in trip.hits: one told in a frame after
+        `since`, the look they were planned from, MISS or damage; or her HP lower than `hp` with none told), and log
         it if that's not `planned`. True if it's a miss: elsewhere than planned, and not because a
-        monster hit her or (`stopped`) she stopped short for one coming into the chain's way (the caller counts
+        monster touched her or (`stopped`) she stopped short for one coming into the chain's way (the caller counts
         misses)."""
         landed = after.where.platform
-        hit = after.hp < hp - HIT
+        touch = self._touch_since(since)
+        hit = touch is not None or after.hp < hp - HIT
         if telemetry.recording():  # (for the coverage report: analysis.coverage)
             telemetry.emit("moved", moves=[{"kind": m.kind, "src": m.src, "dst": m.dst, "x": round(m.x, 1)}
                                            for m in moved],
-                           planned=planned.id, landed=landed.id if landed else None, hit=hit)
+                           planned=planned.id, landed=landed.id if landed else None, hit=hit,
+                           **({"touch": touch["kind"]} if touch is not None else {}))
         trip.moves += [f"{m.kind} {m.src}->{m.dst}" for m in moved]
         trip.moves[-1] += f": landed on {landed.id if landed else None}" + (" (hit)" if hit else "")
         if hit:
@@ -1326,7 +1363,7 @@ class Navigator:
         if landed is not None and landed.id == planned.id:
             return False
         if hit:
-            self.log(f"    hit on the way ({hp:.0%} -> {after.hp:.0%}): on {platform_text(landed)}; replanning")
+            self.log(f"    {_touch_text(touch, hp, after.hp)} on the way: on {platform_text(landed)}; replanning")
             return False
         if stopped:  # (where the cut left her: said by _after_chain)
             return False
@@ -1334,14 +1371,15 @@ class Navigator:
         return True
 
     def follow(self, legs, keys, hp: float, dst: int, why: str, trip: Trip, st: TripState | None = None,
-               path: list[Move] | None = None, monsters=()) -> tuple[str, list]:
+               path: list[Move] | None = None, monsters=(), since: float | None = None) -> tuple[str, list]:
         """Run a chain's plan and keep going like a player, with no stop before the next chain: late in
         it, a look around decides whether one may follow (_look_ahead); once she's back on the ground for
         good, a look places her and the next chain is planned from there (_queue_next), queued so the
         player starts it the moment this one finishes. Meanwhile her dot and HP are watched ~15 times a
-        second: a hit, or her being on another platform than planned for a few glances, cuts the running
-        plan and the queued one short (the player lets go of every key). Returns why it was cut ('' if
-        not) and all the legs sent. (`path`: the route the chain is from; `st`: its trip; `monsters`: the
+        second: a touch told after `since` (the frame time of the look it was planned from: TOUCH_CUTS, MISS or
+        damage) or her HP lower than `hp` (HIT), or her being on another platform than planned for a few glances,
+        cuts the running plan and the queued one short (the player lets go of every key). Returns why it was cut
+        ('' if not) and all the legs sent. (`path`: the route the chain is from; `st`: its trip; `monsters`: the
         ones the chain keeps clear of.)"""
 
         def send(chain_legs, chain_keys, why: str, tail: float = 0.0) -> tuple[str, float]:
@@ -1375,7 +1413,7 @@ class Navigator:
         self._sent_plans = [current.plan_id]  # every plan this chain sent: cancelled if anything fails
         self.actions.pressed = True
         try:
-            return self._watch(current, hp, dst, send, st)
+            return self._watch(current, hp, dst, send, st, since)
         except BaseException:
             # Whatever went wrong here (Ctrl+C included), the plans sent must not play on unwatched.
             for pid in self._sent_plans:
@@ -1386,9 +1424,10 @@ class Navigator:
             self._ended(None, cut=True)
             raise
 
-    def _watch(self, current: _Running, hp: float, dst: int, send, st: TripState | None) -> tuple[str, list]:
-        """follow's loop: watch the running chain, queue the next, cut both short when she's hit or off
-        her path."""
+    def _watch(self, current: _Running, hp: float, dst: int, send, st: TripState | None,
+               since: float | None = None) -> tuple[str, list]:
+        """follow's loop: watch the running chain, queue the next, cut both short when she's touched (after `since`)
+        or hit, or off her path."""
         queued, sent, cut = None, list(current.legs), ""
         stood = None  # since when, and where, her dot has stood (_stood)
         off_since, off_leg = None, False  # the first glance in a row off the planned path, and whether one of them
@@ -1454,8 +1493,9 @@ class Navigator:
             if dot is not None and telemetry.recording():
                 gx, gy = self.senses.localizer.to_map(dot)
                 telemetry.emit("glance", x=round(gx, 1), y=round(gy, 1), hp=round(now_hp, 3))
-            if now_hp < hp - HIT:
-                cut = f"hit ({hp:.0%} -> {now_hp:.0%})"
+            touch = self._touch_since(since) if TOUCH_CUTS else None
+            if touch is not None or now_hp < hp - HIT:
+                cut = _touch_text(touch, hp, now_hp)
             elif dot is not None:
                 on, want, leg, behind = self._placed(dot, seen_at - stood[0] >= STILL_S, current)
                 if on is not None and on.id not in (leg.start.platform.id, leg.end.platform.id):
@@ -1474,7 +1514,7 @@ class Navigator:
                 self._reacted[tid] = time.monotonic()
                 cut = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
             if cut:
-                climbing = self._climbing(current, dot) if cut.startswith("hit") and CLIMB_ON else None
+                climbing = self._climbing(current, dot) if cut.startswith(TOUCHED) and CLIMB_ON else None
                 for pid in [current.plan_id] + ([queued.plan_id] if queued else []):
                     if not client.cancel(pid):
                         client.wait(pid)
@@ -1510,16 +1550,16 @@ class Navigator:
         return None
 
     def _climb_on(self, top: float, y: float) -> None:
-        """A hit while she climbs a rope (_climbing): the cut let go of every key, up too, and the game keeps her on the
-        rope when she's touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang below its top
-        (see CLIMB_ON); up again, to the top and onto the platform there, held as a chain's climb holds it (the climb
-        from her height at flow.ROPE_SPEED, the step onto the platform in it, and UP_EXTRA: 0.75 s from 52 under, where
-        mover.climb_ms's 0.945 s had the same mushroom touch her again on the platform 9 ms before it ended in
-        loop_tree_walls), waited for, so the next pass looks once she's there."""
+        """A touch while she climbs a rope (_climbing: a MISS too): the cut let go of every key, up too, and the game
+        keeps her on the rope when she's touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang
+        below its top (see CLIMB_ON); up again, to the top and onto the platform there, held as a chain's climb holds it
+        (the climb from her height at flow.ROPE_SPEED, the step onto the platform in it, and UP_EXTRA: 0.75 s from 52
+        under, where mover.climb_ms's 0.945 s had the same mushroom touch her again on the platform 9 ms before it ended
+        in loop_tree_walls), waited for, so the next pass looks once she's there."""
         k = self.actions.keys.up.name
         hold = ms(max(0.0, y - top) / ROPE_SPEED + UP_EXTRA)
-        self.log(f"    hit on the rope {y - top:.0f} under its top: up again ({hold} ms)")
-        telemetry.emit("event", kind="climb_on", text=f"hit on the rope {y - top:.0f} under its top: up again")
+        self.log(f"    touched on the rope {y - top:.0f} under its top: up again ({hold} ms)")
+        telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top: up again")
         self.actions.play([[0, k, "down"], [hold, k, "up"]], "climb_on")
 
     def _ended(self, plan_id: str | None, cut: bool = False) -> None:
@@ -1553,6 +1593,7 @@ class Navigator:
             raw.append(tr)
         if not tracks:
             return None
+        self._immunity(running.start)  # (no touch counts while her invulnerability lasts: IMMUNE)
         for leg in running.legs:
             if leg.end.t < t + REACT_LEAD_S:
                 continue
@@ -1740,6 +1781,7 @@ class Navigator:
             return _no_follow("a monster in the way of the next move")
         # It starts when the running plan ends, or at once if that's over: the monsters are predicted for then.
         start = max(starts, time.monotonic() + PLAN_START_S)
+        self._immunity(start)  # (no touch counts on its legs while her invulnerability lasts: IMMUNE)
         tracks = [replace(m, seen_at=m.seen_at - (start - starts)) for m in ahead.tracks]
         price, alts, goal = self._pricing(st, tracks)
         legs, keys, why = self.flow.chain(path, Body(0.0, x, p, end.run, False, QUEUE_SLACK), tracks,
@@ -1796,6 +1838,16 @@ def standing(s: Scene) -> bool:
     there's none: the minimap dot alone puts her on a platform she's falling past or jumping over), unless her
     name tag is hidden or no ground was read."""
     return not s.tag_seen or s.ground is None or s.ground[1] - s.ground[0] >= s.geo.fpx(MIN_GROUND_PX)
+
+
+def _touch_text(touch: dict | None, hp: float, now: float) -> str:
+    """Why a chain was cut short (or a move ended elsewhere) for her being touched: the touch told (Senses.touch: MISS,
+    the damage's number) and her HP from `hp` to `now`; or with none told, her HP dropping alone."""
+    if touch is None:
+        return f"{TOUCHED} (HP {hp:.0%} -> {now:.0%})"
+    kind = touch.get("kind")
+    what = "MISS" if kind == MISS else (f"damage {touch['text']}" if touch.get("text") else str(kind))
+    return f"{TOUCHED} ({what}: HP {hp:.0%} -> {now:.0%})"
 
 
 def _no_follow(why: str) -> None:

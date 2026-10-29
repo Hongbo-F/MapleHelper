@@ -1,0 +1,247 @@
+{
+ "miss": {
+  "doc": "her MISS (00:44:44.872)",
+  "want": "MISS",
+  "from": "S7-1028-0049 00:44:44.872 (etector/20261028-004927/before/00290.jpg)",
+  "crop": [
+   701,
+   309,
+   901,
+   579
+  ],
+  "frames": [
+   {
+    "file": "miss_-1.png",
+    "t": -0.067,
+    "hp": 0.7212,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "miss_+0.png",
+    "t": 0.0,
+    "hp": 0.7212,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "miss_+1.png",
+    "t": 0.067,
+    "hp": 0.7212,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "miss_+2.png",
+    "t": 0.133,
+    "hp": 0.7212,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   }
+  ]
+ },
+ "damage": {
+  "doc": "her damage 133 by a Horny Mushroom",
+  "want": "damage 133",
+  "from": "S1-1024-2351 23:50:07.404 (etector/20261024-235130/before/00865.jpg)",
+  "crop": [
+   445,
+   318,
+   645,
+   588
+  ],
+  "frames": [
+   {
+    "file": "damage_-1.png",
+    "t": -0.13,
+    "hp": 1.0,
+    "tag": [
+     90,
+     237
+    ],
+    "seen": true
+   },
+   {
+    "file": "damage_+0.png",
+    "t": 0.0,
+    "hp": 1.0,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "damage_+1.png",
+    "t": 0.101,
+    "hp": 0.9615,
+    "tag": [
+     89,
+     222
+    ],
+    "seen": true
+   }
+  ]
+ },
+ "other": {
+  "doc": "another player's 40 over her, her HP the same",
+  "want": "another's 40",
+  "from": "S2-1025-0055 00:51:40.690 (etector/20261025-005511/before/00898.jpg)",
+  "crop": [
+   658,
+   359,
+   858,
+   629
+  ],
+  "frames": [
+   {
+    "file": "other_-1.png",
+    "t": -0.096,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     234
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+0.png",
+    "t": 0.0,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+1.png",
+    "t": 0.102,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     226
+    ],
+    "seen": true
+   }
+  ]
+ },
+ "flash": {
+  "doc": "a skill's flash, unread, one frame",
+  "want": "flash",
+  "from": "S3-1026-0025 00:21:50.995 (etector/20261026-002509/before/01025.jpg)",
+  "crop": [
+   649,
+   337,
+   849,
+   607
+  ],
+  "frames": [
+   {
+    "file": "flash_-1.png",
+    "t": -0.158,
+    "hp": 0.9327,
+    "tag": [
+     100,
+     232
+    ],
+    "seen": true
+   },
+   {
+    "file": "flash_+0.png",
+    "t": 0.0,
+    "hp": 0.9327,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "flash_+1.png",
+    "t": 0.05,
+    "hp": 0.9327,
+    "tag": [
+     100,
+     229
+    ],
+    "seen": true
+   },
+   {
+    "file": "flash_+2.png",
+    "t": 0.132,
+    "hp": 0.9327,
+    "tag": [
+     100,
+     228
+    ],
+    "seen": true
+   }
+  ]
+ },
+ "orange": {
+  "doc": "her damage 124 under her own orange numbers",
+  "want": "damage 124",
+  "from": "S3-1026-0025 00:22:25.627 (etector/20261026-002509/before/01372.jpg)",
+  "crop": [
+   695,
+   305,
+   895,
+   575
+  ],
+  "frames": [
+   {
+    "file": "orange_-1.png",
+    "t": -0.081,
+    "hp": 0.9423,
+    "tag": [
+     93,
+     237
+    ],
+    "seen": true
+   },
+   {
+    "file": "orange_+0.png",
+    "t": 0.0,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "orange_+1.png",
+    "t": 0.169,
+    "hp": 0.8365,
+    "tag": [
+     145,
+     221
+    ],
+    "seen": true
+   },
+   {
+    "file": "orange_+2.png",
+    "t": 0.206,
+    "hp": 0.8173,
+    "tag": [
+     156,
+     228
+    ],
+    "seen": true
+   }
+  ]
+ }
+}

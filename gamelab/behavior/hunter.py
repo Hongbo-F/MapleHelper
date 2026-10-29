@@ -47,12 +47,13 @@ from ..localization.monsters import Monster
 from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
-from ..localization.worldstate import HP_GAP_S, reading_of
+from ..localization.worldstate import HP_GAP_S, TOUCH_SAME_S, reading_of
 from ..motion import physics
 from ..perception import drops, exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
+from ..perception.touches import DAMAGE, HP, MISS, POPUP
 from . import fight
 from .attacks import Attacks
 from .darts import DartWatch, presses_for
@@ -74,8 +75,8 @@ PET_CLEAR = 250  # map units
 HP_ZERO = 0.02        # an HP read this low ...
 HP_DOUBT_AFTER = 0.3  # ... right after one this high isn't believed at once (_doubt_hp)
 HP_ZERO_SHOTS = 5     # frames of such looks saved, to find out why
-HIT_EXACT_S = 1.0     # s: a hit's text has her HP number's touch if it read one this soon before (touches came 1.38 s
-                      # apart at the least: behavior.safety)
+HIT_EXACT_S = 1.0     # s: a touch's text has her HP number's drop if it read one this soon before (touches come 1.435 s
+                      # apart at the least: perception.touches.INVULNERABLE_S)
 HP_NUMBER_WAIT_S = 10.0  # s of looks with her HP number never read: said once (the safety stop on her bar then, under
                          # bootstrap.UNREAD_SHARE of it: the perception service not restarted since 2026-10-28, a client
                          # it can't read at, such as the stretched 1920x1080, where it reads none)
@@ -91,9 +92,11 @@ PLAN_DEF_STEP = 5.0  # her DEF for the positioning model (attack.danger) to this
 # her health: `asked`), and not while she retreats (`retreating`: the Lie Detector's way to a safe place isn't cut short
 # by it). False: at health_check only, as until then.
 STOP_ON_LOOK = True
-# s a touch's knock may still be moving her after the look that saw it take HP: it carries her through the air
-# (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800: 0.22 s more). A jump keyed
-# from a look in that time comes while she's in the air (and is lost) or still sliding, from where she no longer is.
+# s a touch's knock may still be moving her after the look that was told of it, a touch that took HP (a MISS doesn't
+# move her: 0 units at the median on the frames of 2026-10-24..28, where damage moved her 63, p90 122; README, Touches):
+# it carries her through the air (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800:
+# 0.22 s more). A jump keyed from a look in that time comes while she's in the air (and is lost) or still sliding, from
+# where she no longer is.
 KNOCK_S = 0.45
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read
@@ -210,8 +213,15 @@ class Hunter:
         self._hp_doubted = False  # the last look's HP read 0 and wasn't believed (_doubt_hp)
         self._hp_zero_shots = 0
         self._last_where: Where | None = None
-        self.hit_at: float | None = None  # the time of the last look that saw her HP drop (a touch)
-        self.knock_waited: float | None = None  # ... the hit_at a jump or step last waited out (fight.knocked_move)
+        # Her last touch (a monster's, MISS or damage: the feed's 'touch' events, perception.touches; with no feed or no
+        # popup of hers, her HP dropping): the look that told it (its frame's time, as a hit's was the look's that saw
+        # her HP drop), its kind, and when its popup showed ...
+        self.hit_at: float | None = None
+        self.hit_kind: str | None = None
+        self.touch_at: float | None = None
+        self.knock_at: float | None = None  # ... and the look that told her last touch that took HP, which knocks her
+                                            # back (`knocked`; a MISS moves her not at all)
+        self.knock_waited: float | None = None  # ... the knock_at a jump or step last waited out (fight.knocked_move)
         self.aim = None  # her running attack's target, for her pace's hold (fight.Aim: throw_act's _note_aim, pace_of)
         self._last_potion = 0.0
         self.pet = PetCare(self.actions, eyes, log=log)
@@ -286,9 +296,14 @@ class Hunter:
                          escort=fight.FightOnTheWay(self) if fighting else None, rng=rng, memory=self.memory)
 
     def knocked(self, s: Scene) -> bool:
-        """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it)
-        saw her HP drop."""
-        return self.hit_at is not None and 0 <= s.t - self.hit_at < KNOCK_S
+        """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it) was told
+        of one that took HP (a MISS knocks nothing)."""
+        return self.knock_at is not None and 0 <= s.t - self.knock_at < KNOCK_S
+
+    def invulnerable_until(self) -> float:
+        """When she can be touched again after her last touch (time.monotonic's clock: Senses.invulnerable_until, the
+        newest touch any look or glance had, perception.touches.INVULNERABLE_S on); -inf with none."""
+        return self.senses.invulnerable_until()
 
     @property
     def max_hp(self) -> float | None:
@@ -771,9 +786,11 @@ class Hunter:
 
     def _vitals(self, s: Scene) -> None:
         """Her EXP number changed since the last look: read, the kills of hers its gain was (one if it can't be
-        read; none if no kill explains it: logged). Her HP dropped: a hit (logged with how far it pushed her when no
-        key was pressed). With a feed, from what it saw frame by frame (s.events, with the number as read then): two
-        gains between two looks are two gains, and the HP lost is every drop's, a potion drunk between them or not."""
+        read; none if no kill explains it: logged). A monster touched her (_touch_told: MISS or damage, logged with how far
+        it pushed her when no key was pressed). With a feed, from what it saw frame by frame (s.events, with the number
+        as read then): two gains between two looks are two gains, the HP lost is every drop's, a potion drunk between
+        them or not, and her touches are its 'touch' events (perception.touches: her popups; an HP drop no popup of hers
+        was told for is one too). Without one (s.events None), her HP dropping is a touch that took HP."""
         self._doubt_hp(s)
         exact = self._hp_number(s)
         self._level_number(s)
@@ -791,10 +808,14 @@ class Hunter:
             if changed or self.meter.wants_reading(s.t):
                 reads.append((s.t, exp_number.read(s.exp_box) if s.exp_box is not None else None, changed))
             lost = 0.0 if self._last_hp is None or s.hp >= self._last_hp else self._last_hp - s.hp
+            touched = [{"kind": DAMAGE, "text": "", "at": s.t, "how": HP}] if lost > 0 and self._last_hp is not None \
+                else []
         else:
             reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in s.events
                      if e.kind in ("exp_gain", "exp_read")]
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
+            touched = [e.data for e in s.events if e.kind == "touch"]
+            touched += self._untold(s, touched)
         heard = []  # her EXP's changes, and the kills each can be: what her throws didn't kill (Attacks.heard)
         for t, reading, changed in reads:
             gains = self.meter.update(t, reading, changed)
@@ -815,15 +836,8 @@ class Hunter:
         self._reserve_check(s.t)
         if lost > 0 and self._last_hp is not None:
             self.report.damage_taken += lost
-            self.hit_at = s.t
-            if (watch := getattr(self.attacks, "watch", None)) is not None:
-                watch.touched(s.t)  # (her regular presses about it aren't judged: behavior.keycheck)
-            touch = self._last_touch
-            text = (f"hit: HP {touch[1]} -> {touch[2]} (-{touch[1] - touch[2]})"
-                    if touch is not None and 0 <= s.t - touch[0] < HIT_EXACT_S
-                    else f"hit: HP {self._last_hp:.0%} -> {s.hp:.0%}")
-            telemetry.emit("event", kind="hit", text=text)
-            self._log_hit(s)
+        for touch in touched:
+            self._touch_told(s, touch)
         self._last_hp, self._last_where, self.actions.pressed = s.hp, s.where, False
 
     def _hp_number(self, s: Scene) -> tuple[int, int] | None:
@@ -932,7 +946,7 @@ class Hunter:
             text = (f"a touch of {size} HP ({before} -> {cur}) fits no kind of the map's: kept, counted for none (the "
                     f"safety stop's {touch.said} touch {touch.hp})")
             self.log(f"  {text}")
-            telemetry.emit("event", kind="touch", text=text)
+            telemetry.emit("event", kind="touch_unfit", text=text)  # ('touch' is a touch told: _touch_told)
         elif kind is not None and self.stats.level is not None:
             most_now = self._measured_now().get(kind, (0, 0))[0]
             mine = next((x for x in self.hp_watch.reserve.touches if x.kind == kind), None)
@@ -944,6 +958,47 @@ class Hunter:
         bootstrap: her level's digits' over it while they read)."""
         level = None if self.meter.at is None else self.meter.at[0]
         self._level_seen(level, HerStats.EXP_FROM, t)
+
+    def _untold(self, s: Scene, touched: list[dict]) -> list[dict]:
+        """Look `s`'s new HP drops (its 'hp_drop' events, `new`) that no touch told came with, within TOUCH_SAME_S
+        either way, nor her last touch before them: each a touch that took HP, seen by her bar alone. The frame step
+        tells those itself (worldstate: its `how` 'hp'), so this is for a feed that tells no touches (a perception
+        service started before 2026-10-28's, or with worldstate.TOUCHES off): her HP drops are her touches, as before."""
+        out = []
+        for e in s.events:
+            if e.kind != "hp_drop" or not e.data.get("new"):
+                continue
+            near = [d.get("at", e.t) for d in touched + out] + ([self.touch_at] if self.touch_at is not None else [])
+            if not any(-TOUCH_SAME_S <= e.t - at <= TOUCH_SAME_S for at in near):
+                out.append({"kind": DAMAGE, "text": "", "at": e.t, "how": HP})
+        return out
+
+    def _touch_told(self, s: Scene, touch: dict) -> None:
+        """A monster touched her (a 'touch' event's data, perception.touches.Touch.data: its `kind`, MISS, damage or
+        unread, and `at`, when its popup showed), told in look `s`: it's her last touch (`hit_at`, `hit_kind`,
+        `touch_at`; one that took HP her last knock too, `knock_at`: a MISS doesn't move her; and her regular presses
+        about it not judged, behavior.keycheck's RegularWatch.touched, as her HP dropping was before), counted in the
+        report, sent as a telemetry event 'touch' with its kind, and logged with her HP number's drop if it read one
+        this soon (HIT_EXACT_S) and how far it pushed her when no key was pressed (_log_hit)."""
+        kind, at = touch.get("kind", DAMAGE), touch.get("at", s.t)
+        self.hit_at, self.hit_kind, self.touch_at = s.t, kind, at
+        if kind == DAMAGE:
+            self.knock_at = s.t
+            if (watch := getattr(self.attacks, "watch", None)) is not None:
+                watch.touched(s.t)  # (her regular presses about it aren't judged: behavior.keycheck)
+        self.report.touches += 1
+        self.report.misses += kind == MISS
+        said = "MISS" if kind == MISS else (f"damage {touch['text']}" if touch.get("text") else kind)
+        how = " (her HP bar alone)" if touch.get("how") == HP else ""
+        ago = f" {s.t - at:.1f} s before this look" if s.t - at >= 0.15 else ""  # (a look after a chain: its touches)
+        last = self._last_touch
+        hp = (f"HP {last[1]} -> {last[2]} (-{last[1] - last[2]})"
+              if kind != MISS and last is not None and 0 <= s.t - last[0] < HIT_EXACT_S else f"HP {s.hp:.0%}")
+        text = f"touched: {said}{how}{ago}, {hp}"
+        telemetry.emit("event", kind="touch", text=text, touch=kind, at=round(at, 3), how=touch.get("how", POPUP),
+                       **({"number": touch["text"]} if kind == DAMAGE and touch.get("text") else {}))
+        pushed = self._log_hit(s, kind)
+        self.log(f"  {text}" + (f"; standing still: {pushed}" if pushed else ""))
 
     def _heading(self, s: Scene) -> None:
         """Which way her look's frame shows her facing (Eyes.heading; not asked on a rope), for her keys (Actions.see:
@@ -961,9 +1016,9 @@ class Hunter:
         c = self.heading_counts
         c["looks"] += 1
         c["told" if reading.side is not None else f"not told ({reading.why})"] += 1
-        if (sure := a.keys_say(s.t, self.hit_at)) is not None and not rope:
+        if (sure := a.keys_say(s.t, self.knock_at)) is not None and not rope:  # (a knock may have turned her)
             eyes.learn_heading(s, sure, reading)
-        against = a.see(reading.side, s.t, self.hit_at, reading.strong)
+        against = a.see(reading.side, s.t, self.knock_at, reading.strong)
         c[a.saw] += 1
         if a.saw == "told otherwise" and reading.strong:
             self._retell(s, reading.side)
@@ -973,7 +1028,7 @@ class Hunter:
             return
         c["against"] += 1
         since_arrow = s.t - a.arrows_at
-        since_hit = None if self.hit_at is None else s.t - self.hit_at
+        since_hit = None if self.knock_at is None else s.t - self.knock_at
         text = (f"the frame shows her facing {reading.side}, her last arrow {against} ({since_arrow:.1f} s after it, "
                 + ("no hit before" if since_hit is None else f"{since_hit:.1f} s after a hit")
                 + f"; matched {reading.score:.2f}, {reading.margin:.2f} ahead of {against})")
@@ -999,7 +1054,7 @@ class Hunter:
         the other way keyed since her last arrow, her last hit and the last look that agreed with her keys (and RETELL_S
         before the frame at most) are told to the feed again that way (localization.tracking: their kills bound on that
         side)."""
-        since = max(self.actions.arrows_at, -1e18 if self.hit_at is None else self.hit_at, self.facing_agreed,
+        since = max(self.actions.arrows_at, -1e18 if self.knock_at is None else self.knock_at, self.facing_agreed,
                     s.t - RETELL_S)
         for th in self.told_throws:
             if since < th[0] <= s.t and th[1] != side:
@@ -1072,20 +1127,24 @@ class Hunter:
                 if e.kind == "died" and e.data.get("cause") != "hers":
                     telemetry.emit("event", kind="died", text=e.text(), track=e.track)
 
-    def _log_hit(self, s: Scene) -> None:
-        """A hit while no key was pressed since the last look: how far it pushed her (knockback), kept
-        in lab/hits.jsonl."""
+    def _log_hit(self, s: Scene, kind: str = DAMAGE) -> str | None:
+        """A touch (of `kind`: MISS, damage or unread) while no key was pressed since the last look: how far it pushed
+        her (knockback: damage alone moves her), kept in lab/hits.jsonl with its kind, and said (None: keys were
+        pressed, or she wasn't placed)."""
         before = self._last_where
         if self.actions.pressed or before is None or s.where is None or before.platform is None:
-            return
+            return None
         pushed = s.where.x - before.x
         same = s.platform is not None and s.platform.id == before.platform.id
-        self.log(f"  hit standing still: pushed {pushed:+.0f} units" + ("" if same else
-                 f", off platform {before.platform.id} onto {s.platform.id if s.platform else 'nothing'}"))
+        said = f"pushed {pushed:+.0f} units" + ("" if same else
+                                                 f", off platform {before.platform.id} onto "
+                                                 f"{s.platform.id if s.platform else 'nothing'}")
         try:
             with paths.of().hit_log.open("a", encoding="utf-8") as f:  # (hers)
                 f.write(json.dumps({"pushed": round(pushed, 1), "dy": round(s.where.y - before.y, 1),
-                                    "hp": round(self._last_hp - s.hp, 4), "how": s.how,
-                                    "platform": before.platform.id, "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+                                    "hp": round(self._last_hp - s.hp, 4) if self._last_hp is not None else None,
+                                    "touch": kind, "how": s.how, "platform": before.platform.id,
+                                    "time": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
         except OSError:
             pass
+        return said

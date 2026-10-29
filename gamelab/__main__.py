@@ -1295,7 +1295,7 @@ def cmd_nav(args) -> int:
     with on_alarm(hunter):  # the Lie Detector seen: she retreats to a safe place, then the command stops
         trip = nav.go(args.platform, x=args.x, seconds=args.seconds)
     print(f"{trip.result} in {time.monotonic() - start:.1f} s: {len(trip.moves)} moves in {trip.chains} chains, "
-          f"{trip.misses} landed somewhere else, {trip.hits} hit on the way, {trip.waits} waits for monsters, "
+          f"{trip.misses} landed somewhere else, {trip.hits} touched on the way, {trip.waits} waits for monsters, "
           f"{trip.kills} monsters shot dead on the way; time looking {trip.time['look']:.1f} s, "
           f"thinking {trip.time['think']:.1f} s, moving {trip.time['move']:.1f} s")
     for kind, v in sorted(nav.tracker.speeds.items()):
