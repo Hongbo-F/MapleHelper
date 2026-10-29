@@ -26,7 +26,10 @@ What changes (classes.magician.SEARCH and CAST: the client's search for an aimed
   close is cast at from the ground only where her search surely picks it when the cast starts, else she steps to where
   it will, jumps away, casts at another her search picks, or waits (2026-10-29: her close quarters' jump throws went out
   as casts from the ground that picked nothing); and her attack choice casts only at a body seen that her search picks,
-  not dead, not again where it took no effect (behavior.attacks.Attacks.picks, from her Policy.unseen 'none').
+  not dead, not again where it took no effect (behavior.attacks.Attacks.picks, from her Policy.unseen 'none');
+- touched, no escape that the fight's R8 makes (stance.FIGHT_CLEAR off: the evade work's, measured on the thief, whose
+  jump back throws; hers is the jump away alone): her close quarters decide as without it. The evade work's movement
+  (the navigator's evade step, the mover's moves watched, the stand check, her retreat's dodge) is hers as the thief's.
 """
 
 import contextlib
@@ -64,7 +67,12 @@ def swaps(c: Character) -> dict:
            # (no point-blank answers up close where her profile has none, Policy.close_quarters 'touch': a cast from
            # the ground her search surely picks the monster with, else a step, the jump away or a wait; 2026-10-29,
            # "cast magic claw for nothing")
-           (stance, "POINT_BLANK"): c.policy.close_quarters == "claw"}
+           (stance, "POINT_BLANK"): c.policy.close_quarters == "claw",
+           # (her close quarters as before the evade work's R8: touched, the thief's escape is a jump back throwing,
+           # hers the jump away alone, which would trade the cast from the ground her search surely picks a Green
+           # Mushroom 50-60 off with for a jump with none; R8 was measured on the thief only, the simulator having no
+           # Magic Claw: the integration of 2026-10-29)
+           (stance, "FIGHT_CLEAR"): False}
     return out
 
 

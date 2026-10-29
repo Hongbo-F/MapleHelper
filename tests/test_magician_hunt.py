@@ -698,3 +698,35 @@ def test_her_stance_reaches_by_the_bodies_game_data_as_her_search_does():
         mine = act(118.0, lambda m: True)
         assert mine[0] == "back" and mine[1] == LEFT and 118.0 + mine[2] >= 123.0, mine
         assert act(130.0, lambda m: True) == ("throw", RIGHT)
+
+
+# --- the evade work integrated (2026-10-29): the fight's R8 the thief's only ------------------------------------------
+
+def test_touched_her_close_quarters_are_as_without_the_fights_r8_the_thiefs_get_clear():
+    """The evade work's R8 (attack.stance.FIGHT_CLEAR): touched, her invulnerability on (Pace.window), a monster on her
+    not about to die, the escape decides, staying put dearer. The thief's escape is a jump back throwing (she still
+    attacks); hers would be the jump away alone, in place of the cast from the ground her search surely picks a Green
+    Mushroom 50-60 off with, or the step back to where it will at 30-40 (master's). Off for her (attack.magic's swaps):
+    touched or not, the same; the thief's R8 as built."""
+    from gamelab.attack import stance
+    from gamelab.attack.danger import Danger
+    from gamelab.localization.monsters import bodies
+    from test_danger import HER, build, seen
+    model = build([(0, 500, 1000, 500)], [("13", 900, 500)])
+    p, d = model.platform_under(500, 500), Danger(model, HER)
+    tops = {k: b.top for k, b in bodies(model).items()}
+    halves = {k: b.half for k, b in bodies(model).items()}
+
+    def act(gap, window, castable=None):
+        ms = [seen("green-mushroom", 300.0 + gap, 500, p.id)]
+        return stance.stance(300.0, 500, p, ms, True, RIGHT, can_jump=lambda a, b: stance.open_above(model, p, a, b),
+                             tops=tops, halves=halves, around=ms, castable=castable, danger=d,
+                             pace=stance.Pace(window=window))
+    assert stance.FIGHT_CLEAR and act(60.0, 1.0) == ("jump_back", RIGHT) != act(60.0, 0.0)  # (the thief's R8)
+    with magic.swapped(MAGE):
+        assert not stance.FIGHT_CLEAR
+        for gap in (30.0, 40.0, 50.0, 60.0):
+            calm, touched = act(gap, 0.0, lambda m: True), act(gap, 1.0, lambda m: True)
+            assert touched == calm and touched[0] in ("back", "throw"), (gap, calm, touched)
+        assert act(55.0, 1.0, lambda m: True) == ("throw", RIGHT)  # (bodies apart: the cast her search surely picks)
+    assert stance.FIGHT_CLEAR
