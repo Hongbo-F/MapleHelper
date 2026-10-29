@@ -341,3 +341,68 @@ class DartWatch:
         """A new stretch: the presses keyed after `after` (their MP not shown yet) go on into it."""
         self.keys = [k for k in self.keys if k > after]
         self.shown, self.span, self.read, self.told, self.chat_read = 0, 0.0, 0, None, 0
+
+
+# --- out of MP (the magician's) ----------------------------------------------------------------------------------
+# Her MP is her ammunition (Magic Claw, 20 MP a cast at level 20), and her pet drinks her MP potions under its warning
+# (5%: about 50 of her 1007). The user, 2026-10-28: low MP is covered by her pet's MP potions, keep casting; stop only if
+# her MP stays under a floor (her pet out of potions), as out of darts stops the thief. So: every read of her MP bar
+# (a look's, a glance's) under OUT_OF_MP_CASTS casts' MP, without a read at or over it, for OUT_OF_MP_S (her pet drinks
+# within a second of its warning; her regen gives a cast in about a minute) ends the hunt (OutOfMp, a HuntStop: her
+# retreat to a safe place, said in capitals, paged, exit code OUT_OF_MP_EXIT). Meanwhile no cast goes (her MP under a
+# cast: behavior.attacks, no regular attack instead).
+OUT_OF_MP_CASTS = 2      # her MP under this many casts' (40 of 1007: 4%, under her pet's 5% warning)
+OUT_OF_MP_S = 12.0       # ... with no read over it for this long: her pet isn't drinking (out of MP potions)
+OUT_OF_MP_EXIT = 8       # the command's exit code after it (the stat window's 7, the key check's 6, out of darts' 5)
+
+
+class OutOfMp(HuntStop):
+    """Her MP stayed under OUT_OF_MP_CASTS casts for OUT_OF_MP_S (MpWatch): her pet's MP potions are out. `mp`: her MP
+    then; `floor`: the floor (MP); `seconds`: how long it had been under."""
+    label = "OUT OF MP"
+    title = "Out of MP"
+    event = "out_of_mp"
+    exit_code = OUT_OF_MP_EXIT
+    keep_s = KEEP_S
+    ends = "to a safe place (no more casts)"
+    advice = "Give her pet MP potions (her Use tab, its auto-potion's MP item) before hunting again."
+
+    def __init__(self, mp: float, floor: float, seconds: float, at: float = 0.0):
+        self.mp, self.floor, self.seconds, self.at = mp, floor, seconds, at
+        super().__init__(f"her MP {mp:.0f} under {floor:.0f} ({OUT_OF_MP_CASTS} casts) for {seconds:.0f} s: her pet "
+                         f"isn't drinking her MP potions (out of them?)")
+
+    def page(self) -> tuple[str, str]:
+        return ("MapleStory: out of MP", f"gamelab stopped the hunt: {self}. She went to a safe place.")
+
+
+@dataclass
+class MpWatch:
+    """Her MP bar's reads for out of MP (`due`): `cast` MP a cast, `max_mp` her MP when full (the magician's)."""
+    cast: float
+    max_mp: float
+    under_since: float | None = None  # the first read under the floor since the last read at or over it
+    last: float | None = None         # the last read's time ...
+    mp: float = 0.0                   # ... and her MP then
+    fired: bool = False
+
+    @property
+    def floor(self) -> float:
+        return OUT_OF_MP_CASTS * self.cast
+
+    def see(self, t: float, share: float | None) -> None:
+        """Her MP bar's `share` off a frame shown at `t` (None: not read)."""
+        if share is None or self.max_mp <= 0:
+            return
+        self.last, self.mp = t, share * self.max_mp
+        if self.mp >= self.floor:
+            self.under_since = None
+        elif self.under_since is None:
+            self.under_since = t
+
+    def due(self, now: float = 0.0) -> OutOfMp | None:
+        """The stop, once: her MP under the floor at every read for OUT_OF_MP_S; else None."""
+        if self.fired or self.under_since is None or self.last is None or self.last - self.under_since < OUT_OF_MP_S:
+            return None
+        self.fired = True
+        return OutOfMp(self.mp, self.floor, self.last - self.under_since, at=now)

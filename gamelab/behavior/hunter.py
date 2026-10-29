@@ -36,6 +36,7 @@ from maplehelper.config import GameKeys
 from .. import character as profiles
 from .. import paths, telemetry
 from ..attack import danger
+from ..attack.choice import Attack
 from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import client
 from ..control.actions import Actions
@@ -57,7 +58,7 @@ from ..perception.hud import exp_changed
 from ..perception.touches import DAMAGE, HP, MISS, POPUP
 from . import fight
 from .attacks import Attacks
-from .darts import DartWatch, presses_for
+from .darts import DartWatch, MpWatch, presses_for
 from .fight import Report
 from .keycheck import CAST_DOUBT, Doubt, KeyCheck, KeyDoubt, MoveWatch, RegularWatch, regular_reach, unquiet
 from .ledger import DropStore, Ledger, Wounds
@@ -209,13 +210,23 @@ class Hunter:
         self._limit_said = ""  # the reserve's threshold as last said (Reserve.limit)
         self._measured: tuple[tuple, dict] = ((None, -1), {})
         self._reserve_check()  # (the reserve, the positioning model's her, and the start line)
-        self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed)
+        # (her Shape: which monsters her attacks went at, and when what they did shows; the thief's THIEF_SHAPE)
+        self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed, shape=profile.shape)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
         self.senses.checks.append(self._stop_now)  # (the safety stop at the look it's due at: STOP_ON_LOOK) ...
         self.senses.glance_checks.append(self._glanced)  # ... and at a glance (a chain's watch: no look for seconds)
         mode = attack or ("skill" if skill else "regular")
+        # Another character than the thief (the magician): her profile's attack mix whatever was asked (Magic Claw
+        # whenever her MP pays for a cast: Policy.default_mode), her regular attack never (Policy.finish_with_regular:
+        # her wand swings up close, not at range), from the ground only where her skill is (AttackSpec.air)
+        spell = profile.attacks.get("skill") if profile.klass != "thief" else None
+        if spell is not None and mode != profile.policy.default_mode:
+            log(f"her attack: {profile.policy.default_mode} ({spell.name} whenever her MP pays for a cast), not {mode}: "
+                f"the {profile.klass}'s")
+            mode = profile.policy.default_mode
         self._attack_mode = mode
         self.actions = Actions(keys, skill=mode != "regular")
+        self.actions.ground_only = spell is not None and not spell.air
         self.senses.keyed = lambda: self.actions.last_key  # a look sees what came of her keys (Senses.fresh_after)
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once
@@ -257,7 +268,11 @@ class Hunter:
                              theirs=lambda: self.ledger.theirs)
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'.
         self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
-                               kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead)
+                               kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
+                               **({} if spell is None else dict(
+                                   skill=Attack(spell.key, spell.hits, int(spell.lo or 1), int(spell.hi or 1),
+                                                spell.mp) if keys.magic_claw is not None else None,
+                                   magic=spell.defence == "mdd", no_regular=not profile.policy.finish_with_regular)))
         self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
         if mode != "regular":
             self.actions.choose = self.attacks.key
@@ -265,6 +280,12 @@ class Hunter:
         # Out of darts (behavior.darts): her Lucky Seven presses and MP bar (the attack choice's), her kills (_gained)
         self.darts = DartWatch(presses_for(model.mob_hp, getattr(model, "mob_pdd", {})))
         self.attacks.darts = self.darts
+        # ... not hers where she throws no stars (the magician): its stop never (her casts always take MP; its message
+        # bar reads for the rope's refusal kept), her MP watched instead (darts.MpWatch: out of MP, her pet's potions)
+        self.mp_watch: MpWatch | None = None
+        if spell is not None and not _throws_stars():
+            self.darts.presses = 10 ** 9
+            self.mp_watch = MpWatch(spell.mp, c.mp)
         # The doubt that her regular attack's key isn't the game's (behavior.keycheck): her regular presses judged by
         # what her looks see of their targets, every mode's (the attack choice's, and the regular attack's alone); on
         # a rope or at its top not judged. In the hunt loop (`doubts_raise`, Hunt.run) a doubt raises KeyDoubt there
@@ -541,6 +562,8 @@ class Hunter:
             self.darts.hear(said)
             lines = " / ".join(line for line in said.splitlines() if line.strip()) or "nothing"
             self.log(f"  {self.darts.shown} Lucky Seven presses in a row took no MP: the pickup log reads {lines}")
+        if (mpw := getattr(self, "mp_watch", None)) is not None and (stop := mpw.due(time.monotonic())) is not None:
+            raise stop  # (the magician's: her MP under a floor for long, her pet's MP potions out: darts.OutOfMp)
         if (stop := self.darts.due(time.monotonic())) is not None:
             if stop.said is None:
                 stop.heard(self._messages())
@@ -817,6 +840,8 @@ class Hunter:
         mp = getattr(st, "mp", None)
         self.hp_watch.see(st.t, hp, self.max_hp, None if exact is None else exact[0],
                           None if mp is None else mp * self.max_mp)
+        if (mpw := getattr(self, "mp_watch", None)) is not None:
+            mpw.see(st.t, mp)
         self._stop_now(st)
     def _misses(self, s: Scene) -> None:
         """Her attack's MISS popups in look `s`'s frame over the targets of her presses waiting to be judged
@@ -1073,6 +1098,8 @@ class Hunter:
         self.hp_watch.see(s.t, s.hp, self.max_hp, None if exact is None else exact[0],
                           None if mp is None else mp * self.max_mp)
         self.darts.roped = self.on_rope(s)  # (presses keyed on a rope, which the game refuses, aren't counted)
+        if (mpw := getattr(self, "mp_watch", None)) is not None:
+            mpw.see(s.t, mp)
         self.darts.at_top = (s.where is not None and s.where.platform is not None  # (her regular presses there watched)
                              and rope_at_top(self.model, s.where) is not None)
         if s.events is None:

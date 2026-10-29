@@ -218,10 +218,10 @@ def ensure(map_id: int | None = None, log: Callable[[str], None] = print) -> boo
     if saved() or now - _ENSURED[0] < ENSURE_EVERY_S or running():
         return False
     _ENSURED[0] = now
-    # (the thief's whoever this command plays: it serves every command, and learns who plays only in the design's S0g;
-    # gamelab.__main__.IN_GAME)
+    # (for the character this command plays, named: hers; else whoever `character use` chose, as the babysitter's;
+    # gamelab.__main__.IN_GAME. A command that hunts refuses a service perceiving another: _perceives_her)
     who = os.environ.get(character.ENV)
-    unnamed = f"set {character.ENV}=&& " if who and who != character.DEFAULT else ""
+    unnamed = f"set {character.ENV}={who}&& " if who and who != character.DEFAULT else ""
     command = (f'cmd.exe /c {unnamed}set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& "{sys.executable}" -u -X utf8 '
                f'-m gamelab perceive' + ("" if map_id is None else f" --map {int(map_id)}") + f' >> "{log_path()}" 2>&1')
     try:
@@ -231,6 +231,14 @@ def ensure(map_id: int | None = None, log: Callable[[str], None] = print) -> boo
         return False
     log(f"perception: started the service (map {map_id}); its console: {log_path()}")
     return True
+
+
+def _who() -> str:
+    """Who the service perceives: the character this process plays (her name tag, pictures and Shape)."""
+    try:
+        return character.active().id
+    except Exception:  # (a config.toml that doesn't parse: said where it's loaded)
+        return character.DEFAULT
 
 
 def _start_detached(command: str, folder: str) -> None:
@@ -275,7 +283,7 @@ def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[floa
         picture = None
     eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo, minimap_picture=picture)
     eyes.log = log
-    senses = Senses(eyes, model, band)
+    senses = Senses(eyes, model, band, shape=character.active().shape)  # (her Shape: who plays, the thief's by default)
     return Runner(frames, eyes, WorldStep(senses, False, schedule, SearchThread(senses)), title)
 
 
@@ -447,7 +455,7 @@ class Service:
         self._listener = multiprocessing.connection.Listener(self.address, family="AF_PIPE", authkey=self.authkey)
         if self.info is not None:
             write_info(self.info, {"pid": os.getpid(), "address": self.address, "authkey": self.authkey.hex(),
-                                   "started": time.time(), "map": self.map_id})
+                                   "started": time.time(), "map": self.map_id, "character": _who()})
         threading.Thread(target=self._accept, name="perceive-accept", daemon=True).start()
 
     def _accept(self) -> None:
@@ -542,7 +550,7 @@ class Service:
 
     def _welcome(self) -> dict:
         """What a client needs to read this run's frames (None for the rings while the game hasn't been seen)."""
-        return {"epoch": self.epoch, "pid": os.getpid(), "map": self.map_id,
+        return {"epoch": self.epoch, "pid": os.getpid(), "map": self.map_id, "character": _who(),
                 "next": self._rebuild if self._rebuild is not None else self.map_id,  # (a new run due: its map)
                 "ring": None if self.ring is None else self.ring.name, "slots": RING_SLOTS,
                 "shape": None if self.ring is None else list(self.ring.shape),

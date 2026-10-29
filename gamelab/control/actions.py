@@ -148,6 +148,10 @@ class Actions:
         # the run (behavior.keycheck), which only her attack choice knows; its answer None sends no throw
         self.routed = False
         self.keyed_ground = False  # whether the attack key last chosen (_attack_key) is a throw's from the ground
+        # Whether her attack is made from the ground only (the magician's Magic Claw: never cast mid-jump, the user,
+        # 2026-10-27): a jump throw goes out as a throw from the ground, a jump back is the jump away alone (no key in
+        # the air). False: the thief's, as before.
+        self.ground_only = False
         # Whether a throw that way still goes (the way -> False to drop it), asked once her lock has been waited out,
         # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
         # decided on drops it). None: every throw goes.
@@ -264,8 +268,8 @@ class Actions:
         own, the mover's single moves (via play), and the navigator's chains: when its last arrow goes is kept
         (`arrows_at`), as frames before then and HEADING_SETTLE_S after can't show what it did to her facing."""
         locked = {self.keys.jump.name, self.keys.attack.name}
-        if self.keys.lucky_seven is not None:
-            locked.add(self.keys.lucky_seven.name)
+        if (skill := self._skill_key()) is not None:
+            locked.add(skill.name)
         arrows = {self.keys.left.name, self.keys.right.name}
         now, wait = time.monotonic(), 0.0
         first = min((e[0] for e in events if len(e) == 3 and e[1] in locked and e[2] == "down"), default=None)
@@ -372,7 +376,10 @@ class Actions:
         must come sooner, at a monster too short for a later one), the tap goes first and the jump waits for its walk to
         stop (JUMP_THROW_TURN_MS). `way` +1/-1 jumps forward that way (the arrow held: FORWARD_JUMP_MS before the jump,
         let go FORWARD_HOLD_MS after it), which faces her that way: a throw that way. False: dropped once her lock was
-        waited out (`still`), or no attack to throw (`throw`'s), no key sent."""
+        waited out (`still`), or no attack to throw (`throw`'s), no key sent. From the ground only (`ground_only`: the
+        magician's), a throw from the ground instead."""
+        if self.ground_only:
+            return self.throw(direction)
         self.wait_lock()
         if not self._still(direction):
             return False
@@ -416,9 +423,10 @@ class Actions:
         makes sure there's room behind her. `key_ms`: the attack key that long after the jump key
         (AIR_TURN_ATTACK_MS, 120, by default: AIR_TURN_LEAD_MS after the turn's arrow; sooner for a monster too short
         to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; later, for a monster higher up). With no
-        attack to throw (`throw`'s), the jump away alone, turning toward it in the air."""
+        attack to throw (`throw`'s), or her attack from the ground only (`ground_only`: the magician's), the jump away
+        alone, turning toward it in the air."""
         self.wait_lock()
-        key = self._attack_key(direction)
+        key = None if self.ground_only else self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))
         toward, jump = self.arrow(direction), self.keys.jump.name
         throw_ms = JB_THROW_MS if key_ms is None else JB_RUN_MS + max(key_ms, JUMP_BACK_ATTACK_MS)
@@ -454,11 +462,17 @@ class Actions:
         or whichever `choose` picks (`keyed_ground` says whether it's a throw from the ground: Attacks.key); `routed`,
         whichever `choose` picks whatever her keys (None: no throw)."""
         self.keyed_ground = ground
-        if self.choose is not None and (self.routed or (self.skill and self.keys.lucky_seven)):
+        skill = self._skill_key()
+        if self.choose is not None and (self.routed or (self.skill and skill)):
             return self.choose(direction)
-        if self.skill and self.keys.lucky_seven:
-            return self.keys.lucky_seven.name
+        if self.skill and skill:
+            return skill.name
         return self.keys.attack.name
+
+    def _skill_key(self):
+        """Her skill's key: Lucky Seven's (the thief's), else Magic Claw's (the magician's), else None."""
+        lucky = self.keys.lucky_seven
+        return lucky if lucky is not None else getattr(self.keys, "magic_claw", None)
 
     def rekey(self, attack: str) -> None:
         """Her regular attack on key `attack` (config.toml's name) from now on (behavior.keycheck: the game has it
@@ -561,7 +575,8 @@ class Actions:
         seed 1, sighted at 40 s, 4 of its 13 looks were of frames shown less than senses.KEY_EFFECT_S after its last
         key, two of them before it)."""
         keys = dataclasses.replace(self.keys, lucky_seven=None, pick_up=None, chair=None, sit=None, hp_potion=None,
-                                   mp_potion=None, pet_food=None)
+                                   mp_potion=None, pet_food=None, magic_claw=None, magic_guard=None, magic_armor=None,
+                                   energy_bolt=None)
         out = Actions(keys, kind=RETREAT)
         out.facing, out.lock_until, out.arrow_until = self.facing, self.lock_until, self.arrow_until
         out._attack_at, out.sent_at = self._attack_at, self.sent_at

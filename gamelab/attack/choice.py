@@ -89,7 +89,7 @@ class Attack:
 
     @property
     def name(self) -> str:
-        return "Lucky Seven" if self.key == "lucky_seven" else "the regular attack"
+        return {"lucky_seven": "Lucky Seven", "magic_claw": "Magic Claw"}.get(self.key, "the regular attack")
 
     def mean(self, pdd: float = 0.0) -> float:
         """Its damage a throw on average, after a defence of `pdd`."""

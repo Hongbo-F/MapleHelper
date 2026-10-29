@@ -412,8 +412,9 @@ def test_the_character_command(monkeypatch, capsys, tmp_path):
     assert json.loads(character.CHOSEN.read_text()) == {"character": "magician"}  # (the test's own: conftest)
     out = capsys.readouterr().out  # (the review's: what the choice doesn't do yet, and what keeps running)
     assert "plays her only when named" in out and "perceive and pet processes running now keep" in out
+    assert "the perception service and the pet feeder play her once they start again" in out
     monkeypatch.delenv(character.FIXED_STATS)  # (as a command has it: the file read; restored after the test)
-    assert cli.main(["character"]) == 0 and "(offline only: a command in the game plays her only with" in (
+    assert cli.main(["character"]) == 0 and "any other command only with --character magician" in (
         capsys.readouterr().out)
     real = character.load
     monkeypatch.setattr(character, "load", lambda cid, *a, **k: (_ for _ in ()).throw(config.ConfigError(
@@ -429,7 +430,9 @@ def test_the_character_command(monkeypatch, capsys, tmp_path):
     assert "nothing was looked at" in capsys.readouterr().out
 
 
-def test_only_the_thief_attacks_in_the_game(monkeypatch):
+def test_the_magician_hunts_but_runs_none_of_the_thiefs_probes_locks_or_combos(monkeypatch):
+    """From 2026-10-29 the magician hunts (`tour`, `hunt`, `nav`: her Magic Claw, gamelab.attack.magic); `lock`,
+    `combo` and `probe run` stay the thief's (__main__.HERS_NOT_YET), refused saying why and what chose her."""
     from gamelab import __main__ as cli
     parser = cli.build_parser()
     monkeypatch.delenv(character.ENV, raising=False)
@@ -442,25 +445,30 @@ def test_only_the_thief_attacks_in_the_game(monkeypatch):
         assert cli._refused_as(args) is None
     monkeypatch.setenv(character.ENV, "magician")
     monkeypatch.setattr(character, "_ACTIVE", [])
-    refused = cli._refused_as(parser.parse_args(["tour"]))
-    assert "only the thief hunts so far" in refused and "by GAMELAB_CHARACTER (--character)" in refused
+    assert cli._refused_as(parser.parse_args(["tour"])) is None  # (hers: Magic Claw)
+    refused = cli._refused_as(parser.parse_args(["probe", "run", "claw-edge"]))
+    assert "only the thief runs it so far" in refused and "by GAMELAB_CHARACTER (--character)" in refused
+    assert "star and claw probes" in refused
     assert cli._refused_as(parser.parse_args(["probe", "list"])) is None  # offline
     assert cli._refused_as(parser.parse_args(["character"])) is None
     assert cli._refused_as(parser.parse_args(["calibrate"])) is None  # (her own: L0's first step)
-    assert cli.main(["tour"]) == 2
+    assert cli._refused_as(parser.parse_args(["perceive"])) is None  # (the service is whoever plays)
+    assert cli.main(["probe", "run", "claw-edge"]) == 2
 
 
-def test_the_perception_service_is_the_thiefs(monkeypatch):
-    """The review's: a service built as the magician (her name tag, pictures and Shape) would serve the thief's hunts
-    after a switch, and nothing tells it who plays yet (S0g): perceive plays the thief only, and the service a command
-    starts is the thief's whoever it plays (its command line clears GAMELAB_CHARACTER; the thief's as before)."""
+def test_the_perception_service_is_whoever_plays_and_says_so(monkeypatch):
+    """From 2026-10-29 the service perceives the character it plays (her name tag, pictures and Shape), named or
+    chosen by `character use` (the babysitter starts it with no --character), and says who in its welcome: a command
+    that hunts refuses one perceiving another (__main__._perceives_her). The review's worry (a service built as the
+    magician serving the thief's hunts after a switch) is that refusal now. The service a command starts is that
+    command's character's (GAMELAB_CHARACTER kept; the thief's command line as before)."""
     import sys
     from gamelab import __main__ as cli
     from gamelab.localization import service
     monkeypatch.setenv(character.ENV, "magician")
     monkeypatch.setattr(character, "_ACTIVE", [])
     parser = cli.build_parser()
-    assert "the perception service is the thief's" in cli._refused_as(parser.parse_args(["perceive"]))
+    assert cli._refused_as(parser.parse_args(["perceive"])) is None
     assert cli._refused_as(parser.parse_args(["perceive", "--frames", "x"])) is None  # (saved frames: its own pipe)
     started = []
     monkeypatch.setattr(service, "_start_detached", lambda command, folder: started.append(command))
@@ -468,7 +476,7 @@ def test_the_perception_service_is_the_thiefs(monkeypatch):
     monkeypatch.setattr(service, "saved", lambda *a: False)
     master = (f'cmd.exe /c set PYTHONUNBUFFERED=1&& set OPENBLAS_NUM_THREADS=1&& "{sys.executable}" -u -X utf8 -m '
               f'gamelab perceive --map 10002073 >> "{service.log_path()}" 2>&1')
-    for who, line in (("magician", "cmd.exe /c set GAMELAB_CHARACTER=&& " + master[len("cmd.exe /c "):]),
+    for who, line in (("magician", "cmd.exe /c set GAMELAB_CHARACTER=magician&& " + master[len("cmd.exe /c "):]),
                       ("thief", master), ("", master)):
         monkeypatch.setenv(character.ENV, who)
         monkeypatch.setattr(service, "_ENSURED", [-1e18])
@@ -476,26 +484,32 @@ def test_the_perception_service_is_the_thiefs(monkeypatch):
         assert started[-1] == line, who
 
 
-def test_a_choice_by_file_alone_plays_the_thief_in_the_game(monkeypatch, capsys):
+def test_a_choice_by_file_alone_plays_the_thief_in_the_game_but_for_the_service_the_pet_and_the_hunts(monkeypatch,
+                                                                                                         capsys):
     """The review's: `character use magician` left behind switched the babysat pet feeder and perception service to
     her files without a word. Until her bottom bar is read (S0g), a command in the game plays her only when named:
-    under the file (or [characters] default) alone it plays the thief and says so; one that attacks refuses."""
+    under the file (or [characters] default) alone it plays the thief and says so. From 2026-10-29 the perception
+    service and the pet feeder (__main__.FOLLOW_CHOICE: the babysitter starts them with no --character) and the
+    commands that hunt play the one chosen, and a hunt refuses a service perceiving another (_perceives_her)."""
     from gamelab import __main__ as cli
     parser = cli.build_parser()
     character.choose("magician")  # (the test's own file: conftest)
     monkeypatch.delenv(character.FIXED_STATS)  # (as a command has it: the file read; restored after the test)
     monkeypatch.setenv(character.ENV, "")  # (none named; restored after the test)
     monkeypatch.setattr(character, "_ACTIVE", [])
-    said = cli._unnamed(parser.parse_args(["pet", "--every", "1"]))
-    assert said.startswith("pet plays the thief: ") and "names magician" in said and "--character magician" in said
+    assert cli._unnamed(parser.parse_args(["pet", "--every", "1"])) is None  # (hers: the babysitter's pet feeder)
+    assert cli._unnamed(parser.parse_args(["perceive"])) is None and not character.named()
+    said = cli._unnamed(parser.parse_args(["watch"]))
+    assert said.startswith("watch plays the thief: ") and "names magician" in said and "--character magician" in said
     assert character.named() and character.active_id() == "thief"  # (set for the command and its children)
     monkeypatch.setenv(character.ENV, "")
     assert cli._unnamed(parser.parse_args(["character"])) is None  # offline: the file's choice stands
     assert cli._unnamed(parser.parse_args(["perceive", "--frames", "x"])) is None  # (saved frames: offline)
     assert character.active_id() == "magician"
-    assert cli._unnamed(parser.parse_args(["tour"])) is None  # it attacks: refused instead, saying why
-    refused = cli._refused_as(parser.parse_args(["tour"]))
-    assert "only the thief hunts so far" in refused and "`gamelab character use`" in refused
+    assert cli._unnamed(parser.parse_args(["tour"])) is None  # it hunts: hers
+    assert cli._refused_as(parser.parse_args(["tour"])) is None
+    refused = cli._refused_as(parser.parse_args(["probe", "run", "claw-edge"]))
+    assert "only the thief runs it so far" in refused and "`gamelab character use`" in refused
     monkeypatch.setenv(character.ENV, "magician")
     assert cli._unnamed(parser.parse_args(["pet", "--every", "1"])) is None  # named: hers (L0's `pet --read`)
     monkeypatch.setenv(character.ENV, "")

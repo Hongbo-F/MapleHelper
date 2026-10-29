@@ -402,7 +402,7 @@ def describe(c: Character) -> list[str]:
     lines.append(f"  safety stop: under {c.safety_hits} of the map's largest touches (behavior.safety)")
     files = "lab/, as before" if not c.files else f"lab/characters/{c.files}/"
     keys = ("the flat [keys]" if c.klass == config.THIEF else "not given yet" if c.keys is None
-            else f"[characters.{c.id}.keys]")
+            else f"her profile's, [characters.{c.id}.keys] over them")
     lines.append(f"  files: {files}; keys: {keys}; stops: {', '.join(c.stops) or 'none'}")
     if c.placeholders:
         lines.append(f"  placeholders still: {', '.join(c.placeholders)}")

@@ -22,6 +22,8 @@ calibration and pet; L1: her lock, delays, MP a cast; design.md 6.1). Until then
 from dataclasses import replace
 
 from maplehelper import config
+from maplehelper.config import GameKeys
+from maplehelper.keys import parse as parse_key
 
 from ..character import AttackSpec, Box, Buff, Character, Geometry, Perception, Pet, Policy, Priors, Search, Shape
 
@@ -34,18 +36,33 @@ MAGIC_ARMOR_MP = (8, 8, 8, 8, 8, 10, 10, 10, 10, 10, 13, 13, 13, 13, 13, 16, 16,
 ALERT_MS = 600  # a buff's cast plays alert2, 600 ms of frames [data: actions.json]; its lock: L0's casts
 
 FIXED_STATS = config.Character(
-    speed=100.0,        # PLACEHOLDER (the game's 100, no gear or Haste): her SPEED -- her stat window; L0's walk
-    jump=100.0,         # PLACEHOLDER: her JUMP -- her stat window; L0's jump (77 units at 100)
-    mp=500.0,           # PLACEHOLDER: her MP when full -- her MP bar's number
+    speed=100.0,        # her SPEED: her stat window, read live 2026-10-28 (lab/characters/magician/her_stats.json)
+    jump=100.0,         # her JUMP: her stat window, the same read
+    mp=1007.0,          # her MP when full: her stat window's MP 667/1007 at level 27 (the same read)
     lucky_seven=0.0,    # (not hers: a thief's skill)
                         # (her HP, level and W.DEF: perception's, as the thief's: behavior.bootstrap)
-    avoid=27.0,         # PLACEHOLDER (the thief's fit, sim.world.EVADE_ACC): her AVOID -- her stat window
+    avoid=18.0,         # her AVOID: her stat window's EVA 18 (the same read)
     climb_speed=117.0,  # PLACEHOLDER (the thief's, physics.CLIMB_SPEED): one climb in L0
     mp_regen=0.32)      # PLACEHOLDER (the thief's, sim.world.MP_REGEN): her idle MP bar in L0, or L1's quiet stretches
 SKILLS = {"magic_claw": 20,   # PLACEHOLDER (its Master Level): her skill window -- the user's answer
           "energy_bolt": 1,   # PLACEHOLDER (Magic Claw's req [data]): her skill window
           "magic_guard": 0,   # PLACEHOLDER (not learned): her skill window
           "magic_armor": 0}   # PLACEHOLDER (not learned): her skill window
+
+# Magic Claw's hit (each of its 2), before the monster's defence: a PRIOR by the v83 magic formula on her stat window of
+# 2026-10-28 (level 27: INT 113, MAGIC 97; her_stats.json) with Magic Claw's mad at level 20 (65 [data]): the most
+# ((MAGIC^2 / 1000 + MAGIC) / 30 + INT / 200) x mad = 267, the least with 10% mastery 76. What it's used for: what a
+# monster has left as she reckons it (behavior.attacks: a monster likely dead isn't cast at, her bars and EXP set it
+# right), never which attack goes (she casts Magic Claw whenever her MP pays for it).
+MAGIC_CLAW_HIT = (76, 267)
+# Her keys: the game's Key Bindings preset 2 as the user gave them (memory magician-facts, 2026-10-28): the thief's
+# but Shift is Magic Claw, A Energy Bolt, her chair (The Green Relaxer) '-', S her stats ([characters.magician.keys] in
+# config.toml replaces them; the binding read off the game's window, `gamelab keys --read`, is followed over them)
+KEYS = GameKeys(left=parse_key("left"), right=parse_key("right"), jump=parse_key("alt"), attack=parse_key("ctrl"),
+                up=parse_key("up"), down=parse_key("down"), pick_up=parse_key("z"), chair=parse_key("-"),
+                sit=parse_key("x"), pet_food=parse_key("u"), magic_claw=parse_key("shift"),
+                energy_bolt=parse_key("a"))
+NAME = "RiceBaby"  # her name as it shows (her name tag: lab/characters/magician/tag_template_1366x768.npy)
 
 # Magic Claw (an aimed spell: RustMS ShotPath.h:36-65, its test tests/shot_path.cpp:76 "so is Magic Claw"; no lt/rb,
 # range or ball of its own [data]): the client's search with a spell's start. 13 bands, the last 290-300; band k's window
@@ -82,8 +99,8 @@ _TIMES = dict(lock_ms=730,              # PLACEHOLDER (the thief's measured 730 
               air=False)                # from the ground only (CAST.air: settled)
 MAGIC_CLAW = AttackSpec("magic_claw", "magic_claw", "Magic Claw", "casting", 2001003, level=SKILLS["magic_claw"],
                         hits=2,                 # attackCount [data]: both on the one monster, together
-                        lo=None, hi=None,       # PLACEHOLDER (not known): by the magic formula from her INT and magic
-                                                # attack (the user's answer) and mad (45-65 [data]); fit on L1's HP bars
+                        lo=MAGIC_CLAW_HIT[0], hi=MAGIC_CLAW_HIT[1],  # PLACEHOLDER (the formula's prior: MAGIC_CLAW_HIT)
+                                                # -- fit on her live HP bars (L2)
                         defence="mdd",          # magicDamage [data]: against the monster's MDDamage
                         mp=float(MAGIC_CLAW_MP[SKILLS["magic_claw"] - 1]),  # mpCon at her level [data]
                         ammo=0, geometry=CAST, **_TIMES)
@@ -134,8 +151,7 @@ PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground
 # hits, 3 for magician". Where that's at or over her pet's warning at her max HP (her HUD's), a command that hunts
 # refuses the map (TooStrong).
 SAFETY_HITS = 3
-PLACEHOLDERS = ("stats", "skill levels", "keys", "name", "lock and delays", "damage", "miss", "the wand", "pet",
-                "MP policy", "priors")
+PLACEHOLDERS = ("skill levels", "lock and delays", "damage", "miss", "the wand", "pet", "priors")
 
 
 def _at(table: tuple, level: int) -> float:
@@ -145,13 +161,13 @@ def _at(table: tuple, level: int) -> float:
 def profile(cid: str = "magician") -> Character:
     """A magician as the design's priors have her: her files under lab/characters/<cid>/ (paths.of)."""
     return Character(id=cid, klass="magician", stats=FIXED_STATS, fixed_stats=FIXED_STATS, skills=dict(SKILLS),
-                     keys=None,           # PLACEHOLDER: her Key Config -- [characters.<id>.keys], the user's answer
+                     keys=KEYS,           # the user's preset 2 ([characters.<id>.keys] over it)
                      timing=None, ammo=None, stops=("out_of_mp",), buffs=(), magic_guard=0.0,
                      attacks={"skill": MAGIC_CLAW, "regular": WAND}, pet=PET, policy=POLICY, priors=PRIORS,
                      shape=SHAPE,
                      perception=Perception(files=cid,
                                            job="Magician",  # PLACEHOLDER: her bottom bar's job line -- the user's
-                                           name=None,       # PLACEHOLDER: her name as it shows -- the user's answer
+                                           name=NAME,
                                            heading_box=(50, 8, 16),  # PLACEHOLDER (the thief's): L0's frames of her,
                                            attack_score=0.4,         # widened if her swing leaves it; refit on her
                                            attack_margin=0.2,        # cast frames (L1)

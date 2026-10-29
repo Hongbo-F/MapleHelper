@@ -34,14 +34,26 @@ def sim_setup() -> tuple[GameKeys, Timing]:
 def her_setup(regular_attack: bool = False, remembered: bool = True) -> tuple[config.Config, GameKeys, Timing]:
     """config.toml, her keys the binding last read off the game's KEY BINDINGS window where there's one
     (`remembered`: control.keymap.at_start; config.toml's [keys] otherwise, and `cfg.keys` always), optionally with
-    Lucky Seven off so throws use the plain attack key (no MP)."""
+    Lucky Seven off so throws use the plain attack key (no MP). Another character than the thief (gamelab.character:
+    the one this process plays) has her profile's keys for config.toml's [keys] (`cfg.keys` hers too): the magician's
+    Magic Claw on her own key."""
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
+    if (mine := _profile_keys()) is not None:
+        cfg = dataclasses.replace(cfg, keys=mine)
     keys = cfg.keys
     if remembered:
         from . import keymap
         keys = keymap.at_start(cfg.keys).keys
-    keys = dataclasses.replace(keys, lucky_seven=None) if regular_attack else keys
+    keys = dataclasses.replace(keys, lucky_seven=None, magic_claw=None) if regular_attack else keys
     return cfg, keys, cfg.timing
+
+
+def _profile_keys() -> GameKeys | None:
+    """The keys of the character this process plays where she isn't the thief (her profile's: gamelab.character), else
+    None (the thief's are config.toml's flat [keys], as before)."""
+    from .. import character
+    c = character.active()
+    return None if c.klass == config.THIEF or c.keys is None else c.keys
 
 
 class _Clock(Ctx):

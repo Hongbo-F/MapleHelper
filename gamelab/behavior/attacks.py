@@ -176,13 +176,21 @@ class Attacks:
 
     def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 623.0, level: float = 16.0,
                  log: Callable[[str], None] = print, kills: Callable[[], list] | None = None,
-                 dead: Callable[[], object] | None = None):
+                 dead: Callable[[], object] | None = None, skill: Attack | None = None, magic: bool = False,
+                 no_regular: bool = False):
+        """`skill`: her skill if not Lucky Seven at `level` (the magician's Magic Claw: behavior.hunter, her profile's),
+        `magic` its damage against the monsters' defence against magic (MapModel.mob_mdd); `no_regular`: her regular
+        attack never thrown (the magician's wand: no swing at range, none to finish a monster, none for MP: `key` says
+        None, no throw, where it would be the regular attack)."""
         if mode not in MODES:
             raise ValueError(f"no such attack mode: {mode!r} (one of {', '.join(MODES)})")
         self.keys, self.mode, self.max_mp, self.log = keys, mode, max_mp, log
-        self.skill: Attack | None = choice.lucky_seven(level) if keys.lucky_seven is not None else None
+        self.skill: Attack | None = (skill if skill is not None else choice.lucky_seven(level)
+                                     if keys.lucky_seven is not None else None)
         self.regular = choice.REGULAR
-        self.stats = {kind_of(name): (hp, model.mob_pdd.get(name, 0.0)) for name, hp in model.mob_hp.items() if hp > 0}
+        self.no_regular = no_regular
+        defence = getattr(model, "mob_mdd", {}) if magic else model.mob_pdd
+        self.stats = {kind_of(name): (hp, defence.get(name, 0.0)) for name, hp in model.mob_hp.items() if hp > 0}
         # each kind's death animation (ledger.dying), the map's game data
         self._die = {k: b.die_s for k, b in bodies(model).items()} if hasattr(model, "mob_bodies") else {}
         self.marks: list[Mark] = []
@@ -359,6 +367,15 @@ class Attacks:
                                 "there's no Lucky Seven to throw instead"
                                 + ("" if self.skill is None else " (her MP under a cast)")))
                 return None
+        if attack is self.regular and self.no_regular:  # (the magician's wand: never at range, nor for MP)
+            self._cast, self._keyed, self._regular, self._target, self._asked = None, None, False, None, False
+            said = f"no cast: {why}"
+            self.counts[said] += 1
+            if self.counts[said] in (1, 10, 100):
+                self.log(f"    no cast ({why}): her regular attack isn't thrown"
+                         + (f" (her MP {self.mp * self.max_mp:.0f} under a cast's {self.skill.mp:g}: her pet's MP "
+                            f"potions)" if why == "MP" and self.mp is not None and self.skill is not None else ""))
+            return None
         self._target, self._regular, self._asked = target, attack is self.regular, True
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
         self._swipe = self._cast is not None and target is not None and self._clawed(target)
@@ -522,6 +539,11 @@ class Attacks:
             return ""
         whys = ", ".join(f"{k} {c[k]}" for k in ("finish", "MP", "nothing in its way") if c[k])
         warned = c["MP 0 under the warning"]
+        if self.skill is not None and self.skill.key != "lucky_seven":  # (the magician's: her skill, and her casts held)
+            held = ", ".join(f"{k} {n}" for k, n in c.items() if k.startswith("no cast: "))
+            return (f"{self.skill.name} {c[self.skill.key]}, the regular attack {c['attack']}"
+                    + (f" ({held})" if held else "")
+                    + (f"; her MP bar's 0 under her pet's warning not believed {warned} times" if warned else ""))
         return (f"Lucky Seven {c['lucky_seven']}, the regular attack {c['attack']}" + (f" ({whys})" if whys else "")
                 + (f"; her MP bar's 0 under her pet's warning not believed {warned} times" if warned else ""))
 
