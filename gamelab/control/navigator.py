@@ -810,7 +810,7 @@ class Navigator:
                 return None  # one the mover can't do: another way (st.cannot)
             still = self.mover.still is True
         if still and ROPE_TOP:
-            after = self._rope_top(st, s, after)
+            after = self._rope_top(st, s, after, jumped=bool(legs) and any(leg.air for leg in legs))
         self._made(st, moved, after.where.platform is not None and after.where.platform.id == planned.id)
         if self._note_landing(st.trip, moved, planned, after, hp, st.stopped, since=s.t):  # a miss
             st.trip.misses += 1
@@ -1721,6 +1721,9 @@ class Navigator:
         st.path = path
         self.chain_still = None
         moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst, monsters)
+        if ROPE_TOP and self.chain_still is not None and self.chain_still[1] >= STUCK_S:
+            # (her dot never moved: on a rope under its top, not on the platform: off it, as _pass's chains are)
+            after = self._rope_top(st, s, after, jumped=any(leg.air for leg in legs))
         landed = after.where.platform is not None and after.where.platform.id == planned.id
         self._made(st, [m for m in moved if m.kind != "step"], landed and not refuge)
         if self._note_landing(st.trip, moved, planned, after, hp, st.stopped, since=s.t):
@@ -1919,7 +1922,7 @@ class Navigator:
             s = self.mover.off_rope(s)
         return s
 
-    def _rope_top(self, st: TripState, s: Scene, after: Scene) -> Scene:
+    def _rope_top(self, st: TripState, s: Scene, after: Scene, jumped: bool = False) -> Scene:
         """After a chain or a move from look `s` whose keys never moved her dot (`_pass`: the chain's glances for
         STUCK_S, or every look of the mover's), with `s` placing her at the top of a rope hanging from her platform
         (rope_at_top) and `after` her dot where it was: she's on that rope under its top, not on the platform (a jump
@@ -1927,15 +1930,18 @@ class Navigator:
         a rope since: localization.pose.ROPE_TOP_GAP), as at 22:19:38 on 2026-10-26, when 10 moves from rope 4's top
         "ended on platform 18 instead" over 15.4 s, her dot 14.8 under 18 at every chain start (Tree Dungeon; the
         3,039 chain starts' standing gaps: at most 14.0, none by a rope's top over 12). Her dot more than STUCK_GAP
-        under the platform's surface only (standing by a rope's top, 9.2 at the most). Off it (Mover.off_rope: up, onto
-        the platform), and a look once she's there; else `after`."""
+        under the platform's surface only (standing by a rope's top, 9.2 at the most), unless the chain had her `jumped`
+        (EVADE: a jump moves her dot two minimap px or more within 0.3 s, so one that never moved it never left the
+        rope; the evade step's passes from a rope's top, "ended on 18 instead of platform 17" again and again where her
+        dot was 12 or less under 18: the harness's walk, seed 34, 99 times). Off it (Mover.off_rope: up, onto the
+        platform), and a look once she's there; else `after`."""
         rope = None if s.where is None else rope_at_top(self.model, s.where)
         if rope is None or after.where is None or after.where.dot is None or s.where.dot is None \
                 or abs(after.where.dot[0] - s.where.dot[0]) > STILL or abs(after.where.dot[1] - s.where.dot[1]) > STILL:
             return after
         x, y = self.senses.localizer.to_map(after.where.dot)
         p = s.where.platform
-        if y - p.y_at(p.clamp(x)) <= STUCK_GAP:
+        if y - p.y_at(p.clamp(x)) <= STUCK_GAP and not (EVADE and jumped):
             return after
         text = (f"her dot never moved: on the rope at x {rope.x:.0f}, {y - rope.top:.0f} under its top, not on "
                 f"platform {s.where.platform.id}")

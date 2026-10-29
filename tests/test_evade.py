@@ -425,6 +425,20 @@ def test_touched_on_a_rope_she_looks_at_its_top_first_and_goes_down_again_if_a_m
     assert played[-1][0] == "climb_on" and played[-1][1][0][1] == "up"
 
 
+def test_a_jump_that_never_moved_her_dot_by_a_ropes_top_means_she_is_on_the_rope_however_near_its_top(model):
+    # _rope_top: her dot 6 under D's surface by the rope at 700, never moved over the chain: standing there (STUCK_GAP),
+    # as before, unless the chain had her jump (a jump moves her dot within 0.3 s): then she's on the rope, and off it
+    # (the evade step's passes from a rope's top were sent again and again: the harness's walk, seed 34).
+    d = by_y(model, 300, 700)
+    nav = _navigator(model)
+    nav.senses = SimpleNamespace(localizer=SimpleNamespace(to_map=lambda dot: (700.0, 306.0)))
+    nav.mover.off_rope = lambda after, rope, at=None: "off"
+    s = SimpleNamespace(where=Where(700, 300, d, (10.0, 20.0)))
+    st = SimpleNamespace(fresh=None)
+    assert nav._rope_top(st, s, s) is s
+    assert nav._rope_top(st, s, s, jumped=True) == "off"
+
+
 # --- R7: her retreat's dodge -------------------------------------------------------------------------------------------
 
 def test_a_dodging_trip_keeps_clear_of_the_monster_that_touched_her_where_the_look_has_none_by_her(model, monkeypatch):
