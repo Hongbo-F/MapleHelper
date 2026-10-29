@@ -106,6 +106,37 @@ def test_a_popup_seen_again_is_the_same_touch_and_one_after_her_invulnerability_
     assert [[x.kind for x in g] for g in got] == [[MISS], [], [MISS]]
 
 
+def test_her_miss_right_after_another_players_number_held_over_her_is_told(reader, monkeypatch):
+    # The review of 2026-10-28 (S2 00:51:40.690): another player's 40 born over her (dx +23), held for her HP bar; her
+    # MISS 0.5 s after it at dx -3, her HP the same throughout: told in its first frame (the sprites read it MISS: no
+    # number re-found), the 40 judged another's at 0.8 s. As first built the 40 held was the re-finds' base as a popup
+    # told is, and the MISS was never told (NEAR_HELD False).
+    told, w = _watch_through("other_miss", reader)
+    assert [(t.kind, t.t, t.late) for t in told] == [(MISS, 0.499, 0.0)] and abs(told[0].dx) <= touches.BIRTH_DX
+    assert [o.text for o in w.others] == ["40"]
+    monkeypatch.setattr(touches, "NEAR_HELD", False)
+    told, w = _watch_through("other_miss", reader)
+    assert told == [] and [o.text for o in w.others] == ["40"]
+
+
+def test_a_number_of_hers_found_again_while_it_waits_for_her_bar_is_that_one(reader):
+    # Her Horny Mushroom's 133 born, lost (unseen past LOST_S) and born again where it was before her bar moved: the
+    # number held, re-found (it doesn't read MISS), not a second one held; told once, as of its first frame, when her bar
+    # moves. Nothing held is anyone else's.
+    c = _case("damage")
+    f0, f1 = c["frames"][1], c["frames"][2]
+
+    def img(f):
+        return np.asarray(Image.open(FIXTURES / f["file"]).convert("RGB"))
+    w = TouchWatch(reader)
+    got = w.update(img(f0), tuple(f0["tag"]), True, f0["hp"], 0.0)
+    got += w.update(img(f0), tuple(f0["tag"]), True, f0["hp"], 0.5)
+    assert got == [] and len(w.held) == 1
+    got += w.update(img(f1), tuple(f1["tag"]), True, f1["hp"], 0.6)
+    assert [(t.kind, t.text, t.t) for t in got] == [(DAMAGE, "133", 0.0)] and w.held == [] and not w.others
+    assert w.last_hers is not None and w.last_hers.first == 0.0
+
+
 def _sprite_frame(parts, back=(40, 90, 40), scale=1.0):
     """The game's popup sprites (BasicEff.img paths) drawn left to right as the game lays a number out (each glyph over
     the last by about two fifths of it), their bottoms on one row, on `back`; shrunk to `scale` as a look frame shows
@@ -166,14 +197,18 @@ def _frames(step, n, hp_at, start=100.0):
     return out
 
 
-@pytest.fixture
-def step():
+def _step():
     from test_worldstate import Drawn, small_map
 
     from gamelab.localization.senses import Senses
     from gamelab.localization.worldstate import Schedule, WorldStep
     model = small_map()
     return WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule())
+
+
+@pytest.fixture
+def step():
+    return _step()
 
 
 def test_a_popup_of_hers_is_a_touch_event_and_every_state_after_has_it(step):
@@ -205,6 +240,54 @@ def test_an_hp_drop_no_popup_was_told_for_is_a_touch_and_a_popup_right_after_it_
     assert [e.data["how"] for s in more for e in s.events if e.kind == "touch"] == [touches.HP]
 
 
+def test_a_miss_whose_touch_took_hp_after_all_is_told_again_as_damage(step, monkeypatch):
+    # A MISS told off its popup in frame 11 (as her 124 under her own orange numbers was, by its width: 2026-10-26
+    # 00:22:25.627) and her bar dropping 5 frames on (0.17 s): told again as damage, a 'touch_fix' event (`was` MISS,
+    # the same `at`) beside the hp_drop, the states' newest touch that one from then on (told then), the MISS count taken
+    # back. As first built the drop was the same touch (TOUCH_SAME_S) and it stayed a MISS: FIX_MISS off.
+    from gamelab.localization import worldstate
+    t0, t1 = 100.0 + 10 / 30, 100.0 + 15 / 30
+    step.eyes.touches = _Told({round(t0, 4): [Touch(t0, MISS, MISS)]})
+    states = _frames(step, 30, lambda k: 0.85 if k >= 15 else 0.95)
+    events = [(s.seq, e.kind, e.data.get("kind"), e.data.get("was")) for s in states for e in s.events]
+    assert events == [(11, "touch", MISS, None), (16, "hp_drop", None, None), (16, "touch_fix", DAMAGE, MISS)]
+    last = states[-1].touch
+    assert (last["kind"], last["was"], last["at"], last["told"]) == (DAMAGE, MISS, round(t0, 3), round(t1, 3))
+    assert (step.counts["touches"], step.counts["misses"], step.counts["MISS fixed"]) == (1, 0, 1)
+    # a drop 1.5 s after a MISS: a touch of its own (her invulnerability over), her bar's alone; none fixed
+    late = _step()
+    late.eyes.touches = _Told({round(t0, 4): [Touch(t0, MISS, MISS)]})
+    states = _frames(late, 70, lambda k: 0.85 if k >= 55 else 0.95)
+    assert [(s.seq, e.kind, e.data.get("how")) for s in states for e in s.events if e.kind != "hp_drop"] == [
+        (11, "touch", touches.POPUP), (56, "touch", touches.HP)]
+    monkeypatch.setattr(worldstate, "FIX_MISS", False)
+    off = _step()
+    off.eyes.touches = _Told({round(t0, 4): [Touch(t0, MISS, MISS)]})
+    states = _frames(off, 30, lambda k: 0.85 if k >= 15 else 0.95)
+    assert [e.kind for s in states for e in s.events] == ["touch", "hp_drop"] and states[-1].touch["kind"] == MISS
+
+
+def test_a_miss_with_another_player_on_her_is_crowded_and_her_invulnerability_doesnt_go_by_it(step):
+    # Another player's dot within CROWD_DX of her: a MISS told off its popup may be theirs (the review's near miss,
+    # 2026-10-26 23:10:19: CHANIKR's MISS 34.5 px from her placed tag): `crowded`, and Senses' invulnerability goes by
+    # her touch before it; one farther off, or damage (hers by her HP), isn't.
+    from gamelab.localization.senses import Senses
+    from gamelab.localization.worldstate import CROWD_DX
+    her = SimpleNamespace(x=100.0, y=-470.0)
+    on_her = SimpleNamespace(where=her, players=[SimpleNamespace(x=100.0 + CROWD_DX - 1, y=-470.0)])
+    away = SimpleNamespace(where=her, players=[SimpleNamespace(x=100.0 + CROWD_DX + 50, y=-470.0)])
+    assert step._tell(Touch(10.0, MISS, MISS), 10.0, on_her).data["crowded"] is True
+    assert "crowded" not in step._tell(Touch(12.0, MISS, MISS), 12.0, away).data
+    assert "crowded" not in step._tell(Touch(14.0, DAMAGE, "54"), 14.1, on_her).data
+    assert step.counts["crowded"] == 1 and step.touch["at"] == 14.0
+    s = Senses.__new__(Senses)  # (only its touch bookkeeping)
+    s.touch, s._sure, s.touch_listeners = None, None, []
+    s._saw_touch({**Touch(10.0, MISS, MISS).data(), "told": 10.0})
+    s._saw_touch({**Touch(11.6, MISS, MISS).data(), "told": 11.6, "crowded": True})
+    assert s.touch["at"] == 11.6 and s.touched_since(11.0) is s.touch  # (still a touch: a chain is cut by it)
+    assert s.invulnerable_until() == pytest.approx(10.0 + INVULNERABLE_S)
+
+
 def test_senses_keep_her_newest_touch_and_her_invulnerability_after_it():
     from gamelab.localization.senses import Senses
     s = Senses.__new__(Senses)  # (only its touch bookkeeping)
@@ -227,18 +310,93 @@ def test_senses_keep_her_newest_touch_and_her_invulnerability_after_it():
 def test_a_miss_knocks_nothing_and_damage_does_and_both_are_her_last_touch():
     from gamelab.behavior.fight import Report
     from gamelab.behavior.hunter import KNOCK_S, Hunter
-    h = Hunter.__new__(Hunter)  # (only what _touched uses)
-    h.hit_at = h.hit_kind = h.knock_at = h.touch_at = None
-    h.report, h.log, h._last_where = Report(), (lambda text: None), None
+    h = Hunter.__new__(Hunter)  # (only what _touch_told uses)
+    h.hit_at = h.hit_kind = h.knock_at = h.touch_at = h._last_touch = None
+    said = []
+    h.report, h.log, h._last_where = Report(), said.append, None
     h.actions = SimpleNamespace(pressed=True)
+    heard = []  # her regular presses' watch (behavior.keycheck): told of the touches that took HP, as of her HP drops
+    h.attacks = SimpleNamespace(watch=SimpleNamespace(touched=heard.append))
     look = SimpleNamespace(t=10.05, hp=0.9, where=None)
-    h._touched(look, Touch(10.0, MISS, MISS).data())
+    h._touch_told(look, Touch(10.0, MISS, MISS).data())
     assert (h.hit_at, h.hit_kind, h.touch_at, h.knock_at) == (10.05, MISS, 10.0, None) and not h.knocked(look)
-    h._touched(SimpleNamespace(t=11.6, hp=0.8, where=None), Touch(11.5, DAMAGE, "54").data())
-    assert (h.hit_at, h.hit_kind, h.touch_at, h.knock_at) == (11.6, DAMAGE, 11.5, 11.6)
+    assert heard == [] and said[-1] == "  touched: MISS, HP 90%"
+    h._last_touch = (11.55, 840, 786)  # (her HP number's drop, read in the frame step: Hunter._touched)
+    h._touch_told(SimpleNamespace(t=11.6, hp=0.8, where=None), Touch(11.5, DAMAGE, "54").data())
+    assert (h.hit_at, h.hit_kind, h.touch_at, h.knock_at) == (11.6, DAMAGE, 11.5, 11.6) and heard == [11.6]
+    assert said[-1] == "  touched: damage 54, HP 840 -> 786 (-54)"
     assert h.knocked(SimpleNamespace(t=11.6 + KNOCK_S - 0.01))
     assert not h.knocked(SimpleNamespace(t=11.6 + KNOCK_S + 0.01))
     assert (h.report.touches, h.report.misses) == (2, 1) and "touches: 2 (1 MISS)" in str(h.report)
+
+
+def test_a_miss_told_again_as_damage_knocks_her_and_is_no_miss_in_the_report():
+    # worldstate's 'touch_fix' (FIX_MISS): her MISS of 10.0 told at the look of 10.05 took HP after all, told at the
+    # look of 10.25: her knock from that look (knocked, her regular presses about it not judged), her last touch's kind
+    # damage, the report's MISS taken back (one touch, none a MISS), said.
+    from gamelab.behavior.fight import Report
+    from gamelab.behavior.hunter import KNOCK_S, Hunter
+    h = Hunter.__new__(Hunter)
+    h.hit_at = h.hit_kind = h.knock_at = h.touch_at = h._last_touch = None
+    said, heard = [], []
+    h.report, h.log, h._last_where = Report(), said.append, None
+    h.actions = SimpleNamespace(pressed=True)
+    h.attacks = SimpleNamespace(watch=SimpleNamespace(touched=heard.append))
+    h._touch_told(SimpleNamespace(t=10.05, hp=0.95, where=None), Touch(10.0, MISS, MISS).data())
+    fixed = {**Touch(10.0, DAMAGE, "").data(), "was": MISS}
+    look = SimpleNamespace(t=10.25, hp=0.85, where=None)
+    h._touch_told(look, fixed)
+    assert (h.hit_at, h.hit_kind, h.touch_at, h.knock_at) == (10.05, DAMAGE, 10.0, 10.25) and heard == [10.25]
+    assert h.knocked(SimpleNamespace(t=10.25 + KNOCK_S - 0.01))
+    assert (h.report.touches, h.report.misses) == (1, 0)
+    assert said[-1] == "  touched: damage after all (its popup read MISS 0.2 s before this look), HP 85%"
+
+
+def test_a_chain_whose_leg_counted_on_the_invulnerability_its_planning_spent_isnt_sent():
+    # The review of 2026-10-28: her invulnerability's window (flow.immune) is taken as the pass plans, and the planning's
+    # own time comes out of it. A leg through a standing monster, planned with the window past where it meets her: with
+    # 0.4 s of it spent planning it ends before then, so the chain isn't sent (said, an 'immune' event), flow.immune
+    # what's left; with none spent, or IMMUNE_RECHECK off, it goes.
+    import time
+
+    from test_flow import KEYS
+    from test_navigation import by_y, tree
+
+    from gamelab.control import navigator as nav
+    from gamelab.localization import mapdata
+    from gamelab.localization.monsters import MonsterTrack
+    from gamelab.motion.flow import Body, Flow, Keys
+    from gamelab.motion.route import Planner
+    model = mapdata.parse(1, tree(), "Test Map", {})
+    c, d = by_y(model, 500, 400), by_y(model, 300, 700)
+    path = Planner(model).plan(c.id, 200, d.id)
+    flow = Flow(model, KEYS)
+    mo = [MonsterTrack(c.id, 450, speed=0.0, kind="green-mushroom")]
+    leg = flow.leg(path[0], Body(0.0, 200, c), Keys(KEYS), "run")
+    (_, meets) = flow.danger(leg, mo)
+    n = nav.Navigator.__new__(nav.Navigator)
+    said = []
+    n.flow, n.log, n._kept = flow, said.append, mo
+    n.actions = SimpleNamespace(lock_until=0.0, arrow_until=0.0)
+    until = [0.0]
+    n.senses = SimpleNamespace(invulnerable_until=lambda: until[0])
+
+    def planned_ago(spent):
+        """flow.immune as planned `spent` s ago, the window then lasting past where the leg meets the monster."""
+        until[0] = time.monotonic() + nav.IMMUNE_MARGIN_S + nav.PLAN_START_S + meets - 0.1
+        flow.immune = until[0] - nav.IMMUNE_MARGIN_S - (time.monotonic() - spent + nav.PLAN_START_S)
+        return flow.immune
+    assert planned_ago(0.4) > meets and n._immunity_spent([leg])
+    assert flow.immune < meets and said[-1].startswith("  her invulnerability spent planning (0.40 s of ")
+    assert "meets the green-mushroom" in said[-1]
+    planned_ago(0.0)
+    assert not n._immunity_spent([leg])
+    nav.IMMUNE_RECHECK = False
+    try:
+        planned_ago(0.4)
+        assert not n._immunity_spent([leg])
+    finally:
+        nav.IMMUNE_RECHECK = True
 
 
 def test_with_a_feed_that_tells_no_touches_her_new_hp_drops_are_her_touches():
@@ -344,8 +502,9 @@ def test_the_harness_counts_her_misses_and_the_touches_the_stack_was_told_of():
     assert (out["touches_told"], out["misses_told"]) == (2, 1)
     nav = harness.navigation(["    touched (MISS: HP 90% -> 90%): plan cut short; on platform 3 ...",
                               "    touched (damage 54: HP 90% -> 83%): plan cut short; on platform 3 ...",
-                              "    a monster coming into its way (...): plan cut short; ..."], None)
-    assert (nav["cut_hit"], nav["cut_touch"], nav["cut_miss"]) == (3, 2, 1)
+                              "    a monster coming into its way (...): plan cut short; ...",
+                              "  her invulnerability spent planning (0.40 s of 1.10): leg 1's walk meets ..."], None)
+    assert (nav["cut_hit"], nav["cut_touch"], nav["cut_miss"], nav["immune_spent"]) == (3, 2, 1, 1)
 
 
 def test_a_miss_on_a_trip_cuts_it_as_a_hit_does_and_she_replans_and_climbs_on(monkeypatch):

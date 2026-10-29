@@ -103,7 +103,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
-                   cuts for a hit, those for a touch (cut_touch: a MISS too, from 2026-10-28) and for a MISS (cut_miss)
+                   cuts for a hit, those for a touch (cut_touch: a MISS too, from 2026-10-28) and for a MISS (cut_miss);
+                   chains not sent for her invulnerability spent planning (immune_spent: navigator.IMMUNE_RECHECK)
   coverage         her moves, platforms and plans, for the coverage report (analysis.coverage.tally: what it
                    keeps of the run's telemetry, 3-7 KB a run as saved)
   turning          her throws and jump throws, those that tapped an arrow to turn her first (control.actions: 80 ms
@@ -494,9 +495,11 @@ def navigation(log: list[str], model) -> dict:
     the way, a landing elsewhere: once each, a cut and the landing after it once); misses, the landings elsewhere
     than planned (the trip's own count); and falls, those of them onto a platform more than 10 units lower than
     the one planned, or onto none."""
-    out = {"cut_hit": 0, "cut_off_path": 0, "replans": 0, "misses": 0, "falls": 0, "cut_touch": 0, "cut_miss": 0}
+    out = {"cut_hit": 0, "cut_off_path": 0, "replans": 0, "misses": 0, "falls": 0, "cut_touch": 0, "cut_miss": 0,
+           "immune_spent": 0}
     cut = False  # the line before was a cut: the landing it logs next is the same replan
     for line in log:
+        out["immune_spent"] += "her invulnerability spent planning" in line
         if "plan cut short" in line:
             out["cut_off_path" if "off the path" in line else "cut_hit"] += 1
             if "touched (" in line:  # (navigator._touch_text)

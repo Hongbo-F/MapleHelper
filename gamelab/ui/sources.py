@@ -14,7 +14,7 @@ from .. import telemetry
 # hunting command writes scenes of its own too (respawn, her memory and coverage read them), which the page leaves out
 # while the service's are coming.
 PERCEIVED = ("scene", "tracks", "exp")
-PERCEIVED_EVENTS = ("died", "exp_gain", "hp_drop")
+PERCEIVED_EVENTS = ("died", "exp_gain", "hp_drop", "touch", "touch_fix")  # (her touches: MISS or damage, from 10-28)
 PERCEIVE_LIVE_S = 3.0  # s since the service's file last grew within which its records are the page's
 # The commands' files the directory says were written within this long are asked their last write (telemetry.newest's
 # recent_s), the rest go by the directory (a file written to for longer than that, its directory entry not brought up

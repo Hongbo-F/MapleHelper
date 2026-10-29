@@ -243,5 +243,98 @@
     "seen": true
    }
   ]
+ },
+ "other_miss": {
+  "doc": "another player's 40 over her (the 'other' case's frames), then her MISS 0.5 s after it at her place, her HP the same throughout (the review of 2026-10-28)",
+  "want": "MISS",
+  "from": "S2-1025-0055 00:51:41.189 (etector/20261025-005511/before/00903.jpg)",
+  "crop": [
+   658,
+   359,
+   858,
+   629
+  ],
+  "frames": [
+   {
+    "file": "other_-1.png",
+    "t": -0.096,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     234
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+0.png",
+    "t": 0.0,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     230
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+1.png",
+    "t": 0.102,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     226
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+2.png",
+    "t": 0.203,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     223
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+3.png",
+    "t": 0.313,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     220
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+4.png",
+    "t": 0.4,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     218
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+5.png",
+    "t": 0.499,
+    "hp": 0.9423,
+    "tag": [
+     100,
+     216
+    ],
+    "seen": true
+   },
+   {
+    "file": "other_+6.png",
+    "t": 0.604,
+    "hp": 0.9423,
+    "tag": [
+     95,
+     215
+    ],
+    "seen": true
+   }
+  ]
  }
 }

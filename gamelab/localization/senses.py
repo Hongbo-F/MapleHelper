@@ -161,8 +161,9 @@ class Senses:
         self._hp = 1.0        # the last HP a state read (a glance without one keeps it)
         # The newest touch of hers a look or a glance has had (worldstate.WorldState.touch: what it was, `at` when its
         # popup showed, `told` the frame that told it), for whatever goes by her being touched (touched_since) and by
-        # her invulnerability after it (invulnerable_until); None: none yet.
+        # her invulnerability after it (invulnerable_until: the newest not `crowded`, `_sure`); None: none yet.
         self.touch: dict | None = None
+        self._sure: dict | None = None
         # Called with each touch of hers new to a look or glance (`touch`'s dict), at once: what listens for her being
         # touched while it waits on glances (a hook: nothing does yet; control.navigator reads touched_since).
         self.touch_listeners: list[Callable[[dict], None]] = []
@@ -327,6 +328,8 @@ class Senses:
         if touch is None or (self.touch is not None and touch["told"] <= self.touch["told"] + 1e-9):
             return
         self.touch = touch
+        if not touch.get("crowded"):
+            self._sure = touch
         for listener in self.touch_listeners:
             listener(touch)
 
@@ -337,8 +340,10 @@ class Senses:
 
     def invulnerable_until(self) -> float:
         """When she can be touched again (time.monotonic's clock): perception.touches.INVULNERABLE_S after the popup of
-        the newest touch a look or glance has had showed (its `at`); -inf with none."""
-        return -1e18 if self.touch is None else self.touch["at"] + INVULNERABLE_S
+        the newest touch a look or glance has had showed (its `at`), but for one `crowded` (a MISS's popup alone with
+        another player on her, which may be theirs: localization.worldstate.CROWD_DX); -inf with none."""
+        sure = getattr(self, "_sure", self.touch)
+        return -1e18 if sure is None else sure["at"] + INVULNERABLE_S
 
     def place(self, obs: Observation) -> Scene:
         """A look placed on the map: where she is (see _place_her), and the other players (Players: a look that

@@ -919,8 +919,8 @@ class Publisher:
             self.log("the game is on screen: watching" if st.visible else f"not watching: {st.why} (nothing is read)")
         if st.visible and st.bad is None:
             for e in st.events:
-                if e.kind == "touch":  # (what it was, when its popup showed, how it was seen: Touch.data)
-                    telemetry.emit("event", kind="touch", text=touch_line(e.data), touch=e.data.get("kind"),
+                if e.kind in ("touch", "touch_fix"):  # (what it was, when its popup showed, how seen: Touch.data)
+                    telemetry.emit("event", kind=e.kind, text=touch_line(e.data), touch=e.data.get("kind"),
                                    at=e.data.get("at"), how=e.data.get("how"), number=e.data.get("text") or None,
                                    late=e.data.get("late"), dx=e.data.get("dx"), dy=e.data.get("dy"))
                 elif e.kind in EVENTS or (e.kind == "hp_drop" and e.data.get("new")):
@@ -938,7 +938,7 @@ class Publisher:
                     why = {"retold": "her throw went the other way", "another seen dying": "another seen dying"}
                     self.log(f"  {e.data['kind']} #{e.track} not her kill: "
                              + why.get(e.data.get("why"), "seen alive"))
-                elif e.kind == "touch":
+                elif e.kind in ("touch", "touch_fix"):
                     self.log(f"  {touch_line(e.data, st.hp)}")
             if st.loot is not None:
                 w["loot"], w["looked"] = st.loot, st.looked
@@ -998,6 +998,10 @@ def touch_line(data: dict, hp: float | None = None) -> str:
     what = "MISS" if kind == "MISS" else (f"damage {data['text']}" if data.get("text") else f"{kind}")
     how = " (her HP bar alone: no popup of hers)" if data.get("how") == "hp" else (
         f" ({data['late']:.2f} s after its popup)" if data.get("late") else "")
+    if data.get("was"):  # (worldstate's 'touch_fix')
+        how = f" after all (its popup read {data['was']}: her HP dropped)"
+    if data.get("crowded"):
+        how += " (another player on her: maybe theirs)"
     return f"touched: {what}{how}" + ("" if hp is None else f", HP {hp:.0%}")
 
 

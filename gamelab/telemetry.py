@@ -52,16 +52,19 @@ Topics (map units; producers build the records, ui.state folds them):
   hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
             status, hers}]
   event     kind, text; track (died, exp_gain, hp_drop,        behavior: kill, touch (from 2026-10-28, where it
-            victim, let_go, touch); touch's touch (MISS,       was 'hit', her HP dropping: MISS or damage, when
-            damage, ?), at, how (popup, hp), number; died's    its popup showed), potion, safety_stop,
-            data cause, at, hurt,                              exp (what a gain's size said), player (one
+            victim, let_go, touch, touch_fix); touch's touch   was 'hit', her HP dropping: MISS or damage, when
+            (MISS, damage, ?), at, how (popup, hp), number,    its popup showed), touch_fix (a MISS that took HP
+            crowded; touch_fix's was (MISS); immune's planned, after all), touch_unfit (her HP number's drop that
+            left; died's data cause, at, hurt,                 fits no kind), immune (a chain not sent: her
+                                                               invulnerability spent planning), potion, safety_stop,
+                                                               exp (what a gain's size said), player (one
             by, share, seen; victim's kind, x, platform,       coming or going), died (the feed's deaths
             gain, share; let_go's kind, gain, why; retold's    not hers), backstop, follow, probe, retold (a
             key, side                                          throw told again the way the frame showed her
                                                                facing), landing (a trip's last landing priced:
                                                                control.navigator); `watch` and the perception
                                                                service:
-                                                               died, exp_gain, hp_drop, touch, victim (a gain bound to
+                                                               died, exp_gain, hp_drop, touch, touch_fix, victim (a gain bound to
                                                                the monster her attack took), let_go (not it:
                                                                why 'seen alive', 'retold' or 'another seen
                                                                dying'; from 2026-10-27; seen: its death seen)

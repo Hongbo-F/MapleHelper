@@ -530,8 +530,9 @@ def test_the_service_says_whether_gamelabs_c_is_in_use():
 
 def test_the_service_says_and_publishes_her_touches(tmp_path):
     """Her touches (worldstate's 'touch' events, perception.touches): each said in the service's log, MISS or the
-    damage's number and how late it was told, published as a telemetry event 'touch' with its fields; and the 10 s line
-    counts them, the MISSes and those her HP bar alone told."""
+    damage's number and how late it was told, published as a telemetry event 'touch' with its fields; a MISS told again
+    as damage ('touch_fix') and one with another player on her (`crowded`) said so; and the 10 s line counts them, the
+    MISSes and those her HP bar alone told."""
     from gamelab import telemetry
     from gamelab.localization.tracking import Event
     from gamelab.localization.worldstate import WorldState
@@ -544,17 +545,22 @@ def test_the_service_says_and_publishes_her_touches(tmp_path):
     try:
         events = [Event("touch", 5.0, data=Touch(5.0, MISS, MISS).data()),
                   Event("touch", 6.6, data=Touch(6.5, DAMAGE, "54", late=0.07).data()),
-                  Event("touch", 8.2, data=Touch(8.2, DAMAGE, how=HP).data())]
+                  Event("touch", 8.2, data=Touch(8.2, DAMAGE, how=HP).data()),
+                  Event("touch", 10.0, data={**Touch(10.0, MISS, MISS).data(), "crowded": True}),
+                  Event("touch_fix", 10.2, data={**Touch(10.0, DAMAGE).data(), "was": MISS})]
         for e in events:
             pub.state(WorldState(1, e.t, True, hp=0.9, geo=STRETCHED, events=[e]))
     finally:
         telemetry.stop()
-    assert said[-3:] == ["  touched: MISS, HP 90%", "  touched: damage 54 (0.07 s after its popup), HP 90%",
-                         "  touched: damage (her HP bar alone: no popup of hers), HP 90%"]
+    assert said[-5:] == ["  touched: MISS, HP 90%", "  touched: damage 54 (0.07 s after its popup), HP 90%",
+                         "  touched: damage (her HP bar alone: no popup of hers), HP 90%",
+                         "  touched: MISS (another player on her: maybe theirs), HP 90%",
+                         "  touched: damage after all (its popup read MISS: her HP dropped), HP 90%"]
     (path,) = tmp_path.glob("*-perceive.jsonl")
-    got = [r for r in telemetry.read(path) if r["topic"] == "event" and r["kind"] == "touch"]
-    assert [(r["touch"], r["number"], r["how"], r["at"]) for r in got] == [
-        (MISS, "MISS", "popup", 5.0), (DAMAGE, "54", "popup", 6.5), (DAMAGE, None, HP, 8.2)]
+    got = [r for r in telemetry.read(path) if r["topic"] == "event" and r["kind"] in ("touch", "touch_fix")]
+    assert [(r["kind"], r["touch"], r["number"], r["how"], r["at"]) for r in got] == [
+        ("touch", MISS, "MISS", "popup", 5.0), ("touch", DAMAGE, "54", "popup", 6.5), ("touch", DAMAGE, None, HP, 8.2),
+        ("touch", MISS, "MISS", "popup", 10.0), ("touch_fix", DAMAGE, None, "popup", 10.0)]
     runner.step.counts.update({"touches": 3, "misses": 1, "touches by HP": 1})
     assert "; touches 3 (1 MISS, 1 by her HP bar alone)" in pub.status(0.0)
     runner.step.close()

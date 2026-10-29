@@ -151,6 +151,13 @@ TOUCH_CUTS = True
 # lasts, and a monster coming into its way then isn't one. False: as before, every leg against every monster.
 IMMUNE = True
 IMMUNE_MARGIN_S = 0.15
+# The window is taken as the pass plans (its start then: now, or her attack lock's end, and PLAN_START_S), and the
+# planning's own time comes out of it before the chain goes: the review of 2026-10-28 found the route to the chain 0.15 s
+# or more on 24 of 239 chains of the 10-28 live tours (0.59 s at the most), so a leg could count on her being
+# invulnerable up to 0.44 s after it was over. As it goes (`_immunity_spent`) the window is taken again, and a chain with
+# a leg that meets one of the monsters it keeps clear of in the part the planning spent isn't sent: the pass looks again
+# and plans with what's left ("her invulnerability spent planning ..."). False: the window as planned.
+IMMUNE_RECHECK = True
 # A hit while she climbs a rope of a chain (_climbing) cuts the plan as any hit does, every key let go, up too, and the
 # game doesn't knock her off a rope (live on 2026-10-26 she stayed on after 11 of 11 hits on ropes, the dot by the rope
 # and still after each): she hung where it caught her. At 22:58:08.596 (Tree Dungeon, the rope at x 111 from 19 up to
@@ -602,6 +609,10 @@ class Navigator:
         elif self._wait_for_monster(st, s, path[0], monsters, legs, why, planned_at):
             return None  # look again: for a way around, or once she's waited a moment
 
+        # Her invulnerability as it is when the chain goes (IMMUNE): the planning's time came out of it.
+        if legs and self._immunity_spent(legs):
+            return None  # look again, and plan with what's left of it
+
         # Move: the chain in one plan, or else the first move on its own.
         hp = s.hp
         if legs:
@@ -917,6 +928,7 @@ class Navigator:
         legs, keys, why = self.flow.chain(path, self._start(st, s), monsters, keep_going=True,
                                           hops=not self.fight if hops is None else hops, price=price, alts=alts,
                                           goal=goal)
+        self._kept = list(monsters)  # (what it keeps clear of: _immunity_spent)
         now = time.monotonic()
         st.trip.time["think"] += now - max(looked, st.thought_to)
         st.thought_to = now
@@ -1317,6 +1329,29 @@ class Navigator:
         until = getattr(self.senses, "invulnerable_until", None)
         self.flow.immune = max(0.0, until() - IMMUNE_MARGIN_S - start) if IMMUNE and until is not None else 0.0
         return self.flow.immune
+
+    def _immunity_spent(self, legs: list[Leg]) -> bool:
+        """IMMUNE_RECHECK: her invulnerability's window taken again for a chain about to go (from now, or her lock's end,
+        and PLAN_START_S); where planning spent more of it than IMMUNE_MARGIN_S covers and a leg meets one of the monsters
+        the chain keeps clear of (the last flow.chain's, `_kept`) before the window it was planned in ended (flow.danger
+        at what's left), True: said, a telemetry event 'immune', and the chain isn't sent. flow.immune is what's left."""
+        planned = self.flow.immune
+        if not (IMMUNE and IMMUNE_RECHECK) or planned <= 0:
+            return False
+        lock = max(getattr(self.actions, "lock_until", 0.0), getattr(self.actions, "arrow_until", 0.0))
+        left = self._immunity(max(time.monotonic(), lock) + PLAN_START_S)
+        if left >= planned - 1e-9:
+            return False
+        kept = getattr(self, "_kept", [])
+        for i, leg in enumerate(legs):
+            met = self.flow.danger(leg, kept) if kept else None
+            if met is not None and met[1] < planned:
+                text = (f"her invulnerability spent planning ({planned - left:.2f} s of {planned:.2f}): leg {i + 1}'s "
+                        f"{leg.move.kind} meets the {met[0].kind or 'monster'} {met[1]:.2f} s in; planned again")
+                self.log(f"  {text}")
+                telemetry.emit("event", kind="immune", text=text, planned=round(planned, 3), left=round(left, 3))
+                return True
+        return False
 
     def _safe_to_stand(self, x: float, here: Platform, move: Move, monsters) -> bool:
         """Whether no monster can reach her standing at x for the next second (as a leg that stays put)."""

@@ -18,18 +18,23 @@ check's 15.5 + 4.6 minutes, 204; D:/MapleHelper-scratch/touch/meas, README: Touc
   EDGE_DY) is hers once it has lasted EDGE_FRAMES frames. Another player's popup over them, anywhere else, isn't;
 - it stays where it was born, rises about 30 px a second and fades from about 0.4 s: a line continuing one seen within
   LOST_S (MATCH_DX across, MATCH_DY and MATCH_VY a second up or down: the camera eases up and down) is the same popup,
-  and a popup of hers born within REFRACT_S of the last, at its place, is the last re-found after her own orange
-  numbers hid it (no touch comes that soon: INVULNERABLE_S);
+  and a popup of hers born within REFRACT_S of one told, at its place, is that one re-found after her own orange
+  numbers hid it (no touch comes that soon: INVULNERABLE_S); one born so near a number still waiting for her HP bar
+  is that number re-found, unless the sprites read it MISS (the number may be another player's: NEAR_HELD);
 - what it says: MISS or the digits, read against the game's own sprites (`Reader`, from the game data copy as the watch
   is made; without it, by width: MISS is one word MISS_W or more wide, a number two or three glyphs);
 - a number with no HP change within HP_WAIT_S of it (none of 135 damage touches had none: a drop, or her pet's potion
   at once) is another player's damage, them standing on her; a line unread that lasts under EDGE_FRAMES frames is a
   skill's flash.
-By eye on the hunting frames: 269 of the 272 touches found, none false (the 3 lost: MISSes half under the Lie
-Detector's window, read as digits), MISS or damage right on 267 of 269, the digits exact on 125 of 130; on the walk
-check's 204, 202 found and 1 false (another player's 119 at the moment her HP changed). 0.5 ms a frame (median; p90
-1.1-1.3, p99 1.6-1.7) on the 1366x768 frame in a box 340x285 around her tag, the reader up to about 15 ms on a touch's
-first frame alone; a MISS is told in the frame it shows, damage once her bar moves (a median 0.04 s later, p90 0.13).
+By eye on the hunting frames (the build's 272 and the review's one more, a MISS of hers 0.5 s after another player's 40
+over her: 273), as ported here: 269 found, none false (the 4 lost: MISSes half under the Lie Detector's window or split
+by her own numbers, read as digits), MISS or damage right on 268 of 269 (her 124 under her own orange numbers, MISS by
+its width: localization.worldstate tells it again as damage when her bar drops, 'touch_fix'); on the walk check's 204,
+202 found and 1 false (another player's 119 at the moment her HP changed; the measured detector's). 0.42 ms a frame
+(median; p90 1.45, p99 3.3) on the 1366x768 frame in a box 340x285 around her tag, the reader 4.7 ms at the median and
+8 at the most on a touch's first frame alone (D:/MapleHelper-scratch/touch/build/eval_cost1.json; with this rule
+D:/MapleHelper-scratch/touch/fix/eval_fix.json); a MISS is told in the frame it shows, damage once her bar moves (a
+median 0.04 s later, p90 0.13).
 
 Px here are game px (the 1366x768 window's, a look frame's at that size); a look frame has Geometry.frame_scale of
 them a game px (half size of 1920x1080: 0.703), and the watch converts them (`scale`).
@@ -83,8 +88,14 @@ MATCH_DX = 12                 # a line is a popup seen before if within this acr
 MATCH_DY = 12                 # ... and this up or down, MATCH_VY a second more (the camera eases vertically)
 MATCH_VY = 250
 LOST_S = 0.45                 # a popup not seen for this long is gone
-REFRACT_S = 1.0               # a popup of hers born this soon after the last, within REFRACT_DX of it: the last one,
+REFRACT_S = 1.0               # a popup of hers born this soon after one told, within REFRACT_DX of it: that one,
 REFRACT_DX = 45               # re-found after her own numbers hid it
+# ... and one born as near a number of hers still waiting for her HP bar (`held`): that number re-found, but for a line
+# the sprites read MISS, which no number is (the number may yet be another player's). As first built the newest held was
+# a base as one told is, and the review of 2026-10-28 found a MISS of hers lost so (S2 00:51:40.690: another player's 40
+# born over her at dx +23, held, judged another's at 41.49; her MISS at 41.189, 92 px wide at dx -3, taken for the 40
+# re-found; tests/fixtures/touches other_+5, other_+6). False: a held number is a base whatever the new line reads.
+NEAR_HELD = True
 MISS_W = 80                   # a line this wide (game px) is MISS, by width alone (its fill 91 wide; 3 digits 56-69)
 HP_WAIT_S = 0.8               # s a number of hers waits for her HP bar to move; none, it's another player's
 HP_EPS = 0.004                # her HP bar moved (a share of it: worldstate.HP_DROP)
@@ -274,8 +285,9 @@ class TouchWatch:
     reader: Reader | None = None
     scale: float = 1.0
     pops: list = field(default_factory=list)
-    last_hers: _Pop | None = None
-    held: list = field(default_factory=list)      # numbers of hers waiting for her HP bar: (Touch, HP before, how read)
+    told: list = field(default_factory=list)      # her popups told within REFRACT_S (_Pop): the bases of re-finds
+    held: list = field(default_factory=list)      # numbers of hers waiting for her HP bar: (Touch, HP before, how read,
+                                                  # its _Pop)
     hp_hist: list = field(default_factory=list)   # (t, HP) of the last HP_KEEP_S
     others: deque = field(default_factory=lambda: deque(maxlen=OTHERS_KEPT))  # judged another player's, or a flash
     counts: dict = field(default_factory=lambda: {"touches": 0, "misses": 0, "others": 0, "read": 0})
@@ -287,18 +299,21 @@ class TouchWatch:
         if hp is not None:
             self.hp_hist = [(a, b) for a, b in self.hp_hist if t - a <= HP_KEEP_S] + [(t, hp)]
         still = []
-        for touch, before, how in self.held:  # numbers waiting for her HP bar (a fall, or a potion's rise at once)
+        for touch, before, how, p in self.held:  # numbers waiting for her HP bar (a fall, or a potion's rise at once)
             if before is not None and hp is not None and abs(hp - before) > HP_EPS:  # (one unread took HP: damage)
                 out.append(replace(touch, kind=DAMAGE, late=round(t - touch.t, 3)))
+                self.told.append(p)
             elif t - touch.t > HP_WAIT_S:
                 if how == "reader" or touch.kind == DAMAGE:
                     self.others.append(touch)  # digits and her HP the same: another player's, or a flash
                     self.counts["others"] += 1
                 else:  # unread but lasting, and her HP the same: hers, no damage (a MISS half hidden)
                     out.append(replace(touch, late=round(t - touch.t, 3)))
+                    self.told.append(p)
             else:
-                still.append((touch, before, how))
+                still.append((touch, before, how, p))
         self.held = still
+        self.told = [p for p in self.told if t - p.first <= REFRACT_S]
         if tag is not None and frame is not None:
             self._look(frame, tag, tag_seen, t, out)
         for touch in out:
@@ -351,24 +366,33 @@ class TouchWatch:
             if hers:
                 p.hers = self._born_hers(p, frame, ln, t, 1, out)
 
+    @property
+    def last_hers(self) -> _Pop | None:
+        """The newest popup of hers told within REFRACT_S, or None."""
+        return max(self.told, key=lambda p: p.first) if self.told else None
+
     def _born_hers(self, p: _Pop, frame: np.ndarray, ln: list, t: float, frames: int, out: list[Touch]) -> bool:
         """A new popup of hers (born where hers are, or lasted at the edge): told, or held for her HP bar; False if it's
-        the last one re-found (REFRACT_S)."""
-        last = self.last_hers
-        if last is not None and p.first - last.first <= REFRACT_S and abs(p.x - last.x) <= REFRACT_DX * self.scale:
+        one told re-found (REFRACT_S), or a number held re-found (NEAR_HELD: not where it reads MISS)."""
+        def near(q: _Pop) -> bool:
+            return p.first - q.first <= REFRACT_S and abs(p.x - q.x) <= REFRACT_DX * self.scale
+        if any(near(q) for q in self.told):
             return False
-        self.last_hers = p
         kind, text, how = self._classify(frame, ln, p.w, frames)
+        if any(near(q) and not (NEAR_HELD and kind == MISS and how == "reader") for _, _, _, q in self.held):
+            return False
         touch = Touch(p.first, kind, text, tuple(ln[:4]), p.dx, p.dy, round(t - p.first, 3))
         if how == "width" and frames < EDGE_FRAMES:
             if kind == MISS and not (HOLD_UNREAD and self.reader is not None):
                 out.append(touch)  # a MISS's width is unmistakable
+                self.told.append(p)
             else:
-                self.held.append((touch, self._hp_before(p.first), how))
+                self.held.append((touch, self._hp_before(p.first), how, p))
         elif kind in (DAMAGE, UNREAD):
-            self.held.append((touch, self._hp_before(p.first), how))
+            self.held.append((touch, self._hp_before(p.first), how, p))
         else:
             out.append(touch)
+            self.told.append(p)
         return True
 
     def _classify(self, frame: np.ndarray, ln: list, w: float, frames: int) -> tuple[str, str, str]:

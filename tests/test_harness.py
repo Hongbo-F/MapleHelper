@@ -573,7 +573,8 @@ def test_her_trips_are_counted_from_the_stacks_log(model):
            f"  8.0     ended on air/rope instead of platform {c.id}; replanning",                # a fall
            f"  9.0     hit on the way (80% -> 70%): on {platform_text(c)}; replanning"]
     assert harness.navigation(log, model) == {"cut_hit": 1, "cut_off_path": 1, "replans": 5, "misses": 3, "falls": 2,
-                                              "cut_touch": 0, "cut_miss": 0}  # (the log's cut is a hit's of before)
+                                              "cut_touch": 0, "cut_miss": 0,  # (the log's cut is a hit's of before)
+                                              "immune_spent": 0}
 
 
 def test_a_world_drops_what_its_maps_monsters_drop(model):

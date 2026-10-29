@@ -2749,7 +2749,7 @@ KEY_EXPECTS = (
     check("the backslash first, then Esc with the window open, nothing else in it, no MENU", _window_ok))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),))),
       expects=KEY_EXPECTS + (
           check("her stars told: she has them", lambda tr: _said(tr, "her stars: ") and _said(tr, "she has them")),
@@ -2768,11 +2768,17 @@ def loop_tree_grind_attack_key(sim):
     look 5 s on (45.0 s) the check again: her stars told by a cast's MP since the doubt's first press; the backslash, the
     window read (ATTACK on A, preset 1), Esc, closed (45.1-46.9 s); her regular attack A for the rest of the run, paged
     once; kills with it after. (Until the review of 2026-10-28 the window opened at 40.0 s with that Green Mushroom near:
-    nothing looked again after the retreat.)"""
+    nothing looked again after the retreat.) (Seed 13 since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does:
+    navigator.TOUCH_CUTS), the world's invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.
+    INVULNERABLE, LEVEL_25_AVOID): on seed 1 no 5 regular presses in a row went without effect in its 2 minutes, nor in
+    the world as it was with the branch's stack; of seeds 1-13 11 and 13 meet all of this (master's stack in master's world
+    1, 12 and 13: the doubt is a seed's luck).
+    On seed 13: the doubt at 81.1 s (a Green Mushroom at 4%, 10/233 HP), away to 25 (2.0 s), a Green and a Horny
+    Mushroom near: put off; her stars told at 95.1 s, the window read and closed at 96.2-96.9 s, A from then on.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),))),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
@@ -2783,11 +2789,12 @@ def loop_tree_grind_attack_key(sim):
 def loop_tree_attack_unbound(sim):
     """As loop_tree_grind_attack_key, the game's Attack on no key: the same doubt, put off and check, the window read
     with ATTACK on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven only (her
-    throws that would have been the regular attack: "the regular attack off this run"), paged once."""
+    throws that would have been the regular attack: "the regular attack off this run"), paged once. (Seed 13 since
+    2026-10-28, as loop_tree_grind_attack_key's: of seeds 1-13, 11 and 13 meet all of this.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -2798,7 +2805,12 @@ def loop_tree_attack_misses(sim):
     """Her keys right, every regular star missing (Noise.regular_miss): 5 presses without effect, the doubt (the same
     Green Mushroom at 37.1 s), the window read with ATTACK on Ctrl as configured: the misses were something else; that
     target gets no more regular attacks, the hunt goes on (Ctrl pressed at others after), nobody paged. A doubt within
-    300 s of it would hold the regular attack at its targets, with no check."""
+    300 s of it would hold the regular attack at its targets, with no check. (Seed 8 since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does:
+    navigator.TOUCH_CUTS), the world's invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.
+    INVULNERABLE, LEVEL_25_AVOID): on seed 1 no 5 regular presses in a row went without effect in its 2 minutes, nor in
+    the world as it was with the branch's stack; of seeds 1-13 8 meet all of this (master's stack in master's world
+    1, 4 and 12: the doubt is a seed's luck).
+    On seed 8: the doubt at 100.6 s, the window read at 111.7-112.4 s.)"""
     return key_check_run(2)(sim)
 
 

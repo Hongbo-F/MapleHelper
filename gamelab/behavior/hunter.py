@@ -816,6 +816,7 @@ class Hunter:
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
             touched = [e.data for e in s.events if e.kind == "touch"]
             touched += self._untold(s, touched)
+            touched += [e.data for e in s.events if e.kind == "touch_fix"]  # (in order: a fix comes after its MISS)
         heard = []  # her EXP's changes, and the kills each can be: what her throws didn't kill (Attacks.heard)
         for t, reading, changed in reads:
             gains = self.meter.update(t, reading, changed)
@@ -981,6 +982,9 @@ class Hunter:
         report, sent as a telemetry event 'touch' with its kind, and logged with her HP number's drop if it read one
         this soon (HIT_EXACT_S) and how far it pushed her when no key was pressed (_log_hit)."""
         kind, at = touch.get("kind", DAMAGE), touch.get("at", s.t)
+        if touch.get("was") == MISS:  # (worldstate's 'touch_fix': told as a MISS, it took HP after all)
+            self._touch_fixed(s, touch)
+            return
         self.hit_at, self.hit_kind, self.touch_at = s.t, kind, at
         if kind == DAMAGE:
             self.knock_at = s.t
@@ -999,6 +1003,25 @@ class Hunter:
                        **({"number": touch["text"]} if kind == DAMAGE and touch.get("text") else {}))
         pushed = self._log_hit(s, kind)
         self.log(f"  {text}" + (f"; standing still: {pushed}" if pushed else ""))
+
+    def _touch_fixed(self, s: Scene, touch: dict) -> None:
+        """A touch told as a MISS whose popup's touch took HP after all (worldstate.FIX_MISS: her HP dropped within
+        perception.touches.HP_WAIT_S of it; a 'touch_fix' event's data, `was` MISS), told in look `s`: damage, her knock
+        from this look (`knock_at`, and her regular presses about it not judged), the report's MISS taken back if it was
+        this hunter's last touch, a telemetry event 'touch_fix', said."""
+        at = touch.get("at", s.t)
+        self.hit_kind, self.knock_at = DAMAGE, s.t
+        if (watch := getattr(self.attacks, "watch", None)) is not None:
+            watch.touched(s.t)
+        if self.touch_at is not None and abs(self.touch_at - at) < 1e-6 and self.report.misses > 0:
+            self.report.misses -= 1
+        self.touch_at = at
+        last = self._last_touch
+        hp = (f"HP {last[1]} -> {last[2]} (-{last[1] - last[2]})"
+              if last is not None and 0 <= s.t - last[0] < HIT_EXACT_S else f"HP {s.hp:.0%}")
+        text = f"touched: damage after all (its popup read MISS {s.t - at:.1f} s before this look), {hp}"
+        telemetry.emit("event", kind="touch_fix", text=text, touch=DAMAGE, was=MISS, at=round(at, 3))
+        self.log(f"  {text}")
 
     def _heading(self, s: Scene) -> None:
         """Which way her look's frame shows her facing (Eyes.heading; not asked on a rope), for her keys (Actions.see:

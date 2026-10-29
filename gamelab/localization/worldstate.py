@@ -98,6 +98,22 @@ TOUCHES = True
 # moved.
 TOUCH_SAME_S = 1.0
 HP_FLOOR = 0.02       # an HP drop to this or less isn't a touch by itself (a bar read empty: behavior.hunter's HP_ZERO)
+# A MISS told off its popup (in its first frame, by the sprites or its width) whose touch took HP after all: a new HP drop
+# within perception.touches.HP_WAIT_S of its popup (none can come from another touch: INVULNERABLE_S) has it told again
+# as damage, a 'touch_fix' event with the touch as it is now (`was` MISS; the same `at`, a new `told`), the state's
+# newest touch that one: what knocks her (behavior.hunter's knock_at) and cuts a chain (control.navigator). On the
+# hunting frames of 2026-10-24..28 one told MISS of the 269 touches had a drop so (her 124 under her own orange numbers,
+# MISS by its width: the drop 0.169 s after it, its truth damage), no other (D:/MapleHelper-scratch/touch/fix,
+# eval_fix.py). Before the review of 2026-10-28 it stayed a MISS: the drop was the same touch (TOUCH_SAME_S), so her
+# knock was never waited out. False: a MISS stays one.
+FIX_MISS = True
+# A touch told off a popup alone (a MISS, or one unread: no HP of hers moved) while another player's minimap dot is within
+# CROWD_DX across and CROWD_DY up or down of her (localization.players) is `crowded` (its data): their popup can be born
+# over her, theirs (the review of 2026-10-28: CHANIKR's MISS 34.5 px from her placed tag, her own hidden under his, at
+# 2026-10-26 23:10:19, 0.5 px out of perception.touches.EDGE_DX), so nothing goes by its invulnerability (Senses.
+# invulnerable_until, the navigator's IMMUNE), while it's still a touch for the rest. Damage is hers by her HP.
+CROWD_DX = 60.0  # map units (the edge window's 34 game px and a minimap px either side, 11.4)
+CROWD_DY = 60.0
 # A frame's re-finds run at once on a pool of this many threads (the real monster detector's: its masked matches, in C
 # or OpenCV, let go of Python's lock; a lone re-find on the frame loop's thread, the hand-off costing more), each with
 # its HP bar's read if that's due, and the frame loop places them in turn: the states are one thread's. In a crowd
@@ -714,9 +730,10 @@ class WorldStep:
         """Her EXP number changed since the last frame (`exp_gain`, with the number as read: the kills its size was go
         to the tracker, which puts each on a monster), or was read unchanged (`exp_read`: to start from, or to confirm a
         jump: ExpMeter.wants_reading); she was touched (`touch`: her popup, MISS or damage, or an HP drop no popup of
-        hers was told for: _touched); her HP dropped (`hp_drop`); her HP number changed and read (`hp_read`: her HP and
-        max HP, and the HP it said at the change before if that read too, `before`: a drop between the two is a touch,
-        exactly; None: not known); her level's digits changed and read (`lv_read`: her level)."""
+        hers was told for: _touched; `touch_fix`: a MISS told that took HP after all, FIX_MISS); her HP dropped
+        (`hp_drop`); her HP number changed and read (`hp_read`: her HP and max HP, and the HP it said at the change
+        before if that read too, `before`: a drop between the two is a touch, exactly; None: not known); her level's
+        digits changed and read (`lv_read`: her level)."""
         out = []
         changed = exp_changed(self._exp, s.exp)
         if changed or self.meter.wants_reading(t):
@@ -737,7 +754,9 @@ class WorldStep:
             self.counts["hits"] += new
             if new and t - self._touch_at > TOUCH_SAME_S and s.hp > HP_FLOOR:  # no popup of hers told for it
                 self.counts["touches by HP"] += 1
-                out.append(self._tell(touches.Touch(t, touches.DAMAGE, how=touches.HP), t))
+                out.append(self._tell(touches.Touch(t, touches.DAMAGE, how=touches.HP), t, s))
+            elif new and (fix := self._fix_miss(t)) is not None:  # a MISS whose touch took HP after all
+                out.append(fix)
         self._hp = s.hp
         if self._hp_number_t is not None and t - self._hp_number_t > HP_GAP_S:
             self.hp_number.see(None)  # (a stretch with no frame: what it did meanwhile isn't known)
@@ -759,16 +778,42 @@ class WorldStep:
         out = []
         for touch in watch.update(s.frame, s.tag, s.tag_seen, s.hp, t):
             if touch.t - self._touch_at > TOUCH_SAME_S:
-                out.append(self._tell(touch, t))
+                out.append(self._tell(touch, t, s))
         return out
 
-    def _tell(self, touch: touches.Touch, t: float) -> Event:
-        """A touch of hers told in the frame shown at t: its event, and it's the state's newest (`touch`)."""
+    def _tell(self, touch: touches.Touch, t: float, s: Scene | None = None) -> Event:
+        """A touch of hers told in the frame shown at t (look `s`): its event, and it's the state's newest (`touch`);
+        `crowded` where it's a popup's alone with another player on her (CROWD_DX)."""
         data = touch.data()
+        if touch.how == touches.POPUP and touch.kind != touches.DAMAGE and s is not None and self._crowded(s):
+            data["crowded"] = True
+            self.counts["crowded"] = self.counts.get("crowded", 0) + 1
         self.touch, self._touch_at = {**data, "told": round(t, 3)}, touch.t
         self.counts["touches"] += 1
         self.counts["misses"] += touch.kind == touches.MISS
         return Event("touch", t, data=data)
+
+    @staticmethod
+    def _crowded(s: Scene) -> bool:
+        """Whether another player's dot is on her at look `s` (CROWD_DX, CROWD_DY of her place)."""
+        if s.where is None:
+            return False
+        return any(abs(p.x - s.where.x) <= CROWD_DX and abs(p.y - s.where.y) <= CROWD_DY for p in s.players or ())
+
+    def _fix_miss(self, t: float) -> Event | None:
+        """A new HP drop at t: if the newest touch is a MISS told off its popup within perception.touches.HP_WAIT_S
+        before (FIX_MISS), it took HP after all: it's damage now (`was` MISS, told at t), its 'touch_fix' event; else
+        None."""
+        last = self.touch
+        if not FIX_MISS or last is None or last.get("kind") != touches.MISS or last.get("how") != touches.POPUP \
+                or t - self._touch_at > touches.HP_WAIT_S:
+            return None
+        data = {**{k: v for k, v in last.items() if k not in ("told", "crowded")}, "kind": touches.DAMAGE, "text": "",
+                "was": touches.MISS}
+        self.touch = {**data, "told": round(t, 3)}
+        self.counts["misses"] -= 1
+        self.counts["MISS fixed"] = self.counts.get("MISS fixed", 0) + 1
+        return Event("touch_fix", t, data=data)
 
     def _touch_watch(self, s: Scene):
         """The touch watch for look `s`'s frames: with real eyes, perception.touches.TouchWatch with the game's sprites
