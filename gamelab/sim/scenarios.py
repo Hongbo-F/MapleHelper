@@ -2279,8 +2279,10 @@ def loop_tree_grind(sim):
     on. In this world she's touched about five times as often as live (README: Grinding). Until the pull's detour rule
     (2026-10-29: behavior.patrol, a pile against the loop's rate) piles pulled her to 23, 24, 19 and 20 on seed 1,
     knocked off 23 down to 25-29 and back, then standing by at the end (resting there until 2026-10-26); since, none
-    pays for its detour: on her way up to 7 she's knocked about between 16 and 24 shooting in passing all of its 3
-    minutes, no stop reached (473 EXP against 488), her kills credited to 16, 18, 19, 20, 23 and 24."""
+    pays for its detour: on her way up to 7 she's knocked about between 16 and 24 shooting in passing, then round by
+    the loop to 10 and to 19, the one stop she reaches (499 EXP against 488; 473 until a pile's touches counted against
+    it, the review of 2026-10-29, when a trip's look at 31.6 s had a pile pay and the choice after it, her kill time
+    learned afresh, not)."""
     return _grind(3)(sim)
 
 
@@ -3020,7 +3022,7 @@ def loop_tree_grind_arrow_key(sim):
     window (master d9774e5, 2026-10-28): on seed 1 her runs' doubt came at 320 s, after the hunt; of seeds 1-12, 9,
     10 and 12 meet all of this, master's stack on 9 doubts at 236 s with too few runs after. On 9: the doubt at 42.7
     s, the window read at 43.8-44.5 s, MOVE RIGHT followed to E, 51 kills after; 55 since the pull's detour rule
-    (2026-10-29: behavior.patrol, a pile against the loop's rate).)"""
+    (2026-10-29: behavior.patrol, a pile against the loop's rate), 54 since a pile's touches count against it.)"""
     return key_check_run(4)(sim)
 
 

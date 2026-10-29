@@ -555,41 +555,159 @@ def test_on_her_way_to_a_pile_another_must_beat_it_with_the_margin():
     assert nxt == sp and info["why"] == "pulled" and info["ahead"] in top
 
 
+def _in_line():
+    """Three platforms side by side, C between A and B (A to C 2 s, C to B 2 s, A to B 4 s), a Horny Mushroom point on
+    each; the loop A, B, C taken up (4.5 EXP a second), her at A (the review of 2026-10-29's probe:
+    D:/MapleHelper-scratch/pull/review/probe_loopstop.py)."""
+    model = _map([(0, 300, 0), (2000, 2300, 0), (1000, 1300, 0)], [(150, 0, "h"), (2150, 0, "h"), (1150, 0, "h")])
+    A, B, C = _pid(model, 150, 0), _pid(model, 2150, 0), _pid(model, 1150, 0)
+    legs = {frozenset((A, B)): 4.0, frozenset((A, C)): 2.0, frozenset((B, C)): 2.0}
+    p = _patrol(model, lambda a, b: legs[frozenset((a, b))])
+    p.belief.update(0.0, Memory(model))
+    p._take(p.rate([p.stop_on(i) for i in (A, B, C)], 0.0), 0.0, "test")
+    return model, (A, B, C), p
+
+
+def test_after_a_pile_at_a_stop_of_the_loop_further_on_she_goes_on_to_the_stop_it_was_costed_to():
+    model, (A, B, C), p = _in_line()
+    sa, sb, sc = (p.stop_on(i) for i in (A, B, C))
+    # Five seen on C, on her way from A to the loop's next, B: pulled, the detour costed on to B ...
+    _seen(model, p, [(HORNY, 1100 + 20 * k, 0) for k in range(5)])
+    j, info = p.choose(1.0, A, 150.0, current=sa)
+    assert j == sc and info["why"] == "pulled" and info["ahead"] == B and p.pulled == (sc, sb)
+    nxt, info = p.choose(1.5, A, 290.0, heading=sc, peek=True)
+    assert nxt == sc and info["why"] == "on her way"
+    # ... and leaving C, on to B. Until 2026-10-29 the loop went on from C, a stop of the loop itself, the next after
+    # it being A, the stop she'd just left: B missed for a round.
+    cq = next(q.id for q in p.points if q.platform == C)
+    p.belief.at.pop(cq)
+    p.belief.empty_since[cq] = p.belief.empty_seen[cq] = 6.0
+    nxt, info = p.choose(8.0, C, 1150.0, current=sc)
+    assert nxt == sb and info["why"] == "the loop" and p.pulled is None
+
+
+def test_on_her_way_to_a_pile_that_no_longer_pays_she_goes_back_to_the_loop():
+    model, (A, B, C), p = _in_line()
+    sa, sb, sc = (p.stop_on(i) for i in (A, B, C))
+    _seen(model, p, [(HORNY, 1100 + 20 * k, 0) for k in range(5)])
+    j, _ = p.choose(1.0, A, 150.0, current=sa)
+    assert j == sc
+    # On her way there, C's monsters shot in passing from A's end: C no longer pays for its detour, even without the
+    # margin: on to the loop's next stop, the one its detour went on to (until 2026-10-29 she went on to the empty pile
+    # and left it with nothing: loop_tree_grind_rope_top's 15, 7 of 26 stays in her 01:11 run) ...
+    cq = next(q.id for q in p.points if q.platform == C)
+    p.belief.at.pop(cq)
+    p.belief.empty_since[cq] = p.belief.empty_seen[cq] = 1.5
+    nxt, info = p.choose(2.0, A, 290.0, heading=sc, peek=True)
+    assert nxt == sb and info["why"] == "back to the loop" and info["dropped"]["stop"] == C
+    assert info["dropped"]["over"] < 0 and "no longer pays" in patrol.choice_text(info)
+    nxt, info = p.choose(2.0, A, 290.0, heading=sc)
+    assert nxt == sb and p.pulled is None and p.at_loop == p.plan.stops.index(sb)
+    # ... and on her way to it, the pile pulls her again only by paying with the margin: as it is, it doesn't; seen
+    # again, it does.
+    nxt, info = p.choose(2.5, A, 290.0, heading=sb, peek=True)
+    assert nxt == sb and info["why"] == "on her way"
+    _seen(model, p, [(HORNY, 1100 + 20 * k, 0) for k in range(5)], t=3.0)
+    nxt, info = p.choose(3.0, A, 290.0, heading=sb, peek=True)
+    assert nxt == sc and info["why"] == "pulled"
+
+
+def test_a_piles_touches_count_against_it_as_a_loops_do(monkeypatch):
+    from dataclasses import replace
+    model, left, right, p = _beside(3.0)
+    here, r = p.stop_on(left[0]), p.stop_on(right)
+    _seen(model, p, [(HORNY, 1100, -200), (HORNY, 1290, -200), (GREEN, 1200, -200)])
+    nxt, info = p.choose(1.0, left[0], 150.0, current=here, peek=True)
+    assert nxt == r and info["why"] == "pulled"
+    # She has seen 4 bars of her HP a minute go there: what touches cost her while she shoots it (HP_PRICE EXP a bar,
+    # as the loop's rate has them at its stops) leaves the three's EXP short of paying for their detour.
+    p.learn_hp(right, 4.0, 60.0)
+    hp = p.hp_rate(right, p.stops[r].x)
+    assert p.net(r, 100.0) == pytest.approx(100.0 * (1 - patrol.HP_PRICE * p.kill_s * hp)) and p.net(r, 100.0) < 75
+    nxt, info = p.choose(1.0, left[0], 150.0, current=here, peek=True)
+    assert p.platform_of(nxt) in left and info["why"] == "the loop"
+    # A loop worth nothing by the belief (its touches costing what it gives): no bar for a pile to beat (until
+    # 2026-10-29 every pile seen paid then, the biggest however far), she keeps to it.
+    p.hp_seen.clear()
+    p.hp_time.clear()
+    p.plan = replace(p.plan, rate=0.0)
+    nxt, info = p.choose(1.0, left[0], 150.0, current=here, peek=True)
+    assert p.platform_of(nxt) in left and info["why"] == "the loop"
+
+
+def test_her_loop_found_again_in_another_order_keeps_its_order_and_takes_its_rate_now():
+    model, a, b, p = _two_areas()
+    p.belief.update(0.0, Memory(model))
+    found = p.best(0.0)
+    mine = found.stops[::-1]
+    p._take(p.rate(mine, 0.0), 0.0, "test")
+    before = p.plan.rate
+    # Refills watched four times as slow as the model's: the same round, its rate now lower; found again in its other
+    # order, hers keeps her order (her place in it) and takes the rate (until 2026-10-29 it kept the one it was taken
+    # up at: a 2-stop round's two orders are one round, so the pulls' bar and a stop's stayed where they started).
+    p.belief.refills = [4.0] * 100
+    t = patrol.REPLAN_S + 1
+    assert set(p.best(t).stops) == set(mine) and p.best(t).stops != mine
+    assert p.replan(t) is None and p.plan.stops == mine
+    assert p.plan.rate == pytest.approx(p.rate(mine, t).rate) and p.plan.rate < 0.8 * before
+
+
 # Her live pulls of 2026-10-29 01:11-01:18 (mage-1029-0111.log's 'next:' lines, the telemetry's 'grind' records):
-# (the stop pulled to, the stop pulled from, the EXP expected there, her kill time then (s a point of EXP, from the
-# record's EXP a second), s to it, s from it on to the other (the planner's route), s to the other from where she was
-# (the planner's, from her latest look), the loop's EXP a second, the pile's EXP a second with its travel and kills and
-# the other's: D:/MapleHelper-scratch/pull/replay_live.py). The other is the loop's next stop in 25 of them; in 3 (from
-# 32, 28 and 20) a pile she was on her way to, which by this rule she wouldn't have been (none of the others pays).
+# (the stop pulled to, the stop pulled from, the EXP expected there, of it what touches there leave (Patrol.net: her HP
+# fed as grinding feeds it), her kill time then (s a point of EXP, from the record's EXP a second), s to it, s from it
+# on to the other (the planner's route), s to the other from where she was (the planner's, from her latest look), the
+# loop's EXP a second as the code had it then (Patrol.replan every REPLAN_S, the belief fed from the run's looks: the
+# 'loop' record's rate is written only when the loop changes, 7.45 and 7.36, and was in this table until the review of
+# 2026-10-29), the pile's EXP a second with its travel and kills and the other's:
+# D:/MapleHelper-scratch/pull/fix/replay_fix.py). The other is the loop's next stop in 25 of them; in 3 (from 32, 28
+# and 20) a pile she was on her way to, which by this rule she wouldn't have been (none of the others pays).
 LIVE_PULLS = [
-    (30, 13, 45.7, 0.0854, 5.8, 20.2, 25.5, 7.452, 4.27, 1.04), (29, 10, 31.5, 0.0796, 3.7, 22.8, 26.2, 7.452, 4.37, 1.34),
-    (31, 10, 13.2, 0.0899, 1.5, 26.0, 23.2, 7.452, 3.58, 1.48), (29, 10, 70.2, 0.0938, 3.7, 22.8, 26.3, 7.452, 6.22, 1.32),
-    (30, 10, 48.7, 0.1018, 2.8, 24.0, 26.7, 7.452, 5.56, 1.3), (32, 10, 45.2, 0.0956, 1.2, 26.8, 23.9, 7.452, 6.93, 1.43),
-    (30, 32, 35.9, 0.0938, 4.2, 1.3, 1.8, 7.452, 4.19, 2.1), (33, 10, 15.0, 0.0924, 1.5, 27.7, 24.3, 7.452, 3.86, 1.42),
-    (32, 10, 15.9, 0.0952, 1.3, 26.8, 26.6, 7.452, 4.17, 1.3), (30, 8, 34.3, 0.1024, 3.3, 26.0, 29.2, 7.452, 4.39, 1.68),
-    (28, 8, 46.8, 0.1009, 4.7, 26.9, 29.9, 7.452, 4.49, 1.65), (31, 8, 47.6, 0.1002, 1.1, 28.1, 24.9, 7.452, 6.93, 1.91),
-    (29, 6, 47.8, 0.1037, 3.7, 26.2, 29.7, 7.452, 4.95, 1.12), (30, 6, 27.3, 0.1024, 2.1, 27.4, 26.2, 7.452, 4.63, 1.26),
-    (32, 6, 24.3, 0.0996, 1.2, 30.2, 27.3, 7.452, 5.26, 1.22), (30, 6, 48.6, 0.1067, 3.0, 27.4, 30.2, 7.452, 5.29, 1.11),
-    (28, 6, 47.0, 0.1073, 4.4, 28.2, 31.0, 7.452, 4.5, 1.08), (30, 28, 48.9, 0.1092, 2.7, 1.0, 3.2, 7.452, 5.41, 3.51),
-    (24, 6, 26.0, 0.1059, 7.6, 20.7, 27.6, 7.452, 2.29, 1.2), (23, 14, 16.0, 0.1063, 1.3, 11.0, 12.2, 7.452, 4.0, 0.68),
-    (20, 14, 16.6, 0.106, 3.6, 7.9, 10.9, 7.452, 2.61, 0.76), (23, 20, 28.4, 0.1065, 1.5, 3.8, 2.4, 7.452, 5.14, 3.19),
-    (29, 9, 72.9, 0.0987, 2.8, 23.8, 26.5, 7.355, 6.63, 1.62), (30, 7, 34.7, 0.101, 4.0, 27.0, 30.8, 7.355, 4.08, 1.54),
-    (32, 7, 48.8, 0.1116, 1.3, 29.9, 27.0, 7.355, 6.3, 1.68), (23, 7, 72.4, 0.1134, 11.3, 19.0, 29.8, 7.355, 3.53, 1.55),
-    (24, 7, 65.2, 0.1125, 1.1, 20.3, 21.0, 7.355, 6.91, 2.03), (23, 7, 100.6, 0.1124, 3.1, 19.0, 21.9, 7.355, 6.53, 1.97),
+    (30, 13, 45.7, 45.1, 0.0854, 5.8, 20.2, 25.5, 7.562, 4.27, 1.04),
+    (29, 10, 31.5, 31.1, 0.0796, 3.7, 22.8, 26.2, 7.562, 4.37, 1.34),
+    (31, 10, 13.2, 12.8, 0.0899, 1.5, 26.0, 23.2, 7.989, 3.58, 1.48),
+    (29, 10, 70.2, 67.3, 0.0938, 3.7, 22.8, 26.3, 7.457, 6.22, 1.32),
+    (30, 10, 48.7, 48.0, 0.1018, 2.8, 24.0, 26.7, 7.235, 5.56, 1.3),
+    (32, 10, 45.2, 44.1, 0.0956, 1.2, 26.8, 23.9, 6.812, 6.93, 1.43),
+    (30, 32, 35.9, 35.5, 0.0938, 4.2, 1.3, 1.8, 6.812, 4.19, 2.1),
+    (33, 10, 15.0, 14.7, 0.0924, 1.5, 27.7, 24.3, 7.242, 3.86, 1.42),
+    (32, 10, 15.9, 15.5, 0.0952, 1.3, 26.8, 26.6, 7.323, 4.17, 1.3),
+    (30, 8, 34.3, 33.6, 0.1024, 3.3, 26.0, 29.2, 7.323, 4.39, 1.68),
+    (28, 8, 46.8, 46.2, 0.1009, 4.7, 26.9, 29.9, 6.778, 4.49, 1.65),
+    (31, 8, 47.6, 46.4, 0.1002, 1.1, 28.1, 24.9, 6.835, 6.93, 1.91),
+    (29, 6, 47.8, 45.1, 0.1037, 3.7, 26.2, 29.7, 6.835, 4.95, 1.12),
+    (30, 6, 27.3, 26.8, 0.1024, 2.1, 27.4, 26.2, 6.7, 4.63, 1.26),
+    (32, 6, 24.3, 23.8, 0.0996, 1.2, 30.2, 27.3, 6.7, 5.26, 1.22),
+    (30, 6, 48.6, 47.5, 0.1067, 3.0, 27.4, 30.2, 6.7, 5.29, 1.11),
+    (28, 6, 47.0, 46.1, 0.1073, 4.4, 28.2, 31.0, 6.7, 4.5, 1.08),
+    (30, 28, 48.9, 47.6, 0.1092, 2.7, 1.0, 3.2, 6.7, 5.41, 3.51),
+    (24, 6, 26.0, 24.6, 0.1059, 7.6, 20.7, 27.6, 6.446, 2.29, 1.2),
+    (23, 14, 16.0, 15.1, 0.1063, 1.3, 11.0, 12.2, 6.528, 4.0, 0.68),
+    (20, 14, 16.6, 16.2, 0.106, 3.6, 7.9, 10.9, 6.528, 2.61, 0.76),
+    (23, 20, 28.4, 27.0, 0.1065, 1.5, 3.8, 2.4, 6.385, 5.14, 3.19),
+    (29, 9, 72.9, 68.7, 0.0987, 2.8, 23.8, 26.5, 6.972, 6.63, 1.62),
+    (30, 7, 34.7, 33.6, 0.101, 4.0, 27.0, 30.8, 7.428, 4.08, 1.54),
+    (32, 7, 48.8, 46.5, 0.1116, 1.3, 29.9, 27.0, 7.211, 6.3, 1.68),
+    (23, 7, 72.4, 69.4, 0.1134, 11.3, 19.0, 29.8, 7.211, 3.53, 1.55),
+    (24, 7, 65.2, 61.7, 0.1125, 1.1, 20.3, 21.0, 6.528, 6.91, 2.03),
+    (23, 7, 100.6, 96.5, 0.1124, 3.1, 19.0, 21.9, 6.528, 6.53, 1.97),
 ]
 
 
 def test_none_of_her_live_pulls_at_the_bottom_pays_for_its_detour():
-    # Each pulled her by the old rule (1.5 times the other's EXP a second); by the detour's, none: the most, 70 EXP 3.7 s
-    # off on her way up from 31 to 29, 1.21 times what the loop gave over its 7.8 s; with no margin (PULL_GAIN 1) about
-    # a third would, each on her way up (1.0-1.2 times).
+    # Each pulled her by the old rule (1.5 times the other's EXP a second); by the detour's, none: the most, 69 EXP (net
+    # of touches) 2.8 s off on her way up from 31 to 29, and 97 on 23 on her way up to 7, 1.18 times what the loop gave
+    # over their 8.3 and 12.6 s. With less margin those on her way would, and only those (going there and on up adds 0.5
+    # s at most to the climb): 5 at 1.1, 10 with none, each on her way up.
     ratios = []
-    for _, _, exp, kill_s, far, on, far_next, rate, gain, other in LIVE_PULLS:
-        assert gain >= 1.5 * other
+    for _, _, exp, net, kill_s, far, on, far_next, rate, gain, other in LIVE_PULLS:
+        assert gain >= 1.5 * other and net < exp
         d = patrol.detour_s(exp, kill_s, far, on, far_next)
-        assert not patrol.pays(exp, d, rate)
-        ratios.append(exp / (rate * d))
-    assert max(ratios) == pytest.approx(1.21, abs=0.01) and 8 <= sum(r >= 1.0 for r in ratios) <= 12
+        assert not patrol.pays(net, d, rate)
+        ratios.append((net / (rate * d), far + on - far_next))
+    assert max(r for r, _ in ratios) == pytest.approx(1.18, abs=0.01)
+    for gain, n in ((1.1, 5), (1.0, 10)):
+        kept = [extra for r, extra in ratios if r >= gain]
+        assert len(kept) == n and max(kept) <= 0.5
 
 
 def test_a_stop_counts_only_the_monsters_she_gets_at_from_it():
@@ -707,6 +825,19 @@ def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch)
     g.h.memory.update(1.5, [_sight(model, HORNY, 150, -200)], None)
     s.t, g._alt = 1.5, None
     assert g._interrupt(s) is True and g._reroute
+    # Rerouted to it at the trip's next pass (Patrol.choose on her way to the far stop) ...
+    g._reroute = False
+    j, info = p.choose(1.5, ids[0], 150.0, heading=p.stop_on(far))
+    assert p.platform_of(j) == ids[1] and info["why"] == "pulled"
+    g.stop, g.visit = j, SimpleNamespace(ground=ids[1], arrived=None, empty_since=None)
+    g.obj = Objective("spot", ids[1], p.stops[j].x, ground=ids[1])
+    # ... and its monster shot in passing on the way: back to the far stop, the loop's, at the next look.
+    q = next(q.id for q in p.points if q.platform == ids[1])
+    g.h.memory = Memory(model)
+    p.belief.empty_since[q] = p.belief.empty_seen[q] = 1.8
+    s.t, g._alt = 2.0, None
+    assert g._interrupt(s) is True and g._reroute
+    assert g._alt[2] == p.stop_on(far) and g._alt[3]["why"] == "back to the loop"
 
 
 def test_a_stop_is_the_safest_place_that_reaches_as_much(monkeypatch):

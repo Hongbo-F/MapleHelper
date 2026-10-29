@@ -23,7 +23,8 @@ What changes from the hunt loop (the rules not named here are its own, unchanged
   and the piles on the way (5b) and on her platform (5): kills and pick-ups between moves, without stopping to clear a
   ground. No trip back for the piles of a stop she leaves (rule 10): those on the way are picked up. Every RECHOOSE_S
   of a trip to a stop, a pile seen elsewhere (Patrol.choose with the stop she's heading to as the default) takes her
-  there instead (`_interrupt`, `_while_travelling`).
+  there instead, and on a trip to a pile one that no longer pays for its detour back to the loop's next stop
+  (`_interrupt`, `_while_travelling`).
 - What she knows: every look updates the belief of each spawn point (patrol.Belief) from her memory of the monsters.
 - What a kill is credited to: the platform it died on (`credit`), not the ground she hunted. The value map
   (lab/grounds.json) isn't written: its EXP a visit credits a ground with its neighbours' kills (live, 48% of 23's on
@@ -80,7 +81,7 @@ class Grind(Hunt):
         self.stays: list[float] = []              # s at each stop she got to
         self.pulls = self.skips = 0
         self._alt: tuple | None = None            # where she'd go instead: (when, heading, stop, choose's info)
-        self._reroute = False                     # a pile seen on a trip: to it at the next pass
+        self._reroute = False                     # a pile seen on a trip (or hers gone): to it at the next pass
         self._start = time.monotonic()
         self._hp: tuple[float, float, int] | None = None  # the last look's (time, HP, platform), for learn_hp
         self._stated = time.monotonic()
@@ -260,7 +261,8 @@ class Grind(Hunt):
 
     def _interrupt(self, s: Scene) -> bool:
         """The hunt loop's reasons to stop a trip, and on a trip to a stop, every RECHOOSE_S, a pile seen elsewhere
-        worth going to instead (Patrol.choose, the stop she's heading to as the default): taken at the next pass."""
+        worth going to instead (Patrol.choose, the stop she's heading to as the default), or on a trip to a pile the
+        loop's next stop when the pile no longer pays (Patrol.choose's "back to the loop"): taken at the next pass."""
         if super()._interrupt(s):
             return True
         o, v = self.obj, self.visit
@@ -269,11 +271,11 @@ class Grind(Hunt):
             return False
         self.patrol.belief.update(s.t, self.h.memory, s.players if s.dot is not None else None)
         j, info = self._instead(s, heading=self.stop)
-        self._reroute = j is not None and j != self.stop and info["why"] == "pulled"
+        self._reroute = j is not None and j != self.stop and info["why"] in ("pulled", "back to the loop")
         return self._reroute
 
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
-        """The hunt loop's, on its way to the pile `_interrupt` saw if it did."""
+        """The hunt loop's, on its way to the pile `_interrupt` saw (or back to the loop) if it did."""
         if self._reroute:
             self._reroute = False
             o, v = self.obj, self.visit

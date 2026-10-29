@@ -2102,25 +2102,38 @@ last loop stop she was at, the first expected to hold a quarter of what it holds
 (`SKIP_FULL`, under the 0.35 of a point never seen: an emptied stretch is skipped until it's due, an unseen one never),
 or on a trip the stop she's on her way to; and a stop whose monsters she has seen (her memory's, not the belief's
 guesses; from one monster at even odds) pulls her there when it pays for its detour against the loop: what it's
-expected to give 1.25 times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second
-(`Plan.rate`, by the same belief); the detour (`Patrol.detour`) is its kills, 1 s a stop, and the travel there and on
-to the loop's next stop beyond going to that one straight (none for a stop on her way); of those that pay, the one that
-leaves her the most EXP over the loop's. On her way to a pile another takes her only when it leaves more with the
-margin than the pile she's going to does without (each costed to the loop's next stop: two piles each worth a detour
-from the other had her turn between them at every look), and after a pile the loop goes on from the stop its detour
-was costed to (before, from the stop after it when a pull came on a trip, missing it for a round). Her time is worth the loop's rate wherever she is (the marginal value
+expected to give, less what touches there cost her while she shoots it (`Patrol.net`, as the loop's rate counts its
+stops'), 1.25 times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second
+(`Plan.rate`, by the same belief, as of the latest look for a better round: a round found again in its other order
+takes its rate afresh, where it had kept the first look's); the detour (`Patrol.detour`) is its kills, 1 s a stop, and
+the travel there and on to the loop's next stop beyond going to that one straight (none for a stop on her way); of
+those that pay, the one that leaves her the most EXP over the loop's. On her way to a pile another takes her only when
+it leaves more with the margin than the pile she's going to does without (each costed to the loop's next stop: two
+piles each worth a detour from the other had her turn between them at every look), and when hers no longer pays even
+without the margin (shot in passing, gone, taken) she goes back to the loop's next stop ("back to the loop": before,
+she went on to it and left with nothing). After a pile the loop goes on from the stop its detour was costed to, also
+when the pile is a stop of the loop further on (`Patrol.pulled`; before, from the stop after it when a pull came on a
+trip, missing it for a round, and from the pile itself when it was the loop's). A loop worth nothing by the belief
+leaves no bar to beat: no pulls. Her time is worth the loop's rate wherever she is (the marginal value
 theorem's bar, as at a stop, below), so a pile pays for the time it takes and the travel it adds, not for being nearer
 than the loop. Until 2026-10-29 a pile pulled at 1.5 times the EXP a second of the next stop, its travel counted: far
 from the loop every pile round her beat the climb. Live on Tree Dungeon (the magician, 2026-10-29 01:11), left at the
 bottom by a Lie Detector's retreat, 28 pulls in 7 minutes kept her on 28-33 and 20-24 (2.3-6.9 EXP/s each, against the
 loop's next stop up the tower at 0.7-2.0, 11-31 s away; her loop 14, 13, 10, 8, 6 at 447 EXP a minute), her kills 185
 EXP a minute (the user: "keeps patrolling the bottom region which has worse spawn rate"): by the detour none of the 28
-pulls (the most, 70 EXP 3.7 s off on her way up, 1.21 times what the loop gives over its 7.8 s), she climbs, shooting
-in passing what's in reach (`tests/test_grind.py`'s `LIVE_PULLS`; `D:/MapleHelper-scratch/pull/replay_live.py` replays
-a run's choices so). A pile pays at most 1 / (her kill time x the loop's rate) times the loop's, 1.5 on Tree Dungeon for
-the thief: on her way, from about 54 EXP (a Horny and a Green Mushroom), a second off it about 107. On the user's play
-(every 5 s) 31 of 50 choices pull, 30 by the old rule but only 6 to the same stop, each to a pile on her way or 1.6 s
-off it at most; 5 of 49 are where the user went next, 13 by the old rule (they roamed the piles round them on 19-24).
+pulls (the loop's rate as the code had it at each, 383-479 EXP a minute, the piles' EXP net of their touches; the most,
+69 EXP 2.8 s off on her way up and 97 on 23 on her way up to 7, 1.18 times what the loop gives meanwhile), she climbs,
+shooting in passing what's in reach (`tests/test_grind.py`'s `LIVE_PULLS`; `D:/MapleHelper-scratch/pull/fix/
+replay_fix.py` replays a run's pulls so); with less margin only piles on her way would (5 at 1.1, 10 with none, each
+adding 0.5 s at most to the climb). The margin multiplies the whole detour, her kill time included: on her way a pile
+pays from 1.25 rate / (1 - 1.25 rate x her kill time) EXP (1 s a stop), and none pays once her kill time times the
+loop's rate reaches 0.8. For the thief (0.085 s a point, the loops 7.4-7.7 EXP a second) from 43-53 EXP (a Horny and a
+Green Mushroom), a second off her way 87-106; for the magician live (Magic Claw, MP-limited: 0.080-0.113 s a point, the
+loop 6.4-8.0) from 32 EXP (0.094, 6.4) to 150 (0.1, 7.5), none from 0.107 at 7.5. On the user's play
+(every 5 s) 30 of 50 choices pull (31 before a pile's touches counted against it), 30 by the old rule but only 6 to
+the same stop, each to a pile on her way or 1.6 s off it at most; 5 of 49 are where the user went next, 13 by the old
+rule (they roamed the piles round them on 19-24). The moment of the old note (on 22, two seen on 19 2.3 s off, on her
+way up to 10) paid just by the margin, and with their touches counted just doesn't: she goes on up.
 In the harness (the thief: `ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world
 zero-walls --world near-misses --world walkers --minutes 5`, seeds 1-48, against master 945f201) 319.8 EXP a minute
 against 310.3 (+3.1%, se 2.4%) and 70.5 touches against 67.6 (+4.3%, se 3.3%), neither beyond 2 se; no deaths, falls
@@ -2145,8 +2158,8 @@ reach is due within 2 s) had no lower bound: a respawn late by the model held he
 spot (rule 7), no lull loot (8), no waiting for respawns (9 only for those 0.3 s), no rate rule, no trip back for the
 piles of a stop she leaves (10). On the legs the hunt loop's rule 4 shoots what a star reaches on any platform (15 s a
 platform), rule 4b finishes what she hurt, 5 and 5b pick up the piles on her platform and on the way, and every second
-a pile seen elsewhere that pays for its detour (the stop she's heading to standing in for the loop's next) takes her
-there instead. (After a rest the next stop
+a pile seen elsewhere that pays for its detour (costed on to the loop's next stop) takes her there instead, and on a
+trip to a pile, one that no longer pays sends her back to the loop. (After a rest the next stop
 was chosen from where she rested, until the rests went on 2026-10-26.) Kills are credited to the platform they died on (the end of the log: "kills by
 platform"); the value map (`lab/grounds.json`) isn't written: its EXP a visit credits a ground with its neighbours'
 kills (48% of 23's live), and a stop's visit is a few seconds.
@@ -2171,7 +2184,9 @@ failing from 20 to 35 s of `loop_tree_grind`, no plan sent in the pause, no stop
 **What it says** (the log, and telemetry 'grind'): each loop taken up ("loop: [10, 7]: 463 EXP a minute (a round 22 s:
 5 s of travel, 15 of shooting; 8 spawn points, 181 EXP) (the first; camping at 7 would give 403)"), each next stop
 ("next: stop 23 at x 8, 1.6 s away: 77 EXP expected (77 seen), 6.8 EXP/s with its kills; pulled (not stop 7: a 7.5 s detour on
-the way to stop 7, the loop's 7.7 EXP/s giving 58 EXP meanwhile)",
+the way to stop 7, the loop's 7.7 EXP/s giving 58 EXP meanwhile)", or on a trip to a pile "next: stop 7 at x -95, 16.5
+s away: 66 EXP expected (0 seen), 3.1 EXP/s with its kills; back to the loop (stop 19's pile no longer pays for its
+detour: 11 EXP expected, 9 under what the loop gives meanwhile)",
 with the stops skipped and when each is due), each stop left ("leaving stop 24: nothing left in reach (16.0 s there,
 108 EXP)", or "... 4.1 EXP/s here, going on gives 7.7"), every 60 s and at the end what it did and learned: loops, stops, stays, pulls, skips, the refill scale,
 her kill time, what others take, HP a minute by platform, kills by platform. `python -m gamelab patrol FILE` runs a
@@ -2179,7 +2194,7 @@ recorded run through her memory and the belief and prints, every few seconds, th
 from where she was (a look, not a choice: her place in the loop doesn't move; it had rotated the loop by itself every 5 s,
 10, 8, 12, 14, read as choices). On the user's recording 43 of 50 choices pulled her to the monsters in view when this
 was written (19-24, 15 and 16 on the way down), 7 by the loop (to 7 and 13); 30 by master's code of 2026-10-29 before
-the detour's rule, 31 with it (above).
+the detour's rule, 31 with it, 30 with a pile's touches counted (above).
 
 **What the harness says** (Tree Dungeon, `--world zero-walls,lucky-seven`: the hunt loop as `tour --loop --skill`
 throws, 10 seeds of 20 minutes, the policies `loop` at bc036b9 (base), `loop` here (the memory, half (V)), `loop-grind`
