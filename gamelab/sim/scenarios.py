@@ -2568,11 +2568,20 @@ def _reserve_holds(tr, her: Her = LEVEL_25) -> bool:
             and touch >= danger.touch_range(pad, her.defence, her.level)[1])
 
 
+def _debounce_of(tr) -> float:
+    """The safety stop's debounce as its watch had it at the stop (behavior.safety.HpWatch.debounce): her HP number's
+    (DEBOUNCE_EXACT_S) when the stop's HP was exact ("HP 375 of 774"), her bar's (DEBOUNCE_S) when it was the bar's
+    ("HP about 375"; the scenario's stack binds no potion key of hers, whose drink would wait for the bar's too)."""
+    from ..behavior.safety import DEBOUNCE_EXACT_S, DEBOUNCE_S
+    return DEBOUNCE_S if "HP about " in tr["result"]["stopped"]["text"] else DEBOUNCE_EXACT_S
+
+
 SAFETY_EXPECTS = (
     check("the hunt stopped for her HP under her profile's hits of the map's largest touch, as the game deals it to her",
           _reserve_holds),
-    check("under it on two looks 0.6 s apart at least (her bar's), or under one touch two looks in a row",
-          lambda tr: tr["result"]["stopped"]["seconds"] >= 0.6 and tr["result"]["stopped"]["looks"] >= 2
+    check("under it on two looks the watch's debounce apart at least (0.25 s by her HP number, 0.6 s by her bar), or "
+          "under one touch two looks in a row",
+          lambda tr: tr["result"]["stopped"]["seconds"] >= _debounce_of(tr) and tr["result"]["stopped"]["looks"] >= 2
           or "on 2 looks in a row" in tr["result"]["stopped"]["text"]),
     check("its numbers in HP: under the threshold, of her max HP as her HUD's number says it",
           lambda tr: _stop_numbers(tr) is not None and tr["result"]["stopped"]["hp"] < _stop_numbers(tr)[3]

@@ -220,6 +220,189 @@ def test_the_reserve_is_made_again_at_a_map_change_a_level_up_a_def_change_a_new
     assert h.hp_watch.threshold() == 3 * _top(75, 111.0, 31) and said[-1].endswith(": the map (Rocky), the kinds counted")
 
 
+def _touch(h, t, before, cur, most=840):
+    """Her HP number's drop from `before` to `cur` at t (a touch, as the perception service's events say it), and the
+    look's reserve check."""
+    h._hp_number(SimpleNamespace(events=[Event("hp_read", t, data={"cur": before, "max": most, "before": None}),
+                                         Event("hp_read", t + 0.5, data={"cur": cur, "max": most, "before": before})],
+                                 hp_of=(cur, most), hp_box=None))
+    h._reserve_check()
+
+
+def test_a_level_up_keeps_what_the_game_hit_her_over_the_formula():
+    """The review of 2026-10-28: at level 31 (DEF 111 by her stat window) a measured 130 over the formula's 122 raised
+    her reserve to 411; her LV. digits' 32 dropped it back to 366 until a touch of that kind was measured again. Now her
+    last CARRY_N touches count at another level, carried by the formula's level term (a tenth of an HP a level)."""
+    from gamelab.behavior.safety import CARRY_N, carried
+    said = []
+    h = _hunter([_look(1.0, 1.0, (840, 840), 31), _look(9.0, 1.0, (840, 840), 32)], log=said)
+    h.look(mobs=False)
+    h._notes.append(h.stats.see_window(111, rows=h.touches.rows))
+    h._reserve_check()
+    assert h.hp_watch.threshold() == 3 * _top(110, 111.0, 31) == 366
+    _touch(h, 3.0, 840, 710)  # the game hitting harder than the formula: 130 over its 122
+    assert h.hp_watch.threshold() == 3 * 137 == 411
+    h.look(mobs=False)  # her LV. digits: 32 (the same monster, the same gear)
+    assert h.level == 32 and h.hp_watch.threshold() == 411
+    t = h.hp_watch.reserve.touch
+    assert (t.measured, t.taken_at, t.prior) == (130, 31, _top(110, 111.0, 32))
+    assert "taken at level 31, carried by the formula's level term" in h.hp_watch.reserve.describe(840)
+    assert said[-1].startswith("  her level 32 by her HUD's LV. digits (was 31) (the safety stop as it was: under 411")
+    # The level term: a whole HP off for every 10 levels up, one more for a level down (the most it can be there).
+    assert [carried(130, 31, lv) for lv in (31, 32, 40, 41, 51, 30)] == [130, 130, 130, 129, 128, 131]
+    # One of another level older than her last CARRY_N touches goes (another gear, as her DEF's fit has it); hers at
+    # her level count however old.
+    kept = Touches(None)
+    kept.rows = ([{"level": 31, "hp": 130, "kind": "horny-mushroom"}, {"level": 32, "hp": 118, "kind": "horny-mushroom"}]
+                 + [{"level": 32, "hp": 50, "kind": "green-mushroom"}] * CARRY_N)
+    assert kept.measured(32)["horny-mushroom"] == (118, 1, 32) and kept.measured(31)["horny-mushroom"] == (130, 1, 31)
+
+
+def test_her_touches_file_seeded_with_the_fixture_starts_her_at_the_fit_and_her_measured_touch():
+    """The merge note's seed (tests/fixtures/touches_2026-10-28.jsonl copied to lab/touches.jsonl, her gear as on
+    10-28): at 840 and level 28 her DEF the fit's (106.5-115.25), her largest measured Horny Mushroom touch there (122)
+    over the formula's top at its low end (123 less the margin): 3 of 129, 387. The review found 369: the fixture's rows
+    had no kind, and a row of no kind counts for none; they're tagged now as the hunter tags a touch live."""
+    import shutil
+    from gamelab import paths
+    shutil.copy(FIXTURES / "touches_2026-10-28.jsonl", paths.TOUCHES)
+    said = []
+    newest = SimpleNamespace(hp_of=(840, 840), level_of=28)
+    h = _hunter(log=said, feed=SimpleNamespace(newest=lambda after: newest, throw=lambda *a: None))
+    t = h.hp_watch.reserve.touch
+    assert (h.stats.defence.low, h.stats.defence.high) == (106.5, 115.25)
+    assert (t.kind, t.measured, t.n, t.hp) == ("horny-mushroom", 122, 38, 129) and h.hp_watch.threshold() == 387
+    assert said[0].startswith("safety stop: under 387 HP of 840 (46%: 3 Horny Mushroom touches of 129); Horny Mushroom "
+                              "129: 38 measured at level 28, the largest 122, 5% over it")
+    # Each row's kind: Horny Mushroom 117-133 at level 25 (17), 103-122 at 28 (38), the touch and potion of 16 none's.
+    rows = _rows()
+    horny = {L: sorted(r["hp"] for r in rows if r["level"] == L and r["kind"] == "horny-mushroom") for L in (25, 28)}
+    assert (len(horny[25]), horny[25][0], horny[25][-1]) == (17, 117, 133)
+    assert (len(horny[28]), horny[28][0], horny[28][-1]) == (38, 103, 122)
+    assert [r["hp"] for r in rows if r["kind"] is None] == [16]
+
+
+def test_her_stats_file_keeps_her_max_hp_and_level_as_last_read(tmp_path):
+    """The review of 2026-10-28: every HerStats() wrote her stats file's max HP and level as null (a hunter's start,
+    `gamelab stats` itself), and an offline `patrol` had nothing to fall back on. A run that hasn't read them keeps
+    them as the file had them, with when they were read; one that reads them writes its own."""
+    path = tmp_path / "her_stats.json"
+    st = HerStats(path)
+    st.see_max_hp(840)
+    st.see_level(28, HerStats.LV_FROM)
+    kept = json.loads(path.read_text(encoding="utf-8"))
+    assert (kept["max_hp"], kept["level"], kept["level_from"]) == (840, 28, HerStats.LV_FROM)
+    read_at = (kept["max_hp_at"], kept["level_at"])
+    again = HerStats(path, [r for r in _rows() if r["level"] == 28])  # (a fit to save: the file written again)
+    assert again.max_hp is None and again.level is None  # (this run's: not read yet; the file's aren't hers now)
+    kept = json.loads(path.read_text(encoding="utf-8"))
+    assert (kept["max_hp"], kept["level"], (kept["max_hp_at"], kept["level_at"])) == (840, 28, read_at)
+    assert kept["defence"]["source"] == "touches"
+    again.see_max_hp(862)
+    kept = json.loads(path.read_text(encoding="utf-8"))
+    assert (kept["max_hp"], kept["level"]) == (862, 28) and kept["max_hp_at"] >= read_at[0]
+
+
+def test_her_level_is_her_exp_numbers_once_her_digits_stop_reading():
+    """The review of 2026-10-28: once her LV. digits had read, her EXP number's level was ignored for the rest of the
+    run, the digits read or not, and their disagreement said once ever. Now her EXP number's is taken once the digits
+    haven't read for LV_UNREAD_S (said), the digits' again when they read; a disagreement said once for each pair."""
+    from gamelab.behavior.bootstrap import LV_UNREAD_S
+    st = HerStats()
+    assert st.see_level(28, HerStats.LV_FROM, 0.0) is not None
+    assert st.see_level(None, HerStats.LV_FROM, 1.0) is None  # (the digits not read since 1.0)
+    assert st.see_level(29, HerStats.EXP_FROM, 1.5) == ("her EXP number says level 29, her HUD's LV. digits 28: the "
+                                                        "digits' taken")
+    assert st.see_level(29, HerStats.EXP_FROM, 2.0) is None and st.level == 28  # (said once for the pair)
+    assert st.see_level(None, HerStats.LV_FROM, 2.5) is None  # (still not read: since 1.0)
+    assert st.see_level(29, HerStats.EXP_FROM, 1.0 + LV_UNREAD_S) == (
+        f"her level 29 by her EXP number (her HUD's LV. digits not read for {LV_UNREAD_S:g} s or more; they said 28)")
+    assert st.level == 29 and st.level_from == HerStats.EXP_FROM
+    assert st.see_level(30, HerStats.EXP_FROM, 3.5) == "her level 30 by her EXP number (was 29)"
+    # The digits again: theirs, and another disagreement is said.
+    assert st.see_level(30, HerStats.LV_FROM, 4.0) is None and st.level_from == HerStats.LV_FROM
+    assert st.see_level(31, HerStats.EXP_FROM, 4.1) == ("her EXP number says level 31, her HUD's LV. digits 30: the "
+                                                        "digits' taken")
+    # A digit read missed for a look (a frame failing its checks) doesn't hand it to the EXP number.
+    assert st.see_level(None, HerStats.LV_FROM, 5.0) is None and st.see_level(30, HerStats.LV_FROM, 5.1) is None
+    assert st.see_level(31, HerStats.EXP_FROM, 5.1 + LV_UNREAD_S) is None and st.level == 30
+
+
+def test_a_def_that_drops_is_followed_by_her_newest_touches():
+    """The review of 2026-10-28, her 178 touches in reverse (DEF about 111 at level 28, then about 64 at 26: gear taken
+    off): the fit of her last 40 stayed at 105.75 for 9 touches after the drop, then 91.25, 77.5, 73.75, reaching 69.25
+    about 32 in, a Horny Mushroom's top 124-131 meanwhile against the 134 she could take. Now her newest 8 not fitting
+    it take the prior (DEF 0, said) until they agree on a DEF, then the lower of the two lows."""
+    rows = list(reversed(_rows()))
+    drop = next(i for i, r in enumerate(rows) if r["level"] == 26)  # (the first touch at the lower DEF)
+    assert fit_defence(rows[:drop]).low == 105.75
+    after = [fit_defence(rows[:n]) for n in range(drop + 1, drop + 23)]
+    assert after[0].source == "prior" and "her newest 8 touches fit neither the DEF her last 40 do" in after[0].why
+    assert all(f.low <= 70.0 for f in after)  # (the level's own fit 61.5-70.25)
+    assert after[4].source == "touches" and "her newest 8 fit" in after[4].words() and "the lower taken" in after[4].why
+    # In time order (DEF going up: new gear) her last 40 at level 28 are as before, nothing said of her newest.
+    assert fit_defence(list(reversed(rows))).why == ""
+
+
+def test_a_hunting_command_waits_for_her_max_hp_and_hunts_nothing_without_it(monkeypatch):
+    """The review of 2026-10-28: before her max HP read the stop was 50% of her bar on every map (under 3 Horny Mushroom
+    touches at levels 24-26, about 2 on a map whose largest is PADamage 150) and no TooStrong could be told. A command
+    that hunts now waits HP_WAIT_S for it (the perception service's newest states) and hunts nothing without it
+    (HpNotRead), unless --low-hp gives a share of her bar."""
+    from gamelab import __main__ as cli
+    from gamelab.behavior import hunter as hunter_mod
+    from gamelab.behavior.safety import EXIT, HP_WAIT_S, HpNotRead
+    # The hunter: the feed's states without her HP number, then with it.
+    states = iter([SimpleNamespace(hp_of=None, level_of=None)] * 3 + [SimpleNamespace(hp_of=(700, 840), level_of=28)])
+    last = [None]
+
+    def newest(after):
+        last[0] = next(states, last[0])
+        return last[0]
+    said = []
+    h = _hunter(log=said, feed=SimpleNamespace(newest=newest, throw=lambda *a: None))
+    assert h.max_hp is None and h.wait_max_hp(seconds=5.0, poll=0.001) and h.max_hp == 840 and h.level == 28
+    assert said[-1].startswith(f"  the safety stop now under {3 * _top(110, 0.0, 28)} HP of 840 (") and (
+        "(was 50% of her HP bar (her max HP not read yet)): her max HP 840 by her HUD's HP number; her level 28" in said[-1])
+    never = _hunter(feed=SimpleNamespace(newest=lambda after: SimpleNamespace(hp_of=None, level_of=28),
+                                         throw=lambda *a: None))
+    assert not never.wait_max_hp(seconds=0.02, poll=0.001)
+    assert "the perception service's states carry no HP number" in never.hp_why
+    stop = HpNotRead(HP_WAIT_S, never.hp_why)
+    assert stop.exit_code == EXIT and stop.after == "Nothing was hunted." and str(stop).startswith(
+        "her max HP not read off her HUD's HP number in 5 s (the perception service's states carry no HP number")
+    # The command line: `tour --loop` refused; with --low-hp a share hunts, in HP it waits too.
+    from gamelab.localization import mapdata, service
+    from test_worldstate import small_map
+
+    class Client:
+        def __init__(self, name, **kw):
+            self.welcome, self.why = {"pid": 1, "epoch": 1, "map": kw["map_id"]}, ""
+
+        def ready(self, timeout):
+            return True
+    waited = []
+    monkeypatch.setattr(service, "ServiceClient", Client)
+    monkeypatch.setattr(cli, "_eyes", lambda model, title, perception, restore: SimpleNamespace(log=print,
+                                                                                               geo=STRETCHED))
+    monkeypatch.setattr(cli, "_fit_start", lambda title, fix: None)
+    monkeypatch.setattr(mapdata, "load", lambda map_id: small_map())
+    monkeypatch.setattr(hunter_mod, "Hunter", lambda eyes, keys, model, log, feed, **kw: SimpleNamespace(
+        wait_max_hp=lambda: waited.append(1) or False, hp_why="why", too_strong=lambda: None,
+        senses=SimpleNamespace(window_fix=None)))
+    try:
+        with pytest.raises(HpNotRead):
+            cli._hunter(cli.build_parser().parse_args(["tour", "--loop"]))
+        cli._hunter(cli.build_parser().parse_args(["tour", "--loop", "--low-hp", "0.5"]))
+        assert len(waited) == 1
+        with pytest.raises(HpNotRead):
+            cli._hunter(cli.build_parser().parse_args(["tour", "--loop", "--low-hp", "400"]))
+        cli._hunter(cli.build_parser().parse_args(["tour", "--loop"]), throws=False)  # (the pet: it hunts nothing)
+        assert len(waited) == 2
+    finally:
+        cli._PERCEPTION.clear()
+
+
 def test_no_constant_stands_for_her_touch():
     """The reserve is the formula's at the read level and DEF, nothing written down: the same map at two levels and two
     DEFs gives four thresholds, each the formula's."""

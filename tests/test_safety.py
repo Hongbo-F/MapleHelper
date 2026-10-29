@@ -108,12 +108,17 @@ def test_her_measured_touches_count_from_the_first_at_her_level_with_a_margin():
         return kept.measured(28)
     # Level 28's live touches (103-122) over the formula's top at the fit's low end with the margin: the measured.
     t = tree(measured=rows([110] * 37 + [122])).touch
-    assert (t.measured, t.n, t.hp) == (122, 38, math.ceil(1.05 * 122)) and t.hp > HORNY
+    assert (t.measured, t.n, t.hp, t.taken_at) == (122, 38, math.ceil(1.05 * 122), 28) and t.hp > HORNY
     assert "1 measured at level 28, the largest 122, 5% over it" in tree(measured=rows([122])).describe(840)
     # Under the prior: the prior.
     assert tree(measured=rows([100])).touch.hp == HORNY
-    # Other levels' don't count, nor one at no level (her level not read when it was taken), nor one of no kind.
-    assert rows([140], level=25) == {} and rows([140], level=None) == {} and rows([140], kind=None) == {}
+    # Another level's count, carried to hers by the formula's level term (a tenth of an HP a level: 3 levels, the same
+    # whole HP; the review of 2026-10-28 found a level-up forgetting them), but not one at no level (her level not read
+    # when it was taken), nor one of no kind.
+    assert rows([140], level=25) == {"horny-mushroom": (140, 1, 25)}
+    assert rows([140], level=None) == {} and rows([140], kind=None) == {}
+    assert "1 measured, the largest 140 at level 28 (taken at level 25, carried by the formula's level term)" in tree(
+        measured=rows([140], level=25)).describe(840)
     # Green Mushroom's measured are its own.
     g = tree(measured=rows([60], kind="green-mushroom"))
     assert [(x.kind, x.hp) for x in g.touches][:2] == [("horny-mushroom", HORNY), ("green-mushroom", 63)]
@@ -138,7 +143,8 @@ def test_her_touches_are_kept_across_runs(tmp_path):
     t.add({"t": 1.0, "map": TREE.id, "level": 28, "hp": 117, "kind": "horny-mushroom", "max": 840, "pads": [110]})
     path.write_text(path.read_text(encoding="utf-8") + "not json\n", encoding="utf-8")
     assert Touches(path).rows == t.rows and Touches(None).rows == []
-    assert t.measured(28) == {"horny-mushroom": (117, 1)} and t.measured(27) == {} and t.measured(None) == {}
+    assert t.measured(28) == {"horny-mushroom": (117, 1, 28)} and t.measured(None) == {}
+    assert t.measured(27) == {"horny-mushroom": (118, 1, 28)}  # (a level lower: the most it can be, one more)
 
 
 def test_two_looks_under_it_debounce_s_apart_stop_the_hunt():

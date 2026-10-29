@@ -66,8 +66,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    value_per_min, the mesos' worth she picked up a minute
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
-  safety_stops     the safety stop (behavior.safety: her HP under her reserve, 2 of the map's largest touches in HP, on
-                   two looks or glances 0.6 s apart by her bar, the simulator's, or under one touch two in a row; until
+  safety_stops     the safety stop (behavior.safety: her HP under her reserve, her profile's hits of the map's largest
+                   touch in HP (the thief's 3 for now), on two looks or glances 0.25 s apart by her HP number, which
+                   the simulator draws (0.6 s by her bar), or under one touch two in a row; until
                    2026-10-28 65% for 2 s, or 25% two looks in a row: her pet's potions not keeping her up): 1 if it
                    ended the run (her retreat to a safe place, then nothing: the
                    hunt ends, as live; the run's time ends with her retreat, alive_s and the idle stretches with it,

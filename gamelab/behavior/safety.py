@@ -20,16 +20,19 @@ touch's size: the reserve is worked out live (Hunter._reserve_check, at every lo
   readings of it have it, meowdb's and the osms datamine's) at the kind's PADamage (the game data's), her level and
   her DEF as perception has them (behavior.bootstrap: her HUD's "LV." digits, else her EXP number; her stat window's
   W.DEF, else fitted to her touches, else DEF 0, the most a touch takes), the roll's top (`Touch.prior`);
-- her own exact touches by that kind at her level (her HP number's drops: perception.hp_number, kept in `Touches`),
-  which check it: MARGIN over the largest, if that's more (the game hitting harder than the formula says), from the
-  first one; they raise it, never lower it (`Touch.hp`);
+- her own exact touches by that kind (her HP number's drops: perception.hp_number, kept in `Touches`), those at her
+  level and her last CARRY_N at others carried to it by the formula's level term (`Touches.measured`: a level-up keeps
+  them), which check it: MARGIN over the largest, if that's more (the game hitting harder than the formula says), from
+  the first one; they raise it, never lower it (`Touch.hp`);
 and made again, said in the log with why, whenever any of it changes: the map, a kind seen, her level, her max HP, her
 DEF, a touch over it. A kind is told by the touch's size (`kind_of_touch`), not by the monster nearest her (none was
 seen near her at 853 of 1,220 touches); one whose size fits no kind (a drop over frames not read: the perception
 service forgets her number across them, worldstate.HP_GAP_S; a kind the data hasn't) counts for none, nor one taken
-before her level was read. Her max HP is her HUD's number's; until it reads the threshold is UNREAD_SHARE of her bar
-(behavior.bootstrap), said. A map whose monsters' touches the game data doesn't give: FALLBACK_SHARE of her max HP,
-said.
+before her level was read. Her max HP is her HUD's number's: a command that hunts waits HP_WAIT_S at its start for it
+and hunts nothing without it (`HpNotRead`, unless `--low-hp`): no share of her bar is her hits of the map's strongest
+touch on every map and at every level. Elsewhere (a `nav` trip, a hunter whose eyes draw no HP number) the threshold is
+UNREAD_SHARE of her bar until it reads (behavior.bootstrap), said. A map whose monsters' touches the game data doesn't
+give: FALLBACK_SHARE of her max HP, said.
 
 Why the old rule went (65% of her HP for 2 s over 3 looks, or 25% two looks in a row). It rested on her pet drinking an
 Orange Potion (250 HP of her 774) whenever a touch left her under its 70%, which put her back over 65% within tenths
@@ -95,7 +98,7 @@ from pathlib import Path
 
 from ..attack.danger import TOP_U, touch_range, touch_taken
 from ..perception.kinds import kind_of
-from .bootstrap import UNREAD_SHARE
+from .bootstrap import FIT_N, UNREAD_SHARE
 
 HITS = 3              # her profile's hits by default (gamelab.character's safety_hits)
 DEBOUNCE_S = 0.6      # s: under the threshold on two looks this far apart at least stops the hunt (her bar's) ...
@@ -112,15 +115,18 @@ KIND_DEF_TOP = 300.0  # ... or at any DEF up to this while hers isn't known
 EXIT = 4              # the command's exit code after it (the Lie Detector's is 3)
 MOB_TABLE = "mobs.json"  # the game data's monster table (gamedata/data/out/tables: name, PADamage, ...), for a kind
                          # seen on a map whose spawn list hasn't it (`mob_touch`)
+CARRY_N = FIT_N       # her last this many kept touches count at another level than theirs (Touches.measured)
+HP_WAIT_S = 5.0       # s a hunting command waits at its start for her HP number (`HpNotRead`)
 
 
 @dataclass(frozen=True)
 class Touch:
     """A kind's touch as the safety stop counts it: `prior`, the formula's top at her DEF and level (the reserve's);
-    `measured`, the largest of her exact touches by it at her level, of `n` (kept: `Touches`). `hp`: the prior, or
-    MARGIN over the measured if that's more, from the first one (a measured touch only ever raises it, so none is
-    waited for). `name`: the kind's as the game data has it ("Horny Mushroom"), `pad` its PADamage; `seen`: a kind a
-    look saw that the map's spawn list hasn't."""
+    `measured`, the largest of her exact touches by it as it would be at her level, of `n` (kept: `Touches.measured`:
+    those at her level and her last CARRY_N at others, carried), taken at level `taken_at` (None: hers). `hp`: the
+    prior, or MARGIN over the measured if that's more, from the first one (a measured touch only ever raises it, so
+    none is waited for). `name`: the kind's as the game data has it ("Horny Mushroom"), `pad` its PADamage; `seen`: a
+    kind a look saw that the map's spawn list hasn't."""
     kind: str
     prior: int
     measured: int | None = None
@@ -128,6 +134,7 @@ class Touch:
     name: str = ""
     pad: float = 0.0
     seen: bool = False
+    taken_at: int | None = None
 
     @property
     def said(self) -> str:
@@ -144,7 +151,11 @@ class Touch:
         prior = f"the formula's top at PADamage {self.pad:g}, DEF {defence:g}, level {level:g}"
         if self.measured is None:
             return prior
-        mine = f"{self.n} measured at level {level:g}, the largest {self.measured}"
+        if self.taken_at is None or self.taken_at == level:
+            mine = f"{self.n} measured at level {level:g}, the largest {self.measured}"
+        else:
+            mine = (f"{self.n} measured, the largest {self.measured} at level {level:g} (taken at level "
+                    f"{self.taken_at}, carried by the formula's level term)")
         if self.hp > self.prior:
             return f"{mine}, {MARGIN:.0%} over it (over {prior}: {self.prior})"
         return f"{prior}; {mine}"
@@ -278,27 +289,36 @@ def kind_of_touch(hp: float, kinds: dict[str, tuple[float, str]], defence: tuple
 
 
 def reserve_of(kinds: dict[str, tuple[float, str]], hits: int = HITS, defence: float = 0.0, level: float = 1.0,
-               measured: dict[str, tuple[int, int]] | None = None, guard: float = 0.0, map_id: int | None = None,
+               measured: dict[str, tuple] | None = None, guard: float = 0.0, map_id: int | None = None,
                seen=frozenset(), stats: str = "") -> Reserve:
     """Her reserve over `kinds` (kind -> (PADamage, name): the map's, kinds_of, and those seen on it, mob_touch):
     `hits` of the largest touch, each kind's the formula's top at `defence` and `level` (touch_range), or her
-    `measured` touches by it at that level (kind -> (the largest, how many): Touches.measured) as Touch says. `seen`:
-    the kinds a look saw that the map's spawn list hasn't; `stats`: where her stats came from, in words."""
+    `measured` touches by it as they'd be at that level (kind -> (the largest, how many[, the level it was taken at]):
+    Touches.measured) as Touch says. `seen`: the kinds a look saw that the map's spawn list hasn't; `stats`: where her
+    stats came from, in words."""
     measured = measured or {}
     out = []
     for k, (pad, name) in kinds.items():
-        most, n = measured.get(k, (None, 0))
-        out.append(Touch(k, touch_range(pad, defence, level)[1], most, n, name, pad, k in seen))
+        most, n, *at = measured.get(k, (None, 0))
+        out.append(Touch(k, touch_range(pad, defence, level)[1], most, n, name, pad, k in seen,
+                         at[0] if at else None))
     out.sort(key=lambda t: (-t.hp, t.kind))
     return Reserve(hits, tuple(out), level, defence, guard, map_id, stats)
+
+
+def carried(hp: int, taken_at: float, level: float) -> int:
+    """The most a touch of `hp` taken at level `taken_at` can be at `level` by the formula (attack.danger.touch_taken:
+    level / 10 off before it's cut to whole HP): HP less the whole levels' tenths gone (none for under 10 levels up; one
+    more for a level lower)."""
+    return int(hp - math.floor((level - taken_at) / 10))
 
 
 class Touches:
     """Her touches as her HP number measured them (a drop from one read to the next, nothing unread between: exact),
     kept across runs in her own file (paths.of().touches), a JSON line each: t (the wall clock), map, level (as
     perception read it then: behavior.bootstrap; None: not read yet, counted at no level), hp, kind (kind_of_touch;
-    None: none fits, counted for none), max (her max HP then), pads (the PADamage of the map's kinds then: what her DEF
-    is fitted to, bootstrap.fit_defence). `path` None: kept in memory only."""
+    None: none fits, counted for none; a row without one counts for none too), max (her max HP then), pads (the PADamage of the map's kinds then: what her DEF is fitted to,
+    bootstrap.fit_defence). `path` None: kept in memory only."""
 
     def __init__(self, path: Path | None = None):
         self.path = path
@@ -315,17 +335,25 @@ class Touches:
             except OSError:  # (none kept yet)
                 pass
 
-    def measured(self, level: int | None) -> dict[str, tuple[int, int]]:
-        """Her touches at `level` by kind: (the largest, how many) (none at no level)."""
-        out: dict[str, tuple[int, int]] = {}
+    def measured(self, level: int | None) -> dict[str, tuple[int, int, int]]:
+        """Her touches by kind as they'd be at `level`: (the largest, how many, the level it was taken at), of all
+        those kept at `level` and her last CARRY_N kept at any other (none at no level). One taken at another level is
+        carried to `level` by the formula's level term (`carried`): a level-up mustn't forget what the game hit her
+        harder than the formula says (the review of 2026-10-28: a measured 130 over the formula's 122 at level 31 gone at
+        32, the reserve back to the formula's until a touch of that kind was measured again), and her last CARRY_N are
+        her gear as her DEF's fit has it (bootstrap.fit_defence's window): older ones of other levels go."""
+        out: dict[str, tuple[int, int, int]] = {}
         if level is None:
             return out
-        for r in self.rows:
-            k, hp = r.get("kind"), r.get("hp")
-            if k is None or r.get("level") != level or not isinstance(hp, (int, float)):
+        kept = [r for r in self.rows if isinstance(r.get("level"), (int, float)) and isinstance(r.get("hp"), (int, float))]
+        recent = {id(r) for r in kept[-CARRY_N:]}
+        for r in kept:
+            k = r.get("kind")
+            if k is None or r["level"] != level and id(r) not in recent:
                 continue
-            most, n = out.get(k, (0, 0))
-            out[k] = (max(most, int(hp)), n + 1)
+            hp = carried(int(r["hp"]), r["level"], level)
+            most, n, at = out.get(k, (0, 0, level))
+            out[k] = (hp, n + 1, int(r["level"])) if hp > most else (most, n + 1, at)
         return out
 
     def add(self, row: dict) -> None:
@@ -431,6 +459,32 @@ class TooStrong(HuntStop):
 
     def page(self) -> tuple[str, str]:
         return ("MapleStory: too strong for her here", str(self))
+
+
+class HpNotRead(HuntStop):
+    """Her max HP not read off her HUD's HP number by HP_WAIT_S into a hunting command (the perception service's
+    newest states: gamelab.__main__'s _hunter, Hunter.wait_max_hp): nothing is hunted, unless `--low-hp` sets the
+    threshold as a share of her bar (in HP it needs her max HP too). Without her max HP the safety stop can't count touches in HP, and no share of her bar stands for her
+    profile's hits of the map's strongest touch on every map and at every level (the review of 2026-10-28: the 50% it
+    hunted at was under 3 Horny Mushroom touches at levels 24-26, 52-55% of her HP then, and about 2 touches of a map
+    whose largest is PADamage 150), nor can TooStrong be told."""
+    label = "HP NOT READ"
+    title = "HP not read"
+    event = "hp_not_read"
+    exit_code = EXIT
+    ends = "nothing hunted"
+    after = "Nothing was hunted."
+    advice = ("Have the perception service (`gamelab perceive`) run on this code, with the game's client at 1366x768 "
+              "and her HUD's HP number showing, or give --low-hp as a share of her HP bar (1 or under) to hunt with a "
+              "threshold of your own.")
+
+    def __init__(self, seconds: float, why: str = ""):
+        self.seconds, self.why = seconds, why
+        super().__init__(f"her max HP not read off her HUD's HP number in {seconds:g} s ({why or 'no state had it'}): "
+                         "the safety stop can't count her profile's hits of the map's strongest touch in HP without it")
+
+    def page(self) -> tuple[str, str]:
+        return ("MapleStory: her HP number not read", str(self))
 
 
 @dataclass

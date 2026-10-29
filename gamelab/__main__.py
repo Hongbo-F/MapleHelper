@@ -187,9 +187,12 @@ def cmd_stats(args) -> int:
         kept = None
     print(f"her stats file: {files.stats}" + ("" if kept else " (none kept yet)"))
     if kept:
-        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(kept.get("at", 0)))
-        print(f"  as last read ({when}): max HP {kept.get('max_hp')}, level {kept.get('level')} (her HUD's: a hunt "
-              "reads them again at its start, these aren't used for it)")
+        def when(key: str) -> str:
+            at = kept.get(f"{key}_at", kept.get("at"))
+            return time.strftime("%Y-%m-%d %H:%M", time.localtime(at)) if at else "never"
+        print(f"  as last read: max HP {kept.get('max_hp')} ({when('max_hp')}), level {kept.get('level')} "
+              f"({kept.get('level_from') or '?'}, {when('level')}) (her HUD's: a hunt reads them again at its start, "
+              "these aren't used for it)")
     print(f"  her {stats.defence.words()}")
     fit = fit_defence(touches.rows)
     print(f"  her kept touches ({len(touches.rows)}, {files.touches}) fit {fit.words()}")
@@ -633,9 +636,11 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
     before the eyes are made (the pet's: PetWait). A command that hunts has the OCR's models loaded at its start, on a
     thread of their own (perception.messages.warm: the message bar's first read comes in a fight). A command that
-    hunts (one that takes `--low-hp`: `hunt`, `tour`, `probe run`) on a map whose monsters are too strong for her
-    (behavior.safety.TooStrong: her safety stop's reserve at or over her pet's warning) is refused before it hunts,
-    unless `--low-hp` is given."""
+    hunts (one that takes `--low-hp`: `hunt`, `tour`, `probe run`) waits for her max HP off her HUD's HP number
+    (Hunter.wait_max_hp: the perception service's newest states, behavior.safety.HP_WAIT_S at most) and hunts nothing
+    without it (behavior.safety.HpNotRead), and on a map whose monsters are too strong for her (behavior.safety.
+    TooStrong: her safety stop's reserve at or over her pet's warning) is refused before it hunts; with `--low-hp`
+    given neither is refused, but `--low-hp` in HP (over 1) needs her max HP too: it's waited for as without it."""
     from .behavior.hunter import Hunter
     from .localization import mapdata
     from .screen import GAME_VIEW
@@ -654,9 +659,14 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
         from .perception.messages import warm
         warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
-    strong = getattr(hunter, "too_strong", None) if throws and not viewer and hasattr(args, "low_hp") else None
+    hunts = throws and not viewer and hasattr(args, "low_hp")  # (`nav`'s trips have the stop as it is)
+    wait = getattr(hunter, "wait_max_hp", None) if hunts and (args.low_hp is None or args.low_hp > 1) else None
+    if wait is not None and not wait():  # (--low-hp in HP needs her max HP too)
+        from .behavior.safety import HP_WAIT_S, HpNotRead
+        raise HpNotRead(HP_WAIT_S, hunter.hp_why)
+    strong = getattr(hunter, "too_strong", None) if hunts else None
     if strong is not None and (refused := strong()) is not None:
-        raise refused  # (the commands that hunt, which take --low-hp: `nav`'s trips have the stop as it is)
+        raise refused  # (the commands that hunt, which take --low-hp)
     if fix is not None and eyes.geo.client == GAME_VIEW:  # (Alt+Enter sets the game's own size, not the stretched one)
         hunter.senses.window_fix = fix
     return hunter
@@ -2249,7 +2259,8 @@ def _her_offline(records: list[dict], args):
         pass
     if hp is None or level is None:
         hp, level = hp or kept.get("max_hp"), level or kept.get("level")
-        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(kept["at"])) if kept.get("at") else "?"
+        at = kept.get("max_hp_at") or kept.get("at")
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(at)) if at else "?"
         source = f"her stats file's, as last read ({when}: {paths.of().stats})"
     if hp is None or level is None:
         return None, ("her max HP and level aren't known (no 'scene' record of the run has them, no --hp and --level, "
@@ -2347,9 +2358,10 @@ def safety_arg(s) -> None:
                    help="the safety stop's threshold: her HP under it on two looks 0.25 s apart by her HP number "
                         "(0.6 s by her bar) ends the hunt, she goes to a safe place and you're paged; 1 or under, a "
                         "share of her max HP; over 1, HP (default: her "
-                        "profile's hits of the map's largest touch, in HP: the thief 2, the magician 3; with an HP "
-                        "potion key of her own, five points under --potion-hp if lower; under one touch two looks in a "
-                        "row stops it too)")
+                        "profile's hits of the map's largest touch, in HP: the thief 3 for now, the magician 3; with an "
+                        "HP potion key of her own, five points under --potion-hp if lower; under one touch two looks in "
+                        "a row stops it too). Without it, or with it in HP, nothing is hunted until her HUD's HP number "
+                        "reads her max HP (5 s at most); a share hunts without it")
 
 
 def _attack(args) -> str:

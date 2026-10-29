@@ -62,7 +62,7 @@ from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
 from .bootstrap import Defence, HerStats
-from .safety import HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
+from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
 from .safety import kinds_of as map_kinds
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
@@ -324,23 +324,56 @@ class Hunter:
         service read them before this command started: live, it runs before any command), else what eyes that know
         the HUD now say of it (`hud_now`: the simulator's, as the service would have read it), else none yet (the
         first look's)."""
+        self._start = (feed, eyes)  # (wait_max_hp's)
         if her is not None:
             self.stats.see_max_hp(int(her.hp))
             self.stats.see_level(her.level, "given")
             self.stats.window = Defence(her.defence, her.defence, her.defence, "stat window")
             self.stats.refit(self.touches.rows)
             return
+        hp_of, level, _ = self._hud_state(feed, eyes)
+        if hp_of is not None:
+            self.stats.see_max_hp(hp_of[1])
+        self.stats.see_level(level, HerStats.LV_FROM)
+
+    @staticmethod
+    def _hud_state(feed, eyes) -> tuple:
+        """Her HUD's numbers as the feed's newest state has them, else as eyes that know the HUD now say (`hud_now`):
+        (hp_of, level_of, why: what had none, in words)."""
         newest = getattr(feed, "newest", None)
         try:
             st = newest(float("-inf")) if newest is not None else None
         except Exception:  # (a feed that can't say yet)
             st = None
-        hp_of, level = (getattr(st, "hp_of", None), getattr(st, "level_of", None)) if st is not None else (None, None)
-        if st is None and (hud := getattr(eyes, "hud_now", None)) is not None:
+        if st is not None:
+            hp_of = getattr(st, "hp_of", None)
+            return hp_of, getattr(st, "level_of", None), (
+                "" if hp_of is not None else "the perception service's states carry no HP number: started before this "
+                "code, or a client size it reads none at?")
+        if (hud := getattr(eyes, "hud_now", None)) is not None:
             hp_of, level = hud()
-        if hp_of is not None:
-            self.stats.see_max_hp(hp_of[1])
-        self.stats.see_level(level, HerStats.LV_FROM)
+            return hp_of, level, "" if hp_of is not None else "the eyes' HUD has no HP number"
+        return None, None, "no state from the perception service" if feed is not None else "no feed to ask"
+
+    def wait_max_hp(self, seconds: float = HP_WAIT_S, poll: float = 0.1) -> bool:
+        """At a hunting command's start (gamelab.__main__'s _hunter), with her max HP not read yet: the feed's newest
+        states asked for it every `poll` s, `seconds` at most (the perception service just started, a frame failing its
+        checks), her reserve made again with it (said: _reserve_check). Whether it's read; why not in `hp_why`."""
+        feed, eyes = getattr(self, "_start", (None, None))
+        end = time.monotonic() + seconds
+        self.hp_why = ""
+        while self.max_hp is None:
+            hp_of, level, self.hp_why = self._hud_state(feed, eyes)
+            if hp_of is not None:
+                self._max_hp_seen(hp_of[1])
+                if level is not None:
+                    self._level_seen(level, HerStats.LV_FROM)
+                break
+            if time.monotonic() >= end:
+                break
+            time.sleep(poll)
+        self._reserve_check()
+        return self.max_hp is not None
 
     def _plan_her(self) -> danger.Her:
         """The positioning model's her (bootstrap.HerStats.her): her DEF to PLAN_DEF_STEP, and while her max HP isn't
@@ -555,7 +588,7 @@ class Hunter:
             return
         if exact is not None:
             self._max_hp_seen(exact[1])
-        self._level_seen(getattr(st, "level_of", None), HerStats.LV_FROM)
+        self._level_seen(getattr(st, "level_of", None), HerStats.LV_FROM, st.t)
         if self._notes:
             self._reserve_check(st.t)
         mp = getattr(st, "mp", None)
@@ -778,7 +811,7 @@ class Hunter:
         self.meter.notes.clear()
         self.exp_events = [e for e in self.exp_events if s.t - e[0] < EXP_MEMORY]
         self._exp = s.exp
-        self._level_check()
+        self._level_check(s.t)
         self._reserve_check(s.t)
         if lost > 0 and self._last_hp is not None:
             self.report.damage_taken += lost
@@ -845,10 +878,11 @@ class Hunter:
         if (note := self.stats.see_max_hp(most)) is not None:
             self._notes.append(note)
 
-    def _level_seen(self, level: int | None, source: str) -> None:
-        """Perception read her level `level` (`source`: her HUD's LV. digits, her EXP number): noted for her reserve if
-        it's new (behavior.bootstrap.HerStats.see_level: the digits' over the EXP number's)."""
-        if (note := self.stats.see_level(level, source)) is not None:
+    def _level_seen(self, level: int | None, source: str, t: float | None = None) -> None:
+        """Perception read her level `level` (`source`: her HUD's LV. digits, her EXP number; None: not read) at `t`:
+        noted for her reserve if it's new (behavior.bootstrap.HerStats.see_level: the digits' over the EXP number's
+        while they read)."""
+        if (note := self.stats.see_level(level, source, t)) is not None:
             self._notes.append(note)
 
     def _level_number(self, s: Scene) -> None:
@@ -858,7 +892,7 @@ class Hunter:
         if level is None and getattr(s, "events", None) is None and (box := getattr(s, "lv_box", None)) is not None:
             self.lv_follow.see(box, s.geo)
             level = self.lv_follow.level
-        self._level_seen(level, HerStats.LV_FROM)
+        self._level_seen(level, HerStats.LV_FROM, s.t)
 
     def _kinds_on(self, s: Scene) -> None:
         """The monsters of look `s`: a kind the map's spawn list hasn't, whose touch the game data's monster table
@@ -905,11 +939,11 @@ class Hunter:
             if mine is not None and size >= most_now and math.ceil(1.05 * size) > mine.hp:
                 self._notes.append(f"a touch of {size} HP ({before} -> {cur}, a {kind}'s) over the formula's")
 
-    def _level_check(self) -> None:
-        """Her EXP number's level (localization.gains: the EXP table places its number) to her stats, where her level's
-        digits haven't read (behavior.bootstrap: theirs over its)."""
+    def _level_check(self, t: float | None = None) -> None:
+        """Her EXP number's level (localization.gains: the EXP table places its number) at `t` to her stats (behavior.
+        bootstrap: her level's digits' over it while they read)."""
         level = None if self.meter.at is None else self.meter.at[0]
-        self._level_seen(level, HerStats.EXP_FROM)
+        self._level_seen(level, HerStats.EXP_FROM, t)
 
     def _heading(self, s: Scene) -> None:
         """Which way her look's frame shows her facing (Eyes.heading; not asked on a rope), for her keys (Actions.see:
