@@ -2137,7 +2137,10 @@ way up to 10) paid just by the margin, and with their touches counted just doesn
 In the harness (the thief: `ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world
 zero-walls --world near-misses --world walkers --minutes 5`, seeds 1-48, against master 945f201) 319.8 EXP a minute
 against 310.3 (+3.1%, se 2.4%) and 70.5 touches against 67.6 (+4.3%, se 3.3%), neither beyond 2 se; no deaths, falls
-or stops either side; 26 of its 48 seeds better.
+or stops either side; 26 of its 48 seeds better. With the review's fixes (a pile's touches counted, back to the loop
+from a pile gone, the loop going on after a pile of its own, its rate afresh), 315.0 against 310.3 (+1.5%, se 2.2%)
+and 69.3 touches against 67.6 (+2.5%, se 3.1%), HP lost 5.05 bars against 4.83 (5.36 before the fixes), drops 94.2%
+picked up against 95.4%; 27 of 48 seeds better (`D:/MapleHelper-scratch/pull/fix/ab3.txt`).
 With two kills' worth asked, before one monster was enough, 18 of 45 moments of the 14:01 hunt with two monsters or
 more on another platform, and 22 of 34 of the user's play, went elsewhere. What a stop is expected to give (`Patrol.expect`) counts a
 remembered monster only where she gets at it from there (on its platform, or in a star's reach from somewhere along it:
