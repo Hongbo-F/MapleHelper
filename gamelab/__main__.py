@@ -180,7 +180,8 @@ def cmd_stats(args) -> int:
     touches = Touches(files.touches)
     stats = HerStats(files.stats, touches.rows)
     cal = stat_window.Calibration.load()
-    print(f"her stat window's reader: {cal.words() if cal is not None else 'not calibrated on this client yet (`gamelab stats --read --record`, live)'}")
+    print("her stat window's reader: " + (cal.words() if cal is not None else
+                                           "not calibrated on this client yet (`gamelab stats --read --record`, live)"))
     if args.frame:
         frame = np.asarray(Image.open(args.frame).convert("RGB"))
         got = stat_window.read_wdef(frame)
