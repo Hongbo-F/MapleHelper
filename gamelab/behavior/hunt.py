@@ -958,12 +958,13 @@ class Hunt:
             return fight._take_stance(self.h, self.fs, s, targets, visible, hidden, approach, toward=toward,
                                       jumps=jumps, goal=goal, edges=edges, up=up, limits=limits)
         here = s.platform
+        castable = fight.castable_of(self.h)
         return fight.cast_or_wait(self.h, stance(
             s.where.x, s.where.y, here, targets, approach, self.h.actions.facing,
             can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
             around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward, goal=goal, edges=edges, up=up,
             pace=fight.pace_of(self.h, s), touch=self.fs.touch, limits=limits, moves=self.fs.moves,
-            castable=fight.castable_of(self.h)))
+            castable=castable), s, castable)
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something

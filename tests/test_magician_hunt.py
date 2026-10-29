@@ -333,10 +333,12 @@ def test_after_a_cast_that_should_have_killed_it_none_until_her_exp_settles_it()
         assert a.key(RIGHT) is None and a.counts["no cast: no effect"] == 1 and a.counts["held: no effect"] == 1
 
 
-def test_a_cast_that_took_no_effect_isnt_repeated_until_she_or_it_moves_or_its_bar_changes():
+def test_a_cast_that_took_no_effect_isnt_repeated_until_she_moves_or_an_effect_shows():
     """Live on platform 18 at 01:55:17-41: a Green Mushroom 106-150 ahead, its bar never up, 26 casts in 24 s. Judged at
-    the first look LANDS_S after the key that sees it: still no bar up, the mark is held; a look that has it HOLD_MOVED
-    nearer or farther, her HOLD_MOVED along, or its bar up lifts it."""
+    the first look LANDS_S after the key that sees it: still no bar up, the mark is held and her spot that way (Spot,
+    the review of 2026-10-29: the mark's hold alone was lifted by its walk of 20, and her casts went on from where she
+    stood). Its walk lifts the mark's, not her spot's; a bar up that way (bars show her damage alone), her HOLD_MOVED
+    along, or SPOT_HELD_S lifts that."""
     with magic.swapped(MAGE):
         from gamelab.behavior import attacks as attacks_mod
         a, said = _picking()
@@ -356,16 +358,21 @@ def test_a_cast_that_took_no_effect_isnt_repeated_until_she_or_it_moves_or_its_b
         assert fight.cast_or_wait(SimpleNamespace(attacks=a), ("back", LEFT, 60.0)) == ("back", LEFT, 60.0)
         assert fight.cast_or_wait(SimpleNamespace(attacks=_picking(picks=False)[0]), ("throw", RIGHT)) == ("throw",
                                                                                                           RIGHT)
-        a.on_look(_look([("green-mushroom", 128.0 + attacks_mod.HOLD_MOVED, None)], t=t + 2.4))
-        assert a.counts["held: lifted"] == 1 and _cast(a)
-        # Judged again: none; its bar up later (another's damage, or hers shown late) lifts it
-        a.heard(t + 3.1, [])
-        a.on_look(_look([("green-mushroom", 150.0, None)], t=t + 3.1))
-        assert a.key(RIGHT) is None and a.counts["held: no effect"] == 2
+        a.on_look(_look([("green-mushroom", 128.0 + attacks_mod.HOLD_MOVED, None)], t=t + 2.4))  # (it walked 20 off)
+        assert a.counts["held: lifted"] == 1 and a.key(RIGHT) is None  # (the mark's lifted, her spot's not)
+        assert a.counts["no cast: no effect from here"] == 1
+        # Its bar up (her damage shown late): her spot's lifted too, and a cast goes; judged none again, held again
+        a.on_look(_look([("green-mushroom", 150.0, 0.6)], t=t + 3.1))
+        assert a.counts["held here: lifted"] == 1 and _cast(a)
+        a.heard(t + 3.8, [])
         a.on_look(_look([("green-mushroom", 150.0, 0.6)], t=t + 3.8))
-        assert a.counts["held: lifted"] == 2 and a.key(RIGHT) == "shift"
+        assert a.key(RIGHT) is None and a.counts["held: no effect"] == 2
         summary = a.summary()
-        assert "no cast: no effect 3" in summary and "her casts that took no effect 2 (holds lifted 2)" in summary
+        assert "no cast: no effect 3" in summary and "no cast: no effect from here 1" in summary
+        assert "her casts that took no effect 2 (holds lifted: her marks' 1, her spots' 1)" in summary
+        # SPOT_HELD_S on with nothing new: one cast tests it again (the mark's lifted by its walk meanwhile)
+        a.on_look(_look([("green-mushroom", 125.0, 0.6)], t=t + 3.8 + attacks_mod.SPOT_HELD_S))
+        assert a.counts["held here: lifted"] == 2 and a.key(RIGHT) == "shift"
         # An effect is no hold: its bar lower after the key
         b, _ = _picking()
         b.on_look(_look([("green-mushroom", 200.0, 0.8)], t=t))
@@ -470,3 +477,224 @@ def test_the_stance_throws_at_none_her_cast_wont_go_at_but_still_keeps_off_it():
         assert _her_stance(model, p, 300, mine, castable=lambda m: False) == ("wait",)
         model, p, mine = _close_scene(300, [("green-mushroom", 330.0)])
         assert _her_stance(model, p, 300, mine, castable=lambda m: False)[0] == "back"
+
+
+# --- after the review of 2026-10-29: her spot held, the feed's new tracks, the stance's no casts said, the other side,
+# no cast on her, her reach by the game's bodies ----------------------------------------------------------------------
+
+def _tracked(s, *tracks):
+    """Look `s` with the feed's track ids on its monsters, in order."""
+    s.monsters = [dataclasses.replace(m, track=k) for m, k in zip(s.monsters, tracks)]
+    return s
+
+
+def test_a_held_mark_and_a_kills_body_carry_over_the_feeds_new_track():
+    """The review of 2026-10-29: the feed gave a body it lost (under her hit's effect, 570 ms live) a new track and her
+    hold went with the old one: the same Green Mushroom, held, under track 7 0.4 s later took a cast. A mark with casts
+    to judge or a hold, its track gone from the look, is carried to a body of its kind beside it under a track first
+    seen since; one of a track seen before isn't it; a kill's body under a new track is as dead as under its own."""
+    with magic.swapped(MAGE):
+        a, _ = _picking()
+        t = time.monotonic()
+        a.on_look(_tracked(_look([("green-mushroom", 132.0, None), ("green-mushroom", 260.0, None)], t=t), 1, 3))
+        assert _cast(a)
+        a.heard(t + 0.7, [])  # (judged under the new track: the look has track 7 where 1 was)
+        a.on_look(_tracked(_look([("green-mushroom", 128.0, None), ("green-mushroom", 255.0, None)], t=t + 0.7), 7, 3))
+        assert a.counts["carried: the feed's new track"] == 1 and a.counts["held: no effect"] == 1
+        a._spots.clear()  # (her spot's hold aside: the mark's own, carried)
+        a.on_look(_tracked(_look([("green-mushroom", 126.0, None), ("green-mushroom", 250.0, None)], t=t + 1.1), 9, 3))
+        assert a.counts["carried: the feed's new track"] == 2
+        assert a.refused(a._last.monsters[0]) == "no effect" and a.key(RIGHT) is None
+        # One of a track the looks had before (3, beside where 1 was) isn't carried to: it's another
+        b, _ = _picking()
+        b.on_look(_tracked(_look([("green-mushroom", 132.0, None), ("green-mushroom", 180.0, None)], t=t), 1, 3))
+        assert _cast(b)
+        b.heard(t + 0.7, [])
+        b.on_look(_tracked(_look([("green-mushroom", 170.0, None)], t=t + 0.7), 3))
+        assert b.counts["carried: the feed's new track"] == 0 and b.counts["held: no effect"] == 0
+        assert b.key(RIGHT) == "shift" and b._target.track == 3
+        # A kill's body under the feed's new track: dead, as under its own (`_corpse`), a live one farther on cast at
+        from gamelab.behavior.ledger import Kill
+        kills = []
+        c, _ = _picking(kills=kills)
+        c.on_look(_tracked(_look([("green-mushroom", 100.0, 0.3)], t=t), 1))
+        assert _cast(c)
+        kills.append(Kill(t - 1.0, "green-mushroom", 1, 100.0, 0.0, 1, track=1))  # (ledger.dying's window over)
+        c.heard(t + 0.6, [(t + 0.35, frozenset({"green-mushroom"}))])
+        c.on_look(_tracked(_look([("green-mushroom", 102.0, None), ("green-mushroom", 200.0, None)], t=t + 0.6), 9, 4))
+        assert c._corpse(c._last.monsters[0], c._last.monsters)
+        assert not c._corpse(c._last.monsters[1], c._last.monsters)
+        assert c.key(RIGHT) == "shift" and c._target.track == 4
+
+
+def test_on_platform_18_her_spot_is_held_whatever_the_feeds_track_or_its_walk(monkeypatch):
+    """Live at 01:55:19-33 on 18: her at one x by her minimap dot, a Green Mushroom walking 116-150 ahead, its bar never
+    up, seen in 1 look of 4, under a new track as it came back, 26 casts in 24 s. The mark's hold alone was lost to its
+    walk of 20 and to the feed's new tracks (replayed, 9 of the 29 casts of 01:55:15-42 went; the review of
+    2026-10-29); her spot held that way, the first cast and one test each SPOT_HELD_S. Looks 0.12 s apart, her casts
+    THROW_S apart where her key sends one, else asked again at the next look (the clock the looks')."""
+    import math
+    from gamelab.attack import choice
+    from gamelab.behavior import attacks as attacks_mod
+    clock = [time.monotonic()]
+    monkeypatch.setattr(attacks_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def grind(a):
+        t0, keyed, sent = clock[0], -1e18, 0
+        for i in range(120):  # 14.4 s
+            t = clock[0] = t0 + 0.12 * i
+            x = 133.0 + 17.0 * math.sin(i / 9.0)  # (walking 116-150 off her)
+            a.heard(t, [])
+            seen = [("green-mushroom", x, None)] if i % 4 == 0 else []
+            a.on_look(_tracked(_look(seen, t=t), *([100 + i // 20] if seen else [])))  # (a new track each 2.4 s)
+            if t - keyed >= choice.THROW_S and a.key(RIGHT) is not None:
+                a.on_throw(t, RIGHT)
+                keyed, sent = t, sent + 1
+        return sent
+
+    with magic.swapped(MAGE):
+        a, _ = _picking()
+        sent = grind(a)
+        assert sent == 2, a.counts  # (at 0, then one test SPOT_HELD_S after its hold, at 7.2 s)
+        assert a.counts["no cast: no effect from here"] + a.counts["no cast: no effect"] > 0
+        monkeypatch.setattr(attacks_mod, "SPOT_HELD_S", 0.0)  # (the mark's hold alone, as before the review)
+        clock[0] += 60.0
+        b, _ = _picking()
+        assert grind(b) == 5, b.counts  # (each walk of 20 a cast, the feed's new tracks carried)
+
+
+def test_her_cast_the_other_way_lifts_her_holds_this_way():
+    """Live at 01:55:44 she cast left at a Horny Mushroom 203 off, and at 01:55:45 right at the Green Mushroom she had
+    stood casting at for nothing, tapping the arrow first (her keys faced left then): a turn is new evidence where her
+    keys had her facing wrong, her spot's and her marks' holds that way lifted."""
+    with magic.swapped(MAGE):
+        a, _ = _picking()
+        t = time.monotonic()
+        a.on_look(_look([("green-mushroom", 132.0, None)], t=t))
+        assert _cast(a)
+        a.heard(t + 0.7, [])
+        a.on_look(_look([("green-mushroom", 130.0, None), ("horny-mushroom", -203.0, None)], t=t + 0.7))
+        assert a.key(RIGHT) is None and a.counts["held: no effect"] == 1
+        assert a.key(LEFT) == "shift"  # (at the Horny Mushroom: her spot that way isn't held)
+        a.on_throw(t + 0.7, LEFT)
+        assert a.counts["held here: lifted"] == 1 and a.counts["held: lifted"] == 1
+        assert a.key(RIGHT) == "shift" and a._target.kind == "green-mushroom"
+
+
+def test_the_stances_no_casts_are_counted_logged_and_said_and_held_ones_alone_are_stepped_off(monkeypatch):
+    """The review of 2026-10-29: her refusals made in the stance (`castable`, fight.cast_or_wait) were silent (her
+    summary's counts only `key`'s; the log 'nothing in reach' with a held one in reach). Now counted (one each THROW_S
+    at most, her casts' pace: the stance is asked look after look), logged and said; with only held ones in reach she
+    steps off her spot (stance.held_step: her move is the new evidence) rather than stand; the thief's as before."""
+    from gamelab.attack import choice, stance
+    from gamelab.behavior import attacks as attacks_mod
+    from gamelab.behavior import fight
+    clock = [time.monotonic()]
+    monkeypatch.setattr(attacks_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    with magic.swapped(MAGE):
+        a, said = _picking()
+        h = SimpleNamespace(attacks=a)
+        t = clock[0]
+        a.on_look(_look([("green-mushroom", 132.0, None)], t=t))
+        assert _cast(a)
+        clock[0] = t + 0.7
+        a.heard(t + 0.7, [])
+        s = _look([("green-mushroom", 128.0, None)], t=t + 0.7)
+        a.on_look(s)
+        clock[0] = t + 1.0
+        act, refused = fight._cast_or_wait(h, ("throw", RIGHT), s)
+        assert act == ("back", LEFT, stance.HELD_STEP) and refused == ("no effect", s.monsters[0])
+        assert a.counts["no cast: no effect"] == 1
+        assert any("no cast right: no effect (green-mushroom +128)" in line for line in said)
+        assert stance.act_text(act, s.monsters, 0.0, [], refused) == \
+            "stepping away left 30; no cast: no effect (green-mushroom +128)"
+        assert stance.act_text(("wait",), s.monsters, 0.0, [], refused) == "no cast: no effect (green-mushroom +128)"
+        assert stance.act_text(("wait",), s.monsters, 0.0, []) == "nothing in reach"  # (the thief's)
+        clock[0] = t + 1.0 + choice.THROW_S / 2  # (asked again before her casts' pace: not counted again)
+        fight._cast_or_wait(h, ("throw", RIGHT), s)
+        assert a.counts["no cast: no effect"] == 1
+        clock[0] = t + 1.0 + choice.THROW_S
+        fight._cast_or_wait(h, ("throw", RIGHT), s)
+        assert a.counts["no cast: no effect"] == 2
+        assert a.key(RIGHT) is None and a.counts["no cast: no effect"] == 3  # (`key`'s: each)
+        # The stance's own (`castable` keeps those it refused): a held one alone in reach, a wait, so a step off it
+        model, p, mine = _close_scene(300, [("green-mushroom", 450.0)])
+
+        def scene(tt):
+            return SimpleNamespace(t=tt, mp=1.0, searched=True, where=SimpleNamespace(x=300.0, y=500.0, platform=p),
+                                   platform=p, monsters=list(mine))
+        b, said = _picking()
+        h = SimpleNamespace(attacks=b, model=model)
+        clock[0] = t
+        b.on_look(scene(t))
+        assert _cast(b)
+        clock[0] = t + 0.7
+        b.heard(t + 0.7, [])
+        s = scene(t + 0.7)
+        b.on_look(s)
+        clock[0] = t + 1.7
+        castable = fight.castable_of(h)
+        act = _her_stance(model, p, 300, s.monsters, castable=castable)
+        assert act == ("wait",) and [why for _, why in castable.refused] == ["no effect"]
+        act, refused = fight._cast_or_wait(h, act, s, castable)
+        assert act == ("back", LEFT, stance.HELD_STEP) and refused[0] == "no effect"
+        assert b.counts["no cast: no effect"] == 1
+        # The thief's: nothing of it
+        th = SimpleNamespace(attacks=_picking(picks=False)[0])
+        assert fight.castable_of(th) is None and fight._cast_or_wait(th, ("wait",), s) == (("wait",), None)
+
+
+def test_a_cast_the_other_way_where_her_search_picks_one_she_casts_at_there():
+    """The review of 2026-10-29: facing right, the first in her search that way refused (here one her cast at it
+    reckons likely dead), one she'd cast at 150 the other way: the stance threw right, cast_or_wait made it a wait, and
+    nothing went left. Now the throw goes left; with none either way, a wait (no step: not a hold)."""
+    from gamelab.behavior import fight
+    with magic.swapped(MAGE):
+        a, _ = _picking()
+        t = time.monotonic()
+        a.on_look(_look([("green-mushroom", 110.0, 0.22), ("green-mushroom", -150.0, None)], t=t))
+        assert _cast(a)
+        s = _look([("green-mushroom", 108.0, 0.22), ("green-mushroom", -150.0, None)], t=t + 0.3)
+        a.on_look(s)
+        assert a.refusal(RIGHT)[0] == "likely dead" and a.target(LEFT) is not None
+        assert fight.cast_or_wait(SimpleNamespace(attacks=a), ("throw", RIGHT), s) == ("throw", LEFT)
+        s = _look([("green-mushroom", 108.0, 0.22)], t=t + 0.35)
+        a.on_look(s)
+        assert fight.cast_or_wait(SimpleNamespace(attacks=a), ("throw", RIGHT), s) == ("wait",)
+
+
+def test_up_close_no_cast_while_their_bodies_overlap():
+    """The review of 2026-10-29: a Green Mushroom 35 off took a cast from the ground (her search picks its far side
+    past 50), their bodies overlapping (28 and her HER_HALF 22 either side: under 50 apart); master stepped back from 35.
+    Now a cast only with them apart when it starts, else a step back to where it surely picks it."""
+    with magic.swapped(MAGE):
+        for gap in (35.0, 40.0, 45.0):
+            model, p, mine = _close_scene(300, [("green-mushroom", 300.0 + gap)])
+            act = _her_stance(model, p, 300, mine)
+            assert act[0] == "back" and act[1] == LEFT, (gap, act)
+        model, p, mine = _close_scene(300, [("green-mushroom", 350.0)])
+        assert _her_stance(model, p, 300, mine) == ("throw", RIGHT)
+
+
+def test_her_stance_reaches_by_the_bodies_game_data_as_her_search_does():
+    """The review of 2026-10-29: 60 over her the stance took a Green Mushroom 116-122 off for in reach (reach's table: a
+    pig's 34 either side) where her search picks one from 123 (the game's 28), and threw, her cast sending none, and
+    she stood. With `castable` (hers) by the game's bodies: out from under it to where her search picks it; the thief's
+    (no `castable`) as before."""
+    from gamelab.attack import stance
+    from gamelab.localization.monsters import bodies
+    from test_danger import build, seen
+    model = build([(0, 500, 1000, 500), (350, 440, 800, 440)], [("13", 900, 500)])
+    p, q = model.platform_under(100, 500), model.platform_under(500, 440)
+    tops = {k: b.top for k, b in bodies(model).items()}
+    halves = {k: b.half for k, b in bodies(model).items()}
+
+    def act(off, castable):
+        m = seen("green-mushroom", 300.0 + off, 440.0, q.id)
+        return stance.stance(300.0, 500.0, p, [m], True, RIGHT, can_jump=lambda a, b: stance.open_above(model, p, a, b),
+                             tops=tops, halves=halves, around=[m], castable=castable)
+    with magic.swapped(MAGE):
+        assert act(118.0, None) == ("throw", RIGHT)  # (as on master: reach's table)
+        mine = act(118.0, lambda m: True)
+        assert mine[0] == "back" and mine[1] == LEFT and 118.0 + mine[2] >= 123.0, mine
+        assert act(130.0, lambda m: True) == ("throw", RIGHT)

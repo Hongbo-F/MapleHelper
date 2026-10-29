@@ -26,8 +26,8 @@ from maplehelper.game import COMBAT
 from .. import character, directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import (AWAY, FLINCH_HOLD_S, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace, act_text,
-                             air_gap, decide, first_attack_s, jump_hits, landing, move_limits, open_above, pct,
-                             pick_target, place_to_shoot, plan_of, shooting_place, stance)
+                             air_gap, decide, first_attack_s, held_step, jump_hits, landing, move_limits, open_above,
+                             pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
@@ -529,22 +529,24 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     throw (st.moves: MAX_MOVES). For a throw, everything in the star's path is kept (st.aimed): a kill is matched against
     it. A jump throw that a stance chose for where its attack reaches is
     logged with its numbers and sent as a telemetry 'jump' record when it's carried out (throw_act: log_jump). Her
-    casts going only where her attack choice sends one (castable_of: the magician's), a throw her cast would send none
-    with (Attacks.target that way: none) is a wait."""
+    casts going only where her attack choice sends one (castable_of: the magician's), as _cast_or_wait has it: a
+    throw her cast would send none with is one the other way, a step off her spot held, or a wait, logged with why
+    (act_text's `refused`: "no cast: no effect from here (green-mushroom +120)", not "nothing in reach")."""
     here = s.platform
     body = bodies(h.model)  # each kind's body (game data)
     tops, halves = body_sizes(h.model)
     around = visible + hidden
+    castable = castable_of(h)
     act = stance(s.where.x, s.where.y, here, fight, approach, h.actions.facing,
                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves, castable=castable_of(h))
-    act = cast_or_wait(h, act)
+                 moves=st.moves, castable=castable)
+    act, refused = _cast_or_wait(h, act, s, castable)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
-        h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
+        h.log(f"  {act_text(act, fight, s.where.x, hidden, refused)} (HP {s.hp:.0%})")
     st.last_act, st.last_hidden = act, bool(hidden)
     throwing = act[0] in THROWS
     if throwing:
@@ -553,7 +555,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
         st.aimed = _in_path(at, act[1], around, attack_gap(h.actions, act, _turn_key(h, s, act)), body,
                             st.flinching)
     if telemetry.recording():
-        telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden), away=moved_away(act),
+        telemetry.emit("stance", act=act[0], text=act_text(act, fight, s.where.x, hidden, refused),
+                       away=moved_away(act),
                        aimed=[{"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1)} for m in st.aimed]
                        if throwing else [])
     return act
@@ -863,29 +866,93 @@ def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Mo
     """attack.stance at `targets` from look `s`, by each kind's size, as _take_stance has it (unlogged)."""
     here = s.platform
     tops, halves = body_sizes(h.model)
+    castable = castable_of(h)
     return cast_or_wait(h, stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
                                   can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
-                                  around=around, danger=h.danger, pace=pace_of(h, s), castable=castable_of(h)))
+                                  around=around, danger=h.danger, pace=pace_of(h, s), castable=castable),
+                        s, castable)
 
 
-def cast_or_wait(h: "Hunter", act: tuple) -> tuple:
-    """Stance `act` as hunter `h` carries it out: where her attack choice casts only where her search picks a body she
-    casts at (castable_of: the magician's), a throw that way with none (Attacks.target: one held, likely dead, or no
-    body her search picks first) is ('wait',), the fight's patience running and the hunt loop's next rules asked, not a
-    key that sends nothing look after look; anything else as it is (the thief's always)."""
-    if act[0] in ("throw", "jump_throw") and castable_of(h) is not None and h.attacks.target(act[1]) is None:
-        return ("wait",)
-    return act
+def cast_or_wait(h: "Hunter", act: tuple, s: Scene | None = None, castable=None) -> tuple:
+    """Stance `act` as hunter `h` carries it out from look `s` (_cast_or_wait's; `castable`: the stance's)."""
+    return _cast_or_wait(h, act, s, castable)[0]
 
 
-def castable_of(h: "Hunter"):
-    """The stance's `castable` for hunter `h`: whether her attack goes at a monster at all, where her attack choice
-    has her skill cast only at a body seen, not dead, likely dead or held (behavior.attacks.Attacks.picks, the
-    magician's: Attacks.refused); None for the thief (every one, as before)."""
+HELD = ("no effect", "no effect from here")  # (behavior.attacks.Attacks.refused's holds: rule 3)
+
+
+def _cast_or_wait(h: "Hunter", act: tuple, s: Scene | None = None, castable=None) -> tuple[tuple, tuple | None]:
+    """Stance `act` as hunter `h` carries it out from look `s`, and why her cast goes at none (None: it goes, or no
+    cast was in it), as (act, (why, the body her search would pick)). Where her attack choice casts only where her
+    search picks a body she casts at (castable_of: the magician's), a throw that way with none (Attacks.target: one
+    held, likely dead, or no body her search picks first) is, as the review of 2026-10-29 had it: a throw the other way
+    where her search picks one she casts at there (facing right, a held one first in her search at +120, a castable one
+    at +220 and one at -150: she waited; a throw from the ground only, no jump's plan changed); else a step off her
+    spot where it's held (stance.held_step: HELD_STEP away from that side, within where she keeps to, into no body nor
+    more danger: her move is the new evidence that lifts the hold, behavior.attacks.Spot); else ('wait',), the fight's
+    patience running and the hunt loop's next rules asked, not a key that sends nothing look after look. A stance that
+    throws none where `castable` refused one it would have thrown at (Castable.refused) is as it is, with that why, and
+    a wait so a step off her spot held too. Each such no cast is counted, logged and recorded (Attacks.no_cast, by
+    'stance': choice.THROW_S apart at most, her casts' pace): before, only `key`'s refusals were, and live the stance
+    mostly decides first. Anything else as it is (the thief's always: `picks` off)."""
+    attacks = getattr(h, "attacks", None)
+    if attacks is None or not getattr(attacks, "picks", False):
+        return act, None
+    if act[0] in ("throw", "jump_throw"):
+        side = act[1]
+        if attacks.target(side) is not None:
+            return act, None
+        why, first = attacks.refusal(side) or ("nothing her search picks", None)
+        other = directions.opposite(side)
+        if act[0] == "throw" and attacks.target(other) is not None:
+            return ("throw", other), None
+        attacks.no_cast(side, why, first)
+        return _held_step(h, s, side, why) or ("wait",), (why, first)
+    refused = getattr(castable, "refused", None)
+    if not refused:
+        return act, None
+    m, why = refused[0]
+    side = RIGHT if s is None or s.where is None or m.x > s.where.x else LEFT
+    attacks.no_cast(side, why, m)
+    if act[0] == "wait":
+        act = _held_step(h, s, side, why) or act
+    return act, (why, m)
+
+
+def _held_step(h: "Hunter", s: Scene | None, side: str, why: str) -> tuple | None:
+    """A step off her spot held that way (stance.held_step), where `why` her cast goes at none is a hold (HELD), from
+    look `s`; else None."""
+    if why not in HELD or s is None or s.where is None or s.platform is None:
+        return None
+    model = getattr(h, "model", None)
+    return held_step(s.where.x, s.platform, side, s.monsters, body_sizes(model)[1], getattr(h, "danger", None),
+                     move_room(h, s) if model is not None else None)
+
+
+class Castable:
+    """The stance's `castable` for her attacks (behavior.attacks.Attacks, `picks`): whether her cast goes at a monster
+    (Attacks.refused says no why), each it refused kept with its why (`refused`, in the order the stance asked), for
+    _cast_or_wait: a stance that throws none where it would have thrown at one of them is a cast not sent, said."""
+
+    def __init__(self, attacks):
+        self.attacks = attacks
+        self.refused: list[tuple[Monster, str]] = []
+
+    def __call__(self, m: Monster) -> bool:
+        why = self.attacks.refused(m)
+        if why is not None and not any(o is m for o, _ in self.refused):
+            self.refused.append((m, why))
+        return why is None
+
+
+def castable_of(h: "Hunter") -> Castable | None:
+    """The stance's `castable` for hunter `h`, a new one each stance (Castable): whether her attack goes at a monster
+    at all, where her attack choice has her skill cast only at a body seen, not dead, likely dead or held
+    (behavior.attacks.Attacks.picks, the magician's: Attacks.refused); None for the thief (every one, as before)."""
     attacks = getattr(h, "attacks", None)
     if attacks is None or not getattr(attacks, "picks", False):
         return None
-    return lambda m: attacks.refused(m) is None
+    return Castable(attacks)
 
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,

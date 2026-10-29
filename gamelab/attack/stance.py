@@ -55,7 +55,7 @@ from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import MOVEMENT
 
 from .. import directions
-from ..localization.mapdata import MapModel, Platform
+from ..localization.mapdata import MapModel, MobBody, Platform
 from ..localization.monsters import DEFAULT_SPEED, MONSTER_SPEED, MONSTER_TOP, Monster, touch_box
 from ..motion import physics
 from ..motion import bodies as her_body
@@ -266,6 +266,8 @@ MAX_MOVES = 2          # guess: steps away in a row without a throw between (her
 ESCAPE_STEPS = True
 ESCAPE_STEP = 20
 AWAY = "away"  # a step away from a close monster ('back', side, units, AWAY): what MAX_MOVES counts
+HELD_STEP = 30.0  # units a step off a spot of the magician's held goes (held_step): past behavior.attacks.HOLD_MOVED's
+                  # 20 as her x reads it, a band and a half of her search
 
 
 @dataclass(frozen=True)
@@ -489,20 +491,21 @@ def _goal_reach() -> float:
 
 
 def _clear_from(platform: Platform, x: float, y: float, t: Monster, lo: float, hi: float,
-                around: list[Monster] | None = None) -> float | None:
+                around: list[Monster] | None = None, sizes: dict[str, MobBody] | None = None) -> float | None:
     """The nearest place to map x along `platform`, from `lo` to `hi` (every CLEAR_STEP units), from where a
     star reaches monster `t` (reach.can_shoot, out to _goal_reach) and terrain doesn't stop it (reach.wall_to),
     or None. A wall of her foothold group stops it from anywhere on her platform; by the v83 line (reach.LINE)
     her own floor stops a star at a monster below unless she stands near enough its end. With `around` (the
     monsters around her), nor does a monster the attack takes first have its star stopped there (reach.can_hit's
     shield): from 14 at x 690 a pig on 17 at 880, in her floor's shadow, takes the stars at one at 1000, and
-    from x 729 on the search doesn't pick it (under 151 off), so the one at 1000 gets them."""
+    from x 729 on the search doesn't pick it (under 151 off), so the one at 1000 gets them. `sizes`: its body by the
+    map's game data (the magician's stance), else reach's tables."""
     xs = [lo + i * CLEAR_STEP for i in range(int((hi - lo) // CLEAR_STEP) + 1)] + [hi]
     if around is None:
-        ok = [g for g in xs if reach.can_shoot(t.x - g, t.y - y, reach=_goal_reach(), kind=t.kind)
+        ok = [g for g in xs if reach.can_shoot(t.x - g, t.y - y, reach=_goal_reach(), kind=t.kind, sizes=sizes)
               and reach.wall_to(platform, g, y, t) is None]
     else:
-        ok = [g for g in xs if reach.can_hit(platform, g, y, t, reach=_goal_reach(), others=around)]
+        ok = [g for g in xs if reach.can_hit(platform, g, y, t, reach=_goal_reach(), others=around, sizes=sizes)]
     return min(ok, key=lambda g: abs(g - x), default=None)
 
 
@@ -678,7 +681,12 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     (behavior.attacks.Attacks.refused: the magician's casts, none at one unseen, dead, likely dead or held; None: every
     one): one it won't go at is never thrown at, nor taken as sure from where she stands up close, but counts as ever
     for her body, the danger and who's too close. Without POINT_BLANK (the magician's), up close with nothing she casts
-    at from where she stands (_close_quarters' 'wait'), a throw that way at another in reach she casts at."""
+    at from where she stands (_close_quarters' 'wait'), a throw that way at another in reach she casts at. With
+    `castable` her reach is by each kind's body in the map's game data (`tops`, `halves`: reach.can_hit's `sizes`), as
+    her casts' search is (ledger.in_path's: a mushroom 28 either side, where reach's table has a pig's 34), so the
+    stance neither throws where that search picks nothing (a throw her cast would send none with) nor stays there: off
+    her level, nearer than it picks one, she steps out from under it (_step_from_under; the review of 2026-10-29: 60
+    over her, the stance took one 116-122 off for in reach where her search picks from 123)."""
     can_jump = can_jump or (lambda a, b: True)
     counts = danger is not None and danger.any
     moves = moves if counts else 0
@@ -688,8 +696,8 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     lo, hi = _stand_limits(platform, crowded=bool(mine))
     # a throw from the ground would be a claw swipe, or it hits too hard, as it will be when the attack starts
     close = [t for t in mine if too_close(t, x, halves, danger, pace, platform, _side_of(t, x) != facing)]
-    in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around)
-                and (castable is None or castable(t))]
+    sizes = _sizes(tops, halves) if castable is not None else None  # (her casts' search: the game's bodies)
+    reachable = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around, sizes=sizes)]
     if close:
         slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
         if limits is not None:
@@ -698,10 +706,12 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
                               (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
                               else None, danger, platform, body, up, y, pace, moves, seen=around, castable=castable)
         if act[0] == "wait" and not POINT_BLANK:  # (her: none she casts at up close; another in reach that she does)
-            others = [t for t in in_reach if not any(t is c for c in close)]
+            others = [t for t in reachable if not any(t is c for c in close) and (castable is None or castable(t))]
             if others:
                 return ("throw", _throw_side(x, others, facing, platform, danger))
         return act
+    # (`castable` asked only where its answer decides: behavior.fight.Castable keeps those it refused, for the log)
+    in_reach = [t for t in reachable if castable is None or castable(t)]
     if in_reach:
         if toward and PASSING_JUMPS and jumps is not None:
             jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward,
@@ -714,10 +724,19 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
                           tops=tops, can_jump=can_jump)
         if jump is not None:
             return jump
-    act = _step_from_under(x, y, platform, wanted, lo, hi, around)
+    act = _step_from_under(x, y, platform, wanted, lo, hi, around, sizes)
     if act is None and approach:
-        act = _close_in(x, y, platform, wanted, lo, hi, around)
+        act = _close_in(x, y, platform, wanted, lo, hi, around, sizes)
     return act or ("wait",)
+
+
+def _sizes(tops: dict[str, float] | None, halves: dict[str, float] | None) -> dict[str, MobBody] | None:
+    """Each kind's body as reach.body_of takes it from the map's game data (MobBody) out of the stance's `tops` and
+    `halves` (behavior.fight.body_sizes: localization.monsters.bodies), or None without them: what the magician's
+    reach goes by (stance's `castable`), as her casts' search does (ledger.in_path's `sizes`)."""
+    if not tops or not halves:
+        return None
+    return {k: MobBody(tops[k], tops[k], halves[k]) for k in halves if k in tops}
 
 
 def air_gap(act: str | tuple) -> float | None:
@@ -1002,8 +1021,10 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     With none of those sure (`sure` False): within CLAW_ONLY of her, or with no jump, the claw from the ground; else the
     jump in place keyed 40 ms after the jump (tapping first if she must turn). Without POINT_BLANK (the magician's): a
     cast from the ground (a tap first if she must turn) where her search surely picks it when the cast starts, its body
-    CLEAR_MARGIN past the search's start (reach.picks, by `top` and `half`, its feet on the slope then), else ('wait',),
-    not sure: no jump in place, no claw."""
+    CLEAR_MARGIN past the search's start (reach.picks, by `top` and `half`, its feet on the slope then) and clear of
+    hers (`half` and HER_HALF apart, middle to middle: the review of 2026-10-29, a Green Mushroom 33-49 off took a cast
+    with their bodies overlapping, where master stepped back from 35), else ('wait',), not sure: no jump in place, no
+    claw; a step away or the jump away comes first (_close_quarters)."""
     d = directions.sign(side)
     turn = facing != side
 
@@ -1019,8 +1040,8 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     tg = pace.lead + (TAP_S if turn else 0.0) + GROUND_PICK_S
     ground = ("throw", side)
     g0 = gap(tg)
-    if not POINT_BLANK:  # (her search from the ground, or nothing: no claw, no cast in the air)
-        sure = reach.picks(g0 - CLEAR_MARGIN, drop(tg), top, half)
+    if not POINT_BLANK:  # (her search from the ground, or nothing: no claw, no cast in the air, none on her)
+        sure = g0 >= half + HER_HALF and reach.picks(g0 - CLEAR_MARGIN, drop(tg), top, half)
         return Here(ground if sure else ("wait",), sure, g0)
     swiped = [o for o in mine if -half_of(o.kind, halves) < (pace.at(o, x, tg, platform) - x) * d
               < reach.ground_sure(half_of(o.kind, halves))[0]]
@@ -1130,6 +1151,27 @@ def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float],
     return min(options, key=lambda o: (round(o[0], 6), o[1]))[2]
 
 
+def held_step(x: float, platform: Platform, side: str, around: list[Monster], halves: dict[str, float] | None = None,
+              danger: Danger | None = None, limits: tuple[float, float] | None = None) -> tuple | None:
+    """A step of HELD_STEP away from `side` from map x on `platform`, where her casts that way took no effect from
+    there (the magician's spot held: behavior.attacks.Spot; behavior.fight.cast_or_wait), new evidence for the next
+    (her HOLD_MOVED along lifts it): within where she keeps to with monsters about (_stand_limits; `limits`, as
+    stance's), into no monster's body of `around` on her platform (_into, `halves`), to no more danger than where she
+    stands (`danger`: Danger.at). ('back', side, HELD_STEP), or None: then she waits (the review of 2026-10-29: with
+    only held ones in reach she stood there)."""
+    away = directions.opposite(side)
+    goal = x + directions.sign(away) * HELD_STEP
+    lo, hi = _stand_limits(platform, crowded=any(m.platform == platform.id for m in around))
+    if limits is not None:
+        lo, hi = max(lo, limits[0]), min(hi, limits[1])
+    if not lo <= goal <= hi or _into(x, goal, platform, around, halves):
+        return None
+    if danger is not None and danger.any and (danger.at(platform.id, goal, around)
+                                              > danger.at(platform.id, x, around) + 1e-9):
+        return None
+    return ("back", away, HELD_STEP)
+
+
 def _on_spawn(gx: float, spawns: list[tuple[float, float]]) -> bool:
     """Whether her body at map x `gx` is within a respawn's body of one of `spawns` ((map x, half its kind's width))."""
     return any(abs(gx - sx) <= sh + HER_HALF for sx, sh in spawns)
@@ -1170,41 +1212,43 @@ def _throw_side(x: float, in_reach: list[Monster], facing: str | None, platform:
 
 
 def _step_from_under(x: float, y: float, platform: Platform, wanted: list[Monster], lo: float,
-                     hi: float, around: list[Monster] = ()) -> tuple | None:
+                     hi: float, around: list[Monster] = (), sizes: dict[str, MobBody] | None = None) -> tuple | None:
     """Off her level and too close sideways (right under or over her), a star misses: step away from
     the nearest such monster, along her platform, to where a star reaches it (reach.shot_dx, by its
     kind; throwing at it from right over it used to go on and on), or where its star isn't stopped if it is
     from there (_clear_from). None if there's none (one whose star terrain stops from all along her platform
-    doesn't count), or no such step. `around`: as stance's."""
+    doesn't count), or no such step. `around`: as stance's; `sizes`: its body by the map's game data (stance's, for
+    the magician), else reach's tables."""
     def goal_of(t: Monster) -> tuple[str, float] | None:
         away = LEFT if t.x > x else RIGHT
-        goal = min(max(t.x + directions.sign(away) * (reach.shot_dx(t.y - y, t.kind) + 40), lo), hi)
-        if reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around):
+        goal = min(max(t.x + directions.sign(away) * (reach.shot_dx(t.y - y, t.kind, sizes) + 40), lo), hi)
+        if reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around, sizes=sizes):
             return away, goal
-        goal = _clear_from(platform, x, y, t, lo, hi, around)
+        goal = _clear_from(platform, x, y, t, lo, hi, around, sizes)
         return None if goal is None else (RIGHT if goal > x else LEFT, goal)
 
     under = [(t, g) for t in wanted if t.platform != platform.id and reach.in_band(t.y - y)
-             and abs(t.x - x) < reach.shot_dx(t.y - y, t.kind) and (g := goal_of(t)) is not None]
+             and abs(t.x - x) < reach.shot_dx(t.y - y, t.kind, sizes) and (g := goal_of(t)) is not None]
     if not under:
         return None
     t, (side, goal) = min(under, key=lambda tg: abs(tg[0].x - x))
-    if abs(goal - x) >= MIN_MOVE and reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around):
+    if abs(goal - x) >= MIN_MOVE and reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around,
+                                                   sizes=sizes):
         return ("back", side, abs(goal - x))
     return None
 
 
 def _close_in(x: float, y: float, platform: Platform, wanted: list[Monster], lo: float,
-              hi: float, around: list[Monster] = ()) -> tuple | None:
+              hi: float, around: list[Monster] = (), sizes: dict[str, MobBody] | None = None) -> tuple | None:
     """Walk toward the nearest monster level enough to shoot, to SHOT_RANGE - 40 from it (never past it), or
     where terrain doesn't stop its star if it does from there (reach.wall_to, _clear_from: a wall of her
     foothold group does from anywhere on her platform, and then she doesn't walk for it). None if there's
-    none, or it can't be brought into reach from her platform. `around`: as stance's."""
+    none, or it can't be brought into reach from her platform. `around`, `sizes`: as _step_from_under's."""
     def goal_of(t: Monster) -> float | None:
         goal = min(max(t.x - directions.sign(_side_of(t, x)) * (reach.SHOT_RANGE - 40), lo), hi)
-        if reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around):
+        if reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around, sizes=sizes):
             return goal
-        return _clear_from(platform, x, y, t, lo, hi, around)
+        return _clear_from(platform, x, y, t, lo, hi, around, sizes)
 
     level = [(t, g) for t in wanted if reach.in_band(t.y - y) and (g := goal_of(t)) is not None]
     if not level:
@@ -1212,14 +1256,22 @@ def _close_in(x: float, y: float, platform: Platform, wanted: list[Monster], lo:
     t, goal = min(level, key=lambda tg: abs(tg[0].x - x))
     side = _side_of(t, x)
     if ((goal - x) * directions.sign(side) > MIN_MOVE
-            and reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around)):
+            and reach.can_hit(platform, goal, y, t, reach=_goal_reach(), others=around, sizes=sizes)):
         return ("approach", side, abs(goal - x))
     return None
 
 
-def act_text(act: tuple, wanted: list[Monster], x: float, hidden: list[Monster]) -> str:
-    """A stance as a log line: "throwing right (pig +120, slime +300 hidden)"."""
-    if act[0] in _THROW_VERBS:
+def act_text(act: tuple, wanted: list[Monster], x: float, hidden: list[Monster],
+             refused: tuple[str, Monster | None] | None = None) -> str:
+    """A stance as a log line: "throwing right (pig +120, slime +300 hidden)". `refused`: why her cast goes at none,
+    and the body it would have (the magician's: behavior.fight.cast_or_wait, behavior.attacks.Attacks.refused), for a
+    stance that sends no cast: "no cast: no effect from here (green-mushroom +120)" for a wait (the review of
+    2026-10-29: it said "nothing in reach" with a held one in reach), said after a move."""
+    why = ""
+    if refused is not None:
+        m = refused[1]
+        why = f"no cast: {refused[0]}" + ("" if m is None else f" ({m.kind} {m.x - x:+.0f})")
+    if act[0] in _THROW_VERBS and refused is None:
         side = [t for t in wanted if (t.x > x) == (act[1] == RIGHT)]
 
         def name(t: Monster) -> str:
@@ -1230,8 +1282,11 @@ def act_text(act: tuple, wanted: list[Monster], x: float, hidden: list[Monster])
                                        f"at {plan.key_ms} ms{f', {plan.why}' if plan.why else ''}")
         return f"{_THROW_VERBS[act[0]]} {act[1]}{how} ({', '.join(name(t) for t in side[:3])})"
     if act[0] in ("back", "approach"):
-        return f"{'stepping away' if act[0] == 'back' else 'closing in'} {act[1]} {act[2]:.0f}"
-    return "nothing in reach"
+        return f"{'stepping away' if act[0] == 'back' else 'closing in'} {act[1]} {act[2]:.0f}" + (
+            f"; {why}" if why else "")
+    if act[0] in _THROW_VERBS:  # (the magician's jump away: no cast in the air)
+        return f"{'jumping back' if act[0] == 'jump_back' else _THROW_VERBS[act[0]]} {act[1]}; {why}"
+    return why or "nothing in reach"
 
 
 def pct(bar: float | None) -> str:
