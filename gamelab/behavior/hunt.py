@@ -865,7 +865,7 @@ class Hunt:
         """What her attacks reach from where she stands in look `s` at `targets` (fight.jump_cover, as a callable worked
         out when first asked; `around`: the monsters about her, the look's by default), kept for the look: the look's
         own monsters and every other asked of it share one."""
-        if not fight.JUMP_SHOTS or s.where is None or s.platform is None:
+        if not fight.JUMP_SHOTS or not fight._air() or s.where is None or s.platform is None:
             return None
         if getattr(self, "_covers_for", None) is not s:  # (tests make a hunt without __init__)
             self._covers_for, self._covers = s, {}

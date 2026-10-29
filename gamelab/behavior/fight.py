@@ -505,8 +505,9 @@ def _air() -> bool:
 def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[Monster]):
     """What her attacks reach from where she stands in look `s` at `targets`, from the ground and from her jumps
     (attack.reach.coverage, by the map's bodies; `around`: every monster about her, each where it walks to by then:
-    walk_on), as a callable working it out when first asked (attack.stance's `jumps`): None with JUMP_SHOTS off."""
-    if not JUMP_SHOTS or s.where is None or s.platform is None:
+    walk_on), as a callable working it out when first asked (attack.stance's `jumps`): None with JUMP_SHOTS off, or
+    for an attack she doesn't make from a jump (_air: the magician's Magic Claw)."""
+    if not JUMP_SHOTS or not _air() or s.where is None or s.platform is None:
         return None
     done = []
 

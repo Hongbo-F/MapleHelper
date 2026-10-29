@@ -73,7 +73,7 @@ def test_magic_claws_search_in_the_attack_layer_and_the_thiefs_back_after():
     from gamelab.attack import spots, stance
     from gamelab.behavior import fight
     thief = (reach.STAR_RANGE, reach.SEARCH_START, reach.SHOT_RANGE, reach.WALLS_BLOCK, reach.CLAW, spots.SHOT_RANGE,
-             fight.JUMP_SHOTS, reach.can_hit.__defaults__, reach.STAR_SURE)
+             stance.PASSING_JUMPS, reach.can_hit.__defaults__, reach.STAR_SURE)
     top, half = reach.body_of("green-mushroom")
     claw_near = reach.claw_chance(40, 0, top, half)
     assert claw_near > 0 and reach.can_shoot(380, 0, reach=434, kind="green-mushroom")  # (the thief's: star to 400)
@@ -89,11 +89,14 @@ def test_magic_claws_search_in_the_attack_layer_and_the_thiefs_back_after():
         assert reach.can_shoot(250, -90, kind="green-mushroom") and not reach.can_shoot(100, -90, kind="green-mushroom")
         s = _look([("green-mushroom", 200.0, None)])
         assert not reach.WALLS_BLOCK and reach.wall_to(s.platform, 0.0, 0.0, s.monsters[0]) is None  # (nothing stops it)
-        assert spots.SHOT_RANGE == 310 and not fight.JUMP_SHOTS and not stance.PASSING_JUMPS
+        assert spots.SHOT_RANGE == 310 and not stance.PASSING_JUMPS
+        with character.using(MAGE):  # (no jump cover for an attack she doesn't make from a jump)
+            assert not fight._air() and fight.jump_cover(None, _look([]), [], []) is None
+        assert fight._air()  # (the thief's)
         assert reach.claw_edge(half) == 50 + half + reach.CLAW_MARGIN  # (her decisions keep one that far off)
     assert not magic.applied()
     assert thief == (reach.STAR_RANGE, reach.SEARCH_START, reach.SHOT_RANGE, reach.WALLS_BLOCK, reach.CLAW,
-                     spots.SHOT_RANGE, fight.JUMP_SHOTS, reach.can_hit.__defaults__, reach.STAR_SURE)
+                     spots.SHOT_RANGE, stance.PASSING_JUMPS, reach.can_hit.__defaults__, reach.STAR_SURE)
     assert reach.claw_chance(40, 0, top, half) == claw_near
     assert not magic.apply(character.load("thief"))  # (nothing for the thief)
 
