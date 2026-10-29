@@ -465,6 +465,28 @@ def test_the_touches_on_her_trips_are_counted_from_a_chains_or_moves_start_to_it
     assert out["trip_s"] == pytest.approx(4.1) and out["trip_hurt"] == 2
 
 
+def test_her_trips_touches_again_and_by_what_she_was_doing_are_counted(model):
+    # harness._retouches: a touch (a MISS too) 2 s or less after the one before; _trips: her trips ('trip' records) and
+    # those that got there, the time on the move an arrival, her touches by what she was doing (a chain's plan, a move
+    # of the mover's, neither), the mover's moves and the navigator's evade steps by kind.
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0))
+    w.touch_log = [(2.0, 0.1), (3.4, 0.0), (5.5, 0.05), (6.0, 0.0), (9.0, 0.2), (14.0, 0.01), (15.9, 0.0)]
+    t0 = 1000.0
+    records = [{"topic": "session", "t": t0}, {"topic": "chain", "t": t0 + 5.0}, {"topic": "chain", "t": t0 + 6.5},
+               {"topic": "moved", "t": t0 + 7.0}, {"topic": "trip", "t": t0 + 7.1, "result": "arrived"},
+               {"topic": "event", "kind": "evade", "step": "spot", "t": t0 + 8.0},
+               {"topic": "move", "t": t0 + 13.0}, {"topic": "moved", "t": t0 + 15.0},
+               {"topic": "trip", "t": t0 + 15.1, "result": "timeout"}, {"topic": "trip", "t": t0 + 70.0, "result": "arrived"}]
+    out = harness.outcomes(w, records, 60.0)
+    assert out["retouch_2s"] == 3  # (3.4 after 2.0, 6.0 after 5.5, 15.9 after 14.0)
+    assert out["trips"] == {"total": 2, "arrived": 1} and out["arrive_share"] == 0.5  # (the one past the horizon: not)
+    assert out["trip_s_per_arrival"] == pytest.approx(4.0)
+    assert out["touches_by"] == {"chain": 2, "move": 1, "off": 4} and out["mover_moves"] == 1
+    assert out["evades"] == {"spot": 1}
+    assert "walk" in harness.POLICIES and list(harness.WALK_PLATFORMS) == list(range(7, 34))
+
+
 def test_her_box_can_be_the_clients_in_the_simulated_world(model):
     # Realism.her_box (`--world client-body`): 22 either side of her feet and 65 tall (motion.bodies), not the
     # simulator's 15 and 55: a slime walking on B, 140 above C's floor, never reaches her there; one on a platform 60

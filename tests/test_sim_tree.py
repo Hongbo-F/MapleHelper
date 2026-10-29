@@ -441,6 +441,15 @@ def test_a_short_harness_run_on_tree_dungeon():
     assert out["map"] == TREE and out["world"] == ["zero-walls"] and "left_map_at" in out and out["coverage"]
 
 
+def test_a_short_movement_only_walk_on_tree_dungeon():
+    # harness `walk`: trips to random platforms of the live QA walk's (7-33), movement only (no kill, no attack)
+    tree_map()
+    from gamelab.sim import harness
+    out = harness.run_one("walk", 1, "crowd", minutes=0.5, map_id=TREE, world=("zero-walls", "walkers"))
+    assert out["trips"]["total"] >= 1 and out["kills"] == 0 and out["attacks"] == 0
+    assert sum(out["touches_by"].values()) == out["touches"]
+
+
 def test_the_harness_builds_her_hunter_as_the_command_line_does():
     """The harness's policies build the hunter as `tour` does: her potion key's 0.45, and the safety stop's threshold
     its default (behavior.safety.SAFETY_HP: `--low-hp` not given). `loop-avoid` (the trips to rest keeping clear of

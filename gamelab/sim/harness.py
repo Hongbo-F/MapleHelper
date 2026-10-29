@@ -10,6 +10,8 @@
     python -m gamelab.sim.harness spot RUN [--seeds 3,9]        a saved run's seeds again here: the same to the digit?
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
 
+POLICY: tour, loop, loop-grind (the hunting commands), or walk (movement only, as the live QA walk: _walk).
+
 `--cache` reads the seeds this checkout's code (its commit's) has already run with the same arguments from the baseline
 cache (sim.baseline: D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json) and runs only the others,
 keeping them; a checkout whose code isn't as committed, or a run with `--think`, runs them all and keeps none. `cached` reads a
@@ -63,6 +65,15 @@ What a run gave is read from the simulated world, not from the bot's own reports
   trip_s           the seconds she was on the move (from a chain's or a lone move's start, 'chain' or 'move' records,
                    to its 'moved' record), and trip_hurt, trip_hp_lost: the touches that hurt her then, and the HP
                    they took (what her trips cost, against her hunting where she stands)
+  retouch_2s       her touches (a MISS too) that came RETOUCH_S (2 s) or less after the one before: a touch again as her
+                   invulnerability ends (live in walk B, 2026-10-28: 53 of 148, 34 at 1.43-1.6 s)
+  trips            her trips (the navigator's 'trip' records): total, and arrived ('arrived' or 'in position');
+                   arrive_share, the share that got there; trip_s_per_arrival, trip_s over the arrivals; touches_by, her
+                   touches (a MISS too) by what she was doing: 'chain' (a chain's plan running), 'move' (a move the
+                   mover made alone: control.mover), 'off' (neither: her looks, waits, fights, between trips);
+                   mover_moves, her moves the mover made alone ('move' records); evades, the navigator's evade steps
+                   by kind ('evade' events: control.navigator's evade step, its passes, its contact rule). The `walk`
+                   policy's (movement only, as the live QA walk) above all
   drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
                    the share she picked up; value_share, the same weighed by what each is worth on the world's
                    map (behavior.looting.worth_for: the game data's prices, mesos by what its monsters drop), and
@@ -320,9 +331,32 @@ def _loop_grind(sim) -> None:
     _safely(h, hunt)
 
 
+# The live QA walk's platforms on Tree Dungeon (D:/MapleHelper-scratch/qa/walk.py's PLATFORMS: 7 to 33) and its trips' time
+WALK_PLATFORMS = range(7, 34)
+WALK_TRIP_S = 40.0
+
+
+def _walk(sim) -> None:
+    """Movement only, as the live QA walk of 2026-10-28 (D:/MapleHelper-scratch/qa/walk.py: random `nav` trips, no
+    attack), its trips in one navigator that avoids monsters (no escort): to a platform and an x on it drawn at random
+    (on Tree Dungeon one of WALK_PLATFORMS, 15 in from its ends), WALK_TRIP_S each, one after another until the horizon;
+    the safety stop and the Lie Detector as in every policy (_safely). Her trips' own numbers: `trips`, `arrive_share`,
+    `trip_s_per_arrival`, `touches_by`, `retouch_2s`, `mover_moves`, `evades` (outcomes)."""
+    h = sim.hunter(potion_hp=0.45)
+    nav = sim.navigator(h, fight=False, seed=POLICY_SEED)
+    rng = random.Random(POLICY_SEED * 1000 + sim.scenario.seed)
+    places = [p for p in sim.model.places if (p.id in WALK_PLATFORMS if sim.model.id == TREE else p.right - p.left >= 60)]
+
+    def hunt():
+        while True:
+            p = rng.choice(places)
+            nav.go(p.id, x=rng.uniform(p.left + 15, p.right - 15), seconds=WALK_TRIP_S)
+    _safely(h, hunt)
+
+
 # (`loop-avoid`, the trips to rest keeping clear of monsters, and `loop-hp50`, resting under half her HP, went with the
 # rests on 2026-10-26.)
-POLICIES = {"tour": _tour, "loop": _loop, "loop-grind": _loop_grind}
+POLICIES = {"tour": _tour, "loop": _loop, "loop-grind": _loop_grind, "walk": _walk}
 
 
 def _only(policy, grounds: tuple[int, ...]):
@@ -555,7 +589,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "misses": world.evaded,
         "touches_told": sum(1 for r in events if r.get("kind") == "touch"),
         "misses_told": sum(1 for r in events if r.get("kind") == "touch" and r.get("touch") == "MISS"),
+        "retouch_2s": _retouches(world, end),
         **_travelling(world, records, end),
+        **_trips(world, records, end),
         "hp_low": round(world.hp_low, 3),
         "potions": world.potions_used,
         "casts": world.casts,
@@ -752,6 +788,52 @@ def _trip_spans(records: list[dict], start: float, end: float) -> list[tuple[flo
     if began is not None:
         spans.append((began, end))
     return spans
+
+
+RETOUCH_S = 2.0  # (retouch_2s) a touch this soon after the one before is a touch again
+
+
+def _retouches(world, end: float) -> int:
+    """retouch_2s (see the top): her touches (a MISS too: World.touch_log) up to `end` that came RETOUCH_S or less after
+    the one before (live in walk B, 53 of 148, 34 of them 1.43-1.6 s on, as her invulnerability ended)."""
+    ts = [t for t, _ in world.touch_log if t <= end]
+    return sum(1 for a, b in zip(ts, ts[1:]) if b - a <= RETOUCH_S)
+
+
+def _trips(world, records: list[dict], end: float) -> dict:
+    """trips, arrive_share, trip_s_per_arrival, touches_by, mover_moves and evades (see the top): her trips (the
+    navigator's 'trip' records up to `end`, all and those that got there: 'arrived' or 'in position'), the seconds on
+    the move an arrival, her touches (a MISS too) by what she was doing ('chain': a chain's plan running, 'move': a move
+    of the mover's, 'off': neither: looks, waits, fights, between trips), her moves made by the mover alone ('move'
+    records), and the navigator's evade steps by kind ('evade' events' `step`)."""
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    if start is None:
+        return {"trips": {"total": 0, "arrived": 0}, "arrive_share": None, "trip_s_per_arrival": None,
+                "touches_by": {}, "mover_moves": 0, "evades": {}}
+    ended = [r for r in records if r.get("topic") == "trip" and r["t"] - start <= end]
+    arrived = sum(1 for r in ended if r.get("result") in ("arrived", "in position"))
+    spans, began = [], None  # (from, to, 'chain' or 'move'), as _trip_spans has them
+    for r in records:
+        if r.get("topic") in ("chain", "move") and began is None:
+            began = (r["t"] - start, "chain" if r["topic"] == "chain" else "move")
+        elif (r.get("topic") == "moved" or r.get("topic") == "event" and r.get("kind") == "cannot") \
+                and began is not None:
+            spans.append((began[0], min(r["t"] - start, end), began[1]))
+            began = None
+    if began is not None:
+        spans.append((began[0], end, began[1]))
+    by = Counter({"chain": 0, "move": 0, "off": 0})
+    for t, _ in world.touch_log:
+        if t <= end:
+            by[next((k for a, b, k in spans if a <= t <= b), "off")] += 1
+    moving = sum(max(0.0, b - a) for a, b, _ in spans if a < end)
+    return {"trips": {"total": len(ended), "arrived": arrived},
+            "arrive_share": round(arrived / len(ended), 4) if ended else None,
+            "trip_s_per_arrival": round(moving / arrived, 2) if arrived else None,
+            "touches_by": dict(by),
+            "mover_moves": sum(1 for r in records if r.get("topic") == "move" and r["t"] - start <= end),
+            "evades": dict(Counter(str(r.get("step")) for r in records if r.get("topic") == "event"
+                                   and r.get("kind") == "evade" and r["t"] - start <= end))}
 
 
 # The hunt loop's rules for her drops (behavior.hunt: 6a, 6, 5, 5b, 8, 10), for pile_s: while one of them decides, or
