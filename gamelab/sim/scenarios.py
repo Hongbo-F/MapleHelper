@@ -2286,7 +2286,9 @@ def loop_tree_grind(sim):
     pays for its detour: on her way up to 7 she's knocked about between 16 and 24 shooting in passing, then round by
     the loop to 10 and to 19, the one stop she reaches (499 EXP against 488; 473 until a pile's touches counted against
     it, the review of 2026-10-29, when a trip's look at 31.6 s had a pile pay and the choice after it, her kill time
-    learned afresh, not)."""
+    learned afresh, not). With the evade work (its integration, 2026-10-29: work/evade-int) the same loop and no pile
+    pays either: up to 7 (stop 7 again at 41.8 s), round to 10 (102.1 s) and to 16 (168.9 s, 14 skipped as empty), the
+    one stop she reaches; 469 EXP by her EXP number (510 by the world's), touched 33 times (20 on master)."""
     return _grind(3)(sim)
 
 
