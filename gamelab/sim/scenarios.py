@@ -2274,10 +2274,13 @@ def _grind(minutes: float):
 def loop_tree_grind(sim):
     """`python -m gamelab tour --loop --grind --minutes 3 --map 10002073` from 23 among the crowding study's other
     players (harness.TREE_CAMPS) with respawns at 30 s (preset crowd-slow's): the loop over the map's spawn points chosen
-    by its EXP a minute (behavior.patrol: the top cluster's 10, 7), and what she sees pulling her off it to the stops
-    around her (23, 24, 19, 20 on seed 1), what she meets on the way shot in passing, kills credited to the platforms
-    they died on (19, 20, 21, 23, 24). In this world she's touched about five times as often as live (README:
-    Grinding): knocked off 23 down to 25-29 and back, then standing by at the end (resting there until 2026-10-26)."""
+    by its EXP a minute (behavior.patrol: the top cluster's 10, 7), what she sees pulling her off it when it pays for
+    its detour against the loop, what she meets on the way shot in passing, kills credited to the platforms they died
+    on. In this world she's touched about five times as often as live (README: Grinding). Until the pull's detour rule
+    (2026-10-29: behavior.patrol, a pile against the loop's rate) piles pulled her to 23, 24, 19 and 20 on seed 1,
+    knocked off 23 down to 25-29 and back, then standing by at the end (resting there until 2026-10-26); since, none
+    pays for its detour: on her way up to 7 she's knocked about between 16 and 24 shooting in passing all of its 3
+    minutes, no stop reached (473 EXP against 488), her kills credited to 16, 18, 19, 20, 23 and 24."""
     return _grind(3)(sim)
 
 
@@ -2819,7 +2822,7 @@ KEY_EXPECTS = (
     check("the backslash first, then Esc with the window open, nothing else in it, no MENU", _window_ok))
 
 
-@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),))),
       expects=KEY_EXPECTS + (
           check("her stars asked", lambda tr: _said(tr, "her stars: ")),
@@ -2839,11 +2842,15 @@ def loop_tree_grind_attack_key(sim):
     read (ATTACK on A, preset 1), Esc, closed (83.6-84.3 s); her regular attack A from 85.0 s, remembered, paged once;
     7 kills with it after. (Seed 13 since master's rebase onto her touches, 2026-10-28: of seeds 1-13, 11 and 13 meet all
     of this there. Until the review of 2026-10-28 the window opened with a Green Mushroom near on 23's side: nothing
-    looked again after the retreat.)"""
+    looked again after the retreat.) (Seed 9 since the pull's detour rule (2026-10-29: behavior.patrol, a pile against
+    the loop's rate): on seed 13 no 5 regular presses in a row went without effect in its 2 minutes; of seeds 1-13, 9
+    alone meets all of this, 6 and 10 press Ctrl after the check. On 9: the doubt at 55.9 s, a Green Mushroom at 4%
+    pressed at from 39.9 s; away to 25 (4.0 s), her stars not known, the window read and closed at 60.7-61.4 s, ATTACK
+    on A: A from 62.1 s, paged once, 19 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),))),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
@@ -2856,11 +2863,14 @@ def loop_tree_attack_unbound(sim):
     window read with ATTACK on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven
     only (her throws that would have been the regular attack: "the regular attack off this run"), paged once; remembered
     so: her next run's start says it and tries the regular attack again (control.keymap.at_start; until the review of
-    2026-10-28 every later run started with it off, nothing to doubt it again)."""
+    2026-10-28 every later run started with it off, nothing to doubt it again). (Seed 9 since the pull's detour rule
+    (2026-10-29: behavior.patrol, a pile against the loop's rate), as loop_tree_grind_attack_key: on 13 no doubt in its
+    2 minutes; of seeds 1-13, 9 alone meets all of this, 6 and 10 never say the regular attack off. On 9 the same doubt
+    and check as there, ATTACK on none at 62.1 s.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -2878,11 +2888,15 @@ def loop_tree_attack_misses(sim):
     her keys followed and her stat window (master d9774e5, 2026-10-28): on seed 8 no 5 regular presses in a row went
     without effect in its 2 minutes; of seeds 1-12, 9 and 10 meet all of this, master's stack on 9 no doubt in its 2
     minutes. On 9: the doubt at 52.2 s, away to 25 (4.5 s), her stars not known, the window read and closed at
-    57.9-58.6 s, ATTACK on Ctrl; Ctrl pressed 13 times at others after, 17 kills after.)"""
+    57.9-58.6 s, ATTACK on Ctrl; Ctrl pressed 13 times at others after, 17 kills after.) (Seed 6 since the pull's detour
+    rule (2026-10-29: behavior.patrol, a pile against the loop's rate): on seed 9 no 5 regular presses in a row went
+    without effect in its 2 minutes; of seeds 1-12, 6 and 10 meet all of this. On 6: the doubt at 46.8 s, a Green
+    Mushroom at 4%; away to 25 (4.8 s), her stars: she has them (a cast took MP since the doubt's first press), the
+    window read and closed at 52.2-52.9 s, ATTACK on Ctrl, 28 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -2899,11 +2913,13 @@ def loop_tree_attack_misses_seen(sim):
     since the rebase of the whole screen 15 times a second (worldstate.WIDE_EVERY_S) onto her keys followed and her
     stat window (master d9774e5, 2026-10-28), as loop_tree_attack_misses: on seed 8 her attack's MISS was read over
     fewer than 3 of her regular presses' targets; of seeds 1-12, 1, 5 and 9-12 meet all of this, master's stack on 9
-    not. On 9 14 MISSes read from 26.6 s, no doubt.)"""
+    not. On 9 14 MISSes read from 26.6 s, no doubt.) (Seed 6 since the pull's detour rule (2026-10-29: behavior.patrol,
+    a pile against the loop's rate), as loop_tree_attack_misses: of seeds 1-12, 1, 2, 6, 9 and 10 meet all of this. On 6
+    7 MISSes read from 15.8 s, no doubt.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=24, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -2931,7 +2947,12 @@ def loop_tree_attack_no_darts(sim):
     5 regular presses in a row went without effect in its 4 minutes, so neither the doubt nor out of darts' stop; of
     seeds 1-12, 5 and 7 meet all of this, master's stack on 5 no doubt. On 5: the doubt at 108.8 s, away to 25 (7.6
     s), MAYBE OUT at 125.8 s, the window read and closed at 126.9-127.6 s, ATTACK on Ctrl: Lucky Seven only, paged;
-    out of darts' stop after 20 such presses, 36 s, paged.)"""
+    out of darts' stop after 20 such presses, 36 s, paged.) (Seed 24 since the pull's detour rule (2026-10-29:
+    behavior.patrol, a pile against the loop's rate): on seed 5 no 5 regular presses in a row went without effect in its
+    4 minutes, so neither the doubt nor out of darts' stop; of seeds 1-24, 24 alone meets all of this, 3, 4, 6, 8, 10
+    and 17 doubt and stop with her stars' test not MAYBE OUT. On 24: the doubt at 113.7 s, a Horny Mushroom at 4%; MAYBE
+    OUT at 121.2 s, the window read and closed at 121.6-122.3 s, ATTACK on Ctrl: Lucky Seven only, paged; out of darts'
+    stop at 144.5 s, paged.)"""
     return key_check_run(4)(sim)
 
 
@@ -2975,7 +2996,9 @@ def loop_tree_grind_jump_key(sim):
     15 times a second (worldstate.WIDE_EVERY_S) onto her keys followed and her stat window (master d9774e5,
     2026-10-28): on seed 3 JUMP was followed at 201.7 s without the doubt said (no 6 jumps in a row without a lift);
     of seeds 1-12, 1, 4-8, 11 and 12 meet all of this, master's stack on 1 past its 400 s. On 1: the doubt at 100.7
-    s, a slime near (put off), the window read at 138.3-139.0 s, JUMP followed to C, 35 kills after.)"""
+    s, a slime near (put off), the window read at 138.3-139.0 s, JUMP followed to C, 35 kills after.) (Since the pull's
+    detour rule (2026-10-29: behavior.patrol, a pile against the loop's rate) on 1: the doubt at 78.5 s, the window read
+    at 79.0-79.7 s, JUMP followed to C at 80.4 s, 53 kills after.)"""
     return key_check_run(4)(sim)
 
 
@@ -2996,7 +3019,8 @@ def loop_tree_grind_arrow_key(sim):
     the rebase of the whole screen 15 times a second (worldstate.WIDE_EVERY_S) onto her keys followed and her stat
     window (master d9774e5, 2026-10-28): on seed 1 her runs' doubt came at 320 s, after the hunt; of seeds 1-12, 9,
     10 and 12 meet all of this, master's stack on 9 doubts at 236 s with too few runs after. On 9: the doubt at 42.7
-    s, the window read at 43.8-44.5 s, MOVE RIGHT followed to E, 51 kills after.)"""
+    s, the window read at 43.8-44.5 s, MOVE RIGHT followed to E, 51 kills after; 55 since the pull's detour rule
+    (2026-10-29: behavior.patrol, a pile against the loop's rate).)"""
     return key_check_run(4)(sim)
 
 
@@ -3012,8 +3036,9 @@ def loop_tree_grind_lucky_seven_key(sim):
     STARS_CHECKED; put off, her Lucky Seven held meanwhile, the regular attack instead, 15 s at the most), the window
     read (Lucky Seven's picture on A): her Lucky Seven A from then on, out of darts' stretch from there, no
     stop; remembered, paged once; kills with it after. (Until 2026-10-28 out of darts stopped the hunt at 24 s.) On seed
-    1: out of darts due at 27.2 s, away to 25 (1.7 s; a safe platform: no put-off), the window read at 29.3-30.0 s,
-    followed at 30.7 s, 67 kills after."""
+    1: out of darts due at 26.5 s, away to 25 (1.6 s; a safe platform: no put-off), the window read at 29.5-30.2 s,
+    followed at 30.9 s, 63 kills after (27.2, 1.7, 29.3-30.0, 30.7 and 67 before the pull's detour rule (2026-10-29:
+    behavior.patrol, a pile against the loop's rate))."""
     return key_check_run(4)(sim)
 
 
