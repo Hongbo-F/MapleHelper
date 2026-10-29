@@ -71,6 +71,12 @@ Topics (map units; producers build the records, ui.state folds them):
   log       text                                               every log line
   gc        collections [gen 0, 1, 2], pause_ms, longest_ms,   once a minute (the perception service, the commands
             frozen, seconds                                    that record telemetry: gcstats)
+  perf      s, fps, cores, wide_a_s, wide_asked_a_s, wide_ms   the perception service, with its 10 s console line
+            [median, p90, max], wide_age_ms [median, p90],     (service.Perf: the whole screens a second made and
+            busy, band_alone_a_s, band_alone_ms [median, p90], asked, each one's search, its result's age in each
+            tracks_a_min, flickers_a_min                       frame's state as it went out, the searches' thread
+                                                               busy, her band's own searches and their wait past
+                                                               their frame; from 2026-10-28)
 """
 
 import atexit

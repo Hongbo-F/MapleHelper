@@ -143,20 +143,21 @@ def test_at_a_whole_screen_a_second_her_band_5_times_a_second(step):
         assert s.wide_at == max((states[k - 1].t for k in wide if k < s.seq), default=None)
 
 
-def test_the_whole_screen_10_times_a_second_her_band_with_it():
-    """The default (worldstate.WIDE_EVERY_S; the user, 2026-10-28: "Let's change whole screen search to 10FPS"): every
-    third frame at 30 a second, her band never alone (a whole screen's search counts as hers). Each due a period after
-    the last was due: with frames stamped a hair early or late (the capture's), still 10 a second, where counting from
-    the last one's frame waited for a fourth frame each time three came a hair under 0.1 s apart."""
+def test_the_whole_screen_15_times_a_second_her_band_with_it():
+    """The default (worldstate.WIDE_EVERY_S; the user, 2026-10-28: "Let's change whole screen search to 10FPS", then
+    "I'm trying to bump the fps to 15 from 10"): every other frame at 30 a second, her band never alone (a whole
+    screen's search counts as hers). Each due a period after the last was due: with frames stamped a hair early or
+    late (the capture's), still 15 (or 10) a second, where counting from the last one's frame waited for a fourth frame
+    each time three came a hair under 0.1 s apart."""
     model = small_map()
     step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-    assert step.schedule.wide_s == worldstate.WIDE_EVERY_S == 0.1
+    assert step.schedule.wide_s == worldstate.WIDE_EVERY_S == 1 / 15
     late = []
     states = frames(step, 3 * FPS, late=late)
-    assert [s.seq for s in late if s.work["wide"]] == list(range(1, 91, 3)) and not any(s.work["band"] for s in late)
-    assert all(s.t - s.band_at <= 0.1 + 1e-9 and s.band_at == s.wide_at for s in states[1:])
+    assert [s.seq for s in late if s.work["wide"]] == list(range(1, 91, 2)) and not any(s.work["band"] for s in late)
+    assert all(s.t - s.band_at <= 1 / 15 + 1e-9 and s.band_at == s.wide_at for s in states[1:])
     rng = np.random.default_rng(3)
-    for wide_s, least, most in ((0.1, 29, 31), (1.0, 3, 3)):  # (3 s of frames, 30 a second, each +-1 ms)
+    for wide_s, least, most in ((1 / 15, 44, 46), (0.1, 29, 31), (1.0, 3, 3)):  # (3 s of frames, 30 a second, +-1 ms)
         jitter = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(wide_s=wide_s))
         late = []
         for k in range(3 * FPS):
@@ -188,17 +189,18 @@ class Paced(Searches):
 
 def test_the_whole_screen_waits_while_its_searches_take_more_than_half_the_thread():
     """worldstate.WIDE_SHARE: the schedule's next whole screen waits until the last one's search took at most half the
-    time since its frame (on Tree Dungeon at 1366x768 a crowd's takes 14-17 ms there: 10 a second; where one takes
-    80 ms, about 6 a second, the thread left free half the time for what's asked). A look's ask doesn't wait."""
+    time since its frame (on Tree Dungeon at 1366x768 a crowd's takes 14-20 ms there: 15 a second; one of 50 ms, 10 a
+    second; where one takes 80 ms, 6 a second, the thread left free half the time for what's asked). A look's ask
+    doesn't wait."""
     model = small_map()
-    for took, every in ((0.015, 3), (0.08, 5)):
+    for took, every in ((0.015, 2), (0.05, 3), (0.08, 5)):
         step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), searches=None)
         step.searches = Paced(step.senses, took)
         late = []
         frames(step, 3 * FPS, late=late)
         wide = [s.seq for s in late if s.work["wide"]]
         assert all(b - a >= every for a, b in zip(wide, wide[1:])) and len(wide) >= 3 * FPS // (every + 1)
-        assert (step.counts["wide put off"] > 0) == (took > 0.05)
+        assert (step.counts["wide put off"] > 0) == (took > 0.5 / 15)  # (half the period's 33 ms)
     step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
     step.searches = Paced(step.senses, 0.08)
     late = []
@@ -211,7 +213,7 @@ def test_the_whole_screen_waits_while_its_searches_take_more_than_half_the_threa
         step.searches = Paced(step.senses, 0.08)
         late = []
         frames(step, 30, late=late)
-        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 3))
+        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 2))
     finally:
         worldstate.WIDE_SHARE = worldstate_share
 
@@ -221,7 +223,8 @@ def test_a_slow_whole_screen_doesnt_stand_in_for_her_bands_own_search():
     a crowd's takes 14-20 ms: her band never searched alone); a slower one (1920x1080's 78-100 ms, the simulator's
     feed.COSTS), held to about 6 a second by WIDE_SHARE, covers her band in its state but her band's own search goes on
     every 0.2 s between, as before 10 a second (the review, 2026-10-28: standing in, her band's monsters were known later
-    than with her band's own search where the whole screen takes 100 ms). Inline, any whole screen stands in."""
+    than with her band's own search where the whole screen takes 100 ms). Inline, any whole screen stands in. (At 15 a
+    second one of 50 ms stands in, held to 10 a second.)"""
     model = small_map()
     # (at 0.08 s, every 0.2 s from her band's last own search, or on the frame after a whole screen due with it)
     for took, alone in ((0.015, []), (0.05, []), (0.08, [2, 8, 14, 20, 27, 33, 39, 45, 52, 58, 64, 70, 77, 83, 89])):
@@ -231,9 +234,10 @@ def test_a_slow_whole_screen_doesnt_stand_in_for_her_bands_own_search():
         states = frames(step, 3 * FPS, late=late)
         assert [s.seq for s in late if s.work["band"]] == alone, took
         wide = [s.seq for s in late if s.work["wide"]]
-        assert all(b - a == (3 if took <= 0.05 else 5) for a, b in zip(wide, wide[1:]))  # (WIDE_SHARE's as ever)
-        # (her band searched, alone or with the screen, at most 3 or 5 frames before each frame's state)
-        assert max(s.t - s.band_at for s in states[1:]) == pytest.approx(0.1 if took <= 0.05 else 5 / FPS)
+        every = {0.015: 2, 0.05: 3, 0.08: 5}[took]
+        assert all(b - a == every for a, b in zip(wide, wide[1:]))  # (WIDE_SHARE's as ever)
+        # (her band searched, alone or with the screen, at most 2, 3 or 5 frames before each frame's state)
+        assert max(s.t - s.band_at for s in states[1:]) == pytest.approx(every / FPS)
     worldstate_share = worldstate.WIDE_SHARE
     try:  # (inline, 0.08 s on the real clock: the step waited for it, its answer in the frame's own step)
         worldstate.WIDE_SHARE = None
@@ -242,7 +246,8 @@ def test_a_slow_whole_screen_doesnt_stand_in_for_her_bands_own_search():
         step.searches.paced = False
         late = []
         frames(step, 30, late=late)
-        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 3)) and not any(s.work["band"] for s in late)
+        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 2))
+        assert not any(s.work["band"] for s in late)
     finally:
         worldstate.WIDE_SHARE = worldstate_share
 
@@ -258,16 +263,17 @@ def test_drops_asked_for_go_first_alone_the_schedules_searches_on_the_next_free_
         old = worldstate.ASKS_FIRST
         try:
             worldstate.ASKS_FIRST = first
-            frames(step, 12, asks={3: Asks(loot=True), 7: Asks(loot_wide=True), 9: Asks(wide=True, loot=True)},
+            frames(step, 12, asks={2: Asks(loot=True), 6: Asks(loot_wide=True), 8: Asks(wide=True, loot=True)},
                    late=late)
         finally:
             worldstate.ASKS_FIRST = old
         jobs = {s.seq: (bool(s.work["wide"]), s.loot is not None) for s in late}
-        if first:  # (the screen due on 4: on 5, the next frame; on 10 asked with the drops, as due then)
-            assert jobs == {1: (True, False), 4: (False, True), 5: (True, False), 7: (True, False), 8: (False, True),
-                            10: (True, True)}
+        if first:  # (the screen due on 3 and 7: on 4 and 8, the next frames, and on 5 as due; on 9 asked with them)
+            assert jobs == {1: (True, False), 3: (False, True), 4: (True, False), 5: (True, False), 7: (False, True),
+                            8: (True, False), 9: (True, True), 11: (True, False)}
         else:
-            assert jobs == {1: (True, False), 4: (True, True), 7: (True, False), 8: (False, True), 10: (True, True)}
+            assert jobs == {1: (True, False), 3: (True, True), 5: (True, False), 7: (True, True), 9: (True, True),
+                            11: (True, False)}
         assert step.wide_due == pytest.approx(100.4) and not any(s.work["band"] for s in late)
 
 

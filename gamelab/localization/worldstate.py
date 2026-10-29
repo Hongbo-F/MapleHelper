@@ -14,8 +14,8 @@ or lost lately looked at for their death (DEATHS: perception.deaths, the game da
 The searches run off that frame loop (`Searches`: in the feed, a thread of its own, `SearchThread`), one at a
 time, on the newest frame placed when one is due: the whole screen every WIDE_EVERY_S, and monsters not tracked yet
 in her band BAND_EVERY_S after the last search for monsters (a whole screen's counts if it came back within
-BAND_STAND_IN_S: with one every 0.1 s her band isn't searched on its own unless asked or the whole screen falls behind
-or takes longer); the drops only when asked (or, for `watch`, on a schedule of their own).
+BAND_STAND_IN_S: with one every 1/15 s her band isn't searched on its own unless asked or the whole screen falls
+behind or takes longer); the drops only when asked (or, for `watch`, on a schedule of their own).
 A consumer can ask for any of those on the next frame (`Asks`); asked while a search is out, they're owed and
 handed over as soon as it's back, on the newest frame. What a search found comes back to a mailbox the
 frame loop empties (`came_back`, and in each step after placing her, before the re-finds, so what it found
@@ -64,12 +64,12 @@ ROPES_EVERY = 1
 # frame, a feed slower than 30 frames a second (on the saved frames, 18 with the searches) searched it less often
 # than a look's freshness needs (feed.MOBS_FRESH_S), so every look asked for one, and half the frames searched it.
 # Counted from the last search for monsters, a whole screen's too (its band holds hers) if it came back as soon as hers
-# would have (BAND_STAND_IN_S): with the whole screen every WIDE_EVERY_S (0.1) her band is searched on its own only
+# would have (BAND_STAND_IN_S): with the whole screen every WIDE_EVERY_S (1/15 s) her band is searched on its own only
 # when asked, when the whole screen is 0.2 s late, or where a whole screen takes longer than that (1920x1080).
 BAND_EVERY_S = 0.2
 # A whole screen stands in for her band's own search (BAND_EVERY_S counted from it) only when its search took at most
 # this long (on a thread of their own, Searches.paced; inline, always). A monster coming into her band is then known on
-# average half a period after it shows, plus the search's time: 0.05 + 0.05 at the most at WIDE_EVERY_S, where her
+# average half a period after it shows, plus the search's time: 0.033 + 0.05 at the most at WIDE_EVERY_S, where her
 # band's own search every 0.2 s had it in 0.1 + its own (7.5 ms live at 1366x768, 26 in the simulator); a slower whole
 # screen, held to 1 / (2 x its time) a second (WIDE_SHARE), has it later than that. On Tree Dungeon at 1366x768 a crowd's
 # whole screen takes 14-20 ms there, so it always stands in. At 1920x1080 (78-100 ms; the simulator's feed.COSTS 100)
@@ -77,27 +77,33 @@ BAND_EVERY_S = 0.2
 # 2026-10-28: standing in, in the 30 Tree goldens her band's monsters were searched for 5.0-5.5 times a second where
 # master's 5.5-5.8, each answer 100 ms after its frame where most 26; now 9.5-10.0, half of them her band's own).
 BAND_STAND_IN_S = 0.05
-# s between searches of the whole screen, 10 a second whoever is attached (the user, 2026-10-28: "Let's change whole
-# screen search to 10FPS"; once a second until then, from when it took 55-69 ms on its thread in a crowd: README, A
-# cheaper whole screen). With the search's step 1 in C a crowd's whole screen takes 16 ms on its thread, so on the
-# crowd's replays of the service's frame loop it costs 0.26-0.30 of a core more held 3x (live's motion; 0.37-0.43 as
-# saved), the frames a second as before, and a monster off her band is known to a client a median 0.054 s after it shows
-# (p90 0.088) where it was 0.44 (0.99), on six live recordings (README, The whole screen 10 times a second).
-WIDE_EVERY_S = 0.1
+# s between searches of the whole screen, 15 a second whoever is attached: every other frame at 30 a second (the user,
+# 2026-10-28: "with this numbers I'm trying to bump the fps to 15 from 10"; 10 a second from that morning, "Let's
+# change whole screen search to 10FPS"; once a second until then, from when it took 55-69 ms on its thread in a crowd:
+# README, A cheaper whole screen). With the search's step 1 in C a crowd's whole screen takes 16-20 ms on its thread.
+# At 10 a second, on the crowd's replays of the service's frame loop, 0.26-0.30 of a core more than once a second held
+# 3x (live's motion; 0.37-0.43 as saved), the frames a second as before, a monster off her band known to a client a
+# median 0.054 s after it shows (p90 0.088) where it was 0.44 (0.99), on six live recordings (README, The whole screen
+# 10 times a second); at 15, 0.20-0.25 of a core more than at 10 held 3x (0.21 as saved, 0.13 on quiet platforms), the
+# frames a second as before, 14.3-14.9 whole screens a second hunting, the searches' thread 32-37% busy in a crowd, a
+# look's wait for her band 2-3 ms longer, a monster off her band known a mean 0.045 s after it shows (p90 0.060) where
+# 0.055 (0.092) at 10 (README, The whole screen 15 times a second).
+WIDE_EVERY_S = 1 / 15
 # The schedule's whole screens take at most this share of the searches' thread: the next waits until the last one's
 # search (with what was searched with it) took at most WIDE_SHARE of the time since its frame (on a thread of their own,
-# Searches.paced; inline nothing waits on it). On Tree Dungeon at 1366x768 a crowd's whole screen takes 14-17 ms there,
-# so it never waits and it's 10 a second; at 1920x1080 on the first map's 17 bench frames it took 78 ms inline
-# (bench-look, 2026-10-28, under load; the simulator's feed.COSTS 100 on the thread), where 10 a second would leave the
-# thread nothing else and an ask for the drops would wait out a whole screen every time: there it's about 5 a second,
-# her band's own search every 0.2 s between (BAND_STAND_IN_S). None: as often as WIDE_EVERY_S says, whatever it takes.
+# Searches.paced; inline nothing waits on it). On Tree Dungeon at 1366x768 a crowd's whole screen takes 14-20 ms there,
+# under the 33 ms that half of 1/15 s leaves, so it waits only after a search of every platform's drops and it's 15 a
+# second; at 1920x1080 on the first map's 17 bench frames it took 78 ms inline (bench-look, 2026-10-28, under load; the
+# simulator's feed.COSTS 100 on the thread), where 10 or 15 a second would leave the thread nothing else and an ask for
+# the drops would wait out a whole screen every time: there it's about 5 a second, her band's own search every 0.2 s
+# between (BAND_STAND_IN_S). None: as often as WIDE_EVERY_S says, whatever it takes.
 WIDE_SHARE = 0.5
 # Drops asked for (a look's: the hunt's, a pile just picked up) are searched on the frame alone, what the schedule has
 # due (the whole screen, her band) on the next frame the searches are free: with the whole screen every 0.1 s it was
-# due on a third of those frames, and the look waited for it besides (on the crowd's replays her drops' looks 24 ms
-# (median) with the whole screen once a second, 29 at 10 a second with it, 23-26 alone; those with every platform's
-# drops 98 then 118, 98-112 alone; README, The whole screen 10 times a second). A look asks for her band or the whole
-# screen only when they're stale (feed.ASK_ONLY_STALE): those go with the drops.
+# due on a third of those frames (every 1/15 s, half), and the look waited for it besides (on the crowd's replays her
+# drops' looks 24 ms (median) with the whole screen once a second, 29 at 10 a second with it, 23-26 alone; those with
+# every platform's drops 98 then 118, 98-112 alone; README, The whole screen 10 times a second). A look asks for her
+# band or the whole screen only when they're stale (feed.ASK_ONLY_STALE): those go with the drops.
 ASKS_FIRST = True
 LOOT_EVERY_S = 0.5    # `watch`: s between searches for the drops on her platform ...
 LOOT_WIDE_EVERY_S = 2.0  # ... and on every platform in view
@@ -320,13 +326,15 @@ class Found:
     loot: list[Loot] | None = None         # None: no drops were
     looked: list = field(default_factory=list)  # where the drops were looked for (Scene.looked)
     took: float = 0.0                      # s it took (the real clock)
+    mobs_took: float = 0.0                 # ... of it the monsters' search (her band's or the whole screen's)
 
     @property
     def work(self) -> dict:
-        """What the searches did, and (`s`) took on the real clock."""
+        """What the searches did, and (`s`) took on the real clock (`mobs s`: of it the search for monsters, the whole
+        screen's on its own: the service's 10 s line and 'perf' record)."""
         j = self.job
         return {"band": int(j.band and not j.wide), "wide": int(j.wide), "loot strips": len(self.looked),
-                "s": self.took}
+                "s": self.took, "mobs s": self.mobs_took}
 
 
 def search(senses: Senses, job: Job) -> Found:
@@ -335,6 +343,7 @@ def search(senses: Senses, job: Job) -> Found:
     s, found = job.scene, Found(job)
     if job.band or job.wide:
         found.monsters = senses.search(s, wide=job.wide)
+        found.mobs_took = time.perf_counter() - began
     if job.loot or job.loot_wide:
         before = len(s.looked)
         found.loot = find_loot(s, senses.model, senses.eyes, job.loot_wide, job.mesos_only)
@@ -712,9 +721,10 @@ class WorldStep:
         `wide_s` apart on average (`wide_due`: each due a period after the one before was, on the first frame shown
         then or later; a period after this one if it came a period or more late), so 10 a second at 0.1 s where the
         time since the last one, at 30 frames a second, waited for a fourth frame whenever three came 0.1 s less a
-        hair apart (8.6 a second on the replays); and not while the last one's search took more
-        than WIDE_SHARE of the time since its frame (`_resting`). The rest by the time since their last (her band's
-        own since the last search for monsters but a whole screen that took longer than BAND_STAND_IN_S: `band_own_at`).
+        hair apart (8.6 a second on the replays), and 15 at 1/15 s, every other frame; and not while the last one's
+        search took more than WIDE_SHARE of the time since its frame (`_resting`). The rest by the time since their
+        last (her band's own since the last search for monsters but a whole screen that took longer than
+        BAND_STAND_IN_S: `band_own_at`).
         Drops asked for go first, alone (ASKS_FIRST): what the schedule has due waits for the next frame the searches
         are free."""
         job = self._last

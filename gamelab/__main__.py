@@ -2374,7 +2374,7 @@ def cmd_perceive(args) -> int:
     if args.wide_every is not None:
         service.pace(args.wide_every)
         print(f"the whole screen searched every {args.wide_every:g} s (--wide-every; the default "
-              f"{worldstate.WIDE_EVERY_S:g})")
+              f"{worldstate.WIDE_EVERY_S:.3g}, {1 / worldstate.WIDE_EVERY_S:.3g} a second)")
     band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
     publish, glimpse, recording = None, None, None
     if args.frames:
@@ -2944,7 +2944,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-record", action="store_true", help="without the rolling recording (`gamelab recorder` keeps "
                                                             "it then)")
     s.add_argument("--wide-every", type=float, metavar="S", help="the whole screen searched every S s without being "
-                   "asked (default 0.1: worldstate.WIDE_EVERY_S), to try another pace")
+                   "asked (default 1/15, 15 a second: worldstate.WIDE_EVERY_S), to try another pace")
     s.set_defaults(func=cmd_perceive)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "

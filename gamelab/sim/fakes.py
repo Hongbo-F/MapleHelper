@@ -286,7 +286,7 @@ class FakeDetector:
         overlapping by its tallest picture and then some (MobDetector.overlap), so a monster wholly inside the rows is
         wholly inside a band. As the bands were drawn here until 2026-10-28, 30 rows apart, one taller than 30 rows
         across a band's edge was missed (an Orange Mushroom 60 above her in fight_step_wall): unseen while her band's
-        own search found it, but with the whole screen 10 times a second her band is searched with it."""
+        own search found it, but with the whole screen 10 (now 15) times a second her band is searched with it."""
         if self.clock is not None:
             self.clock.sleep(DETECT_WIDE_S)
         return self._find(frame, rows)

@@ -79,10 +79,10 @@ def test_one_pace_and_searches_whoever_is_attached_the_drops_asked_for_by_a_hunt
         assert svc.status()["hz"] == 30.0
     finally:
         svc.runner.step.close()
-    # The screen every 0.1 s either way (since 2026-10-28; her band on its own 0.2 s after the last search for monsters,
-    # a whole screen's too); the drops at watch's rates, or when asked
-    assert (SCHEDULE.band_s, SCHEDULE.wide_s, SCHEDULE.loot_s, SCHEDULE.loot_wide_s) == (0.2, 0.1, 0.5, 2.0)
-    assert (HUNTING.band_s, HUNTING.wide_s, HUNTING.loot_s, HUNTING.loot_wide_s) == (0.2, 0.1, None, None)
+    # The screen every 1/15 s either way (every 0.1 s that morning, since 2026-10-28's evening; her band on its own
+    # 0.2 s after the last search for monsters, a whole screen's too); the drops at watch's rates, or when asked
+    assert (SCHEDULE.band_s, SCHEDULE.wide_s, SCHEDULE.loot_s, SCHEDULE.loot_wide_s) == (0.2, 1 / 15, 0.5, 2.0)
+    assert (HUNTING.band_s, HUNTING.wide_s, HUNTING.loot_s, HUNTING.loot_wide_s) == (0.2, 1 / 15, None, None)
     assert not hasattr(service, "IDLE_HZ") and not hasattr(service, "ACTIVE")
 
 
@@ -457,8 +457,8 @@ def test_perceive_on_saved_frames_has_a_pipe_mutex_and_info_file_of_its_own(tmp_
     assert (c.address, c.info.name) == (service.ADDRESS, "perceive.json")
 
 
-def test_perceive_searches_the_whole_screen_10_times_a_second_and_can_try_another_pace(tmp_path, monkeypatch):
-    # (`perceive --wide-every S`: both schedules' whole screen, whoever is attached; without it every 0.1 s)
+def test_perceive_searches_the_whole_screen_15_times_a_second_and_can_try_another_pace(tmp_path, monkeypatch):
+    # (`perceive --wide-every S`: both schedules' whole screen, whoever is attached; without it every 1/15 s)
     from PIL import Image
 
     from gamelab import __main__ as cli
@@ -481,7 +481,7 @@ def test_perceive_searches_the_whole_screen_10_times_a_second_and_can_try_anothe
             return {}
     monkeypatch.setattr(service, "Service", Made)
     assert cli.main(["perceive", "--frames", str(tmp_path), "--minutes", "0.01"]) == 0
-    assert seen[-1] == (worldstate.WATCH, worldstate.Schedule()) and worldstate.Schedule().wide_s == 0.1
+    assert seen[-1] == (worldstate.WATCH, worldstate.Schedule()) and worldstate.Schedule().wide_s == 1 / 15
     assert cli.main(["perceive", "--frames", str(tmp_path), "--minutes", "0.01", "--wide-every", "0.2"]) == 0
     watch, hunting = seen[-1]
     assert (watch.wide_s, hunting.wide_s) == (0.2, 0.2)
@@ -521,7 +521,7 @@ def test_the_service_says_whether_gamelabs_c_is_in_use():
     runner = drawn_runner()
     pub.started(runner, 1)
     assert said == [f"perception: gamelab's C pieces {native.state()}; the monster search's step 1 "
-                    f"{native.search_state()}; the whole screen searched every 0.1 s"]
+                    f"{native.search_state()}; the whole screen searched every 0.0667 s (15 a second)"]
     assert ("C pieces" in pub.status(0.0)) == pub.slow
     assert pub.slow == (native.lib() is None or not native.masked_in_c() or native.search_lib() is None)
     assert "noise bound" not in pub.status(0.0)
@@ -569,21 +569,66 @@ def test_the_service_says_and_publishes_her_touches(tmp_path):
 
 
 def test_the_service_says_how_many_searches_a_second_it_made():
-    """The console's 10 s line says the searches a second since the line before (the whole screen 10 a second while it
-    keeps up, worldstate.WIDE_EVERY_S): nothing at a run's first line, nor across runs (a new step's counts)."""
+    """The console's 10 s line says the searches a second since the line before (the whole screen 15 a second while it
+    keeps up, worldstate.WIDE_EVERY_S, against the pace asked): nothing at a run's first line, nor across runs (a new
+    step's counts); and each time a 'perf' record of the same window (test_perf)."""
+    from gamelab import telemetry
     pub = service.Publisher((100, 100), log=lambda m: None)
     runner = drawn_runner()
     pub.started(runner, 1)
-    assert "searched a second" not in pub.status(100.0)  # (the first line: nothing to count from)
-    runner.step.counts.update(wide=runner.step.counts["wide"] + 99, band=runner.step.counts["band"] + 2,
-                              loot=runner.step.counts["loot"] + 15)
-    assert ("; searched a second: the whole screen 9.9, her band alone 0.2, the drops 1.5"
-            in pub.status(110.0))
-    other = drawn_runner()
-    pub.started(other, 1)  # (a new run: its step counts from 0)
-    assert "searched a second" not in pub.status(120.0)
+    records = []
+    sink, telemetry._sink = telemetry._sink, records.append
+    try:
+        assert "searched a second" not in pub.status(100.0)  # (the first line: nothing to count from)
+        runner.step.counts.update(wide=runner.step.counts["wide"] + 149, band=runner.step.counts["band"] + 2,
+                                  loot=runner.step.counts["loot"] + 15)
+        line = pub.status(110.0, 30.1)
+        assert "; searched a second: the whole screen 14.9 (asked 15), her band alone 0.2, the drops 1.5" in line
+        perf = [r for r in records if r["topic"] == "perf"]
+        assert "the searches' thread 0% busy" in line and len(perf) == 1
+        assert perf[0]["s"] == 10.0 and perf[0]["fps"] == 30.1 and perf[0]["wide_asked_a_s"] == 15
+        other = drawn_runner()
+        pub.started(other, 1)  # (a new run: its step counts from 0)
+        assert "searched a second" not in pub.status(120.0) and [r for r in records if r["topic"] == "perf"] == perf
+    finally:
+        telemetry._sink = sink
     runner.step.close()
     other.step.close()
+
+
+def test_perf():
+    """service.Perf, the 10 s line's and the 'perf' record's numbers (the user, 2026-10-28): each whole screen's search
+    on the searches' thread (its late state's 'mobs s', the drops searched with it left out), the whole screen's
+    result's age in each frame's state as it goes out (a late state's not counted, nor a frame not fit to act on), the
+    thread's busy share (every late state's 's'), her band's own searches and their states' wait past their frame, the
+    tracks made and flickers a minute; the window begun again at each record."""
+    from gamelab.localization.worldstate import WorldState
+    from gamelab.perception.framecheck import Problem
+    perf = service.Perf(100.0)
+    perf.begin(100.0, {"tracks": 5, "flickers": 1})
+    for k in range(150):  # 10 s at 15 whole screens a second, a frame's state at 30 a second between
+        t = 100 + k / 15
+        perf.state(WorldState(2 * k, t, True, wide_at=t, late=True,
+                              work={"wide": 1, "band": 0, "loot strips": 2 if k % 10 == 0 else 0,
+                                    "s": 0.030 if k % 10 == 0 else 0.016, "mobs s": 0.016 + 0.001 * (k % 5)}), t + 0.02)
+        for j in (1, 2) if k % 3 else (1,):  # (the frames after: the newest whole screen 1/30 or 2/30 s old, each
+            perf.state(WorldState(2 * k + j, t + j / 30, True, wide_at=t), t + j / 30 + 0.008)  # state out 8 ms on)
+    perf.state(WorldState(999, 105.0, True, wide_at=90.0, bad=Problem("size", "another size")), 105.0)  # (not fit)
+    for k in range(4):  # her band's own, each out 21 ms after its frame
+        perf.state(WorldState(1000 + k, 101 + k, True, late=True, work={"wide": 0, "band": 1, "s": 0.007}), 101.021 + k)
+    r = perf.record(110.0, 1 / 15, {"tracks": 65, "flickers": 11}, fps=30.0)
+    assert (r["s"], r["fps"], r["wide_a_s"], r["wide_asked_a_s"], r["band_alone_a_s"]) == (10.0, 30.0, 15.0, 15.0, 0.4)
+    assert r["wide_ms"] == [18.0, 20.0, 20.0] and r["band_alone_ms"] == [21.0, 21.0]
+    assert r["wide_age_ms"] == pytest.approx([41.3, 74.7], abs=0.1)  # (1/30 and 2/30 s, and the 8 ms out)
+    assert r["busy"] == pytest.approx((15 * 0.030 + 135 * 0.016 + 4 * 0.007) / 10, abs=1e-3)
+    assert (r["tracks_a_min"], r["flickers_a_min"]) == (360.0, 60.0)
+    said = service.perf_line(r)
+    assert said.startswith("; a whole screen 18 ms on the searches' thread (p90 20, max 20), its result 41 ms old as a "
+                           "frame's state goes out (p90 75); her band alone out 21 ms after its frame (p90 21); the "
+                           "searches' thread 26% busy; ")
+    empty = perf.record(120.0, 1 / 15, {"tracks": 65, "flickers": 11})  # (a window with no search: none said)
+    assert empty["wide_ms"] == [None, None, None] and empty["wide_a_s"] == 0 and empty["tracks_a_min"] == 0
+    assert service.perf_line(empty).startswith("; the searches' thread 0% busy; ")
 
 
 def _client_process(address: str, info: str) -> None:

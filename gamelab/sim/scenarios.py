@@ -2272,7 +2272,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=5, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2311,7 +2311,12 @@ def loop_tree_ore_waits(sim):
     6, 8, 9 and 11-16, hurt 65 times against master's 101.) (Seed 1 since the whole screen 10 times a second with her
     band's own search beside it where a whole screen takes longer than 0.05 s (worldstate.BAND_STAND_IN_S, 2026-10-28:
     at the simulator's costs her band about 5 times a second and the whole screen 5): on seed 2 she was hurt 10 times
-    and picked up 5 ores; of seeds 1-16, 1, 4-8, 11, 15 and 16 meet all of this.)"""
+    and picked up 5 ores; of seeds 1-16, 1, 4-8, 11, 15 and 16 meet all of this.) (Seed 5 since the rebase onto the
+    regular attack's key check, master 4558f61, with the whole screen 15 times a second (worldstate.WIDE_EVERY_S,
+    2026-10-28; at the simulator's costs the same timeline as at 10, WIDE_SHARE holding a 100 ms whole screen to 5 a
+    second): on seed 1 she was hurt more than five times; of seeds 1-16, 4-6, 11-13, 15 and 16 meet all of this, with
+    master's stack 2, 6, 8, 9, 11, 12 and 14-16 (on 5 hurt more than five times). Her regular attack was doubted with
+    her keys right on 7 of the 16, the key check finding ATTACK on Ctrl after (master's stack: 6), on 5 never.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 

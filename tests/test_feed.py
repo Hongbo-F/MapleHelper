@@ -591,10 +591,10 @@ def test_a_look_after_a_glance_saw_her_still_takes_that_frame_and_waits_for_none
 def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band(sync):
     # Her memory takes what the feed follows off her band (Scene.swept), with the whole screen as searched while the
     # feed's last search of it is fresh: at the old pace (a whole screen a second), only now and then; at the default's
-    # (10 a second, or as often as the searches' thread allows: worldstate.WIDE_SHARE), every look.
+    # (15 a second, or as often as the searches' thread allows: worldstate.WIDE_SHARE), every look.
     from gamelab.localization.memory import Memory
     f, clock, eyes = sync
-    assert f.step.schedule.wide_s == 0.1
+    assert f.step.schedule.wide_s == 1 / 15
     f.step.schedule = Schedule(wide_s=1.0)
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
     memory = Memory(f.step.model)

@@ -52,12 +52,12 @@ HZ = 30.0            # frames a second the feed looks at (the game shows 60; a f
 RING_SLOTS = 4       # look frames a Ring keeps by default (the service's: service.RING_SLOTS)
 FRAME_SHAPE = (540, 960, 3)  # ... each of this shape at 1920x1080 (frame_shape)
 MOBS_FRESH_S = 0.3   # a look's monsters: her band searched at most this long before its frame. It's searched every
-                     # 0.2 s at the most (worldstate.BAND_EVERY_S; with the whole screen, every 0.1 s since
+                     # 0.2 s at the most (worldstate.BAND_EVERY_S; with the whole screen, every 1/15 s since
                      # 2026-10-28), and the frame after that and the search itself take about 0.1 s more: with 0.25,
                      # on the saved frames a third of the frames searched it, every look asking. (Without
                      # ASK_ONLY_STALE a look asks for it on a frame of its own.)
-WIDE_FRESH_S = 0.5   # ... the whole screen (searched every 0.1 s, worldstate.WIDE_EVERY_S, so a look asks for it only
-                     # if that falls 0.4 s behind; tracked monsters are re-found every frame)
+WIDE_FRESH_S = 0.5   # ... the whole screen (searched every 1/15 s, worldstate.WIDE_EVERY_S, so a look asks for it
+                     # only if that falls 0.43 s behind; tracked monsters are re-found every frame)
 FEED_WAIT_S = 0.6    # s a look waits for the feed's state before it asks again (the whole screen with every drop in
                      # view takes ~0.25 s; Senses.look stands still after senses.LOST_S of none)
 GLANCE_WAIT_S = 0.25  # s a glance waits for a frame from the feed (none: no dot, Senses.glance)
@@ -504,8 +504,8 @@ COSTS = Costs()
 # start, the fake tour attached, the machine 5-20% busy), the same fit: her place and the step but its re-finds 5.0-5.1
 # ms, a re-find 0.26-0.27, a fallback 0.55-0.62 more, beside 1.5-2.3; on their thread her band 7.4 (1,428 searches), the
 # whole screen 12.4-13.0 (354 and 3,721), a strip of drops 5.9-6.4. Until then the costs above: with them a whole screen
-# 10 times a second (worldstate.WIDE_EVERY_S) would have taken 70% of the simulated thread (WIDE_SHARE holding it to
-# half: 7 a second), where it takes 13% live.
+# 10 times a second would have taken 70% of the simulated thread (WIDE_SHARE holding it to half: 7 a second), where it
+# takes 13% live (15 a second, worldstate.WIDE_EVERY_S: 20% in the simulator at these costs).
 COSTS_1366 = Costs(look=0.005, refind=0.0003, fallback=0.0006, beside=0.002, band=0.0075, wide=0.013, loot_strip=0.006)
 GAME_HZ = 60.0  # frames a second the game shows
 
@@ -544,6 +544,7 @@ class TimedSearches(Searches):
             return None
         out, self._found, self.began = self._found, None, None
         out.took = self.costs.search(out.work)  # (what it took on the simulator's clock, as the thread's would live)
+        out.mobs_took = self.costs.search({**out.work, "loot strips": 0})  # (... of it the monsters')
         return out
 
 
