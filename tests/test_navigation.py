@@ -1734,6 +1734,10 @@ def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(m
     from dataclasses import replace
 
     from gamelab.control.navigator import WAIT_LOOKS, _key
+    from gamelab.motion import flow
+    # (the hop timed for one standing, as first built: this look's sighting is as old as the clock, and walking at her
+    # since then, flow.HOP_AT_HER, it would be at C's far end; test_evade has a hop timed for one walking at her)
+    monkeypatch.setattr(flow, "HOP_AT_HER", False)
     c, d = by_y(model, 500, 400), by_y(model, 300, 700)
     escort = _escort(shots=None)
     nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450))

@@ -303,6 +303,24 @@ def _ground(b: Body, d: int, t: float) -> tuple[float, float]:
     return x0 + body.run_x(t - t0, v0, d, SHOE), body.run_speed(t - t0, v0, d, SHOE)
 
 
+# Her run along the platform to a takeoff, with the run-up's stop or step back first (_runup) as a span of its own
+# (RUNUP_SPANS, from 2026-10-28: the evade work's R6): as one straight span from where she stood to the takeoff, a step
+# back of up to 23 units behind her was left out of the monster checks (flow.danger) and the chain's watch. False: as
+# before.
+RUNUP_SPANS = True
+# A hop over a monster whose walking isn't known (no vx: one look) timed as if it walked at her at its kind's speed
+# (HOP_AT_HER; R6), the soonest it can close: timed as if it stood, it came on into her before her jump. False: as before.
+HOP_AT_HER = True
+
+
+def _via(a: Platform, b: "Body", start: "Body", t1: float, x1: float) -> list[Span]:
+    """Her run on platform `a` from body b to (t1, x1), by `start` (where the run-up's stop or step back left her,
+    _runup) when that's elsewhere (RUNUP_SPANS): one span, or two."""
+    if RUNUP_SPANS and (start.t > b.t + 1e-9 or abs(start.x - b.x) > 1e-6):
+        return [Span(a.id, b.t, start.t, b.x, start.x), Span(a.id, start.t, t1, start.x, x1)]
+    return [Span(a.id, b.t, t1, b.x, x1)]
+
+
 def _tap_pick_up(k: Keys, legs: list[Leg]) -> None:
     """Pick up whatever she runs over, as a player taps the key all the way."""
     for leg in legs:
@@ -486,8 +504,7 @@ class Flow:
         land, lx, ta, v_land = flight(self.model, takeoff, a.y_at(takeoff), vx, -JUMP_SPEED, group=a.group)
         if land is None or land.id != m.dst or not self.sure_takeoff(a, takeoff, vx, land, lx):
             return None
-        return self._landing(m, b, k, variant, t_off + ta, lx, land, d, v_land,
-                             [Span(a.id, b.t, t_off, b.x, takeoff)],
+        return self._landing(m, b, k, variant, t_off + ta, lx, land, d, v_land, _via(a, b, start, t_off, takeoff),
                              Arc(t_off, t_off + ta, takeoff, a.y_at(takeoff), lx, land.y_at(lx), -JUMP_SPEED))
 
     def sure_takeoff(self, a: Platform, x: float, vx: float, land: Platform, lx: float) -> bool:
@@ -513,7 +530,7 @@ class Flow:
         if land is None or land.id != m.dst:
             return None
         k.set_arrow(start.t, d)
-        return self._landing(m, b, k, variant, t + ta, lx, land, d, v_land, [Span(a.id, b.t, t, b.x, edge)],
+        return self._landing(m, b, k, variant, t + ta, lx, land, d, v_land, _via(a, b, start, t, edge),
                              Arc(t, t + ta, edge + d, a.y_at(edge) - 1, lx, land.y_at(lx), 0.0))
 
     def _jump_up(self, m: Move, b: Body, k: Keys, variant: str, at: float | None = None) -> Leg | None:
@@ -631,6 +648,7 @@ class Flow:
             t_rope = t_lift + _rise_time(gap - ROPE_ARMS)
             arc = Arc(t_lift, t_rope, b.x, a.y_at(b.x), rx, a.y_at(rx) - grab_h, -JUMP_SPEED)
             waits = [Span(a.id, t, t_lift, b.x, b.x)]  # (the jump's lift-off)
+            runup = b
         else:
             d = _sign(rx - b.x)
             ran_to = rx - d * GRAB_LEAD
@@ -646,11 +664,12 @@ class Flow:
             grab_h = APEX
             k.set_arrow(t_rope + 0.12, 0)  # let go of the arrow once she's on the rope
             arc, waits = Arc(t, t_rope, ran_to, a.y_at(ran_to), rx, a.y_at(rx) - grab_h, -JUMP_SPEED), []
+            runup = start
         t_top = t_rope + max(0.0, (a.y_at(rx) - grab_h) - m.rope_top) / ROPE_SPEED
         k.hold(t, t_top + UP_EXTRA, "up")
         end = Body(t_top + CLIMB_OVER, rx, top, slack=b.slack + SLACK_PER_LEG, early_arrow=t_top - PRE_ARROW)
         # Up the rope from where she grabs it to its top's platform (the climb-over: standing there, Leg.stands).
-        return Leg(m, b, end, [Span(a.id, b.t, t, b.x, ran_to)], [arc],
+        return Leg(m, b, end, _via(a, b, runup, t, ran_to), [arc],
                    [Climb(t_rope, t_top, rx, a.y_at(rx) - grab_h, m.rope_top)],
                    waits + [Span(top.id, t_top, end.t, rx, rx)])
 
@@ -793,12 +812,22 @@ class Flow:
         def her_x(t: float) -> float:
             return _ground(b, d, t)[0]
 
-        closing = WALK_SPEED + max(0.0, -(mo.vx or 0.0) * d)  # how fast the gap shrinks
+        if HOP_AT_HER and mo.vx is None:  # its walking not known: as if it walked at her (the soonest it closes)
+            lo_c, hi_c = a.left + mo.half, a.right - mo.half
+
+            def mo_x(t: float) -> float:
+                x = mo.x - d * mo.speed * max(0.0, t - mo.seen_at)
+                return min(max(x, lo_c), hi_c) if lo_c < hi_c else (a.left + a.right) / 2
+            closing = WALK_SPEED + mo.speed
+        else:
+            def mo_x(t: float) -> float:
+                return mo.at(t, a)
+            closing = WALK_SPEED + max(0.0, -(mo.vx or 0.0) * d)  # how fast the gap shrinks
         disc = JUMP_SPEED ** 2 - 2 * GRAVITY * mo.height
         rise = (JUMP_SPEED - disc ** 0.5) / GRAVITY if disc > 0 else APEX_T  # s to clear its height
         gap = mo.half + HOP_HALF + closing * rise + 3   # distance to its middle at takeoff
         t = b.t
-        while t < b.t + HOP_HORIZON and (mo.at(t, a) - her_x(t)) * d > gap:
+        while t < b.t + HOP_HORIZON and (mo_x(t) - her_x(t)) * d > gap:
             t += 0.01
         if t >= b.t + HOP_HORIZON:
             return None  # it keeps ahead of her
@@ -806,10 +835,10 @@ class Flow:
         if t < earliest:
             return None  # already too close to time it
         press, t_off, x_off, vx = self.liftoff(b, d, t)  # (from standing: maybe later, out of the kick's blind spot)
-        if (mo.at(t_off, a) - x_off) * d < gap - 15 or not a.covers(x_off, -EDGE_ROOM):
+        if (mo_x(t_off) - x_off) * d < gap - 15 or not a.covers(x_off, -EDGE_ROOM):
             return None  # too close by then, or no room
         land, lx, ta, v_land = flight(self.model, x_off, a.y_at(x_off), vx, -JUMP_SPEED, group=a.group)
-        if land is not a or (lx - mo.at(t_off + ta, a)) * d < 0 or not self.sure_takeoff(a, x_off, vx, a, lx):
+        if land is not a or (lx - mo_x(t_off + ta)) * d < 0 or not self.sure_takeoff(a, x_off, vx, a, lx):
             return None  # off the platform (or too near its end to be sure), or she'd come down short of it
         k.set_arrow(b.t, d)
         k.tap(press, "jump")

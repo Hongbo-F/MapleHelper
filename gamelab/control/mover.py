@@ -24,6 +24,7 @@ from ..motion.body import ROPE_GROUP
 from ..motion.flow import ARROW_LAG
 from ..motion.physics import CLIMB_SPEED, GRAVITY, JUMP_LAG, JUMP_SPEED, ROPE_REACH, WALK_SPEED, fly, hold_ms, run_ms
 from ..motion.route import JUMP_FROM, ROPE_TOP_DY, Move, drop_clear, drop_spots, grab_height, hung_from, side_jump
+from . import client
 from .actions import WALK_PICK_AFTER_MS, Actions, tap
 
 
@@ -59,6 +60,14 @@ STILL = 0.6               # minimap px: her dot within this of where a move bega
                           # (control.navigator.STILL's)
 
 
+class MoveCut(Exception):
+    """A move cut short while it was watched (Mover.watch): why (a touch, her HP dropping, off the move)."""
+
+
+class MoveRefused(Exception):
+    """A move refused before its keys went (Mover.clear: a run-up's or back-off's walk into a monster): why."""
+
+
 def grab_lead(gap: float) -> float | None:
     """How far before a rope to jump (running at her walking speed) to grab it at the top of the jump,
     when its bottom is `gap` above her feet; None if a jump can't reach it."""
@@ -80,6 +89,12 @@ class Mover:
         # Whether her dot stood where the last move (`do`) began on every look of it (None: no move yet): keys that
         # moved her nowhere (a jump or an arrow on a rope does nothing: control.navigator's rope-top check)
         self.still: bool | None = None
+        # While a move is watched (the navigator's, control.navigator.WATCH_MOVES): `watch()`, called between glances
+        # while a key plan runs, says why to cut it short (MoveCut) or None; `clear(x0, x1)` says why a walk along her
+        # platform from x0 to x1 (a run-up's, a back-off's) isn't clear of the monsters (MoveRefused, or a climb from
+        # under the rope instead), or None. None: unwatched, unchecked, as before.
+        self.watch = None
+        self.clear = None
 
     # --- looking ----------------------------------------------------------------------------
 
@@ -120,9 +135,45 @@ class Mover:
     # --- walking ----------------------------------------------------------------------------
 
     def _send(self, events, name):
-        """Run a move's key plan (in any order: it's sorted by time here)."""
-        self.actions.play(sorted(events, key=lambda e: e[0]), name)
+        """Run a move's key plan (in any order: it's sorted by time here); watched (`watch`), cut short (MoveCut)."""
+        if self.watch is None:
+            self.actions.play(sorted(events, key=lambda e: e[0]), name)
+        else:
+            self._watched(sorted(events, key=lambda e: e[0]), name)
         self.actions.facing = None  # moves turn her; the next throw turns her to its target
+
+    def _watched(self, events: list, name: str) -> None:
+        """A key plan sent without waiting (as Actions.play holds it back for her locks), `watch` asked between its
+        glances until it's over; cut short (every key let go: client.cancel) and MoveCut raised when it says why. Its
+        keys must not play on unwatched: anything going wrong meanwhile cancels it too."""
+        a = self.actions
+        a.hold_back(events)
+        a.sent_at = time.monotonic()
+        pid = client.send(events, lead_ms=0, focus=True, name=name, kind=getattr(a, "kind", None))
+        try:
+            while not client.done(pid):
+                why = self.watch()
+                if why:
+                    if not client.cancel(pid):
+                        client.wait(pid)
+                    raise MoveCut(why)
+            client.wait(pid)
+        except MoveCut:
+            raise
+        except BaseException:
+            try:
+                client.cancel(pid)
+            except Exception:
+                pass
+            raise
+        finally:
+            if hasattr(a, "ended"):
+                a.ended()
+            a.pressed = True
+
+    def _clear(self, x0: float, x1: float) -> str | None:
+        """Why a walk along her platform from x0 to x1 isn't clear of the monsters (`clear`), or None (unchecked too)."""
+        return None if self.clear is None or abs(x1 - x0) < 1 else self.clear(x0, x1)
 
     def walk_to(self, x: float, tolerance: float = X_TOLERANCE, tries: int = 4, s: Scene | None = None) -> Scene:
         """Walk along her platform until her feet are at map x."""
@@ -194,6 +245,8 @@ class Mover:
 
     def _jump_up(self, m: Move, s: Scene) -> None:
         """Walk to the takeoff spot (unless she's there) and jump straight up."""
+        if abs(m.x - s.where.x) > 15 and (why := self._clear(s.where.x, m.x)):
+            raise MoveRefused(why)
         events, t = self.walk_events(m.x - s.where.x, 15)
         self._send(events + tap(t, self.actions.keys.jump.name), "jump_up")
         time.sleep(0.45)  # then settle looks for her standing still
@@ -207,6 +260,8 @@ class Mover:
         p = self.model.platform(m.src)
         edge = p.right if sign > 0 else p.left
         if (edge - s.where.x) * sign < MIN_RUN:  # too close to the end for a run-up: back off first
+            if why := self._clear(s.where.x, edge - sign * (MIN_RUN + RUN_UP_SPARE)):
+                raise MoveRefused(why)
             s = self.walk_to(edge - sign * (MIN_RUN + RUN_UP_SPARE), tolerance=SPOT_TOLERANCE, s=s)
         arrow = self.actions.arrow(m.direction)
         ms = hold_ms(abs(m.land_x - s.where.x) + 20)
@@ -225,6 +280,8 @@ class Mover:
             spots = drop_spots(self.model, a, below)
             if spots:
                 dx, tolerance = min(spots, key=lambda x: abs(x - here)) - here, 0
+        if abs(dx) > tolerance and (why := self._clear(here, here + dx)):
+            raise MoveRefused(why)
         events, t = self.walk_events(dx, tolerance)
         self._send(events + [[t, down, "down"], *tap(t + 120, jump), [t + 320, down, "up"]], "drop")
         time.sleep(0.3)  # then settle looks for her standing still
@@ -238,6 +295,8 @@ class Mover:
         takeoff = m.takeoff if m.takeoff is not None else edge - sign * JUMP_FROM
         run = (takeoff - s.where.x) * sign  # how far she runs before jumping
         if run < MIN_RUN:  # too close to the end (or past the takeoff): back up to the run-up start first
+            if why := self._clear(s.where.x, m.x):
+                raise MoveRefused(why)
             s = self.walk_to(m.x, tolerance=SPOT_TOLERANCE, s=s)
             run = (takeoff - s.where.x) * sign
         arrow, jump = self.actions.arrow(m.direction), self.actions.keys.jump.name
@@ -277,6 +336,12 @@ class Mover:
             if not p.covers(back, -10):
                 # No room to back off: stand under it instead (a rope past her platform's end: as far back as it goes).
                 back = m.rope_x if p.covers(m.rope_x) else p.clamp(back)
+            if why := self._clear(s.where.x, back):
+                # The back-off into a monster: from under the rope instead, if that walk is clear (else refused)
+                if back == m.rope_x or not p.covers(m.rope_x) or self._clear(s.where.x, m.rope_x):
+                    raise MoveRefused(why)
+                self.log(f"    {why}: up from under the rope instead")
+                back = m.rope_x
             s = self.walk_to(back, tolerance=SPOT_TOLERANCE, s=s)
             if back == m.rope_x:
                 # Under it now (within the walk's SPOT_TOLERANCE). Calling _climb again here recursed

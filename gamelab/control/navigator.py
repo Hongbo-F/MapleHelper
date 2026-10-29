@@ -14,7 +14,10 @@ Monsters, without an escort (the default): the look before each chain covers the
 chain stops before a leg a monster could touch her on (flow.danger: her body's box all along the way her
 feet go, on the ground, in the air and on a rope, against each monster's wherever it can be by then, on any
 platform); that move then costs extra in the route planner so a way around is taken if there is one, else she
-waits for the monster to move off (a few looks), and then goes anyway. A touch during a move (the feed's: her popup,
+waits for the monster to move off (a few looks, while she can stand where she is), else she evades (from 2026-10-28,
+EVADE: a refuge along her platform or a move off it, waiting there while it stays safe, the contact rule), and then
+goes past it as a chain planned without it, watched as any (never the mover for a move a monster is in the way of; the
+mover's own moves watched too: WATCH_MOVES). A touch during a move (the feed's: her popup,
 MISS or damage, perception.touches; else lost HP) cuts it short: she replans from wherever she was pushed to, without
 counting it as a missed move, and while her invulnerability after it lasts no touch counts on the legs she plans
 (IMMUNE: she may pass a monster then).
@@ -36,6 +39,7 @@ the chain's legs ahead of her now meet, that the look it was planned from hadn't
 runs along a platform with room to stop (REACT), and the next pass meets it.
 """
 
+import math
 import random
 import time
 from collections.abc import Callable, Mapping
@@ -58,11 +62,12 @@ from ..motion.flow import END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow
 from ..motion.physics import JUMP_HEIGHT, WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
-from ..perception.touches import MISS
+from ..perception.touches import INVULNERABLE_S, MISS
+from ..motion.flow import Keys, _ground
 from ..motion.route import Move, Planner, keeping_off, route_record
 from . import client
 from .actions import Actions
-from .mover import Mover, platform_text
+from .mover import MoveCut, MoveRefused, Mover, platform_text
 
 ON_WAY_TRIES = 5    # monsters engaged per platform while passing through (respawns could keep her forever)
 MAX_FIGHTS = 3      # fights in a row clearing the way, without a move between: then she moves on regardless
@@ -290,6 +295,98 @@ LAND_WAITS = 4       # guess: looks spent in a row waiting for one to clear a la
 # with them 10, 45 and 62). True: wider takeoffs too.
 QUEUE_SPREAD = False
 
+# The evade step (from 2026-10-28; the user, watching a movement-only walk: "Looks like there was no attempt to avoid
+# hitting the mobs", "there was no attempt to even evade"). Live in walk B (D:/MapleHelper-scratch/qawalk/report) 57% of
+# her 148 touches came after _wait_for_monster handed a move a monster was in the way of to the mover (control.mover:
+# it doesn't look at monsters, nothing watched it, no touch stopped it), where her spot was judged unsafe to wait on or
+# her WAIT_LOOKS ran out; she never stepped back or turned away. Now a move she can't wait for (her spot unsafe, the
+# waits spent, or waiting can't clear the way: _worth_waiting) gets, in order (_evade, `evade` events and log lines):
+# the contact rule (CONTACT, below); a refuge: the nearest spot along her platform within EVADE_WALK, EVADE_STEP_MIN
+# away at least and EVADE_IN in from its ends, that a step there and standing there EVADE_HOLD_S (and to her
+# invulnerability's end and STAND_PAST_S, R3) keep clear of every monster (flow.danger: the step's checks start after
+# her invulnerability too, so right after a touch the step may pass the monster), else a single move off her platform
+# that chains clear and lands where she can stand as long, the trip EVADE_MOVE_S dearer at most (a retreat after a stop:
+# no bound), the quickest; ties between spots as near broken by the hunter's danger model (attack.danger, spawn points
+# too) where the navigator has it (`danger`); a step to a refuge is a chain watched as any (a touch cuts it), and she
+# looks again from there, waiting WAIT_S between looks while it stays safe, another refuge only once it doesn't
+# (EVADE_REFUGES a blocked move at most); EVADE_S from the first refuge decision (a retreat: the time it has left), or
+# no refuge, or EVADE_DEADLINE_S left of the trip, and she goes past (_go_past: the chain planned without the monsters
+# in the way of the move, one at a time, PASS_TRIES at most, else blind; said, an `evade` event 'pass' and a backstop
+# event NO_REFUGE, EVADE_S, EVADE_REFUGES or DEADLINE), and the mover only for a move no chain can plan at all, watched
+# (R2: Mover.watch). With an escort (_meet) the same refuge before her last shot and the pass regardless. In the
+# simulator's prototype (D:/MapleHelper-scratch/evade/design, proto2.py: a walk of random trips as live, Tree Dungeon's
+# crowd, walkers, 8 seeds of 5 minutes) the bundle (refuges, refuge moves 3 s dearer at most, the planner's monsters as
+# below, the contact rule) cut her touches by 16.2 a run of 119 (se 3.5), her touches within 2 s of the one before by
+# 16.9 of 74, and her arrivals from 118 of 138 trips to 106 of 131; refuge moves of any cost cut 22.4 but arrived 72 of
+# 115; keeping away up to 8 s doubled her touches in the walk's replays (hence the short budget). False: as before.
+EVADE = True
+EVADE_WALK = 150.0     # units along her platform a refuge spot may be (1 s of walking)
+EVADE_STEP_MIN = 8.0   # ... this far from where she stands at least (here was judged unsafe)
+EVADE_IN = 22.0        # ... and this far in from its ends
+SPOT_STEP = 5.0        # ... the spots tried this far apart, the nearest first
+EVADE_HOLD_S = 1.5     # s she must be able to stand where a refuge takes her, once there
+EVADE_MOVE_S = 1.5     # s a refuge move off her platform may cost the trip more at most (math.inf: no bound)
+REFUGE_MOVES = True    # refuges off her platform too (False: spots along it only)
+EVADE_S = 3.5          # s a blocked move gets from its first block (BUDGET_FROM_BLOCK), its waits in it: then past
+EVADE_REFUGES = 4      # refuges a blocked move gets at most
+EVADE_DEADLINE_S = 4.0  # s: a trip with this little left goes past at once ...
+HURRY_SLACK = 0.0       # ... or with less left than its route's time (Move.seconds) this many times over and that
+                        # (0: off)
+PASS_TRIES = 3         # monsters left out of a pass one at a time, before it's planned blind
+WORTH_WAIT = True      # without an escort she waits only while waiting can clear the way (_worth_waiting)
+SAFE_PASS = False      # safe where she stands, waits spent or no use: past it at once (a refuge only from an unsafe spot)
+BUDGET_FROM_BLOCK = True  # EVADE_S counted from the move's first block, its waits in it (False: from its first refuge)
+AROUND_ALL = True      # R4: a way around costs every move of it the same monsters block (_around), not the first's alone
+PASS_COMMIT_S = 5.0    # s after a pass no refuge move takes her back onto the platform she passed from (she went
+                       # up past a monster, met another there, and a refuge move took her back down: to and fro)
+# R3: the stand check behind waiting (_safe_to_stand) runs to her invulnerability's end and STAND_PAST_S more, at least
+# 1 s: with a second or more of it left, a second's check was vacuous (no touch counts before its end) and she
+# "waited" in contact. The contact rule (CONTACT): where a monster seen live (its sighting CONTACT_LIVE_S old at most)
+# touches her within CONTACT_S whatever she does now (standing, or a run either way), and she isn't invulnerable, that
+# touch is taken as given, and the chain planned with the window that follows it (its time + INVULNERABLE_S, less
+# IMMUNE_MARGIN_S): she's got clear of it within the window instead of stalling where she stands; once in
+# CONTACT_AGAIN_S unless a touch was told since (the prototype: 3.6 fewer touches a run, 4.4 fewer touches again).
+STAND_PAST_S = 0.5
+STAND_WINDOW = True  # (R3's stand check to the window's end; False: a second, as before)
+CONTACT = True
+CONTACT_S = 0.25
+CONTACT_LIVE_S = 0.5
+CONTACT_AGAIN_S = 2.0
+# R5: the planner's monsters without an escort (UNSEEN_AVOID), as with one since 2026-10-26 (UNSEEN_TRIPS): her memory's
+# where the chain goes (`remembered`), the feed's tracks out of sight (`hidden_tracks`) and the last cut's monster
+# (TripState.came); each look's monster walking as the feed follows it where the look's tracker had none (51% of the
+# danger entries in walk B); and a monster the look placed on no platform (in the air, a slime's hop: walk B's 345)
+# placed on the platform under its feet (PLACE_REACH). The ghost guard: a track out of sight on her (its box on hers)
+# with no touch told in GHOST_S, while she can be touched, is none (walk B: half the chains flagged had a track sitting
+# on her at the plan's start; with every track, 127 of 210 chains planned nothing: a stall). False: as before.
+UNSEEN_AVOID = True
+PLACE_REACH = 40.0
+GHOST_S = 1.0
+# R2: the mover's moves (those no chain plans) watched as a chain is (Mover.watch): cut on a touch told since the move
+# began (a MISS too), her HP dropping, or her standing on a platform the move neither leaves nor goes to (MOVE_OFF_S);
+# the navigator replans from a quick look. Its run-ups and back-offs, and the walk to where she's sent on arrival, are
+# checked against the monsters (Mover.clear): a back-off into one climbs from under the rope instead (a climb), or the
+# move is refused and costs AVOID_SECONDS as a monster in its way does (not CANNOT_S). False: as before.
+WATCH_MOVES = True
+MOVE_OFF_S = 0.109
+REFUSALS = 3  # a move refused this many times in a row (no refuge meanwhile, a wait each) goes unchecked
+# R7: a trip that dodges from a touch (go's `toucher`: her retreat, behavior.retreat) keeps clear of the monster that
+# touched her as its first chains plan: where no monster of the look is on her platform within TOUCHER_NEAR of her, a
+# stand-in for it at her x (its walking not known), of the map's kind that touches hardest (PADamage), while the touch
+# (a look's or glance's, not `crowded`) is TOUCHER_S old at most. In the prototype's retreats after the safety stop
+# (D:/MapleHelper-scratch/evade/design/trace_loop2.txt) the first chain off 8 was planned without the Horny Mushroom
+# that had touched her three times, hidden under her sprite, and it touched her again 0.4 s later.
+TOUCHER_S = 2.0
+TOUCHER_NEAR = 40.0
+# R6: before a chain queued on the move whose first leg is a drop or a climb starts (2 glances before), its flight and
+# landing, or its climb and the rope's top, are checked against the feed's newest tracks (the glance's: live ones, and
+# those out of sight QUEUE_SEEN_S at most): one that meets it withdraws it, and she stops where the running one ends
+# (QUEUE_CHECK). After a touch on a rope (CLIMB_ON), the rope's top is looked at first (CLIMB_LOOK): a monster the feed
+# has there by the time she'd be up, and she goes down the rope again instead of up into it. False: as before.
+QUEUE_CHECK = True
+QUEUE_SEEN_S = 1.0
+CLIMB_LOOK = True
+
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
 HUNT = "hunt"        # the escort shoots what's in reach before each chain, and what's in the way of a move
@@ -452,10 +549,27 @@ class TripState:
     sighted: list[tuple[MonsterTrack, Monster]] = field(default_factory=list)  # the last pass's tracks of the
                                                                               # monsters it saw, each with the sighting
     cannot: set = field(default_factory=set)  # moves the mover couldn't do from where she stood (CANNOT_S)
+    refused: dict = field(default_factory=dict)  # moves the mover refused for a monster (Mover.clear) -> how often
     stopped: bool = False  # the last chain was cut short for a monster coming into its way (REACT): not a miss
     came: object | None = None  # ... the feed's track of that monster (tracking.Track), kept for the next chain
     thought_to: float = 0.0  # up to when thinking is counted (Trip.time: _chain, called again for a pass's replans)
     land_waits: int = 0  # looks spent in a row waiting for a monster to clear the chain's last landing (LAND_WAITS)
+    # The evade step (EVADE): when the blocked move's first refuge decision came (None: none since a move was planned
+    # clear), the refuges taken for it, the last one's (platform, x) while she's there, the contact rule's last touch
+    # taken as given (time.monotonic), and the trip's budget: EVADE_S, and how much dearer a refuge move may make it
+    evade_since: float | None = None
+    refuges: int = 0
+    refuge: tuple[int, float] | None = None
+    contact_at: float = -1e18
+    evade_s: float | None = None   # (None: EVADE_S)
+    refuge_s: float | None = None  # (None: EVADE_MOVE_S)
+    passed: tuple[int, float] | None = None  # the platform her last pass set off from, and when (PASS_COMMIT_S)
+    toucher: bool = False        # its chains keep clear of the monster that touched her last (TOUCHER_S: R7)
+    deadline_pass: bool = True   # with EVADE_DEADLINE_S left it goes past; False (a retreat after a stop): it doesn't
+
+    def __post_init__(self):
+        self.evade_s = EVADE_S if self.evade_s is None else self.evade_s
+        self.refuge_s = EVADE_MOVE_S if self.refuge_s is None else self.refuge_s
 
     def end(self, result: str) -> Trip:
         """The trip, over: `result` says how it ended."""
@@ -480,15 +594,19 @@ class Navigator:
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
                  health: Callable[[Scene], None] | None = None, escort: Escort | None = None,
-                 variety: float | None = None, rng: random.Random | None = None, memory=None, moves=None):
+                 variety: float | None = None, rng: random.Random | None = None, memory=None, moves=None,
+                 danger: Callable[[], object] | None = None):
         """`health(scene)`, asked at every pass's look: her potions, and the safety stop, which it raises (a hunter's
         health_check: behavior.safety); `escort` fights on the way (without one she avoids monsters instead).
         `variety`: the moves' random weights (route.NOISE by default; 0 for none). `memory`: her memory of the
         monsters (localization.memory.Memory, a hunter's), whose monsters where a fighting trip's chain goes it keeps
         clear of too (`remembered`); None, only the looks'. `moves`: what her dot showed of her chains' jumps and runs
-        is told to it (a hunter's behavior.keycheck.MoveWatch: `_keys_seen`); None: to nothing."""
+        is told to it (a hunter's behavior.keycheck.MoveWatch: `_keys_seen`); None: to nothing. `danger`: the hunter's
+        danger model as of each ask (attack.danger.Danger: its `at`), which breaks ties between refuges as near
+        (EVADE); None: the nearest on the left first."""
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
         self.moves = moves
+        self.danger = danger
         self.memory = memory
         self.health = health or (lambda s: None)
         self.escort = escort
@@ -519,6 +637,7 @@ class Navigator:
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
         # (None: it moved, or no glance had it): _rope_top
         self.chain_still: tuple[tuple[float, float], float] | None = None
+        self._tracks_at = time.monotonic()  # when the last pass's monsters were made (their plan time 0: _chain_monsters)
 
     @property
     def fight(self) -> bool:
@@ -538,7 +657,9 @@ class Navigator:
 
     def go(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
            until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-           scene: Scene | None = None, keep_off=(), vary: bool = True, stand_until: float | None = None) -> Trip:
+           scene: Scene | None = None, keep_off=(), vary: bool = True, stand_until: float | None = None,
+           evade_s: float | None = None, refuge_s: float | None = None, toucher: bool = False,
+           deadline_pass: bool = True) -> Trip:
         """Get onto platform `dst` (and to map x on it, if given). `until` is asked before every chain,
         with a look that includes monsters (late in the chain before, when it follows on from that one):
         True ends the trip early ('in position'). `mode` (AVOID, HUNT or TRANSIT; the navigator's own by
@@ -546,8 +667,13 @@ class Navigator:
         pass instead of a new one if it's fresh (no keys sent since). `keep_off`: platforms its routes go onto
         only at a cost (TripState.keep_off). `vary`: it chooses among the planner's ways (route.ROUTES; TripState.
         vary). While its looks fail (LookLost) it stands still up to its deadline, or `stand_until` (time.monotonic) if
-        that's sooner: a retreat's window (behavior.retreat)."""
-        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary)
+        that's sooner: a retreat's window (behavior.retreat). `evade_s` and `refuge_s`: its evade step's budget and how
+        much dearer a refuge move may make it (EVADE_S, EVADE_MOVE_S; a retreat's own); `toucher`: its chains keep clear
+        of the monster that touched her last (TOUCHER_S); `deadline_pass`: it goes past a monster with EVADE_DEADLINE_S
+        left (False: it waits at a refuge to the end, a retreat after a stop)."""
+        st = self.begin(dst, x, seconds, max_misses, until, mode=mode, scene=scene, keep_off=keep_off, vary=vary,
+                        evade_s=evade_s, refuge_s=refuge_s)
+        st.toucher, st.deadline_pass = toucher, deadline_pass
         while not st.over:
             try:
                 self.step(st)
@@ -561,7 +687,8 @@ class Navigator:
 
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
-              scene: Scene | None = None, keep_off=(), vary: bool = True) -> TripState:
+              scene: Scene | None = None, keep_off=(), vary: bool = True, evade_s: float | None = None,
+              refuge_s: float | None = None) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
@@ -573,7 +700,7 @@ class Navigator:
                               # Dungeon, a chain then planned from a look that old: review, 2026-10-24; Hunter.danger
                               # has it from the map's cache since)
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, self.health, mode,
-                       keep_off=frozenset(keep_off), vary=vary)
+                       keep_off=frozenset(keep_off), vary=vary, evade_s=evade_s, refuge_s=refuge_s)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -603,7 +730,12 @@ class Navigator:
 
     def _pass(self, st: TripState) -> Trip | None:
         if not time.monotonic() < st.deadline:
-            return st.end("timeout")
+            last = st.last.where if st.last is not None else None
+            at = st.refuge is not None and last is not None and last.platform is not None \
+                and last.platform.id == st.refuge[0] and abs(last.x - st.refuge[1]) <= ARRIVE_TOLERANCE
+            return st.end("timeout (at a refuge)" if at else "timeout")
+        if st.trip.misses >= st.max_misses:  # (an evade step's chain missed last: _carry_evade)
+            return st.end("too many misses")
         # The Lie Detector seen: the trip stops here, keys or not (behavior.retreat); a retreat's own trip goes on (its
         # plans are the kind the player takes then).
         if getattr(self.actions, "kind", None) is None:
@@ -623,7 +755,7 @@ class Navigator:
             # basin spent all of it shooting respawns there (tour_hunt_basin).
             if st.x is not None and self._clear_the_way(st, s, st.x):
                 return None  # look again after the fight
-            if st.x is not None:
+            if st.x is not None and self._arrival_clear(st, s):
                 self.mover.walk_to(st.x, tolerance=ARRIVE_TOLERANCE, s=s)
             return st.end("arrived")
         if self._shoot_on_the_way(st, s):
@@ -641,6 +773,8 @@ class Navigator:
         monsters, near = self._chain_monsters(st, s, path)
         st.quick = False
         legs, keys, why = self._chain(st, s, path, monsters, looked)
+        if legs:  # (the way is clear, or clear to where it's met: the evade step starts again from nothing)
+            st.evade_since, st.refuges, st.refuge = None, 0, None
         if self.fight:
             met = self._meet(st, s, path, monsters, legs, why, planned_at, looked)
             if met is True:
@@ -649,8 +783,8 @@ class Navigator:
                 legs, keys, why = met  # a hop over it
             elif self._clear_landing(st, s, path, monsters, legs, why):
                 return None  # look again: after the shot, or once she's waited a moment
-        elif self._wait_for_monster(st, s, path[0], monsters, legs, why, planned_at):
-            return None  # look again: for a way around, or once she's waited a moment
+        elif self._wait_for_monster(st, s, path, monsters, legs, why, planned_at, looked):
+            return None  # look again: for a way around, once she's waited a moment, or after a refuge or a pass
 
         # Her invulnerability as it is when the chain goes (IMMUNE): the planning's time came out of it.
         if legs and self._immunity_spent(legs):
@@ -669,8 +803,10 @@ class Navigator:
             still = self.chain_still is not None and self.chain_still[1] >= STUCK_S
         else:
             st.stopped = False
-            moved, planned, after = self._carry_out_move(st, s, path)
+            moved, planned, after = self._carry_out_move(st, s, path, monsters)
             if not moved:
+                if _key(path[0]) in st.refused:  # refused for a monster: a refuge, else a wait (then unchecked)
+                    self._refused_step(st, s, path, monsters, looked)
                 return None  # one the mover can't do: another way (st.cannot)
             still = self.mover.still is True
         if still and ROPE_TOP:
@@ -830,19 +966,27 @@ class Navigator:
         if self.fight and not self._threats():
             return [], None
         platforms = _platforms(path)
+        unseen = self.fight or UNSEEN_AVOID  # (without an escort too: R5)
         if st.quick:  # the last look's monsters, moved on by the time since
             looked, seen_then = self.tracker.last
             tracks = [replace(mo, seen_at=looked - time.monotonic()) for mo in seen_then]
             st.sighted = []
         else:
-            seen = self.trip_monsters(s, platforms) if self.fight else s.monsters
+            seen = self.trip_monsters(s, platforms) if self.fight else \
+                self._on_platforms(s.monsters) if UNSEEN_AVOID else s.monsters
             tracks = self.tracker.update(s.t, seen, seen_at=s.t - time.monotonic())
-            st.sighted = list(zip(tracks, [m for m in seen if m.platform is not None]))  # (as the tracker keeps them)
-            if self.fight:  # and those her memory has there that the look didn't find (not into the tracker's)
+            placed = [m for m in seen if m.platform is not None]  # (as the tracker keeps them)
+            if not self.fight and UNSEEN_AVOID:  # walking as the feed follows them, where the tracker can't tell yet
+                tracks = self._walking(s, tracks, placed)
+            st.sighted = list(zip(tracks, placed))
+            if unseen:  # and those her memory has there that the look didn't find (not into the tracker's)
                 tracks = tracks + self.remembered(s, platforms, seen, s.t - time.monotonic())
-        if self.fight:  # and the feed's out of sight, and the one the last cut was for (not into the tracker's)
+        if unseen:  # and the feed's out of sight, and the one the last cut was for (not into the tracker's)
             tracks = tracks + self.hidden_tracks(s, platforms, tracks, st.came)
         st.came = None
+        if st.toucher and (toucher := self._toucher(s, tracks)) is not None:  # (R7: her retreat)
+            tracks = tracks + [toucher]
+        self._tracks_at = time.monotonic()  # (plan time 0 of these: the mover's checks, Mover.clear)
         if not st.quick and telemetry.recording():
             telemetry.emit("monsters", **tracks_record(tracks, self.model))
         if not self.fight:
@@ -915,6 +1059,66 @@ class Navigator:
                                     MONSTER_HEIGHT.get(e.kind, top), 0, e.kind, top))
         return out
 
+    def _toucher(self, s: Scene, tracks: list[MonsterTrack]) -> MonsterTrack | None:
+        """R7: a stand-in for the monster that touched her last (Senses.touch, not `crowded`, TOUCHER_S old at most)
+        where look `s` has none of `tracks` on her platform within TOUCHER_NEAR of her: at her x as of the touch's
+        popup, its walking not known, of the map's kind that touches hardest (its game data's PADamage); else None."""
+        touch = getattr(self.senses, "touch", None)
+        w = s.where
+        if not isinstance(touch, dict) or touch.get("crowded") or w is None or w.platform is None \
+                or not 0 <= s.t - touch.get("at", -1e18) <= TOUCHER_S:
+            return None
+        if any(t.platform == w.platform.id and abs(t.x - w.x) <= TOUCHER_NEAR for t in tracks):
+            return None
+        names = {n for ns in self.model.monsters_by_platform.values() for n in ns}
+        if not names:
+            return None
+        kind = kind_of(max(names, key=lambda n: (self.model.mob_damage.get(n, 0.0), n)))
+        half, top = touch_box(kind, self.tracker.body.get(kind))
+        return MonsterTrack(w.platform.id, w.x, self.tracker.walking.get(kind, DEFAULT_SPEED), 0, half, None,
+                            touch["at"] - time.monotonic(), MONSTER_HEIGHT.get(kind, top), 0, kind, top)
+
+    def _on_platforms(self, monsters: list[Monster]) -> list[Monster]:
+        """A look's monsters, one placed on no platform (in the air: a slime's hop, a knock; R5) put on the platform under
+        its feet within PLACE_REACH (MapModel.platform_under), if there's one."""
+        out = []
+        for m in monsters:
+            if m.platform is None and (q := self.model.platform_under(m.x, m.y, reach=PLACE_REACH)) is not None:
+                m = replace(m, platform=q.id)
+            out.append(m)
+        return out
+
+    def _walking(self, s: Scene, tracks: list[MonsterTrack], placed: list[Monster]) -> list[MonsterTrack]:
+        """A look's tracks (`tracks`, one each of `placed`), each the tracker can't tell the walking of yet (vx None)
+        walking as the feed follows it (Monster.track, the look's Scene.tracks: tracking's velocity, its kind's speed at
+        most; under STILL_VX it stands), as _track_of has a track (R5)."""
+        feed = {tr.id: tr for tr in (getattr(s, "tracks", None) or ())}
+        if not feed:
+            return tracks
+        out = []
+        for t, m in zip(tracks, placed):
+            tr = feed.get(getattr(m, "track", None))
+            if t.vx is None and tr is not None and getattr(tr, "vx", None) is not None:
+                vx = max(-t.speed, min(t.speed, tr.vx)) if abs(tr.vx) > STILL_VX else 0.0
+                t = replace(t, vx=vx, heading=(1 if vx > 0 else -1) if vx else 0)
+            out.append(t)
+        return out
+
+    def _ghost(self, s: Scene, tr, now: float) -> bool:
+        """The ghost guard (R5, without an escort): the feed's track `tr`, out of sight GHOST_S or more, on her (its box
+        on hers where look `s` has her), with no touch told in GHOST_S and her not invulnerable: it isn't there (it would
+        have touched her)."""
+        w = s.where
+        if self.fight or w is None or w.platform is None or tr.platform != w.platform.id or now - tr.last_seen < GHOST_S:
+            return False
+        half, _ = touch_box(tr.kind, self.tracker.body.get(tr.kind))
+        if abs(tr.x - w.x) > half + her_body.HER_HALF:
+            return False
+        touch = getattr(self.senses, "touch", None)
+        told = touch.get("told", -1e18) if isinstance(touch, dict) else -1e18
+        until = getattr(self.senses, "invulnerable_until", None)
+        return s.t - told > GHOST_S and (until is None or until() <= now)
+
     def hidden_tracks(self, s: Scene, platforms, tracks: list[MonsterTrack], came=None) -> list[MonsterTrack]:
         """The monsters the feed follows out of sight on screen as of look `s` that count as about (localization.unseen.
         hidden: last seen within its TRACK_S, none that a kill of hers is on: her memory's `kills`, the ledger's) on
@@ -933,6 +1137,8 @@ class Navigator:
         for tr in cands:
             if tr.platform is None or tr.platform not in platforms \
                     or (self.escort is not None and not self.escort.threat(tr.kind)):
+                continue
+            if UNSEEN_AVOID and self._ghost(s, tr, now):
                 continue
             speed = self.tracker.walking.get(tr.kind, DEFAULT_SPEED)
             age = now - tr.last_seen
@@ -1139,6 +1345,9 @@ class Navigator:
             self.log(f"  waiting for the {kind} to move off ({st.waited})")
             time.sleep(WAIT_S)
             return True
+        # (only where she can't stand and wait: with an escort, from a safe spot a refuge is waiting on for nothing)
+        if EVADE and not self._safe_to_stand(s.where.x, s.where.platform, move, monsters)                 and self._evade_step(st, s, path, monsters, looked):
+            return True  # look again: from the refuge, or after the chain the contact rule planned
         if LAST_SHOT and mo is not None and self._last_shot(st, s, mo, planned_at):
             return True  # look again after the shot
         return self._regardless(st, s, path, monsters, looked, mo,
@@ -1205,8 +1414,12 @@ class Navigator:
         hunt loop's trips were touched 14% more often than with only `mo` left out: harness, 20 seeds.)"""
         telemetry.emit("event", kind="backstop", text=why)
         st.waited = 0
+        st.evade_since, st.refuges, st.refuge = None, 0, None
+        st.passed = (s.where.platform.id, time.monotonic())
         regardless = self._chain(st, s, path, [] if blind else [t for t in monsters if t is not mo], looked,
                                  priced=monsters)
+        if not regardless[0] and EVADE and not blind:  # (never the mover for a move a monster is in the way of: blind)
+            regardless = self._chain(st, s, path, [], looked, priced=monsters)
         return regardless if regardless[0] else None
 
     def _worth_waiting(self, move: Move, start: Body, monsters: list, linger: float, mo: MonsterTrack | None) -> bool:
@@ -1227,24 +1440,291 @@ class Navigator:
             delay += WAIT_S
         return False
 
-    def _wait_for_monster(self, st: TripState, s: Scene, move: Move, monsters: list, legs: list[Leg],
-                          why: str, planned_at: float) -> bool:
-        """A monster in the way of the first move (nothing chained because of it): look for a way around
-        (the move costs extra from `planned_at` on), else wait for it to go, WAIT_LOOKS looks at most.
-        Waiting only makes sense where no monster can reach her meanwhile. True to look again."""
+    def _wait_for_monster(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg],
+                          why: str, planned_at: float, looked: float = 0.0) -> bool:
+        """A monster in the way of the route's first move (nothing chained because of it): look for a way around (the
+        move costs extra from `planned_at` on, and with EVADE each move of the way offered then that the same monsters
+        block: _around), else wait for it to go, WAIT_LOOKS looks at most, where no monster can reach her meanwhile
+        (_safe_to_stand) and, with EVADE, while waiting can clear the way (_worth_waiting); else the evade step (EVADE:
+        _evade, a refuge or past it). True to look again; False to go on (with `legs`, or the move alone: the mover's,
+        only for a move no chain can plan)."""
+        move = path[0]
+        if legs or why != "monster":
+            st.waited = 0
+            return False
+        start, linger = self._start(st, s), END_LINGER if len(path) == 1 else 0.0
+        if EVADE and BUDGET_FROM_BLOCK and st.evade_since is None:  # (its waits count in the evade step's budget)
+            st.evade_since = time.monotonic()
         safe_here = self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
-        if not legs and why == "monster" and st.waited < WAIT_LOOKS and safe_here:
+        hurry = EVADE and HURRY_SLACK > 0 and self._due(st, path)  # (no time for waits either: past it)
+        if st.waited < WAIT_LOOKS and safe_here and not hurry and (
+                not (EVADE and WORTH_WAIT) or self._worth_waiting(move, start, monsters, linger,
+                                                                  self._blocker(move, start, monsters, linger))):
             if _key(move) not in st.avoid:
-                st.avoid[_key(move)] = planned_at
                 self.log(f"  a monster could get in the way of {move.kind} -> {move.dst}: looking for a way around")
+                if EVADE and AROUND_ALL:
+                    self._around(st, s, move, monsters, planned_at)
+                else:
+                    st.avoid[_key(move)] = planned_at
                 return True
             st.waited += 1
             st.trip.waits += 1
             self.log(f"  waiting for the monster to move off ({st.waited})")
             time.sleep(WAIT_S)
             return True
-        st.waited = 0
+        if not EVADE:
+            st.waited = 0
+            return False
+        if safe_here and SAFE_PASS:  # (no refuge is safer than here: past it now, waiting more can't clear the way)
+            return self._go_past(st, s, path, monsters, looked,
+                                 f"WAIT_LOOKS: {st.waited} looks waited" if st.waited >= WAIT_LOOKS
+                                 else "NO_WAIT: waiting can't clear the way")
+        return self._evade(st, s, path, monsters, looked)
+
+    def _blocker(self, move: Move, start: Body, monsters: list, linger: float) -> MonsterTrack | None:
+        """The monster that stops a chain before `move` from `start` (flow.in_the_way, with `linger` there, else standing
+        where it ends END_LINGER: chain's own), or None."""
+        hit = self.flow.in_the_way(move, start, monsters, linger)
+        if hit is None and not linger:
+            hit = self.flow.in_the_way(move, start, monsters, END_LINGER)
+        return None if hit is None else hit[0]
+
+    def _first_blocker(self, path: list[Move], start: Body, monsters: list) -> MonsterTrack | None:
+        """The monster that stops a chain of `path` from `start` short of its first move: walking the chain on (each
+        move's first way clear of `monsters`, as flow.chain picks), the one in the way of the first move one is (a
+        chain stopped there backs off every leg whose end one could reach her standing at, END_LINGER: so the first
+        move's end being unsafe stops it before it too); else the one by the first move's end; None if none is."""
+        b, by_end = start, None
+        for i, m in enumerate(path[:MAX_LEGS]):
+            linger = END_LINGER if i == len(path) - 1 else 0.0
+            hit = self.flow.in_the_way(m, b, monsters, linger)
+            if hit is not None:
+                return hit[0]
+            leg = None
+            for v in Flow.VARIANTS:
+                lg = self.flow.leg(m, b, Keys(self.flow.key_names), v)
+                if lg is not None and self.flow.danger(lg, monsters, linger) is None:
+                    leg = lg
+                    break
+            if leg is None:
+                break
+            if i == 0 and (stand := self.flow.danger(leg, monsters, linger=END_LINGER)) is not None:
+                by_end = stand[0]
+            b = leg.end
+        return by_end
+
+    # --- the evade step (EVADE) ------------------------------------------------------------------------------------
+
+    def _evade(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float) -> bool:
+        """Without an escort, the route's first move blocked by a monster and waiting not allowed: the evade step
+        (_evade_step: the contact rule, waiting at a refuge that stays safe, a refuge), else past it (_go_past). True
+        to look again; False for the mover (a move no chain plans, even blind)."""
+        if self._evade_step(st, s, path, monsters, looked):
+            return True
+        return self._go_past(st, s, path, monsters, looked, self._why_past(st, path))
+
+    @staticmethod
+    def _due(st: TripState, path: list[Move] | None = None) -> bool:
+        """Whether the trip has too little time left to spend any on the evade step: EVADE_DEADLINE_S, or with
+        HURRY_SLACK its route's time (`path`'s moves) that many times over and EVADE_DEADLINE_S; never for a trip that
+        doesn't go past for its deadline (`deadline_pass`: a retreat after a stop)."""
+        if not st.deadline_pass:
+            return False
+        left = st.deadline - time.monotonic()
+        need = HURRY_SLACK * sum(m.seconds for m in path or ()) if HURRY_SLACK else 0.0
+        return left <= EVADE_DEADLINE_S + need
+
+    def _why_past(self, st: TripState, path: list[Move] | None = None) -> str:
+        """Why the evade step gives way to a pass: its backstop's name, and why."""
+        now = time.monotonic()
+        spent = now - (st.evade_since if st.evade_since is not None else now)
+        if spent >= st.evade_s:
+            return f"EVADE_S: {spent:.1f} s blocked"
+        if self._due(st, path):
+            return f"DEADLINE: {max(0.0, st.deadline - now):.1f} s left of the trip"
+        if st.refuges >= EVADE_REFUGES:
+            return f"EVADE_REFUGES: {st.refuges} refuges taken"
+        return "NO_REFUGE: no refuge along her platform nor a move off it"
+
+    def _evade_step(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float) -> bool:
+        """The evade step for the route's first move, blocked by a monster and waiting not allowed (EVADE): the contact
+        rule (_contact: a touch she can't avoid taken as given, the chain planned with the window after it); else, at the
+        refuge she went to and while it stays safe, a look again WAIT_S on; else a refuge (_refuge: a step along her
+        platform, or a move off it), gone to as a watched chain; each within the budget (TripState.evade_s from the
+        move's first block, BUDGET_FROM_BLOCK; EVADE_REFUGES; EVADE_DEADLINE_S left of the trip, _due). True if she did
+        one (look again)."""
+        now = time.monotonic()
+        if st.evade_since is None:
+            st.evade_since = now
+        spent = now - st.evade_since
+        move, p, x = path[0], s.where.platform, s.where.x
+        if CONTACT and (hit := self._contact(st, s, move, monsters)) is not None:
+            mo, t = hit
+            st.contact_at = now
+            self.flow.immune = t + INVULNERABLE_S - IMMUNE_MARGIN_S
+            legs, keys, why = self._chain(st, s, path, monsters, looked)
+            if legs:
+                self._carry_evade(st, s, path, legs, keys, why, monsters, "contact",
+                                  f"{move.kind} -> {move.dst}: the {mo.kind or 'monster'} touches her within "
+                                  f"{CONTACT_S:g} s whatever she does: through in the window after it "
+                                  f"({self.flow.immune:.2f} s)")
+                return True
+        budget = spent < st.evade_s and not self._due(st, path)
+        if budget and st.refuge is not None and st.refuge[0] == p.id and abs(st.refuge[1] - x) <= ARRIVE_TOLERANCE \
+                and self._safe_to_stand(x, p, move, monsters):
+            st.trip.waits += 1
+            self.log(f"  at the refuge at x {x:.0f}: waiting for the way to clear ({spent:.1f} s of {st.evade_s:g})")
+            time.sleep(WAIT_S)
+            return True
+        if budget and st.refuges < EVADE_REFUGES and (ref := self._refuge(st, s, monsters)) is not None:
+            step, legs, keys, text, to = ref
+            st.refuges += 1
+            st.refuge = to
+            self._carry_evade(st, s, path, legs, keys, "done", monsters, step,
+                              f"{text} (refuge {st.refuges}, {move.kind} -> {move.dst} blocked {spent:.1f} s)",
+                              refuge=True)
+            return True
         return False
+
+    def _stand_until(self, t: float, hold: float) -> float:
+        """Plan time a stand from `t` must be clear to: `hold` on, and her invulnerability's end and STAND_PAST_S at
+        least (R3: no touch counts before then, so a stand ending earlier is no check)."""
+        return max(t + hold, self.flow.immune + STAND_PAST_S) if STAND_WINDOW else t + hold
+
+    def _refuge(self, st: TripState, s: Scene, monsters: list) -> tuple | None:
+        """Where the evade step goes from look `s`: ('spot', legs, keys, why, (platform, x)) the nearest spot along her
+        platform within EVADE_WALK (EVADE_STEP_MIN away at least, EVADE_IN in from its ends, every SPOT_STEP; as near,
+        the one the hunter's danger model rates safer: `danger`) that a step there (flow._step) and standing there
+        EVADE_HOLD_S (_stand_until) keep clear of every monster; else ('move', ...) the quickest single move off her
+        platform that chains clear (flow.chain, no hop) and lands where she can stand as long, the trip st.refuge_s
+        dearer at most; None if there's neither."""
+        p, x0 = s.where.platform, s.where.x
+        start = self._start(st, s)
+        lo, hi = p.left + EVADE_IN, p.right - EVADE_IN
+        spots = [lo + i * SPOT_STEP for i in range(int(max(0.0, hi - lo) // SPOT_STEP) + 1)]
+        spots = [x for x in spots if EVADE_STEP_MIN <= abs(x - x0) <= EVADE_WALK]
+        model = self._danger_model()
+
+        def rank(x: float) -> tuple:
+            near = round(abs(x - x0) / SPOT_STEP)
+            return near, (model.at(p.id, x, s.monsters) if model is not None else 0.0), x
+
+        for x in sorted(spots, key=rank):
+            k = Keys(self.flow.key_names)
+            t_stop, x_stop = Flow._step(Body(start.t, x0, p), x, k)
+            d = "right" if x_stop > x0 else "left"
+            step = Leg(Move("step", p.id, p.id, x0, x_stop, d), Body(start.t, x0, p), Body(t_stop, x_stop, p),
+                       [Span(p.id, start.t, t_stop, x0, x_stop)])
+            if self.flow.danger(step, monsters) is not None:
+                continue
+            until = self._stand_until(t_stop, EVADE_HOLD_S)
+            stand = Leg(step.move, step.end, Body(until, x_stop, p), [Span(p.id, t_stop, until, x_stop, x_stop)])
+            if self.flow.danger(stand, monsters) is not None:
+                continue
+            return "spot", [step], k, f"a step {d} to x {x_stop:.0f} on platform {p.id}", (p.id, x_stop)
+        here = self.planner.quickest(p.id, x0, st.dst) if math.isfinite(st.refuge_s) else None
+        best = None
+        back = st.passed[0] if st.passed is not None and time.monotonic() - st.passed[1] < PASS_COMMIT_S else None
+        for m in (self.planner.moves if REFUGE_MOVES or not math.isfinite(st.refuge_s) else ()):
+            if m.src != p.id or m.dst == back:
+                continue
+            legs, keys, why = self.flow.chain([m], start, monsters, keep_going=False, hops=False)
+            if not legs or why != "done":
+                continue
+            e = legs[-1].end
+            if e.platform.id != st.dst and math.isfinite(st.refuge_s):
+                there = self.planner.quickest(e.platform.id, e.x, st.dst)
+                if here is None or there is None or e.t + there.cost > here.cost + st.refuge_s:
+                    continue
+            until = self._stand_until(e.t, EVADE_HOLD_S)
+            stand = Leg(m, e, Body(until, e.x, e.platform), [Span(e.platform.id, e.t, until, e.x, e.x)])
+            if self.flow.danger(stand, monsters) is not None:
+                continue
+            if best is None or e.t < best[1][-1].end.t:
+                best = ("move", legs, keys, f"{m.kind} -> platform {m.dst} (x {e.x:.0f})", (e.platform.id, e.x))
+        return best
+
+    def _danger_model(self):
+        """The hunter's danger model (attack.danger.Danger) where the navigator has one and a kind on the map counts,
+        else None."""
+        try:
+            model = self.danger() if self.danger is not None else None
+        except Exception:  # (one that can't be made: no tie-break, the nearest first)
+            return None
+        return model if model is not None and getattr(model, "any", False) else None
+
+    def _contact(self, st: TripState, s: Scene, move: Move, monsters: list) -> tuple[MonsterTrack, float] | None:
+        """The contact rule (CONTACT): a monster seen live (its sighting CONTACT_LIVE_S old at most) that touches her
+        within CONTACT_S whatever she does now (standing, or a run either way: flow.danger), while she isn't
+        invulnerable: it and when; None otherwise, and within CONTACT_AGAIN_S of the last touch it took as given unless
+        a touch was told since."""
+        if self.flow.immune > 0:
+            return None
+        if time.monotonic() - st.contact_at < CONTACT_AGAIN_S and self._touch_since(st.contact_at) is None:
+            return None
+        live = [t for t in monsters if t.seen_at >= -CONTACT_LIVE_S]
+        if not live:
+            return None
+        p, x = s.where.platform, s.where.x
+        b = Body(0.0, x, p)
+        stand = Leg(move, b, Body(CONTACT_S, x, p), [Span(p.id, 0.0, CONTACT_S, x, x)])
+        hit = self.flow.danger(stand, live)
+        if hit is None:
+            return None
+        for d in (-1, 1):
+            x1 = p.clamp(_ground(b, d, CONTACT_S)[0])
+            run = Leg(move, b, Body(CONTACT_S, x1, p, run=d), [Span(p.id, 0.0, CONTACT_S, x, x1)])
+            if self.flow.danger(run, live) is None:
+                return None
+        return hit
+
+    def _go_past(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float, why: str) -> bool:
+        """Past the monsters in the way of the route's first move: the chain planned without them, one at a time
+        (_blocker: the one that stops it, then the next), PASS_TRIES at most, else blind; said (`why`: the backstop's
+        name and why), an `evade` event 'pass' and a backstop event, carried out and watched as any chain. False if
+        nothing chains even so (the mover's move: watched, WATCH_MOVES)."""
+        move, start = path[0], self._start(st, s)
+        others, past, legs, keys, chained = list(monsters), [], [], None, "done"
+        for _ in range(PASS_TRIES):
+            mo = self._first_blocker(path, start, others)
+            if mo is None:
+                break
+            past.append(mo)
+            others = [t for t in others if t is not mo]
+            legs, keys, chained = self._chain(st, s, path, others, looked, priced=monsters)
+            if legs:
+                break
+        blind = not legs
+        if blind:
+            legs, keys, chained = self._chain(st, s, path, [], looked, priced=monsters)
+        st.waited = 0
+        st.evade_since, st.refuges, st.refuge = None, 0, None
+        st.passed = (s.where.platform.id, time.monotonic())
+        names = ", ".join(sorted({t.kind or "monster" for t in past})) or "monster"
+        text = f"{why}; {move.kind} -> {move.dst} past the {names}" + (" (blind)" if blind else "")
+        telemetry.emit("event", kind="backstop", text=text)
+        if not legs:
+            self.log(f"  {text}: nothing chains; the move alone")
+            return False
+        self._carry_evade(st, s, path, legs, keys, chained, monsters, "pass", text)
+        return True
+
+    def _carry_evade(self, st: TripState, s: Scene, path: list[Move], legs: list[Leg], keys, why: str, monsters: list,
+                     step: str, text: str, refuge: bool = False) -> None:
+        """An evade step's chain (`step`: 'spot' or 'move' for a refuge, 'contact', 'pass'), said (the log, an `evade`
+        event) and carried out as a pass's chain is (_carry_out_chain: watched, cut on a touch), her landing noted. A
+        refuge's moves don't count as getting her where the trip goes (MEET_S goes on: _made's `arrived`), and a step
+        along her platform is no move of the route's."""
+        self.log(f"  {step}: {text}")
+        telemetry.emit("event", kind="evade", step=step, text=text)
+        hp = s.hp
+        st.path = path
+        self.chain_still = None
+        moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst, monsters)
+        landed = after.where.platform is not None and after.where.platform.id == planned.id
+        self._made(st, [m for m in moved if m.kind != "step"], landed and not refuge)
+        if self._note_landing(st.trip, moved, planned, after, hp, st.stopped, since=s.t):
+            st.trip.misses += 1
 
     def _around(self, st: TripState, s: Scene, move: Move, monsters: list, planned_at: float) -> None:
         """Move `move` costs extra from `planned_at` on (st.avoid), and so does each move of the way the route planner
@@ -1290,27 +1770,132 @@ class Navigator:
         st.came, self._came = (self._came if st.stopped else None), None
         return [leg.move for leg in legs], legs[-1].end.platform, after
 
-    def _carry_out_move(self, st: TripState, s: Scene, path: list[Move]) -> tuple[list[Move], Platform, Scene]:
+    def _carry_out_move(self, st: TripState, s: Scene, path: list[Move],
+                        monsters=()) -> tuple[list[Move], Platform, Scene]:
         """The route's first move on its own, closed loop (control.mover). Returns it (as a list), the
         platform it goes to, and a look once it's done; none, where she is and `s`, if the mover can't do it
-        from here (it costs CANNOT_S for the rest of the trip: st.cannot)."""
+        from here (it costs CANNOT_S for the rest of the trip: st.cannot). With WATCH_MOVES its key plans are watched
+        (Mover.watch: _move_watch) and cut on a touch, her HP dropping, or her standing on a platform the move doesn't
+        go by: she replans from a quick look, as after a chain cut short; its run-ups and back-offs are checked against
+        `monsters` (the pass's: Mover.clear), and one into a monster refuses the move (Mover.MoveRefused), which then
+        costs AVOID_SECONDS as a move a monster is in the way of (st.avoid), not CANNOT_S."""
         move = path[0]
         self.log(f"  {platform_text(s.where.platform)} at x {s.where.x:.0f} ({s.how}): {move.kind} "
                  f"{move.direction} -> platform {move.dst}  [{len(path)} moves to go]")
         if telemetry.recording():  # (as a chain's 'chain' record: she sets off; 'moved' once it's done)
             telemetry.emit("move", kind=move.kind, src=move.src, dst=move.dst, x=round(move.x, 1))
         t2 = time.monotonic()
+        if WATCH_MOVES:
+            self.mover.watch = self._move_watch(s, move)
+            # (refused REFUSALS times in a row: unchecked, as a pass goes past)
+            self.mover.clear = self._walk_clear(s, list(monsters)) if st.refused.get(_key(move), 0) < REFUSALS \
+                else None
         try:
             after = self.mover.do(move, s)
+        except MoveCut as cut:  # cut short as a chain is: she replans from where she is, from a quick look
+            st.trip.time["move"] += time.monotonic() - t2
+            st.moved_at = time.monotonic()
+            after = self.recover()
+            self.log(f"    {cut}: the move cut short; on {platform_text(after.where.platform)} at x "
+                     f"{after.where.x:.0f} after {time.monotonic() - t2:.2f} s: replanning from there")
+            telemetry.emit("event", kind="move_cut", text=f"{move.kind} -> {move.dst}: {cut}")
+            st.quick = True
+            return [move], self.model.platform(move.dst), after
+        except MoveRefused as e:  # a back-off into a monster: another way, as for a monster in the way
+            self.log(f"    refused: {e}; another way")
+            st.avoid[_key(move)] = time.monotonic()
+            st.refused[_key(move)] = st.refused.get(_key(move), 0) + 1
+            if telemetry.recording():  # (nothing made: no 'moved' record ends the 'move' one)
+                telemetry.emit("event", kind="cannot", text=f"{move.kind} -> {move.dst}: refused: {e}")
+            return [], s.where.platform, s
         except ValueError as e:  # one it can't do from here (CANNOT_S): another way, from the next look
             self.log(f"    can't: {e}; another way")
             st.cannot.add(_key(move))
             if telemetry.recording():  # (nothing made: no 'moved' record ends the 'move' one)
                 telemetry.emit("event", kind="cannot", text=f"{move.kind} -> {move.dst}: {e}")
             return [], s.where.platform, s
+        finally:
+            self.mover.watch = self.mover.clear = None
         st.trip.time["move"] += time.monotonic() - t2
         st.moved_at = time.monotonic()
+        st.refused.pop(_key(move), None)
         return [move], self.model.platform(move.dst), after
+
+    def _refused_step(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float) -> None:
+        """The mover refused the route's first move for a monster by its run-up or back-off (Mover.clear): the evade
+        step's refuge (_evade_step), else a wait (WAIT_S); refused REFUSALS times in a row, it goes unchecked next
+        (_carry_out_move), said, a backstop event."""
+        move = path[0]
+        if EVADE and self._evade_step(st, s, path, monsters, looked):
+            return
+        if st.refused.get(_key(move), 0) >= REFUSALS:
+            text = f"REFUSALS: {move.kind} -> {move.dst} refused {st.refused[_key(move)]} times: unchecked"
+            self.log(f"  {text}")
+            telemetry.emit("event", kind="backstop", text=text)
+            return
+        st.trip.waits += 1
+        self.log(f"  waiting for the monster by its run-up to move off ({st.refused[_key(move)]})")
+        time.sleep(WAIT_S)
+
+    def _move_watch(self, s: Scene, move: Move) -> Callable[[], str | None]:
+        """What watches a move of the mover's from look `s` (WATCH_MOVES: Mover.watch, between its key plan's glances):
+        a glance, and why to cut it short, or None: a touch told after the look (TOUCH_CUTS, a MISS too) or her HP
+        lower than it had it (HIT), as a chain's; or her standing MOVE_OFF_S on a platform the move neither leaves nor
+        goes to (a knock, a fall past it)."""
+        since, hp0, by = s.t, s.hp, {move.src, move.dst}
+        stood = [None]
+
+        def watch() -> str | None:
+            self.senses.wait_frame(GLANCE_S)
+            dot, hp = self.senses.glance()
+            touch = self._touch_since(since) if TOUCH_CUTS else None
+            if touch is not None or hp < hp0 - HIT:
+                return _touch_text(touch, hp0, hp)
+            stood[0] = _stood(stood[0], self.senses.glanced_at, dot)
+            if stood[0] is not None and self.senses.glanced_at - stood[0][0] >= MOVE_OFF_S:
+                mx, my = self.senses.localizer.to_map(dot)
+                on = self.model.platform_under(mx, my - 6, reach=16)
+                if on is not None and on.id not in by:
+                    return f"off the move (on {on.id}, planned {move.dst})"
+            return None
+        return watch
+
+    def _walk_clear(self, s: Scene, monsters: list) -> Callable[[float, float], str | None]:
+        """What checks a walk of the mover's along her platform from map x0 to x1, set off now (Mover.clear: its
+        run-ups and back-offs): why it isn't clear (a monster of `monsters`, the pass's, could touch her on it or as she
+        stands there after: flow.danger, her invulnerability counted), or None."""
+        p = s.where.platform
+
+        def clear(x0: float, x1: float) -> str | None:
+            if p is None or not monsters:
+                return None
+            t0 = max(0.0, time.monotonic() - self._tracks_at)
+            t1 = t0 + abs(x1 - x0) / WALK_SPEED + SETTLE_S
+            leg = Leg(Move("walk", p.id, p.id, x0, x1, "right" if x1 > x0 else "left"), Body(t0, x0, p),
+                      Body(t1, x1, p), [Span(p.id, t0, t1, x0, x1)])
+            hit = self.flow.danger(leg, monsters, linger=STAND_PAST_S)
+            if hit is None:
+                return None
+            return f"a {hit[0].kind or 'monster'} on {hit[0].platform} by the walk from x {x0:.0f} to {x1:.0f}"
+        return clear
+
+    def _arrival_clear(self, st: TripState, s: Scene) -> bool:
+        """Without an escort (WATCH_MOVES), whether the walk to where she's sent on the trip's platform (look `s`) keeps
+        clear of its monsters (the look's, tracked; her invulnerability counted): else she stays where she is, said, the
+        trip arrived. With an escort, the monster in her way is shot first (_clear_the_way): always."""
+        if self.fight or not WATCH_MOVES or st.x is None or abs(st.x - s.where.x) <= ARRIVE_TOLERANCE:
+            return True
+        monsters = self.tracker.update(s.t, self._on_platforms(s.monsters) if UNSEEN_AVOID else s.monsters,
+                                       seen_at=s.t - time.monotonic())
+        self._tracks_at = time.monotonic()
+        lock = max(getattr(self.actions, "lock_until", 0.0), getattr(self.actions, "arrow_until", 0.0))
+        self._immunity(max(time.monotonic(), lock) + PLAN_START_S)
+        why = self._walk_clear(s, monsters)(s.where.x, st.x)
+        if why is None:
+            return True
+        self.log(f"  on platform {st.dst} at x {s.where.x:.0f}, not walked on to x {st.x:.0f}: {why}")
+        telemetry.emit("event", kind="evade", step="arrival", text=f"not walked on to x {st.x:.0f}: {why}")
+        return False
 
     def _onto_platform(self, s: Scene) -> Scene:
         """`s` if she's standing on a platform; else (in the air, or hanging on a rope) a look once she's
@@ -1397,9 +1982,12 @@ class Navigator:
         return False
 
     def _safe_to_stand(self, x: float, here: Platform, move: Move, monsters) -> bool:
-        """Whether no monster can reach her standing at x for the next second (as a leg that stays put)."""
+        """Whether no monster can reach her standing at x for the next second (as a leg that stays put), and with EVADE
+        to her invulnerability's end and STAND_PAST_S at least (R3: with a second of it left, a second's stand was no
+        check, and she "waited" in contact)."""
+        until = self._stand_until(0.0, 1.0) if EVADE else 1.0
         return not self.flow.danger(
-            Leg(move, Body(0.0, x, here), Body(1.0, x, here), [Span(here.id, 0.0, 1.0, x, x)]), monsters)
+            Leg(move, Body(0.0, x, here), Body(until, x, here), [Span(here.id, 0.0, until, x, x)]), monsters)
 
     def _after_chain(self, cut: str, moved_at: float, st: TripState) -> Scene:
         """A look once a chain's plan is over: once she's stopped moving if it was cut short (`cut`),
@@ -1429,13 +2017,15 @@ class Navigator:
         landed = after.where.platform
         touch = self._touch_since(since)
         hit = touch is not None or after.hp < hp - HIT
+        moved = [m for m in moved if m.kind != "step"]  # (an evade step's step along her platform: no route move)
         if telemetry.recording():  # (for the coverage report: analysis.coverage)
             telemetry.emit("moved", moves=[{"kind": m.kind, "src": m.src, "dst": m.dst, "x": round(m.x, 1)}
                                            for m in moved],
                            planned=planned.id, landed=landed.id if landed else None, hit=hit,
                            **({"touch": touch["kind"]} if touch is not None else {}))
-        trip.moves += [f"{m.kind} {m.src}->{m.dst}" for m in moved]
-        trip.moves[-1] += f": landed on {landed.id if landed else None}" + (" (hit)" if hit else "")
+        if moved:
+            trip.moves += [f"{m.kind} {m.src}->{m.dst}" for m in moved]
+            trip.moves[-1] += f": landed on {landed.id if landed else None}" + (" (hit)" if hit else "")
         if hit:
             trip.hits += 1
         if landed is not None and landed.id == planned.id:
@@ -1518,6 +2108,17 @@ class Navigator:
         glanced: list[tuple[float, tuple]] = []  # every glance's (frame time, dot), for _keys_seen
         last = getattr(st, "last", None)  # (the pass's look: a chain from a rope's top tells the watch nothing)
         top = last is not None and last.where is not None and rope_at_top(self.model, last.where) is not None
+        checked, withdrawn = None, []  # the queued chain checked against the feed's newest tracks (QUEUE_CHECK)
+        try:
+            return self._watching(current, hp, dst, send, st, since, queued, sent, cut, stood, off_since, off_leg,
+                                  ahead, over, first, moved, first_at, last_at, dot, glanced, top, checked, withdrawn)
+        finally:
+            for pid in withdrawn:  # (taken by the player before it was withdrawn: it lets go at once, its result read)
+                client.wait(pid)
+
+    def _watching(self, current, hp, dst, send, st, since, queued, sent, cut, stood, off_since, off_leg, ahead, over,
+                  first, moved, first_at, last_at, dot, glanced, top, checked, withdrawn) -> tuple[str, list]:
+        """_watch's loop, its state handed in (the queued chains it withdrew, `withdrawn`, waited for by _watch)."""
         while True:
             # The look around goes late in the chain: from where she starts, where she's going can be
             # off screen (from platform 34 the basin's slimes were under the status bar).
@@ -1567,6 +2168,17 @@ class Navigator:
             self.senses.wait_frame(GLANCE_S)
             dot, now_hp = self.senses.glance()
             seen_at = self.senses.glanced_at
+            if QUEUE_CHECK and queued is not None and checked is not queued \
+                    and queued.start - time.monotonic() <= 2 * GLANCE_S:
+                checked = queued
+                if (why_q := self._queued_meets(queued)) is not None:
+                    self.log(f"    {why_q}: the chain queued after this one withdrawn")
+                    telemetry.emit("event", kind="evade", step="queued", text=why_q)
+                    if not client.cancel(queued.plan_id):
+                        withdrawn.append(queued.plan_id)
+                    sent = sent[:len(sent) - len(queued.legs)]
+                    queued, current = None, current._replace(more=False)
+                    continue
             if dot is not None:
                 glanced.append((seen_at, dot))
             stood = _stood(stood, seen_at, dot)
@@ -1657,10 +2269,33 @@ class Navigator:
                 if (t1 - t0 >= RUN_SEEN_S or (t1 - t0) * WALK_SPEED >= RUN_CUT_UNITS) and len(xs) >= 3:
                     self.moves.ran(t0, max(xs) - min(xs) >= need)
 
-    def _climbing(self, running: _Running, dot) -> tuple[float, float] | None:
+    def _queued_meets(self, queued: _Running) -> str | None:
+        """QUEUE_CHECK: why the chain queued to start next mustn't (its first leg a drop or a climb, its flight and
+        landing or its climb and the rope's top meeting a monster the feed has now: the last glance's tracks, live or out
+        of sight QUEUE_SEEN_S at most, of the kinds the chain keeps clear of, walking as followed; her invulnerability
+        counted), or None."""
+        leg = queued.legs[0]
+        state = getattr(self.senses, "glanced", None)
+        if leg.move.kind not in ("drop", "climb") or state is None or not getattr(state, "placed", False):
+            return None
+        tracks = [self._track_of(tr, queued.start) for tr in state.tracks
+                  if tr.platform is not None and (tr.state == LIVE or tr.state == HIDDEN
+                                                  and state.t - tr.last_seen <= QUEUE_SEEN_S)
+                  and (not self.fight or self.escort.threat(tr.kind))]
+        if not tracks:
+            return None
+        off = min([a.t0 for a in leg.air] + [c.t0 for c in leg.rope], default=leg.start.t)
+        self._immunity(queued.start)
+        hit = self.flow.danger(leg, tracks, linger=END_LINGER if leg is queued.legs[-1] else 0.0, after=off)
+        if hit is None:
+            return None
+        return (f"a {hit[0].kind or 'monster'} on {hit[0].platform} by its {leg.move.kind} -> {leg.move.dst} "
+                f"({hit[1] - (time.monotonic() - queued.start):.2f} s ahead, the newest tracks)")
+
+    def _climbing(self, running: _Running, dot) -> tuple[float, float, float] | None:
         """Whether she's climbing a rope of the running plan now (its Climb from the grab to UP_EXTRA past the top, and
         her last glance's dot by the rope and CLIMB_ON_UNDER or more under its top, or no dot and the plan's height
-        so): the rope's top and her height on it (her dot's, else the plan's); None if not."""
+        so): the rope's top, her height on it (her dot's, else the plan's) and its x; None if not."""
         t = time.monotonic() - running.start
         for leg in running.legs:
             for c in leg.rope:
@@ -1668,13 +2303,38 @@ class Navigator:
                     continue
                 if dot is None:
                     y = c.at(t)[1]
-                    return (c.y1, y) if y - c.y1 >= CLIMB_ON_UNDER else None
+                    return (c.y1, y, c.x) if y - c.y1 >= CLIMB_ON_UNDER else None
                 mx, my = self.senses.localizer.to_map(dot)
                 if abs(mx - c.x) <= CLIMB_ON_X and c.y1 + CLIMB_ON_UNDER <= my <= c.y0 + CLIMB_ON_X:
-                    return c.y1, my
+                    return c.y1, my, c.x
         return None
 
-    def _climb_on(self, top: float, y: float) -> None:
+    def _top_taken(self, x: float, top: float, up_s: float) -> str | None:
+        """CLIMB_LOOK: why the top of the rope at map x (its top at map y `top`) isn't clear for her to climb on to it
+        (a monster the feed has now on the platform there, walking as followed, whose box can be on hers at the top
+        from her invulnerability's end, less IMMUNE_MARGIN_S, to `up_s` and STAND_PAST_S on), or None; None too while
+        she gets up within the window with STAND_PAST_S to spare (the touch that cut the climb left her one: up through
+        the monster then is safe, and the next pass gets her clear of it)."""
+        state = getattr(self.senses, "glanced", None)
+        q = self.model.platform_under(x, top - 1, reach=20)
+        if state is None or q is None:
+            return None
+        now = time.monotonic()
+        until = getattr(self.senses, "invulnerable_until", None)
+        window = max(0.0, until() - IMMUNE_MARGIN_S - now) if until is not None else 0.0
+        if up_s + STAND_PAST_S <= window:
+            return None
+        for tr in state.tracks:
+            if tr.platform != q.id or tr.state not in (LIVE, HIDDEN) or state.t - tr.last_seen > QUEUE_SEEN_S \
+                    or (self.fight and not self.escort.threat(tr.kind)):
+                continue
+            mo = self._track_of(tr, now)
+            lo, hi = mo.reach_over(min(window, up_s), up_s + STAND_PAST_S, q)
+            if lo - mo.half - her_body.HER_HALF <= x <= hi + mo.half + her_body.HER_HALF:
+                return f"a {tr.kind or 'monster'} by its top"
+        return None
+
+    def _climb_on(self, top: float, y: float, x: float | None = None) -> None:
         """A touch while she climbs a rope (_climbing: a MISS too): the cut let go of every key, up too, and the game
         keeps her on the rope when she's touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang
         below its top (see CLIMB_ON); up again, to the top and onto the platform there, held as a chain's climb holds it
@@ -1683,6 +2343,15 @@ class Navigator:
         in loop_tree_walls), waited for, so the next pass looks once she's there."""
         k = self.actions.keys.up.name
         hold = ms(max(0.0, y - top) / ROPE_SPEED + UP_EXTRA)
+        if CLIMB_LOOK and x is not None and (why := self._top_taken(x, top, hold / 1000)) is not None:
+            rope = min(self.model.ropes, key=lambda r: abs(r.x - x) + abs(r.top - top))
+            down = self.actions.keys.down.name
+            hold = ms(max(0.0, rope.bottom - y) / ROPE_SPEED + UP_EXTRA)
+            self.log(f"    touched on the rope {y - top:.0f} under its top, {why}: down again ({hold} ms)")
+            telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top, {why}: "
+                                                          f"down again")
+            self.actions.play([[0, down, "down"], [hold, down, "up"]], "climb_down")
+            return
         self.log(f"    touched on the rope {y - top:.0f} under its top: up again ({hold} ms)")
         telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top: up again")
         self.actions.play([[0, k, "down"], [hold, k, "up"]], "climb_on")

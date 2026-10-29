@@ -259,6 +259,19 @@ MEET_PRICE_S = 2.5     # ... more where one walks into her before her first atta
 WALL_ROOM = HER_HALF + 3.0  # units a move away keeps from a wall end of her platform (a knock can't take her off it):
                             # her half width and the slack of her dot
 MAX_MOVES = 2          # guess: steps away in a row without a throw between (her decisions are made again at each look)
+# R8 (the evade work, 2026-10-28): touched, she gets clear of the monster on her before her invulnerability ends
+# (FIGHT_CLEAR). Live in walk B 53 of 148 touches came within 2 s of the one before, 34 of them as the window ended; in the
+# simulator's hunt loop 68% of her touches came off her trips, and a fight stayed on a Horny Mushroom for three windows
+# (D:/MapleHelper-scratch/evade/design/trace_loop2.txt). With the window on at the look (Pace.window, over
+# CLEAR_MIN_S), the nearest monster on her platform too close for a throw from the ground in contact (its body on hers
+# then, CONTACT_SLACK more) and not about to die (its HP bar over KILL_BAR: a throw may well take it), and a kind that
+# counts (danger): the escape (_escape) decides, staying put CLEAR_STAY dearer than its danger there, whatever the
+# kind's keep_off. False: as before.
+FIGHT_CLEAR = True
+CLEAR_MIN_S = 0.2
+CONTACT_SLACK = 10.0
+KILL_BAR = 0.25
+CLEAR_STAY = 0.05
 # From a monster that hits hard (_escape), the steps tried: STEP_AWAY or the room there is, as before, and (ESCAPE_STEPS)
 # every ESCAPE_STEP from STEP_ROOM up, the safest end first: with the room a wall end leaves her (move_limits) the full
 # step could end by another monster or a spawn point where a shorter one is safe (loop_tree_grind at 1.0 s: from a Horny
@@ -284,6 +297,7 @@ class Pace:
     halves: dict[str, float] | None = None
     hold: Callable[[Monster], tuple[float, float] | None] | None = None  # (from, until) s after the look it stands:
                                                                           # her running attack's hit (FLINCH_HOLD_S)
+    window: float = 0.0  # s left of her invulnerability after a touch at the look (Senses.invulnerable_until): R8
 
     def at(self, m: Monster, x: float, t: float, platform: Platform | None = None) -> float:
         """Where monster `m` will be (map x) `t` s after the look, her at map x `x`: as its walk has it, within
@@ -962,8 +976,12 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
                                                                               else seen)]
               if danger is not None and danger.any and platform is not None else [])
     near_ground = reach.ground_sure(half)[0]
-    if danger is not None and platform is not None and danger.keep_off(nearest.kind) > near_ground:
-        return _escape(x, side, room, can_jump, danger, platform, others, here, halves, up, stepping, spawns)
+    touched = FIGHT_CLEAR and pace.window > CLEAR_MIN_S and danger is not None and danger.any \
+        and danger.share(nearest.kind) > 0 and abs(where[id(nearest)] - x) <= half + HER_HALF + CONTACT_SLACK \
+        and (nearest.bar is None or nearest.bar > KILL_BAR)
+    if danger is not None and platform is not None and (danger.keep_off(nearest.kind) > near_ground or touched):
+        return _escape(x, side, room, can_jump, danger, platform, others, here, halves, up, stepping, spawns,
+                       stay=CLEAR_STAY if touched else 0.0)
     if here.sure:
         return here.act
     jumpable = jump_reach(top, half) < near_ground
@@ -1112,7 +1130,7 @@ def _clear_step(x: float, y: float, m: Monster, away: str, room: float, top: flo
 def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float], bool], danger: Danger,
             platform: Platform, around: list[Monster], here: Here, halves: dict[str, float] | None = None,
             up: Callable[[float], Platform | None] | None = None, stepping: bool = True,
-            spawns: list[tuple[float, float]] = ()) -> tuple:
+            spawns: list[tuple[float, float]] = (), stay: float = 0.0) -> tuple:
     """From a monster on her platform that hits hard, on `side` of her, too near (Danger.keep_off): of a jump back
     (JUMP_BACK_SPAN away, throwing back; with JUMP_BACK_ROOM of `room` behind her), a step away (STEP_AWAY, or the
     room there is, STEP_ROOM at least) and the throw from where she is (`here`: _from_here's), the one leaving her the
@@ -1130,7 +1148,8 @@ def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float],
     room behind her within where her steps keep to (stance's `edges`, or `limits`). Not `stepping` (MAX_MOVES moves
     away in a row), no step. With ESCAPE_STEPS the step's every ESCAPE_STEP from STEP_ROOM up are weighed too, the
     safest end first (of equal danger the shortest). Neither a step nor a jump back ends within a respawn's body of one
-    of `spawns` (_close_quarters': spawn points no monster seen accounts for)."""
+    of `spawns` (_close_quarters': spawn points no monster seen accounts for). `stay`: the throw from where she is that
+    much dearer (FIGHT_CLEAR: touched, the monster on her)."""
     away = directions.opposite(side)
     back = directions.sign(away)
     options = []  # (danger there, order, act)
@@ -1145,7 +1164,7 @@ def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float],
         if not _into(x, x + back * step, platform, around, halves) and not _on_spawn(x + back * step, spawns):
             options.append((danger.at(platform.id, x + back * step, around) + ESCAPE_THROW, 1,
                             ("back", away, step, AWAY)))
-    options.append((danger.at(platform.id, x, around) + (0.0 if here.sure else ESCAPE_THROW), 2, here.act))
+    options.append((danger.at(platform.id, x, around) + (0.0 if here.sure else ESCAPE_THROW) + stay, 2, here.act))
     if ESCAPE_UP and up is not None and (q := up(x)) is not None:
         options.append((danger.at(q.id, x, around), 3, ("jump_throw", side, JumpPlan(why=f"up onto {q.id}"))))
     return min(options, key=lambda o: (round(o[0], 6), o[1]))[2]

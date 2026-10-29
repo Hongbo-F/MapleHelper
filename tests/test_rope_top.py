@@ -464,11 +464,12 @@ def test_her_climb_on_after_a_touch_only_under_the_rope_s_top():
     top, bottom = -880.0, -760.0
     running = _Running("p", [SimpleNamespace(rope=[Climb(0.0, 2.0, 111.0, bottom, top)])], time.monotonic() - 1.0,
                        False)
-    assert nav._climbing(running, loc.to_dot(111.0, top + 30)) == (top, pytest.approx(top + 30))
-    assert nav._climbing(running, loc.to_dot(111.0, top + CLIMB_ON_UNDER)) == (top, pytest.approx(top + CLIMB_ON_UNDER))
+    assert nav._climbing(running, loc.to_dot(111.0, top + 30)) == (top, pytest.approx(top + 30), 111.0)
+    assert nav._climbing(running, loc.to_dot(111.0, top + CLIMB_ON_UNDER)) == (top, pytest.approx(top + CLIMB_ON_UNDER),
+                                                                         111.0)
     for under in (CLIMB_ON_UNDER - 1, 0.0, -2.0, -12.0):
         assert nav._climbing(running, loc.to_dot(111.0, top + under)) is None, under
-    assert nav._climbing(running, None) == (top, pytest.approx(top + 60, abs=0.5))  # (the plan's: halfway up)
+    assert nav._climbing(running, None) == (top, pytest.approx(top + 60, abs=0.5), 111.0)  # (the plan's: halfway up)
     late = running._replace(start=time.monotonic() - 2.2)  # (the plan's past the top, in UP_EXTRA)
     assert nav._climbing(late, None) is None
     played = []

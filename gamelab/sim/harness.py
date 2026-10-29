@@ -332,26 +332,23 @@ def _loop_grind(sim) -> None:
 
 
 # The live QA walk's platforms on Tree Dungeon (D:/MapleHelper-scratch/qa/walk.py's PLATFORMS: 7 to 33) and its trips' time
+# (behavior.walk's)
 WALK_PLATFORMS = range(7, 34)
 WALK_TRIP_S = 40.0
 
 
 def _walk(sim) -> None:
     """Movement only, as the live QA walk of 2026-10-28 (D:/MapleHelper-scratch/qa/walk.py: random `nav` trips, no
-    attack), its trips in one navigator that avoids monsters (no escort): to a platform and an x on it drawn at random
-    (on Tree Dungeon one of WALK_PLATFORMS, 15 in from its ends), WALK_TRIP_S each, one after another until the horizon;
-    the safety stop and the Lie Detector as in every policy (_safely). Her trips' own numbers: `trips`, `arrive_share`,
-    `trip_s_per_arrival`, `touches_by`, `retouch_2s`, `mover_moves`, `evades` (outcomes)."""
+    attack), its trips in one navigator that avoids monsters (no escort): behavior.walk's, as `nav --walk` makes them
+    (to a platform and an x on it drawn at random, on Tree Dungeon one of WALK_PLATFORMS, 15 in from its ends,
+    WALK_TRIP_S each), one after another until the horizon; the safety stop and the Lie Detector as in every policy
+    (_safely). Her trips' own numbers: `trips`, `arrive_share`, `trip_s_per_arrival`, `touches_by`, `retouch_2s`,
+    `mover_moves`, `evades` (outcomes)."""
+    from ..behavior import walk
     h = sim.hunter(potion_hp=0.45)
     nav = sim.navigator(h, fight=False, seed=POLICY_SEED)
     rng = random.Random(POLICY_SEED * 1000 + sim.scenario.seed)
-    places = [p for p in sim.model.places if (p.id in WALK_PLATFORMS if sim.model.id == TREE else p.right - p.left >= 60)]
-
-    def hunt():
-        while True:
-            p = rng.choice(places)
-            nav.go(p.id, x=rng.uniform(p.left + 15, p.right - 15), seconds=WALK_TRIP_S)
-    _safely(h, hunt)
+    _safely(h, lambda: walk.walk(nav, sim.model, rng, trip_s=WALK_TRIP_S))
 
 
 # (`loop-avoid`, the trips to rest keeping clear of monsters, and `loop-hp50`, resting under half her HP, went with the

@@ -3264,3 +3264,24 @@ def nav_tree_landing_no_shot(sim):
     it drops from another, clear of both, and there's nothing to say; not hurt either way."""
     from ..control.navigator import HUNT
     return sim.navigator(sim.hunter(), fight=True).go(23, x=8.0, mode=HUNT)
+
+
+def _no_mover(tr: dict) -> bool:
+    """No move made by the mover alone (its log line ends "[N moves to go]"; a chain's says why it ended)."""
+    return not any(line.rstrip().endswith("moves to go]") for line in tr["log"])
+
+
+@tree((21, 60.0), monsters=[("Green Mushroom", 21, 130.0)], seed=2, limit=70,
+      **dict(_LIVE, realism=Realism(zero_walls=True, chase=harness.CHASE_TREE, invulnerable=harness.INVULNERABLE_LIVE)),
+      expects=(ends("arrived"), logs("contact:"), logs("pass:"), logs("spot:"),
+               check("no move a monster blocks made by the mover", _no_mover),
+               check("on 19 by the end", lambda tr: tr["world"]["platform"] == 19)))
+def nav_tree_evade(sim):
+    """A movement-only trip (no escort: navigator.AVOID) from 21 at x 60 up to 19, a Green Mushroom 70 off on 21 walking
+    at her (the walkers world: world.CHASE_TREE, her invulnerability as live): the evade step of 2026-10-28
+    (navigator.EVADE). It can touch her within CONTACT_S whatever she does, so the touch is taken as given and the jump
+    planned through it in the window after (the contact rule, "contact:"); knocked back, past it ("pass: NO_REFUGE"); on
+    22, the next jump blocked and her spot unsafe, a step along 22 to the nearest spot clear of it ("spot:"), and from
+    there past it once EVADE_S has gone by ("pass: EVADE_S"). No move of the mover's (the move a monster was in the way
+    of went to control.mover, unwatched, before)."""
+    return _nav(19, seconds=60)(sim)

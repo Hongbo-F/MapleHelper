@@ -56,6 +56,7 @@ from ..attack.ropes import Refuge
 from ..control import alarm, client
 from ..control.alarm import RETREAT_S, RETREAT_WINDOW_S
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
+from ..control import navigator as navigation
 from ..control.navigator import AVOID, Navigator
 from ..localization.mapdata import Rope
 from ..localization.scene import Scene
@@ -78,6 +79,19 @@ GO_SLACK_S = 1.5    # ... a go given this long past its trip's time (trip_s), th
 ROPE_STILL_LOOKS = 3  # looks in a row with her dot put (on no platform) that have her hanging on a rope, not in the
                       # air: a jump's top keeps it put over one look's gap at most (0.08 s) ...
 ROPE_STILL_S = 1.0    # ... looked for this long at most
+# Her retreat dodges (from 2026-10-28, the evade work's R7; DODGE): its trips are the navigator's that avoid monsters, so
+# the evade step goes with them (control.navigator.EVADE: a refuge where a monster is in the way of a move she can't
+# wait for, the contact rule, ways around, the watched mover), and besides: its chains keep clear of the monster that
+# touched her last (Navigator.go's `toucher`: TOUCHER_S, a stand-in at her x where the look has none by her); the evade
+# step's budget is the time the retreat has left (a stop's: to the player's window, RETREAT_WINDOW_S; the Lie Detector's
+# EVADE_S at most), and after a stop she waits at a refuge rather than go past a monster while one is there (no bound on
+# a refuge move's detour, no pass for the trip's deadline: a refuge that stays safe is a safe place); her looks and
+# chains keep clear of what her memory has too (the hunter's), and the refuges' ties go by her danger model. `choose`
+# weighs each place's way too: a move of it by a monster of the look (WAY_NEAR of where it sets off or lands) costs
+# WAY_BLOCKED_S more. False: as before.
+DODGE = True
+WAY_NEAR = 60.0
+WAY_BLOCKED_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -91,6 +105,7 @@ class Place:
     seconds: float
     danger: float = 0.0
     rope: Refuge | None = None
+    way: float = 0.0  # s its way is dearer by monsters of the look on it (DODGE: _way_cost), for choosing among them
 
     def text(self) -> str:
         if self.rope is not None:
@@ -213,7 +228,10 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
         log(f"{why.label}: seen {out.began:.1f} s ago, past the {RETREAT_S:g} s a retreat has: she stays where she is")
         return _end(out, seen, log, None, why=why)
     actions = h.actions.moves_only()
-    nav = Navigator(h.senses, actions, h.model, log=log, variety=0, rng=rng)  # no escort: she keeps clear of monsters
+    # no escort: she keeps clear of monsters (DODGE: of her memory's too, refuges' ties by her danger model)
+    nav = Navigator(h.senses, actions, h.model, log=log, variety=0, rng=rng,
+                    **({"memory": getattr(h, "memory", None), "danger": lambda: h.danger} if DODGE else {}))
+    stop = why is not LIE_DETECTOR and why is not KEY_CHECK  # (a stop's: the safety stop, out of darts)
     s = None
     try:
         for go in range(TRIES):
@@ -253,8 +271,13 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
             telemetry.emit("event", kind="retreat", text=f"{why.event}: retreat to {p.text()} ({p.why})")
             deadline = seen + RETREAT_WINDOW_S
             seconds = min(deadline - time.monotonic(), trip_s(p.seconds) + GO_SLACK_S)  # longer: from where she is
+            dodge = {}
+            if DODGE:  # (the evade step's budget: the time the retreat has left; after a stop, refuges to the end)
+                dodge = dict(toucher=True, evade_s=max(0.0, deadline - time.monotonic()) if stop else
+                             min(navigation.EVADE_S, max(0.0, RETREAT_S - (time.monotonic() - seen))),
+                             refuge_s=math.inf if stop else navigation.EVADE_MOVE_S, deadline_pass=not stop)
             trip = nav.go(p.platform, x=p.rope.x if p.rope else p.x, seconds=max(0.1, seconds), mode=AVOID, scene=s,
-                          vary=False, stand_until=deadline)
+                          vary=False, stand_until=deadline, **dodge)
             out.result = trip.result
             if p.rope is not None and trip.result == "arrived":
                 s = nav.mover.locate(tries=LOCATE_TRIES)
@@ -344,13 +367,14 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
     if counts and now <= SAFE_DANGER:
         return Place(here.id, x, "here: safe enough", 0.0, now)
     times = nav.planner.times(here.id, x)
+    way = _way_cost(nav, here.id, x, seen) if DODGE else (lambda pid: 0.0)
     safe, hangs, safest = [], [], [Place(here.id, x, "here: the safest within reach", 0.0, now)]
     for p in model.places:
         t = 0.0 if p.id == here.id else times.get(p.id)
         if t is None or not in_time(t):
             continue
         if p.id != here.id and model.safe(p.id):
-            safe.append(Place(p.id, None, "a safe platform", t))
+            safe.append(Place(p.id, None, "a safe platform", t, way=way(p.id)))
             continue
         if not counts:
             continue
@@ -361,7 +385,7 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
                 continue
             r = risk(p.id, gx)
             (safe if r <= SAFE_DANGER else safest).append(
-                Place(p.id, gx, "safe enough" if r <= SAFE_DANGER else "the safest within reach", tt, r))
+                Place(p.id, gx, "safe enough" if r <= SAFE_DANGER else "the safest within reach", tt, r, way=way(p.id)))
         for r in ropes.refuges(model, d, p.id, None):  # at its safest height with every spawn filled; the look too
             tt = nav.planner.arrive(here.id, x, p.id, r.x)
             if tt is None or not in_time(tt + r.on_s):
@@ -369,13 +393,43 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
             worse = max([r.danger] + [d.on_rope(r.rope, r.y + dy, seen) for dy in (-ropes.HANG_SLACK, 0.0,
                                                                                    ropes.HANG_SLACK)])
             if worse <= SAFE_DANGER:
-                hangs.append(Place(p.id, r.x, "a rope as safe: no safe platform near", tt + r.on_s, worse, r))
-    first = (lambda c: (round(c.seconds, 3), c.x is not None))  # the quickest; a safe platform before a place on one
+                hangs.append(Place(p.id, r.x, "a rope as safe: no safe platform near", tt + r.on_s, worse, r,
+                                   way=way(p.id)))
+    # the quickest (by its way too: a move by a monster of the look dearer, DODGE); a safe platform before a place on one
+    first = (lambda c: (round(c.seconds + c.way, 3), c.x is not None))
     if near := [c for c in safe if trip_s(c.seconds) <= NEAR_S]:
         return min(near, key=first)
     if safe or hangs:
-        return min(safe + hangs, key=lambda c: (round(c.seconds, 3), c.rope is not None, c.x is not None))
+        return min(safe + hangs, key=lambda c: (round(c.seconds + c.way, 3), c.rope is not None, c.x is not None))
     return min(safest, key=lambda c: (round(c.danger, 4), c.seconds))
+
+
+def _way_cost(nav: Navigator, src: int, x: float, seen) -> Callable[[int], float]:
+    """How much dearer the quickest way from (platform src, x) onto each platform is (s) with a move by a monster of a
+    look (`seen`: on the platform it sets off from within WAY_NEAR of its takeoff, or on the one it lands on within
+    WAY_NEAR of where it lands) costing WAY_BLOCKED_S more, as the route planner weighs it (Planner.quickest with that
+    penalty), against without (DODGE: `choose`); 0 where it's none dearer or there's no way. Worked out per platform once."""
+    near: dict[int, list[float]] = {}
+    for m in seen or ():
+        if m.platform is not None:
+            near.setdefault(m.platform, []).append(m.x)
+
+    def blocked(mv) -> float:
+        start = mv.takeoff if mv.takeoff is not None else mv.x
+        by = any(abs(mx - start) <= WAY_NEAR for mx in near.get(mv.src, ())) \
+            or any(abs(mx - mv.land_x) <= WAY_NEAR for mx in near.get(mv.dst, ()))
+        return WAY_BLOCKED_S if by else 0.0
+
+    memo: dict[int, float] = {}
+
+    def cost(pid: int) -> float:
+        if not near or pid == src:
+            return 0.0
+        if pid not in memo:
+            plain, weighed = nav.planner.quickest(src, x, pid), nav.planner.quickest(src, x, pid, blocked)
+            memo[pid] = max(0.0, weighed.cost - plain.cost) if plain is not None and weighed is not None else 0.0
+        return memo[pid]
+    return cost
 
 
 def trip_s(route_s: float) -> float:

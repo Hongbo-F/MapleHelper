@@ -1697,10 +1697,15 @@ def _ways(args) -> None:
 
 
 def cmd_nav(args) -> int:
+    if args.walk is None and args.platform is None:
+        print("nav: a platform to go to, or --walk MINUTES")
+        return 2
     _ways(args)
     _record("nav", args.map)  # (before the hunter, whose start may set the client right: _fit_start)
     hunter = _hunter(args)
-    nav = hunter.navigator(fighting=args.fight)
+    nav = hunter.navigator(fighting=args.fight, rng=random.Random(args.seed) if args.walk is not None else None)
+    if args.walk is not None:
+        return _nav_walk(args, hunter, nav)
     if args.avoid:  # those kinds of move cost 20 times as much: any other way wins
         weight = nav.weight
         nav.weight = lambda m: weight(m) * (20.0 if m.kind in args.avoid else 1.0)
@@ -1717,6 +1722,37 @@ def cmd_nav(args) -> int:
     for kind, v in sorted(nav.tracker.speeds.items()):
         v = sorted(v)
         print(f"  {kind} speeds seen: median {v[len(v) // 2]:.0f}, 90% {v[int(len(v) * 0.9)]:.0f} units/s ({len(v)})")
+    return 0
+
+
+def _nav_walk(args, hunter, nav) -> int:
+    """`nav --walk MINUTES`: movement only, random trips in one navigator for MINUTES (behavior.walk; the live QA walk
+    in one process), the rolling recording saved every walk.SAVE_S (save-recent's, named qa-walk; none if the recorder
+    isn't running), the Lie Detector's or the safety stop's retreat ending it as any hunt's; then, on Tree Dungeon, a
+    trip to walk.PARK and the recording saved once more."""
+    from .behavior import walk
+    from .behavior.retreat import on_alarm
+    from .control import rolling
+    if not _to_game():
+        return 1
+
+    def save(name: str = "qa-walk") -> None:
+        try:
+            out = rolling.ask(300.0, name)
+            _log(f"walk: saved the recording: {out.get('folder', out.get('error'))}")
+        except rolling.NotRunning as e:
+            _log(f"walk: the recording not saved: {e}")
+    rng = random.Random(args.seed)
+    start = time.monotonic()
+    with on_alarm(hunter):  # the Lie Detector or a stop: she retreats to a safe place, then the command stops
+        trips = walk.walk(nav, hunter.model, rng, minutes=args.walk, log=_log, save=save)
+        if hunter.model.id == walk.TREE:
+            park = nav.go(walk.PARK[0], x=walk.PARK[1], seconds=60)
+            _log(f"walk: parked on {walk.PARK[0]} at x {walk.PARK[1]:.0f}: {park.result}")
+    save("qa-walk-end")
+    arrived = sum(1 for t in trips if t.result in ("arrived", "in position"))
+    print(f"walk done in {time.monotonic() - start:.0f} s: {len(trips)} trips, {arrived} arrived, "
+          f"{sum(t.hits for t in trips)} touched on the way, {sum(t.waits for t in trips)} waits")
     return 0
 
 
@@ -2942,7 +2978,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_map)
 
     s = sub.add_parser("nav", help="go to a platform: plan a route (ropes, jumps, drops) and follow it")
-    s.add_argument("platform", type=int, help="platform id (see `map`)")
+    s.add_argument("platform", type=int, nargs="?", help="platform id (see `map`); none with --walk")
+    s.add_argument("--walk", type=float, metavar="MINUTES",
+                   help="movement only: random trips for MINUTES in one navigator (behavior.walk: the QA walk), the "
+                        "rolling recording saved every 270 s, then parked on 27 at x 77 (Tree Dungeon)")
+    s.add_argument("--seed", type=int, help="--walk's random seed for its trips and their route choices")
     s.add_argument("--x", type=float, help="and walk to this map x on it")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)
     s.add_argument("--seconds", type=float, default=180)

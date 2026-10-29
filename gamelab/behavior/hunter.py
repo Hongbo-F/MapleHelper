@@ -357,7 +357,7 @@ class Hunter:
         avoiding them; its fighting trips keep clear of the monsters her memory has too (Navigator.remembered)."""
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
                          escort=fight.FightOnTheWay(self) if fighting else None, rng=rng, memory=self.memory,
-                         moves=self.moves)
+                         moves=self.moves, danger=lambda: self.danger)
 
     def knocked(self, s: Scene) -> bool:
         """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it) was told

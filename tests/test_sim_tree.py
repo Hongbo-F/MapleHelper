@@ -465,7 +465,7 @@ def test_the_harness_builds_her_hunter_as_the_command_line_does():
         made.append(kw)
         raise Stop
     sim = SimpleNamespace(hunter=hunter)
-    assert set(harness.POLICIES) == {"tour", "loop", "loop-grind"}
+    assert set(harness.POLICIES) == {"tour", "loop", "loop-grind", "walk"}
     for policy in harness.POLICIES:
         with pytest.raises(Stop):
             harness.POLICIES[policy](sim)

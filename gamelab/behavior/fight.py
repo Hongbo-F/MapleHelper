@@ -475,7 +475,9 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
         if m.pose == "move" and m.facing:
             return m.facing * walking.get(m.kind, DEFAULT_SPEED)
         return 0.0
-    return Pace(lead, walk, walking, body_sizes(model)[1] if model is not None else None, hold)
+    until = getattr(getattr(h, "senses", None), "invulnerable_until", None)
+    window = max(0.0, until() - now) if until is not None else 0.0  # (her invulnerability left: stance's R8)
+    return Pace(lead, walk, walking, body_sizes(model)[1] if model is not None else None, hold, window)
 
 
 # The navigator's price of a landing (FightOnTheWay.landings) by what the looks don't have now: a track not seen within
