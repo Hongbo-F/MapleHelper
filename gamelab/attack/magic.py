@@ -17,7 +17,8 @@ What changes (classes.magician.SEARCH and CAST: the client's search for an aimed
   Horny Mushroom about 90 off), stepping away as the thief does from her claw's reach (attack.stance's close quarters);
 - nothing stops it (WALLS_BLOCK off: walls and floors alike), no old ramp below her (RAMP_BELOW off), no flight
   (STAR_SPEED: its hit shows at the cast's release);
-- from the ground only: no jump shots planned (stance.PASSING_JUMPS off here; behavior.fight's and the hunt loop's
+- from the ground only: no jump shots planned (stance.PASSING_JUMPS and JUMP_THROW_SNAILS off here, and ESCAPE_UP:
+  her close quarters' escape is a step or a jump away, never a jump up throwing; behavior.fight's and the hunt loop's
   jump cover none for an attack her profile doesn't make from a jump, fight._air), and her Actions never key an attack
   in the air (control.actions.Actions.ground_only: a jump throw goes out from the ground, a jump back is the jump away
   alone).
@@ -51,7 +52,10 @@ def swaps(c: Character) -> dict:
            (reach, "CLAW"): reach.Claw((("none", ((-1, -10000), (0, -9999))),), start),  # (no body reaches it)
            (reach, "RAMP_BELOW"): False, (reach, "WALLS_BLOCK"): False, (reach, "STAR_SPEED"): 1e9,
            (spots, "SHOT_RANGE"): shot_range,
-           (stance, "PASSING_JUMPS"): False, (stance, "JUMP_THROW_SNAILS"): False}
+           (stance, "PASSING_JUMPS"): False, (stance, "JUMP_THROW_SNAILS"): False,
+           # (no escape up onto a platform overhead: its jump throw would go out as a cast from the ground, her left
+           # beside the monster her close quarters just ruled too near: the review of 2026-10-29)
+           (stance, "ESCAPE_UP"): False}
     return out
 
 

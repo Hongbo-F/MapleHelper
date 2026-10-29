@@ -73,7 +73,8 @@ def test_magic_claws_search_in_the_attack_layer_and_the_thiefs_back_after():
     from gamelab.attack import spots, stance
     from gamelab.behavior import fight
     thief = (reach.STAR_RANGE, reach.SEARCH_START, reach.SHOT_RANGE, reach.WALLS_BLOCK, reach.CLAW, spots.SHOT_RANGE,
-             stance.PASSING_JUMPS, reach.can_hit.__defaults__, reach.STAR_SURE)
+             stance.PASSING_JUMPS, stance.ESCAPE_UP, reach.can_hit.__defaults__, reach.STAR_SURE)
+    assert stance.ESCAPE_UP  # (the thief's escape up onto a platform overhead, as on master)
     top, half = reach.body_of("green-mushroom")
     claw_near = reach.claw_chance(40, 0, top, half)
     assert claw_near > 0 and reach.can_shoot(380, 0, reach=434, kind="green-mushroom")  # (the thief's: star to 400)
@@ -90,15 +91,39 @@ def test_magic_claws_search_in_the_attack_layer_and_the_thiefs_back_after():
         s = _look([("green-mushroom", 200.0, None)])
         assert not reach.WALLS_BLOCK and reach.wall_to(s.platform, 0.0, 0.0, s.monsters[0]) is None  # (nothing stops it)
         assert spots.SHOT_RANGE == 310 and not stance.PASSING_JUMPS
+        assert not stance.ESCAPE_UP  # (her escape never a jump up: it would be a cast from the ground beside it)
         with character.using(MAGE):  # (no jump cover for an attack she doesn't make from a jump)
             assert not fight._air() and fight.jump_cover(None, _look([]), [], []) is None
         assert fight._air()  # (the thief's)
         assert reach.claw_edge(half) == 50 + half + reach.CLAW_MARGIN  # (her decisions keep one that far off)
     assert not magic.applied()
     assert thief == (reach.STAR_RANGE, reach.SEARCH_START, reach.SHOT_RANGE, reach.WALLS_BLOCK, reach.CLAW,
-                     spots.SHOT_RANGE, stance.PASSING_JUMPS, reach.can_hit.__defaults__, reach.STAR_SURE)
+                     spots.SHOT_RANGE, stance.PASSING_JUMPS, stance.ESCAPE_UP, reach.can_hit.__defaults__,
+                     reach.STAR_SURE)
     assert reach.claw_chance(40, 0, top, half) == claw_near
     assert not magic.apply(character.load("thief"))  # (nothing for the thief)
+
+
+def test_her_escape_is_never_the_jump_up_onto_a_platform_overhead():
+    """test_danger's scene (a Horny Mushroom 60 off on her platform, another platform 60 over her): the thief escapes up
+    onto it throwing back as she rises; she can't cast in a jump, so her escape is anything but that jump (as a cast
+    from the ground it would leave her beside the monster her close quarters ruled too near)."""
+    from gamelab.attack import stance
+    from test_danger import HER, Danger, build, seen
+    model = build([(0, 500, 1000, 500), (0, 440, 400, 440)], [("19", 300, 500)])
+    her, over = model.platform_under(700, 500), model.platform_under(200, 440)
+    mine = seen("horny-mushroom", 260, 500, her.id)
+
+    def act():
+        return stance.stance(200, 500, her, [mine], around=[mine], danger=Danger(model, HER),
+                             can_jump=lambda a, b: stance.open_above(model, her, a, b),
+                             up=lambda x: stance.overhead(model, her, x), edges=stance.drop_limits(model, her))
+    thief = act()
+    assert thief[0] == "jump_throw" and stance.plan_of(thief).why == f"up onto {over.id}"  # (the thief's, as on master)
+    with magic.swapped(MAGE):
+        hers = act()
+        plan = stance.plan_of(hers)
+        assert not (hers[0] == "jump_throw" and plan is not None and plan.why.startswith("up onto")), hers
 
 
 def _her_attacks():
