@@ -17,6 +17,8 @@ OUTBOX = LAB / "outbox"          # player results
 STOP = LAB / "STOP"              # create this file to stop the player
 GPU = LAB / "GPU"                # create this file for the re-finds' matches on the GPU (native.GPU; GAMELAB_GPU wins)
 ALARM = LAB / "ALARM.json"       # the Lie Detector was seen; nothing runs until it's cleared
+ALARM_KEYS = LAB / "alarm_keys.json"  # her moves' and pet food's keys as the running commands follow them: the player's
+                                      # allowance with the alarm up (control.alarm.AlarmKeys)
 PLAYER_LOG = LAB / "player.log"
 RECORDINGS = LAB / "recordings"  # saved frames + key events, by name
 LIE_RECORDINGS = LAB / "lie_detector"  # each Lie Detector's whole cycle as the player saw it (control.lie_recorder)
@@ -41,6 +43,8 @@ STATS = LAB / "her_stats.json"  # her DEF as her stat window read it or her touc
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)
+KEYBINDINGS = "keybindings-{}.json"  # (under LAB) a character's key bindings as the game's window last showed them
+                                    # (control.keymap: read by behavior.keycheck, `gamelab keys --read`)
 WINDOW_TRIES = LAB / "window_tries.json"  # when Alt+Enter was tried on the client (control.window_size), by any process
 
 

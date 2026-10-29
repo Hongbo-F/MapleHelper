@@ -14,7 +14,8 @@ runs normally and talks to it through files. To keep that safe it only ever:
   held), the player pages whoever is at the PC, records the Lie Detector's whole cycle
   (control.lie_recorder) while refusing every plan but two kinds (alarm_refusal: a tap of her pet food key,
   a few a minute; her retreat's moves, arrows, jump, up and down, for alarm.RETREAT_WINDOW_S after the
-  sighting; neither with the mouse; those two held to it with the alarm file up too, raised by another program), and
+  sighting; neither with the mouse; those two held to it with the alarm file up too, raised by another program; her
+  keys for them config.toml's, or where the running commands follow them to, paths.ALARM_KEYS: alarm.AlarmKeys), and
   stops once a person has run `python -m gamelab clear-alarm` and the Lie Detector has been off the screen for a
   minute; it won't start again until the alarm is cleared (it never tries to answer it, and never moves her by
   itself: her retreat is the running hunt's, behavior.retreat, which knows the map and where she is; with no hunt
@@ -50,8 +51,9 @@ from maplehelper.keys import KEY_CODES, Key
 from maplehelper.keys import parse as parse_key
 
 from .. import window
-from ..paths import ALARM, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_LOG, STOP
-from .alarm import LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS, RETREAT, RETREAT_WINDOW_S
+from ..paths import ALARM, ALARM_KEYS, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_LOG, STOP
+from .alarm import (ALARM_UNSAFE, LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS, RETREAT, RETREAT_WINDOW_S,
+                    AlarmKeys)
 
 # It used to stop after 3 idle hours; on 2026-10-23 the user asked that it not be exited proactively (starting it
 # again needs their UAC click), and it had stopped by itself overnight: a day, so it outlasts a night without plans.
@@ -659,16 +661,23 @@ class Watchdog(threading.Thread):
 class Player:
     """Plays one plan at a time: presses its keys on time (on a thread of their own) while recording
     the game's client area, and stops at once when the alarm goes off or the plan is cancelled. With the alarm up it
-    plays only what alarm_refusal lets through, by `keys` (her bindings), and says so in its log."""
+    plays only what alarm_refusal lets through, by `keys` (her bindings: config.toml's at its start), or with
+    `keys_file` by those keys with the file's over her moves and pet food (alarm.AlarmKeys, read again whenever it
+    changes, none of `unsafe`: where the running commands follow them to, control.keymap), and says so in its log."""
 
     def __init__(self, allowed: dict[str, Key], game_title: str, alarm: threading.Event | None = None,
-                 keys: GameKeys | None = None, log=None):
+                 keys: GameKeys | None = None, log=None, keys_file=None, unsafe=ALARM_UNSAFE):
         self.allowed = allowed
         self.title = game_title
         self.alarm = alarm if alarm is not None else Alarm()
         self.keys = keys
         self.log = log or _log
+        self.alarm_keys = None if keys_file is None else AlarmKeys(keys, keys_file, unsafe, log=self.log)
         self.fed: list[float] = []  # when the pet food plans it ran with the alarm up started (time.monotonic())
+
+    def allowance(self) -> GameKeys | None:
+        """Her keys as the alarm's allowance takes them now: `keys`, the file's over them (`keys_file`)."""
+        return self.keys if self.alarm_keys is None else self.alarm_keys.current()
 
     def run(self, plan: dict) -> dict:
         """Play a plan (checked by `validate` first) and return its result: the keys sent and when,
@@ -797,7 +806,7 @@ class Player:
         self.fed = [t for t in self.fed if now - t < 60]
         kind, name = plan["kind"], plan.get("id", "?")
         up = "Lie Detector alarm up" + (" (its file's; this player hasn't seen it)" if filed else "")
-        if why := alarm_refusal(plan, self.keys, since, self.fed, now):
+        if why := alarm_refusal(plan, self.allowance(), since, self.fed, now):
             self.log(f"{up}: refused {name} ({kind}): {why}")
             return {"error": f"{LIE_DETECTOR_ERROR}: {why}"}
         if kind == PET_FOOD:
@@ -864,14 +873,21 @@ def serve() -> None:
         stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
     alarm = Alarm()
-    player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm, keys=cfg.keys)
+    # (never onto maplehelper's own keys either: config.toml's [hotkeys] and [control], hidden from the game while it runs)
+    unsafe = (*ALARM_UNSAFE, *(k.name for k in getattr(cfg, "hotkeys", {}).values()),
+              *(k.name for k in (getattr(cfg, "abort", None), getattr(cfg, "slow_mode", None)) if k is not None))
+    player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm, keys=cfg.keys, keys_file=ALARM_KEYS,
+                    unsafe=unsafe)
     win32.enable_dpi_awareness()
     watchdog = Watchdog(cfg.game_window_title, alarm, shadow=True)
     watchdog.start()
-    pet = cfg.keys.pet_food.name if cfg.keys is not None and cfg.keys.pet_food is not None else None
+    now_keys = player.allowance()
+    pet = now_keys.pet_food.name if now_keys is not None and now_keys.pet_food is not None else None
     _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector "
          f"(with it seen: {f'a tap of {pet!r} for her pet, {PET_FOOD_PER_MIN} a minute, and ' if pet else ''}her "
-         f"retreat's moves for {RETREAT_WINDOW_S:g} s; nothing else)")
+         f"retreat's moves for {RETREAT_WINDOW_S:g} s; nothing else; her keys for them "
+         + ("config.toml's" if player.alarm_keys.used is None else f"{ALARM_KEYS.name}'s, as followed") + ", and "
+         f"{ALARM_KEYS.name}'s whenever it changes)")
     idle_since = time.monotonic()
     with win32.precise_timers():
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:

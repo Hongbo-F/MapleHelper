@@ -618,6 +618,8 @@ class Noise:
     (detect_miss is drawn per look, so with it on, an extra look does change what later looks see)."""
     miss: float = 0.0            # chance a star that would hit misses (lab/shots.jsonl: 72.5% of 204 hit)
     regular_miss: float = 0.0    # ... and a regular attack's star, on top of it (behavior.keycheck's doubt with her keys right)
+    miss_unseen: float = 0.0     # chance a missed star's MISS popup over its monster isn't seen (World.misses: under
+                                 # other numbers, a window); 1: none is (the doubt as before her attack's MISS was read)
     walk_jitter: float = 0.0     # units: letting go of an arrow stops her up to this much early or late
     lag_sd: float = 0.0          # the lags' spread around their medians, times the measured one (body.Lags:
                                  # sd 7.7 ms of when the game sees each key, which the wait for its next
@@ -1261,6 +1263,9 @@ class World:
         # "nothing" (no monster picked, or one dead by then); how far above her feet the pick's were, + above). What
         # each kind of throw hit (sim.harness: `attack_kinds`).
         self.attack_log: list[tuple] = []
+        # Her stars' MISS popups (as the game draws one over a monster her star missed, where it was as the star landed:
+        # FakeEyes.misses): (s it shows from, map x, the monster's feet's y, its height), Noise.miss_unseen's left out
+        self.misses: list[tuple[float, float, float, float]] = []
         self._key_tag = ""              # the plan of the key being taken (_handle), for attack_log
         self.pet_drank_ms = -10_000     # when her pet last drank one
         self.pet_fed = 0                # times she fed her pet (the pet food key)
@@ -1284,6 +1289,9 @@ class World:
         self.knock_log: list[tuple[float, int, int | None, float]] = []
         self._knocked_from: tuple[float, int, float] | None = None  # the touch's (t, platform, her y) while it flies
         self.actions = _actions(keys, self.realism.game_keys)
+        # her chair and SIT, which nothing presses in this world: where the window draws them (binding_view)
+        self.unused = {k.name: what for what, k in (("chair", keys.chair), ("sit", keys.sit)) if k is not None
+                       and k.name not in self.actions}
         self.actions.setdefault("\\", "set_key")  # (the KEY BINDINGS window's keys: _key_window)
         self.actions.setdefault("esc", "esc")
         self.key_window = False   # the KEY BINDINGS window open (Realism.game_keys) ...
@@ -1633,11 +1641,14 @@ class World:
 
     def binding_view(self) -> dict[str, int | str]:
         """The keys' functions as the KEY BINDINGS window draws them (perception.keybindings: key name -> its function
-        picture's id, or PICTURE for an item's or a skill's), from what each key does in this world."""
+        picture's id, her Lucky Seven's and pet food's pictures by name, kb.PICTURES, or PICTURE for another item's),
+        from what each key does in this world."""
         from ..perception import keybindings as kb
         icons = {"attack": 52, "jump": 53, "pick": 50, "left": 300, "right": 301, "up": 302, "down": 303,
-                 "set_key": 9, "esc": 46, "skill": kb.PICTURE, "pet_food": kb.PICTURE, "potion": kb.PICTURE}
-        return {key: icons[action] for key, action in self.actions.items() if action in icons}
+                 "set_key": 9, "esc": 46, "skill": "lucky_seven", "pet_food": "pet_food", "potion": kb.PICTURE,
+                 "chair": "chair", "sit": 51}
+        shown = {key: icons[what] for key, what in self.unused.items()}
+        return {**shown, **{key: icons[action] for key, action in self.actions.items() if action in icons}}
 
     def _sent(self, e: Event) -> float:
         """The clock time key event `e` went out: when it was sent for (its lags count from then, not from
@@ -2347,6 +2358,10 @@ class World:
                           and self.chance("regular_miss") < self.noise.regular_miss):
             self.note(f"star misses {m.kind} #{m.idx} at {dx:+.0f}")
             self._logged(how, "miss")
+            if not (self.noise.miss_unseen and self.chance("miss_unseen") < self.noise.miss_unseen):
+                lands = self.ms if key_ms is None else max(self.ms, key_ms + int(STAR_DELAY * 1000))
+                feet = m.platform.y_at(m.platform.clamp(mx))
+                self.misses = [p for p in self.misses if p[0] > self.t - 5.0] + [(lands / 1000, mx, feet, m.height)]
             return
         her = self.character
         stars = her.skill if skill else her.stars

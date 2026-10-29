@@ -62,6 +62,8 @@ class Scene(Observation):
                                                           # (localization.players: confirmed over two looks)
     touch: dict | None = None     # with a continuous feed, the newest touch of hers told as of this look's frame
                                   # (worldstate.WorldState.touch: MISS or damage, when); None: none yet, or no feed
+    misses: list = field(default_factory=list)  # her attack's MISS popups in this look's frame over her regular presses'
+                                                # targets, as map (x, y) of their bottom centre (behavior.hunter._misses)
     tracks: list = field(default_factory=list)  # with a continuous feed, the monsters it follows as of this look's frame
                                                 # (tracking.Track: live, hidden on screen up to HIDE_S, or just dead):
                                                 # those it didn't find are about still (localization.unseen); [] without

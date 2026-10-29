@@ -108,6 +108,12 @@ MESSAGES_S = 0.4
 # not read before (perception.messages: 0.28 s CPU a read live)
 CHAT_S, CHAT_OCR_S = 0.035, 0.28
 CAPTURE_S = 0.035         # the client's whole picture (Eyes._capture: the perception service's next frame)
+# Her star's MISS popup over a monster (World.misses, Eyes.misses): read for this long after the star lands (live a
+# fresh one read 0.87-0.96 in 2-7 frames at 10-15 a second, about half a second, faded past it: perception.misses), its
+# bottom this far over the monster's top, rising this fast (units a second)
+MISS_SHOWN_S = 0.45
+MISS_ABOVE = 10.0
+MISS_RISE = 30.0
 EXP_START = (LEVEL_19.level, LEVEL_19.exp)  # her level and EXP when a run starts on the first map (World.character's)
 START_LATENCY = 0.01      # a plan starts this long after it's handed over (the player polls its inbox)
 RESULT_LATENCY = 0.01     # ... and its result is seen this long after it ends
@@ -502,6 +508,22 @@ class FakeEyes(Eyes):
         hp = hp_number.read(self._hp_box(), STRETCHED)
         lv = lv_number.read(self._lv_box(), STRETCHED)
         return hp.of, lv.level
+    def misses(self, obs, boxes) -> list:
+        """Eyes.misses: her stars' MISS popups (World.misses) showing at the look's time (MISS_SHOWN_S from its star's
+        landing, as one reads live: perception.misses), their bottom centre MISS_ABOVE over the monster's top where it
+        was then, in look-frame px (by the look's placing of her: Scene.screen_x), inside `boxes`."""
+        from ..perception.misses import Popup
+        if getattr(obs, "where", None) is None or obs.tag is None:
+            return []
+        out = []
+        for t0, x, feet, height in self.world.misses:
+            age = obs.t - (self.world.origin + t0)
+            if not 0.0 <= age <= MISS_SHOWN_S:
+                continue
+            px, py = obs.screen_x(x), obs.screen_y(feet - height - MISS_ABOVE - MISS_RISE * age)
+            if any(x0 <= px <= x1 and y0 <= py <= y1 for x0, y0, x1, y1 in boxes):
+                out.append(Popup(px, py, 0.95))
+        return out
 
     def bar(self, obs: Observation, mob: Mob) -> float | None:
         """Eyes.bar, off the bar drawn over it as the game draws it (perception.hud.draw_hp_bar); with

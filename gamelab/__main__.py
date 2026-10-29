@@ -642,9 +642,13 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     TooStrong: her safety stop's reserve at or over her pet's warning) is refused before it hunts; with `--low-hp`
     given neither is refused, but `--low-hp` in HP (over 1) needs her max HP too: it's waited for as without it."""
     from .behavior.hunter import Hunter
+    from .control import keymap
     from .localization import mapdata
     from .screen import GAME_VIEW
-    cfg, keys, _ = her_setup()
+    cfg, _, _ = her_setup(remembered=False)
+    start = keymap.at_start(cfg.keys)  # (the binding last read off the game's window, else config.toml's [keys])
+    keys = start.keys
+    _log(f"her keys: {start.source}")
     title = cfg.game_window_title
     model = mapdata.load(args.map)
     perception = _perception(model, title, args.cmd + ("-" + args.mode if hasattr(args, "mode") else ""),
@@ -659,6 +663,12 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
         from .perception.messages import warm
         warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
+    hunter.config_keys = cfg.keys
+    if start.attack_off and not viewer:
+        _log(f"  the remembered key bindings have {start.attack_off}: no regular attacks this run (Lucky Seven only)")
+        hunter.regular_off(f"the remembered key bindings: {start.attack_off}")
+    if not viewer and hasattr(hunter, "actions") and not keymap.publish(keys, why=f"`{args.cmd}` at its start"):
+        _log("  her keys for the Lie Detector's allowance not written (the player keeps the ones it has)")
     hunts = throws and not viewer and hasattr(args, "low_hp")  # (`nav`'s trips have the stop as it is)
     wait = getattr(hunter, "wait_max_hp", None) if hunts and (args.low_hp is None or args.low_hp > 1) else None
     if wait is not None and not wait():  # (--low-hp in HP needs her max HP too)
@@ -744,9 +754,17 @@ def cmd_keys(args) -> int:
     doubt (behavior.keycheck.KeyCheck). With --record the backslash's and Esc's plans record the client (RECORD_FPS
     for OPEN_MS and CLOSE_MS) to time the window's opening and closing, saved with a report under
     lab/shots/keybindings-<time>. Nothing else is sent: no attack, no move, no click; with the Lie Detector alarm up,
-    nothing."""
+    nothing. A window read live has her keys followed to where it shows them (control.keymap.follow, said) and
+    remembered for her next runs (lab/keybindings-<her>.json: every command's keys at its start, not config.toml's
+    [keys]); --forget drops that; with none of the three, the keys in use are said."""
+    from .control import keymap
     from .perception import keybindings as kb
     reader = kb.Reader()
+    if args.forget:
+        path = keymap.path_of()
+        print(f"{path.name} dropped: config.toml's [keys] from the next start" if keymap.forget()
+              else f"no key bindings remembered ({path.name}): config.toml's [keys] in use")
+        return 0
     if args.frame:
         for path in args.frame:
             frame = np.asarray(Image.open(path).convert("RGB"))
@@ -756,9 +774,13 @@ def cmd_keys(args) -> int:
                 print(f"  {kb.functions_text(reader.functions(frame, r))}")
         return 0
     if not args.read:
-        print("keys: --read (live: opens the KEY BINDINGS window with the backslash, reads it, closes it) or --frame "
-              "PNG (a saved frame, nothing sent)")
-        return 2
+        cfg, _, _ = her_setup(remembered=False)
+        start = keymap.at_start(cfg.keys)
+        print(f"her keys: {start.source}")
+        print("  " + ", ".join(f"{f} {n}" for f, n in keymap.names(start.keys).items() if n))
+        print("keys: --read (live: opens the KEY BINDINGS window with the backslash, reads it, closes it, follows and "
+              "remembers her keys), --frame PNG (a saved frame, nothing sent), --forget (config.toml's [keys] again)")
+        return 0
     if client.alarm_up():
         print("the Lie Detector alarm is up: nothing sent")
         return 3
@@ -779,7 +801,28 @@ def cmd_keys(args) -> int:
         return 1
     fn = reader.functions(check._frame_read, r) if check._frame_read is not None else {}
     _say_keys(r, fn, configured)
+    _follow_read(hunter, r, fn, check.kept)
     return 0 if check.window_state == "closed" else 1
+
+
+def _follow_read(hunter, r, fn: dict, frame=None) -> None:
+    """keys --read: her keys followed to where the window read `r` shows them (control.keymap.follow), said, and
+    remembered for her next runs (and her moves' and pet food's for the player) unless one of them can't be followed."""
+    from .control import keymap
+    if not r.read or not fn or getattr(hunter, "actions", None) is None:
+        return
+    f = keymap.follow(hunter.actions.keys, fn, r.illegible)
+    if f.stop is not None:
+        print(f"  HER KEYS CAN'T BE FOLLOWED: {f.stop}: nothing remembered (put them right in the game's Key Bindings)")
+        return
+    print("  her keys as the game has them: " + (f.text() if f.moved else "as she has them")
+          + "".join(f"; {x}" for x in f.said if not any(x.startswith(k.replace('_', ' ') + ' on ') for k in f.moved)))
+    off = f.off.get("attack")
+    saved = keymap.remember(f.keys, config_keys=getattr(hunter, "config_keys", None), frame=frame, preset=r.preset,
+                            functions=fn, why="keys --read", attack_off=None if off is None else f"ATTACK {off}")
+    keymap.publish(f.keys, why="keys --read")
+    print(f"  remembered in {saved}: her keys at her next runs' start" if saved is not None
+          else "  NOT REMEMBERED: its file couldn't be written")
 
 
 RECORD_FPS = 15      # keys --record: frames a second recorded after the backslash and after Esc ...
@@ -867,7 +910,9 @@ def _keys_recorded(hunter, reader, configured: str) -> int:
     keep("open", frames[-1])
     last = reads[-1]
     report["reading"] = last.record()
-    _say_keys(last, reader.functions(np.asarray(frames[-1]), last) if last.read else {}, configured)
+    fn = reader.functions(np.asarray(frames[-1]), last) if last.read else {}
+    _say_keys(last, fn, configured)
+    _follow_read(hunter, last, fn, out / "open.png")
     for go in (1, 2):
         res = client.submit([[0, "esc", "down"], [40, "esc", "up"]], fps=RECORD_FPS, duration_ms=CLOSE_MS, scale=1,
                             lead_ms=0, name=f"keybindings_close{go}")
@@ -943,6 +988,7 @@ def cmd_pet(args) -> int:
             present = not window.minimized(window.find_game(title))
         except RuntimeError:  # no game window: the pet isn't out
             present = False
+        _pet_keys(hunter)
         try:
             level = hunter.pet.tend(present=present)
         except client.PlayerError as e:  # the alarm's limits, the player stopped: the food goes again next time
@@ -953,6 +999,23 @@ def cmd_pet(args) -> int:
         if not args.every:
             return 0
         time.sleep(args.every * 60)
+
+
+def _pet_keys(hunter) -> None:
+    """`pet --every`, before each follow: her keys as the binding last read off the game's window has them now
+    (control.keymap.at_start: a hunt that followed her pet food elsewhere since this one started wrote it), followed
+    if they changed (said), and her moves' and pet food's for the player."""
+    from .control import keymap
+    actions = getattr(hunter, "actions", None)
+    if actions is None or not hasattr(hunter, "follow"):
+        return
+    start = keymap.at_start(getattr(hunter, "config_keys", actions.keys))
+    if not keymap.changes(hunter.actions.keys, start.keys):
+        return
+    _log(f"pet: her keys changed since it started ({keymap.changes_text(keymap.changes(hunter.actions.keys, start.keys))}"
+         f"): {start.source}")
+    hunter.follow(start.keys)
+    keymap.publish(start.keys, why="`pet --every`: the remembered key bindings changed")
 
 
 def _pet_unfit(title: str, perception, want: tuple[int, int] | None = None):
@@ -2553,6 +2616,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--record", action="store_true", help="with --read: record its opening and closing (15 frames a "
                                                           "second) into lab/shots/keybindings-<time>")
     s.add_argument("--frame", nargs="+", help="saved frames (PNG, 1366x768) to read instead: nothing sent")
+    s.add_argument("--forget", action="store_true", help="drop the key bindings last read (lab/keybindings-<her>.json): "
+                                                          "config.toml's [keys] from the next start")
     s.set_defaults(func=cmd_keys)
 
     s = sub.add_parser("pet", help="keep her pet fed: its fullness followed in time (read once off her Character Info) "

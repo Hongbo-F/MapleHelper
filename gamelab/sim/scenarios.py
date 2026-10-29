@@ -103,6 +103,8 @@ class Scenario:
     map_id: int = MAP_ID         # the map it's on (real_map)
     her: Her | None = None       # her HP, level and pet (world.Her); None: as she is on the map (HER)
     attack: str | None = None    # the stack's attack a throw (behavior.attacks.MODES); None: the hunter's own
+    remembered: dict | None = None  # her keys as a read of the game's window left them (control.keymap.remember, in the
+                                    # run's own lab), which her hunter starts with (keymap.at_start); None: none
     doc: str = ""
 
 
@@ -256,7 +258,17 @@ class Sim:
         # behavior.bootstrap; the world's character is the world's, not hers to know)
         if self.scenario.attack is not None:  # Lucky Seven or the regular attack a throw (behavior.attacks)
             kw.setdefault("attack", self.scenario.attack)
-        h = Hunter(self.eyes, self.keys, self.model, log=self.log, feed=self.feed, **kw)
+        keys = self.keys
+        if self.scenario.remembered is not None:  # (as gamelab.__main__._hunter: the binding last read, if any)
+            from ..control import keymap
+            if not keymap.path_of("thief").exists():
+                keymap.remember(keymap.keys_of(self.scenario.remembered, self.keys), "thief", config_keys=self.keys,
+                                why="the scenario's")
+            start = keymap.at_start(self.keys, "thief")
+            keys = start.keys
+            self.log(f"her keys: {start.source}")
+        h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)
+        h.config_keys = self.keys
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         self.senses.append(h.senses)
         # The way each attack is meant to go, for the world to count those her facing sends the other way
@@ -2682,7 +2694,10 @@ def loop_tree_out_of_darts(sim):
     (behavior.retreat), whoever is at the PC is paged, and the recording's last minutes are saved. (On seed 4 since the
     reviews of her kill's monster, 2026-10-27: on seed 1 her first kill's monster, bound and by her, kept her from the
     jump onto 22 at 1.6 s, and the stop came at 82 s on 28, where her retreat to the rope at x 146 was knocked back off
-    32 twice and ended on 33. Of seeds 1-12, all but 1 meet it, and master's stack all but 3 and 12.)"""
+    32 twice and ended on 33. Of seeds 1-12, all but 1 meet it, and master's stack all but 3 and 12.) Since the afternoon of 2026-10-28 out of darts'
+    stop due in the hunt loop has the key bindings read first (her Lucky Seven's key moved does the same): due at 72.4 s,
+    on 25 (a safe platform: at once), the window read, Lucky Seven on Shift as configured: the stop at 76.1 s, her moves
+    alone after it."""
     return darts_stop(5)(sim)
 
 
@@ -2714,19 +2729,33 @@ def key_check_run(minutes: float = 4, grind: bool = True):
         sim.world.advance(sim.clock.now)
         said = [[float(line.split()[0]), line.split(None, 1)[1].strip()] for line in sim.trace.log
                 if "THE REGULAR ATTACK TOOK NO EFFECT" in line or "ATTACK KEY:" in line or "her stars:" in line
-                or "the key bindings" in line or "KEY CHECK" in line]
-        outcome = next((t for t, line in said if line.startswith("ATTACK KEY:")), None)
-        attack = {sim.keys.attack.name, *(k for _, k in sim.world.realism.game_keys if k is not None)}
+                or "the key bindings" in line or "KEY CHECK" in line or "HER KEYS:" in line or "HER JUMPS" in line
+                or "HER RUNS" in line or "the key bindings checked first" in line or "her attack's MISS" in line]
+        outcome = next((t for t, line in said if line.startswith(("ATTACK KEY:", "HER KEYS:"))
+                        and "put off" not in line and "no check" not in line), None)
+        attack = {sim.keys.attack.name, *(k for f, k in sim.world.realism.game_keys if k is not None and f == "attack")}
         after: dict[str, int] = {}
+        keys_after: dict[str, int] = {}
+        keys_all: dict[str, int] = {}
         for t, name, events, _ in sim.trace.plans:
             for e in events:
-                if outcome is not None and t > outcome and len(e) == 3 and e[2] == "down" and e[1] in attack:
-                    after[e[1]] = after.get(e[1], 0) + 1
+                if len(e) == 3 and e[2] == "down":
+                    keys_all[e[1]] = keys_all.get(e[1], 0) + 1
+                if outcome is not None and t > outcome and len(e) == 3 and e[2] == "down":
+                    keys_after[e[1]] = keys_after.get(e[1], 0) + 1
+                    if e[1] in attack:
+                        after[e[1]] = after.get(e[1], 0) + 1
         window = [[t, name, [e[1] for e in events if len(e) == 3 and e[2] == "down"]] for t, name, events, _
                   in sim.trace.plans if name.startswith("key_bindings")]
         kills = [k for k in sim.world.kill_log if k[3] == "her" and outcome is not None and k[0] > outcome]
+        from ..control import keymap
+        remembered = keymap.at_start(sim.keys, "thief")
         return {"said": said, "window": window, "pages": sim.player.pages, "stopped": stopped,
-                "kills_after": len(kills), "attack_keys_after": dict(sorted(after.items())), "outcome_at": outcome}
+                "kills_after": len(kills), "attack_keys_after": dict(sorted(after.items())), "outcome_at": outcome,
+                "keys_after": dict(sorted(keys_after.items())), "keys_all": dict(sorted(keys_all.items())),
+                "remembered": None if remembered.data is None else remembered.data.get("keys"),
+                "moves": dict(tour.h.moves.counts), "watch": dict(tour.h.attacks.watch.counts),
+                "casts": None if tour.h.attacks.casts is None else dict(tour.h.attacks.casts.counts)}
     return run
 
 
@@ -2752,7 +2781,7 @@ KEY_EXPECTS = (
 @tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),))),
       expects=KEY_EXPECTS + (
-          check("her stars told: she has them", lambda tr: _said(tr, "her stars: ") and _said(tr, "she has them")),
+          check("her stars asked", lambda tr: _said(tr, "her stars: ")),
           logs("ATTACK KEY: THE GAME HAS ATTACK ON A, NOT CTRL"),
           check("paged once, about the attack key", lambda tr: len(tr["result"]["pages"]) == 1
                 and "attack key" in tr["result"]["pages"][0][1]),
@@ -2763,18 +2792,12 @@ def loop_tree_grind_attack_key(sim):
     """`tour --loop --grind --map 10002073` (the feed, the attack choice) with the game's Attack on A, not on her Ctrl
     (as live on 2026-10-28 00:30, the user's own play having moved it): her Lucky Seven casts hurt, her regular presses
     to finish a monster do nothing; 5 of them in a row judged without effect, the doubt (on seed 1 at 37.1 s: a Green
-    Mushroom at 4%, its 9/233 HP, pressed at from 32.3 s); a monster near, so away to 25 (2.2 s), a Green Mushroom
-    within 250 of her there still: the check put off (her regular presses held, Lucky Seven at it); at the first quiet
-    look 5 s on (45.0 s) the check again: her stars told by a cast's MP since the doubt's first press; the backslash, the
-    window read (ATTACK on A, preset 1), Esc, closed (45.1-46.9 s); her regular attack A for the rest of the run, paged
-    once; kills with it after. (Until the review of 2026-10-28 the window opened at 40.0 s with that Green Mushroom near:
-    nothing looked again after the retreat.) (Seed 13 since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does:
-    navigator.TOUCH_CUTS), the world's invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.
-    INVULNERABLE, LEVEL_25_AVOID): on seed 1 no 5 regular presses in a row went without effect in its 2 minutes, nor in
-    the world as it was with the branch's stack; of seeds 1-13 11 and 13 meet all of this (master's stack in master's world
-    1, 12 and 13: the doubt is a seed's luck).
-    On seed 13: the doubt at 81.1 s (a Green Mushroom at 4%, 10/233 HP), away to 25 (2.0 s), a Green and a Horny
-    Mushroom near: put off; her stars told at 95.1 s, the window read and closed at 96.2-96.9 s, A from then on.)"""
+    Mushroom at 4%, its 9/233 HP, pressed at from 32.3 s); a monster near, so away to 25 (2.2 s), a safe platform, so the
+    Green Mushroom within 250 of her there (on 24: it can't touch her) doesn't put the check off (keycheck.near_her, from
+    the afternoon of 2026-10-28; until then put off to 45.0 s): her stars not known (no monster in reach to cast at), the
+    backslash, the window read (ATTACK on A, preset 1), Esc, closed (39.7-41.2 s); her regular attack A from then,
+    remembered, paged once; kills with it after. (Until the review of 2026-10-28 the window opened at 40.0 s with that
+    Green Mushroom near on 23's side: nothing looked again after the retreat.)"""
     return key_check_run(2)(sim)
 
 
@@ -2787,30 +2810,41 @@ def loop_tree_grind_attack_key(sim):
           check("no regular attack after it", lambda tr: not tr["result"]["attack_keys_after"]),
           logs("the regular attack off this run")))
 def loop_tree_attack_unbound(sim):
-    """As loop_tree_grind_attack_key, the game's Attack on no key: the same doubt, put off and check, the window read
-    with ATTACK on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven only (her
-    throws that would have been the regular attack: "the regular attack off this run"), paged once. (Seed 13 since
-    2026-10-28, as loop_tree_grind_attack_key's: of seeds 1-13, 11 and 13 meet all of this.)"""
+    """As loop_tree_grind_attack_key, the game's Attack on no key: the same doubt and check, the window read with ATTACK
+    on none (no key of the keyboard carries it), so no more regular attacks this run: Lucky Seven only (her throws that
+    would have been the regular attack: "the regular attack off this run"), paged once; remembered so (her next run
+    starts with the regular attack off)."""
     return key_check_run(2)(sim)
 
 
 @tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True,
-      **dict(_LIVE, noise=Noise(regular_miss=1.0)),
+      **dict(_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
           check("nobody paged", lambda tr: not tr["result"]["pages"]),
           check("the hunt went on: kills after it", lambda tr: tr["result"]["kills_after"] >= 3),
           check("no stop", lambda tr: tr["result"]["stopped"] is None)))
 def loop_tree_attack_misses(sim):
-    """Her keys right, every regular star missing (Noise.regular_miss): 5 presses without effect, the doubt (the same
-    Green Mushroom at 37.1 s), the window read with ATTACK on Ctrl as configured: the misses were something else; that
-    target gets no more regular attacks, the hunt goes on (Ctrl pressed at others after), nobody paged. A doubt within
-    300 s of it would hold the regular attack at its targets, with no check. (Seed 8 since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does:
-    navigator.TOUCH_CUTS), the world's invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.
-    INVULNERABLE, LEVEL_25_AVOID): on seed 1 no 5 regular presses in a row went without effect in its 2 minutes, nor in
-    the world as it was with the branch's stack; of seeds 1-13 8 meet all of this (master's stack in master's world
-    1, 4 and 12: the doubt is a seed's luck).
-    On seed 8: the doubt at 100.6 s, the window read at 111.7-112.4 s.)"""
+    """Her keys right, every regular star missing (Noise.regular_miss) and its MISS popup not seen (Noise.miss_unseen:
+    under other numbers, say): 5 presses without effect, the doubt (the same Green Mushroom at 37.1 s), the window read
+    with ATTACK on Ctrl as configured: the misses were something else; that target gets no more regular attacks, the hunt
+    goes on (Ctrl pressed at others after), nobody paged. A doubt within 300 s of it would hold the regular attack at its
+    targets, with no check. (loop_tree_attack_misses_seen: the MISSes read, no doubt.)"""
+    return key_check_run(2)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, noise=Noise(regular_miss=1.0)),
+      expects=(check("her attack's MISS read over her regular presses' targets",
+                     lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
+               check("no doubt: the MISSes say her key works", lambda tr: not _said(tr, "THE REGULAR ATTACK TOOK NO")),
+               check("the window never opened", lambda tr: not tr["result"]["window"]),
+               check("nobody paged", lambda tr: not tr["result"]["pages"]),
+               check("no stop", lambda tr: tr["result"]["stopped"] is None)))
+def loop_tree_attack_misses_seen(sim):
+    """As loop_tree_attack_misses, every regular star missing, its MISS popup over the monster read (perception.misses;
+    the user, 2026-10-28: "Yes, read it"): each press with one over its target took effect (keycheck: "missed"), so no
+    run of 5 without effect: no doubt, no window, nobody paged."""
     return key_check_run(2)(sim)
 
 
@@ -2825,13 +2859,98 @@ def loop_tree_attack_misses(sim):
 def loop_tree_attack_no_darts(sim):
     """`tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts Lucky Seven's presses, so
     it doesn't fire while she throws it) with 40 throwing stars: gone at about 50 s, her regular presses only swing the
-    claw, nothing at range; 5 in a row without effect at a Green Mushroom she had hurt (91%), the doubt at 81.4 s; a
-    Green Mushroom near after her retreat to 25: the check put off, her regular presses held, so Lucky Seven at them,
-    which takes no MP with no stars (the world's); put off once more (a Green Mushroom within 250 at the quiet look's
-    check, after her stars "not known": nothing in reach to cast at); out of darts' own stop at 20 such presses (121.3 s:
-    her retreat, paged, the recording kept). Until the review of 2026-10-28 her stars' test stopped it at 5 casts
-    without MP (79.5 s), which live, with her stars in her bag, 7-8 in a row had (behavior.keycheck)."""
+    claw, nothing at range; 5 in a row without effect at a Green Mushroom she had hurt (91%), the doubt at 81.4 s; away
+    to 25 (6.4 s), a safe platform: the check there (her stars' test: a cast lowered its target's bar, she has them; the
+    window, ATTACK on Ctrl as configured: no more regular attacks at that Green Mushroom); her regular presses held at
+    the next doubts' targets (no check within 300 s), Lucky Seven at them, which takes no MP with no stars (the
+    world's); out of darts' own stop at 20 such presses (135.3 s: within the check's gap, no key check first: her
+    retreat, paged, the recording kept). Until the afternoon of 2026-10-28 the check was put off (a Green Mushroom on
+    24 within 250 of her on 25) and the stop came at 121.3 s; until the review of 2026-10-28 her stars' test stopped it
+    at 5 casts without MP (79.5 s), which live, with her stars in her bag, 7-8 in a row had (behavior.keycheck)."""
     return key_check_run(4)(sim)
+
+
+# --- her other keys moved in the game: followed (the user, 2026-10-28: "Follow them"; control.keymap) ----------------
+# Her jump or an arrow on another key: her jumps don't lift her or her runs don't move her (keycheck.MoveWatch), the
+# doubt, the check, the window read: followed. Her Lucky Seven on another key: her casts take no MP and kill nothing,
+# out of darts' stop due: the check first, the window read: followed, no stop. And the binding read, remembered: the next
+# run starts with it (keymap.at_start), no doubt.
+
+def _keys_ok(after: dict, pressed: str, never: str) -> bool:
+    return after.get(pressed, 0) >= 1 and never not in after
+
+
+FOLLOW_EXPECTS = (
+    check("the backslash first, then Esc with the window open, nothing else in it, no MENU", _window_ok),
+    check("paged once, about her keys", lambda tr: len(tr["result"]["pages"]) == 1
+          and "her keys" in tr["result"]["pages"][0][1]),
+    check("no stop", lambda tr: tr["result"]["stopped"] is None),
+    check("remembered for her next runs", lambda tr: tr["result"]["remembered"] is not None))
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("jump", "c"),))),
+      expects=FOLLOW_EXPECTS + (
+          logs("HER JUMPS DIDN'T LIFT HER 6 TIMES IN A ROW"), logs("HER KEYS: THE GAME HAS THEM ON OTHER KEYS"),
+          logs("JUMP ALT -> C"),
+          check("C pressed after it, Alt never", lambda tr: _keys_ok(tr["result"]["keys_after"], "c", "alt")),
+          check("her jumps lifted her after it", lambda tr: tr["result"]["moves"].get("lifted", 0) >= 3),
+          check("C remembered as her jump", lambda tr: (tr["result"]["remembered"] or {}).get("jump") == "c")))
+def loop_tree_grind_jump_key(sim):
+    """`tour --loop --grind --map 10002073` (the feed, the attack choice) with the game's JUMP on C, not on her Alt (her
+    own play having moved it): her jumps don't lift her, her trips end short and she drops to the floor; 6 jumps in a
+    row her minimap dot didn't rise over, the doubt (keycheck.MoveWatch); the check where she is (her moves doubted: no
+    retreat) at a quiet moment, the window read (JUMP on C), Esc, closed; her jump C from then on (her chains' key names
+    and her actions'), remembered (lab/keybindings-thief.json) and her moves' keys for the player (alarm_keys.json),
+    paged once; her jumps lift her again."""
+    return key_check_run(4)(sim)
+
+
+@tree((23, -150.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("right", "e"),))),
+      expects=FOLLOW_EXPECTS + (
+          logs("HER RUNS DIDN'T MOVE HER 4 TIMES IN A ROW"), logs("RIGHT RIGHT -> E"),
+          check("E pressed after it, Right never", lambda tr: _keys_ok(tr["result"]["keys_after"], "e", "right")),
+          check("her runs moved her after it", lambda tr: tr["result"]["moves"].get("ran", 0) >= 3)))
+def loop_tree_grind_arrow_key(sim):
+    """As loop_tree_grind_jump_key from the left of 23, the game's MOVE RIGHT on E, not on her Right arrow: her runs right
+    don't move her (her chains cut short, her dot standing where they run her: 'off the path (still at x ...)'), 4 in a
+    row, the doubt; the window read (MOVE RIGHT on E): her right E from then on, remembered, paged once. (From 23 at 73
+    on seeds 1-3, and with her left on Q, the hunt kept her where she was, throwing, and her chains came only once it was
+    over: an arrow moved shows in her runs alone, not in her facing, which live frames tell otherwise than her taps
+    with her keys right too: 151 times in the tour runs of 2026-10-24 to 28, up to 13 within 20 s.)"""
+    return key_check_run(4)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("lucky_seven", "a"),))),
+      expects=FOLLOW_EXPECTS + (
+          logs("the key bindings checked first"), logs("LUCKY SEVEN SHIFT -> A"),
+          check("A pressed after it, Shift never", lambda tr: _keys_ok(tr["result"]["keys_after"], "a", "shift")),
+          check("kills after it", lambda tr: tr["result"]["kills_after"] >= 3)))
+def loop_tree_grind_lucky_seven_key(sim):
+    """As loop_tree_grind_jump_key, the game's Lucky Seven on A, not on her Shift: her casts take no MP and kill nothing
+    (the key does nothing), 20 in a row: out of darts' stop due, the key bindings checked first (behavior.hunter:
+    STARS_CHECKED; put off, her Lucky Seven held meanwhile, the regular attack instead, 15 s at the most), the window
+    read (Lucky Seven's picture on A): her Lucky Seven A from then on, out of darts' stretch from there, no
+    stop; remembered, paged once; kills with it after. (Until 2026-10-28 out of darts stopped the hunt at 24 s.) On seed
+    1: out of darts due at 25.4 s, away to 25 (a safe platform: no put-off), the window read at 28.7 s, 71 kills after."""
+    return key_check_run(4)(sim)
+
+
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      remembered={"jump": "c"},
+      **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("jump", "c"),))),
+      expects=(logs("her keys: the key bindings read off the game's window"), logs("JUMP ALT -> C"),
+               check("no doubt, no window", lambda tr: not tr["result"]["window"]
+                     and not _said(tr, "HER JUMPS DIDN'T")),
+               check("C pressed, Alt never", lambda tr: _keys_ok(tr["result"]["keys_all"], "c", "alt")),
+               check("her jumps lifted her", lambda tr: tr["result"]["moves"].get("lifted", 0) >= 3)))
+def loop_tree_remembered_keys(sim):
+    """The run after loop_tree_grind_jump_key's: the game's JUMP on C still, and the binding that check read remembered
+    (lab/keybindings-thief.json): her hunter starts with C for her jump (control.keymap.at_start, said in the log), her
+    jumps lift her from the start, no doubt, no window."""
+    return key_check_run(2)(sim)
 
 
 # --- the top of a rope: hanging just under a platform, her dot snapped onto it -------------------------------------

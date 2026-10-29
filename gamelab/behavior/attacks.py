@@ -167,6 +167,7 @@ class Attacks:
     dead (Ledger.dead), whose marks end too."""
     # (the doubt's: see __init__; here too for an Attacks made without it, as the tests' stand-ins are)
     watch = None
+    casts = None
     roped = None
     forced = None
     _target = None
@@ -223,6 +224,7 @@ class Attacks:
         # throw: its target, whether it's the regular attack, and whether `key` was asked at all (with the regular attack
         # alone her Actions key it themselves)
         self.watch = None
+        self.casts = None  # ... and her Lucky Seven casts so (keycheck.RegularWatch, `kind` "casts": the Hunter's)
         self.roped: Callable[[], bool] | None = None
         self.forced: str | None = None
         self._target: Monster | None = None
@@ -240,10 +242,10 @@ class Attacks:
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
-                if self.watch is not None:
-                    gained = getattr(k, "gained", None)
-                    self.watch.killed(k.t if gained is None else gained, k.kind, k.platform, k.x,
-                                      getattr(k, "track", None))
+                for w in (self.watch, self.casts):
+                    if w is not None:
+                        gained = getattr(k, "gained", None)
+                        w.killed(k.t if gained is None else gained, k.kind, k.platform, k.x, getattr(k, "track", None))
                 self.marks = [mk for mk in self.marks if not is_kill(mk.m, k)]
                 if (gained := getattr(k, "gained", None)) is not None:  # its gain was that monster's: no other's kill
                     for g in [g for g in self._gains if abs(g - gained) < GAIN_SAME_S][:1]:
@@ -273,6 +275,8 @@ class Attacks:
         self.marks = [mk for mk in self.marks if s.t - mk.seen < LOST_S and s.t - mk.thrown < FORGET_S]
         if self.watch is not None:
             self.watch.look(s.t, s.monsters, s)  # (her regular presses judged: the doubt)
+        if self.casts is not None:
+            self.casts.look(s.t, s.monsters, s)  # (... and her casts)
 
     def glance(self, t: float, mp: float | None) -> None:
         """Her MP bar's share `mp` off a frame shown at `t` newer than the latest look (None: not read), as on_look
@@ -295,8 +299,9 @@ class Attacks:
         self._gains = {g: k for g, k in self._gains.items() if t - g < GAINS_KEPT_S}
         self._gains.update((g, k) for g, k in gains if t - g < GAINS_KEPT_S)  # (a look's after a glance's: its meter's)
         self._heard = max(self._heard, t)
-        if self.watch is not None:
-            self.watch.heard(gains)
+        for w in (self.watch, self.casts):
+            if w is not None:
+                w.heard(gains)
 
     def shown_by(self) -> float:
         """When a frame shows what her last throw at a target did to it, if it killed it: KILL_SHOWN_S after its key
@@ -334,10 +339,13 @@ class Attacks:
         # for little. Until 2026-10-26 by the latter, the dead chance then mostly stale (KILL_SHOWN_S).
         what = None if target is None else float("inf") if left is None else left if DEAD_CHOICE else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
+        skill_held = self.watch is not None and getattr(self.watch, "skill_held", False)
+        if attack is self.skill and skill_held and self.forced is None:
+            attack, why = self.regular, "Lucky Seven held"  # (out of darts due, its key's check put off: keycheck)
         if self.forced == "lucky_seven" and self.skill is not None:
             attack, why = self.skill, "her stars' test"
         elif attack is self.regular and self.watch is not None and self.watch.holds(target):
-            if target is not None and self.skill is not None and (self.mp is None or choice.can_cast(
+            if target is not None and self.skill is not None and not skill_held and (self.mp is None or choice.can_cast(
                     self.mp, self.max_mp, self.skill.mp)):
                 attack, why = self.skill, "off" if self.watch.off is not None else "held"
             else:  # (nothing in its way: no cast spent at nothing; no Lucky Seven to throw instead: no throw)
@@ -381,6 +389,11 @@ class Attacks:
                 self._watch_regular(at, self._target)
             else:
                 self.watch.cast(at, self._target)
+        if self.casts is not None and self._asked:
+            if self._regular:
+                self.casts.cast(at, self._target)  # (the other attack: an effect it could have made isn't a cast's)
+            elif not self._swipe and self.forced is None:  # (up close the key swipes; her stars' test's are its own)
+                self._watch_regular(at, self._target, self.casts)
         self._asked, self._regular = False, False
         if self._keyed is not None:
             mk, i = self._keyed
@@ -400,13 +413,13 @@ class Attacks:
         if self.darts is not None:
             self.darts.cast(at, swipe=self._swipe)
 
-    def _watch_regular(self, at: float, m: Monster | None) -> None:
+    def _watch_regular(self, at: float, m: Monster | None, w=None) -> None:
         """A regular press keyed at `at` at `m` told to the doubt's watch, with what decides whether it's judged: its
         kind's HP known, it not dying, a throw from the ground (`from_ground`), her not on a rope (`roped`), it in her
         regular attack's reach from where the last look had her (the watch's reach_ok), the monsters about that the look
         didn't find (`unseen`, and those the watch saw lately: RegularWatch.hidden) counted with its own (one of them
         nearer that way takes the attack: keycheck._in_front)."""
-        s, w = self._last, self.watch
+        s, w = self._last, self.watch if w is None else w
         ground = self.from_ground() if self.from_ground is not None else True
         roped = self.roped() if self.roped is not None else False
         seen = [] if s is None else s.monsters
@@ -561,6 +574,7 @@ class Attacks:
         reason = {"MP": f"MP {mp:.0f} < a cast's {self.skill.mp:.0f}" if self.skill is not None and mp is not None
                   else "MP", "finish": "finishing it", "damage": "", "skill": "", "regular": "",
                   "nothing in its way": "", "held": "the regular attack held (its key doubted)",
+                  "Lucky Seven held": "Lucky Seven held (out of darts due: its key's check put off)",
                   "off": "the regular attack off this run"}.get(why, why)
         self.log(f"    {attack.name}: {what}" + (f"; {reason}" if reason else "")
                  + ("" if mp is None or why == "MP" else f" (MP {mp:.0f})"))

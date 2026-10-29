@@ -1302,7 +1302,10 @@ SLOW_SCENARIOS = {"tour_run", "loop_run", "tour_rocky_run", "loop_rocky_run", "t
                   "tour_hunt_from_safe_spot", "loop_rocky_bridge", "loop_basin", "loop_tree_walls", "tour_hunt_basin",
                   "tour_hunt_platform_12", "loop_tree_crowd", "nav_rocky_fight_bridge", "loop_tree_23", "nav_fight_basin",
                   "loop_tree_grind", "loop_noisy", "nav_fight_across_runs_out", "loop_tree_wait", "loop_spot_off_ground",
-                  "nav_fight_up_runs_out", "loop_tree_23_near_misses"}
+                  "nav_fight_up_runs_out", "loop_tree_23_near_misses",
+                  # her keys followed (2026-10-28): 45-50 s each; loop_tree_grind_jump_key and loop_tree_remembered_keys
+                  # stay in
+                  "loop_tree_grind_arrow_key", "loop_tree_grind_lucky_seven_key"}
 # Not met since her escorted trips keep clear of the monsters whose touch counts (Escort.threat), tuned on Tree
 # Dungeon only until the work is taken to other maps: on West Rocky Mountain II the Axe Stump (75) counts, and
 # loop_rocky_run fell out of the map at 536 s (work/safe-travel, 2026-10-24).

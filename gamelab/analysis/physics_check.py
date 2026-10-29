@@ -78,7 +78,7 @@ def _actions(sent, key_names: dict[str, str]) -> list[tuple[float, str, bool]]:
 def her_key_names() -> dict[str, str]:
     """Her key bindings as key name -> action (config.toml [keys])."""
     from ..control.timeline import her_setup
-    _, keys, _ = her_setup()
+    _, keys, _ = her_setup(remembered=False)
     return {getattr(keys, a).name: a for a in ("left", "right", "jump", "attack") if getattr(keys, a)}
 
 

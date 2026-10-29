@@ -45,6 +45,106 @@ PET_FOOD_PER_MIN = 3   # a food is given at most every 75 s or so (behavior.pet:
 RETREAT_S = 10.0       # s from the sighting by which she's on a safe place (behavior.retreat plans for it) ...
 RETREAT_WINDOW_S = 12.0  # ... and the player takes her retreat's moves this long after it, then none
 
+# Her keys for those two, as the running commands follow them (the user, 2026-10-28: "Follow them", her moves' keys moved
+# in the game; behavior.keycheck, control.keymap): the elevated player, which reads config.toml once at its start,
+# learns them from paths.ALARM_KEYS, a file of key names alone that it reads again whenever it changes (`alarm_keys`).
+# Only these fields: what goes with the alarm up stays her moves and her pet food, by whatever keys they're on.
+ALARM_FIELDS = ("left", "right", "jump", "up", "down", "pet_food")
+# Keys none of them is followed onto (control.keymap) nor taken from the file: Esc (it closes or opens the game's windows)
+# and the backslash (the KEY BINDINGS window); Enter, Tab and Backspace (a form's: the image quiz has its Confirm, the
+# keypad quiz its numbers to type); the digits (the Violetta quiz's buttons are 1 to 4, the keypad's numbers): with the
+# alarm up a retreat's move or a pet food tap must never answer the Lie Detector. (maplehelper's hotkeys too: the
+# player and control.keymap add config.toml's [hotkeys] and [control].)
+ALARM_UNSAFE = ("esc", "\\", "enter", "tab", "backspace", *"0123456789")
+ALARM_MOVES = ("left", "right", "jump", "up", "down")
+
+
+def alarm_keys_problem(names: dict, unsafe=ALARM_UNSAFE) -> str | None:
+    """Why key names `names` (ALARM_FIELDS -> a key name, or None: not bound) can't be the alarm's allowance (None: they
+    can): a field not one of ALARM_FIELDS, a name config.toml can't name (maplehelper.keys.KEY_CODES), one of `unsafe`,
+    two of her moves on one key, her pet food on one of her moves' keys, or her arrows or jump on none (named None)."""
+    from maplehelper.keys import KEY_CODES
+    if not isinstance(names, dict) or (extra := set(names) - set(ALARM_FIELDS)):
+        return f"not only her moves and pet food ({', '.join(sorted(map(str, extra)))})" if isinstance(names, dict) \
+            else "not a table of her keys"
+    for f, k in names.items():
+        if k is None:
+            continue
+        if not isinstance(k, str) or k not in KEY_CODES:
+            return f"{f} {k!r}: not a key config.toml can name"
+        if k in unsafe:
+            return f"{f} on {k!r}: a key not pressed with the alarm up"
+    moves = [names.get(f) for f in ALARM_MOVES if names.get(f) is not None]
+    if any(f in names and names[f] is None for f in ("left", "right", "jump")):
+        return "her arrows or jump on no key"
+    if len(set(moves)) != len(moves):
+        return "two of her moves on one key"
+    if names.get("pet_food") is not None and names["pet_food"] in moves:
+        return "her pet food on one of her moves' keys"
+    return None
+
+
+class AlarmKeys:
+    """Her moves' and pet food's keys for the two kinds of plan that go with the alarm up (the player's: `current`):
+    config.toml's (`base`, read at the player's start) with paths.ALARM_KEYS's over them, the file read again whenever it
+    changes (its size or modification time). A file that can't be read, or doesn't hold only her keys as they can be
+    (alarm_keys_problem: each a key config.toml can name, none of `unsafe`, her five moves on five keys, her pet food on
+    none of those) is left out: config.toml's then, said once a change of it (`log`). What it holds can only move which
+    keys her moves and pet food are on: the player lets through with the alarm up what it always did, a tap of her pet
+    food (PET_FOOD_PER_MIN) and her retreat's moves (RETREAT_WINDOW_S), by these keys."""
+
+    def __init__(self, base, path=None, unsafe=ALARM_UNSAFE, log=None):
+        from ..paths import ALARM_KEYS
+        self.base, self.path = base, ALARM_KEYS if path is None else path
+        self.unsafe, self.log = tuple(unsafe), log or (lambda msg: None)
+        self._stamp: tuple | None = None
+        self._keys = base
+        self.why: str | None = None   # why the file was left out (None: used, or not there)
+        self.used: dict | None = None  # the file's keys in use (None: config.toml's)
+
+    def current(self):
+        """Her keys as the alarm's allowance takes them now (a GameKeys; `base` if None)."""
+        if self.base is None:
+            return None
+        try:
+            st = self.path.stat()
+            stamp = (st.st_mtime_ns, st.st_size)
+        except FileNotFoundError:
+            stamp = None
+        except OSError as e:
+            stamp = ("error", str(e))
+        if stamp == self._stamp:
+            return self._keys
+        self._stamp = stamp
+        keys, why, used = self.base, None, None
+        if stamp is not None:
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                names = data.get("keys") if isinstance(data, dict) else None
+                why = alarm_keys_problem(names, self.unsafe)  # (the file's alone: only her keys, as they can be)
+                if why is None:  # (... and with config.toml's where it gives none)
+                    merged = {f: getattr(getattr(self.base, f, None), "name", None) for f in ALARM_FIELDS}
+                    merged.update(names)
+                    why = alarm_keys_problem(merged, self.unsafe)
+                if why is None:
+                    keys, used = self._over(names), merged
+            except (OSError, ValueError) as e:
+                why = f"not read ({type(e).__name__})"
+        if why is not None:
+            self.log(f"her keys for the alarm: {self.path.name} left out ({why}): config.toml's")
+        elif used is not None and used != self.used:
+            self.log(f"her keys for the alarm from {self.path.name}: " + ", ".join(
+                f"{f} {used.get(f) or '-'}" for f in ALARM_FIELDS))
+        self._keys, self.why, self.used = keys, why, used
+        return keys
+
+    def _over(self, names: dict):
+        """`base` with the file's keys in place of its own (a field it doesn't give: `base`'s)."""
+        import dataclasses
+
+        from maplehelper.keys import parse
+        return dataclasses.replace(self.base, **{f: None if k is None else parse(k) for f, k in names.items()})
+
 
 def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector", form: str | None = None) -> dict:
     """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC. An alarm that

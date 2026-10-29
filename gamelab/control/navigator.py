@@ -38,7 +38,7 @@ runs along a platform with room to stop (REACT), and the next pass meets it.
 
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple, Protocol
 
@@ -184,6 +184,26 @@ CLIMB_ON_UNDER = 8
 STUCK_S = 0.4
 STUCK_GAP = 12
 ROPE_TOP = True
+# What her dot shows of a chain's jumps and runs, told to the hunter's watch of her moves' keys (`moves`:
+# behavior.keycheck.MoveWatch; the user, 2026-10-28: her keys moved in the game are followed): a planned jump's lift-off
+# lifted her if a glance from it to LIFT_BY_S after has her dot LIFT_UNITS over the highest it had LIFT_BEFORE_S before
+# (the dot lags: live it showed the jump's top 0.3-0.7 s after the lift-off planned, the telemetry's chains and glances of
+# 2026-10-24 to 28: D:/MapleHelper-scratch/akey2/moves); a run on the ground RUN_UNITS long moved her if her dot went
+# RUN_SEEN within it and RUN_AFTER_S after; a chain cut short for her dot standing where it runs her ("off the path
+# (still at x ...)") didn't move her. Told only with GLANCES_MIN glances in a jump's window (3 in a run's), seen
+# LIFT_SEEN_S (RUN_SEEN_S) before the chain was cut short, and not from a rope's top (her dot snapped onto the
+# platform: _rope_top).
+LIFT_UNITS = 40.0
+LIFT_BY_S = 1.0
+LIFT_BEFORE_S = 0.35
+RUN_UNITS = 60.0
+RUN_SEEN = 30.0
+RUN_AFTER_S = 0.5
+GLANCES_MIN = 2
+LIFT_KINDS = ("jump", "jump_up")  # the moves whose jumps are told (a climb's grab of a rope goes with up alone)
+LIFT_SEEN_S = 0.7     # a jump's window seen this long at least (a chain cut short sooner: not told) ...
+RUN_SEEN_S = 0.5      # ... and a run's (her walk goes 75 units in it, RUN_SEEN 30), or one cut short once her walk
+RUN_CUT_UNITS = 45.0  # would have gone this far (3 px of her dot): moved if her dot went half of it
 # Looks at most, each after waiting up to 2 s for her to land and stand still (Mover.settle), for one that puts
 # her on a platform, when a look shows her in the air: a slime's touch as she walked off platform 3 onto 4
 # knocked her back into the 12-unit gap between the blocks at x 669-681, down which she fell to the basin for
@@ -335,6 +355,28 @@ class Trip:
     time: dict = field(default_factory=lambda: {"look": 0.0, "think": 0.0, "move": 0.0})  # s spent
 
 
+class KeyNames(Mapping):
+    """Her moves' key names (flow.Keys': left, right, jump, up, down, and "pick" for her pick-up) as her actions have
+    them at each ask: a key followed to where the game has it (behavior.keycheck, Actions.follow) is in the next chain.
+    Until 2026-10-28 they were taken at the navigator's start."""
+    FIELDS = {"left": "left", "right": "right", "jump": "jump", "up": "up", "down": "down", "pick": "pick_up"}
+
+    def __init__(self, actions):
+        self.actions = actions
+
+    def __getitem__(self, name: str) -> str:
+        key = getattr(self.actions.keys, self.FIELDS[name], None) if name in self.FIELDS else None
+        if key is None:
+            raise KeyError(name)
+        return key.name
+
+    def __iter__(self):
+        return (n for n, f in self.FIELDS.items() if getattr(self.actions.keys, f, None) is not None)
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
 class _Running(NamedTuple):
     """A chain's key plan, sent to the player (running, or queued to start when the one before ends)."""
     plan_id: str
@@ -438,13 +480,15 @@ class Navigator:
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
                  health: Callable[[Scene], None] | None = None, escort: Escort | None = None,
-                 variety: float | None = None, rng: random.Random | None = None, memory=None):
+                 variety: float | None = None, rng: random.Random | None = None, memory=None, moves=None):
         """`health(scene)`, asked at every pass's look: her potions, and the safety stop, which it raises (a hunter's
         health_check: behavior.safety); `escort` fights on the way (without one she avoids monsters instead).
         `variety`: the moves' random weights (route.NOISE by default; 0 for none). `memory`: her memory of the
         monsters (localization.memory.Memory, a hunter's), whose monsters where a fighting trip's chain goes it keeps
-        clear of too (`remembered`); None, only the looks'."""
+        clear of too (`remembered`); None, only the looks'. `moves`: what her dot showed of her chains' jumps and runs
+        is told to it (a hunter's behavior.keycheck.MoveWatch: `_keys_seen`); None: to nothing."""
         self.senses, self.actions, self.model, self.log = senses, actions, model, log
+        self.moves = moves
         self.memory = memory
         self.health = health or (lambda s: None)
         self.escort = escort
@@ -461,10 +505,9 @@ class Navigator:
         self._weights: dict[tuple, float] = {}
         self._used: dict[tuple, float] = {}  # move -> when she last set off on it (route.STALE_S) ...
         self._since = time.monotonic()       # ... (one she never set off on: since it began)
-        names = {k: getattr(actions.keys, k).name for k in ("left", "right", "jump", "up", "down")}
-        if actions.keys.pick_up is not None:
-            names["pick"] = actions.keys.pick_up.name  # pressed all through her runs: loot on the way
-        self.flow = Flow(model, names, rng=self.rng if self.variety else None)
+        # her keys' names as her actions have them at every chain (KeyNames: followed keys too), pick-up pressed all
+        # through her runs (loot on the way)
+        self.flow = Flow(model, KeyNames(actions), rng=self.rng if self.variety else None)
         self.tracker = Tracker(model)  # which way the monsters walk, from look to look
         self._checked: Scene | None = None  # follow: the last look placing her for the next chain
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
@@ -1472,6 +1515,9 @@ class Navigator:
         self.chain_still = None  # her dot where the first glance had it all along, and for how long (_rope_top)
         first, moved, first_at, last_at = None, False, 0.0, 0.0
         dot = None
+        glanced: list[tuple[float, tuple]] = []  # every glance's (frame time, dot), for _keys_seen
+        last = getattr(st, "last", None)  # (the pass's look: a chain from a rope's top tells the watch nothing)
+        top = last is not None and last.where is not None and rope_at_top(self.model, last.where) is not None
         while True:
             # The look around goes late in the chain: from where she starts, where she's going can be
             # off screen (from platform 34 the basin's slimes were under the status bar).
@@ -1489,9 +1535,12 @@ class Navigator:
                         sent += queued.legs
                         self._sent_plans.append(queued.plan_id)
             if over:
+                if not top:
+                    self._keys_seen(current, glanced)
                 if queued is None:
                     break
                 current, queued, over = queued, None, False
+                top = False
                 continue
             if queued is None and not current.more:
                 # Nothing follows: she stops where its last leg ends (the rest of a tail kept for the look placing
@@ -1518,6 +1567,8 @@ class Navigator:
             self.senses.wait_frame(GLANCE_S)
             dot, now_hp = self.senses.glance()
             seen_at = self.senses.glanced_at
+            if dot is not None:
+                glanced.append((seen_at, dot))
             stood = _stood(stood, seen_at, dot)
             if dot is not None:
                 if first is None:
@@ -1549,6 +1600,11 @@ class Navigator:
                 self._reacted[tid] = time.monotonic()
                 cut = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
             if cut:
+                if not top:
+                    still = cut.startswith("off the path (still")  # (her dot standing where the plan runs her)
+                    self._keys_seen(current, glanced, until=seen_at, runs=not still)
+                    if still and self.moves is not None:
+                        self.moves.ran(seen_at, False)  # (the chain's run, once)
                 climbing = self._climbing(current, dot) if cut.startswith(TOUCHED) and CLIMB_ON else None
                 for pid in [current.plan_id] + ([queued.plan_id] if queued else []):
                     if not client.cancel(pid):
@@ -1565,7 +1621,41 @@ class Navigator:
                 over = True  # the queued chain takes over, or the next one is still to come (see above)
         if first is not None and not moved:
             self.chain_still = (first, last_at - first_at)
+        if not cut and not top and not over:  # (the last chain's end: over, its glances seen through; cut: told above)
+            self._keys_seen(current, glanced)
         return cut, sent
+
+    def _keys_seen(self, running: _Running, glanced: list, until: float | None = None, runs: bool = True) -> None:
+        """What her dot showed of a chain's jumps and runs (the glances `glanced`: frame times and dots), told to
+        `moves` (see LIFT_UNITS): each planned jump's lift-off (a jump's or a jump up's: a climb's onto a rope she can
+        grab with up alone) and each run of RUN_UNITS, seen for LIFT_SEEN_S and RUN_SEEN_S at least (not past `until`,
+        when the chain was cut short: off its path with her dot standing, a run that didn't move her is cut so)."""
+        if self.moves is None or not glanced:
+            return
+        to_map = self.senses.localizer.to_map
+        pts = [(t, *to_map(d)) for t, d in glanced]
+        end = float("inf") if until is None else until
+        for leg in running.legs:
+            if leg.move.kind in LIFT_KINDS:
+                for arc in leg.air:
+                    if arc.vy >= 0:  # (a fall: off an edge, a drop)
+                        continue
+                    t0 = running.start + arc.t0
+                    t1 = min(t0 + LIFT_BY_S, end)
+                    before = [y for t, _, y in pts if t0 - LIFT_BEFORE_S <= t <= t0]
+                    after = [y for t, _, y in pts if t0 < t <= t1]
+                    if t1 - t0 >= LIFT_SEEN_S and before and len(after) >= GLANCES_MIN:
+                        self.moves.jumped(t0, min(after) <= min(before) - LIFT_UNITS)
+            for sp in leg.spans if runs else ():
+                if abs(sp.x1 - sp.x0) < RUN_UNITS:
+                    continue
+                t0 = running.start + sp.t0
+                t1 = min(running.start + sp.t1 + RUN_AFTER_S, end)
+                xs = [x for t, x, _ in pts if t0 <= t <= t1]
+                # (seen for RUN_SEEN_S, or cut short once her walk would have gone RUN_CUT_UNITS: half of it seen)
+                need = RUN_SEEN if t1 - t0 >= RUN_SEEN_S else (t1 - t0) * WALK_SPEED / 2
+                if (t1 - t0 >= RUN_SEEN_S or (t1 - t0) * WALK_SPEED >= RUN_CUT_UNITS) and len(xs) >= 3:
+                    self.moves.ran(t0, max(xs) - min(xs) >= need)
 
     def _climbing(self, running: _Running, dot) -> tuple[float, float] | None:
         """Whether she's climbing a rope of the running plan now (its Climb from the grab to UP_EXTRA past the top, and

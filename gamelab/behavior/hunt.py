@@ -106,7 +106,7 @@ from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from . import fight
-from .keycheck import KeyDoubt
+from .keycheck import Doubt, KeyDoubt
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import DROP_LANDS, Pile
 from .looting import DROPS_LAST, SETTLE, DropSpot
@@ -197,6 +197,12 @@ WIDE_EVERY = 2.0       # s between whole-screen looks while nothing is going on
 OBJECTIVE_S = 60.0     # backstop: s on one objective, suspensions included
 GROUND_S = 600.0       # backstop: s at one ground
 STUCK_S = 120.0        # backstop: s without a kill, a pick-up or a new ground before she stands by
+# ... the game's key bindings read first (behavior.keycheck, a "stall" doubt), once a stretch: her keys moved in the game
+# (an arrow, her jump) can keep her throwing where she stands with no kill (the simulator's runs with her right arrow on
+# E or her jump on C: no doubt of her runs or jumps for minutes, her chains none); followed, the hunt goes on. False: she
+# stands by at once, as before.
+STUCK_CHECKS = True
+STALL_WAIT_S = 30.0    # ... its check put off (no quiet moment), the hunt goes on this long more for one
 PICK_S = 0.6           # s standing on a pile (4 presses)
 # Her drops, priced by the HP getting them would cost (`_pile_block`, `_pile_price`). Live on 2026-10-25 (Tree Dungeon,
 # tour --loop 23:43-23:54, 340 EXP a minute; D:/MapleHelper-scratch/analysis-1025/damage-skeptic on23.py, ctx10.py) all
@@ -492,10 +498,13 @@ class Hunt:
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
-                except KeyDoubt as doubt:  # her regular attack took no effect 5 times in a row: the check, then on
+                except KeyDoubt as doubt:  # her keys doubted (her regular attack, her casts, her moves, out of
+                    # darts due: behavior.keycheck): the check, then on
                     paused, back = time.monotonic(), True
                     try:
-                        self.h.check_keys(doubt.doubt)
+                        out = self.h.check_keys(doubt.doubt)
+                        if doubt.doubt.kind == "stall" and getattr(out, "what", None) in ("followed", "switched"):
+                            self._progress = time.monotonic()  # (her keys put right: the stretch starts again)
                     except LookLost as lost:  # (a look of the check's failed its checks: stand still, as above)
                         back = self.h.senses.regain(lost, end)
                     self._paused(time.monotonic() - paused)
@@ -869,6 +878,18 @@ class Hunt:
     def _stuck(self) -> bool:
         if time.monotonic() - self._progress < STUCK_S:
             return False
+        watch = getattr(getattr(self.h, "attacks", None), "watch", None)
+        now, asked = time.monotonic(), getattr(self, "_stall_at", None)
+        if STUCK_CHECKS and getattr(self.h, "doubts_raise", False) and watch is not None:
+            # (her keys moved in the game may be why: the key bindings read first, behavior.keycheck, once in STUCK_S;
+            # followed, the hunt goes on from here; its check put off, STALL_WAIT_S more for a quiet moment)
+            if (asked is None or now - asked >= STUCK_S) and watch.may_check(now) is None:
+                self._stall_at = now
+                raise KeyDoubt(Doubt.stall(f"NO KILL, PICK-UP OR NEW GROUND FOR {STUCK_S:.0f} S: her keys may be on "
+                                           "other keys in the game", now))
+            if (asked is not None and now - asked < STALL_WAIT_S and watch.deferred is not None
+                    and watch.deferred.kind == "stall"):
+                return False
         self.log(f"  no kill, pick-up or new ground for {STUCK_S:.0f} s: standing by")
         telemetry.emit("event", kind="backstop", text=f"STUCK_S: {STUCK_S:.0f} s without progress")
         self.report.stop = "stuck"

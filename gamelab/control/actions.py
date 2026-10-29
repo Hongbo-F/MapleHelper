@@ -464,7 +464,13 @@ class Actions:
         """Her regular attack on key `attack` (config.toml's name) from now on (behavior.keycheck: the game has it
         there): these actions' keys with it (her moves' copies made from them later too: moves_only)."""
         from maplehelper.keys import parse
-        self.keys = dataclasses.replace(self.keys, attack=parse(attack))
+        self.follow(dataclasses.replace(self.keys, attack=parse(attack)))
+
+    def follow(self, keys: GameKeys) -> None:
+        """Her keys as the game has them from now on (behavior.keycheck, control.keymap.follow): every plan made from
+        now reads them (her throws, walks and pick-ups here, the mover's single moves, the navigator's chains through
+        its key names, control.navigator.KeyNames, her pet's food, her retreat's moves: moves_only)."""
+        self.keys = keys
 
     def faces(self, direction: str) -> bool:
         """Whether she faces `direction` surely enough for a throw that way to go without the tap that turns her: her

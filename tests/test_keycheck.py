@@ -5,7 +5,12 @@ stand-in game (its window drawn from the game's pictures, perception.keybindings
 (put off and tried again), her stars, the window opened, read and closed (late, slow to close, partly off, not
 recognised, no frames, another size), each outcome, her moves' keys, the Lie Detector halfway, the safety stop, the gap
 between checks, the magician. End to end in the simulator: loop_tree_grind_attack_key, loop_tree_attack_unbound,
-loop_tree_attack_misses and loop_tree_attack_no_darts (tests/test_sim.py runs every scenario)."""
+loop_tree_attack_misses and loop_tree_attack_no_darts (tests/test_sim.py runs every scenario). Since 2026-10-28 (the
+user's answers: her keys followed, the binding read remembered, her attack's MISS read) every key of hers is followed
+to where the window shows it (control.keymap; tests/test_keymap.py), and her moves and Lucky Seven are doubted too
+(MoveWatch, the casts' RegularWatch, out of darts' stop checked first): the outcomes here, the watches' rules there and
+in tests/test_keymap.py; end to end loop_tree_grind_jump_key, loop_tree_grind_arrow_key, loop_tree_grind_lucky_seven_key,
+loop_tree_remembered_keys and loop_tree_attack_misses_seen."""
 
 import json
 import time
@@ -405,10 +410,12 @@ class Hunter:
                                        target=lambda side: None)
         self.darts = DartWatch()
         self.darts.mp_shown_at = mp_shown_at
-        keys = SimpleNamespace(attack=K("ctrl"), lucky_seven=K("shift"), jump=K("alt"), pick_up=K("z"),
-                               pet_food=K("u"), up=K("up"), down=K("down"), left=K("left"), right=K("right"),
-                               chair=None, sit=None)
+        from maplehelper.config import GameKeys
+        keys = GameKeys(attack=K("ctrl"), lucky_seven=K("shift"), jump=K("alt"), pick_up=K("z"), pet_food=K("u"),
+                        up=K("up"), down=K("down"), left=K("left"), right=K("right"), chair=K("d"), sit=K("x"))
+        self.config_keys = keys
         self.actions = SimpleNamespace(keys=keys, play=game.play, attack_at=0.0)
+        self.followed = []
         self.senses = SimpleNamespace(eyes=SimpleNamespace(_capture=game.capture))
         self.rekeyed, self.off = None, None
         self.hit_at, self.hp_watch = None, None
@@ -427,8 +434,14 @@ class Hunter:
         return False
 
     def rekey(self, key):
-        self.rekeyed = key
-        self.actions.keys.attack = K(key)
+        import dataclasses
+        self.follow(dataclasses.replace(self.actions.keys, attack=K(key)))
+
+    def follow(self, keys):
+        if keys.attack != self.actions.keys.attack:
+            self.rekeyed = keys.attack.name
+        self.followed.append(keys)
+        self.actions.keys = keys
         self.attacks.watch.held = False
 
     def regular_off(self, why):
@@ -452,6 +465,8 @@ def quiet(monkeypatch, tmp_path):
     """No sleeping, no paging (kept), no alarm, no retreat (counted), the window's frames kept in a scratch folder."""
     from gamelab import paths
     monkeypatch.setattr(paths, "SHOTS", tmp_path)
+    monkeypatch.setattr(paths, "LAB", tmp_path)  # (the binding read remembered there: control.keymap)
+    monkeypatch.setattr(paths, "ALARM_KEYS", tmp_path / "alarm_keys.json")
     pages = []
     monkeypatch.setattr(keycheck.time, "sleep", lambda s: None)
     monkeypatch.setattr(alarm, "page", lambda title, text: pages.append((title, text)))
@@ -476,48 +491,74 @@ def test_attack_on_another_key_her_regular_attack_is_that_key_paged(quiet):
                                     ("key_bindings_close", ["esc"])]
     assert not g.open and g.menu == 0
     assert any(line.startswith("ATTACK KEY: THE GAME HAS ATTACK ON A, NOT CTRL (Key Bindings, preset 2): her regular "
-                               "attack is A for the rest of this run (config.toml unchanged); CTRL does nothing now")
+                               "attack is A from now on (config.toml unchanged; remembered in keybindings-thief.json "
+                               "for her next runs); CTRL does nothing now")
                for line in h.lines)
     assert len(quiet) == 1 and quiet[0][0] == "MapleStory: the attack key"
+    from gamelab.control import keymap
+    assert keymap.at_start(h.config_keys, "thief").keys.attack.name == "a"  # (her next run's start: A)
 
 
-def test_attack_on_her_lucky_seven_s_key_stops_the_hunt(quiet):
-    """The game's ATTACK on Shift, her Lucky Seven's key (a picture: where her Lucky Seven went can't be told off the
-    window): her casts would attack, so the hunt stops (KeyCheckStop), not switched."""
+def test_attack_on_her_lucky_seven_s_key_and_lucky_seven_on_none_stops_the_hunt(quiet):
+    """The game's ATTACK on Shift, her Lucky Seven's key, and Lucky Seven's picture on no key: her casts can't be
+    followed (Lucky Seven needed: control.keymap.NEEDED), so the hunt stops (KeyCheckStop), nothing followed or
+    remembered."""
     h = Hunter(Game({**kb.LIVE, "ctrl": None, "shift": 52}), mp_shown_at=1001.0)
     with pytest.raises(KeyCheckStop) as e:
         KeyCheck(h).run(_doubt())
-    assert "SHIFT is her lucky seven key" in str(e.value) and h.rekeyed is None and not e.value.window
-    assert e.value.exit_code == keycheck.EXIT
+    assert "her lucky seven key SHIFT shows ATTACK" in str(e.value) and "LUCKY SEVEN is on no key" in str(e.value)
+    assert h.rekeyed is None and not h.followed and not e.value.window and e.value.exit_code == keycheck.EXIT
+    from gamelab import paths
+    assert not (paths.LAB / "keybindings-thief.json").exists()
+
+
+def test_attack_on_her_lucky_seven_s_key_and_lucky_seven_on_another_both_followed(quiet):
+    """The same with Lucky Seven's picture on A: both followed (her regular attack Shift, her Lucky Seven A), said in
+    capitals, paged once, remembered."""
+    h = Hunter(Game({**kb.LIVE, "ctrl": None, "shift": 52, "a": "lucky_seven"}), mp_shown_at=1001.0)
+    out = KeyCheck(h).run(_doubt())
+    assert out.what == "switched" and out.key == "shift"
+    assert (h.actions.keys.attack.name, h.actions.keys.lucky_seven.name) == ("shift", "a")
+    assert "HER KEYS FOLLOWED: LUCKY SEVEN SHIFT -> A" in out.text and len(quiet) == 1
+
+
+def test_attack_and_jump_swapped_both_followed(quiet):
+    """The review's case: the game's ATTACK on Alt, her jump key, and JUMP on Ctrl. Until 2026-10-28 it stopped the
+    hunt (her moves weren't followed); now both are: her regular attack Alt, her jump Ctrl (her trips' chains take her
+    keys' names at each chain, the player the file's for her retreat), remembered and for the player."""
+    h = Hunter(Game({**kb.LIVE, "ctrl": 53, "alt": 52}), mp_shown_at=1001.0)
+    out = KeyCheck(h).run(_doubt())
+    assert out.what == "switched" and out.key == "alt" and h.actions.keys.jump.name == "ctrl"
+    assert "HER KEYS FOLLOWED: JUMP ALT -> CTRL" in out.text
+    from gamelab import paths
+    assert json.loads(paths.ALARM_KEYS.read_text())["keys"]["jump"] == "ctrl"
 
 
 @pytest.mark.parametrize("bindings, says", [
-    ({"ctrl": 53, "alt": 52}, "JUMP is on CTRL"),       # (the review's: Attack and Jump swapped)
-    ({"ctrl": None, "alt": 52}, "JUMP is on no key"),
+    ({"ctrl": None, "alt": 52}, "her jump key ALT shows ATTACK in the game's Key Bindings, and JUMP is on no key"),
+    ({"left": None}, "her left key LEFT shows nothing in the game's Key Bindings, and MOVE LEFT is on no key"),
+    ({"left": None, "1": 300}, "MOVE LEFT is on 1 (not a key to press for it)"),  # (the alarm's: never a digit)
+    ({"u": None}, "her pet food key U shows nothing in the game's Key Bindings, and PET FOOD is on no key"),
 ])
-def test_attack_on_her_jump_key_stops_the_hunt(quiet, bindings, says):
-    """The review's case: the game's ATTACK on Alt, her jump key, was switched to and she jumped on a key that attacks.
-    Her moves' keys not as she has them stop the hunt (not followed: her trips' chains and the player's retreat under
-    the Lie Detector go by config.toml's)."""
+def test_a_needed_one_on_no_key_she_can_press_stops_the_hunt(quiet, bindings, says):
+    """Her moves, her Lucky Seven and her pet food on no key she can press (control.keymap.NEEDED): the hunt stops,
+    nothing followed or remembered."""
     h = Hunter(Game({**kb.LIVE, **bindings}), mp_shown_at=1001.0)
     with pytest.raises(KeyCheckStop) as e:
         KeyCheck(h).run(_doubt())
-    assert "her jump key ALT shows ATTACK" in str(e.value) and says in str(e.value) and h.rekeyed is None
+    assert says in str(e.value) and h.rekeyed is None and not h.followed
 
 
-def test_an_arrow_without_its_move_stops_the_hunt_whatever_attack_is_on(quiet):
-    h = Hunter(Game({**kb.LIVE, "left": None}), mp_shown_at=1001.0)
-    with pytest.raises(KeyCheckStop) as e:
-        KeyCheck(h).run(_doubt())
-    assert "her left key LEFT shows nothing" in str(e.value) and "MOVE LEFT is on no key" in str(e.value)
-
-
-def test_attack_on_her_pick_up_key_is_switched_and_said(quiet):
-    """Her pick-up presses attack then (no loot picked up, nothing worse): switched, said and paged."""
+def test_attack_on_her_pick_up_key_and_pick_up_elsewhere_both_followed(quiet):
+    """The game's ATTACK on Z, her pick-up key, PICK UP on A: her regular attack Z, her pick-up A (until 2026-10-28 her
+    pick-ups went on pressing Z, attacking); PICK UP on no key: her pick-ups off, said."""
     h = Hunter(Game({**kb.LIVE, "ctrl": None, "z": 52, "a": 50}), mp_shown_at=1001.0)
     out = KeyCheck(h).run(_doubt())
-    assert out.what == "switched" and out.key == "z" and "Z IS HER PICK-UP KEY TOO" in out.text
-    assert "PICK UP IS ON A IN THE GAME" in out.text and "Z IS HER PICK-UP KEY TOO" in quiet[0][1]
+    assert out.what == "switched" and out.key == "z" and h.actions.keys.pick_up.name == "a"
+    assert "HER KEYS FOLLOWED: PICK UP Z -> A" in out.text
+    h = Hunter(Game({**kb.LIVE, "ctrl": None, "z": 52}), mp_shown_at=1001.0)
+    out = KeyCheck(h).run(_doubt())
+    assert out.key == "z" and h.actions.keys.pick_up is None and "pick up on no key: not pressed any more" in out.text
 
 
 @pytest.mark.parametrize("bindings, tray, says", [
@@ -895,3 +936,137 @@ def test_keys_record_sends_a_second_esc_only_with_the_window_seen_still_open(mon
     out = capsys.readouterr().out
     assert want in out, out
     assert [keys for _, keys in g.plans].count(["esc"]) == escs and g.menu == 0
+
+
+# --- her other doubts: her casts, her moves, out of darts' stop (2026-10-28's answers) -------------------------------
+
+def _kind_doubt(kind: str, stop=None) -> keycheck.Doubt:
+    if kind == "stars":
+        return keycheck.Doubt.stars(stop, 1000.0)
+    if kind == "moves":
+        return keycheck.Doubt.moves("HER JUMPS DIDN'T LIFT HER 6 TIMES IN A ROW (...)", 1000.0)
+    return keycheck.Doubt([keycheck.Press(1000.0 + i, mon(), 0.09, after=0.09, at=1001.3 + i)
+                           for i in range(keycheck.CAST_DOUBT)], 1009.0, kind="casts")
+
+
+def test_her_casts_without_effect_in_a_row_are_a_doubt_of_their_own():
+    w = RegularWatch(presses=keycheck.CAST_DOUBT, kind="casts")
+    for i in range(keycheck.CAST_DOUBT):
+        press_and_look(w, 10.0 * i, mon(bar=0.5), bar_after=0.5)
+    d = w.due()
+    assert d is not None and d.kind == "casts" and d.text().startswith("HER LUCKY SEVEN TOOK NO EFFECT 8 TIMES")
+
+
+@pytest.mark.parametrize("kind", ["moves", "casts"])
+def test_her_moves_or_casts_doubted_as_configured_nothing_changes_nobody_paged(quiet, kind):
+    h = Hunter(Game(), mp_shown_at=None)
+    out = KeyCheck(h).run(_kind_doubt(kind))
+    assert out.what == "as configured" and "AS CONFIGURED" in out.text and not quiet and not h.followed
+    assert out.stars == "" and not h.attacks.watch.held  # (no stars' test, nothing held)
+
+
+@pytest.mark.parametrize("bindings, field, key", [
+    ({"alt": None, "c": 53}, "jump", "c"),
+    ({"right": None, "e": 301}, "right", "e"),
+    ({"shift": None, "a": "lucky_seven"}, "lucky_seven", "a"),
+])
+def test_her_moves_doubted_a_moved_key_followed_paged_once(quiet, bindings, field, key):
+    h = Hunter(Game({**kb.LIVE, **bindings}), mp_shown_at=None)
+    out = KeyCheck(h).run(_kind_doubt("moves"))
+    assert out.what == "followed" and getattr(h.actions.keys, field).name == key
+    assert len(quiet) == 1 and quiet[0][0] == "MapleStory: her keys"
+    from gamelab import paths
+    assert json.loads((paths.LAB / "keybindings-thief.json").read_text())["keys"][field] == key
+
+
+def test_her_moves_doubted_with_a_monster_near_no_retreat_put_off_then_the_stop(quiet):
+    """Her moves doubted, the check waits where she is (her moves may not get her away); DEFERS_MAX times put off:
+    the hunt stops (her moves can't be trusted and the window can't be read)."""
+    h = Hunter(Game(), mp_shown_at=None)
+    h.monsters, h.clear_after_retreat = [mon(x=50.0, y=0.0)], False
+    check, d = KeyCheck(h), _kind_doubt("moves")
+    for _ in range(DEFERS_MAX):
+        assert check.run(d).what == "put off"
+    assert h.retreats == 0
+    with pytest.raises(KeyCheckStop) as e:
+        check.run(d)
+    assert "no quiet moment to check her key bindings" in str(e.value)
+
+
+def test_out_of_darts_doubted_lucky_seven_moved_is_followed_and_the_stretch_starts_again(quiet):
+    stop = OutOfDarts(20, 24.0, 1.0)
+    h = Hunter(Game({**kb.LIVE, "shift": None, "a": "lucky_seven"}), mp_shown_at=None)
+    h.darts.fired, h.darts.keys = True, [1.0, 2.0]
+    out = KeyCheck(h).run(_kind_doubt("stars", stop))
+    assert out.what == "followed" and h.actions.keys.lucky_seven.name == "a"
+    assert not h.darts.fired and h.darts.keys == [] and "LUCKY SEVEN SHIFT -> A" in out.text
+
+
+def test_out_of_darts_doubted_lucky_seven_as_configured_or_not_read_the_stop(quiet, monkeypatch):
+    now = [5000.0]
+    monkeypatch.setattr(keycheck.time, "monotonic", lambda: now[0])
+    for game in (Game(), Game(opens=False)):
+        stop = OutOfDarts(20, 24.0, 1.0, at=1.0)
+        h = Hunter(game, mp_shown_at=None)
+        with pytest.raises(OutOfDarts) as e:
+            KeyCheck(h).run(_kind_doubt("stars", stop))
+        assert e.value is stop and stop.at == now[0]  # (the stop's time now: her retreat from here, not from its due)
+
+
+def test_out_of_darts_doubted_put_off_holds_her_lucky_seven(quiet):
+    """A monster near after the retreat: put off, her Lucky Seven held (behavior.attacks: the regular attack instead;
+    her casts may go out on a key that does nothing), the stop waiting hunter.STARS_WAIT_S at the most."""
+    from maplehelper.config import GameKeys
+    from maplehelper.engine import RIGHT
+    from gamelab.behavior.attacks import Attacks
+    h = Hunter(Game(), mp_shown_at=None)
+    h.monsters, h.clear_after_retreat = [mon(x=50.0, y=0.0)], False
+    out = KeyCheck(h).run(_kind_doubt("stars", OutOfDarts(20, 24.0, 1.0)))
+    assert out.what == "put off" and h.attacks.watch.skill_held and "her Lucky Seven held" in out.text
+    model = SimpleNamespace(mob_hp={"Horny Mushroom": 403.0}, mob_pdd={"Horny Mushroom": 10.0})
+    keys = GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("ctrl"), lucky_seven=K("shift"))
+    for held, want in ((True, "ctrl"), (False, "shift")):  # (Lucky Seven held: the regular attack)
+        a = Attacks(model, keys, "choice", max_mp=623.0, level=16.0, log=[].append)
+        a.watch, a.mp = RegularWatch(skill_held=held), 0.9
+        a.aimed = mon(kind="horny-mushroom", x=200.0, bar=None)
+        assert a.key(RIGHT) == want, held
+
+
+def test_keys_forget_and_the_keys_in_use(monkeypatch, tmp_path, capsys):
+    import dataclasses
+    import gamelab.__main__ as cli
+    from gamelab import paths
+    from gamelab.control import keymap
+    monkeypatch.setattr(paths, "LAB", tmp_path)
+    assert cli.main(["keys"]) == 0 and "her keys: config.toml [keys]" in capsys.readouterr().out
+    cfg, _, _ = cli.her_setup(remembered=False)
+    keymap.remember(dataclasses.replace(cfg.keys, jump=K("c")), "thief", config_keys=cfg.keys)
+    assert cli.main(["keys"]) == 0
+    out = capsys.readouterr().out
+    assert "read off the game's window" in out and "jump c" in out
+    assert cli.main(["keys", "--forget"]) == 0 and "dropped" in capsys.readouterr().out
+    assert cli.main(["keys", "--forget"]) == 0 and "no key bindings remembered" in capsys.readouterr().out
+
+
+def test_a_stall_reads_the_key_bindings_first_once_then_stands_by(monkeypatch):
+    """behavior.hunt.Hunt._stuck: no kill, pick-up or new ground for STUCK_S in the hunt loop, the key bindings read
+    first (a "stall" doubt: her keys moved can keep her throwing where she stands); within STUCK_S of it, or its check put
+    off past STALL_WAIT_S, she stands by as before; outside the hunt loop, at once."""
+    from gamelab.behavior import hunt as hunt_mod
+    h = object.__new__(hunt_mod.Hunt)
+    now = [1000.0]
+    monkeypatch.setattr(hunt_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(hunt_mod.telemetry, "emit", lambda *a, **k: None)
+    watch = RegularWatch()
+    h.h = SimpleNamespace(doubts_raise=True, attacks=SimpleNamespace(watch=watch))
+    h._progress, h.log, h.report = now[0] - hunt_mod.STUCK_S - 1, lambda text: None, SimpleNamespace(stop=None)
+    with pytest.raises(KeyDoubt) as e:
+        h._stuck()
+    assert e.value.doubt.kind == "stall" and "NO KILL, PICK-UP OR NEW GROUND" in e.value.doubt.text()
+    watch.deferred = e.value.doubt  # (put off: no quiet moment)
+    now[0] += 5
+    assert h._stuck() is False  # (waiting for its quiet moment)
+    now[0] += hunt_mod.STALL_WAIT_S
+    assert h._stuck() is True and h.report.stop == "stuck"
+    h.h.doubts_raise, h._stall_at = False, None
+    assert h._stuck() is True

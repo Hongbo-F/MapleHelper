@@ -504,6 +504,16 @@ class Eyes:
         """A monster's HP bar (the fraction left), or None if it hasn't been hit."""
         return hp_bar(obs.frame, mob.x, mob.y - mob.h // 2, obs.geo)
 
+    def misses(self, obs: Observation, boxes: list[tuple[float, float, float, float]]) -> list:
+        """Her attack's MISS popups (perception.misses: the game's NoRed0 MISS picture) in boxes (x0, y0, x1, y1) of
+        a look's frame: each a misses.Popup, its bottom centre in look-frame px."""
+        if obs.frame is None or not boxes:
+            return []
+        if getattr(self, "_misses", None) is None or self._misses[0] != obs.geo.frame_scale:
+            from .misses import MissReader
+            self._misses = (obs.geo.frame_scale, MissReader(scale=obs.geo.frame_scale))
+        return self._misses[1].find(obs.frame, boxes)
+
     def items(self, obs: Observation, box: tuple[int, int, int, int], mesos_only: bool = False) -> list[Item]:
         """Drops lying in a box (x0, y0, x1, y1) of the frame."""
         return self.loot_detector().detect(obs.frame, box, mesos_only=mesos_only)

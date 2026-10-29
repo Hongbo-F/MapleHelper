@@ -330,6 +330,13 @@ class DartWatch:
                 f"{self.swiped_presses} from the ground at a monster the claw reaches: not counted")
         return said
 
+    def followed(self, t: float) -> None:
+        """Her Lucky Seven's key followed to where the game has it (behavior.keycheck: a stars doubt's check, or another
+        that found it moved): the presses so far went out on a key that didn't cast, so a stretch starts at `t`, and the
+        stop is due again only at a stretch of its own."""
+        self._restart(t)
+        self.fired = False
+
     def _restart(self, after: float) -> None:
         """A new stretch: the presses keyed after `after` (their MP not shown yet) go on into it."""
         self.keys = [k for k in self.keys if k > after]

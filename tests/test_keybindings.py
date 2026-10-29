@@ -55,12 +55,15 @@ def test_the_live_window_reads_attack_on_ctrl_preset_2(reader, live):
 
 
 def test_the_live_window_s_whole_map_43_functions_and_her_pictures(reader, live):
+    """Every function on its key, and her pictures told apart where they're known (kb.PICTURES: her Lucky Seven on both
+    Shifts, her Pet Food on U, The Green Relaxer on D); her potions on C and V a picture not known."""
     fn = reader.functions(live, reader.read(live))
     functions = {k: v for k, v in fn.items() if v not in (None, kb.PICTURE)}
-    assert len(functions) == 41  # (43 cells: both Ctrls one key, both Alts one)
+    assert len(functions) == 44  # (43 cells: both Ctrls one key, both Alts one; and her three pictures)
     assert (fn["ctrl"], fn["alt"], fn["z"], fn["x"], fn["\\"], fn["esc"], fn["space"]) == (
         "ATTACK", "JUMP", "PICK UP", "SIT", "SET KEY", "MENU", "NPC CHAT")
-    assert {k for k, v in fn.items() if v == kb.PICTURE} == {"u", "d", "shift", "c", "v"}  # her items and Lucky Seven
+    assert (fn["shift"], fn["u"], fn["d"]) == ("LUCKY SEVEN", "PET FOOD", "THE GREEN RELAXER")
+    assert {k for k, v in fn.items() if v == kb.PICTURE} == {"c", "v"}  # (her potions: pictures not known)
     assert fn["f8"] is None and fn["a"] is None
     assert kb.functions_text(fn, ("ctrl", "a")) == "CTRL ATTACK"
 
@@ -72,7 +75,9 @@ def test_the_window_of_2026_10_24_reads_too(reader, name):
     r = reader.read(_frame(_png(f"{name}_window.png"), at=(180, 174)))
     assert r.read and r.at == (180, 174) and r.attack == ("ctrl",) and r.preset == 2
     f = _frame(_png(f"{name}_window.png"), at=(180, 174))
-    assert reader.functions(f, r)["u"] == kb.PICTURE
+    fn = reader.functions(f, r)
+    # her Pet Food on U; dragged over it (the pointer holding it there), a picture not known: not told
+    assert fn["u"] == ("PET FOOD" if name == "nm_keys" else kb.PICTURE) and fn["shift"] == "LUCKY SEVEN"
 
 
 def test_a_tooltip_over_the_keyboard_isn_t_read(reader):
@@ -190,7 +195,8 @@ def test_the_pictures_are_the_copy_s(tmp_path):
         pytest.skip("needs the game data's copy (gamedata/data/copy)")
     n = kb.cut_assets(tmp_path)
     mine = sorted(p.relative_to(kb.FOLDER).as_posix() for p in kb.FOLDER.rglob("*.png"))
-    assert n == len(mine) == 133
+    assert n == len(mine) == 140  # (133 of KeyBindings.img, 7 of her items' and skills', kb.PICTURES)
+    assert (tmp_path / "picture" / "origins.json").read_text() == (kb.FOLDER / "picture" / "origins.json").read_text()
     for rel in mine:
         a = np.asarray(Image.open(kb.FOLDER / rel).convert("RGBA"))
         b = np.asarray(Image.open(tmp_path / rel).convert("RGBA"))
@@ -216,3 +222,33 @@ def test_the_window_dragged_past_the_frame_s_right_edge_is_open_not_read(reader)
     r = reader.read(kb.compose(kb.LIVE, 2, at=(900, 174), frame=_frame()))
     assert r.open and not r.read and r.why == "partly off the frame" and r.at == (900, 174)
     assert not reader.read(_frame()).open  # (the minimap's title, "MINI MAP", isn't its name)
+
+
+def test_her_pictures_are_told_apart_on_the_live_window_and_nowhere_else(reader, live):
+    """kb.PICTURES on the live window: each at its own cell 0.98-1.00 of its px drawn as they are (but under the key's
+    name and an item's count), at any other cell 0.60 at the most (Energy Bolt's against the FACE pictures, which are
+    functions, read first)."""
+    r = reader.read(live)
+    ox, oy = r.at
+    win = reader._levels(live[oy:oy + kb.WINDOW[1], ox:ox + kb.WINDOW[0]])
+    own = {"lucky_seven": "shift", "pet_food": "u", "chair": "d"}
+    for c in kb.BOUND:
+        for name, share in reader.picture_shares(win, c).items():
+            if own.get(name) == c.key:
+                assert share >= 0.98, (name, c.key, share)
+            else:
+                assert share <= 0.61, (name, c.key, share)
+
+
+@pytest.mark.parametrize("bindings, want", [
+    ({"shift": None, "a": "lucky_seven"}, {"a": "LUCKY SEVEN", "shift": None}),       # Lucky Seven moved to A
+    ({"u": None, "i": "pet_food"}, {"i": "PET FOOD", "u": None}),                      # her pet food to I
+    ({"shift": "pet_food", "u": "lucky_seven"}, {"shift": "PET FOOD", "u": "LUCKY SEVEN"}),
+    ({"alt": None, "c": 53, "left": None, "q": 300}, {"c": "JUMP", "q": "MOVE LEFT", "alt": None, "left": None}),
+])
+def test_moved_functions_and_pictures_read_where_they_are(reader, bindings, want):
+    """compose's window with her keys moved (the simulator draws it so: sim.world.World.binding_view) reads them where
+    they are."""
+    f = kb.compose({**kb.LIVE, **bindings}, 2, frame=_frame())
+    fn = reader.functions(f, reader.read(f))
+    assert {k: fn[k] for k in want} == want

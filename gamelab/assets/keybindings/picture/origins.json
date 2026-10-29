@@ -1,0 +1,30 @@
+{
+ "lucky_seven": [
+  0,
+  32
+ ],
+ "pet_food": [
+  -4,
+  32
+ ],
+ "chair": [
+  1,
+  30
+ ],
+ "magic_claw": [
+  0,
+  32
+ ],
+ "magic_guard": [
+  0,
+  32
+ ],
+ "magic_armor": [
+  0,
+  32
+ ],
+ "energy_bolt": [
+  0,
+  32
+ ]
+}

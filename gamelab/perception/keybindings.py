@@ -83,7 +83,25 @@ FUNCTIONS = {0: "EQUIPMENT", 1: "ITEM", 2: "ABILITY", 3: "SKILL", 4: "BUDDY", 5:
              55: "CRAFTING", 58: "MAILBOX", 202: "MUTE", 204: "KEYS1", 205: "KEYS2", 206: "KEYS3", 300: "MOVE LEFT",
              301: "MOVE RIGHT", 302: "MOVE UP", 303: "MOVE DOWN", 400: "OK", 401: "CANCEL",
              **{i: f"FACE {i - 99}" for i in range(100, 107)}}
-PICTURE = "picture"  # a cell with an item's or a skill's picture on it (not a function's)
+PICTURE = "picture"  # a cell with an item's or a skill's picture on it (not a function's), not one of PICTURES
+# The item and skill pictures her keys carry, told apart (`Reader.functions`: what her keys are followed by,
+# behavior.keymap): each its GameKeys field -> (its name as `functions` gives it, where it is in the copy: ("skill",
+# its Skill image, its id) or ("item", its Item folder, its image, its id)). The window draws a skill's `icon` and an
+# item's `icon` (with its shadow) with its origin at the cell's slot's bottom left (on the live frame Lucky Seven's at
+# Shift exactly, the Pet Food's at U, The Green Relaxer's at D, the potions' at C and V: D:/MapleHelper-scratch/akey2/
+# icons), an item's count over its bottom left and the key's name over its top left (left out of the match).
+PICTURES = {"lucky_seven": ("LUCKY SEVEN", ("skill", "400.img", 4001003)),
+            "pet_food": ("PET FOOD", ("item", "Consume", "0212.img", 2120000)),
+            "chair": ("THE GREEN RELAXER", ("item", "Install", "0301.img", 3010000)),
+            "magic_claw": ("MAGIC CLAW", ("skill", "200.img", 2001003)),
+            "magic_guard": ("MAGIC GUARD", ("skill", "200.img", 2001000)),
+            "magic_armor": ("MAGIC ARMOR", ("skill", "200.img", 2001001)),
+            "energy_bolt": ("ENERGY BOLT", ("skill", "200.img", 2001002))}
+PICTURE_OK = 0.8           # share of a picture's opaque px drawn as they are, but under its key's name and count: it
+                           # (on the live window and both of 2026-10-24 Lucky Seven's 1.00 and 0.98 at the Shifts, the Pet
+                           # Food's 1.00 at U, the Relaxer's 0.99 at D; any of them at any other cell 0.60 at the most,
+                           # the FACE pictures of F1-F7 against Energy Bolt's; the Pet Food dragged over U 0.07)
+COUNT_BOX = (18, 12)       # an item's count: the slot's bottom left this wide and high (px), left out of its match
 
 # The keyboard (backgrnd_keyboard, 618x237): each row's top (px in the keyboard's picture) and its cells: x, width, the
 # key (config.toml's name; None: drawn grey, the game doesn't bind it), its scan code (the game's key/<code> name
@@ -218,6 +236,15 @@ class Reader:
         for p in sorted((self.folder / "icon").glob("*.png"), key=lambda p: int(p.stem)):
             self.icons[int(p.stem)] = _rgba(p)
         self.labels = {int(p.stem): _rgba(p) for p in (self.folder / "key").glob("*.png")}
+        # Her items' and skills' pictures (PICTURES), each with its origin: {field: (RGBA, (ox, oy), item?)}
+        self.pictures: dict[str, tuple[np.ndarray, tuple[int, int], bool]] = {}
+        origins = self.folder / "picture" / "origins.json"
+        if origins.is_file():
+            import json
+            for name, (ox, oy) in json.loads(origins.read_text(encoding="utf-8")).items():
+                if name in PICTURES and (self.folder / "picture" / f"{name}.png").is_file():
+                    self.pictures[name] = (_rgba(self.folder / "picture" / f"{name}.png"), (int(ox), int(oy)),
+                                           PICTURES[name][1][0] == "item")
         a = self.icons[ATTACK]
         self._att = a[ICON_ROWS:, :, :3].astype(np.float32)
         self._att_mask = a[ICON_ROWS:, :, 3] > 200
@@ -387,9 +414,63 @@ class Reader:
             empty = float((np.abs(cell - self.kb[c.y + 12:c.y + CELL_H, c.x:c.x + c.w, :3].astype(np.int16))
                            .max(axis=2) <= 8).mean())
             what = FUNCTIONS.get(which, str(which)) if best <= 8.0 else PICTURE if empty < EMPTY_OK else None
-            if out.get(c.key) is None:
+            if what == PICTURE:
+                what = self.picture_at(frame, c) or PICTURE
+            if out.get(c.key) is None or out[c.key] == PICTURE and what not in (None, PICTURE):
                 out[c.key] = what
         return out
+
+    def picture_at(self, win: np.ndarray, c: Cell) -> str | None:
+        """Which of her items' and skills' pictures (PICTURES) the window's crop `win` (its levels brought back) has on
+        cell `c`: its name ("LUCKY SEVEN"), or None (another picture, or none)."""
+        best, which = 0.0, None
+        for name, (pic, origin, item) in self.pictures.items():
+            share = self._picture_share(win, pic, origin, item, c)
+            if share > best:
+                best, which = share, name
+        return PICTURES[which][0] if which is not None and best >= PICTURE_OK else None
+
+    def picture_shares(self, win: np.ndarray, c: Cell) -> dict[str, float]:
+        """Each of PICTURES' shares on cell `c` (for the tests and the measures)."""
+        return {name: round(self._picture_share(win, pic, origin, item, c), 3)
+                for name, (pic, origin, item) in self.pictures.items()}
+
+    def _picture_share(self, win: np.ndarray, pic: np.ndarray, origin: tuple[int, int], item: bool, c: Cell,
+                       slack: int = 1) -> float:
+        """The share of picture `pic`'s opaque px (origin `origin`) drawn as they are on cell `c` of the window's crop,
+        those under the key's name and (an item's) its count left out: drawn with its origin at the cell's slot's bottom
+        left (the function pictures' place, Cell.icon, 32 high), best within `slack` px."""
+        kx, ky = KEYBOARD_AT
+        sx, sy = kx + c.icon[0], ky + c.icon[1]  # (the slot's top left; its bottom left 32 under it)
+        px, py = sx - origin[0], sy + 32 - origin[1]
+        h, w = pic.shape[:2]
+        keep = pic[:, :, 3] > 250
+        lab = self.labels.get(c.code)
+        if lab is not None:  # (its key's name drawn over it)
+            lx, ly = kx + c.x + c.label_dx - px, ky + c.y + 1 - py
+            lh, lw = lab.shape[:2]
+            y0, y1, x0, x1 = max(0, ly), min(h, ly + lh), max(0, lx), min(w, lx + lw)
+            if y0 < y1 and x0 < x1:
+                keep[y0:y1, x0:x1] &= ~(lab[y0 - ly:y1 - ly, x0 - lx:x1 - lx, 3] > 0)
+        if item:  # (its count, over the slot's bottom left)
+            bx, by = sx - px, sy + 32 - COUNT_BOX[1] - py
+            keep[max(0, by):max(0, by + COUNT_BOX[1]), max(0, bx):max(0, bx + COUNT_BOX[0])] = False
+        if keep.sum() < 50:
+            return 0.0
+        ref = pic[:, :, :3].astype(np.float32)[keep]
+        best = 0.0
+        for dy in range(-slack, slack + 1):
+            for dx in range(-slack, slack + 1):
+                x, y = px + dx, py + dy
+                if x < 0 or y < 0:
+                    continue
+                crop = win[y:y + h, x:x + w, :3]
+                if crop.shape[:2] != (h, w):
+                    continue
+                d = crop.astype(np.float32)[keep] - ref
+                d -= d.mean(axis=0)
+                best = max(best, float((np.abs(d).max(axis=1) <= DRAWN_LEVELS).mean()))
+        return best
 
 
 def functions_text(functions: dict[str, str | None], keys=None) -> str:
@@ -458,7 +539,10 @@ def compose(bindings: dict[str, int | str | None], preset: int = 1, at: tuple[in
         return out
     for c in BOUND:
         what = bindings.get(c.key)
-        if what is not None:
+        if what in r.pictures:  # (one of her items' or skills' pictures, by its field: PICTURES)
+            pic, (ox, oy), _ = r.pictures[what]
+            _paste(out, pic, kx + c.icon[0] - ox, ky + c.icon[1] + 32 - oy)
+        elif what is not None:
             pic = picture_icon(c.code) if what == PICTURE else r.icons[int(what)]
             _paste(out, pic, kx + c.icon[0], ky + c.icon[1])
         _paste(out, r.labels[c.code], kx + c.x + c.label_dx, ky + c.y + 1)
@@ -468,8 +552,8 @@ def compose(bindings: dict[str, int | str | None], preset: int = 1, at: tuple[in
 # The window as it was live on 2026-10-28 at 10:56 (D:/MapleHelper-scratch/akey/live/keyconfig.png): her keys' functions,
 # preset 2 (`compose`'s default bindings for the tests and the simulator)
 LIVE = {"esc": 46, **{f"f{i}": 99 + i for i in range(1, 8)}, "f9": 22, "f10": 14, "f11": 48, "scrolllock": 47,
-        "8": 13, "9": 12, "0": 10, "q": 8, "w": 5, "e": 0, "u": PICTURE, "i": 1, "o": 4, "p": 19, "[": 6, "]": 15,
-        "\\": 9, "s": 2, "d": PICTURE, "h": 11, "k": 3, "l": 55, ";": 58, "'": 16, "shift": PICTURE, "z": 50, "x": 51,
+        "8": 13, "9": 12, "0": 10, "q": 8, "w": 5, "e": 0, "u": "pet_food", "i": 1, "o": 4, "p": 19, "[": 6, "]": 15,
+        "\\": 9, "s": 2, "d": "chair", "h": 11, "k": 3, "l": 55, ";": 58, "'": 16, "shift": "lucky_seven", "z": 50, "x": 51,
         "c": PICTURE, "v": PICTURE, "m": 7, ",": 45, "up": 302, "ctrl": 52, "alt": 53, "space": 54, "left": 300,
         "down": 303, "right": 301}
 LIVE_PRESET = 2
@@ -512,4 +596,39 @@ def cut_assets(dest: Path = FOLDER, copy: Path | None = None) -> int:
     for code in sorted({c.code for c in BOUND}):
         put(tree["key"][str(code)], f"key/{code}.png")
         n += 1
-    return n
+    return n + cut_pictures(dest, copy)
+
+
+def cut_pictures(dest: Path = FOLDER, copy: Path | None = None) -> int:
+    """Her items' and skills' pictures (PICTURES) into `dest`/picture, from the copy: a skill's `icon` (its frames in
+    Packs/Skill_00000.ms, its pixels at the same path in Skill/_Canvas), an item's `icon` (Item/<folder>/<folder>_000.wz,
+    its pixels where its link points), and their origins (origins.json). Returns the pictures written."""
+    import json
+
+    from PIL import Image
+
+    from gamedata.canvas import pixels, source
+    from gamedata.ms import MsPack
+    from gamedata.paths import COPY
+    from gamedata.wz import Package
+    copy = COPY if copy is None else Path(copy)
+    out = Path(dest) / "picture"
+    out.mkdir(parents=True, exist_ok=True)
+    origins = {}
+    skills = MsPack(copy / "Packs" / "Skill_00000.ms")
+    skill_px = Package(copy / "Skill" / "_Canvas" / "_Canvas_000.wz")
+    for name, (_, where) in PICTURES.items():
+        if where[0] == "skill":
+            _, img, sid = where
+            node = skills.image(f"Skill/{img}")["skill"][str(sid)]["icon"]
+            rgba = pixels(skill_px.image(img)["skill"][str(sid)]["icon"])
+        else:
+            _, folder, img, iid = where
+            tree = Package(copy / "Item" / folder / f"{folder}_000.wz").image(img)
+            node = tree[f"{iid:08d}"]["info"]["icon"]
+            rgba = pixels(source(node, tree, copy))
+        o = node.props.get("origin")
+        origins[name] = [o.x, o.y]
+        Image.fromarray(rgba, "RGBA").save(out / f"{name}.png")
+    (out / "origins.json").write_text(json.dumps(origins, indent=1) + "\n", encoding="utf-8")
+    return len(origins)

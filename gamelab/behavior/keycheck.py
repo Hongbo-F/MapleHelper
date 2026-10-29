@@ -1,5 +1,6 @@
-"""Her regular attack's key doubted, checked and set right: the user's rule of 2026-10-28, after a hunt pressed a
-regular attack the game didn't have on its key any more.
+"""Her keys doubted, checked and followed to where the game has them: the user's rule of 2026-10-28, after a hunt pressed
+a regular attack the game didn't have on its key any more, and their answers of that afternoon: her other keys moved in
+the game "Follow them", the binding read "Remember it" (control.keymap), her attack's MISS over a monster "Yes, read it".
 
 What happened (live, 2026-10-28 00:30, Tree Dungeon; D:/MapleHelper-scratch/live/grind-1028-0030.log, telemetry
 lab/telemetry/20261028-003049-tour.jsonl): the user had moved the regular attack off Ctrl in their own play and not put
@@ -22,8 +23,21 @@ keyboard config (\\) to check the key configuration and see if attack button is 
    gain naming its kind since SHOWS_S after the key; an **effect** when its bar is lower (or one is up where there was
    none), a kill of hers is placed on it or a gain names its kind (a party share names none: it isn't one). An effect
    a Lucky Seven cast at it keyed after the press could have made (keyed SHOWS_S before the effect or earlier) is the
-   cast's: the press is passed over, as every press not judged is (neither counted nor ending a run). DOUBT_PRESSES
-   no-effects in a row are the doubt.
+   cast's: the press is passed over, as every press not judged is (neither counted nor ending a run). A press with her
+   attack's MISS over its target (perception.misses: the game's NoRed MISS popup, read off her looks' frames and the
+   feed's frame before her next key, behavior.hunter._miss_points), MISS_FROM_S to MISS_BY_S after its key, took effect
+   (it missed: the key works): "missed", the run starts again. DOUBT_PRESSES no-effects in a row are the doubt.
+1b. **Her other doubts**, each checked the same way (2.-5.): her Lucky Seven casts judged as her regular presses are (a
+   second RegularWatch, `kind` "casts", fed by Attacks; CAST_DOUBT in a row: an arrow moved has her throw the way she
+   faced, a Lucky Seven key moved casts nothing); her moves (MoveWatch, told by control.navigator what her minimap dot
+   showed of every chain: JUMPS_DOUBT planned jumps that didn't lift her, RUNS_DOUBT runs that didn't move her; the
+   check where she is, no retreat on moves doubted, put off DEFERS_MAX times the hunt stops); and out of darts' stop due
+   in the hunt loop (behavior.hunter.STARS_CHECKED: her Lucky Seven's key moved takes no MP and kills nothing as no stars
+   do), the window read first, the stop raised once it shows her Lucky Seven where she has it (or isn't read), at once
+   without a check due (the gap, the game's word); put off, her Lucky Seven held (the regular attack instead) for
+   hunter.STARS_WAIT_S at the most. And the hunt loop's stall (behavior.hunt.STUCK_S: no kill, pick-up or new ground
+   for 120 s; a "stall" doubt, once a stretch, hunt.STUCK_CHECKS): an arrow or her jump moved can keep her throwing where
+   she stands, her chains none; followed, the hunt goes on, else she stands by as before.
 2. **A place to do it**: no monster within PLACE_CLEAR of her in a look, she stays; else away to a safe place as on
    the Lie Detector (behavior.retreat.away: her moves alone, 10 s at most), and a look after it: one still near puts the
    check off (below).
@@ -54,22 +68,25 @@ keyboard config (\\) to check the key configuration and see if attack button is 
    retreat, the page "close it with Esc or CANCEL"; what keys do in the game with it open isn't known). Only the
    backslash, Esc and one mouse move are sent; with the Lie Detector alarm up the player refuses them (the alarm goes
    on as ever; a window that may be open then is said and paged).
-5. **What then** (`KeyCheck._act`, said in capitals; a telemetry event 'attack_key'). The window read, her moves'
-   keys first: her jump on a key showing JUMP and her arrows on MOVE LEFT/RIGHT/UP/DOWN, else the hunt stops
-   (KeyCheckStop: they aren't followed to where the window shows them, as her trips' chains take their keys at the
-   navigator's start, control.flow, and the player takes only config.toml's moves for her retreat under the Lie
-   Detector), then:
-   - ATTACK on another key the player can press (every key the window binds is one of config.toml's names, and the
-     player takes them all): her regular attack is that key for the rest of the run (Hunter.rekey: her Actions' and
-     her attack choice's keys; config.toml unchanged), and whoever is at the PC is paged; that key her pick-up's too,
-     said (her pick-ups attack then, no loot picked up); her Lucky Seven's or her pet food's (pictures: where they
-     went can't be told), the hunt stops (KeyCheckStop);
-   - ATTACK on no key (in the tray, or on none), on a key not to press (Esc, the backslash, maplehelper's hotkeys F1-F4
-     and F12: NOT_ATTACK), or the window not read: no more regular attacks this run (Lucky Seven only; her configured
-     key may do something else now), paged;
-   - ATTACK on her configured key after all: the misses were something else ("misses? out of reach?"): no more
-     regular attacks at the doubt's targets (`RegularWatch.no_regular_at`, every attack mode's: Hunter.hold_at), the
-     hunt goes on, logged only; with her stars maybe out (3.), no more regular attacks this run, paged.
+5. **What then** (`KeyCheck._act`, said in capitals; a telemetry event 'attack_key'). The window read, every key of
+   hers is followed to where it shows her function (control.keymap.follow: JUMP, the MOVE arrows, ATTACK, PICK UP, SIT,
+   her Lucky Seven's, pet food's and chair's pictures, perception.keybindings.PICTURES); one of her moves, her Lucky
+   Seven or her pet food on no key she can press (keymap.NEEDED; never Esc, the backslash or maplehelper's hotkeys, and
+   her moves and pet food never on what the Lie Detector's allowance can't take, alarm.ALARM_UNSAFE) stops the hunt
+   (KeyCheckStop), nothing followed. Else what moved is followed (Hunter.follow: her Actions' keys, which her chains'
+   key names, the mover, her pet's care and her retreat read as they go, and her attack choice's), the binding read
+   remembered for her next runs (keymap.remember, lab/keybindings-<character>.json) and her moves' and pet food's keys
+   handed to the player (keymap.publish, paths.ALARM_KEYS: its allowance with the Lie Detector's alarm up), then:
+   - ATTACK on another key: her regular attack is that key from now on (config.toml unchanged), paged; her other keys
+     moved said with it ("HER KEYS FOLLOWED: ...");
+   - ATTACK on no key (in the tray, or on none), on a key not to press (NOT_ATTACK), or the window not read: no more
+     regular attacks this run (Lucky Seven only), paged (remembered so: the next run starts with it off);
+   - ATTACK on her configured key, other keys moved: "followed", said, paged; her Lucky Seven moved, out of darts'
+     stretch starts again (DartWatch.followed);
+   - nothing moved: a regular doubt's misses were something else ("misses? out of reach?"): no more regular attacks at
+     the doubt's targets (`RegularWatch.no_regular_at`, every attack mode's: Hunter.hold_at), the hunt goes on, logged
+     only; with her stars maybe out (3.), no more regular attacks this run, paged; her moves' or casts' doubt: "as
+     configured", logged only; a stars doubt: out of darts' stop.
    At most CHECKS_MAX checks a run and none within CHECK_GAP_S of the last: a doubt in that time holds the regular
    attack at its targets only; once CHECKS_MAX have run, the next doubt turns it off for the run (paged).
 
@@ -82,7 +99,7 @@ that `unquiet` passes; after DEFERS_MAX of them, no more regular attacks this ru
 `hunt clear`, `nav`, a plain `tour`, `probe run`) her regular presses are held (Lucky Seven only) and whoever is at the
 PC is paged to run `gamelab keys --read`.
 
-On the live data (gamelab README: The regular attack's key checked; tests/test_keycheck.py replays the runs of
+On the live data (gamelab README: The regular attack's key checked, Her keys followed; tests/test_keycheck.py replays the runs of
 2026-10-25 to 28 through `RegularWatch`, tests/fixtures/regular_live_2026-10-28.json): at 00:31 the doubt at the look
 of 00:31:20.9, its 5th press keyed at 00:31:19.3, 12 s before her last useless press (as built 00:31:19.7); with her
 keys right (the other 15 runs, 245 minutes, 595 regular presses) never: 66 judged, 4 without effect, 2 in a row at the
@@ -99,13 +116,19 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import paths, telemetry
 from ..attack import reach
-from ..control import alarm, client
+from ..control import alarm, client, keymap
+from ..control.navigator import LIFT_BY_S, LIFT_UNITS, RUN_SEEN, RUN_UNITS
 from ..localization.monsters import TRACK_SLACK, Monster, seen_again
 from ..perception import keybindings
 from ..perception.framecheck import BadLook
 from .safety import HuntStop
 
 DOUBT_PRESSES = 5      # regular presses in a row that took no effect: the doubt (the user's "5 times")
+# ... and her Lucky Seven casts, judged so too (a second RegularWatch, `kind` "casts": the thief's, her star's reach):
+# her keys moved in the game (an arrow: she throws the way she faced, a Lucky Seven key that casts nothing) show so. Live
+# (the tour runs of 2026-10-25 to 28, keys right, 2,085 casts judged): 89 without effect, 5 in a row at the most
+# (D:/MapleHelper-scratch/akey2/moves/casts_replay.py)
+CAST_DOUBT = 8
 JUDGE_FROM_S = 0.6     # a press judged at the first look this long after its key (attacks.LANDS_S) ...
 JUDGE_BY_S = 2.0       # ... and no later (live the first sign of an effect came 0.25-1.27 s after the key, p10-p90,
                        # 1.52 at the most, of 135 regular presses with one)
@@ -128,6 +151,18 @@ BAR_MEMORY_S = 3.0     # a monster seen with its bar up this recently is hurt st
                        # 00:31:14.7's: the Horny Mushroom at 9% read with no bar, between two reads of it at 9%; taken
                        # for unhurt, its bar back at 9% was an effect, and the doubt came 2.4 s later, at 00:31:23.3)
 UNHURT_AGAIN_S = 0.3   # an unhurt target's no effect: two looks this far apart with still no bar up (a bar missed once)
+# Her attack's MISS over a press's target (perception.misses; the user, 2026-10-28, "Yes, read it"): the key works, it
+# missed. A press with one over its target seen MISS_FROM_S to MISS_BY_S after its key (the popup shows as her star
+# lands, 0.3-0.9 s after the key at her range, and reads for about half a second) took effect: `verdict` "missed", the
+# run of no-effects starts again. Over it: within MISS_DX across of where its target was, its bottom from MISS_UP over
+# the target's feet to MISS_DOWN under them (it's drawn over the monster's head and rises about 30 px a second). One a
+# Lucky Seven cast at it keyed after the press could have made is the cast's (passed over, as an effect is).
+MISSES_READ = True
+MISS_FROM_S = 0.15
+MISS_BY_S = 1.6
+MISS_DX = 70.0
+MISS_UP = 200.0
+MISS_DOWN = 15.0
 HIDDEN_S = 1.8         # a monster seen this recently that a look didn't find is about still (fight.HIDDEN_FOR: hit, under
                        # its damage numbers): one nearer a press's target takes its attack (loop_tree_ore_waits)
 WALK_S = 120.0         # units a second a target unseen for a while may have walked (a Horny Mushroom's 100 or so)
@@ -154,17 +189,27 @@ QUIET_S = 3.0          # ... within this long (from a retreat's end), else the c
 DEFER_GAP_S = 5.0      # a check put off is tried again at a quiet look this long after at the soonest ...
 DEFERS_MAX = 3         # ... this many times, then no more regular attacks this run
 # Keys the regular attack isn't switched to: Esc (maplehelper's abort, and the game's MENU), the backslash (SET KEY: what
-# opens the window), maplehelper's hotkeys (config.toml [hotkeys] and [control]: hidden from the game while it runs)
-NOT_ATTACK = ("esc", "\\", "f1", "f2", "f3", "f4", "f12")
+# opens the window), maplehelper's hotkeys (config.toml [hotkeys] and [control]: hidden from the game while it runs): the
+# keys none of hers is followed onto (control.keymap.NEVER, with config.toml's)
+NOT_ATTACK = keymap.NEVER
 KEPT_PRESSES = 12      # a doubt's presses kept for its report (the run's last)
-# Her keys besides the regular attack's, for a clash with the key the game has ATTACK on
-OTHER_KEYS = ("jump", "lucky_seven", "pick_up", "pet_food", "up", "down", "left", "right", "chair", "sit")
-# Her moves' keys and the function the window names on each (perception.keybindings.FUNCTIONS): one not showing it, the
-# hunt stops (not followed: her trips' chains take their keys at the navigator's start, control.flow, and the player
-# takes only config.toml's moves for her retreat under the Lie Detector, control.player)
-MOVES = {"jump": "JUMP", "left": "MOVE LEFT", "right": "MOVE RIGHT", "up": "MOVE UP", "down": "MOVE DOWN"}
-UNUSED = ("chair", "sit")  # (no sitting since 2026-10-26: a clash with them is said, nothing else)
+# Her moves doubted (MoveWatch, fed by control.navigator at every chain's end: her jumps that never lifted her and her
+# runs that never moved her by her minimap dot on the chain's glances, 15 a second; its LIFT_UNITS and the rest)
+# In a row, the doubt: live (the tour runs of 2026-10-24 to 28, 3,408 planned jumps, 1,824 runs of 60 units and more),
+# outside the hangs at a rope's top (her dot never moving for 11 and 17 in a row: control.navigator._rope_top since),
+# the jumps' that showed no lift 5 in a row at the most (by the telemetry's estimated lift-offs: the chains' plan times
+# are exacter), the runs' that didn't move her 3, and a chain cut short for her dot standing where it ran her, 15 of
+# 3,393 chains, never 2 in a row (D:/MapleHelper-scratch/akey2/moves)
+JUMPS_DOUBT = 6
+RUNS_DOUBT = 4
 EXIT = 6               # the command's exit code after KeyCheckStop (the safety stop's 4, out of darts' 5)
+
+
+def _now(stop):
+    """A stop held by a stars doubt (out of darts'), raised now: its time (`at`) now, the hunt's end there."""
+    if hasattr(stop, "at"):
+        stop.at = time.monotonic()
+    return stop
 
 
 def _believable(bar: float | None) -> bool:
@@ -211,11 +256,24 @@ def _in_front(s, m: Monster, far: float) -> Monster | None:
     return None
 
 
-def near_her(s) -> list[Monster]:
-    """The monsters look `s` has within PLACE_CLEAR of her."""
+def near_her(s, model=None) -> list[Monster]:
+    """The monsters look `s` has within PLACE_CLEAR of her; on a safe platform (`model`'s: MapModel.safe, none spawn on
+    it and none's platform runs under it, and monsters never leave their platform) only those placed on hers, none
+    else can touch her there (since 2026-10-28: a Green Mushroom on 24 within 250 of her on 25 had put the check off)."""
     if s is None or s.where is None:
         return []
-    return [m for m in s.monsters if abs(m.x - s.where.x) < PLACE_CLEAR[0] and abs(m.y - s.where.y) < PLACE_CLEAR[1]]
+    near = [m for m in s.monsters if abs(m.x - s.where.x) < PLACE_CLEAR[0] and abs(m.y - s.where.y) < PLACE_CLEAR[1]]
+    p = getattr(s, "platform", None)
+    if near and model is not None and p is not None and _safe(model, p.id):
+        near = [m for m in near if m.platform in (None, p.id)]
+    return near
+
+
+def _safe(model, pid: int) -> bool:
+    try:
+        return bool(model.safe(pid))
+    except Exception:
+        return False
 
 
 def unquiet(h, s) -> str | None:
@@ -231,7 +289,7 @@ def unquiet(h, s) -> str | None:
         return "at a rope's top"
     if h.knocked(s):
         return "touched just now"
-    if near := near_her(s):
+    if near := near_her(s, getattr(h, "model", None)):
         return f"{', '.join(sorted({m.kind for m in near}))} within {PLACE_CLEAR[0]:.0f} of her"
     return None
 
@@ -275,15 +333,33 @@ def _clock(t: float) -> str:
 
 @dataclass
 class Doubt:
-    """DOUBT_PRESSES regular presses in a row that took no effect (RegularWatch.due): the presses (the run's last
-    KEPT_PRESSES), when the last was judged (`known`), the run's how-many-th doubt."""
+    """Her keys doubted: `kind` "regular", DOUBT_PRESSES regular presses in a row that took no effect (RegularWatch.due:
+    the presses, the run's last KEPT_PRESSES, when the last was judged, `known`); "moves", her jumps or runs not moving
+    her (MoveWatch.due: `what` says how); "stars", out of darts' stop due (`stop`: its OutOfDarts, raised if the window
+    shows her Lucky Seven where she has it). The run's how-many-th doubt (`number`)."""
     presses: list[Press]
     known: float
     number: int = 1
+    kind: str = "regular"
+    what: str = ""
+    stop: object = None
+
+    @classmethod
+    def moves(cls, what: str, known: float, number: int = 1) -> "Doubt":
+        return cls([], known, number, "moves", what)
+
+    @classmethod
+    def stall(cls, what: str, known: float) -> "Doubt":
+        return cls([], known, 1, "stall", what)
+
+    @classmethod
+    def stars(cls, stop, known: float) -> "Doubt":
+        return cls([], known, 1, "stars", f"OUT OF DARTS DUE ({stop}): the key bindings checked first (her Lucky "
+                                          "Seven's key may be another in the game)", stop)
 
     @property
     def first(self) -> float:
-        return self.presses[0].t
+        return self.presses[0].t if self.presses else self.known
 
     @property
     def targets(self) -> list[Monster]:
@@ -295,13 +371,55 @@ class Doubt:
         return out
 
     def text(self) -> str:
+        if self.kind not in ("regular", "casts"):
+            return self.what
         kinds = ", ".join(sorted({p.kind for p in self.presses}))
         bars = "/".join(sorted({p.bar_text() for p in self.presses},
                                key=lambda b: (b == "no bar", float(b[:-1]) if b != "no bar" else 0.0)))
         judged = sorted(p.at - p.t for p in self.presses if p.at is not None)
         each = f", each judged {judged[len(judged) // 2]:.1f} s after its key" if judged else ""
-        return (f"THE REGULAR ATTACK TOOK NO EFFECT {len(self.presses)} TIMES IN A ROW ({kinds}, its bar {bars} "
+        head = "THE REGULAR ATTACK" if self.kind == "regular" else "HER LUCKY SEVEN"
+        return (f"{head} TOOK NO EFFECT {len(self.presses)} TIMES IN A ROW ({kinds}, its bar {bars} "
                 f"throughout, {_clock(self.presses[0].t)}-{_clock(self.presses[-1].t)}: in reach, untouched{each})")
+
+
+@dataclass
+class MoveWatch:
+    """Her moves doubted (see the module's doc): control.navigator tells it, at each chain's end, of every planned jump
+    whose lift-off its glances saw through (`jumped`: whether her dot rose LIFT_UNITS) and every run of RUN_UNITS
+    (`ran`: whether her dot moved RUN_SEEN); JUMPS_DOUBT jumps in a row that didn't lift her, or RUNS_DOUBT runs that
+    didn't move her, are the doubt (`due`, once; its count starts again). None of it at a rope's top (the navigator
+    doesn't tell it then: her dot snapped onto the platform, control.navigator._rope_top)."""
+    jumps: int = 0
+    runs: int = 0
+    counts: Counter = field(default_factory=Counter)
+    doubts: int = 0
+    _due: Doubt | None = None
+
+    def jumped(self, t: float, lifted: bool) -> None:
+        self.counts["lifted" if lifted else "no lift"] += 1
+        self.jumps = 0 if lifted else self.jumps + 1
+        if self.jumps >= JUMPS_DOUBT and self._due is None:
+            self._doubt(t, f"HER JUMPS DIDN'T LIFT HER {self.jumps} TIMES IN A ROW (her minimap dot never rose "
+                           f"{LIFT_UNITS:.0f} units within {LIFT_BY_S:g} s of a planned lift-off): her jump key may be "
+                           "another in the game")
+
+    def ran(self, t: float, moved: bool) -> None:
+        self.counts["ran" if moved else "no run"] += 1
+        self.runs = 0 if moved else self.runs + 1
+        if self.runs >= RUNS_DOUBT and self._due is None:
+            self._doubt(t, f"HER RUNS DIDN'T MOVE HER {self.runs} TIMES IN A ROW (her minimap dot never went "
+                           f"{RUN_SEEN:.0f} units in a run of {RUN_UNITS:.0f} and more): an arrow key of hers may be "
+                           "another in the game")
+
+    def _doubt(self, t: float, what: str) -> None:
+        self.doubts += 1
+        self._due = Doubt.moves(what, t, self.doubts)
+        self.jumps = self.runs = 0
+
+    def due(self) -> Doubt | None:
+        d, self._due = self._due, None
+        return d
 
 
 class KeyDoubt(Exception):
@@ -344,6 +462,7 @@ class RegularWatch:
     her (look, monster -> bool: `regular_reach`; None: always)."""
     presses: int = DOUBT_PRESSES
     reach_ok: Callable | None = None
+    kind: str = "regular"  # what it judges: her regular presses, or "casts" (her Lucky Seven's: CAST_DOUBT)
     pending: list[Press] = field(default_factory=list)
     run: list[Press] = field(default_factory=list)       # the no-effects in a row so far
     casts: list[tuple[float, Monster]] = field(default_factory=list)  # Lucky Seven keys at a target, the last KEPT_S
@@ -352,9 +471,12 @@ class RegularWatch:
     kills: list[tuple] = field(default_factory=list)     # her kills placed: (when, kind, platform, x, track)
     bars: list[tuple] = field(default_factory=list)      # monsters seen with a bar up, BAR_MEMORY_S: (t, monster)
     recent: list[tuple] = field(default_factory=list)    # every monster seen, HIDDEN_S: (t, monster)
+    misses: list[tuple] = field(default_factory=list)    # her attack's MISS popups seen, KEPT_S: (t, map x, map y)
     counts: Counter = field(default_factory=Counter)     # presses by what came of them (and why passed over)
     longest: int = 0                                     # the longest run of no-effects
     held: bool = False                                   # regular presses held (a doubt waiting for its check)
+    skill_held: bool = False                             # Lucky Seven held (out of darts due, its check put off: the
+                                                         # regular attack instead; KeyCheck._defer)
     off: str | None = None                               # why the regular attack is off for the run (None: it isn't)
     no_regular_at: list[Monster] = field(default_factory=list)  # targets it skips (a check found the key right)
     doubts: list[Doubt] = field(default_factory=list)
@@ -426,19 +548,22 @@ class RegularWatch:
         self.kills = [k for k in self.kills if k[0] > horizon]
         self.bars = [b for b in self.bars if b[0] > t - BAR_MEMORY_S] + [(t, m) for m in monsters if _believable(m.bar)]
         self.recent = [r for r in self.recent if r[0] > t - HIDDEN_S] + [(t, m) for m in monsters]
+        self.misses = [x for x in self.misses if x[0] > horizon] + [(t, mx, my) for mx, my in
+                                                                    (getattr(s, "misses", None) or ())]
+        # (and those behavior.hunter saw before her keys since, off the feed's newest state: Hunter._miss_glance)
         for p in self.pending:
             if p.verdict is None:
                 self._judge(p, t, monsters, s)
         while self.pending and self.pending[0].verdict is not None:
             p = self.pending.pop(0)
             self.counts[p.verdict if p.verdict != "passed" else f"passed: {p.why}"] += 1
-            if p.verdict == "effect":
+            if p.verdict in ("effect", "missed"):  # (a MISS over it: the key works)
                 self.run = []
             elif p.verdict == "none":
                 self.run.append(p)
                 self.longest = max(self.longest, len(self.run))
                 if len(self.run) >= self.presses and self._due is None and not self.held and self.off is None:
-                    self._due = Doubt(list(self.run[-KEPT_PRESSES:]), t, len(self.doubts) + 1)
+                    self._due = Doubt(list(self.run[-KEPT_PRESSES:]), t, len(self.doubts) + 1, kind=self.kind)
         self.no_regular_at = [seen_again(m, monsters) or m for m in self.no_regular_at]
 
     def _judge(self, p: Press, t: float, monsters: list[Monster], s) -> None:
@@ -455,6 +580,12 @@ class RegularWatch:
             return
         if again is not None:
             p.m, p.seen = again, t
+        if (missed := self._missed(p, t)) is not None:
+            if any(p.t < c_t <= missed - MISS_FROM_S and seen_again(c_m, [p.m]) is p.m for c_t, c_m in self.casts):
+                p.verdict, p.why, p.at = "passed", "a cast's MISS maybe", missed
+            else:
+                p.verdict, p.at = "missed", missed
+            return
         if t - p.t < JUDGE_FROM_S:
             return
         if t - p.t > JUDGE_BY_S:
@@ -485,6 +616,17 @@ class RegularWatch:
         near = [m for m in monsters if m.kind == p.kind and m.platform == p.m.platform and abs(m.x - p.m.x) < far
                 and getattr(m, "track", None) is None]
         return near[0] if len(near) == 1 else None
+
+    def _missed(self, p: Press, t: float) -> float | None:
+        """When a MISS popup over press `p`'s target showed (its key's MISS_FROM_S to MISS_BY_S after, by `t`), or None."""
+        hits = [mt for mt, mx, my in self.misses if p.t + MISS_FROM_S <= mt <= min(t, p.t + MISS_BY_S)
+                and abs(mx - p.m.x) <= MISS_DX and p.m.y - MISS_UP <= my <= p.m.y + MISS_DOWN]
+        return min(hits) if hits else None
+
+    def boxes(self, t: float) -> list[Monster]:
+        """The targets of the presses waiting whose MISS a look at `t` could show (MISS_FROM_S to MISS_BY_S after their
+        keys): where behavior.hunter looks for her attack's MISS popups."""
+        return [p.m for p in self.pending if p.verdict is None and p.t + MISS_FROM_S <= t <= p.t + MISS_BY_S]
 
     def _effect(self, p: Press, t: float, again: Monster | None) -> float | None:
         """When an effect of press `p` (or of a cast after it) shows by `t`: its target's bar lower (one up where none
@@ -544,8 +686,9 @@ class RegularWatch:
         c = self.counts
         if not self.doubts:
             return ""
-        out = (f"her regular presses: {c['effect'] + c['none']} judged, {c['none']} took no effect, {self.longest} in a "
-               f"row at the most (the doubt at {self.presses})")
+        out = (f"her regular presses: {c['effect'] + c['none'] + c['missed']} judged, {c['none']} took no effect, "
+               + (f"{c['missed']} MISSed (her attack's MISS over its target), " if c["missed"] else "")
+               + f"{self.longest} in a row at the most (the doubt at {self.presses})")
         out += f"; {len(self.doubts)} doubt(s), {len(self.checks)} check(s)"
         if self.deferred is not None:
             out += f"; a check put off {self.defers} time(s), not run (her regular presses held)"
@@ -587,6 +730,7 @@ class KeyCheck:
         self._last = None        # the last frame taken
         self.sent = False
         self.window_state = "not opened"
+        self.kept = None  # the window's frame as saved (lab/shots), the last read's
 
     @property
     def reader(self) -> keybindings.Reader:
@@ -595,36 +739,42 @@ class KeyCheck:
         return self._reader
 
     def run(self, doubt: Doubt) -> Outcome:
-        """The check: a place, her stars, a quiet moment, the window, what then (each said). Raises OutOfDarts (out of
-        darts' own watch due after her stars' test), SafetyStop (the HP watch, at every look), KeyCheckStop (the window
-        may be open; her keys where she can't follow them) and client.LieDetectorAlarm (the player refuses its keys
-        then)."""
+        """The check: a place, her stars (a regular doubt's), a quiet moment, the window, what then (each said). Raises
+        OutOfDarts (out of darts' own watch due after her stars' test; a stars doubt's stop, the window showing her Lucky
+        Seven where she has it), SafetyStop (the HP watch, at every look), KeyCheckStop (the window may be open; her keys
+        where she can't follow them) and client.LieDetectorAlarm (the player refuses its keys then)."""
         start = time.monotonic()
         watch = self.h.attacks.watch
         if (why := watch.may_check(start)) is not None:
             return self._hold(doubt, why)
-        self.h.hold_regular()  # (held through it: what it finds lets go)
+        if doubt.kind == "regular":
+            self.h.hold_regular()  # (held through it: what it finds lets go)
         stars = ""
-        if (why := self._place()) is None:
-            stars = self._stars(doubt)
-            why = self._quiet()
+        moves_ok = doubt.kind != "moves"  # (her moves doubted: no retreat)
+        if (why := self._place(retreat=moves_ok)) is None:
+            if doubt.kind == "regular":
+                stars = self._stars(doubt)
+            why = self._quiet(retreat=moves_ok)
         if why is not None:
             out = self._defer(doubt, why)
         else:
             watch.checked(time.monotonic())
+            watch.skill_held = False  # (what it finds lets go, or stops the hunt)
+            if (casts := getattr(self.h.attacks, "casts", None)) is not None:
+                casts.run, casts.pending = [], []
             reading = self._window()
             if self.window_state == "may be open":
                 text = ("the KEY BINDINGS window may be open in the game (the backslash sent, it wasn't seen closed): "
                         "close it with Esc or CANCEL" + ("" if reading is None or not reading.read
                                                           else f"; it read {reading.text()}"))
-                telemetry.emit("event", kind="attack_key", text=text, what="stopped", stars=stars,
+                telemetry.emit("event", kind="attack_key", text=text, what="stopped", stars=stars, doubt=doubt.kind,
                                seconds=round(time.monotonic() - start, 2),
                                **({"reading": reading.record()} if reading is not None else {}))
                 raise KeyCheckStop(text, window=True, at=time.monotonic())
             out = self._act(doubt, reading, stars)
         out.stars, out.seconds = stars, time.monotonic() - start
         telemetry.emit("event", kind="attack_key", text=out.text, what=out.what, key=out.key, stars=stars,
-                       seconds=round(out.seconds, 2),
+                       doubt=doubt.kind, seconds=round(out.seconds, 2),
                        **({"reading": out.reading.record()} if out.reading is not None else {}))
         return out
 
@@ -638,17 +788,21 @@ class KeyCheck:
 
     # --- 1. a place ------------------------------------------------------------------------------------------------
 
-    def _place(self) -> str | None:
+    def _place(self, retreat: bool = True) -> str | None:
         """No monster within PLACE_CLEAR of her in a look: she stays; else away to a safe place (behavior.retreat) and
-        a look after it. Why the check is put off (one still near), or None."""
+        a look after it (not with `retreat` False: her moves doubted, the check waits for a quiet moment where she is).
+        Why the check is put off (one still near), or None."""
         from .retreat import KEY_CHECK, away
-        near = near_her(self._look())
+        model = getattr(self.h, "model", None)
+        near = near_her(self._look(), model)
         if not near:
             self.log(f"  the key check where she is: no monster within {PLACE_CLEAR[0]:.0f} of her")
             return None
+        if not retreat:
+            return f"{', '.join(sorted({m.kind for m in near}))} near her (her moves doubted: no retreat)"
         self.log(f"  the key check: {', '.join(m.kind for m in near)} near her: to a safe place first")
         r = away(self.h, time.monotonic(), KEY_CHECK, self.log)
-        if near := near_her(self._look()):
+        if near := near_her(self._look(), model):
             return (f"{', '.join(sorted({m.kind for m in near}))} near her still after the retreat "
                     f"({getattr(r, 'result', '?')})")
         return None
@@ -771,18 +925,18 @@ class KeyCheck:
 
     # --- 3. a quiet moment -----------------------------------------------------------------------------------------
 
-    def _quiet(self) -> str | None:
+    def _quiet(self, retreat: bool = True) -> str | None:
         """A quiet moment for the window (`unquiet`, her still over two looks QUIET_LOOK_S apart) within QUIET_S, one
-        more retreat if a monster's near. Why the check is put off, or None."""
+        more retreat if a monster's near (`retreat`). Why the check is put off, or None."""
         from .retreat import KEY_CHECK, away
-        retreated, last, why = False, None, "not looked"
+        retreated, last, why = not retreat, None, "not looked"
         end = time.monotonic() + QUIET_S
         while True:
             s = self._look()
             why = unquiet(self.h, s)
             if why is None and last is not None and _still(last, s):
                 return None
-            if why is not None and near_her(s) and not retreated:
+            if why is not None and near_her(s, getattr(self.h, "model", None)) and not retreated:
                 self.log(f"  the key check: {why}: to a safe place first")
                 away(self.h, time.monotonic(), KEY_CHECK, self.log)
                 retreated, last, end = True, None, time.monotonic() + QUIET_S
@@ -793,17 +947,33 @@ class KeyCheck:
             time.sleep(QUIET_LOOK_S)
 
     def _defer(self, doubt: Doubt, why: str) -> Outcome:
-        """The check put off (`why`): her regular presses held, its doubt raised again at a quiet look (RegularWatch.
-        again); past DEFERS_MAX, no more regular attacks this run."""
+        """The check put off (`why`): its doubt raised again at a quiet look (RegularWatch.again), a regular doubt's
+        presses held; past DEFERS_MAX, a regular doubt's: no more regular attacks this run; a stars doubt's: its out of
+        darts stop; her moves': the hunt stops (KeyCheckStop)."""
         w = self.h.attacks.watch
         w.defers += 1
         if w.defers > DEFERS_MAX:
             w.deferred = None
+            if doubt.kind == "stars":
+                self.log(f"KEY CHECK: no quiet moment for it ({DEFERS_MAX} times put off; {why}): out of darts' stop")
+                raise _now(doubt.stop)
+            if doubt.kind == "moves":
+                text = (f"her moves doubted ({doubt.what.split(' (')[0].lower()}) and no quiet moment to check her key "
+                        f"bindings ({DEFERS_MAX} times put off; {why})")
+                self.log(f"KEY CHECK: {text.upper()}")
+                raise KeyCheckStop(text, at=time.monotonic())
+            if doubt.kind in ("casts", "stall"):
+                self.log(f"HER KEYS: no quiet moment for the key check ({DEFERS_MAX} times put off; {why}): nothing done")
+                return Outcome("put off", "no quiet moment")
             return self._off(f"ATTACK KEY: NO QUIET MOMENT FOR THE KEY CHECK ({DEFERS_MAX} TIMES PUT OFF; {why}): no more "
                              "regular attacks this run (Lucky Seven only)", f"no quiet moment for the key check ({why})")
         w.deferred, w.deferred_at = doubt, time.monotonic()
-        text = (f"ATTACK KEY: the key check put off ({why}): her regular presses held; again at a quiet moment "
-                f"({w.defers} of {DEFERS_MAX})")
+        if doubt.kind == "stars":  # (her casts on a key that may do nothing: the regular attack meanwhile)
+            w.skill_held = True
+        held = (": her regular presses held" if doubt.kind == "regular" else
+                ": her Lucky Seven held (the regular attack instead)" if doubt.kind == "stars" else "")
+        text = (f"{'ATTACK KEY' if doubt.kind == 'regular' else 'HER KEYS'}: the key check put off ({why}){held}; again "
+                f"at a quiet moment ({w.defers} of {DEFERS_MAX})")
         self.log(text)
         return Outcome("put off", text)
 
@@ -926,69 +1096,115 @@ class KeyCheck:
         try:
             from PIL import Image
             paths.SHOTS.mkdir(parents=True, exist_ok=True)
-            Image.fromarray(frame).save(paths.SHOTS / f"keybindings_{time.strftime('%Y%m%d-%H%M%S')}.png")
+            path = paths.SHOTS / f"keybindings_{time.strftime('%Y%m%d-%H%M%S')}.png"
+            Image.fromarray(frame).save(path)
             self.frames_kept += 1
+            self.kept = path
         except Exception:
             pass
 
     # --- 5. what then ----------------------------------------------------------------------------------------------
 
     def _act(self, doubt: Doubt, reading: keybindings.Reading | None, stars: str = "") -> Outcome:
+        """What the window read says, done (see the module's doc, 5.): her keys followed (control.keymap.follow) and
+        remembered, then her regular attack's outcome; a stars doubt's out of darts stop raised with her Lucky Seven
+        where she has it; her moves' doubt "as configured" with none of them moved."""
         h = self.h
         configured = h.actions.keys.attack.name
         cfg = configured.upper()
-        if reading is None or not reading.read:
-            why = "no frame" if reading is None else reading.why
+        fn = {} if reading is None or not reading.read else self._functions(reading)
+        if reading is None or not reading.read or not fn:
+            why = "no frame" if reading is None else reading.why if not reading.read else "its keys not read"
             sent = (" (the backslash went out and nothing changed where the window opens: if it's open in the game, "
                     "close it with Esc or CANCEL)" if self.sent else "")
+            if doubt.kind == "stars":
+                self.log(f"KEY CHECK: the key bindings not read ({why}): out of darts' stop{sent}")
+                raise _now(doubt.stop)
+            if doubt.kind == "moves":
+                text = f"her moves doubted and the key bindings not read ({why}){sent}"
+                self.log(f"KEY CHECK: {text.upper()}")
+                raise KeyCheckStop(text, at=time.monotonic())
+            if doubt.kind in ("casts", "stall"):
+                text = f"HER KEYS: THE KEY BINDINGS NOT READ ({why}): nothing changed{sent}"
+                self.log(text)
+                return Outcome("held", text, None, reading)
             return self._off(f"ATTACK KEY: THE KEY BINDINGS NOT READ ({why}): no more regular attacks this run "
                              f"(Lucky Seven only){sent}", f"the key bindings not read ({why})", reading)
         preset = f"Key Bindings, preset {reading.preset}" if reading.preset else "Key Bindings"
-        fn = self._functions(reading)
-        self._her_moves(fn)  # (raises KeyCheckStop: her moves' keys not as she has them)
-        said: list[str] = []
-        if any(keybindings.same_key(k, configured) for k in reading.attack):
-            if stars == "maybe out":
-                return self._off(f"ATTACK KEY: ATTACK IS ON {cfg} AS CONFIGURED ({preset}), AND HER STARS MAY BE OUT: "
-                                 "no more regular attacks this run (Lucky Seven only: out of darts' own watch stops the "
-                                 "hunt if her casts keep taking no MP)", "her stars may be out", reading)
-            targets = doubt.targets
-            h.hold_at(targets)
-            text = (f"ATTACK KEY: ATTACK IS ON {cfg} AS CONFIGURED ({preset}): the misses were something else (misses? "
-                    f"out of reach?); no more regular attacks at that {', '.join(m.kind for m in targets)}")
+        f = keymap.follow(h.actions.keys, fn, reading.illegible)
+        if f.stop is not None:  # (a move of hers, her Lucky Seven or pet food on no key she can press: not remembered)
+            text = f"{f.stop}: her keys can't be followed there"
+            self.log(f"HER KEYS: {text.upper()}")
+            raise KeyCheckStop(text, at=time.monotonic())
+        attack_off = None
+        if "attack" in f.off or "attack" in f.unknown:
+            attack_off = ("in the tray (on no key)" if reading.in_tray else "on no key" if not reading.attack
+                          else f"on {', '.join(k.upper() for k in reading.attack)} (not a key to press)")
+        saved = keymap.remember(f.keys, config_keys=getattr(h, "config_keys", None), frame=self.kept,
+                                preset=reading.preset, functions=fn, why=doubt.kind,
+                                attack_off=None if attack_off is None else f"ATTACK {attack_off}")
+        where = (f"remembered in {saved.name} for her next runs" if saved is not None
+                 else "not remembered: its file not written")
+        others = {k: v for k, v in f.moved.items() if k != "attack"}
+        now_on = self._what_on(fn, configured)
+        if f.moved:
+            h.follow(f.keys)  # (her actions', attack choice's and trips' keys)
+            keymap.publish(f.keys, why=f"followed off the window ({doubt.kind} doubt)")
+        followed = keymap.changes_text([(k, a, b) for k, (a, b) in others.items()])
+        said = [x for x in f.said if not x.startswith("attack ")
+                and not any(x.startswith(k.replace("_", " ") + " on ") for k in f.moved)]
+        tail = (f"; HER KEYS FOLLOWED: {followed}" if followed else "") + "".join(f"; {x}" for x in said)
+        if "attack" in f.moved:
+            key = f.moved["attack"][1]
+            text = (f"ATTACK KEY: THE GAME HAS ATTACK ON {key.upper()}, NOT {cfg} ({preset}): her regular attack is "
+                    f"{key.upper()} from now on (config.toml unchanged; {where}); {cfg} {now_on}" + tail)
+            self.log(text)
+            alarm.page("MapleStory: the attack key",
+                       f"gamelab found the game's Attack on {key.upper()}, not {cfg}: the hunt uses {key.upper()} for "
+                       f"the regular attack ({where})."
+                       + (f" Her keys followed too: {followed}." if followed else "")
+                       + "".join(f" {x}." for x in said)
+                       + f" Put Attack back on {cfg} in the Key Bindings (\\), then `gamelab keys --forget`.")
+            return Outcome("switched", text, key, reading)
+        if attack_off is not None:
+            return self._off(f"ATTACK KEY: THE GAME HAS ATTACK {attack_off.upper()} ({preset}): no more regular attacks "
+                             f"this run (Lucky Seven only){tail}", f"ATTACK {attack_off}", reading)
+        if others:
+            if "lucky_seven" in others:
+                h.darts.followed(time.monotonic())  # (her presses went on a key that didn't cast: a stretch from now)
+            elif doubt.kind == "stars":
+                self.log(f"HER KEYS: LUCKY SEVEN ON {h.actions.keys.lucky_seven.name.upper()} AS CONFIGURED "
+                         f"({preset}; followed: {followed}): out of darts' stop")
+                raise _now(doubt.stop)
+            text = (f"HER KEYS: THE GAME HAS THEM ON OTHER KEYS ({preset}): followed from now on ({where}): "
+                    f"{followed}" + "".join(f"; {x}" for x in said) + f"; attack on {cfg} as configured")
+            self.log(text)
+            alarm.page("MapleStory: her keys", f"gamelab found her keys moved in the game's Key Bindings and follows "
+                                               f"them: {followed} ({where})." + "".join(f" {x}." for x in said)
+                       + " Put them back in the Key Bindings (\\), then `gamelab keys --forget`.")
+            return Outcome("followed", text, None, reading)
+        if doubt.kind == "stars":
+            self.log(f"HER KEYS: LUCKY SEVEN ON {h.actions.keys.lucky_seven.name.upper()} AS CONFIGURED ({preset}): "
+                     "out of darts' stop")
+            raise _now(doubt.stop)
+        if doubt.kind in ("moves", "casts", "stall"):
+            what = {"moves": "HER MOVES' KEYS", "casts": "HER LUCKY SEVEN AND MOVES' KEYS"}.get(doubt.kind, "HER KEYS")
+            text = (f"HER KEYS: {what} AS CONFIGURED ({preset}): the misses were something else; nothing "
+                    "changed" + "".join(f"; {x}" for x in said))
             self.log(text)
             return Outcome("as configured", text, configured, reading)
-        on = [k for k in reading.attack if k not in NOT_ATTACK]
-        if not on:
-            where = ("in the tray (on no key)" if reading.in_tray else "on no key" if not reading.attack else
-                     f"on {', '.join(k.upper() for k in reading.attack)} (not a key to press)")
-            return self._off(f"ATTACK KEY: THE GAME HAS ATTACK {where.upper()} ({preset}): no more regular attacks "
-                             f"this run (Lucky Seven only)", f"ATTACK {where}", reading)
-        clashes = {k: self._clash(k) for k in on}
-        key = min(on, key=lambda k: len(clashes[k]))  # (one that's none of her keys first)
-        now_on = self._what_on(fn, configured)
-        for f in clashes[key]:
-            if f in UNUSED:
-                said.append(f"{key.upper()} is her {f} key too (not used)")
-            elif f == "pick_up":  # (her pick-up presses attack then: no loot picked up, nothing worse)
-                where = self._where(fn, "PICK UP", key)
-                said.append(f"{key.upper()} IS HER PICK-UP KEY TOO: HER PICK-UPS ATTACK, NO LOOT PICKED UP (PICK UP IS "
-                            + (f"ON {where.upper()} IN THE GAME)" if where else "ON NO KEY IN THE GAME)"))
-            else:  # (her Lucky Seven's, her pet food's: pictures, where they went can't be told off the window)
-                text = (f"the game has ATTACK on {key.upper()}, not {cfg} ({preset}), and {key.upper()} is her "
-                        f"{f.replace('_', ' ')} key: her {f.replace('_', ' ')} presses would attack")
-                self.log(f"ATTACK KEY: {text.upper()}")
-                raise KeyCheckStop(text, at=time.monotonic())
-        h.rekey(key)
-        text = (f"ATTACK KEY: THE GAME HAS ATTACK ON {key.upper()}, NOT {cfg} ({preset}): her regular attack is "
-                f"{key.upper()} for the rest of this run (config.toml unchanged); {cfg} {now_on}"
-                + "".join(f"; {x}" for x in said))
+        if said:
+            self.log("HER KEYS: " + "; ".join(said))
+        if stars == "maybe out":
+            return self._off(f"ATTACK KEY: ATTACK IS ON {cfg} AS CONFIGURED ({preset}), AND HER STARS MAY BE OUT: "
+                             "no more regular attacks this run (Lucky Seven only: out of darts' own watch stops the "
+                             "hunt if her casts keep taking no MP)", "her stars may be out", reading)
+        targets = doubt.targets
+        h.hold_at(targets)
+        text = (f"ATTACK KEY: ATTACK IS ON {cfg} AS CONFIGURED ({preset}): the misses were something else (misses? "
+                f"out of reach?); no more regular attacks at that {', '.join(m.kind for m in targets)}")
         self.log(text)
-        alarm.page("MapleStory: the attack key",
-                   f"gamelab found the game's Attack on {key.upper()}, not {cfg}: the hunt uses {key.upper()} for the "
-                   f"regular attack this run. Put Attack back on {cfg} in the Key Bindings (\\), or set config.toml."
-                   + "".join(f" {x}." for x in said))
-        return Outcome("switched", text, key, reading)
+        return Outcome("as configured", text, configured, reading)
 
     def _functions(self, reading: keybindings.Reading) -> dict[str, str | None]:
         """What each key does as the window read shows it (perception.keybindings.Reader.functions), {} if not told."""
@@ -996,37 +1212,6 @@ class KeyCheck:
             return {} if self._frame_read is None else self.reader.functions(self._frame_read, reading)
         except Exception:
             return {}
-
-    def _clash(self, key: str) -> list[str]:
-        """Her keys (OTHER_KEYS) on `key`, as she has them now."""
-        keys = self.h.actions.keys
-        return [f for f in OTHER_KEYS if (k := getattr(keys, f, None)) is not None and keybindings.same_key(k.name, key)]
-
-    @staticmethod
-    def _where(fn: dict, name: str, but: str | None = None) -> str | None:
-        """The key the window shows function `name` on (one she can press, not `but`), or None."""
-        found = [k for k, v in fn.items() if v == name and k not in NOT_ATTACK and not keybindings.same_key(k, but)]
-        return found[0] if found else None
-
-    def _her_moves(self, fn: dict) -> None:
-        """Her jump and arrows as the window shows them (`fn`; {} not told: nothing done): one on a key without its
-        function (JUMP, MOVE LEFT/RIGHT/UP/DOWN) stops the hunt (KeyCheckStop), saying where the window has it."""
-        if not fn:
-            return
-        keys = self.h.actions.keys
-        for f, name in MOVES.items():
-            k = getattr(keys, f, None)
-            if k is None:
-                continue
-            on = fn.get(keybindings.SAME_KEY.get(k.name, k.name), "?")
-            if on == name or on == "?":  # ('?': a key the window doesn't draw: not told)
-                continue
-            to = self._where(fn, name)
-            text = (f"her {f} key {k.name.upper()} shows {'nothing' if on is None else on} in the game's Key Bindings ("
-                    + (f"{name} is on {to.upper()}" if to else f"{name} is on no key she can press")
-                    + "): her moves' keys aren't followed")
-            self.log(f"ATTACK KEY: {text.upper()}")
-            raise KeyCheckStop(text, at=time.monotonic())
 
     @staticmethod
     def _what_on(fn: dict, key: str) -> str:
@@ -1043,9 +1228,17 @@ class KeyCheck:
         return Outcome("off", text, None, reading)
 
     def _hold(self, doubt: Doubt, why: str) -> Outcome:
-        """No check (`why`): past CHECKS_MAX the regular attack off for the run (paged); within CHECK_GAP_S held at the
+        """No check (`why`): a stars doubt's out of darts stop raised as it was; her moves' doubt logged, nothing done;
+        a regular doubt's past CHECKS_MAX the regular attack off for the run (paged), within CHECK_GAP_S held at the
         doubt's targets only (logged)."""
         watch = self.h.attacks.watch
+        if doubt.kind == "stars":
+            self.log(f"KEY CHECK: no check ({why}): out of darts' stop")
+            raise _now(doubt.stop)
+        if doubt.kind in ("moves", "casts", "stall"):
+            text = f"HER KEYS: no check ({why}): {doubt.text().split(' (')[0].lower()}; nothing done"
+            self.log(text)
+            return Outcome("held", text)
         if len(watch.checks) >= CHECKS_MAX:
             return self._off(f"ATTACK KEY: ANOTHER DOUBT, {why}: no more regular attacks this run (Lucky Seven only)",
                              why)

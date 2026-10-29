@@ -136,6 +136,38 @@ class Config:
     default_character: str = THIEF  # [characters] default: who plays when nothing names her (gamelab.character)
 
 
+def followed(cfg: Config, path: str | Path) -> tuple[Config, str | None]:
+    """`cfg` with her keys as gamelab last read them off the game's KEY BINDINGS window (its file for the thief,
+    gamelab/lab/keybindings-thief.json: gamelab.control.keymap, the user's "Remember it" of 2026-10-28), where there is
+    one with keys as they can be (a key name for each of her actions, her arrows, jump and attack bound, none on a
+    combo's button, abort or slow mode); and a line saying which keys are in use (None: config.toml's, no file)."""
+    import json
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return cfg, None
+    except (OSError, ValueError) as e:
+        return cfg, f"her keys: config.toml's ({Path(path).name} not read: {type(e).__name__})"
+    table = data.get("keys") if isinstance(data, dict) else None
+    known = {f.name for f in fields(GameKeys)}
+    try:
+        if not isinstance(table, dict) or set(table) - known:
+            raise ConfigError("not her keys")
+        if any(not table.get(name) for name in ("left", "right", "jump", "attack")):
+            raise ConfigError("her arrows, jump or attack on no key")
+        game_keys = replace(cfg.keys, **{name: None if value is None else _key(f"{path}: {name}", value)
+                                          for name, value in table.items()})
+        _check_collisions(game_keys, cfg.hotkeys, cfg.abort, cfg.slow_mode)
+    except ConfigError as e:
+        return cfg, f"her keys: config.toml's ({Path(path).name} left out: {e})"
+    moved = [f"{name} {getattr(cfg.keys, name).label if getattr(cfg.keys, name) else '-'} -> "
+             f"{getattr(game_keys, name).label if getattr(game_keys, name) else '-'}"
+             for name in known if getattr(cfg.keys, name) != getattr(game_keys, name)]
+    return replace(cfg, keys=game_keys), (f"her keys: as the game's Key Bindings showed them at {data.get('read_at', '?')}"
+                                          f" ({Path(path).name})" + (f"; not config.toml's: {', '.join(sorted(moved))}"
+                                                                     if moved else ""))
+
+
 def load(path: str | Path, combo_names: Iterable[str]) -> Config:
     try:
         with open(path, "rb") as f:

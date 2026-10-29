@@ -31,10 +31,16 @@ def sim_setup() -> tuple[GameKeys, Timing]:
     return SIM_KEYS, her_setup()[2]
 
 
-def her_setup(regular_attack: bool = False) -> tuple[config.Config, GameKeys, Timing]:
-    """config.toml, optionally with Lucky Seven off so throws use the plain attack key (no MP)."""
+def her_setup(regular_attack: bool = False, remembered: bool = True) -> tuple[config.Config, GameKeys, Timing]:
+    """config.toml, her keys the binding last read off the game's KEY BINDINGS window where there's one
+    (`remembered`: control.keymap.at_start; config.toml's [keys] otherwise, and `cfg.keys` always), optionally with
+    Lucky Seven off so throws use the plain attack key (no MP)."""
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
-    keys = dataclasses.replace(cfg.keys, lucky_seven=None) if regular_attack else cfg.keys
+    keys = cfg.keys
+    if remembered:
+        from . import keymap
+        keys = keymap.at_start(cfg.keys).keys
+    keys = dataclasses.replace(keys, lucky_seven=None) if regular_attack else keys
     return cfg, keys, cfg.timing
 
 

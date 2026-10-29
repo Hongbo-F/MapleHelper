@@ -767,3 +767,89 @@ def test_a_plan_refused_for_the_lie_detector_raises_its_alarm_even_before_its_fi
         (client.OUTBOX / f"{pid}.json").write_text(json.dumps({"error": error}), encoding="utf-8")
         with pytest.raises(client.LieDetectorAlarm, match="Lie Detector on screen"):
             client.wait(pid, timeout=1)
+
+
+# --- her keys followed to where the game has them (control.keymap): the alarm's allowance by the file's keys ----------
+
+def _followed_player(tmp_path, names: dict | None, seen_ago: float = 1.0, unsafe=None):
+    """A player with the alarm up 1 s ago, config.toml's keys (_keys), and an alarm keys file holding `names` (None: no
+    file) that it reads again whenever it changes (alarm.AlarmKeys)."""
+    from gamelab.control import alarm as alarm_mod
+    from gamelab.control.player import Alarm, allowed_keys
+    path = tmp_path / "alarm_keys.json"
+    if names is not None:
+        path.write_text(json.dumps({"keys": names, "character": "thief", "at": "2026-10-28 16:00:00"}),
+                        encoding="utf-8")
+    flag, said = Alarm(), []
+    flag.set()
+    flag.at = time.monotonic() - seen_ago
+    keys = _keys()
+    p = Player(allowed_keys(keys), "Game", flag, keys=keys, log=said.append, keys_file=path,
+               unsafe=alarm_mod.ALARM_UNSAFE if unsafe is None else unsafe)
+    return p, said, path
+
+
+def test_with_her_keys_followed_the_alarm_still_lets_through_only_her_moves_and_pet_food(monkeypatch, tmp_path):
+    """Her jump followed onto C and her pet food onto I (the game's Key Bindings read: control.keymap.publish wrote the
+    file): with the alarm up the player takes her retreat's moves by C and a tap of I, and still nothing else: not her
+    old jump (Alt now does something else in the game), not her attack, Lucky Seven, pick-up or old pet food key, no
+    mouse."""
+    game = _Game(monkeypatch, tmp_path)
+    p, said, _ = _followed_player(tmp_path, {"jump": "c", "pet_food": "i"})
+    run = [[0, "left", "down"], [100, "c", "down"], [140, "c", "up"], [600, "left", "up"]]
+    assert "error" not in p.run(_plan("flow", run, "retreat"))
+    assert "error" not in p.run(_plan("food", _tap("i")))
+    assert game.sent == [("left", True), ("c", True), ("c", False), ("left", False), ("i", True), ("i", False)]
+    for pid, events, kind in (("old_jump", _tap("alt"), "retreat"), ("attack", _tap("ctrl"), "retreat"),
+                              ("l7", _tap("shift"), "retreat"), ("pick", _tap("z"), "retreat"),
+                              ("old_food", _tap("u"), "pet_food"), ("click", _tap("lbutton"), "retreat"),
+                              ("food_jump", _tap("c"), "pet_food"), ("hunt", _tap("c"), None)):
+        assert p.run(_plan(pid, events, kind))["error"].startswith(LIE_DETECTOR_ERROR), pid
+    assert len(game.sent) == 6
+    assert any("from alarm_keys.json: left left, right right, jump c, up up, down down, pet_food i" in line
+               for line in said)
+
+
+@pytest.mark.parametrize("names, why", [
+    ({"jump": "c", "attack": "a"}, "not only her moves and pet food"),        # another of her keys: never the file's
+    ({"jump": "1"}, "a key not pressed with the alarm up"),                    # a digit (the Violetta quiz's buttons)
+    ({"pet_food": "enter"}, "a key not pressed with the alarm up"),            # Enter (a form's)
+    ({"jump": "esc"}, "a key not pressed with the alarm up"),
+    ({"jump": "f2"}, "a key not pressed with the alarm up"),                   # maplehelper's hotkey (the player's)
+    ({"jump": "left"}, "two of her moves on one key"),
+    ({"pet_food": "alt"}, "her pet food on one of her moves' keys"),
+    ({"jump": None}, "her arrows or jump on no key"),
+    ({"jump": "lbutton"}, "not a key config.toml can name"),
+    ({"jump": 7}, "not a key config.toml can name"),
+])
+def test_an_alarm_keys_file_not_as_her_keys_can_be_is_left_out(monkeypatch, tmp_path, names, why):
+    """A file that doesn't hold only her moves' and pet food's keys as they can be (alarm.alarm_keys_problem) is left
+    out, said once, and config.toml's keys stand: what goes with the alarm up never widens."""
+    from gamelab.control import alarm as alarm_mod
+    game = _Game(monkeypatch, tmp_path)
+    p, said, _ = _followed_player(tmp_path, names, unsafe=(*alarm_mod.ALARM_UNSAFE, "f1", "f2", "f3", "f4", "f12"))
+    assert p.allowance() == _keys() and why in p.alarm_keys.why
+    assert "error" not in p.run(_plan("flow", _tap("alt"), "retreat"))   # (config.toml's moves)
+    assert p.run(_plan("x", _tap("a"), "retreat"))["error"].startswith(LIE_DETECTOR_ERROR)
+    assert sum("left out" in line for line in said) == 1 and game.sent == [("alt", True), ("alt", False)]
+
+
+def test_the_player_reads_the_alarm_keys_file_again_when_it_changes(monkeypatch, tmp_path):
+    """No file: config.toml's. Written (a hunt followed her jump): the file's, at the next plan, without the player
+    started again (its UAC click). Broken or gone: config.toml's again."""
+    _Game(monkeypatch, tmp_path)
+    p, said, path = _followed_player(tmp_path, None)
+    assert p.allowance().jump.name == "alt"
+    path.write_text(json.dumps({"keys": {"jump": "c"}}), encoding="utf-8")
+    assert p.allowance().jump.name == "c" and p.allowance().left.name == "left"
+    path.write_text("{not json", encoding="utf-8")
+    assert p.allowance().jump.name == "alt" and "not read" in p.alarm_keys.why
+    path.unlink()
+    assert p.allowance().jump.name == "alt" and p.alarm_keys.why is None
+
+
+def test_a_player_without_the_file_takes_config_toml_s_keys_as_before():
+    from gamelab.control.player import Alarm, allowed_keys
+    keys = _keys()
+    p = Player(allowed_keys(keys), "Game", Alarm(), keys=keys)
+    assert p.alarm_keys is None and p.allowance() is keys

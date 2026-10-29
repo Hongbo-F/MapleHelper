@@ -47,9 +47,11 @@ def _start_logging(debug: bool) -> logging.handlers.QueueListener:
     return listener
 
 
-def _print_banner(cfg: config.Config) -> None:
+def _print_banner(cfg: config.Config, keys_note: str | None = None) -> None:
     titles = {c.name: c.title for c in COMBOS}
     print(f'MapleHelper is running. Hotkeys work only while the focused window title contains "{cfg.game_window_title}".')
+    if keys_note:
+        print(keys_note)
     for name, key in cfg.hotkeys.items():
         print(f"  {key.label:<6} {titles[name]}")
     print(f"  {cfg.abort.label:<6} stop the running combo")
@@ -63,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="path to config.toml")
     parser.add_argument("--debug", action="store_true",
                         help="log every key press with the focused window's title")
+    parser.add_argument("--config-keys", action="store_true",
+                        help="config.toml's [keys], not the ones gamelab last read off the game's Key Bindings")
     args = parser.parse_args(argv)
 
     try:
@@ -70,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     except config.ConfigError as e:
         print(f"Config problem: {e}")
         return 2
+    keys_note = None
+    if not args.config_keys:  # (her keys as gamelab last read them off the game's window: gamelab.control.keymap)
+        cfg, keys_note = config.followed(cfg, args.config.parent / "gamelab" / "lab" / "keybindings-thief.json")
 
     listener = _start_logging(args.debug)
     win32.enable_dpi_awareness()
@@ -81,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     with win32.precise_timers():
         runner.start()
         hook.start()
-        _print_banner(cfg)
+        _print_banner(cfg, keys_note)
         try:
             coach.run()
         finally:
