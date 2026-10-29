@@ -2513,7 +2513,7 @@ def cmd_save_recent(args) -> int:
     from .analysis import disk
     from .control import rolling
     try:
-        out = rolling.ask(args.seconds, args.name)
+        out = rolling.ask(args.seconds, args.name, png=args.png)
     except rolling.NotRunning as e:
         print(f"error: {e}")
         return 1
@@ -3163,6 +3163,8 @@ def build_parser() -> argparse.ArgumentParser:
                                            "(frames, index, summary) and print the folder")
     s.add_argument("--seconds", type=float, default=300.0, help="how far back (default 300, all it keeps)")
     s.add_argument("--name", help="a word added to the folder's name")
+    s.add_argument("--png", action="store_true", help="the frames lossless (PNG, about 800 KB a frame) instead of "
+                   "JPEG: a dataset's (the 5 GB the saves keep counts them too: move a save out of lab/recent)")
     s.set_defaults(func=cmd_save_recent)
 
     s = sub.add_parser("heading", help="which way she faces on saved frames (her picture above her name tag), and "

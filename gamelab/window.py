@@ -72,6 +72,18 @@ dwmapi.DwmGetWindowAttribute.argtypes = (wintypes.HWND, wintypes.DWORD, ctypes.c
 dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long  # an HRESULT: 0 is S_OK
 DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_CLOAKED = 9, 14  # a window's box as drawn; whether it's hidden by the compositor
 OVER_MAX = 2000  # `over`: windows above the game looked at at most (the walk can go round if windows change meanwhile)
+# Programs whose windows `over` counts as the game's own, by their executable's name: the Nexon launcher, which starts
+# the game, keeps an overlay over it the whole time (2026-10-29: class Chrome_WidgetWin_1, 2400x900 at 720,570, layered,
+# click-through, topmost, drawing nothing the user sees), so every frame of the night was "covered": the Lie Detector's
+# clips and save-recent's saves had none, and the user saw nothing over the game ("It's not, what are you talking
+# about?"). What it draws is the game's launcher's, not another program's.
+GAME_FAMILY = ("nexon_client.exe",)
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                ctypes.POINTER(wintypes.DWORD))
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 # The game's client sizes the player may set (resize_client): the game lays out a 1366x768 view and stretches it to
 # its window (screen.Geometry.stretch), so a 1366x768 client shows it pixel for pixel; 1920x1080 is how it was set until
 # 2026-10-23. A normal program can't resize the game's window (it runs as administrator: "access denied", tried
@@ -176,8 +188,9 @@ def over(hwnd: int, area: dict) -> int | None:
     (DWMWA_EXTENDED_FRAME_BOUNDS: without the invisible borders Windows 10 puts round a window to grab, else
     GetWindowRect) meets the area. `shows` looks at points only: a window between them (a notification, a small box
     of 200x150 at COVER_GRID's points 225x188 px apart, the client's left 8 px) or one clicks pass through (a layered
-    overlay: WindowFromPoint skips it) passes it. The game's own windows are left out (its picture). 39 windows above
-    the game, none shown over it: 0.1 ms (median of 50; 0.66 ms in the review's run), 2026-10-24."""
+    overlay: WindowFromPoint skips it) passes it. The game's own windows are left out (its picture), and those of
+    GAME_FAMILY's programs (its launcher's overlay). 39 windows above the game, none shown over it: 0.1 ms (median of
+    50; 0.66 ms in the review's run), 2026-10-24."""
     x0, y0 = area["left"], area["top"]
     x1, y1 = x0 + area["width"], y0 + area["height"]
     game = _process(hwnd)
@@ -186,7 +199,7 @@ def over(hwnd: int, area: dict) -> int | None:
         if not above:
             return None
         if user32.IsWindowVisible(above) and not user32.IsIconic(above) and not _cloaked(above) \
-                and _process(above) != game:
+                and (pid := _process(above)) != game and not _family(pid):
             left, top, right, bottom = _drawn(above)
             if left < x1 and right > x0 and top < y1 and bottom > y0 and right > left and bottom > top:
                 return above
@@ -206,6 +219,32 @@ def _process(hwnd: int) -> int:
     pid = wintypes.DWORD(0)
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     return pid.value
+
+
+_images: dict[int, str] = {}  # pid -> its executable's name, lower case ("" if it can't be read)
+
+
+def _image(pid: int) -> str:
+    """The executable's file name of process `pid`, lower case ("" if Windows won't say), kept once read."""
+    if pid not in _images:
+        name = ""
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            try:
+                buf, size = ctypes.create_unicode_buffer(1024), wintypes.DWORD(1024)
+                if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                    name = buf.value.rsplit("\\", 1)[-1].lower()
+            finally:
+                kernel32.CloseHandle(handle)
+        if len(_images) > 512:
+            _images.clear()
+        _images[pid] = name
+    return _images[pid]
+
+
+def _family(pid: int) -> bool:
+    """Whether process `pid` is one of GAME_FAMILY's (the game's launcher): its windows are the game's own."""
+    return _image(pid) in GAME_FAMILY
 
 
 def _cloaked(hwnd: int) -> bool:

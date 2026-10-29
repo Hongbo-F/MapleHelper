@@ -236,7 +236,7 @@ def _over(hwnd: int, area: dict) -> int | None:
             return None
         if _held.IsWindowVisible(above) and not _held.IsIconic(above):
             _held.GetWindowThreadProcessId(above, ctypes.byref(pid))
-            if pid.value != game and not window._cloaked(above):
+            if pid.value != game and not window._cloaked(above) and not window._family(pid.value):
                 left, top, right, bottom = window._drawn(above)
                 if left < x1 and right > x0 and top < y1 and bottom > y0 and right > left and bottom > top:
                     return above

@@ -113,7 +113,7 @@ WRITER_PRIORITY = -1  # THREAD_PRIORITY_BELOW_NORMAL
 # about 4 (1 GB, 5 minutes of JPEG, until 2026-10-25). The PC has 32 GB.
 MAX_BYTES = 4 * 1024 ** 3
 MAX_ITEMS = int(2 * SECONDS * FPS)  # moments kept at most whatever the clock does (it can be set back)
-RECENT_KEEP_BYTES = 5 * 1024 ** 3  # save-recent's saves: the oldest go, when one is made, past this (about 8 of 5 min)
+RECENT_KEEP_BYTES = 20 * 1024 ** 3  # save-recent's saves: the oldest go, when one is made, past this (5 GB until the user asked for 20, 2026-10-29)
 ALARM_POLL_S = 0.5    # how often it looks for a new Lie Detector alarm
 STATUS_S = 5.0        # how often it writes its status file (what `recorder --status` and `save-recent` read)
 STATUS_STALE_S = 30.0  # a status file older than this: no recorder is running
@@ -635,6 +635,7 @@ class Recorder:
                 ask = json.loads(taken.read_text(encoding="utf-8"))
                 seconds = min(max(float(ask.get("seconds", SECONDS)), 1 / self.fps), self.ring.seconds)
                 name = safe_name(ask.get("name"))
+                png = bool(ask.get("png", False))
             except (OSError, ValueError, TypeError, AttributeError) as e:
                 self._answer(path.stem, taken, {"error": f"the request couldn't be read ({type(e).__name__}: {e})"})
                 continue
@@ -642,8 +643,8 @@ class Recorder:
                 self._answer(path.stem, taken, {"error": f"busy: {SAVES_WAITING} saves are waiting to be written"})
                 continue
             snapshot = self.ring.last(seconds)
-            self.jobs.put(lambda rid=path.stem, taken=taken, snapshot=snapshot, seconds=seconds, name=name:
-                          self._save_recent(rid, taken, snapshot, seconds, name))
+            self.jobs.put(lambda rid=path.stem, taken=taken, snapshot=snapshot, seconds=seconds, name=name, png=png:
+                          self._save_recent(rid, taken, snapshot, seconds, name, png))
 
     # --- saving (the saver's thread) ---
 
@@ -671,14 +672,18 @@ class Recorder:
             finally:
                 self.jobs.task_done()
 
-    def _save_recent(self, rid: str, taken: Path, snapshot: list[Item], seconds: float, name: str) -> None:
+    def _save_recent(self, rid: str, taken: Path, snapshot: list[Item], seconds: float, name: str,
+                     png: bool = False) -> None:
+        """`png`: the frames lossless (PNG_PARAMS), for a dataset (the user, 2026-10-29: "record at the 15fps where
+        perception would run, save this as a dataset"); JPEG by default, as ever."""
         try:
             gone = lie_recorder.prune(self.recent, self.recent_keep)
             if gone:
                 self._say(f"recorder: deleted the {len(gone)} oldest saves to keep the rest under "
                           f"{self.recent_keep / 1024 ** 3:g} GB")
             folder = new_folder(self.recent, name)
-            summary = self._write(folder, snapshot, {"kind": "save-recent", "name": name or None, "asked_s": seconds})
+            summary = self._write(folder, snapshot, {"kind": "save-recent", "name": name or None, "asked_s": seconds},
+                                  png=png)
             answer = {"folder": str(folder),
                       **{k: summary[k] for k in ("seconds", "frames", "bytes", "gaps", "window")}}
             self._saved(folder, summary)
@@ -1035,10 +1040,10 @@ def running(box: Path | None = None, now: float | None = None) -> dict | None:
 
 
 def ask(seconds: float = SECONDS, name: str | None = None, box: Path | None = None,
-        taken_s: float = ASK_TAKEN_S, wait_s: float = ASK_WAIT_S) -> dict:
-    """Ask the running recorder to save its last `seconds` (the folder named for now and `name`), and wait for its
-    answer: the `folder`, its `seconds`, `frames`, `bytes`, `gaps` and `window`; or `error`. Raises NotRunning if no
-    recorder runs or none takes the request within `taken_s` (the request withdrawn)."""
+        taken_s: float = ASK_TAKEN_S, wait_s: float = ASK_WAIT_S, png: bool = False) -> dict:
+    """Ask the running recorder to save its last `seconds` (the folder named for now and `name`; `png`: lossless), and
+    wait for its answer: the `folder`, its `seconds`, `frames`, `bytes`, `gaps` and `window`; or `error`. Raises
+    NotRunning if no recorder runs or none takes the request within `taken_s` (the request withdrawn)."""
     box = Path(box or paths.RECORDER)
     if running(box) is None:
         raise NotRunning(f"no recorder is running (its status file, {box / 'status.json'}, is missing, says it stopped "
@@ -1049,7 +1054,7 @@ def ask(seconds: float = SECONDS, name: str | None = None, box: Path | None = No
     rid = f"{time.strftime('%H%M%S')}_{uuid.uuid4().hex[:6]}"
     request, answer = inbox / f"{rid}.json", outbox / f"{rid}.json"
     tmp = inbox / f"{rid}.tmp"
-    tmp.write_text(json.dumps({"seconds": seconds, "name": name, "asked": time.time()}), encoding="utf-8")
+    tmp.write_text(json.dumps({"seconds": seconds, "name": name, "asked": time.time(), "png": png}), encoding="utf-8")
     os.replace(tmp, request)
     start = time.monotonic()
     while True:
