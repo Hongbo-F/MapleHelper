@@ -84,8 +84,13 @@ like the rest of the lab), their labels in `tests/fixtures`; never in a scratch 
 `tests/testdata.py` lists the sets and finds them: in `GAMELAB_TESTDATA` (a folder, or several separated by `;`) if
 set, else in this checkout's `gamelab/lab/testdata`, then, in a git worktree, the main checkout's. A test whose set
 isn't there fails, saying which set and where it looked; on a computer without them `GAMELAB_NO_TESTDATA=1` skips those
-tests instead, saying the same. West Rocky Mountain II's labelled frames were lost (three of them are in
-`tests/fixtures/native`): the tests on all of them skip, saying they need a new capture.
+tests instead, saying the same. And never in the lab's folders the recorders prune to their newest few GB (`lab/recent`,
+`lab/lie_detector`, `lab/alarm_clips`): the rolling recorder's clips the 1366x768 HP bars were labelled on went that
+way. `tests/test_testdata.py` fails if a test names a scratch folder or one of those. Every run's summary lists the
+skips with their reasons (`-rfEs` in `pyproject.toml`). Lost and to be captured again, their tests skipping with
+"NEEDS A NEW CAPTURE": West Rocky Mountain II's labelled frames (31 at 1366x768, of which the three in
+`tests/fixtures/native` still run, and 42 at 1920x1080) and those HP-bar clips (609 frames; the 3 left in `lab/shots`
+still run). `tests/testdata.py` says what each set is and what its capture would be.
 
 ## Adding a combo
 

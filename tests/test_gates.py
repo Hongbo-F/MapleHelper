@@ -381,15 +381,13 @@ def test_tree_dungeons_mushrooms_are_found_and_told_apart():
 def test_horny_and_green_mushrooms_are_told_apart_wherever_the_sprite_fit_saw_one():
     model, labels, paths = tree_dungeon()
     det = sprites.detector_for(model, NATIVE)
-    told = []
+    told, cut = [], []
     for name, e in labels.items():
         scene = np.asarray(Image.open(paths[name]).convert("RGB"))[:700]
         for m in e["monsters"]:
             if not m["kind"].endswith("mushroom") or not m["frame"].startswith(("stand", "move", "hit1")):
                 continue
-            # (behind the chat bar, not searched; cut by the frame's top edge, part of what tells the kinds apart out of
-            # the frame: on these frames 11 so with a frame fitted, 12 of their 22 tellings right)
-            if not whole(m):
+            if m["y"] > 700:  # (behind the chat bar: not searched)
                 continue
             for start in ("horny-mushroom", "green-mushroom"):  # found as either, the same monster's kind
                 t = next(t for t in det.templates[start] if t.frame == m["frame"] and t.facing == m["facing"])
@@ -397,9 +395,15 @@ def test_horny_and_green_mushrooms_are_told_apart_wherever_the_sprite_fit_saw_on
                 r = mobs._match_at(scene, t.rgb, t.mask3, int(m["x"] - t.origin[0]) + tw // 2,
                                    int(m["y"] - t.origin[1]) + th // 2, mobs.FINE_SLACK)
                 hit = mobs._seen(start, t, r[1], r[2], r[3], r[4], round(r[0], 3))
-                told.append(mobs._pick_kind(scene, hit, det.twins[start], det.templates, mobs.FINE_SLACK).kind
-                            == m["kind"])
+                (told if whole(m) else cut).append(
+                    mobs._pick_kind(scene, hit, det.twins[start], det.templates, mobs.FINE_SLACK).kind == m["kind"])
     assert len(told) == 2 * 88 and all(told)  # spawning, flinching, frozen and covered ones too (on 2026-10-24's, 55)
+    # Cut by the frame's top edge (11 with a frame fitted, 16-94% of the picture in the frame, part of what tells the
+    # kinds apart out of it): a weakness of the pick, not put right. Told right on 12 of the 22 tellings, the mostly
+    # shown ones too (td_p13_0 and _1's Horny at 79% taken for a Green from a Horny start, td_p23_2's Green at 88% for a
+    # Horny from one: the pick takes the twin or keeps the kind it started from). Pinned so a change shows: where it's
+    # made better, put the new numbers here.
+    assert (len(cut), sum(cut)) == (2 * 11, 12)
 
 
 TWINS = {"horny-mushroom": ("green-mushroom",), "green-mushroom": ("horny-mushroom",),

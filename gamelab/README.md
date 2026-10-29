@@ -1133,7 +1133,13 @@ is the same filled red, and a monster's as it dies all red and black.
   none), 16 of 16 with the end covered, none of the 131 monsters without one (before 3). Two labels were put right on
   review: a full bar whose end a vine covers (its mint green counted as green) is 38 of 46 px green, the HP lost's black
   after it, as in the frames either side; a pig's bar under a damage number's purple halo, labelled with no green, is
-  0.675 green. 0.5 ms a monster at 1366x768, 0.8 ms at half size (0.2 before).
+  0.675 green. 0.5 ms a monster at 1366x768, 0.8 ms at half size (0.2 before). Since 2026-10-28 (test data,
+  `tests/testdata.py`) the 1366x768 clips are gone, pruned from `lab/recent` by the rolling recorder: the test checks the
+  3 frames left in `lab/shots` (2 bars within half a px, 4 monsters with none) and skips the rest saying they need a new
+  capture; and Tree Dungeon's 24 frames of 2026-10-28, whose 118 monsters have no bar (she didn't attack, and the bar
+  over a monster others hit isn't shown to her; 18 flinching or dying under their hits, damage numbers and skills over
+  many): none read. The 1920x1080 frames are the set `hp_bars_1920x1080` (the recordings' labelled frames and the 9
+  screenshots, copied out of `gamelab/lab`).
 - **In the simulator** the bars are drawn as the game draws them (`hud.draw_hp_bar`, at the half-size look's blend), and
   `--world bars-empty` (`Realism.bars_empty`) reads every bar up as empty, as live did before.
 

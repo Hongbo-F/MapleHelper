@@ -1,6 +1,8 @@
 """Where the tests' data too big for git lives (README: Tests): gamelab/lab/testdata, git-ignored like the rest of the
 lab, one folder a set. Never a scratch folder: the cleanup of D:/MapleHelper-scratch on 2026-10-28 deleted the labelled
-frames of Tree Dungeon and West Rocky Mountain II that tests read there, and those tests skipped without a word.
+frames of Tree Dungeon and West Rocky Mountain II that tests read there, and those tests skipped without a word. Nor
+gamelab/lab/recent, which the rolling recorder prunes to its newest 5 GB (rolling.RECENT_KEEP_BYTES), nor
+lab/lie_detector (lie_recorder.prune): the clips the 1366x768 HP bars were labelled on went that way.
 
 The sets (each one's labels in tests/fixtures, in git):
 - `tree_dungeon_native`: 24 lossless frames of Tree Dungeon, Forest Up North II (10002073) at the game's own 1366x768,
@@ -8,9 +10,23 @@ The sets (each one's labels in tests/fixtures, in git):
   (td_p<platform>_<i>.png, the td_p24 ones on 25: her_platform; tree_dungeon_native_monsters.json: every monster, player
   and pet; no drop on any).
 - `tree_dungeon_drops`: 7 frames of the hunts there of 2026-10-24 with drops lying (hp0_*.png, as saved in lab/shots;
-  tree_dungeon_drops.json).
+  tree_dungeon_drops.json; three of them have labelled HP bars too, hp_bars/labelled.json's "shots/").
+- `hp_bars_1920x1080`: the first map's frames with labelled HP bars at 1920x1080 (hp_bars/labelled.json): its 9
+  screenshots as saved in gamelab/lab, and the 20 recordings of lab/recordings that it names, each with only its
+  labelled frames (`frames`, and `index`: their numbers in the recording; 237 in all).
 Lost, to be captured again (`lost`): West Rocky Mountain II's (10004021) 31 frames at 1366x768 and 42 at 1920x1080 of
 2026-10-23 (west_rocky_native_monsters.json, west_rocky_monsters.json); three of the 31 are in tests/fixtures/native.
+And `tree_dungeon_clips`: the rolling recorder's clips of her Tree Dungeon hunts of 2026-10-24 and 25 (609 frames,
+JPEG) with labelled HP bars at 1366x768, pruned from lab/recent.
+What a new capture would be (each then labelled offline, as tree_dungeon_native's were, into a new labels file):
+- West Rocky Mountain II at 1366x768 (`west_rocky_native`): lossless PNGs of the game window as tree_dungeon_native's
+  (`snap --scale 1`, copied off lab/shots/snap.png), her standing still on a few platforms with its Stumps, Dark
+  Stumps, Axe Stumps and Red Snails in view, 3 frames a platform a second or two apart (the lost ones: on stair 28,
+  another player fighting the bridge's stumps).
+- West Rocky Mountain II at 1920x1080 (`west_rocky`): the same with the game stretched to a 1920x1080 window, only if
+  she is to play that way again (she plays at the game's own 1366x768 now).
+- HP bars at 1366x768 (`tree_dungeon_clips`): frames of a hunt of hers on Tree Dungeon (a monster's bar shows only once
+  she has hit it): `save-recent` during one, its folder copied here, the bars labelled as hp_bars/labelled.json's.
 
 Where: GAMELAB_TESTDATA, a folder (or several, separated by os.pathsep), if set; else this checkout's
 gamelab/lab/testdata, then, in a git worktree, the main checkout's (a worktree's lab is a copy without it). A test whose
@@ -113,14 +129,17 @@ def missing(why: str):
                 f"computer without it to skip the tests that need it (README: Tests; tests/testdata.py)", pytrace=False)
 
 
-def lost(name: str, files=(), what: str = "", labels: str = "") -> Path:
-    """A set whose frames were lost (deleted from D:/MapleHelper-scratch on 2026-10-28): its folder if it's back (the
-    same frames, named as their labels name them), else the test skips, saying plainly it needs a new capture (and new
-    labels: `labels` were made on the lost frames)."""
+SCRATCH_CLEANUP = "deleted from D:/MapleHelper-scratch on 2026-10-28"
+
+
+def lost(name: str, files=(), what: str = "", labels: str = "", gone: str = SCRATCH_CLEANUP) -> Path:
+    """A set whose frames were lost (`gone`: how; most were deleted from D:/MapleHelper-scratch on 2026-10-28): its
+    folder if it's back (the same frames, named as their labels name them), else the test skips, saying plainly it
+    needs a new capture (and new labels: `labels` were made on the lost frames)."""
     files = list(files)
     path = find(name, files)
     if path is not None:
         return path
-    pytest.skip(f"NEEDS A NEW CAPTURE: {what or name}: its frames were deleted from D:/MapleHelper-scratch on "
-                f"2026-10-28 and exist nowhere else; capture the map again into gamelab/lab/testdata/{name} and label "
-                f"the new frames as {labels or 'its labels'} were labelled (the old labels fit only the lost frames)")
+    pytest.skip(f"NEEDS A NEW CAPTURE: {what or name}: its frames were {gone} and exist nowhere else; capture the map "
+                f"again into gamelab/lab/testdata/{name} and label the new frames as {labels or 'its labels'} were "
+                f"labelled (the old labels fit only the lost frames)")

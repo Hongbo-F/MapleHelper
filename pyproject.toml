@@ -8,6 +8,8 @@ requires-python = ">=3.11"
 testpaths = ["tests"]
 pythonpath = ["."]
 # pytest-xdist: as many workers as tests/conftest.py's pytest_xdist_auto_num_workers says (8 for the suite, none for
-# files or tests named), the long tests handed round as workers come free. -n 8 or -n 0 says it outright.
-addopts = "-n auto --dist worksteal"
+# files or tests named), the long tests handed round as workers come free. -n 8 or -n 0 says it outright. -rfEs: the
+# summary at the end lists every skip with its reason (a test whose test data is lost says it needs a new capture;
+# GAMELAB_NO_TESTDATA=1's say what they'd need: tests/testdata.py) besides the failures and errors (pytest's own 'fE').
+addopts = "-n auto --dist worksteal -rfEs"
 markers = ["slow: long simulations and sweeps, left out unless --slow is given (README: Tests)"]

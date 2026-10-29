@@ -23,3 +23,18 @@ monsters with none. Its test skips where those frames aren't. Two labels were pu
 00230, 00240 and 00245 (0.8261); `recordings/do_attack5.npz#36`'s pig at (296, 119), labelled a bar with no green, is
 green to 0.675 under a damage number's purple halo (114-177 over red and blue, from the fill's left at 280.1 to about
 302.0 of 32.3 half-size px), the red after it.
+
+Where the frames are since 2026-10-28 (test data, `tests/testdata.py`; the test fails where a set's frames aren't, or
+skips with `GAMELAB_NO_TESTDATA=1`): the names stay where the frames were in `gamelab/lab`, and the test reads them out
+of the sets. At 1366x768 the rolling recorder's clips (`recent/...`, 609 frames) are gone: the recorder prunes
+`lab/recent` to its newest 5 GB (it held only 2026-10-28's saves then), so that case skips, saying it needs a new
+capture (the clips of a hunt of hers: a bar shows only over a monster she hit), into `gamelab/lab/testdata/
+tree_dungeon_clips`; the 3 saved in `lab/shots` are in the set `tree_dungeon_drops` (2 bars, 4 monsters with none). At
+1920x1080 the set `hp_bars_1920x1080` holds the 9 screenshots as saved in `gamelab/lab` and the 20 recordings of
+`lab/recordings` it names with only their labelled frames (237: `frames`, and `index`, each one's number in the
+recording; 93 MB for their 517). `labelled.json`'s `tree_dungeon_native` (2026-10-28) is the 118 monsters of the set
+`tree_dungeon_native` (`tests/fixtures/tree_dungeon_native_monsters.json`), each at its picture's centre and top as
+`eyes.bar` asks (its labelled frame's sprite placed on its feet; a stand one's for the 14 dying or with no frame
+fitted), none with a bar: she didn't attack, and the bar over a monster other players hit isn't shown to her (a search
+of the 24 frames for the bar's frame anywhere found none, and none by eye over the 18 flinching or dying under their
+hits), with damage numbers, skills, players and their tags where a bar would be.
