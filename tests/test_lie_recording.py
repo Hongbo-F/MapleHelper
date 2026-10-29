@@ -410,26 +410,31 @@ def test_a_game_window_gone_or_minimized_mid_cycle_is_recorded_as_such_not_as_th
     assert summary["end"] == "gone" and summary["outcome"] == "answered"
 
 
-def test_a_game_with_another_window_over_it_is_checked_but_not_saved_nor_counted_as_the_lie_detector_gone(tmp_path):
+def test_a_game_with_another_window_over_it_is_checked_not_saved_and_counted_as_the_lie_detector_gone(tmp_path):
+    """The user, 2026-10-29: "count seconds when game window is covered" (this app's window over a corner of the game
+    kept the player locked after the answer): a look with another window over some of the game is checked as the
+    screen is, its frame not saved, and with none seen it counts toward the stretch without the Lie Detector, so a
+    cycle ends under cover too; gone or minimized still doesn't count (the test above)."""
     screen = Screen()
     dog, flag, said, alarms = make_dog(tmp_path, screen)
     covered = ("covered", 0)
     t = play(dog, screen, [("covered", 1)])  # seen round a window over the game: raised as ever
     assert flag.is_set() and alarms == [True]
-    t = play(dog, screen, [1] + [covered] * 8, t)  # 2 s covered: not gone
+    t = play(dog, screen, [1] + [covered] * 3, t)  # 0.5 s covered without it: counting, not yet END_S
+    assert dog.recording is not None and dog.gone_since == 0.5
+    t = play(dog, screen, [("covered", 2), 0, 0, 0, covered], t)  # seen through it again; then gone 0.75 s
     assert dog.recording is not None
-    t = play(dog, screen, [("covered", 2), 0, 0, 0, 0], t)  # seen through it again; then gone 0.75 s
-    assert dog.recording is not None
-    play(dog, screen, [0], t)  # 1 s
+    play(dog, screen, [covered], t)  # 1 s, its last quarter covered: over
+    assert dog.recording is None and dog.cycle_t0 is None
     [(folder, summary, index)] = written(dog)
-    assert summary["not_showing"] == {"covered": 10} and summary["frames"] == 6 and summary["grabs"] == 16
-    assert len(list(folder.glob("*.jpg"))) == 6  # only the game's own pictures
+    assert summary["not_showing"] == {"covered": 7} and summary["frames"] == 4 and summary["grabs"] == 11
+    assert len(list(folder.glob("*.jpg"))) == 4  # only the game's own pictures
     assert index[0] == {"t": 0.0, "game": "covered", "seen": True, "scores": COUNTDOWN}
     assert index[2] == {"t": 0.5, "game": "covered", "seen": False, "scores": GONE}
-    assert index[1]["file"] == "00000.jpg" and index[11]["file"] == "00001.jpg"
-    assert summary["first_seen"] == 0.0 and summary["last_seen"] == 2.5
+    assert index[1]["file"] == "00000.jpg" and index[6]["file"] == "00001.jpg"
+    assert summary["first_seen"] == 0.0 and summary["last_seen"] == 1.25 and summary["end"] == "gone"
     assert summary["forms"] == {"countdown": {"first": 0.0, "last": 0.25, "frames": 2},
-                                "mini-game": {"first": 2.5, "last": 2.5, "frames": 1}}
+                                "mini-game": {"first": 1.25, "last": 1.25, "frames": 1}}
     assert summary["end"] == "gone" and summary["window"] == [64, 48]
 
 
@@ -867,11 +872,11 @@ def test_clear_alarm_waits_for_the_lie_detector_s_recording_to_end(tmp_path, mon
         if (rec.folder / INDEX).exists():
             break
         time.sleep(0.02)
-    # Cleared now, a running player would stop a minute after the last sight, the person maybe still at it.
+    # Cleared now, a running player would stop END_S after the last sight, the person maybe still at it.
     assert main(["clear-alarm"]) == LIE_DETECTOR_EXIT
     out = capsys.readouterr().out
     assert out.startswith(f"the Lie Detector's recording is still going ({rec.folder}): it ends once the game has "
-                          "shown no Lie Detector for 60 s")
+                          "shown no Lie Detector for 10 s (a window over some of it counts")
     assert "The alarm stays up" in out and alarm_file.exists()
     rec.add(0.25, frame(), GONE)
     finished(rec)

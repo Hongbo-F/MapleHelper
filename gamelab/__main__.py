@@ -138,11 +138,11 @@ def cmd_clear_alarm(args) -> int:
     from .control.alarm import alarm_info, clear_alarm
     folder = lie_recorder.going()
     if folder is not None and alarm_info() is not None:
-        # Cleared now, a running player would stop a minute after the Lie Detector's last sight, the person maybe
+        # Cleared now, a running player would stop END_S after the Lie Detector's last sight, the person maybe
         # still at it (the spotter can't see the figure tracking: lie_recorder.END_S); and the commands would run.
         print(f"the Lie Detector's recording is still going ({folder}): it ends once the game has shown no Lie "
-              f"Detector for {lie_recorder.END_S:g} s (with no window over it: a window over the game, or the game "
-              "minimized, doesn't count). The alarm stays up: run `clear-alarm` again then.")
+              f"Detector for {lie_recorder.END_S:g} s (a window over some of it counts; the game minimized or gone "
+              "doesn't). The alarm stays up: run `clear-alarm` again then.")
         return LIE_DETECTOR_EXIT
     info = clear_alarm()
     if info is None:

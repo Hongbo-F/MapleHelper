@@ -52,8 +52,12 @@ from ..paths import LIE_RECORDINGS
 # window ("N sec until the Lie Detector mini-game starts") and the Violettas' window (both have the yellow title) and
 # a frame or two missed in a flicker (a window redrawn, the pointer over the title). How long the tracking lasts
 # isn't measured (no recording of it yet: the first one's index will tell, the notice's last `seen` and the frames
-# after it); a minute is several times the count's 5 s and a tracking of tens of seconds, at 240 frames of tail.
-END_S = 60.0
+# after it); a minute was several times the count's 5 s and a tracking of tens of seconds, at 240 frames of tail.
+# 10 s since the user's "Change lie detector timeout from 60s to 10s" (2026-10-29 ~01:26: a person answers it and
+# clears the alarm, and the minute kept the player locked and the grind waiting after the answer; a tracking stretch
+# that shows nothing for longer may end the cycle early: then the recording stops there and `clear-alarm` may stop the
+# player while it's still up, which only a person starting it again undoes).
+END_S = 10.0
 # ... and at the latest this long after the first sight, seen or not: the longest cycle the game makes, as far as
 # it has been seen, is a test left unanswered (its windows run a minute or two) and the Truth Booth it sends her to
 # (4:44 left on its timer in the screenshot taken as she arrived, 2026-10-18), then END_S: about 8 minutes. Ten

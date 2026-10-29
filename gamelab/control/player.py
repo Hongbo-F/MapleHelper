@@ -350,8 +350,10 @@ class Watchdog(threading.Thread):
     then does the recording start (control.lie_recorder), with that first frame. From there every grab goes into it
     until the game has shown no Lie Detector for `end_s` (lie_recorder.END_S): the cycle's end; or, at the latest,
     `cap_s` after the first sight, when the recording stops and the cycle goes on unrecorded. A grab with the game
-    window gone, minimized or covered by another window (checked for the Lie Detector all the same) is recorded as
-    such, with no frame, and doesn't count as the Lie Detector gone.
+    window gone or minimized is recorded as such, with no frame, and doesn't count as the Lie Detector gone; one with
+    another window over some of the game (checked for the Lie Detector all the same: the screen as it is there) is
+    recorded with no frame too, but counts as gone when the check sees none (the user, 2026-10-29: "count seconds when
+    game window is covered": this app's window over a corner of the game had kept the player locked after the answer).
 
     `shadow` (True: the YOLO checkpoint, perception.lie_detector_yolo; or one made for tests; None or False: none)
     checks the game's frames of a cycle for the mouse mini-game's pattern board on a thread of its own (ShadowWorker),
@@ -472,8 +474,8 @@ class Watchdog(threading.Thread):
                 frame, why = None, "check failed"
         seen = scores is not None and max(scores.values()) >= 1
         shown = frame is not None and why is None  # the game itself, nothing over it: only then is the frame saved
-        if seen or not shown:
-            self.gone_since = None  # a game not showing (gone, minimized, covered) may have it up behind
+        if seen or frame is None:
+            self.gone_since = None  # a game not showing (gone, minimized) may have it up behind; a covered one counts
         elif self.gone_since is None:
             self.gone_since = now
         if seen and self.cycle_t0 is None:
@@ -538,7 +540,8 @@ class Watchdog(threading.Thread):
             return False
 
     def gone_for(self, now: float) -> bool:
-        """Whether the game has shown no Lie Detector for end_s, every look of it showing the game."""
+        """Whether the game has shown no Lie Detector for end_s, every look of it having a frame (the game, or the
+        screen over it where another window covers some of it)."""
         return self.gone_since is not None and now - self.gone_since >= self.end_s
 
     def _raise_again(self, frame) -> None:
