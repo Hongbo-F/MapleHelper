@@ -133,6 +133,26 @@ def cmd_stop(args) -> int:
     return 0
 
 
+def cmd_notify(args) -> int:
+    """The phone's pushes (control.notify): set up, say where they go, send a test."""
+    from .control import notify
+    cfg = notify.setup() if args.setup else notify.load()
+    if cfg is None:
+        print(f"no phone push set up ({notify.CONFIG} missing): `python -m gamelab notify --setup`")
+        return 1
+    print(f"pushes go to {cfg['server']}/{cfg['topic']} ({notify.CONFIG}): in the ntfy app, subscribe to the topic "
+          f"{cfg['topic']!r} on {cfg['server']} (keep it to yourself: anyone who knows it can read the pushes)")
+    if args.test:
+        try:
+            notify.send(cfg, "gamelab test", f"a test push at {time.strftime('%H:%M:%S')}: a Lie Detector comes "
+                                              "like this, urgent, every 30 s while it's up", "urgent")
+        except Exception as e:
+            print(f"the test push failed: {e}")
+            return 1
+        print("test push sent")
+    return 0
+
+
 def cmd_clear_alarm(args) -> int:
     from .control import lie_recorder
     from .control.alarm import alarm_info, clear_alarm
@@ -2766,6 +2786,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("clear-alarm", help="after you've answered a Lie Detector and its recording has ended: let "
                                        "gamelab run again (start the player again after it)"
                    ).set_defaults(func=cmd_clear_alarm)
+    s = sub.add_parser("notify", help="the Lie Detector pushed to your phone through ntfy (control.notify): --setup "
+                                      "makes lab/ntfy.json with a random topic and says how to subscribe; --test sends "
+                                      "one push")
+    s.add_argument("--setup", action="store_true")
+    s.add_argument("--test", action="store_true")
+    s.set_defaults(func=cmd_notify)
     s = sub.add_parser("character", help="who plays: her profiles, the one a command plays and why; `use ID` plays ID "
                                          "when nothing names another (lab/character.json); `check`: her bottom bar "
                                          "(not read yet). Offline: no game, no keys")

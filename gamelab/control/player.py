@@ -393,7 +393,7 @@ class Watchdog(threading.Thread):
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
                  interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None,
-                 shadow=False):
+                 shadow=False, pusher=None):
         super().__init__(name="lie-detector-watch", daemon=True)
         from ..perception.framecheck import anchors_off
         from ..perception.lie_detector import NATIVE_FRAME, WHOLE_EVERY, LieDetectorSpotter
@@ -417,6 +417,7 @@ class Watchdog(threading.Thread):
         self.end_s = lie_recorder.END_S if end_s is None else end_s
         self.cap_s = lie_recorder.CAP_S if cap_s is None else cap_s
         self.Recording = lie_recorder.Recording
+        self.pusher = pusher                  # the phone's pushes of a cycle (control.notify.Pusher; None: none)
         self.stopped = threading.Event()
         self.looked = threading.Event()       # its first look is done: the player takes no plan before (serve)
         self.cleared = threading.Event()      # the alarm cleared by a person and the screen clear since: the player
@@ -493,6 +494,8 @@ class Watchdog(threading.Thread):
             self._start_recording(info)
         elif seen and self.alarm_written and not alarm_up():
             self._raise_again(frame)
+        if seen and self.pusher is not None:  # (after the alarm: the keys have stopped, the PC paged)
+            self._pushed(lambda: self.pusher.seen(now, max(scores, key=scores.get)))
         number = None
         if self.recording is not None:
             number = self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
@@ -507,6 +510,8 @@ class Watchdog(threading.Thread):
             if self.recording is not None:
                 self._end_recording("gone")
             self.cycle_t0 = None
+            if self.pusher is not None:
+                self._pushed(lambda: self.pusher.ended(now))
             self._say(f"the Lie Detector has been off the screen for {self.end_s:g} s: its cycle is over"
                       + (" (waiting for `clear-alarm`, then the player stops)" if alarm_up() else ""))
         if self.alarm.is_set() and not self.cleared.is_set():
@@ -517,6 +522,13 @@ class Watchdog(threading.Thread):
                 self._say(f"the Lie Detector alarm was cleared and none has been on screen for {self.end_s:g} s: "
                           "the player stops (it takes plans again once it's started again: `python -m gamelab "
                           "player --elevate`)")
+
+    def _pushed(self, fn) -> None:
+        """A push to the phone (control.notify), whatever goes wrong in it said, never raised."""
+        try:
+            fn()
+        except Exception as e:
+            self._trouble("the phone push failed", e)
 
     def _scores(self, frame) -> dict[str, float]:
         """The spotter's scores of a look's frame: near the forms' places (`near`), or of the whole frame (`scores`) on
@@ -882,7 +894,9 @@ def serve() -> None:
     player = Player(allowed_keys(cfg.keys), cfg.game_window_title, alarm, keys=cfg.keys, keys_file=ALARM_KEYS,
                     unsafe=unsafe)
     win32.enable_dpi_awareness()
-    watchdog = Watchdog(cfg.game_window_title, alarm, shadow=True)
+    from . import notify
+    pusher = notify.Pusher.from_lab(log=_log)  # the phone's pushes (lab/ntfy.json, read at each: none without it)
+    watchdog = Watchdog(cfg.game_window_title, alarm, shadow=True, pusher=pusher)
     watchdog.start()
     now_keys = player.allowance()
     pet = now_keys.pet_food.name if now_keys is not None and now_keys.pet_food is not None else None
@@ -890,7 +904,9 @@ def serve() -> None:
          f"(with it seen: {f'a tap of {pet!r} for her pet, {PET_FOOD_PER_MIN} a minute, and ' if pet else ''}her "
          f"retreat's moves for {RETREAT_WINDOW_S:g} s; nothing else; her keys for them "
          + ("config.toml's" if player.alarm_keys.used is None else f"{ALARM_KEYS.name}'s, as followed") + ", and "
-         f"{ALARM_KEYS.name}'s whenever it changes)")
+         f"{ALARM_KEYS.name}'s whenever it changes); "
+         + ("the phone pushed through ntfy" if notify.load() is not None else "no phone push yet (no lab/ntfy.json: "
+                                                                             "`python -m gamelab notify --setup`)"))
     idle_since = time.monotonic()
     with win32.precise_timers():
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
