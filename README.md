@@ -78,6 +78,15 @@ python -m pytest --slow
 
 A file or a test named runs in one process, as starting the workers takes longer than most files; `-n 8` spreads it anyway.
 
+**Test data** (from 2026-10-28). Saved game frames too big for git live in `gamelab/lab/testdata/<set>` (git-ignored
+like the rest of the lab), their labels in `tests/fixtures`; never in a scratch folder (a cleanup of
+`D:/MapleHelper-scratch` deleted the labelled frames tests read there, and those tests skipped without a word).
+`tests/testdata.py` lists the sets and finds them: in `GAMELAB_TESTDATA` (a folder, or several separated by `;`) if
+set, else in this checkout's `gamelab/lab/testdata`, then, in a git worktree, the main checkout's. A test whose set
+isn't there fails, saying which set and where it looked; on a computer without them `GAMELAB_NO_TESTDATA=1` skips those
+tests instead, saying the same. West Rocky Mountain II's labelled frames were lost (three of them are in
+`tests/fixtures/native`): the tests on all of them skip, saying they need a new capture.
+
 ## Adding a combo
 
 Write a function in [maplehelper/combos.py](maplehelper/combos.py), add it to `COMBOS`, and give it a button in `[hotkeys]`. A combo is a list of steps:

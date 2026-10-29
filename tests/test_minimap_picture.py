@@ -1,8 +1,6 @@
 """Where the map's own minimap picture is in the window (minimap.MinimapPicture), and her dot read by it: on a map
 taller than the window shows, the picture scrolls with her."""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from PIL import Image
@@ -13,8 +11,9 @@ from gamelab.perception import minimap
 from gamelab.perception.minimap import MinimapPicture, minimap_box
 from gamelab.screen import Geometry, STRETCHED
 
+import testdata
+
 NATIVE = Geometry((1366, 768))
-FRAMES = Path("D:/MapleHelper-scratch/map3/native")  # Tree Dungeon, Forest Up North II at 1366x768 (no keys)
 
 
 def _picture(seed=1, size=(183, 67)):
@@ -54,18 +53,20 @@ def test_the_shift_is_none_where_the_first_map_had_its_picture():
     assert stretched.shift() == (0.0, 0.0)  # by whole game px
 
 
-@pytest.mark.skipif(mapdata.minimap_picture(10002073) is None or not FRAMES.is_dir(),
-                    reason="needs the game data copy and the saved frames of Tree Dungeon, Forest Up North II")
+@pytest.mark.skipif(mapdata.minimap_picture(10002073) is None, reason="needs the game data copy")
 def test_her_dot_falls_on_the_platform_she_stands_on_where_the_minimap_scrolls():
+    # Tree Dungeon's labelled frames (test data): on 8 platforms, from 13 to 30, the minimap scrolled to each (of
+    # 2026-10-24's frames, two on 28 and one on 19); her platform, the one under her labelled feet (her_platform)
+    labels, files = testdata.labelled(testdata.TREE_DUNGEON)
     model = mapdata.load(10002073)
     pic = mapdata.minimap_picture(10002073)
     x0, y0, x1, y1 = minimap_box(NATIVE)
     checked = 0
-    for name, platform in (("here_000.png", 28), ("here_039.png", 28), ("first_000.png", 19)):
-        path = FRAMES / name
-        if not path.is_file():
+    for name in sorted(labels):
+        platform = labels[name]["her_platform"]
+        if platform is None:  # (td_p24_0: in the air, landing; her dot puts her 36 above her feet, between platforms)
             continue
-        full = np.asarray(Image.open(path).convert("RGB"))
+        full = np.asarray(Image.open(files[name]).convert("RGB"))
         finder = MinimapPicture(pic, NATIVE)
         assert finder.find(full[y0:y1, x0:x1]) is not None
         dot = minimap.her_dot(full, NATIVE)
@@ -73,7 +74,7 @@ def test_her_dot_falls_on_the_platform_she_stands_on_where_the_minimap_scrolls()
         where = Localizer(model, geo=NATIVE).where_dot((dot[0] - sx, dot[1] - sy))
         assert where.platform is not None and where.platform.id == platform, (name, where)
         checked += 1
-    assert checked
+    assert checked == 23
 
 
 def test_on_a_map_narrower_than_the_view_the_camera_is_centred_and_her_tag_places_her():

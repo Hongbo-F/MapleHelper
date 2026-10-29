@@ -12,6 +12,8 @@ from gamelab import paths, window
 from gamelab.__main__ import main
 from gamelab.analysis import bench
 
+import testdata
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -66,32 +68,47 @@ def test_live_refuses_unless_the_game_is_in_front(monkeypatch):
     assert main(["bench-look", "--live"]) == 1
 
 
-TREE_DUNGEON = Path("D:/MapleHelper-scratch/map3/native")  # 10002073 at 1366x768 (skipped without them)
-
-
 def test_saved_frames_of_a_map_place_her_by_its_own_minimap_picture():
     """bench-look (and bodies, and the saved feed) read her dot as the game's Eyes do, by the map's own minimap picture:
-    on Tree Dungeon's saved frames, by the portal on 28 (the watch of 2026-10-24 had her at x 261.6-265.3 there), where
-    read as on the first map's minimap her dot put her at x 902, off the map (770 wide), which the place check now
-    refuses (localization.placecheck), and bench.refused says so of every frame at once."""
+    on Tree Dungeon's labelled frames (test data: 24 of 2026-10-28, on 8 platforms from 13 to 30, the minimap scrolled
+    to each), on the platform under her labelled feet (her_platform) and within a unit of them across (the frame's x
+    less the camera's, which this map, narrower than the view, holds still: 0.3) where her name tag places her, 6
+    where her dot alone does (td_p21_1 and _2, damage numbers over her tag: 5.4); in the air (td_p24_0, landing) on
+    none. Read as
+    on the first map's minimap her dot put her off the map (770 wide), which the place check now refuses
+    (localization.placecheck), and bench.refused says so of every frame at once but one, which that reading puts
+    inside the check's slack. (On the 20 frames of 2026-10-24, all by the portal on 28, her dot put her at x 255-275,
+    the watch of then at 261.6-265.3, and at 902 read as the first map's.)"""
     from gamelab.attack import reach
     from gamelab.localization import mapdata
+    from gamelab.localization import placecheck
     from gamelab.localization.senses import Senses
-    files = sorted(TREE_DUNGEON.glob("here_00*.png")) if TREE_DUNGEON.is_dir() else []
     picture = mapdata.minimap_picture(10002073)
-    if not files or picture is None:
-        pytest.skip("needs Tree Dungeon's saved frames and its game data")
+    if picture is None:
+        pytest.skip("needs Tree Dungeon's game data")
+    labels, files = testdata.labelled(testdata.TREE_DUNGEON)
     model = mapdata.load(10002073)
-    frames = bench.load(files)
+    frames = bench.load(list(files.values()))
     geo = bench.geometry_of(frames)
     template = np.load(FIXTURES / "native" / "tag_template_1366x768.npy")
     eyes = bench.SavedEyes(template, None, geo, picture)
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
     assert bench.refused(eyes, senses, frames) == []
-    for _, bgra in frames:
+    placed = {}
+    for name, bgra in frames:
         eyes.show(bgra)
         s = senses.look(mobs=False)
-        assert s.platform is not None and s.platform.id == 28 and 255 <= s.where.x <= 275
+        e = labels[name]
+        placed[name] = (s.platform and s.platform.id, labels[name]["her_platform"], s.how,
+                        round(abs(s.where.x - (e["her"][0] - e["camera"][0])), 1))
+    assert all(p == want for p, want, _, _ in placed.values()), placed  # (in the air: None)
+    assert all(dx <= (1 if how == "camera" else 6) for p, _, how, dx in placed.values() if p is not None), placed
+    by_dot = [name for name, (_, _, how, _) in placed.items() if how == "dot"]
+    assert by_dot == ["td_p21_1.png", "td_p21_2.png", "td_p24_0.png"]
     eyes = bench.SavedEyes(template, None, geo, None)
     bad = bench.refused(eyes, Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)), frames)
-    assert len(bad) == len(frames) and all("off the map" in b for b in bad), bad
+    # td_p20_0: her dot, 7 minimap px left of the others' on 20, read as the first map's puts her at x 422, within the
+    # check's OFF_X of the map's right edge (410): 632 units from her, but not off the map
+    assert placecheck.OFF_X == 20 and model.bounds[2] == 410
+    assert len(bad) == len(frames) - 1 and all("off the map" in b for b in bad), bad
+    assert not any(b.startswith("td_p20_0.png") for b in bad)

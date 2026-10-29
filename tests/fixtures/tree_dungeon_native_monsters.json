@@ -1,0 +1,512 @@
+{
+ "about": "Every monster, player and pet on 24 frames of Tree Dungeon, Forest Up North II (map 10002073) at the game's own 1366x768, saved losslessly in game on 2026-10-28 at 19:17:54-19:19:43 (the frames are the test data set tree_dungeon_native, in gamelab/lab/testdata/tree_dungeon_native, git-ignored like the rest of the lab, not in git: tests/testdata.py): td_p<platform>_<i>.png, 3 frames about 2 s apart with her on each of platforms 13, 16, 18, 20, 21, 23, 25 and 30 (the td_p24 ones named for 24, where she stood as the capture began: she dropped onto 25 as it did, landing on td_p24_0; a frame shows the game up to about 1.5 s before its file's time, td_p24_0 0.86 s by the perception service's looks), on a crowded channel (Fidelio, Kalusmi, Nodx, Yellowish, Arkangel, Momette, CLOUDENVY, MadAngryDawn, Jezhan and their pets about her, attacking the same monsters: damage numbers, skills and hit sparks over many of them). Labelled 2026-10-28 by eye on 2x gridded tiles of each frame's play area and 4-8x gridded zooms of every object (the perception service's scene records of those seconds, 20261028-181611-perceive.jsonl, taken as a starting hint only: its nearest record had 22 of the 88 monsters shown here that aren't fading or mostly cut within 12 px, 29 within 25), then checked by: each kind's sprites fitted around each label (every stand, move, hit1 and die1 frame of the three kinds, both ways, masked TM_CCOEFF_NORMED on their opaque pixels within the frame and above the chat bar; where something is in front, scored leaving it out; a frozen one channel by channel), the footholds (screen = map + camera, the camera's x and its y from the service's view, the y refitted so the best-fitted monsters' feet lie on their footholds: every monster's feet then within 2.5 px of one), a whole-frame sprite search down to 0.5, a scan for a mushroom body's exact colours outside the labels (each such blob found to be a player, a pet, a tag or her), the map's monster detector (sprites.detector_for at NATIVE, detect_wide over rows 0-700: all of its 71 finds are labelled) and its loot detector (no drop found on any frame; none seen by eye either: there is no drops file). Format as tree_dungeon_monsters.json: a monster's x, y are its feet (its sprite's origin; +-1 px where its fit is 0.95 or more, +-3 px where it's partly hidden, by eye where no frame fits), facing 1 right, -1 left, 0 not told; state normal, hit (its flinch frame), spawning (fading in), dying (a die1 frame; the last fades to a cap in a bubble) or frozen (tinted blue by a player's ice skill, its pose otherwise as drawn); hidden true where something covers part of it (hidden_by says what: a player, a pet, a tag, a skill, a damage number, the portal's light, the top edge or the chat bar) and for every spawning or dying one; visible_rows, its picture's share inside the frame and above the chat bar (row 700); frame and fit, the frame of its kind's sprites that fits it best within 2 px and that fit's plain score ('' where none fits or the fit can't tell the facing; for a frozen one fit_tint is the channel-by-channel score); certain false where its kind can't be told from what shows (a body cut by the top edge: the mushrooms' bodies are the same picture) and is its platform's (platform: the foothold its feet are on; this map's platforms each spawn one kind, and a monster keeps to its platform), or where the picture is too covered to tell; note says what else was seen. her: her feet, her name tag's centre less 11 rows (her_tag, by the 1366x768 tag template; on td_p21_1 and td_p21_2, where damage numbers cover it, by eye). her_platform: the platform under her feet (within 2 of its surface; null on td_p24_0, where she's in the air: her_note), added 2026-10-28 from the map's footholds and checked against the perception service's looks of those seconds. Players and pets: feet and tag (a tag's centre: its text's middle across, its capitals' top + 5 down; null where hidden), the feet the tag less 11 rows (standing ones' tags are 9-10 rows under their foothold), else read by eye (on the foothold under them where only a head shows above the chat bar); a player's name from his tag, name_from 'look' where it's hidden and his look is that of a player named in another frame, null where neither tells; a pet's owner 'her', a player's name (whose pet it follows in these frames), or null. Pets here: her orange Snail, other players' Snails, Fidelio's White Bunny, Arkangel's White Bunny named Psalms (in a helmet) and Kalusmi's Black Pig. None of them is a monster. other: what else is on the frame and isn't labelled. camera: map_to_screen as used for the platforms.",
+ "frames": {
+  "td_p13_0.png": {
+   "her": [555, 489], "her_tag": [555, 500], "camera": [658, 1667], "her_platform": 13,
+   "players": [
+    {"name": "CLOUDENVY", "feet": [644, 153], "tag": [644, 164]},
+    {"name": "Momette", "feet": [578, 309], "tag": [578, 320], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [876, 701], "tag": null, "name_from": "look", "note": "under the chat bar; his archer's look and purple hair"}
+   ],
+   "pets": [
+    {"name": "Snail", "owner": "her", "feet": [590, 486], "tag": [590, 497], "note": "its tag half behind hers"},
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [803, 717], "tag": null, "note": "under the chat bar"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 538, "y": 71, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true, "platform": 7},
+    {"kind": "horny-mushroom", "x": 870, "y": 41, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.79, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 6, "hidden_by": "top edge"},
+    {"kind": "horny-mushroom", "x": 706, "y": 107, "facing": -1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/2", "fit": 0.77, "certain": true, "platform": 8, "hidden_by": "CLOUDENVY's skill"},
+    {"kind": "green-mushroom", "x": 891, "y": 480, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/1", "fit": 0.84, "certain": true, "platform": 12, "hidden_by": "the portal's light"},
+    {"kind": "green-mushroom", "x": 767, "y": 547, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.786, "certain": true, "platform": 14, "hidden_by": "damage 121 and a hit spark"},
+    {"kind": "horny-mushroom", "x": 633, "y": 614, "facing": 1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/1", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 790, "y": 664, "facing": 1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/3", "fit": 0.775, "certain": true, "platform": 16, "hidden_by": "half transparent", "note": "its last die frame, a faded cap in a bubble"}
+   ],
+   "other": ["damage 90 beside her Snail, 121 on a green mushroom", "the bottom rows of a damage number at the top edge (680-735, 0-4)"]
+  },
+  "td_p13_1.png": {
+   "her": [555, 489], "her_tag": [555, 500], "camera": [658, 1667], "her_platform": 13,
+   "players": [
+    {"name": "CLOUDENVY", "feet": [762, 104], "tag": [762, 115]},
+    {"name": "Momette", "feet": [578, 309], "tag": [578, 320], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [876, 701], "tag": null, "name_from": "look", "note": "under the chat bar"}
+   ],
+   "pets": [
+    {"name": "Snail", "owner": "her", "feet": [487, 486], "tag": [487, 497]},
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [803, 717], "tag": null, "note": "under the chat bar"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 633, "y": 61, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 7},
+    {"kind": "horny-mushroom", "x": 870, "y": 41, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.79, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 6, "hidden_by": "top edge"},
+    {"kind": "horny-mushroom", "x": 451, "y": 77, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.793, "certain": true, "platform": 7, "hidden_by": "half transparent"},
+    {"kind": "green-mushroom", "x": 820, "y": 91, "facing": -1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.898, "certain": true, "platform": 8, "hidden_by": "half transparent"},
+    {"kind": "horny-mushroom", "x": 549, "y": 191, "facing": -1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.869, "certain": true, "platform": 10, "hidden_by": "half transparent"},
+    {"kind": "horny-mushroom", "x": 760, "y": 206, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.777, "certain": true, "platform": 10, "hidden_by": "half transparent"},
+    {"kind": "horny-mushroom", "x": 610, "y": 487, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "move/2", "fit": 0.776, "certain": true, "platform": 13, "hidden_by": "half transparent"},
+    {"kind": "green-mushroom", "x": 893, "y": 480, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/3", "fit": 0.798, "certain": true, "platform": 12, "hidden_by": "the portal's light"},
+    {"kind": "green-mushroom", "x": 701, "y": 558, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 14},
+    {"kind": "horny-mushroom", "x": 578, "y": 621, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "move/2", "fit": 0.816, "certain": true, "platform": 15, "hidden_by": "half transparent"},
+    {"kind": "green-mushroom", "x": 734, "y": 671, "facing": 1, "state": "spawning", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.896, "certain": true, "platform": 16, "hidden_by": "half transparent"}
+   ],
+   "other": ["CLOUDENVY's skill"]
+  },
+  "td_p13_2.png": {
+   "her": [555, 489], "her_tag": [555, 500], "camera": [658, 1667], "her_platform": 13,
+   "players": [
+    {"name": "CLOUDENVY", "feet": [650, 153], "tag": [650, 164]},
+    {"name": "Momette", "feet": [578, 309], "tag": [578, 320], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [876, 701], "tag": null, "name_from": "look", "note": "under the chat bar"}
+   ],
+   "pets": [
+    {"name": "Snail", "owner": "her", "feet": [487, 486], "tag": [487, 497]},
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [803, 717], "tag": null, "note": "under the chat bar"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 451, "y": 76, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 7},
+    {"kind": "horny-mushroom", "x": 953, "y": 49, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.94, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 6, "hidden_by": "top edge"},
+    {"kind": "green-mushroom", "x": 770, "y": 106, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 8},
+    {"kind": "horny-mushroom", "x": 667, "y": 200, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/3", "fit": 0.694, "certain": true, "platform": 10, "hidden_by": "CLOUDENVY's tag and skill"},
+    {"kind": "horny-mushroom", "x": 760, "y": 205, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 10},
+    {"kind": "horny-mushroom", "x": 664, "y": 483, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true, "platform": 13},
+    {"kind": "green-mushroom", "x": 908, "y": 481, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.44, "certain": true, "platform": 12, "hidden_by": "the portal's light"},
+    {"kind": "green-mushroom", "x": 749, "y": 555, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.893, "certain": true, "platform": 14, "hidden_by": "damage 70 and a hit spark"},
+    {"kind": "horny-mushroom", "x": 605, "y": 619, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 721, "y": 670, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 16}
+   ],
+   "other": ["CLOUDENVY's skill, damage 70"]
+  },
+  "td_p16_0.png": {
+   "her": [759, 489], "her_tag": [759, 500], "camera": [658, 1487], "her_platform": 16,
+   "players": [
+    {"name": "Momette", "feet": [578, 129], "tag": [578, 140], "note": "on the rope"},
+    {"name": "Arkangel", "feet": [738, 364], "tag": [738, 375]},
+    {"name": "Fidelio", "feet": [880, 520], "tag": [880, 531]}
+   ],
+   "pets": [
+    {"name": "Psalms", "owner": "Arkangel", "feet": [685, 368], "tag": [685, 379], "note": "a White Bunny named Psalms, in a helmet"},
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 535], "tag": [810.5, 546], "note": "its tag's left half behind a green mushroom's cap"},
+    {"name": "Snail", "owner": "her", "feet": [783.5, 589], "tag": [783.5, 600], "note": "its tag's first letter hidden"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 627, "y": 16, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.31, "frame": "move/2", "fit": 1.0, "certain": false, "platform": 10, "hidden_by": "top edge", "note": "body only (rows 0-15): kind by its platform's spawns (10: horny only)"},
+    {"kind": "green-mushroom", "x": 864, "y": 295, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 12},
+    {"kind": "horny-mushroom", "x": 528, "y": 444, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 788, "y": 589, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.536, "certain": true, "platform": 18, "hidden_by": "a Snail and the White Bunny's tag"},
+    {"kind": "green-mushroom", "x": 687, "y": 377, "facing": 1, "state": "hit", "hidden": true, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.351, "certain": true, "platform": 14, "hidden_by": "Psalms (a pet) and its tag", "note": "only its cap's rim and its body's foot show round the pet: hit1/0 fits them at 0.968 leaving the pet out (231 px; move/2 0.934)"}
+   ],
+   "other": ["damage 39 and 120 (the tree's trunk, x 620-720)", "the portal's light (x 910-980, y 270-310)"]
+  },
+  "td_p16_1.png": {
+   "her": [759, 489], "her_tag": [759, 500], "camera": [658, 1487], "her_platform": 16,
+   "players": [
+    {"name": "Momette", "feet": [578, 129], "tag": [578, 140], "note": "on the rope"},
+    {"name": "Arkangel", "feet": [760, 369], "tag": [760, 380]},
+    {"name": "Fidelio", "feet": [880, 520], "tag": [880, 531]}
+   ],
+   "pets": [
+    {"name": "Psalms", "owner": "Arkangel", "feet": [698, 377], "tag": [698, 388]},
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 535], "tag": [810.5, 546]},
+    {"name": "Snail", "owner": "her", "feet": [693.5, 604], "tag": [693.5, 615]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 615, "y": 16, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.31, "frame": "move/2", "fit": 1.0, "certain": false, "platform": 10, "hidden_by": "top edge", "note": "body only (rows 0-15): kind by its platform's spawns (10: horny only)"},
+    {"kind": "horny-mushroom", "x": 824, "y": 28, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.55, "frame": "move/3", "fit": 1.0, "certain": true, "platform": 10, "hidden_by": "top edge"},
+    {"kind": "green-mushroom", "x": 883, "y": 298, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.97, "certain": true, "platform": 12},
+    {"kind": "horny-mushroom", "x": 609, "y": 439, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 655, "y": 603, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 0.999, "certain": true, "platform": 18},
+    {"kind": "green-mushroom", "x": 761, "y": 370, "facing": 0, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "", "fit": 0.05, "certain": true, "platform": 14, "hidden_by": "Arkangel", "note": "behind Arkangel: only its pale cap's two ends show; no sprite fits; green by them and its platform (14: green only), y on its foothold"}
+   ],
+   "other": []
+  },
+  "td_p16_2.png": {
+   "her": [759, 489], "her_tag": [759, 500], "camera": [658, 1487], "her_platform": 16,
+   "players": [
+    {"name": "CLOUDENVY", "feet": [568, 9], "tag": [568, 20], "note": "feet just inside the top edge"},
+    {"name": "Momette", "feet": [578, 129], "tag": [578, 140], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [880, 520], "tag": [880, 531]}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 535], "tag": [810.5, 546]},
+    {"name": "Snail", "owner": "her", "feet": [689.5, 604], "tag": [689.5, 615]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 749, "y": 23, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.44, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 10, "hidden_by": "top edge", "note": "body and the cap's bluish rim (rows 0-3) only"},
+    {"kind": "green-mushroom", "x": 776, "y": 364, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 14},
+    {"kind": "green-mushroom", "x": 872, "y": 296, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 12},
+    {"kind": "horny-mushroom", "x": 608, "y": 439, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 693, "y": 605, "facing": 1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/0", "fit": 0.248, "certain": true, "platform": 18, "hidden_by": "her Snail and a hit spark", "note": "only the cap's right end shows (70 px): die1/0 fits them at 0.995 leaving out the Snail and the spark; green by its pale cap and its platform (18: green only)"}
+   ],
+   "other": ["damage 69 and 112, a hit spark on the green under her Snail"]
+  },
+  "td_p18_0.png": {
+   "her": [726, 489], "her_tag": [726, 500], "camera": [658, 1374], "her_platform": 18,
+   "players": [
+    {"name": "Momette", "feet": [578, 16], "tag": [578, 27], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [880, 407], "tag": [880, 418]},
+    {"name": "Yellowish", "feet": [948, 732], "tag": null, "name_from": "look", "note": "under the chat bar: only his head shows; his red bandana"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 422], "tag": [810.5, 433]},
+    {"name": "Snail", "owner": "her", "feet": [702.5, 489], "tag": [702.5, 500], "note": "its tag behind hers but its first letter"}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 482, "y": 122, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true, "platform": 11},
+    {"kind": "horny-mushroom", "x": 673, "y": 188, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 13},
+    {"kind": "green-mushroom", "x": 752, "y": 261, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 14},
+    {"kind": "horny-mushroom", "x": 463, "y": 334, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 0.995, "certain": true, "platform": 15},
+    {"kind": "horny-mushroom", "x": 604, "y": 326, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/2", "fit": 0.805, "certain": true, "platform": 15, "hidden_by": "the horny mushroom in front"},
+    {"kind": "horny-mushroom", "x": 635, "y": 320, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 680, "y": 491, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.69, "certain": true, "platform": 18, "hidden_by": "her Snail"},
+    {"kind": "horny-mushroom", "x": 831, "y": 724, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.54, "frame": "move/0", "fit": 0.99, "certain": true, "platform": 19, "hidden_by": "chat bar"}
+   ],
+   "other": ["damage 89 and 88 (the left platform, y 190-230)"]
+  },
+  "td_p18_1.png": {
+   "her": [726, 489], "her_tag": [726, 500], "camera": [658, 1374], "her_platform": 18,
+   "players": [
+    {"name": "Momette", "feet": [578, 16], "tag": [578, 27], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [880, 407], "tag": [880, 418]},
+    {"name": "Arkangel", "feet": [676, 256], "tag": [676, 267], "note": "attacking: his sprite under the sparks"},
+    {"name": "Yellowish", "feet": [935, 730], "tag": null, "name_from": "look", "note": "under the chat bar: only his head shows"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 422], "tag": [810.5, 433]},
+    {"name": "Snail", "owner": "her", "feet": [783.5, 476], "tag": [783.5, 487]},
+    {"name": "Psalms", "owner": "Arkangel", "feet": [700, 265], "tag": [700, 276]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 592, "y": 141, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true, "platform": 11},
+    {"kind": "horny-mushroom", "x": 470, "y": 195, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true, "platform": 13},
+    {"kind": "horny-mushroom", "x": 522, "y": 332, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "horny-mushroom", "x": 611, "y": 326, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "green-mushroom", "x": 680, "y": 491, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.997, "certain": true, "platform": 18}
+   ],
+   "other": ["Arkangel's attack sparks over him and his pet"]
+  },
+  "td_p18_2.png": {
+   "her": [726, 489], "her_tag": [726, 500], "camera": [658, 1374], "her_platform": 18,
+   "players": [
+    {"name": "Momette", "feet": [578, 16], "tag": [578, 27], "note": "on the rope"},
+    {"name": "Fidelio", "feet": [880, 407], "tag": [880, 418]},
+    {"name": "Arkangel", "feet": [703, 264], "tag": [703, 275]},
+    {"name": "Yellowish", "feet": [922, 731], "tag": null, "name_from": "look", "note": "under the chat bar: only his head shows"},
+    {"name": "Kalusmi", "feet": [553, 749], "tag": null, "name_from": "look", "note": "under the chat bar: only his blue star hat shows"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 422], "tag": [810.5, 433]},
+    {"name": "Snail", "owner": "her", "feet": [783.5, 476], "tag": [783.5, 487]},
+    {"name": "Psalms", "owner": "Arkangel", "feet": [659, 296], "tag": [659, 307], "note": "its tag behind a dying horny mushroom"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [600, 747], "tag": null, "note": "under the chat bar: only its ear tips show (rows 696-699)"}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 574, "y": 141, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 11},
+    {"kind": "horny-mushroom", "x": 500, "y": 193, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true, "platform": 13},
+    {"kind": "horny-mushroom", "x": 592, "y": 327, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 1.0, "certain": true, "platform": 15},
+    {"kind": "horny-mushroom", "x": 635, "y": 320, "facing": -1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/3", "fit": 0.628, "certain": true, "platform": 15, "hidden_by": "Psalms (a pet) and its tag; half transparent"},
+    {"kind": "green-mushroom", "x": 680, "y": 491, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.997, "certain": true, "platform": 18}
+   ],
+   "other": []
+  },
+  "td_p20_0.png": {
+   "her": [448, 499], "her_tag": [448, 510], "camera": [658, 1117], "her_platform": 20,
+   "players": [
+    {"name": "Yellowish", "feet": [629.5, 64], "tag": [629.5, 75]},
+    {"name": "Fidelio", "feet": [880, 150], "tag": [880, 161], "note": "his tag over the White Bunny's"},
+    {"name": "Kalusmi", "feet": [811.5, 467], "tag": [811.5, 478], "note": "his tag over the Black Pig's"},
+    {"name": "Nodx", "feet": [649.5, 667], "tag": [649.5, 678], "note": "his tag over his Snail's"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [867.5, 150], "tag": [867.5, 161], "note": "half behind Fidelio"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [844, 467], "tag": [844, 478]},
+    {"name": "Snail", "owner": "her", "feet": [522.5, 495], "tag": [522.5, 506]},
+    {"name": "Snail", "owner": "Nodx", "feet": [637.5, 671], "tag": [637.5, 682]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 470, "y": 75, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.899, "certain": true, "platform": 15, "hidden_by": "a player's claw skill"},
+    {"kind": "horny-mushroom", "x": 606, "y": 71, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/0", "fit": 0.5, "certain": true, "platform": 15, "hidden_by": "Yellowish and his skill"},
+    {"kind": "green-mushroom", "x": 701, "y": 235, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/1", "fit": 1.0, "certain": true, "platform": 18},
+    {"kind": "horny-mushroom", "x": 475, "y": 495, "facing": 0, "state": "frozen", "hidden": true, "visible_rows": 1.0, "frame": "", "fit": 0.109, "certain": false, "fit_tint": 0.095, "platform": 20, "hidden_by": "her and an ice skill", "note": "tinted blue, its cap's spikes under ice crystals beside her: no sprite fits; horny by its spiky outline and its platform (20: horny only)"},
+    {"kind": "horny-mushroom", "x": 643, "y": 671, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.375, "certain": true, "platform": 23, "hidden_by": "Nodx and his Snail"},
+    {"kind": "green-mushroom", "x": 964, "y": 693, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": ["damage 299 above her, an ice skill over the frozen horny mushroom, a claw skill"]
+  },
+  "td_p20_1.png": {
+   "her": [529, 496], "her_tag": [529, 507], "camera": [658, 1119], "her_platform": 20,
+   "players": [
+    {"name": "Yellowish", "feet": [629.5, 66], "tag": [629.5, 77]},
+    {"name": "Fidelio", "feet": [880, 152], "tag": [880, 163]},
+    {"name": "Kalusmi", "feet": [811.5, 470], "tag": [811.5, 481]},
+    {"name": "Nodx", "feet": [695, 664], "tag": [695, 675]}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [867.5, 152], "tag": [867.5, 163], "note": "half behind Fidelio"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [847, 470], "tag": [847, 481]},
+    {"name": "Snail", "owner": "her", "feet": [505.5, 496], "tag": [505.5, 507], "note": "its tag behind hers but its first letter"},
+    {"name": "Snail", "owner": "Nodx", "feet": [710.5, 664], "tag": [710.5, 675], "note": "its tag behind his but its last letters"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 587, "y": 74, "facing": 1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/3", "fit": 0.473, "certain": true, "platform": 15, "hidden_by": "Yellowish; half transparent"},
+    {"kind": "green-mushroom", "x": 654, "y": 8, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.16, "frame": "move/3", "fit": 1.0, "certain": false, "platform": 14, "hidden_by": "top edge", "note": "body only (rows 0-7): kind by its platform's spawns (14: green only)"},
+    {"kind": "green-mushroom", "x": 701, "y": 237, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 18},
+    {"kind": "horny-mushroom", "x": 494, "y": 498, "facing": 1, "state": "frozen", "hidden": true, "visible_rows": 1.0, "frame": "move/2", "fit": 0.391, "certain": true, "fit_tint": 0.408, "platform": 20, "hidden_by": "her Snail", "note": "tinted blue"},
+    {"kind": "horny-mushroom", "x": 618, "y": 674, "facing": 1, "state": "hit", "hidden": false, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.957, "certain": true, "platform": 23},
+    {"kind": "green-mushroom", "x": 919, "y": 696, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": []
+  },
+  "td_p20_2.png": {
+   "her": [529, 496], "her_tag": [529, 507], "camera": [658, 1119], "her_platform": 20,
+   "players": [
+    {"name": "Yellowish", "feet": [535.5, 74], "tag": [535.5, 85]},
+    {"name": "Fidelio", "feet": [880, 152], "tag": [880, 163]},
+    {"name": "Kalusmi", "feet": [711.5, 549], "tag": [711.5, 560], "note": "in the air"},
+    {"name": "Nodx", "feet": [660, 589], "tag": [660, 600], "note": "in the air"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [810.5, 167], "tag": [810.5, 178]},
+    {"name": "Snail", "owner": "her", "feet": [474.5, 496], "tag": [474.5, 507]},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [809, 498], "tag": [809, 509]},
+    {"name": "Snail", "owner": "Nodx", "feet": [704.5, 665], "tag": [704.5, 676]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 733, "y": 8, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.16, "frame": "move/1", "fit": 1.0, "certain": false, "platform": 14, "hidden_by": "top edge", "note": "body only (rows 0-7): kind by its platform's spawns (14: green only)"},
+    {"kind": "green-mushroom", "x": 717, "y": 237, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 18},
+    {"kind": "green-mushroom", "x": 963, "y": 695, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": []
+  },
+  "td_p21_0.png": {
+   "her": [748, 489], "her_tag": [748, 500], "camera": [658, 1061], "her_platform": 21,
+   "players": [
+    {"name": "Fidelio", "feet": [747, 64], "tag": [747, 75]},
+    {"name": "Kalusmi", "feet": [606.5, 433], "tag": [606.5, 444], "note": "under his own skill's white burst"},
+    {"name": "Nodx", "feet": [729, 425], "tag": [729, 436], "note": "his tag half behind his sword; in the air"},
+    {"name": "Yellowish", "feet": [701.5, 489], "tag": [701.5, 500], "note": "his tag behind the Snail's and hers but 'ell'"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [791.5, 111], "tag": [791.5, 122]},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [662.5, 416], "tag": [662.5, 427]},
+    {"name": "Snail", "owner": "her", "feet": [712.5, 489], "tag": [712.5, 500], "note": "its tag between Yellowish's and hers"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 509, "y": 21, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.41, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 15, "hidden_by": "top edge", "note": "body and the cap's bluish rim (rows 0-3) only"},
+    {"kind": "green-mushroom", "x": 639, "y": 177, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 18},
+    {"kind": "green-mushroom", "x": 807, "y": 415, "facing": -1, "state": "hit", "hidden": true, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.69, "certain": true, "platform": 19, "hidden_by": "Nodx's slash"},
+    {"kind": "horny-mushroom", "x": 556, "y": 436, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 20},
+    {"kind": "green-mushroom", "x": 460, "y": 551, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 22},
+    {"kind": "horny-mushroom", "x": 643, "y": 615, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 23},
+    {"kind": "horny-mushroom", "x": 819, "y": 593, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 23}
+   ],
+   "other": ["damage 102 and 712 (x 760-860, y 260-325) over a faint old damage number", "Kalusmi's skill's white burst", "Nodx's slash"]
+  },
+  "td_p21_1.png": {
+   "her": [748, 489], "her_tag": [748, 500], "camera": [657, 1061], "her_platform": 21,
+   "players": [
+    {"name": "Fidelio", "feet": [613, 11], "tag": [613, 22], "note": "his tag over the White Bunny's"},
+    {"name": "Kalusmi", "feet": [606.5, 433], "tag": [606.5, 444]},
+    {"name": "Nodx", "feet": [719, 606], "tag": [719, 617]},
+    {"name": "Yellowish", "feet": [720, 491], "tag": null, "note": "his tag under damage numbers"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [617.5, 11], "tag": [617.5, 22]},
+    {"name": "Snail", "owner": "her", "feet": [794.5, 475], "tag": [794.5, 486]},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [617, 548], "tag": [617, 559]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 487, "y": 18, "facing": 0, "state": "hit", "hidden": true, "visible_rows": 0.35, "frame": "", "fit": 0.334, "certain": false, "platform": 15, "hidden_by": "top edge and a hit spark", "note": "body only (rows 0-18) under a hit spark: kind by its platform's spawns (15: horny only), the horny at (509,21) a frame earlier"},
+    {"kind": "green-mushroom", "x": 762, "y": 168, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 0.998, "certain": true, "platform": 18},
+    {"kind": "green-mushroom", "x": 652, "y": 543, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 22, "hidden_by": "Black Pig (a pet)"},
+    {"kind": "horny-mushroom", "x": 522, "y": 618, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 23},
+    {"kind": "horny-mushroom", "x": 770, "y": 607, "facing": -1, "state": "hit", "hidden": true, "visible_rows": 1.0, "frame": "hit1/0", "fit": 0.415, "certain": true, "platform": 23, "hidden_by": "Nodx and his slash"}
+   ],
+   "other": ["damage 75 and 72 over her and Yellowish (x 740-800, y 430-510)", "Nodx's slash"]
+  },
+  "td_p21_2.png": {
+   "her": [748, 489], "her_tag": [748, 500], "camera": [657, 1061], "her_platform": 21,
+   "players": [
+    {"name": "Fidelio", "feet": [580, 11], "tag": [580, 22]},
+    {"name": "Yellowish", "feet": [768.5, 258], "tag": [768.5, 269], "note": "on the rope"},
+    {"name": "Nodx", "feet": [746, 606], "tag": [746, 617]},
+    {"name": "Kalusmi", "feet": [697, 493], "tag": null, "note": "his tag behind the Black Pig's"}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [617.5, 11], "tag": [617.5, 22]},
+    {"name": "Snail", "owner": "her", "feet": [806.5, 473], "tag": [806.5, 484]},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [706, 491], "tag": [706, 502], "note": "its tag over hers and Kalusmi's"}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 734, "y": 177, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 0.999, "certain": true, "platform": 18},
+    {"kind": "horny-mushroom", "x": 658, "y": 613, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 23},
+    {"kind": "horny-mushroom", "x": 775, "y": 606, "facing": 0, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "", "fit": 0.089, "certain": true, "platform": 23, "hidden_by": "Nodx and his sword", "note": "the cap tipped low over its body (a die1 frame) behind Nodx: no sprite fits; horny by its spiky blue cap"}
+   ],
+   "other": ["damage 72 and 85 over her tag (x 740-800, y 430-510)", "damage 254, faint (x 450-500, y 380-420)"]
+  },
+  "td_p23_0.png": {
+   "her": [646, 497], "her_tag": [646, 508], "camera": [658, 944], "her_platform": 23,
+   "players": [
+    {"name": "Kalusmi", "feet": [668.5, 374], "tag": [668.5, 385]}
+   ],
+   "pets": [
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [852, 333], "tag": [852, 344], "note": "in the air"},
+    {"name": "Snail", "owner": "her", "feet": [673.5, 496], "tag": [673.5, 507], "note": "its tag half behind hers"}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 638, "y": 60, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 18},
+    {"kind": "green-mushroom", "x": 840, "y": 295, "facing": -1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/2", "fit": 0.485, "certain": true, "platform": 19, "hidden_by": "an ice skill", "note": "die1/2 fits at 0.75 leaving out the ice"},
+    {"kind": "horny-mushroom", "x": 893, "y": 305, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 19},
+    {"kind": "horny-mushroom", "x": 583, "y": 499, "facing": 1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/2", "fit": 1.0, "certain": true, "platform": 23},
+    {"kind": "green-mushroom", "x": 863, "y": 511, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": ["damage 206, 106 and 113", "an ice skill over the dying green", "a dark strip at the top edge (790-830, 0-2): the bottom of a tag above the frame"]
+  },
+  "td_p23_1.png": {
+   "her": [646, 497], "her_tag": [646, 508], "camera": [658, 944], "her_platform": 23,
+   "players": [
+    {"name": "Kalusmi", "feet": [668.5, 374], "tag": [668.5, 385]},
+    {"name": "Nodx", "feet": [819, 475], "tag": [819, 486]}
+   ],
+   "pets": [
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [774, 489], "tag": [774, 500]},
+    {"name": "Snail", "owner": "Nodx", "feet": [769.5, 489], "tag": [769.5, 500], "note": "its tag over the Black Pig's"},
+    {"name": "Snail", "owner": "her", "feet": [591.5, 496], "tag": [591.5, 507]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 638, "y": 60, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 18},
+    {"kind": "horny-mushroom", "x": 882, "y": 303, "facing": -1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/2", "fit": 1.0, "certain": true, "platform": 19},
+    {"kind": "green-mushroom", "x": 910, "y": 521, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": ["damage 243 and 55"]
+  },
+  "td_p23_2.png": {
+   "her": [646, 497], "her_tag": [646, 508], "camera": [658, 944], "her_platform": 23,
+   "players": [
+    {"name": "Kalusmi", "feet": [789.5, 295], "tag": [789.5, 306], "note": "in the air"},
+    {"name": "Nodx", "feet": [806, 539], "tag": [806, 550], "note": "in the air"}
+   ],
+   "pets": [
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [828, 446], "tag": [828, 457], "note": "in the air"},
+    {"name": "Snail", "owner": "her", "feet": [582.5, 498], "tag": [582.5, 509]},
+    {"name": "Snail", "owner": "Nodx", "feet": [806.5, 593], "tag": [806.5, 604]}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 781, "y": 46, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.88, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 18, "hidden_by": "top edge"},
+    {"kind": "green-mushroom", "x": 964, "y": 520, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": []
+  },
+  "td_p24_0.png": {
+   "her": [762, 565], "her_tag": [762, 576], "camera": [658, 910], "her_platform": null, "her_note": "in the air, her feet 5 above platform 25 as she lands on it from 24: the perception service's look of this frame (0.86 s before the file's time) placed her by her dot alone, on no platform",
+   "players": [
+    {"name": "Kalusmi", "feet": [604.5, 398], "tag": [604.5, 409]},
+    {"name": "Nodx", "feet": [741, 455], "tag": [741, 466]}
+   ],
+   "pets": [
+    {"name": "Psalms", "owner": "Arkangel", "feet": [673, 26], "tag": [673, 37], "note": "its tag's first letter hidden; its owner off screen"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [625, 397], "tag": [625, 408], "note": "its tag behind his but 'Pig'"},
+    {"name": "Snail", "owner": null, "feet": [944.5, 487], "tag": [944.5, 498]},
+    {"name": "Snail", "owner": "her", "feet": [788.5, 564], "tag": [788.5, 575], "note": "its tag behind hers but 'nail'"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 506, "y": 291, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 20},
+    {"kind": "horny-mushroom", "x": 911, "y": 269, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 19},
+    {"kind": "green-mushroom", "x": 830, "y": 324, "facing": -1, "state": "frozen", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 0.799, "certain": true, "fit_tint": 0.999, "platform": 21, "note": "tinted blue: move/1 fits it at 0.999 matched channel by channel"},
+    {"kind": "green-mushroom", "x": 881, "y": 482, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 24}
+   ],
+   "other": ["damage 175 and 48", "a grey 2-row arc above the chat bar (492-508, 698-699), over no platform: something in the air below, not labelled"]
+  },
+  "td_p24_1.png": {
+   "her": [744, 545], "her_tag": [744, 556], "camera": [658, 883], "her_platform": 25,
+   "players": [
+    {"name": "Kalusmi", "feet": [744.5, 311], "tag": [744.5, 322]},
+    {"name": "Nodx", "feet": [808, 417], "tag": [808, 428]}
+   ],
+   "pets": [
+    {"name": "Psalms", "owner": "Arkangel", "feet": null, "tag": [686, 11], "note": "its picture above the frame, its tag at the top edge"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [690, 289], "tag": [690, 300]},
+    {"name": "Snail", "owner": null, "feet": [882.5, 515], "tag": [882.5, 526]},
+    {"name": "Snail", "owner": "her", "feet": [782.5, 543], "tag": [782.5, 554], "note": "its tag behind hers but 'nail'"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 632, "y": 250, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 20},
+    {"kind": "horny-mushroom", "x": 875, "y": 240, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "stand/0", "fit": 1.0, "certain": true, "platform": 19}
+   ],
+   "other": ["damage 50"]
+  },
+  "td_p24_2.png": {
+   "her": [744, 545], "her_tag": [744, 556], "camera": [658, 883], "her_platform": 25,
+   "players": [
+    {"name": "Kalusmi", "feet": [777.5, 299], "tag": [777.5, 310]},
+    {"name": "Nodx", "feet": [711, 428], "tag": [711, 439]}
+   ],
+   "pets": [
+    {"name": "White Bunny", "owner": "Fidelio", "feet": [610, 35], "tag": [610, 46], "note": "its owner off screen"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [738, 311], "tag": [738, 322]},
+    {"name": "Snail", "owner": null, "feet": [817.5, 528], "tag": [817.5, 539]},
+    {"name": "Snail", "owner": "her", "feet": [715.5, 545], "tag": [715.5, 556], "note": "its tag behind hers but 'Sn'"}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 855, "y": 237, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/2", "fit": 1.0, "certain": true, "platform": 19}
+   ],
+   "other": ["a faint old damage number (x 430-470, y 110-150)"]
+  },
+  "td_p30_0.png": {
+   "her": [715, 553], "her_tag": [715, 564], "camera": [658, 559], "her_platform": 30,
+   "players": [
+    {"name": "Arkangel", "feet": [708, 104], "tag": [708, 115]},
+    {"name": "Nodx", "feet": [683, 108], "tag": null, "name_from": "look", "note": "beside Arkangel, his tag behind Arkangel's"},
+    {"name": "MadAngryDawn", "feet": [825.5, 499], "tag": [825.5, 510]},
+    {"name": null, "feet": [873, 507], "tag": null, "note": "blue hair, sitting on a chair; his tag behind MadAngryDawn's, its last letter 't'"}
+   ],
+   "pets": [
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [839, 87], "tag": [839, 98], "note": "in the air; its owner off screen"},
+    {"name": "Psalms", "owner": "Arkangel", "feet": [760, 103], "tag": [760, 114]},
+    {"name": "Snail", "owner": null, "feet": [745.5, 219], "tag": [745.5, 230]},
+    {"name": "Snail", "owner": "her", "feet": [690.5, 553], "tag": [690.5, 564], "note": "its tag behind hers but 'Sn'"}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 594, "y": 510, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/3", "fit": 1.0, "certain": true, "platform": 29},
+    {"kind": "horny-mushroom", "x": 578, "y": 687, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 1.0, "frame": "move/3", "fit": 0.904, "certain": true, "platform": 31, "hidden_by": "damage 19"},
+    {"kind": "green-mushroom", "x": 732, "y": 733, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.37, "frame": "stand/0", "fit": 0.975, "certain": true, "platform": 32, "hidden_by": "chat bar", "note": "only the cap's top above the chat bar"}
+   ],
+   "other": ["damage 19 over the horny mushroom", "the portal's light (x 915-975, y 400-520)"]
+  },
+  "td_p30_1.png": {
+   "her": [715, 545], "her_tag": [715, 556], "camera": [658, 550], "her_platform": 30,
+   "players": [
+    {"name": "MadAngryDawn", "feet": [825.5, 491], "tag": [825.5, 502]},
+    {"name": null, "feet": [873, 498], "tag": null, "note": "the sitter, as in td_p30_0"},
+    {"name": "Jezhan", "feet": [941, 498], "tag": [941, 509], "note": "fading in at the portal: his picture and tag faint"}
+   ],
+   "pets": [
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [635, 30], "tag": [635, 41]},
+    {"name": "Snail", "owner": null, "feet": [623.5, 41], "tag": [623.5, 52], "note": "its tag half behind the Black Pig's"},
+    {"name": "Snail", "owner": "her", "feet": [737, 543], "tag": null, "note": "behind her, only its eye stalk shows"}
+   ],
+   "monsters": [
+    {"kind": "green-mushroom", "x": 621, "y": 499, "facing": 1, "state": "dying", "hidden": true, "visible_rows": 1.0, "frame": "die1/3", "fit": 0.405, "certain": true, "platform": 29, "hidden_by": "half transparent", "note": "its last die frame, a faded cap in a bubble"},
+    {"kind": "horny-mushroom", "x": 510, "y": 686, "facing": -1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/1", "fit": 1.0, "certain": true, "platform": 31},
+    {"kind": "green-mushroom", "x": 787, "y": 710, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.81, "frame": "move/0", "fit": 0.99, "certain": true, "platform": 32, "hidden_by": "chat bar"},
+    {"kind": "slime", "x": 669, "y": 783, "facing": -1, "state": "normal", "hidden": true, "visible_rows": 0.13, "frame": "move/4", "fit": 1.0, "certain": true, "platform": 33, "hidden_by": "chat bar", "note": "only its antenna's tip (a bright green ball on a black arc, rows 689-699, 45 px) shows above the chat bar: the top of a hop (move/4, its tip 94 px above its feet) fits them exactly, its feet on platform 33 (its spawns')"}
+   ],
+   "other": ["damage 57 and 126", "Jezhan's portal light (x 915-975)"]
+  },
+  "td_p30_2.png": {
+   "her": [715, 545], "her_tag": [715, 556], "camera": [658, 550], "her_platform": 30,
+   "players": [
+    {"name": "MadAngryDawn", "feet": [825.5, 491], "tag": [825.5, 502]},
+    {"name": null, "feet": [873, 498], "tag": null, "note": "the sitter, as in td_p30_0"},
+    {"name": "Jezhan", "feet": [899.5, 502], "tag": [899.5, 513]}
+   ],
+   "pets": [
+    {"name": "Psalms", "owner": "Arkangel", "feet": null, "tag": [614, 0], "note": "only its tag's bottom rows, at the top edge"},
+    {"name": "Black Pig", "owner": "Kalusmi", "feet": [617, 37], "tag": [617, 48]},
+    {"name": "Snail", "owner": "her", "feet": [777.5, 530], "tag": [777.5, 541]}
+   ],
+   "monsters": [
+    {"kind": "horny-mushroom", "x": 495, "y": 684, "facing": 1, "state": "normal", "hidden": false, "visible_rows": 1.0, "frame": "move/0", "fit": 1.0, "certain": true, "platform": 31},
+    {"kind": "green-mushroom", "x": 775, "y": 711, "facing": 1, "state": "normal", "hidden": true, "visible_rows": 0.78, "frame": "move/1", "fit": 0.992, "certain": true, "platform": 32, "hidden_by": "chat bar"}
+   ],
+   "other": ["damage 112 over the horny mushroom", "the portal's light"]
+  }
+ }
+}

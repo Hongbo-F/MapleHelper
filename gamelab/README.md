@@ -1270,7 +1270,23 @@ searched as one, 172.
 West Rocky Mountain II's 1366x768 frames are labelled in `tests/fixtures/west_rocky_native_monsters.json` (new: each
 kind by eye on 2-3x crops, the feet and facing from its sprites' best fit), its 1920x1080 ones in
 `west_rocky_monsters.json`, and Tree Dungeon's in `tree_dungeon_monsters.json` (from the map's study, with every player
-and pet); the frames stay in `D:/MapleHelper-scratch`, and `tests/test_gates.py` checks these numbers where they are.
+and pet). Those frames were in `D:/MapleHelper-scratch`, and its cleanup of 2026-10-28 deleted them: West Rocky Mountain
+II's tests on them now skip saying they need a new capture, but for its three frames in `tests/fixtures/native`, which
+`tests/test_gates.py` still checks (Stumps and Axe Stumps in plain view 6 of 7 found, a Stump on native_first.png
+missed, none of the wrong kind, nothing else; re-found by their own kind's tracks 7 of 7, by the other kinds' none of
+14, 13 without the kind check).
+
+**Tree Dungeon's labelled frames since 2026-10-28** (test data, `tests/testdata.py`: 24 lossless frames at 1366x768 of
+2026-10-28 in `gamelab/lab/testdata/tree_dungeon_native`, 3 on each of platforms 13, 16, 18, 20, 21, 23, 25 and 30 of a
+crowded channel, ten other players and their pets about her; labelled in
+`tests/fixtures/tree_dungeon_native_monsters.json`: 118 monsters, 62 Horny Mushrooms, 55 Green and a slime, 12 cut by
+the frame's top edge and 5 under the chat bar, 3 frozen by another player's ice skill; 75 players, 74 pets).
+`tests/test_gates.py` checks on them: in plain view (58: 28 Horny, 30 Green) all found, each as its kind, facing its
+way, its feet where its sprite fit put them; of the 113 above the chat bar 71 found, none of the wrong kind; no player,
+pet or tag found as one. Horny against Green at each whole one whose frame was fitted, found as either: 176 of 176 (the
+spawning, flinching, frozen and covered too); at the 11 cut by the top edge, 12 of 22 (part of the cap out of the
+frame). Re-found where they stand: by their own kind's tracks 81 of 88 (the 7 missed mostly covered: a player and his
+skill or pet, a pet and its tag, the portal's light), by the other kind's none (81 without the kind check).
 
 **Drawn onto the maps' own frames** (`bench-paste FRAMES --map ID`: every frame of each kind, both ways, twice, at
 random places): on Tree Dungeon's 20 frames at 1366x768, Green Mushrooms 28 of 28, Horny Mushrooms 27 of 28 and slimes
@@ -1397,28 +1413,29 @@ maps' own frames, 24 OpenCV threads, with other work loading the CPU): her platf
 map's pictures on Tree Dungeon, 7.7 against 5.9 on West Rocky Mountain II; every platform in view 118 against 91, and
 114 against 85.
 
-**Seen in game** (`tests/test_loot.py`; the frames in `D:/MapleHelper-scratch/perception/tree_dungeon_drops`, the
-labels in `tests/fixtures/tree_dungeon_drops.json`). The hunts on Tree Dungeon on 2026-10-24 saved a few frames of the
-game as it was (where her HP read 0: `lab/shots/hp0_*.png`), five of them at 13:53 by piles her kills had left, 24 s
-at one spot with the camera moving up and down between them: 13 drops, 5 Horny Mushroom Caps, a Bronze Ore, a Green
-Mushroom Cap, an Orange Potion, 4 bronze coins and a gold one, with other players, their pets and the mushrooms about
-them, seen 39 times in plain view. Searched over the whole screen above the chat bar, the map's detector found all 39
-as their kinds (three caps lying overlapped scored 0.83-1.00, a coin half behind the ore 0.73), and nothing else; on
+**Seen in game** (`tests/test_loot.py`; the frames the test data set `tree_dungeon_drops`, `lab/shots/hp0_*.png` copied
+into `gamelab/lab/testdata/tree_dungeon_drops` since the copy in `D:/MapleHelper-scratch/perception` was deleted on
+2026-10-28, the labels in `tests/fixtures/tree_dungeon_drops.json`). The hunts on Tree Dungeon on 2026-10-24 saved a few
+frames of the game as it was (where her HP read 0: `lab/shots/hp0_*.png`), five of them at 13:53 by piles her kills had
+left, 24 s at one spot with the camera moving up and down between them: 13 drops, 5 Horny Mushroom Caps, a Bronze Ore, a
+Green Mushroom Cap, an Orange Potion, 4 bronze coins and a gold one, with other players, their pets and the mushrooms
+about them, seen 39 times in plain view. Searched over the whole screen above the chat bar, the map's detector found all
+39 as their kinds (three caps lying overlapped scored 0.83-1.00, a coin half behind the ore 0.73), and nothing else; on
 three more frames with no drop in view (two with the window off the screen's corner, one with the hunt look's boxes
-drawn on it), nothing. The kinds were read by eye; the places are where the detector found them, checked by eye to sit
-on each drop (the test holds it within 2 px of there). So an ore found in game is one Bronze Ore, the potion, the Green
-cap and the gold coin one each. Not found: the coins it doesn't look for, 4 edge-on, and 2 half behind another coin.
-The first map's detector, the one she hunted with, found 12 of the 39 sightings, 6 of the 13 drops: the coins and the
-potion. (A whole screen took 360-420 ms with the map's pictures, 260-340 with the first map's, with other work loading
-the CPU; a look searches the strips above the platforms.) In those hunts (13 runs, 8,795 scenes) the first map's
-detector found mesos 1,091 times, potions 122 (Orange 50, Red 46, Blue 26) and Squishy Liquid 6 (on 33, by the slimes),
-and none of the caps and ores, which it didn't look for. The day's longest watch (09:54-13:05, 75,760 scenes searched,
-her by the portal on 28) did name the first map's items where they don't drop, with the same detector: a Snail Shell
-219 times (one thing that didn't move, on 27 at x -8, from 10:59:54 to 11:01:54; no monster spawns on 27), Squishy
-Liquid 41 times (on 30 at x 146, 10:42:22-46; the slimes spawn on 33) and a Pig's Head 4 times (on 24 at x 298, by two
-players, within 0.3 s), and no mesos. No frame of them was saved: a false match on a player, a pet or the scenery, or
-an item a player dropped, can't be told apart, and what matched may match one of Tree Dungeon's pictures now (the
-check in game below).
+drawn on it: lost with the scratch copy, so the test has the other two), nothing. The kinds were read by eye; the places
+are where the detector found them, checked by eye to sit on each drop (the test holds it within 2 px of there). So an
+ore found in game is one Bronze Ore, the potion, the Green cap and the gold coin one each. Not found: the coins it
+doesn't look for, 4 edge-on, and 2 half behind another coin. The first map's detector, the one she hunted with, found 12
+of the 39 sightings, 6 of the 13 drops: the coins and the potion. (A whole screen took 360-420 ms with the map's
+pictures, 260-340 with the first map's, with other work loading the CPU; a look searches the strips above the
+platforms.) In those hunts (13 runs, 8,795 scenes) the first map's detector found mesos 1,091 times, potions 122 (Orange
+50, Red 46, Blue 26) and Squishy Liquid 6 (on 33, by the slimes), and none of the caps and ores, which it didn't look
+for. The day's longest watch (09:54-13:05, 75,760 scenes searched, her by the portal on 28) did name the first map's
+items where they don't drop, with the same detector: a Snail Shell 219 times (one thing that didn't move, on 27 at x -8,
+from 10:59:54 to 11:01:54; no monster spawns on 27), Squishy Liquid 41 times (on 30 at x 146, 10:42:22-46; the slimes
+spawn on 33) and a Pig's Head 4 times (on 24 at x 298, by two players, within 0.3 s), and no mesos. No frame of them was
+saved: a false match on a player, a pet or the scenery, or an item a player dropped, can't be told apart, and what
+matched may match one of Tree Dungeon's pictures now (the check in game below).
 
 **What they're worth** (`looting.PRICES`, `Worth`, `coins_for`). Every map's items are priced from the game data
 (`info/price`, by item id; a test checks each): of the new maps', an Opal Ore 160, a Sapphire 120, an Orihalcon 100, a
@@ -3017,8 +3034,8 @@ First look, explore only (no attacks):
   off it and the key came in the air (both times, her dot corrected: -402 then down onto 17 at -354). The rope itself
   is grabbed as planned (its bottom 64 above 14 there, platform 10 between them, 20 under it; missing it from -455
   lands on 10, not off 14), and in the simulator the climb arrives on 16 seeds of the game's errors.
-- Full-size frames from 24, the bridge (22), the high bridge (11), 17 and the stairs (30) are in
-  `D:/MapleHelper-scratch/newmap/frames` (`<platform>_<n>.png`).
+- Full-size frames from 24, the bridge (22), the high bridge (11), 17 and the stairs (30) were in
+  `D:/MapleHelper-scratch/newmap/frames` (`<platform>_<n>.png`; deleted by the cleanup of 2026-10-28).
 
 **The map, from its game data** (offline: `mapdata.load(10004021)`, the planner, `attack.reach`; worked out on
 2026-10-24 with the fixes above). 33 platforms, 31 places (11 and 21 are twins), 4 ropes, 2 portals, 49 spawn points
@@ -4557,7 +4574,7 @@ The user, 2026-10-27 about 14:20, on learning that the perception service re-fin
 - *The states* (`tools/ident_dump.py`: the service's WorldStep, its searches inline, its re-finds on its pool, each frame decoded one at a time into the capture's kept pictures, 12 held; compared by pfast's `ident.py` with master b41d528's dumps of the same recipe, `sfast/opt-cpu/runs/ident`): both Lie Detectors' `before/` (00:25 and 01:01), the drops searched and not, each frame held 3 times, and stamped 30 a second: 0 of 36,576 frames differ.
 - *The answers* (`tools/verify.py`: the whole screen's and her band's searches with the C and without in one process, every field of every monster and each value's type): the crowd's 600 frames, 01:01, 00:25 and 23:15 every 5th frame, the ten recent clips every 10th: 4,481 frames, 20,302 monsters of the whole screen's and 4,757 of her band's, 0 differ.
 - *Step 1's peaks* (`probe/peaks_diff.py`: the C's against OpenCV's and `native.peaks`, shape by shape on every band of both searches; each peak in one set alone classed by its exact score and its neighbours', worked out from the integer sums): of 589,478 shape-bands (the crowd's 600 frames and the three folders every 5th) 465 had another peak set: 434 an extra peak where two neighbours' exact scores tie, 30 two neighbours within 2e-6 of each other the other way round, 1 a score within 2e-6 of the threshold, none otherwise; at the peaks both have, the scores at most 1.13e-6 apart. None made another answer above.
-- *Tests* (`tests/test_search_c.py`): the shrink against `cv2.resize` on band and odd sizes and views, and its declines; the hand-made colour tests against `mobs.PALETTES` on all 2^24 colours, the learned gates against `gates.Gates` on random tables and ragged rows; every silhouette score on made-up frames against numpy's exact sums to the bit, the peaks against master's rule on them, OpenCV within 2e-6 of them and 0 at their flat windows; the places against `_places` on 300 random sets with ties; the searches' answers with the C and without (to the type) on made-up kinds, learned and hand-made, at 1366x768, on the first map's cut-outs at 1920x1080 half size, and on Tree Dungeon's sprites on its labelled frames (D:/MapleHelper-scratch/map3/native: skipped without them); the declines and an overflow leaving the planes clean. `test_native_match`'s recorder of the search's masked matches runs with the C off (its calls are through Python there). The 28 Tree Dungeon golden traces the same to the byte (the simulator's eyes are its own: `golden check`); the fast suite passing (2,242 tests on 2 workers).
+- *Tests* (`tests/test_search_c.py`): the shrink against `cv2.resize` on band and odd sizes and views, and its declines; the hand-made colour tests against `mobs.PALETTES` on all 2^24 colours, the learned gates against `gates.Gates` on random tables and ragged rows; every silhouette score on made-up frames against numpy's exact sums to the bit, the peaks against master's rule on them, OpenCV within 2e-6 of them and 0 at their flat windows; the places against `_places` on 300 random sets with ties; the searches' answers with the C and without (to the type) on made-up kinds, learned and hand-made, at 1366x768, on the first map's cut-outs at 1920x1080 half size, and on Tree Dungeon's sprites on its labelled frames (test data: `tests/testdata.py`; the test fails without them); the declines and an overflow leaving the planes clean. `test_native_match`'s recorder of the search's masked matches runs with the C off (its calls are through Python there). The 28 Tree Dungeon golden traces the same to the byte (the simulator's eyes are its own: `golden check`); the fast suite passing (2,242 tests on 2 workers).
 
 **The search alone** (`tools/verify.py`, normal priority, one run at a time: `run_timing.sh`, `runs/timing`; 300 frames of 01:01's crowd, every 2nd, and of its quiet [0:600]; master's path and the C's alternated frame by frame; ms a search, medians; CPUs 12-23 56-70% busy with other agents' work):
 

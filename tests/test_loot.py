@@ -21,6 +21,8 @@ from gamelab.localization.scene import Loot, Scene, find_loot
 from gamelab.perception.eyes import Eyes
 from gamelab.perception.loot import Item, LootDetector, says_full
 
+import testdata
+
 SKY = (60, 140, 230)
 GRASS = (90, 170, 40)
 DIRT = (120, 105, 50)
@@ -605,11 +607,17 @@ def test_finds_the_drops_in_frames_saved_in_game():
     assert kinds("loot_0_after.png") == []
 
 
-# --- the new maps' drops, the game's own pictures, on frames of those maps (Tree Dungeon's stay in
-# D:/MapleHelper-scratch: skipped without them) ------------------------------------------------------------------
+# --- the new maps' drops, the game's own pictures, on frames of those maps (Tree Dungeon's are test data:
+# tests/testdata.py) -----------------------------------------------------------------------------------------------
 
-TREE_DUNGEON = Path("D:/MapleHelper-scratch/map3/native")  # 10002073 at 1366x768: 20 frames, no drop on any
-WEST_ROCKY = ROOT / "tests" / "fixtures" / "native"         # 10004021 at 1366x768: 3 frames, no drop on any
+TREE_DUNGEON = testdata.TREE_DUNGEON  # 10002073 at 1366x768: 24 frames of 2026-10-28 (a test data set), no drop on any
+WEST_ROCKY = ROOT / "tests" / "fixtures" / "native"  # 10004021 at 1366x768: 3 frames, no drop on any
+
+
+def frames_of(where) -> list[Path]:
+    """The frames of a folder, or of a test data set (its name): those its labels name, where they are
+    (testdata.labelled: the test fails without them)."""
+    return sorted(where.glob("*.png")) if isinstance(where, Path) else sorted(testdata.labelled(where)[1].values())
 
 
 @pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
@@ -623,9 +631,7 @@ def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_els
     from gamelab.perception import loot
     from gamelab.perception.drops import items_for
     from gamelab.screen import NATIVE
-    files = sorted(frames.glob("*.png")) if frames.is_dir() else []
-    if not files:
-        pytest.skip(f"needs frames of map {map_id} in {frames}")
+    files = frames_of(frames)
     items = items_for(mapdata.load(map_id))
     det = loot.LootDetector(geo=NATIVE, items=items)
     assert {t.kind for t in det.templates} == loot.kinds_of(items)
@@ -642,11 +648,7 @@ def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_els
         assert det.detect(full, (0, 0, full.shape[1], int(full.shape[0] * NATIVE.hud_top))) == []
 
 
-TREE_DUNGEON_DROPS = Path("D:/MapleHelper-scratch/perception/tree_dungeon_drops")  # 10002073 in game, with drops
-
-
-@pytest.mark.skipif(not (COPY / "Item").is_dir() or not TREE_DUNGEON_DROPS.is_dir(),
-                    reason="needs the game data copy and the frames")
+@pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
 def test_tree_dungeons_drops_seen_in_game_are_found_as_their_kinds_and_nothing_else_is():
     """The drops lying on frames saved in game on Tree Dungeon (tests/fixtures/tree_dungeon_drops.json: 13 drops, 5 Horny
     Mushroom Caps, a Bronze Ore, a Green Mushroom Cap, an Orange Potion, 4 bronze coins and a gold one, seen 39 times in
@@ -655,15 +657,14 @@ def test_tree_dungeons_drops_seen_in_game_are_found_as_their_kinds_and_nothing_e
     it was found when they were labelled (the labels' places are the detector's, checked by eye; their kinds were read by
     eye), and nothing where none lies. The first map's detector found the coins and the potion alone, 12 of the 39
     sightings, 6 of the 13 drops."""
-    import json
     from gamelab.localization import mapdata
     from gamelab.perception import loot
     from gamelab.screen import NATIVE
-    labels = json.loads((ROOT / "tests" / "fixtures" / "tree_dungeon_drops.json").read_text(encoding="utf-8"))["frames"]
+    labels, frames = testdata.labelled(testdata.TREE_DUNGEON_DROPS)
     det = loot.detector_for(mapdata.load(10002073), NATIVE)
     shown, found_shown = 0, 0
     for name, drops in labels.items():
-        frame = np.asarray(Image.open(TREE_DUNGEON_DROPS / name).convert("RGB"))
+        frame = np.asarray(Image.open(frames[name]).convert("RGB"))
         found = det.detect(frame, (0, 0, frame.shape[1], 700))
 
         def near(d, i, px):
@@ -718,9 +719,7 @@ def test_a_twin_of_a_tree_dungeon_drop_is_not_taken_for_it():
     from gamelab.analysis import pasted
     from gamelab.perception import loot
     from gamelab.screen import NATIVE
-    files = sorted(TREE_DUNGEON.glob("*.png")) if TREE_DUNGEON.is_dir() else []
-    if not files:
-        pytest.skip(f"needs frames of Tree Dungeon in {TREE_DUNGEON}")
+    files = frames_of(TREE_DUNGEON)
     det = loot.detector_for(mapdata.load(10002073), NATIVE)
     folder, held = loot.folder_for(NATIVE.stretch), {t.kind for t in det.templates}
     listed = {k for t in held - {loot.MESOS} for k in (folder / loot.TWINS / f"{t}.txt").read_text().split()}

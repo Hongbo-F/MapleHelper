@@ -22,6 +22,7 @@ from gamelab.perception import gates, mobs
 from gamelab.perception.mobs import COARSE, SILHOUETTE_THRESHOLD, MobDetector
 from gamelab.screen import NATIVE, STRETCHED
 
+import testdata
 from test_gates import body, detector as learned_detector
 from test_pasted import FRAMES, frame, game_folder, pig
 from test_perception import typed, with_monsters
@@ -30,7 +31,6 @@ pytestmark = pytest.mark.skipif(native.search_lib() is None or native.lib() is N
                                 reason=f"the search's C isn't here: {native.search_why or native.why}")
 
 SEARCH = NATIVE.frame_scale / mobs.SEARCH_SCALE  # a 1366x768 look frame's px per step 1's
-TREE_DUNGEON = Path("D:/MapleHelper-scratch/map3/native")  # 10002073 at 1366x768 (test_gates': labelled)
 NOISY = Path(__file__).parent / "fixtures" / "search"  # where OpenCV's noise decided (its README)
 
 
@@ -436,14 +436,16 @@ def test_at_1920x1080_half_size_the_first_maps_monsters_are_found_as_without_the
 
 def test_tree_dungeons_sprites_find_what_they_found_without_the_c(monkeypatch):
     from gamedata.paths import COPY
-    if not TREE_DUNGEON.is_dir() or not (COPY / "Packs" / "Mob_00000.ms").is_file():
-        pytest.skip(f"needs {TREE_DUNGEON} and the game data copy")
+    if not (COPY / "Packs" / "Mob_00000.ms").is_file():
+        pytest.skip("needs the game data copy")
     from gamelab.localization import mapdata
     from gamelab.perception import sprites
+    _, tree = testdata.labelled(testdata.TREE_DUNGEON)
     det = sprites.detector_for(mapdata.load(10002073), NATIVE)
     assert det._step1_in_c(None) is not None
     found = 0
-    for path in sorted(TREE_DUNGEON.glob("*.png"))[:12] + [Path(__file__).parent / "fixtures" / "native" / FRAMES[0]]:
+    # every other one of its 24 frames (all 8 platforms they were saved on), and one of West Rocky Mountain II's
+    for path in sorted(tree.values())[::2] + [Path(__file__).parent / "fixtures" / "native" / FRAMES[0]]:
         scene = np.asarray(Image.open(path).convert("RGB"))
         for search in (lambda: det.detect_wide(scene, (0, 700)), lambda: det.detect(scene, (300, 520))):
             a, b = both(monkeypatch, search)
