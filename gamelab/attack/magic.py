@@ -21,7 +21,12 @@ What changes (classes.magician.SEARCH and CAST: the client's search for an aimed
   her close quarters' escape is a step or a jump away, never a jump up throwing; behavior.fight's and the hunt loop's
   jump cover none for an attack her profile doesn't make from a jump, fight._air), and her Actions never key an attack
   in the air (control.actions.Actions.ground_only: a jump throw goes out from the ground, a jump back is the jump away
-  alone).
+  alone);
+- no point-blank answers up close (stance.POINT_BLANK off, from her profile's Policy.close_quarters 'touch'): one too
+  close is cast at from the ground only where her search surely picks it when the cast starts, else she steps to where
+  it will, jumps away, casts at another her search picks, or waits (2026-10-29: her close quarters' jump throws went out
+  as casts from the ground that picked nothing); and her attack choice casts only at a body seen that her search picks,
+  not dead, not again where it took no effect (behavior.attacks.Attacks.picks, from her Policy.unseen 'none').
 """
 
 import contextlib
@@ -55,7 +60,11 @@ def swaps(c: Character) -> dict:
            (stance, "PASSING_JUMPS"): False, (stance, "JUMP_THROW_SNAILS"): False,
            # (no escape up onto a platform overhead: its jump throw would go out as a cast from the ground, her left
            # beside the monster her close quarters just ruled too near: the review of 2026-10-29)
-           (stance, "ESCAPE_UP"): False}
+           (stance, "ESCAPE_UP"): False,
+           # (no point-blank answers up close where her profile has none, Policy.close_quarters 'touch': a cast from
+           # the ground her search surely picks the monster with, else a step, the jump away or a wait; 2026-10-29,
+           # "cast magic claw for nothing")
+           (stance, "POINT_BLANK"): c.policy.close_quarters == "claw"}
     return out
 
 

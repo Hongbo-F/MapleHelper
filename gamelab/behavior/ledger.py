@@ -386,16 +386,19 @@ def dying(kills: list[Kill], m: Monster, t: float, seen: list[Monster] = (),
     return any(all(abs(o.x - k.x) >= abs(m.x - k.x) for o in others) for k in near)
 
 
-def in_path(s: Scene, side: str, monsters: list[Monster]) -> list[Monster]:
+def in_path(s: Scene, side: str, monsters: list[Monster], sizes: dict | None = None) -> list[Monster]:
     """The monsters an attack from the ground that way from where she stands in look `s` can take, the
     likeliest first (attack.reach.take_chances, by each kind's body: the nearest the claw's stance reaches,
     else the star's search's first band, any monster in it, whatever the terrain), and of those none whose
     star terrain stops (reach.wall_to: a kill after a throw from 4 isn't put on a monster on 2). The client
     checks the line to its pick alone, and stopped, no other monster takes the star: so with the first band's
-    only monster on 2, there's none (one the claw reaches is swiped whatever the terrain)."""
+    only monster on 2, there's none (one the claw reaches is swiped whatever the terrain). `sizes`: each kind's
+    body from the map's game data (localization.monsters.bodies; reach.body_of), else reach's tables (a mushroom as
+    a pig, 34 either side where the game has 28): the magician's casts go by the game's (behavior.attacks.Attacks.picks:
+    her search's first 50 by a body's far side), the thief's as before."""
     x, y = s.where.x, s.where.y
     ahead = [m for m in monsters if (m.x > x) == (side == RIGHT)]
-    bodies = [(abs(m.x - x), m.y - y, *reach.body_of(m.kind)) for m in ahead]
+    bodies = [(abs(m.x - x), m.y - y, *reach.body_of(m.kind, sizes)) for m in ahead]
     chances = reach.take_chances(bodies)
     return [m for c, m, b in sorted(zip(chances, ahead, bodies), key=lambda cmb: -cmb[0])
             if c > 0 and (reach.claw_chance(*b) > 0 or reach.wall_to(s.platform, x, y, m) is None)]

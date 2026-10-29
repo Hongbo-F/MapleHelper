@@ -202,6 +202,16 @@ CLAW_ONLY = 15.0     # units, middle to middle: nearer than this (on her), with 
                      # twice a swipe's damage on average, 0-10 about as much for its 14 MP. In the harness (Tree, crowd,
                      # 8 seeds of 5 minutes, the world as first fitted) 30 made 361.1 EXP a minute on the hunt loop
                      # where 15 made 370.6, 358.3 grinding where 347.8: the same within the seeds' noise
+# Whether her attack has point-blank answers up close: a jump in place, a tap first, a jump back throwing, the claw from
+# the ground (the thief's: `_from_here`, `_close_quarters`). Off for an attack whose search picks nothing within its
+# first stretch and nothing in the air (the magician's Magic Claw: her profile's Policy.close_quarters 'touch', set by
+# attack.magic for her process): up close she casts from the ground only where her search surely picks the monster when
+# the cast starts (CLEAR_MARGIN past its start), else steps to where it will (_clear_step, judged from the ground
+# alone), jumps back (the jump away alone: control.actions.Actions.ground_only), casts that way at another her search
+# picks from where she stands, or waits ('wait'), never a cast that picks nothing. Live on 2026-10-29 her close
+# quarters' jump throws went out as casts from the ground (Actions.ground_only): 106 of her 540 casts of 01:46-02:03,
+# 62% of them showing nothing (D:/MapleHelper-scratch/mcasts).
+POINT_BLANK = True
 STEP_SETTLE_S = 0.25  # s after a step's walk before her next keys: the slide (STOP_RUN) and the look after it
 # A monster walking at her stops where its body meets hers (its half and HER_HALF from her x), on the side of her it was
 # seen on: it touches her there, and the touch's knock (about 58 units) leaves it on that side. Until the reviews of
@@ -635,7 +645,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
            jumps: Callable[[], reach.Coverage] | None = None, toward: int = 0, goal: float | None = None,
            edges: tuple[float, float] | None = None, up: Callable[[float], Platform | None] | None = None,
            pace: Pace = NO_PACE, touch: list[Monster] = (), limits: tuple[float, float] | None = None,
-           moves: int = 0) -> tuple:
+           moves: int = 0, castable: Callable[[Monster], bool] | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units[, AWAY]) to step away,
@@ -664,7 +674,11 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     end, from 2026-10-27); `moves`: how many moves away she has made since her last throw (MAX_MOVES: then no step),
     counted only where something counts as a danger (`danger`'s any: not on the first map, whose stance is as it was).
     A step away from a close monster comes as ('back', side, units, AWAY), and _step_from_under's as ('back', side,
-    units): the fights count only the first toward MAX_MOVES."""
+    units): the fights count only the first toward MAX_MOVES. `castable`: whether her attack goes at a monster at all
+    (behavior.attacks.Attacks.refused: the magician's casts, none at one unseen, dead, likely dead or held; None: every
+    one): one it won't go at is never thrown at, nor taken as sure from where she stands up close, but counts as ever
+    for her body, the danger and who's too close. Without POINT_BLANK (the magician's), up close with nothing she casts
+    at from where she stands (_close_quarters' 'wait'), a throw that way at another in reach she casts at."""
     can_jump = can_jump or (lambda a, b: True)
     counts = danger is not None and danger.any
     moves = moves if counts else 0
@@ -674,14 +688,20 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     lo, hi = _stand_limits(platform, crowded=bool(mine))
     # a throw from the ground would be a claw swipe, or it hits too hard, as it will be when the attack starts
     close = [t for t in mine if too_close(t, x, halves, danger, pace, platform, _side_of(t, x) != facing)]
-    in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around)]
+    in_reach = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around)
+                and (castable is None or castable(t))]
     if close:
         slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
         if limits is not None:
             slo, shi = max(platform.left, limits[0]), min(platform.right, limits[1])
-        return _close_quarters(x, close, mine, facing, slo, shi, can_jump, tops or MONSTER_TOP, halves,
-                               (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
-                               else None, danger, platform, body, up, y, pace, moves, seen=around)
+        act = _close_quarters(x, close, mine, facing, slo, shi, can_jump, tops or MONSTER_TOP, halves,
+                              (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
+                              else None, danger, platform, body, up, y, pace, moves, seen=around, castable=castable)
+        if act[0] == "wait" and not POINT_BLANK:  # (her: none she casts at up close; another in reach that she does)
+            others = [t for t in in_reach if not any(t is c for c in close)]
+            if others:
+                return ("throw", _throw_side(x, others, facing, platform, danger))
+        return act
     if in_reach:
         if toward and PASSING_JUMPS and jumps is not None:
             jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward,
@@ -874,7 +894,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
                     danger: Danger | None = None, platform: Platform | None = None,
                     around: list[Monster] | None = None, up: Callable[[float], Platform | None] | None = None,
                     y: float | None = None, pace: Pace = NO_PACE, moves: int = 0,
-                    seen: list[Monster] | None = None) -> tuple:
+                    seen: list[Monster] | None = None, castable: Callable[[Monster], bool] | None = None) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`, as it will be when her next attack
     starts: too_close; `mine`: all on her platform), the nearest one then deciding (on the side she faces, if any will
     be there: one walking at her stops where it meets her, on its side, Pace's PACE_STOP). The throw from where she
@@ -894,7 +914,10 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     the monsters the look saw (`seen`: `around` less her kill's, which may be the one due back there) don't account for
     (Danger.free_points: a respawn there lands on her), and after `moves` moves away in a row without a throw
     (MAX_MOVES) no step, an escape's neither (a jump back, which throws, still). A step away is ('back', side, units,
-    AWAY)."""
+    AWAY). Without POINT_BLANK (the magician's) the throw from where she stands is a cast from the ground her search
+    surely picks it with (_from_here), and with none, `castable` saying no to it, or her search not picking it then,
+    no throw at it: a step, a jump back (the jump away alone) or ('wait',), never the claw's swipe nor a jump in place
+    (which went out as a cast from the ground that picked nothing)."""
     at = pace.lead + GROUND_PICK_S  # where each will be when a throw from the ground would start (its side, how near)
     where = {id(t): pace.at(t, x, at, platform) for t in close}
 
@@ -913,6 +936,8 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         y = nearest.y if platform is None else platform.y_at(min(max(x, platform.left), platform.right))
     others = mine if around is None else around
     here = _from_here(x, y, side, nearest, facing, can_jump, top, half, mine, halves, platform, pace)
+    if not POINT_BLANK and here.sure and castable is not None and not castable(nearest):
+        here = Here(("wait",), False, here.gap)  # (her: no cast at one she won't cast at, however her search picks it)
     stepping = moves < MAX_MOVES
     spawns = ([(sx, half_of(kind, halves)) for sx, kind in danger.free_points(platform.id, others if seen is None
                                                                               else seen)]
@@ -943,7 +968,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         # times). Step away, else throw from the ground.
         return ("back", away, min(STEP_AWAY, room), AWAY)
     if not jumpable:
-        return ("throw", side)
+        return ("throw", side) if POINT_BLANK else here.act  # (her: no claw to swipe it with)
     return here.act
 
 
@@ -975,7 +1000,10 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     a mushroom on her level picked from 144 ahead) or tapping the arrow first and jumping once the tap's walk has
     stopped (physics.JUMP_THROW_TURN_MS, then 40 ms: JumpPlan air_turn False), whichever picks it, the air turn first.
     With none of those sure (`sure` False): within CLAW_ONLY of her, or with no jump, the claw from the ground; else the
-    jump in place keyed 40 ms after the jump (tapping first if she must turn)."""
+    jump in place keyed 40 ms after the jump (tapping first if she must turn). Without POINT_BLANK (the magician's): a
+    cast from the ground (a tap first if she must turn) where her search surely picks it when the cast starts, its body
+    CLEAR_MARGIN past the search's start (reach.picks, by `top` and `half`, its feet on the slope then), else ('wait',),
+    not sure: no jump in place, no claw."""
     d = directions.sign(side)
     turn = facing != side
 
@@ -991,6 +1019,9 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     tg = pace.lead + (TAP_S if turn else 0.0) + GROUND_PICK_S
     ground = ("throw", side)
     g0 = gap(tg)
+    if not POINT_BLANK:  # (her search from the ground, or nothing: no claw, no cast in the air)
+        sure = reach.picks(g0 - CLEAR_MARGIN, drop(tg), top, half)
+        return Here(ground if sure else ("wait",), sure, g0)
     swiped = [o for o in mine if -half_of(o.kind, halves) < (pace.at(o, x, tg, platform) - x) * d
               < reach.ground_sure(half_of(o.kind, halves))[0]]
     if g0 >= reach.ground_sure(half)[0] and not swiped:
@@ -1043,8 +1074,8 @@ def _clear_step(x: float, y: float, m: Monster, away: str, room: float, top: flo
             continue  # (on her there when her throw starts: a touch, no clearance)
         if (gx - pace.at(m, gx, star_t, platform)) * d >= reach.star_sure(half):
             return step
-        if can_jump is not None and not can_jump(gx, gx):
-            continue
+        if not POINT_BLANK or (can_jump is not None and not can_jump(gx, gx)):
+            continue  # (her: no attack from a jump, the step has to clear it for one from the ground)
         jump_t = done + physics.JUMP_THROW_TURN_MS / 1000 + jump_pick_s(physics.JUMP_ATTACK_MS)
         if pace.meets(m, gx, jump_t, platform, half):
             continue

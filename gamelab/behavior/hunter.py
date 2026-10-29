@@ -266,13 +266,16 @@ class Hunter:
         # the ones they were: after the ledger, so a look's kills are in it.
         self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
                              theirs=lambda: self.ledger.theirs)
-        # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'.
+        # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'. Her skill cast
+        # only at a body seen that her search picks, not dead, not again where it took no effect, where her profile
+        # casts nothing at nothing (Policy.unseen 'none': the magician's Magic Claw; Attacks.picks)
         self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
                                kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
                                **({} if spell is None else dict(
                                    skill=Attack(spell.key, spell.hits, int(spell.lo or 1), int(spell.hi or 1),
                                                 spell.mp) if keys.magic_claw is not None else None,
-                                   magic=spell.defence == "mdd", no_regular=not profile.policy.finish_with_regular)))
+                                   magic=spell.defence == "mdd", no_regular=not profile.policy.finish_with_regular,
+                                   picks=profile.policy.unseen == "none")))
         self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
         if mode != "regular":
             self.actions.choose = self.attacks.key
@@ -863,6 +866,8 @@ class Hunter:
             return []
         casts = getattr(self.attacks, "casts", None)
         targets = watch.boxes(s.t) + ([] if casts is None else casts.boxes(s.t))
+        if getattr(self.attacks, "picks", False):  # (her casts judged: a MISS over its target, it picked it)
+            targets += self.attacks.boxes(s.t)
         if not targets:
             return []
         upp = s.geo.units_per_px

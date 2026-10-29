@@ -528,7 +528,9 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
     way, to map x `goal` on her platform if given; `edges`, `up`, `limits`: stance's, and her moves away since her last
     throw (st.moves: MAX_MOVES). For a throw, everything in the star's path is kept (st.aimed): a kill is matched against
     it. A jump throw that a stance chose for where its attack reaches is
-    logged with its numbers and sent as a telemetry 'jump' record when it's carried out (throw_act: log_jump)."""
+    logged with its numbers and sent as a telemetry 'jump' record when it's carried out (throw_act: log_jump). Her
+    casts going only where her attack choice sends one (castable_of: the magician's), a throw her cast would send none
+    with (Attacks.target that way: none) is a wait."""
     here = s.platform
     body = bodies(h.model)  # each kind's body (game data)
     tops, halves = body_sizes(h.model)
@@ -538,7 +540,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves)
+                 moves=st.moves, castable=castable_of(h))
+    act = cast_or_wait(h, act)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
         h.log(f"  {act_text(act, fight, s.where.x, hidden)} (HP {s.hp:.0%})")
@@ -860,9 +863,29 @@ def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Mo
     """attack.stance at `targets` from look `s`, by each kind's size, as _take_stance has it (unlogged)."""
     here = s.platform
     tops, halves = body_sizes(h.model)
-    return stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
-                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves, around=around,
-                  danger=h.danger, pace=pace_of(h, s))
+    return cast_or_wait(h, stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
+                                  can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
+                                  around=around, danger=h.danger, pace=pace_of(h, s), castable=castable_of(h)))
+
+
+def cast_or_wait(h: "Hunter", act: tuple) -> tuple:
+    """Stance `act` as hunter `h` carries it out: where her attack choice casts only where her search picks a body she
+    casts at (castable_of: the magician's), a throw that way with none (Attacks.target: one held, likely dead, or no
+    body her search picks first) is ('wait',), the fight's patience running and the hunt loop's next rules asked, not a
+    key that sends nothing look after look; anything else as it is (the thief's always)."""
+    if act[0] in ("throw", "jump_throw") and castable_of(h) is not None and h.attacks.target(act[1]) is None:
+        return ("wait",)
+    return act
+
+
+def castable_of(h: "Hunter"):
+    """The stance's `castable` for hunter `h`: whether her attack goes at a monster at all, where her attack choice
+    has her skill cast only at a body seen, not dead, likely dead or held (behavior.attacks.Attacks.picks, the
+    magician's: Attacks.refused); None for the thief (every one, as before)."""
+    attacks = getattr(h, "attacks", None)
+    if attacks is None or not getattr(attacks, "picks", False):
+        return None
+    return lambda m: attacks.refused(m) is None
 
 
 def _count_kills(h: "Hunter", st: FightState, s: Scene, wanted: list[Monster], gains: int,
