@@ -167,22 +167,25 @@ def test_nothing_is_read_from_a_frame_the_game_isnt_showing(step):
 
 
 def test_the_drops_rotation_searches_every_strip_in_view_her_platforms_most_often():
-    """worldstate.DROPS_STRIPS a frame, unasked, the one searched longest ago first (her platform's counted DROPS_HER
-    times as old): every strip in view within a few frames, each one's last search in every state (`drops`: when, and
-    what it had), the state's `loot` still only what was asked for."""
+    """worldstate.DROPS_STRIPS (1) every DROPS_EVERY_S (0.2 s: every third frame at 15), unasked, the one searched
+    longest ago first (her platform's counted DROPS_HER times as old): every strip in view in turn, each one's last
+    search in every state (`drops`: when, and what it had), the state's `loot` still only what was asked for."""
     model = small_map()
     step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), throws=False)
-    assert step.schedule.drops_strips == worldstate.DROPS_STRIPS == 2
+    assert (step.schedule.drops_strips, step.schedule.drops_every_s) == (worldstate.DROPS_STRIPS,
+                                                                         worldstate.DROPS_EVERY_S) == (1, 0.2)
     step.eyes.drops = [Item("mesos", 480 + round(50 / U), 300 - 6, 13, 13, 0.9)]  # on her platform
-    states = frames(step, 8)
-    assert all(s.loot is None for s in states) and all(s.work["strips"] == 2 for s in states)
-    first = states[0].drops
-    assert len(first) == 2 and {d.platform for d in first} == {p.id for p in model.places}
-    assert all(d.at == states[0].t for d in first)  # (two strips in view, both searched on the first frame)
+    states = frames(step, 9)
+    assert all(s.loot is None for s in states) and [s.work["strips"] for s in states] == [1, 0, 0] * 3
+    assert len(states[0].drops) == 2 and {d.platform for d in states[0].drops} == {p.id for p in model.places}
     mine = model.platform_under(1000, 500).id
+    first = {d.platform: d.at for d in states[0].drops}
+    assert first[mine] == states[0].t and set(first.values()) == {states[0].t, None}  # (hers first, the other not yet)
+    later = {d.platform: d.at for d in states[3].drops}
+    assert later[mine] == states[0].t and None not in later.values()  # (then the other, searched longest ago)
     (strip,) = [d for d in states[-1].drops if d.platform == mine]
-    assert [d.item.kind for d in strip.loot] == ["mesos"] and strip.at == states[-1].t
-    # A look's drops asked for: searched whole on their frame, before the rotation, which takes the rest.
+    assert [d.item.kind for d in strip.loot] == ["mesos"]
+    # A look's drops asked for: searched whole on their frame, before the rotation, which takes another when it's due.
     (asked,) = frames(step, 1, start=101.0, asks={0: Asks(loot=True)})
     assert [d.item.kind for d in asked.loot] == ["mesos"] and asked.work["asked strips"] == 1
     assert asked.work["strips"] == 2  # (the other platform's by rotation)

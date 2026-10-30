@@ -15,7 +15,8 @@ pass (`WorldStep.step`):
    its track's id in the state (Monster.track), their HP bars read where due (`_bar_due`), and those lost lately or found
    weakly looked at for their death (DEATHS: perception.deaths, the game data's die1 frames where each was);
 4. the drops: the strips asked for (a look's: her platform's, or every platform's in view) on the frame asked for, then
-   DROPS_STRIPS strips in view by rotation (`drops`: every strip in view with when it was last searched and what it had).
+   a strip in view by rotation now and then (DROPS_STRIPS, DROPS_EVERY_S; `drops`: every strip in view with when it
+   was last searched and what it had).
 A consumer asks for drops on the next frame (`Asks`); her band and the whole screen, which a look asked for until
 2026-10-30, are in every state.
 
@@ -132,16 +133,20 @@ CROWD_DY = 60.0
 # (`deaths`, sim.fakes.FakeDeaths), or none. 0.72 ms a frame on one thread, replayed on the 23:10 recording
 # (perception.deaths).
 DEATHS = True
-# The drops searched in every frame without being asked: this many strips in view (scene.drop_strips: one over each
-# stretch of level ground of every platform), by rotation (the one searched longest ago first, her platform's taken as
-# DROPS_HER times as old), each strip's last search kept with when it was (`WorldState.drops`): at 12 strips in view
-# (Tree Dungeon's crowd: 12, 15 at most) every one is searched again every 0.4 s, 2 x 3.84 ms a frame (0.115 cores at
-# 15 a second; every platform in view on every 15th frame, D:/MapleHelper-scratch/replan/p15/drops_cost.py: 46.5 ms a
-# frame, p90 51.7, the most 62.9). What a look asks for (Asks: her platform's drops, or every platform's) is searched on
-# the frame asked for, whole (a pile just picked up must not be seen again, and an item in two platforms' strips goes to
-# the one it lies on: scene.find_loot), before the rotation. Until 2026-10-30 the drops were searched only when asked
-# (and on `watch`'s schedule, her platform's every 0.5 s and every platform's every 2 s, while no command hunted).
-DROPS_STRIPS = 2
+# The drops searched without being asked: DROPS_STRIPS strips in view (scene.drop_strips: one over each stretch of level
+# ground of every platform) at most every DROPS_EVERY_S, by rotation (the one searched longest ago first, her platform's
+# taken as DROPS_HER times as old), each strip's last search kept with when it was (`WorldState.drops`): at 12 strips in
+# view (Tree Dungeon's crowd: 12, 15 at most) every one searched again every 2.4 s, as `watch`'s schedule had every
+# platform's every 2 s until 2026-10-30 (and her platform's every 0.5 s, while no command hunted; a hunt asked for what
+# it wanted). Built as the design had it, 2 strips every frame (every strip every 0.4 s, 2 x 3.84 ms a frame by its
+# drops_cost.py: 0.115 cores at 15 a second), the service's frame loop took 0.77-0.80 cores on the user's own play's 300
+# frames of the crowd against 0.43 with none (the loot detector's own threads), the pass 21.5 ms (median) against 11.8:
+# one strip every third frame instead (D:/MapleHelper-scratch/replan/p15/impl: bench_service.py). For the loot design
+# to tune. What a look asks for (Asks: her platform's drops, or every platform's) is searched on the frame asked for,
+# whole (a pile just picked up must not be seen again, and an item in two platforms' strips goes to the one it lies on:
+# scene.find_loot), before the rotation, whatever its pace.
+DROPS_STRIPS = 1
+DROPS_EVERY_S = 0.2
 DROPS_HER = 2.0
 
 
@@ -149,7 +154,8 @@ DROPS_HER = 2.0
 class Schedule:
     """What the pass does without being asked."""
     ropes_every: int = ROPES_EVERY       # frames
-    drops_strips: int = DROPS_STRIPS     # strips of drops in view a frame, by rotation (0: none)
+    drops_strips: int = DROPS_STRIPS     # strips of drops in view searched by rotation (0: none) ...
+    drops_every_s: float = DROPS_EVERY_S  # ... at most this often (half a frame short)
 
 
 WATCH = Schedule()  # (`watch`'s, the same as the hunt's since 2026-10-30: the drops' rotation for the mini-map too)
@@ -225,7 +231,7 @@ class WorldState:
     looked: list = field(default_factory=list)  # ... where (Scene.looked)
     loot_wide: bool = False        # ... on every platform in view (else on hers)
     mesos_only: bool = False
-    drops: list[DropStrip] = field(default_factory=list)  # every strip of drops in view, as last searched (DROPS_STRIPS)
+    drops: list[DropStrip] = field(default_factory=list)  # every strip of drops in view, as last searched (DROPS_*)
     tracks: list[Track] = field(default_factory=list)  # the monsters followed, alive (seen or not) or just dead
     events: list[Event] = field(default_factory=list)  # what happened, as of this frame
     # what this frame's pass did and took (the real clock): `s` all of it, `look s` her look, `wide s` the whole
@@ -291,6 +297,7 @@ class WorldStep:
         self.owed: Asks | None = None    # drops asked for and not searched yet (no frame shown at their time yet)
         self.mesos_only = False          # whether the drops are looked for as mesos alone (the last ask's)
         self._strips: dict[tuple[int, float], DropStrip] = {}  # each strip of drops' last search (Strip.key)
+        self._rotated = -1e18                    # ... and when the rotation last searched one (DROPS_EVERY_S)
         self._bar_read: dict[int, float] = {}   # when each track's bar was last read (_bar_due)
         self._death_at: dict[int, float] = {}   # ... and when it was last looked at for its death (deaths.EVERY_S)
         self._exp: np.ndarray | None = None
@@ -485,7 +492,8 @@ class WorldStep:
     def _drops(self, s: Scene, t: float, placed: bool, work: dict):
         """The drops in look `s`'s frame (shown at t): what was asked for (`owed`, for a frame shown at its time or
         later: her platform's strips, or every platform's in view, searched whole: scene.find_loot), then the
-        schedule's DROPS_STRIPS strips by rotation. (loot asked for or None, where it looked, on every platform,
+        schedule's DROPS_STRIPS strips by rotation, every DROPS_EVERY_S. (loot asked for or None, where it looked, on
+        every platform,
         every strip in view as last searched)."""
         work["strips"] = work["asked strips"] = 0
         if not placed:
@@ -505,7 +513,7 @@ class WorldStep:
             work["asked strips"] = len(strips)
             self.counts["loot"] += 1
             self.counts["loot wide"] += wide
-        if self.schedule.drops_strips > 0:
+        if self.schedule.drops_strips > 0 and t - self._rotated >= self.schedule.drops_every_s - 0.5 / HZ:
             mine = s.platform.id if s.platform is not None else None
 
             def stale(st: Strip) -> float:  # (how long ago it was searched, her platform's counted DROPS_HER times)
@@ -516,6 +524,7 @@ class WorldStep:
             pick = todo[:self.schedule.drops_strips]
             if pick:
                 self._searched(pick, find_loot(s, self.model, self.eyes, False, self.mesos_only, pick), t)
+                self._rotated = t
             work["strips"] = len(pick)
         work["strips"] += work["asked strips"]
         self.counts["strips"] += work["strips"]

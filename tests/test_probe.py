@@ -394,7 +394,7 @@ def test_the_scorer_finds_the_window_top_the_world_has(monkeypatch):
     # From 13 at a lone pig on 12, 60 above her, 110-200 off: with the client's top (44, reach's) the star picks
     # it from 111, with the logs' lower one (21) only from 191. Each world's log fits its own top and rules out
     # the other. With no hit at all the fit would be flat down to 0, not bounding the top from below (on the
-    # scenario's seed 1 the lower top's world has 7, 199-219 off).
+    # scenario's seed 1 the lower top's world had 7, 199-219 off; on its seed 2 since 2026-10-30, 1).
     model = scenarios.real_map()
     rows = _rows(scenarios.run("probe_top"))
     high = probe.fit_top0(rows, model)

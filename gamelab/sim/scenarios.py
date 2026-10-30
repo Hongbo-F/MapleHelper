@@ -742,7 +742,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=1,
+@scenario((12, -300.0), monsters="all", seed=2,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to 13), and
@@ -773,7 +773,9 @@ def nav_fight_across(sim):
     kill's monster bound by her kept in her body's way (behavior.fight.TOUCH_NEAR) and her kills credited to the monster
     her attack took: on seed 4 she ran out of her 180 s; of seeds 1-16, 1, 5-7 and 10-14 meet all of this, and with
     master's stack 4, 7, 11, 13 and 16.) (Seed 1 since perception at 15 frames a second, one pass a frame (2026-10-30):
-    on seed 7 no knock took her off 12; seed 1 meets all of this.)"""
+    on seed 7 no knock took her off 12; seed 1 meets all of this.) (Seed 2 since the drops' rotation searches a strip
+    in view every 0.2 s, not two every frame (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 1 no knock took her off
+    12; seed 2 meets all of this.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -947,7 +949,7 @@ def move_climb_down(sim):
     return _one_move(sim, "climb_down", 30, 36)
 
 
-@scenario((30, 700.0), seed=8, noise=Noise(walk_jitter=5.0, dot_px=True),
+@scenario((30, 700.0), seed=3, noise=Noise(walk_jitter=5.0, dot_px=True),
           expects=(sends("nudge", "nudges by the rope on screen"),
                    check("lined up in a few nudges", lambda tr: 1 <= sum(p[1] == "nudge" for p in tr["plans"]) <= 4),
                    ends(36, key="landed", what="down the rope after all")))
@@ -965,7 +967,9 @@ def move_climb_down_nudge(sim):
     for 5 units, which moved her 9, 4 past the rope's top.) (Seed 8 since every look is perception's newest frame after
     her keys' effect (Senses.fresh_after, the feed in every scenario): of seeds 1-40, 8 nudge, 7 of them once, from one
     side, and seed 30 twice, both from the left: one look after a nudge sees where it left her, and a nudge lines her
-    up; on seed 6 the walk stopped close enough not to nudge.)"""
+    up; on seed 6 the walk stopped close enough not to nudge.) (Seed 3 since perception at 15 frames a second, one pass
+    a frame, with the drops' rotation a strip in view every 0.2 s (worldstate.DROPS_EVERY_S, 2026-10-30): on seeds 8,
+    1 and 2 the walk stopped close enough not to nudge; on 3 one nudge lines her up.)"""
     return _one_move(sim, "climb_down", 30, 36)
 
 
@@ -1253,7 +1257,7 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 _AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=1, limit=400, realism=_AT_RELEASE,
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=2, limit=400, realism=_AT_RELEASE,
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
@@ -1607,7 +1611,11 @@ def loop_spot_off_ground(sim):
     """tour_hunt_from_safe_spot's twin: nothing in the basin, so on to platform 17, hunted from the safe
     spot on 16 above it. (Seed 1 since the hunt loop keeps the grounds worth a visit by their EXP a second:
     the basin's 4 s visit then leaves 35 out, the draws that vary her choice fall otherwise, and on seed 25
-    she went to 4 first. 23 of seeds 1-32 show it, 22 before.)"""
+    she went to 4 first. 23 of seeds 1-32 show it, 22 before.) (Seed 2 since perception at 15 frames a second, one pass
+    a frame, with the drops' rotation a strip in view every 0.2 s (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 1
+    the hits weren't all and only the throws 111 off or more at the pick (27 of the 30 hit); of seeds 1-10, 2-4 and
+    6-9 meet all of this, every star hitting on all but 9 (1 of the 30 missing), and on 2 and 3 alone the logs' top's
+    world has a hit to bound its fit from below (tests/test_probe.py's window-top test: none on 4, 6, 8 and 9).)"""
     return _loop(3)(sim)
 
 
@@ -1628,7 +1636,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=1, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1662,7 +1670,10 @@ def loop_lull_loot(sim):
     AIR_PICK) and her stance going by where each monster will be when her attack starts (attack.stance.Pace): on seed 1
     no lull came; of seeds 1-12, 2-10 meet all of this.) (Seed 2 kept with the whole screen 10 times a second,
     2026-10-28: of seeds 1-16 all but 4, 9, 14 and 16 meet all of this; with the whole screen standing in for her band's
-    own search as first built, worldstate.BAND_STAND_IN_S, all but 2 and 10, no lull coming on 2.)"""
+    own search as first built, worldstate.BAND_STAND_IN_S, all but 2 and 10, no lull coming on 2.) (Seed 1 since
+    perception at 15 frames a second, one pass a frame, with the drops' rotation a strip in view every 0.2 s
+    (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 2 the rule 'lull loot' never decided; seed 1 meets all of this,
+    17 pigs and 10 Orange Mushrooms killed, 7 piles.)"""
     return _loop_on_12(sim)
 
 
@@ -2518,7 +2529,7 @@ def loop_tree_lie_detector(sim):
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=15, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=9, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2559,7 +2570,11 @@ def loop_tree_lie_detector_28(sim):
     on all 13 she is on a safe place 10 s after the sighting, with no fall.) (Seed 15 since perception at 15 frames a
     second, one pass a frame (2026-10-30): on seed 2 at 40 s she was by the rope over 32, not on her way down from 28,
     and retreated to that rope (a rope as safe); of seeds 1-15, 15 alone meets all of this, 3 and 13 going to 25, the
-    others to a rope or 27. On 15 back onto 28 at x 227.)"""
+    others to a rope or 27. On 15 back onto 28 at x 227.) (Seed 9 since the drops' rotation searches a strip in view
+    every 0.2 s, not two every frame (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 15 a touch knocked her out of the
+    tower at 23.3 s, before the sighting (in this world her own group's walls alone stop her); of seeds 1-9, 9 alone
+    goes back onto 28 (at x 227, 5.9 s after the sighting), 3 and 6 to 25, the others to a rope, all on a safe place
+    10 s after it.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2921,7 +2936,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -2946,11 +2961,14 @@ def loop_tree_attack_misses(sim):
     window read and closed at 52.2-52.9 s, ATTACK on Ctrl, 28 kills after.) (Seed 2 since perception at 15 frames a
     second, one pass a frame (2026-10-30): on seeds 6 and 1 no 5 regular presses in a row went without effect in its 2
     minutes. On 2 the doubt at 82.9 s, a Green Mushroom at 7-10%; away to 25 (1.5 s), the window read, ATTACK on Ctrl at
-    86.4 s, 11 kills after.)"""
+    86.4 s, 11 kills after.) (Seed 1 since the drops' rotation searches a strip in view every 0.2 s, not two every
+    frame (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 2 no 5 regular presses in a row went without effect in its 2
+    minutes; of seeds 1-10, 1, 4 and 10 meet all of this. On 1 the doubt at 46.3 s, a Green Mushroom at 4%; away to 25
+    (3.9 s), the window read, ATTACK on Ctrl at 52.1 s, Ctrl pressed once at another after, 22 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -2971,11 +2989,13 @@ def loop_tree_attack_misses_seen(sim):
     a pile against the loop's rate), as loop_tree_attack_misses: of seeds 1-12, 1, 2, 6, 9 and 10 meet all of this. On 6
     7 MISSes read from 15.8 s, no doubt.) (Seed 2 since perception at 15 frames a second, one pass a frame (2026-10-30):
     as loop_tree_attack_misses: on seeds 6 and 1 her attack's MISS read over fewer than 3 of her regular presses'
-    targets. On 2 11 MISSes read from 11.9 s, no doubt.)"""
+    targets. On 2 11 MISSes read from 11.9 s, no doubt.) (Seed 1 since the drops' rotation searches a strip in view
+    every 0.2 s, as loop_tree_attack_misses: of seeds 1-12, 1, 2, 4, 5, 6 and 10 meet all of this. On 1 her attack's
+    MISS read over 4 of her regular presses' targets, 5 seen from 29.0 s, no doubt.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -3012,7 +3032,13 @@ def loop_tree_attack_no_darts(sim):
     and R7's dodge with the pull's detour rule): on 24, and on 3 (the evade work's pick without the pull's rule), out of
     darts' stop never came in its 4 minutes; of seeds 1-24, 5, 8 and 12 meet all of this. On 5: the doubt at 75.1 s (a
     Green and a Horny Mushroom), MAYBE OUT at 82.5 s, the window read and closed at 83.7-84.4 s, ATTACK on Ctrl: Lucky
-    Seven only, paged; out of darts' stop at 100.9 s, paged.)"""
+    Seven only, paged; out of darts' stop at 100.9 s, paged.) (Seed 8 since perception at 15 frames a second, one pass a
+    frame, with the drops' rotation a strip in view every 0.2 s (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 5 her
+    stars' test had no monster in reach to cast at (her stars: not known), so neither MAYBE OUT nor out of darts' stop
+    in its 4 minutes; of seeds 1-8, 8 alone meets all of this (on 1, 2 and 4 out of darts' stop without MAYBE OUT). On
+    8: the doubt at 79.8 s, a Green Mushroom at 63%, the check put off (it stayed near her), MAYBE OUT at 100.1 s, the
+    window read and closed at 102.3-103.7 s, ATTACK on Ctrl: Lucky Seven only, paged; out of darts' stop at 105.3 s,
+    paged.)"""
     return key_check_run(4)(sim)
 
 

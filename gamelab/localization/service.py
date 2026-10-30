@@ -11,10 +11,11 @@ none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoev
 "Run the perception at the same rate between hunt and idle. The idea is perception is running as a constant thing and
 hunt is only a consumer of it"): HZ frames a second (localization.rate: 15 since 2026-10-30, everything once a frame:
 "I meant everything at 15 fps"); a frame a command asks for is taken at once, the next a period after it (feed.run), and
-the drops it asks for are searched on it, besides DROPS_STRIPS strips in view by rotation on every frame (SCHEDULE,
-HUNTING alike). Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
-`watch`'s was (a scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl,
-and every 10 s the pass's pace and time (a 'perf' record, as its console line says them: `Perf`).
+the drops it asks for are searched on it, besides a strip of drops in view by rotation every third frame
+(worldstate.DROPS_STRIPS, DROPS_EVERY_S; SCHEDULE, HUNTING alike). Her throws are known to the tracker while a command
+that tells them is attached. Its telemetry is `watch`'s was (a scene 10 times a second, the tracks twice, the events,
+her EXP: `Publisher`), in <time>-perceive.jsonl, and every 10 s the pass's pace and time (a 'perf' record, as its
+console line says them: `Perf`).
 It keeps the rolling recording too (control.recording, handed to it by `perceive`: its own frames, every one, the last 5
 minutes in memory; `perceive --no-record` without), which `gamelab recorder` kept with a capture of its own until
 2026-10-26.
@@ -98,9 +99,9 @@ FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a lo
 # (15: everything once a frame, the whole screen's search in every frame's pass; README, Perception at 15 frames a
 # second, one pass a frame).
 HZ = feed.HZ
-# What's searched without being asked: since 2026-10-30 the whole screen in every frame's pass and DROPS_STRIPS strips
-# of drops in view by rotation (worldstate.DROPS_STRIPS), whoever is attached. Until then the whole screen every 1/15 s
-# on a thread of its own, her band with it (its own search every 0.2 s only when no search for monsters came in that
+# What's searched without being asked: since 2026-10-30 the whole screen in every frame's pass and a strip of drops in
+# view by rotation every third frame (worldstate.DROPS_STRIPS, DROPS_EVERY_S), whoever is attached. Until then the
+# whole screen every 1/15 s on a thread of its own, her band with it (its own search every 0.2 s only when no search for monsters came in that
 # long; every 0.1 s on 2026-10-28 till the evening, once a second and her band every 0.2 s until then; the hunt's
 # schedule, until 2026-10-26 only while a command that hunts was), and the drops at `watch`'s rates (her
 # platform's every 0.5 s, every platform in view every 2 s: SCHEDULE) for the mini-map while none hunts. While one does,
@@ -983,9 +984,9 @@ class Publisher:
         self.slow = not native.masked_in_c() or native.search_lib() is None
         sch = runner.step.schedule
         telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native,
-                       schedule={"hz": HZ, "drops_strips": sch.drops_strips})
+                       schedule={"hz": HZ, "drops_strips": sch.drops_strips, "drops_every_s": sch.drops_every_s})
         self.log(f"perception: gamelab's C pieces {self.native}; {HZ:g} frames a second, the whole screen in every "
-                 f"frame's pass, {sch.drops_strips} strips of drops a frame by rotation")
+                 f"frame's pass, {sch.drops_strips} strip(s) of drops every {sch.drops_every_s:g} s by rotation")
 
     def state(self, st: WorldState) -> None:
         if self.runner is None:

@@ -513,8 +513,8 @@ def test_the_service_says_whether_gamelabs_c_is_in_use():
     runner = drawn_runner()
     pub.started(runner, 1)
     assert said == [f"perception: gamelab's C pieces {native.state()}; the monster search's step 1 "
-                    f"{native.search_state()}; 15 frames a second, the whole screen in every frame's pass, 2 strips "
-                    f"of drops a frame by rotation"]
+                    f"{native.search_state()}; 15 frames a second, the whole screen in every frame's pass, 1 "
+                    f"strip(s) of drops every 0.2 s by rotation"]
     assert ("C pieces" in pub.status(0.0)) == pub.slow
     assert pub.slow == (native.lib() is None or not native.masked_in_c() or native.search_lib() is None)
     assert "noise bound" not in pub.status(0.0)
