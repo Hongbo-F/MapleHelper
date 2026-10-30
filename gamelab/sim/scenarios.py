@@ -2140,7 +2140,9 @@ def loop_tree_run(sim):
     meeting all of it too (hurt 38 times). Kept on the rebase onto her keys followed and her stat window, master
     d9774e5: on 5 57 kills, hurt 32 times, 1,236 EXP; master's stack on 5 as before.) (Seed 1 since the evade work's
     review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 5 under
-    forty kills; of seeds 1-13, 1, 4, 6-8 and 11 meet all of this.)"""
+    forty kills; of seeds 1-13, 1, 4, 6-8 and 11 meet all of this.) (The same at the evade work's integration with
+    master 8dcc2e6, the pull's detour rule and the magician's casts (2026-10-29, work/evade-int; swept again after its
+    review): of seeds 1-13, 1, 4, 6-8 and 11, every seed's touches and what it misses as on work/evade.)"""
     return _loop(5)(sim)
 
 
@@ -2219,7 +2221,9 @@ def loop_tree_23_near_misses(sim):
     a Horny Mushroom the looks missed (the feed's hidden tracks, her memory's: localization.unseen) is by them
     (hunt.PILE_CLEAR), as one did live (the service's track 130: 6 touches and a fall to 29). (Seed 2 since the evade
     work's review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 1 no
-    'later, a horny-mushroom unseen' line; of seeds 1-13 all but 1 and 11 meet all of this.)"""
+    'later, a horny-mushroom unseen' line; of seeds 1-13 all but 1 and 11 meet all of this.) (The same at the evade
+    work's integration with master 8dcc2e6 (2026-10-29, work/evade-int; swept again after its review): of seeds 1-13
+    all but 1 and 11, every seed's touches as on work/evade.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2542,7 +2546,9 @@ def loop_tree_lie_detector_28(sim):
     R7's dodge, the rope fixes; rebased onto master 945f201): on seed 5 her retreat went to 27, a safe platform, not
     back onto 28; of seeds 1-13, 2, 4 and 6 meet all of this (every switch off: 1, 2, 4 and 5), and on all 13 she is on
     a safe place 10 s after the sighting, with no fall (the review's falls off 25 were on the code before the rebase;
-    her retreat weighs 25 by its places now: retreat.OVERHEAD).)"""
+    her retreat weighs 25 by its places now: retreat.OVERHEAD).) (The same at the evade work's integration with master
+    8dcc2e6 (2026-10-29, work/evade-int; swept again after its review): of seeds 1-13, 2, 4 and 6 meet all of this, and
+    on all 13 she is on a safe place 10 s after the sighting, with no fall.)"""
     return lie_detector(40.0)(sim)
 
 
