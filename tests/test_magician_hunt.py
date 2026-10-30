@@ -589,7 +589,9 @@ def test_the_stances_no_casts_are_counted_logged_and_said_and_held_ones_alone_ar
     from gamelab.attack import choice, stance
     from gamelab.behavior import attacks as attacks_mod
     from gamelab.behavior import fight
-    clock = [time.monotonic()]
+    # A fixed clock, not time.monotonic(): with the machine up 6 days (547,084 s) t + 1.0 + THROW_S less t + 1.0 came
+    # out 0.83999999997, under THROW_S, so the count below at exactly her casts' pace failed by the uptime alone
+    clock = [1000.0]
     monkeypatch.setattr(attacks_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     with magic.swapped(MAGE):
         a, said = _picking()
