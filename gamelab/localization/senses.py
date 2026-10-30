@@ -445,7 +445,9 @@ class Senses:
         place on screen), the platform she stands on, the cue that placed her (`how`: "tag", "plate", "body", or
         "carried" where nothing did and the filter's prediction stands: `tag_seen` False then) and how sure
         (`confidence`), her mode ("ground", "air", "rope"). Not found yet (the first frames): her dot places her, the
-        view puts her on screen (`how` "dot"). A place off the map isn't placed (placecheck)."""
+        view puts her on screen (`how` "dot"). A place off the map isn't placed (placecheck). Her dot not read (something
+        over the minimap), `where.dot` is where her place puts it (what reads it, her stillness by her dot, the rope's
+        top, has it as before; `s.dot` stays None)."""
         if loc.feet is None:
             if s.dot is None:
                 return
@@ -459,7 +461,12 @@ class Senses:
             s.where, s.how, s.feet, s.mode, s.confidence = where, "dot", (fx, fy), None, 0.0
             s.tag, s.tag_seen = (round(fx - dx), round(fy - dy)), False
             return
-        where = Where(loc.x, loc.y, loc.platform, s.dot)
+        dot = s.dot
+        if dot is None:
+            from .locate import DOT_OFF
+            self.localizer.use(s.geo)
+            dot = self.localizer.to_dot(loc.x + DOT_OFF[0], loc.y + DOT_OFF[1])
+        where = Where(loc.x, loc.y, loc.platform, dot)
         if (off := off_map(self.model, where)) is not None:
             s.bad = Problem("place", off)
             return

@@ -170,6 +170,9 @@ def test_senses_places_her_by_the_scene_and_the_scene_converts_by_its_view(art, 
     assert (s.where.x, s.where.y) == pytest.approx((43.5, p.y_at(43.5))) and s.platform is p
     assert s.floor_y == round(fy) and s.mode == "ground" and s.grounded
     assert s.map_x(0) == VIEW[0] and s.map_y(10) == VIEW[1] + 10 and s.screen_x(43.5) == pytest.approx(fx)
+    # (no minimap on the frame: her dot not read, the place's dot where her place puts it, as what reads it expects)
+    assert s.dot is None and s.where.dot == pytest.approx(
+        senses.localizer.to_dot(43.5 + DOT_OFF[0], p.y_at(43.5) + DOT_OFF[1]))
     her = s.record()["her"]
     assert her["how"] == "tag" and her["mode"] == "ground" and her["conf"] > 0.9 and her["view_sure"]
     bare, _ = art.window(*VIEW)   # her gone: carried, not seen
