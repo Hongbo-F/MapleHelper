@@ -71,6 +71,10 @@ SHADOW_WAIT_S = 30.0
 # Past this, the player's log becomes player.log.1 (the one before goes) when the player starts. It writes
 # about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
 LOG_MAX_BYTES = 5 * 1024 * 1024
+# A claimed plan's file, refused by Windows (PermissionError: another program has it open, a scanner looking at the file
+# just renamed), is read again for up to this long: on 2026-10-29 17:04:41 a walk's plan failed so ("Permission denied:
+# ...inbox\170440_walk_a709.running"), its answer an error, and the grind ended there.
+READ_RETRY_S = 0.5
 
 # Every key config.toml can name, and both mouse buttons: since 2026-10-23 the player may press any of
 # them (the key bindings window, \, needs clicks to save a change). The Lie Detector still stops all of it.
@@ -857,6 +861,19 @@ def _rotate_log(limit: int = LOG_MAX_BYTES) -> None:
         pass  # no log yet, or it can't be moved now: it goes on
 
 
+def _read_plan(path) -> dict:
+    """A claimed plan's JSON, read again every 5 ms for up to READ_RETRY_S while Windows refuses it (PermissionError:
+    another program has the file open); raised past that."""
+    deadline = time.monotonic() + READ_RETRY_S
+    while True:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.005)
+
+
 def _answer(path, result: dict) -> str:
     """Write a plan's result to the outbox (atomically) in place of the plan file at `path`; returns
     the plan id."""
@@ -928,7 +945,7 @@ def serve() -> None:
             except OSError:
                 continue  # withdrawn just now
             try:
-                plan = json.loads(running.read_text(encoding="utf-8"))
+                plan = _read_plan(running)
                 plan["id"] = "".join(ch for ch in path.stem if ch.isalnum() or ch in "-_")[:64] or "plan"
                 result = player.run(plan)
             except Exception as e:
