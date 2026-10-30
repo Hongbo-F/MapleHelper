@@ -1029,17 +1029,18 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     wait = getattr(hunter, "wait_max_hp", None) if hunts and (args.low_hp is None or args.low_hp > 1) else None
     read = getattr(hunter, "read_stats", None) if hunts else None  # (her stat window: her W.DEF, behavior.statcheck)
     chat = getattr(hunter, "collapse_chat", None) if hunts else None  # (her chat box, behavior.chatcheck)
+    loop = bool(getattr(args, "loop", False))  # (`tour --loop`: a put-off of either tried again in the hunt loop)
     waited = wait is None or wait()  # (--low-hp in HP needs her max HP too)
     if chat is not None:  # (collapsed if it's expanded: it hides the play area's bottom left, before her stat window's
-        chat(at_start=True)  # quiet moment looks for monsters)
+        chat(at_start=True, loop=loop)  # quiet moment looks for monsters)
     if not waited:
         if read is not None:  # (her stat window shows her max HP too)
-            read(at_start=True)
+            read(at_start=True, loop=loop)
         if getattr(hunter, "max_hp", None) is None:
             from .behavior.safety import HP_WAIT_S, HpNotRead
             raise HpNotRead(HP_WAIT_S, hunter.hp_why)
     elif read is not None:
-        read(at_start=True)
+        read(at_start=True, loop=loop)
     strong = getattr(hunter, "too_strong", None) if hunts else None
     if strong is not None and (refused := strong()) is not None:
         raise refused  # (the commands that hunt, which take --low-hp)

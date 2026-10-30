@@ -22,13 +22,17 @@ the 21 Lie Detector recordings (JPEG, 3,077: 7 expanded, each so by eye; scan_mo
 The game's notices (the system lines flashing at the middle right) and the effects of the play area aren't over the
 button's place (the UI is drawn over the scene); what is (the mouse pointer, a window dragged there) leaves it unknown.
 
-Its input line may have the keyboard (`typing`): the field showing text or a caret (TYPED_LEAST dark px or more in its
-white; an expanded box's field was empty on every frame of the recording, her keys going to the game all the while: her
-MP spent by her Lucky Seven), or white with the box collapsed (the input line open without the box: not seen, taken
-so). A key pressed then would be typed into it.
+Its input line may have the keyboard (`typing`): the field marked (`marks`: its px not white, TYPED_LEAST or more: text,
+a caret, a lone apostrophe's 1 x 3; an expanded box's field was white to the px on every frame we have, the recording's
+515, the Lie Detector recordings' 121 JPEG frames and lab/shots' 8, her keys going to the game all the while: her MP
+spent by her Lucky Seven), or white with the box collapsed (the input line open without the box: not seen, taken so). A
+key pressed then would be typed into it. The mouse pointer over the field marks it too (its black outline, its glove's
+blue: the review of 2026-10-30, 215 of 216 places over the field read typing), and over the button it hides the glyph
+(frame 592: unknown): behavior.chatcheck moves it off the box once and looks again before it believes either.
 
-At any other client size the box isn't read: unknown (the HUD is drawn scaled there; no frame of it kept). Cheap: the
-button's 144 px, and the field's and the tab's 8,500 only where its glyph is one of the two (0.04-0.08 ms a frame)."""
+At any other client size the box isn't read: unknown, `readable` False (the HUD is drawn scaled there; no frame of it
+kept: nothing on the box changes that). Cheap: the button's 144 px, and the field's and the tab's 8,500 only where its
+glyph is one of the two (0.04-0.08 ms a frame)."""
 
 from dataclasses import dataclass
 
@@ -52,8 +56,8 @@ BLUE_SHARE = 0.9           # the inside's px not of the glyph: this share blue a
 FIELD = (372, 707, 808, 724)  # the input row's field (x0, y0, x1, y1): white expanded, the newest line's gray collapsed
 FIELD_WHITE = 224          # a field px white: every channel this or over ...
 FIELD_SHARE = 0.75         # ... over this share of it: the input row (1.0 expanded, 0.001 collapsed at most)
-TYPED_DARK = 128           # a px of text or a caret in the white field: no channel at this or over ...
-TYPED_LEAST = 4            # ... this many of them: its input line has text or a caret (0 on the recording)
+TYPED_LEAST = 2            # its px not white (`marks`) this many or more: its input line has text or a caret (0 on
+                           # every expanded frame we have; a caret 12, a lone apostrophe 3; one px alone not)
 TAB = (289, 708, 365, 722)  # the 'All' tab's fill (x0, y0, x1, y1) ...
 TAB_SHARE = 0.6            # ... navy over this share (0.961 expanded, 0.164 collapsed at most)
 
@@ -61,10 +65,15 @@ TAB_SHARE = 0.6            # ... navy over this share (0.961 expanded, 0.164 col
 @dataclass(frozen=True)
 class ChatBox:
     """What a frame shows of the chat box: `state` EXPANDED, COLLAPSED or UNKNOWN (`why`); `typing`: its input line has
-    text or a caret, or is open with the box collapsed (it may have the keyboard: a key would be typed into it)."""
+    text or a caret, or is open with the box collapsed (it may have the keyboard: a key would be typed into it);
+    `marks`: the expanded box's field's px not white (text, a caret, the mouse pointer: what a key typed into it adds
+    to); `readable` False: no frame of the client's size (another size, none), where nothing over the box is what
+    hides it."""
     state: str
     typing: bool = False
     why: str = ""
+    marks: int = 0
+    readable: bool = True
 
     @property
     def told(self) -> bool:
@@ -106,11 +115,13 @@ def glyph(frame: np.ndarray) -> str | None:
 
 
 def _field(frame: np.ndarray) -> tuple[float, int]:
-    """The input row's field: the share of its px white, and its dark px (text, a caret) where it's white."""
+    """The input row's field: the share of its px white, and its px not white (text, a caret, the pointer) where it's
+    white over FIELD_SHARE (else 0)."""
     x0, y0, x1, y1 = FIELD
     f = frame[y0:y1, x0:x1]
-    white = np.count_nonzero(_low(f) >= FIELD_WHITE) / ((y1 - y0) * (x1 - x0))
-    return white, np.count_nonzero(_high(f) < TYPED_DARK) if white >= FIELD_SHARE else 0
+    n = (y1 - y0) * (x1 - x0)
+    white = np.count_nonzero(_low(f) >= FIELD_WHITE)
+    return white / n, n - white if white >= FIELD_SHARE * n else 0
 
 
 def _navy(frame: np.ndarray) -> float:
@@ -124,16 +135,16 @@ def _navy(frame: np.ndarray) -> float:
 def read(frame: np.ndarray | None) -> ChatBox:
     """The chat box on a whole frame of the client (RGB, full size; see the module's doc)."""
     if frame is None:
-        return ChatBox(UNKNOWN, why="no frame")
+        return ChatBox(UNKNOWN, why="no frame", readable=False)
     h, w = frame.shape[:2]
     if (w, h) != FRAME:
-        return ChatBox(UNKNOWN, why=f"the client is {w}x{h}, not {FRAME[0]}x{FRAME[1]}")
+        return ChatBox(UNKNOWN, why=f"the client is {w}x{h}, not {FRAME[0]}x{FRAME[1]}", readable=False)
     g = glyph(frame)
     if g is None:
         return ChatBox(UNKNOWN, why="its button not seen")
-    white, typed = _field(frame)
+    white, marks = _field(frame)
     if g == "plus":
         return ChatBox(COLLAPSED, typing=bool(white >= FIELD_SHARE))
     if white < FIELD_SHARE or _navy(frame) < TAB_SHARE:
         return ChatBox(UNKNOWN, why=f"its button's minus, its input row not seen ({white:.0%} of its field white)")
-    return ChatBox(EXPANDED, typing=bool(typed >= TYPED_LEAST))
+    return ChatBox(EXPANDED, typing=bool(marks >= TYPED_LEAST), marks=int(marks))

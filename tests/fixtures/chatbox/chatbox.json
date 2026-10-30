@@ -2,44 +2,44 @@
  "expanded_bugbaby": {
   "file": "expanded_bugbaby.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "expanded",
-  "what": "BugBaby's grind of 2026-10-30 08:17:50, frame 0: the box expanded (four lines of megaphones)"
+  "what": "BugBaby's grind of 2026-10-30 08:17:50, frame 0: the box expanded (megaphones' teal lines, a notice)"
  },
  "expanded_invite": {
   "file": "expanded_invite.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "expanded",
-  "what": "... frame 300: expanded, the party invite over the box's right"
+  "what": "... frame 300: expanded, the party invite over the box's right and its scrollbar"
  },
  "expanded_last": {
   "file": "expanded_last.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "expanded",
-  "what": "... frame 514, the last expanded: the user collapsed it by the next"
+  "what": "... frame 514, the last expanded (other lines, the invite still up): the user collapsed it by the next"
  },
  "collapsed_bugbaby": {
   "file": "collapsed_bugbaby.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "collapsed",
-  "what": "... frame 515: collapsed (the newest line on gray)"
+  "what": "... frame 515: collapsed (the newest line on gray, the invite above it)"
  },
  "pointer_over_button": {
   "file": "pointer_over_button.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "unknown",
   "what": "... frame 592: collapsed, the mouse pointer over its button"
@@ -47,8 +47,8 @@
  "collapsed_by_hand": {
   "file": "collapsed_by_hand.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "collapsed",
   "what": "her play by hand of 2026-10-30, frame 2000: collapsed"
@@ -56,17 +56,26 @@
  "expanded_magician": {
   "file": "expanded_magician.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "expanded",
-  "what": "RiceBaby's HUD capture (lab/shots/mage-hud.png): expanded"
+  "what": "RiceBaby's HUD capture (lab/shots/mage-hud.png): expanded (pink lines)"
+ },
+ "expanded_stat_window": {
+  "file": "expanded_stat_window.png",
+  "at": [
+   278,
+   626
+  ],
+  "state": "expanded",
+  "what": "a hunt's start of 2026-10-29 09:26 (lab/shots/statwindow_20261029-092609.png, her stat window's frame): expanded"
  },
  "expanded_lie_detector_jpeg": {
   "file": "expanded_lie_detector_jpeg.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "expanded",
   "what": "the Lie Detector of 2026-10-29 09:26 (JPEG), frame 60: expanded, the Lie Detector's window over the box's lines"
@@ -74,10 +83,18 @@
  "greyed_jpeg": {
   "file": "greyed_jpeg.png",
   "at": [
-   280,
-   700
+   278,
+   626
   ],
   "state": "unknown",
   "what": "the Lie Detector of 2026-10-29 09:29 (JPEG), frame 0: the UI greyed (its button grey)"
+ },
+ "_pointer": {
+  "file": "pointer.png",
+  "at": [
+   805,
+   701
+  ],
+  "what": "the mouse pointer (its px in frame 592 of BugBaby's grind that differ from frame 591's around the box's button, RGBA), where it was in 592"
  }
 }

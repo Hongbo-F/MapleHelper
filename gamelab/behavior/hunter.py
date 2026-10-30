@@ -344,7 +344,7 @@ class Hunter:
         self._shots = len(list(shots.glob("*.png"))) if shots.exists() else 0
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.wounds.on_look, self.memory.on_look, self._misses,
-                                  self.attacks.on_look]
+                                  self.attacks.on_look, self._chat_seen]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
                                          self.attacks.on_throw,  # (a cast's MP)
                                          self._tell_feed]  # (the feed's: whose kills are whose, tracking)
@@ -613,7 +613,7 @@ class Hunter:
             self.log("  the key check put off: a quiet moment now")
             raise KeyDoubt(doubt)  # (a check put off: tried again at a quiet look, keycheck.KeyCheck._defer)
         cc = getattr(self, "chat_check", None)  # (her chat box's collapse put off: behavior.chatcheck)
-        if (cc is not None and cc.pending and self.doubts_raise and cc.again(time.monotonic())
+        if (cc is not None and cc.pending and self.doubts_raise and cc.again(time.monotonic(), s)
                 and unquiet(self, s) is None):
             self.log("  the chat box's collapse put off: a quiet moment now")
             raise ChatDue(s)  # (the hunt loop collapses it, this look its first: collapse_chat)
@@ -625,25 +625,35 @@ class Hunter:
 
     # --- her chat box (behavior.chatcheck) --------------------------------------------------------------------------
 
-    def collapse_chat(self, at_start: bool = False, look=None):
+    def _chat_seen(self, st) -> None:
+        """Every look's and glance's state while her chat box's collapse is put off (Senses.listeners, `_glanced`): its
+        field seen unmarked on them or not (ChatCheck.watch), so ChatDue's quiet look can have the key at once (with
+        none watched, in the simulator's crowd a monster came within 250 while the check gathered its own looks, and it
+        was put off till 28.7 s; watched, the key at ChatDue's look, 11.4 s in)."""
+        cc = getattr(self, "chat_check", None)
+        if cc is not None and cc.pending:
+            cc.watch(st)
+
+    def collapse_chat(self, at_start: bool = False, look=None, loop: bool | None = None):
         """Her chat box collapsed if it's expanded (chatcheck.ChatCheck.run): at a hunt's start (`at_start`: gamelab.
-        __main__'s _hunter, before her stat window's read), and in the hunt loop when a collapse put off there comes due
-        (ChatDue: `look`, the quiet look it was raised at). Its outcome. Raises SafetyStop (at every look of it) and
-        client.LieDetectorAlarm."""
+        __main__'s _hunter, before her stat window's read; `loop`: whether a hunt loop follows, where a collapse put off
+        is tried again), and in the hunt loop when a collapse put off there comes due (ChatDue: `look`, the quiet look it
+        was raised at). Its outcome. Raises SafetyStop (at every look of it) and client.LieDetectorAlarm."""
         if self.chat_check is None:
             self.chat_check = ChatCheck(self)
-        return self.chat_check.run(at_start=at_start, look=look)
+        return self.chat_check.run(at_start=at_start, look=look, loop=loop)
 
     # --- her stat window (behavior.statcheck) ----------------------------------------------------------------------
 
-    def read_stats(self, at_start: bool = False, quiet: bool = True):
+    def read_stats(self, at_start: bool = False, quiet: bool = True, loop: bool | None = None):
         """Her stat window opened, read and closed if it's due (statcheck.StatCheck.run): at a hunt's start
-        (`at_start`: gamelab.__main__'s _hunter), and in the hunt loop when a read put off there comes due (StatsDue);
-        `quiet` False: no quiet moment waited for (`gamelab stats --read`). Its outcome. Raises StatWindowStop (the
-        window may be open), SafetyStop (at every look of it) and client.LieDetectorAlarm."""
+        (`at_start`: gamelab.__main__'s _hunter; `loop`: whether a hunt loop follows, where a read put off is tried
+        again), and in the hunt loop when a read put off there comes due (StatsDue); `quiet` False: no quiet moment
+        waited for (`gamelab stats --read`). Its outcome. Raises StatWindowStop (the window may be open), SafetyStop (at
+        every look of it) and client.LieDetectorAlarm."""
         if self.stat_check is None:
             self.stat_check = StatCheck(self)
-        return self.stat_check.run(at_start=at_start, quiet=quiet)
+        return self.stat_check.run(at_start=at_start, quiet=quiet, loop=loop)
 
     def _stats_read(self, reading, out) -> None:
         """What her stat window read (statcheck.StatCheck.run, `reading`: perception.stat_window.StatReading) to her
@@ -858,7 +868,9 @@ class Hunter:
         comes for up to seconds: the review of 2026-10-28 had a stop's first look under her reserve come after a
         second touch): her HP to the safety stop's watch as a look's (her HP number's as the state has it, else its
         bar's), and the stop raised there if it's due (`_stop_now`). An HP of HP_ZERO or less right after one of
-        HP_DOUBT_AFTER or more isn't taken from a glance (_doubt_hp has the next look tell)."""
+        HP_DOUBT_AFTER or more isn't taken from a glance (_doubt_hp has the next look tell). Her chat box as it
+        shows (`_chat_seen`)."""
+        self._chat_seen(st)
         hp, exact = getattr(st, "hp", None), getattr(st, "hp_of", None)
         if hp is None:
             return

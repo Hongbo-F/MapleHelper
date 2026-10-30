@@ -245,6 +245,7 @@ class StatCheck:
         self.pending = False      # a read put off (not quiet), tried again in the hunt loop (`again`)
         self.pending_at = 0.0
         self.defers = 0
+        self.loop: bool | None = None  # whether a hunt loop follows the start (`run`'s; None: as the start or the hunt)
         self.said_skip = ""       # why it isn't read, as last said (said once)
         self.window_state = "not opened"
         self.sent: list[str] = []
@@ -295,12 +296,17 @@ class StatCheck:
         try at the soonest."""
         return self.pending and t - self.pending_at >= DEFER_GAP_S
 
-    def run(self, at_start: bool = False, quiet: bool = True, force: bool = False) -> Outcome:
+    def run(self, at_start: bool = False, quiet: bool = True, force: bool = False,
+            loop: bool | None = None) -> Outcome:
         """A read (the module's doc), if it's due (else "skipped", said once). `at_start`: a hunt's start (put off
-        there, it's tried again only in the hunt loop); `quiet` False: no quiet moment waited for (`gamelab stats
-        --read`, whoever is at the PC watching); `force`: read whatever her stats file says. Raises StatWindowStop
-        (the window may be open), SafetyStop (the HP watch, at every look) and client.LieDetectorAlarm (the player
-        refuses its keys then)."""
+        there, it's tried again only in the hunt loop); `loop`: whether a hunt loop follows the start (False: `hunt
+        kill`, a plain `tour`, `probe run`, where a read put off is not this run; kept for the run; None: as before, a
+        start's or the hunter's doubts_raise); `quiet` False: no quiet moment waited for (`gamelab stats --read`,
+        whoever is at the PC watching); `force`: read whatever her stats file says. Raises StatWindowStop (the window
+        may be open), SafetyStop (the HP watch, at every look) and client.LieDetectorAlarm (the player refuses its keys
+        then)."""
+        if loop is not None:
+            self.loop = loop
         start = time.monotonic()
         if (why := self.due(force)) is not None:
             self.pending = False
@@ -380,7 +386,8 @@ class StatCheck:
     def _defer(self, why: str, at_start: bool) -> Outcome:
         """Put off (`why`): in the hunt loop tried again at a quiet look (`again`), DEFERS_MAX times; else not this run."""
         self.defers += 1
-        loop = bool(getattr(self.h, "doubts_raise", False)) or at_start
+        loop = (self.loop if self.loop is not None
+                else bool(getattr(self.h, "doubts_raise", False)) or at_start)  # (a hunt loop to try it again in)
         if self.defers > DEFERS_MAX or not loop:
             self.pending = False
             text = (f"her stat window not read: no quiet moment for it ({why}"

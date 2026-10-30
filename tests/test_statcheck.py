@@ -141,6 +141,27 @@ def test_put_off_near_a_monster_and_not_waited_there():
     assert not h.stat_check.again(at + statcheck.DEFER_GAP_S - 0.1) and h.stat_check.again(at + statcheck.DEFER_GAP_S)
 
 
+def test_put_off_where_no_hunt_loop_follows_is_not_this_run(monkeypatch):
+    """`loop` False at a start (gamelab.__main__'s _hunter: `hunt kill`, a plain `tour`, `probe run`, not `tour
+    --loop`): a read put off is not this run, said so, not pending (the review of 2026-10-30, of the chat box's check,
+    which had it from here: "again at a quiet moment in the hunt" was said where nothing tried again). `loop` None: as
+    before (a start's put-off pending)."""
+    monkeypatch.setattr(statcheck.telemetry, "emit", lambda *a, **k: None)
+    lines = []
+    sc = StatCheck(SimpleNamespace(log=lines.append, doubts_raise=False))
+    sc.due = lambda force=False: None
+    sc._quiet = lambda: "green-mushroom within 250 of her"
+    out = sc.run(at_start=True, loop=False)
+    assert out.what == "put off" and not sc.pending and sc.loop is False
+    assert lines == ["  her stat window not read: no quiet moment for it (green-mushroom within 250 of her): not this "
+                     "run"]
+    sc = StatCheck(SimpleNamespace(log=lines.append, doubts_raise=False))
+    sc.due = lambda force=False: None
+    sc._quiet = lambda: "green-mushroom within 250 of her"
+    assert sc.run(at_start=True).what == "put off" and sc.pending
+    assert lines[-1] == "  her stat window put off (green-mushroom within 250 of her): again at a quiet moment in the hunt"
+
+
 @REAL
 def test_another_client_size_nothing_sent():
     def bigger(sim, h):
@@ -336,7 +357,7 @@ def test_a_hunting_commands_start_reads_it_after_her_max_hp(monkeypatch):
         h = SimpleNamespace(hp_why="why", too_strong=lambda: order.append("strong"), max_hp=made.hud,
                             senses=SimpleNamespace(window_fix=None))
         h.wait_max_hp = lambda: order.append("wait") or h.max_hp is not None
-        h.read_stats = lambda at_start: order.append(("read", at_start)) or setattr(
+        h.read_stats = lambda at_start, loop=None: order.append(("read", at_start)) or setattr(
             h, "max_hp", h.max_hp if h.max_hp is not None else made.window)
         return h
     made.hud, made.window = 840, 840
