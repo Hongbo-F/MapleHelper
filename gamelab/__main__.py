@@ -173,21 +173,12 @@ def cmd_notify(args) -> int:
                 return 1
             print(f"test text sent to {', '.join(mcfg['to'])}")
         return 0
-    cfg = notify.setup() if args.setup else notify.load()
-    if cfg is None:
-        print(f"no phone push set up ({notify.CONFIG} missing): `python -m gamelab notify --setup`")
-        return 1
-    print(f"pushes go to {cfg['server']}/{cfg['topic']} ({notify.CONFIG}): in the ntfy app, subscribe to the topic "
-          f"{cfg['topic']!r} on {cfg['server']} (keep it to yourself: anyone who knows it can read the pushes)")
-    if args.test:
-        try:
-            notify.send(cfg, "gamelab test", f"a test push at {time.strftime('%H:%M:%S')}: a Lie Detector comes "
-                                              "like this, urgent, every 30 s while it's up", "urgent")
-        except Exception as e:
-            print(f"the test push failed: {e}")
-            return 1
-        print("test push sent")
-    return 0
+    bcfg, mcfg = notify.load_bark(), notify.load_mail()
+    print("critical alerts: " + ("through Bark" if bcfg else f"none ({notify.BARK_CONFIG} missing: `notify "
+                                                                  "--setup-bark KEY`)"))
+    print("texts: " + (f"to {', '.join(mcfg['to'])} through {mcfg['host']}" if mcfg else
+                       f"none ({notify.MAIL_CONFIG} missing or not filled in: `notify --setup-sms ADDRESS`)"))
+    return 0 if bcfg or mcfg else 1
 
 
 def cmd_clear_alarm(args) -> int:
@@ -2859,11 +2850,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("clear-alarm", help="after you've answered a Lie Detector and its recording has ended: let "
                                        "gamelab run again (start the player again after it)"
                    ).set_defaults(func=cmd_clear_alarm)
-    s = sub.add_parser("notify", help="the Lie Detector pushed to your phone through ntfy (control.notify): --setup "
-                                      "makes lab/ntfy.json with a random topic and says how to subscribe; --test sends "
-                                      "one push")
-    s.add_argument("--setup", action="store_true")
-    s.add_argument("--test", action="store_true")
+    s = sub.add_parser("notify", help="the Lie Detector sent to your phone (control.notify): a critical alert through "
+                                      "Bark, a text through your mail; with no option, says what's set up")
     s.add_argument("--setup-sms", metavar="ADDRESS", help="a text to ADDRESS (a carrier's email-to-text address) at a "
                                                            "Lie Detector's first sight and the Truth Booth's, mailed "
                                                            "through your account in lab/smtp.json (you fill its login)")

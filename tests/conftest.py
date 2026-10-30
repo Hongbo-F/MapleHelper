@@ -10,7 +10,7 @@ os.environ["GAMELAB_FIXED_STATS"] = "1"
 os.environ.pop("GAMELAB_CHARACTER", None)  # ... and the thief's, whoever the shell names (gamelab.character.ENV)
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")  # 3 GB a process otherwise (gamelab/__init__.py)
 os.environ.setdefault("GAMELAB_GPU", "0")  # the re-finds' GPU off unless a test turns it on, the lab's GPU file or not
-# No Lie Detector push or text to the user's phone from the lab's ntfy.json and smtp.json (gamelab.control.notify
+# No Lie Detector alert or text to the user's phone from the lab's bark.json and smtp.json (gamelab.control.notify
 # .NO_PUSH_ENV): the suite in the main checkout sent one from a test's fake screen on 2026-10-29 ~05:35.
 os.environ["GAMELAB_NO_PUSH"] = "1"
 

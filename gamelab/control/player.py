@@ -955,7 +955,7 @@ def serve() -> None:
                     unsafe=unsafe)
     win32.enable_dpi_awareness()
     from . import notify
-    pusher = notify.Pusher.from_lab(log=_log)  # the phone's pushes (lab/ntfy.json, read at each: none without it)
+    pusher = notify.Pusher.from_lab(log=_log)  # the phone's alerts (lab/bark.json, lab/smtp.json, read at each push)
     watchdog = Watchdog(cfg.game_window_title, alarm, shadow=True, pusher=pusher)
     watchdog.start()
     now_keys = player.allowance()
@@ -965,8 +965,9 @@ def serve() -> None:
          f"retreat's moves for {RETREAT_WINDOW_S:g} s; nothing else; her keys for them "
          + ("config.toml's" if player.alarm_keys.used is None else f"{ALARM_KEYS.name}'s, as followed") + ", and "
          f"{ALARM_KEYS.name}'s whenever it changes); "
-         + ("the phone pushed through ntfy" if notify.load() is not None else "no phone push yet (no lab/ntfy.json: "
-                                                                             "`python -m gamelab notify --setup`)"))
+         + ("critical alerts to the phone through Bark" if notify.load_bark() is not None else
+            "no Bark alerts yet (no lab/bark.json: `python -m gamelab notify --setup-bark KEY`)")
+         + ("; texts through the mail" if notify.load_mail() is not None else "; no texts"))
     idle_since = time.monotonic()
     with win32.precise_timers():
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:

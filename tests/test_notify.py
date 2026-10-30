@@ -1,6 +1,7 @@
-"""The Lie Detector pushed to the user's phone through ntfy (control.notify; the user, 2026-10-29: "I need a better
-notification method, I didn't catch the notification in time to solve this"): a cycle's pushes, the topic's file, a
-push that fails, and the player's watchdog sending them. Nothing here reaches the network but a port nobody listens on."""
+"""The Lie Detector sent to the user's phone (control.notify; the user, 2026-10-29: "I need a better notification
+method, I didn't catch the notification in time to solve this"; later "Bark", and "Let's remove ntfy notification all
+along"): a cycle's pushes, Bark's file and alerts, a push that fails, the text's mail, and the player's watchdog sending
+them. Nothing here reaches the network but a port nobody listens on."""
 import json
 
 from gamelab.control import notify
@@ -53,58 +54,48 @@ def test_the_truth_booth_is_pushed_once_as_missed_and_not_repeated():
                      "text")]
 
 
-def test_the_topic_lives_in_the_labs_file_made_once_with_a_long_random_topic(tmp_path):
-    path = tmp_path / "lab" / "ntfy.json"
-    assert notify.load(path) is None
-    cfg = notify.setup(path)
-    assert cfg["server"] == "https://ntfy.sh" and cfg["topic"].startswith("gamelab-") and len(cfg["topic"]) >= 30
-    assert notify.setup(path) == cfg == notify.load(path)  # (kept, not made again)
-    assert notify.setup(tmp_path / "other.json")["topic"] != cfg["topic"]
-    path.write_text(json.dumps({"topic": "t", "server": "https://example.test/"}), encoding="utf-8")
-    assert notify.load(path) == {"server": "https://example.test", "topic": "t"}
-    path.write_text("{", encoding="utf-8")
-    assert notify.load(path) is None
-
-
-def test_no_file_no_push_and_the_file_is_read_at_each_push(tmp_path, monkeypatch):
-    path = tmp_path / "ntfy.json"
+def test_no_file_no_alert_and_barks_file_is_read_at_each_push(tmp_path, monkeypatch):
+    path = tmp_path / "bark.json"
     went = []
-    monkeypatch.setattr(notify, "send", lambda cfg, title, text, priority="urgent", tags="": went.append(cfg["topic"]))
-    p = Pusher.from_lab(path=path)
+    monkeypatch.setattr(notify, "send_bark", lambda cfg, title, text, level="critical", call=False:
+                        went.append((cfg["key"], level)))
+    p = Pusher.from_lab(mail_path=tmp_path / "smtp.json", bark_path=path)
     p.seen(0.0, "countdown")
     assert went == []  # no file yet
     p.ended(5.0)
-    notify.setup(path)  # set up with the player running: its next push goes
+    notify.setup_bark("k1", path)  # set up with the player running: its next push goes
     p.seen(10.0, "countdown")
     for _ in range(100):
         if went:
             break
         import time
         time.sleep(0.01)
-    assert went == [notify.load(path)["topic"]]
+    assert went == [("k1", "critical")]
+    path.write_text("{", encoding="utf-8")
+    assert notify.load_bark(path) is None
 
 
 def test_the_tests_never_push_or_text_from_the_labs_own_files(tmp_path, monkeypatch):
     # The suite in the main checkout (2026-10-29 ~05:35, the game closed) texted the user "countdown seen at 05:35:28"
     # from the test above, its mail_path the real lab/smtp.json by default. Under conftest's GAMELAB_NO_PUSH the lab's
     # files, wherever they are, are never read for a push; named ones still are.
-    lab_push, lab_mail = tmp_path / "ntfy.json", tmp_path / "smtp.json"
-    lab_push.write_text(json.dumps({"topic": "t"}), encoding="utf-8")
+    lab_push, lab_mail = tmp_path / "bark.json", tmp_path / "smtp.json"
+    lab_push.write_text(json.dumps({"key": "t"}), encoding="utf-8")
     lab_mail.write_text(json.dumps({"host": "h", "user": "u", "password": "p", "to": ["a"]}), encoding="utf-8")
-    monkeypatch.setattr(notify, "CONFIG", lab_push)
+    monkeypatch.setattr(notify, "BARK_CONFIG", lab_push)
     monkeypatch.setattr(notify, "MAIL_CONFIG", lab_mail)
     went = []
-    monkeypatch.setattr(notify, "push", lambda cfg, *a, **k: went.append(("push", cfg)))
+    monkeypatch.setattr(notify, "bark", lambda cfg, *a, **k: went.append(("push", cfg)))
     monkeypatch.setattr(notify, "mail", lambda cfg, *a, **k: went.append(("mail", cfg)))
     assert notify.NO_PUSH_ENV == "GAMELAB_NO_PUSH"
-    assert notify.load() is None and notify.load_mail() is None
+    assert notify.load_bark() is None and notify.load_mail() is None
     Pusher.from_lab().seen(0.0, "countdown")
     assert went == [("push", None), ("mail", None)]
-    assert notify.load(lab_push) == {"server": "https://ntfy.sh", "topic": "t"}  # (named: read)
+    assert notify.load_bark(lab_push) == {"server": "https://api.day.app", "key": "t"}  # (named: read)
     monkeypatch.delenv(notify.NO_PUSH_ENV)  # the player's own: the lab's files, looked up at each push
     went.clear()
     Pusher.from_lab().seen(0.0, "countdown")
-    assert [w[0] for w in went] == ["push", "mail"] and went[0][1]["topic"] == "t" and went[1][1]["to"] == ["a"]
+    assert [w[0] for w in went] == ["push", "mail"] and went[0][1]["key"] == "t" and went[1][1]["to"] == ["a"]
 
 
 def test_bark_gets_a_critical_ringing_alert_at_the_first_sight_critical_repeats_and_an_ordinary_end(tmp_path,
@@ -120,11 +111,10 @@ def test_bark_gets_a_critical_ringing_alert_at_the_first_sight_critical_repeats_
     assert "call=" not in notify.bark_url(cfg, "t", "x", "critical") and "volume" not in notify.bark_url(cfg, "t", "x",
                                                                                                           "active")
     went = []
-    monkeypatch.setattr(notify, "push", lambda *a, **k: None)
     monkeypatch.setattr(notify, "mail", lambda *a, **k: None)
     monkeypatch.setattr(notify, "bark", lambda cfg, title, text, level="critical", call=False, log=None:
                         went.append((title, level, call)))
-    p = Pusher.from_lab(path=tmp_path / "ntfy.json", mail_path=tmp_path / "smtp.json", bark_path=path)
+    p = Pusher.from_lab(mail_path=tmp_path / "smtp.json", bark_path=path)
     p.seen(0.0, "mini-game notice")
     p.seen(30.0, "mini-game")
     p.seen(60.0, "truth booth")
@@ -152,14 +142,6 @@ def test_a_bark_push_that_fails_or_is_refused_is_said_and_never_raised(monkeypat
     import pytest
     with pytest.raises(RuntimeError, match="Bark answered"):
         notify.send_bark({"server": "https://api.day.app", "key": "k"}, "t", "x")
-
-
-def test_a_push_that_fails_is_said_and_never_raised():
-    said = []
-    t = notify.push({"server": "http://127.0.0.1:9", "topic": "x"}, "t", "x", log=said.append)
-    t.join(timeout=notify.SEND_TIMEOUT_S + 5)
-    assert not t.is_alive() and len(said) == 1 and said[0].startswith("the phone push failed: ")
-    assert notify.push(None, "t", "x") is None
 
 
 def test_the_watchdog_pushes_a_cycle_from_its_first_sight_to_its_end(tmp_path):
@@ -219,13 +201,13 @@ def test_a_text_is_mailed_through_the_labs_account_at_a_cycles_first_sight_only_
         def send_message(self, msg):
             sent.append((self.host, self.port, msg["To"], msg["Subject"], msg.get_content().strip()))
     monkeypatch.setattr(notify.smtplib, "SMTP", SMTP)
-    monkeypatch.setattr(notify, "send", lambda *a, **k: None)  # (the push: not here)
+    monkeypatch.setattr(notify, "send_bark", lambda *a, **k: None)  # (the alert: not here)
     path = tmp_path / "smtp.json"
     cfg, ready = notify.setup_mail("5550001111@sms.example", path)
     assert not ready and cfg["to"] == ["5550001111@sms.example"] and cfg["user"] == cfg["password"] == ""
     assert notify.load_mail(path) is None  # (no login yet: nothing goes)
     said = []
-    p = Pusher.from_lab(log=said.append, path=tmp_path / "ntfy.json", mail_path=path)
+    p = Pusher.from_lab(log=said.append, mail_path=path, bark_path=tmp_path / "bark.json")
     p.seen(0.0, "countdown")
     p.ended(10.0)
     cfg.update(user="me@example.com", password="app-password")
