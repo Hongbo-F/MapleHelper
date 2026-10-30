@@ -1321,8 +1321,7 @@ def cmd_pet(args) -> int:
     from .behavior.pet import WAIT_POLL_S, PetWait
     title = _game_title()
     waits: list = []
-    if args.every:
-        _wait_for_game(title)
+    waited = _wait_for_game(title) if args.every else False
 
     def fit(perception) -> None:  # (before the eyes: their calibration is for the size the client is)
         wait = PetWait(title, lambda: _pet_unfit(title, perception), log=_log, spot=_lie_detector_look(perception),
@@ -1332,6 +1331,8 @@ def cmd_pet(args) -> int:
             time.sleep(WAIT_POLL_S)
 
     hunter = _hunter(args, throws=False, fit=fit if args.every else None)
+    if waited:  # (the game wasn't there: that time isn't the pet's; 16:29 on 2026-10-30 it was, fed by blind twice)
+        hunter.pet.away()
     eyes = hunter.senses.eyes.geo.client if waits else None
     if waits:  # (from here on, the size the eyes are for; Alt+Enter sets the game's own, PetWait's `want`)
         waits[0].unfit = lambda: _pet_unfit(title, hunter.senses.feed, eyes)
@@ -1443,14 +1444,15 @@ def _close_perception() -> None:
               + (f"; {down}" if down and down != "closed" else ""))
 
 
-def _wait_for_game(title: str) -> None:
+def _wait_for_game(title: str) -> bool:
     """Until the game's window is there (GAME_POLL_S apart), said once: a command that keeps running between sessions
-    (`pet --every`) waits for the game instead of ending (the babysitter started it again every 5 s)."""
+    (`pet --every`) waits for the game instead of ending (the babysitter started it again every 5 s). True if it
+    waited (the game wasn't there)."""
     said = False
     while True:
         try:
             window.find_game(title)
-            return
+            return said
         except RuntimeError as e:
             if not said:
                 print(f"waiting for the game ({e}); nothing is sent meanwhile", flush=True)

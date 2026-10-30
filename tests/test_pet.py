@@ -223,6 +223,31 @@ def test_time_away_from_the_game_does_not_count(state):
     assert care.tend() == pytest.approx(65)
 
 
+def test_after_a_long_while_unfollowed_it_is_read_before_any_food(state):
+    # 2026-10-30 16:29: the feeder waited hours for a closed game, then counted it all (89 -> 0) and fed by blind twice
+    game = _Game(96)
+    said = []
+    now = [10_000.0]
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=said.append, clock=lambda: now[0])
+    state.write_text(json.dumps({"level": 89.0, "at": now[0], "read_at": now[0] - 600, "fed": now[0]}))
+    now[0] += pet.UNWATCHED_S + 3 * 3600
+    assert care.tend() == 96 and game.plans == ["pet_info", "pet_close"]  # read, not fed
+    assert any("not followed for" in line for line in said)
+    now[0] += pet.TICK_S  # followed again from the read
+    assert care.tend() == pytest.approx(96 - pet.HUNGRY) and game.plans == ["pet_info", "pet_close"]
+
+
+def test_the_time_waited_for_the_game_is_not_the_pets(state):
+    game = _Game(70)
+    now = [0.0]
+    care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: now[0])
+    care.tend()
+    now[0] += 5 * 3600  # the game closed, the feeder waiting for it
+    care.away()
+    now[0] += 5 * pet.TICK_S
+    assert care.tend() == pytest.approx(65) and game.plans == ["pet_info", "pet_close"]
+
+
 def test_a_hunt_reads_it_only_with_no_monster_near_her(state):
     game = _Game(90)
     care = PetCare(_Actions(game), _Eyes(), ocr=game, log=lambda m: None, clock=lambda: 0.0)

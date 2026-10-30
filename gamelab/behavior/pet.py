@@ -101,6 +101,12 @@ BLIND_BELOW = 20       # followed fullness under which a food due on a key not t
                        # be made now (over it, a moment to read is waited for: 40 points are 50 minutes or so)
 VERIFIED_S = 2 * 60 * 60  # s a key not trusted goes by blind after a check saw its food take (then a check again)
 FALLBACK_S = 2 * 60 * 60  # s since the last feed after which a check that can't read the panel feeds it anyway
+# s the fullness went unfollowed (no tend: no pet feeder, no hunt) after which, the game there now, it's taken as not
+# known and read before any food: whether the game, and the pet, was out meanwhile isn't known. On 2026-10-30 a feeder
+# started while the game was closed waited for it 3 to 8 hours, and when it came back counted all that time as the
+# pet's (89 -> 0): fed by blind 30 and 59 at 16:29-16:30 (and three times at 08:08-08:10), the pet at 96 when read.
+# The feeder tends every minute and a hunt every TICK_S, so only a gap like that is longer.
+UNWATCHED_S = 30 * 60
 BODY_ABOVE_TAG = 42    # game px from her name tag's middle up to her body's middle (tag at y 540, body 495-500 at 1366x768)
 CLICK_GAP_MS = 90      # between the two clicks of a double-click
 SETTLE_S = 0.6         # the window's (and a food's number's) time to show
@@ -200,6 +206,14 @@ class PetCare:
             self._ocr = shared()
         return self._ocr
 
+    def away(self) -> None:
+        """The game wasn't there until now (`pet --every` waited for it to start): the time since the fullness was last
+        followed isn't counted, the pet not out, as tend(present=False) has it."""
+        state = _state()
+        if "at" in state:
+            follow(state, self.clock(), present=False)
+            _save(state)
+
     def due(self) -> bool:
         """Whether CHECK_EVERY_S have passed since the last check (never yet: now). Never without a pet food key."""
         if self.actions.keys.pet_food is None:
@@ -216,6 +230,10 @@ class PetCare:
             return None
         now = self.clock()
         state = _state()
+        if present and "level" in state and now - state.get("at", now) > UNWATCHED_S:
+            self.log(f"pet: its fullness not followed for {(now - state['at']) / 60:.0f} minutes (nothing watched it; "
+                     "the game may have been closed): read before any food")
+            del state["level"]
         follow(state, now, present)
         if "level" not in state:
             if present and client.alarm_up():
