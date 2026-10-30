@@ -24,7 +24,11 @@ yet"; mapleclassic.wiki and planet-helper likewise). Two independent v95 server 
 official routine (Rebirth95 CPet.cs:75-109, "CPet::Update"; Kinoko Pet.java:100-115), take 1 a time after 60 s plus a
 random 0 to 36 - 6 x hungry s: for hungry 1, 60-90 s, 75 on average. That fits the three readings of 2026-10-24
 (99 at 10:04:47, 85 at 10:21:14, 82 at 10:25:46: a fixed period fits only between 70.0 and 75.9 s, best 74.1; 60 s,
-the OdinMS v55 timer remembered at first, and the v83 emulators' 180 s are ruled out). Where it goes home is
+the OdinMS v55 timer remembered at first, and the v83 emulators' 180 s are ruled out). It didn't hold live on 2026-10-29 (the user: "validate if the code's
+existing assumption holds"): two reads 32 minutes apart with no food between, 89 at 21:33:38 and 54 at 22:05:48, are a
+point every 55.1 s, faster than even the emulators' fastest 60; at 75 the feeder had given 30 a 37.5 minutes where
+the pet lost about 41, and a read a minute after a food it took for 90 found 29 (the pet near empty: its potions
+had stopped, an out-of-MP stop at 20:41). TICK_S is that measurement now: a food about every 27.5 minutes. Where it goes home is
 disputed: at 0 back at 5 with a closeness lost (the ported code, Nexon support), or at 5 or less back at 15 (the
 OdinMS family, MeowDB "Unconfirmed"); PACKED_AT takes the higher. Notes and sources: D:/MapleHelper-scratch/pet.
 No key opens the Character Info (the key bindings' unbound functions are MUTE and KEYS1-3; the equipment window shows
@@ -80,7 +84,8 @@ from ..perception.framecheck import BadLook, Problem
 from ..screen import GAME_VIEW
 
 HUNGRY = 1             # fullness the pet loses a tick (the game data's info/hungry of the Snail pets)
-TICK_S = 75            # s a point on average: 60 + random 0..30 for hungry 1 (above); the readings' best fixed fit 74.1
+TICK_S = 55            # s a point: measured 2026-10-29, 89 -> 54 in 1,930 s with no food between (55.1); the emulators'
+                      # 60 + random 0..30 (75 on average, the readings of 10-24's best fit 74.1) fell behind live
 FOOD = 30              # fullness a Pet Food gives (9 -> 39 -> 69 -> 99)
 PACKED_AT = 5          # at or under it the pet may be sent home (5 by the OdinMS family and MeowDB; 0 by the ported code)
 FOLLOW_FEED_BELOW = 60  # followed fullness under which she gives it a food: well above PACKED_AT, for a random tick
@@ -91,7 +96,7 @@ MAX_FEEDS = 3          # Pet Food at most in one check (9 -> 99 took three)
 CHECK_EVERY_S = 20 * 60  # s between checks; the pet lost about 90 fullness over a night and a morning summoned
 FOOD_DOUBT = 2         # pet food taps in a row her pet's fullness, read after each, didn't rise for: the doubt (a food
                        # gives 30, live 9 -> 39 -> 69 -> 99; one not read isn't counted)
-FOOD_DOUBT_WAIT_S = 30 * 60  # s that key isn't tapped again after its doubt (a food is due every 37 min at most)
+FOOD_DOUBT_WAIT_S = 30 * 60  # s that key isn't tapped again after its doubt (a food is due about every 27.5 min)
 BLIND_BELOW = 20       # followed fullness under which a food due on a key not trusted goes by blind when no read can
                        # be made now (over it, a moment to read is waited for: 40 points are 50 minutes or so)
 VERIFIED_S = 2 * 60 * 60  # s a key not trusted goes by blind after a check saw its food take (then a check again)
@@ -108,7 +113,7 @@ NAME_BOX = (355, 735, 500, 765)
 # service's newest state) ...
 WAIT_POLL_S = 5.0
 # ... and an Alt+Enter-twice try at most this often (the task of 2026-10-26: "at most once every 30 min"; a food is due
-# every 37 minutes or so at the most often: FOOD points at a point a TICK_S)
+# about every 27.5 minutes: FOOD points at a point a TICK_S)
 TRY_EVERY_S = 30 * 60
 
 
@@ -325,7 +330,7 @@ class PetCare:
     def _may_go_blind(self, now: float) -> bool:
         """Whether a food due may go by blind (the fullness followed): her pet food key `trusted`, or one a check saw a
         food of take within VERIFIED_S (the babysitter beside the user's own play: a read every food would double-click
-        her every 37 minutes or so)."""
+        her about every 27.5 minutes)."""
         if self.trusted():
             return True
         key = getattr(self.actions.keys.pet_food, "name", None)
