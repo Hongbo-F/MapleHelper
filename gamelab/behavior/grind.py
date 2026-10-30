@@ -369,7 +369,7 @@ class Grind(Hunt):
         self.log(f"  grinding: {d['loops']} loops taken up, {d['stops']} stops{stays}, {d['pulls']} pulled off the "
                  f"loop, {d['skips']} stops skipped; a free point refilling at {d['refill_tick']:.0%} a tick lately "
                  f"(x{d['refill_scale']:.2f} the prior's pace; {d['refills']} refills seen, {d['watched_s']} s of "
-                 f"points seen free), a kill {d['kill_s']:.3f} s a point of EXP, others take {d['takes']}; HP bars a minute by "
-                 f"platform ({HP_LOG_S:.0f} s there at least) {d['hp']}; kills by platform: "
+                 f"points seen free), a kill {d['kill_s']:.3f} s a point of EXP, others take {d['takes']}; HP bars a "
+                 f"minute by platform ({HP_LOG_S:.0f} s there at least) {d['hp']}; kills by platform: "
                  + ", ".join(f"{pid}: {n} ({e:.0f} EXP)" for pid, (n, e) in d["credit"].items()))
         telemetry.emit("grind", what="end", **d)
