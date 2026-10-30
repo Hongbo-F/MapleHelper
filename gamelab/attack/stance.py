@@ -243,7 +243,9 @@ PACE_STOP = True
 WALK_AT = False
 TRACK_MATCH = 25.0   # units: a look's monster is its track's (Scene.tracks) within this of the track's x, its kind and
                      # platform the same (behavior.fight.pace_of)
-TRACK_SEEN = 3       # ... and that track's speed counts once it was seen in this many frames (its speed is filtered)
+TRACK_SEEN = 1       # ... and that track's speed counts once it was seen in this many frames: from its first, its
+                     # speed the game data's the way it heads (localization.tracking, since 2026-10-30; 3 until
+                     # then, its speed filtered)
 # A monster her running attack was at stands from when its damage shows until FLINCH_HOLD_S after the key (Pace.hold):
 # live, walkers 120-300 off walking at her when she threw at them came on 19 units by 0.3 s after the key, 17 by 0.6, 19 by
 # 0.9 and -1 by 1.2 when hurt (n 16-28), where those her throw didn't hurt came on 19, 36, 43 and 50 (D:/MapleHelper-

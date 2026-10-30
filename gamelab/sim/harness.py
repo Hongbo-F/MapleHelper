@@ -279,7 +279,9 @@ ATTACK_HER = {"skill": LUCKY_SEVEN, "spread": True}
 # own costs are localization.feed.COSTS: these are what a look taken by the fakes costs (Hunter's on FakeEyes
 # without a feed, the tests'), and the pick-up log's OCR (fakes.MESSAGES_S).
 # `measured-1366`: those, and the feed's own as measured on Tree Dungeon's 1366x768 frames with the masked match in C
-# and a frame's re-finds at once (localization.feed.COSTS_1366, its "feed" here: COSTS stays the scenarios').
+# and a frame's re-finds at once (localization.feed.COSTS_1366, its "feed" here: COSTS stays the scenarios'). Since
+# 2026-10-30 the feed's COSTS are the one pass's at 1366x768, the live size, and COSTS_1366 is COSTS: `measured` and
+# `measured-1366` run alike (the name kept for master's cached tables).
 COSTS = {
     "coded": {},
     "measured": {"LOOK_S": 0.020, "LOOK_LAG": 0.006, "DETECT_S": 0.024, "DETECT_WIDE_S": 0.084, "LOOT_S": 0.008},

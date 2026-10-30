@@ -545,12 +545,13 @@ def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch)
         harness.run_one("loop", 1, "game", minutes=0.5, costs="measured-1366")
     assert seen == [(feed.COSTS_1366, harness.COSTS["measured"]["LOOK_S"])]
     assert feed.COSTS is coded and fakes.LOOK_S == look
-    # (fitted again with the search's step 1 in C, 2026-10-28: a re-find 0.27 ms where 0.66 then, a whole screen 13)
-    assert feed.COSTS_1366.refind < feed.COSTS.refind and feed.COSTS_1366.wide < feed.COSTS.wide / 5
+    # (since 2026-10-30 COSTS are the one pass's at 1366x768, the live size: COSTS_1366 is them, the whole screen 8.4
+    # ms in every frame's pass where 1920x1080's took 100 on its thread)
+    assert feed.COSTS_1366 is feed.COSTS and feed.COSTS.wide < 0.01
     made = feed.SyncFeed.__new__(feed.SyncFeed)
     monkeypatch.setattr(feed, "COSTS", feed.COSTS_1366)
     made.__init__(type("Step", (), {"senses": None})(), lambda ropes: None)
-    assert made.costs is feed.COSTS_1366 and made.searches.costs is feed.COSTS_1366
+    assert made.costs is feed.COSTS_1366
 
 
 def test_the_stacks_computing_is_timed_between_its_calls_and_the_run_is_as_it_was():

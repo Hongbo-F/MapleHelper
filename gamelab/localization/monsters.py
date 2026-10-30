@@ -136,6 +136,26 @@ def speeds(model: MapModel | None = None) -> dict[str, float]:
     return out
 
 
+def walk_vx(kind: str, facing: int, pose: str, walking: dict[str, float] | None = None) -> float | None:
+    """How fast a monster seen in one detection walks (units/s, + right): its kind's speed from the game data
+    (`walking`: speeds(model); DEFAULT_SPEED for a kind it doesn't know) the way it faces in a move frame, 0 in a stand
+    frame or flinching (hit1, knocked back); None where the detection doesn't tell (its pose not known, or a move frame
+    facing no known way). Perception gives a monster's heading (its facing and pose, the template that matched), never
+    a measured speed (the user, 2026-10-30: "Perception should only give mob heading, speed should come from data-mined
+    game files"). On the user's own play's clip at 15 frames a second (D:/MapleHelper-scratch/replan/p15: 4,507 frames,
+    11,948 whole-screen detections) the walking median was 100.0 units/s for all three of Tree Dungeon's kinds, as the
+    data has it (walkSpeed 125 x (1 - 20/100)); the facing was the way it walked in 99.2% of the walking windows, a move
+    frame moving over the next 0.2 s 88.7% of the time, a stand frame still 95.4%; predicted from one detection by this
+    and turned back at its platform's ends, 0.6 units off a frame on (median; p90 12.6), 4.0 at 0.5 s (37.6), the best
+    rule at every horizon tried (the chain's own velocity 0.6 and 8.3, standing still 5.0 and 26). Shared by the tracker
+    (localization.tracking) and the fights (behavior.fight.walk_on)."""
+    if pose == "move":
+        return facing * (walking or {}).get(kind, MONSTER_SPEED.get(kind, DEFAULT_SPEED)) if facing else None
+    if pose in ("stand", "hit1"):
+        return 0.0
+    return None
+
+
 def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50,
                      exact: bool = False) -> Platform | None:
     """The platform a monster seen at map (x, y) walks on. With `exact` feet (FEET_SNAP), any platform

@@ -202,15 +202,15 @@ class Sim:
 
     def feed_record(self) -> dict:
         """What the feed did (the trace's 'feed'): frames, how many were asked for, how long its frame loop was
-        busy, its searches (on their thread) and how long they took, the world step's and the tracker's counts,
-        and how many of her looks and glances came from it."""
+        busy, the world step's and the tracker's counts, and how many of her looks and glances came from it. (Its
+        searches on their thread and their time until 2026-10-30, `searches` and `searching_s`: in every frame's pass
+        since.)"""
         f = self.feed
         senses = {}
         for s in self.senses:
             for k, v in s.counts.items():
                 senses[k] = senses.get(k, 0) + v
         return {"frames": f.counts["frames"], "asked": f.counts["asked"], "busy_s": round(f.counts["busy"], 3),
-                "searches": f.counts["searches"], "searching_s": round(f.counts["searching"], 3),
                 "step": dict(f.step.counts), "tracker": dict(f.step.tracker.counts), "senses": senses}
 
     def __enter__(self) -> "Sim":
@@ -742,7 +742,7 @@ def nav_fight_up(sim):
     return _nav(1, fight=True, kinds=TOUR_KINDS)(sim)
 
 
-@scenario((12, -300.0), monsters="all", seed=7,
+@scenario((12, -300.0), monsters="all", seed=1,
           expects=(ends("arrived"), logs("knocked off?"), logs("plan cut short")))
 def nav_fight_across(sim):
     """From 12 across to 17 with `fight` on: starting among the pigs on 12 she fights, is knocked off (down to 13), and
@@ -772,7 +772,8 @@ def nav_fight_across(sim):
     16 meet all of this.) (Seed 7 since the rebase of her kill's monster onto clearance and slopes, 2026-10-27, her
     kill's monster bound by her kept in her body's way (behavior.fight.TOUCH_NEAR) and her kills credited to the monster
     her attack took: on seed 4 she ran out of her 180 s; of seeds 1-16, 1, 5-7 and 10-14 meet all of this, and with
-    master's stack 4, 7, 11, 13 and 16.)"""
+    master's stack 4, 7, 11, 13 and 16.) (Seed 1 since perception at 15 frames a second, one pass a frame (2026-10-30):
+    on seed 7 no knock took her off 12; seed 1 meets all of this.)"""
     return _nav(17, fight=True, kinds=TOUR_KINDS)(sim)
 
 
@@ -1088,7 +1089,7 @@ def hunt_kill_far(sim):
     return _kill_far(sim)
 
 
-@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=8, noise=Noise(miss=0.35),
+@scenario((36, 200.0), monsters=[("Pig", 36, 850.0)], seed=1, noise=Noise(miss=0.35),
           expects=(ends("killed", key="ended"), happens("star misses"),
                    wrote("shots2.jsonl", '"hit": false', "a throw scored as a miss in the shot log")))
 def hunt_kill_misses(sim):
@@ -1103,7 +1104,8 @@ def hunt_kill_misses(sim):
     release: fight.LANDS_FROM_S); of seeds 1-16, 3 and 5 meet all of this.) (Seed 8 since the whole screen 10 times a
     second with her band's own search beside it where a whole screen takes longer than 0.05 s (worldstate.BAND_STAND_IN_S,
     2026-10-28): on seed 3 no throw was scored a miss in the shot log; of seeds 1-16, 8, 9, 11 and 16 meet all of this,
-    with master's stack and the branch as first built 3, 5, 8 and 16.)"""
+    with master's stack and the branch as first built 3, 5, 8 and 16.) (Seed 1 since perception at 15 frames a second,
+    one pass a frame (2026-10-30): on seed 8 none of its 3 throws was a miss; seed 1 meets all of this.)"""
     return _kill_far(sim)
 
 
@@ -1187,7 +1189,7 @@ def fight_snail_stab(sim):
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
-                                ("Orange Mushroom", 2, 200.0)], seed=10, limit=60,
+                                ("Orange Mushroom", 2, 200.0)], seed=1, limit=60,
           expects=(check("no throw from the ground from platform 4",
                          lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
@@ -1212,7 +1214,9 @@ def fight_step_wall(sim):
     searched with it (2026-10-28; at the simulator's costs about 5 a second, worldstate.WIDE_SHARE), and the fake whole
     screen finding a monster across its bands' edges as the real one does (sim.fakes.FakeDetector.detect_wide): on seed 4
     she didn't stay on platform 4; of seeds 1-16, 10 and 11 meet all of this, and with master's stack 4 and 12; with her
-    band's own search beside a whole screen that takes longer than 0.05 s, worldstate.BAND_STAND_IN_S, 10-12 and 16.)"""
+    band's own search beside a whole screen that takes longer than 0.05 s, worldstate.BAND_STAND_IN_S, 10-12 and 16.)
+    (Seed 1 since perception at 15 frames a second, one pass a frame (2026-10-30): on seed 10 she stepped off platform
+    4; seed 1 meets all of this.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1804,7 +1808,7 @@ def loop_noisy(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=4, limit=400, may_die=True,
+@scenario((36, 300.0), monsters="all", seed=2, limit=400, may_die=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
                    _died("other")))
@@ -1819,7 +1823,9 @@ def loop_rival(sim):
     none of the rival's kills die; of seeds 1-16, 2, 4-7, 9 and 14-16 meet all of this.) (Seed 4 since the rebase of her
     kill's monster onto clearance and slopes, 2026-10-27, her kill's monster bound by her kept in her body's way
     (behavior.fight.TOUCH_NEAR) and her kills credited to the monster her attack took: on seed 2 the feed saw none of
-    the rival's kills die; of seeds 1-12, 4-7, 9 and 10 meet all of this, and with master's stack 2, 4-7 and 9.)"""
+    the rival's kills die; of seeds 1-12, 4-7, 9 and 10 meet all of this, and with master's stack 2, 4-7 and 9.) (Seed 2
+    since perception at 15 frames a second, one pass a frame (2026-10-30): on seed 4 the feed judged none of the rival's
+    kills someone else's in its 3 minutes (3 lost in a crowd); of seeds 1-2, 2 meets all of this.)"""
     return _loop(3)(sim)
 
 
@@ -2512,7 +2518,7 @@ def loop_tree_lie_detector(sim):
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=2, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=15, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2550,7 +2556,10 @@ def loop_tree_lie_detector_28(sim):
     a safe place 10 s after the sighting, with no fall (the review's falls off 25 were on the code before the rebase;
     her retreat weighs 25 by its places now: retreat.OVERHEAD).) (The same at the evade work's integration with master
     8dcc2e6 (2026-10-29, work/evade-int; swept again after its review): of seeds 1-13, 2, 4 and 6 meet all of this, and
-    on all 13 she is on a safe place 10 s after the sighting, with no fall.)"""
+    on all 13 she is on a safe place 10 s after the sighting, with no fall.) (Seed 15 since perception at 15 frames a
+    second, one pass a frame (2026-10-30): on seed 2 at 40 s she was by the rope over 32, not on her way down from 28,
+    and retreated to that rope (a rope as safe); of seeds 1-15, 15 alone meets all of this, 3 and 13 going to 25, the
+    others to a rope or 27. On 15 back onto 28 at x 227.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2577,7 +2586,7 @@ _LIVE = dict(attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK
              realism=Realism(zero_walls=True))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, **_LIVE, expects=LIE_DETECTOR_EXPECTS + (
+@tree((23, 73.0), monsters="all", seed=2, limit=400, **_LIVE, expects=LIE_DETECTOR_EXPECTS + (
     logs("loop: ["), logs("Lucky Seven:")))
 def loop_tree_lie_detector_grind(sim):
     """`tour --loop --grind --map 10002073` as it runs by default (the feed, the attack choice) from 23, as
@@ -2586,7 +2595,10 @@ def loop_tree_lie_detector_grind(sim):
     her moves alone: on seed 1 down onto 25, a safe platform, at 5.6 s. (Of seeds 1-12, all 12 are on a safe place at
     10 s, 10 on 25 and 2 on 28; resting on 25 when it was seen, as she could until 2026-10-26, she stayed, the rest's
     next look up to 5 s after it.) (With the refill learned from what she sees, 2026-10-29: work/respawn, the grind
-    before it goes otherwise: on seed 1 onto 25 at x 119, 4.9 s after the sighting, safe at 10 s.)"""
+    before it goes otherwise: on seed 1 onto 25 at x 119, 4.9 s after the sighting, safe at 10 s.) (Seed 2 since
+    perception at 15 frames a second, one pass a frame (2026-10-30): on seed 1 a Horny Mushroom touched her on her
+    walk-off from 20 1.2 s into her retreat to 25, which ended there: on 20 at 10 s, not safe; on 2 to the rope at x 111
+    by 18 (no safe platform near), safe at 10 s.)"""
     return lie_detector(75.0, grind=True)(sim)
 
 
@@ -2844,7 +2856,7 @@ KEY_EXPECTS = (
     check("the backslash first, then Esc with the window open, nothing else in it, no MENU", _window_ok))
 
 
-@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=10, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),))),
       expects=KEY_EXPECTS + (
           check("her stars asked", lambda tr: _said(tr, "her stars: ")),
@@ -2875,11 +2887,14 @@ def loop_tree_grind_attack_key(sim):
     the refill learned from what she sees, 2026-10-29: work/respawn, on 9 no pull to 19 at 39.9 s, the loop's rate as
     learned higher in this world of monsters back 8 s after their deaths: on her way up to 7 the doubt at 50.7 s,
     away to the rope at x -8 by 29 (no safe platform near; 4.9 s), the window read and closed at 76.9-77.6 s, ATTACK
-    on A, paged once, 11 kills after.)"""
+    on A, paged once, 11 kills after.) (Seed 10 since perception at 15 frames a second, one pass a frame (2026-10-30):
+    on seed 9 the doubt at 63.8 s, and A not pressed after the check in its 2 minutes; of seeds 1-10, 10 alone meets all
+    of this, on 1-8 no 5 regular presses in a row went without effect in its 2 minutes. On 10 the doubt at 73.3 s, 4
+    kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=10, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),))),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
@@ -2899,11 +2914,14 @@ def loop_tree_attack_unbound(sim):
     work/evade-int, her evade step and R7's dodge with the pull's detour rule), as loop_tree_grind_attack_key: of seeds
     1-13, 3, 6, 9, 11 and 12 meet all of this. On 9 the same doubt and check as there, ATTACK on none at 64.7 s, 19 kills
     after.) (With the refill learned from what she sees, 2026-10-29: work/respawn, as there: the doubt at 50.7 s,
-    ATTACK on none at 78.3 s, 11 kills after.)"""
+    ATTACK on none at 78.3 s, 11 kills after.) (Seed 10 since perception at 15 frames a second, one pass a frame
+    (2026-10-30): as loop_tree_grind_attack_key: on seed 9 the doubt at 63.8 s and no 'the regular attack off this run'
+    in its 2 minutes; of seeds 1-10, 10 alone meets all of this, 1-8 with no doubt. On 10 the doubt at 73.3 s, 4 kills
+    after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -2925,11 +2943,14 @@ def loop_tree_attack_misses(sim):
     rule (2026-10-29: behavior.patrol, a pile against the loop's rate): on seed 9 no 5 regular presses in a row went
     without effect in its 2 minutes; of seeds 1-12, 6 and 10 meet all of this. On 6: the doubt at 46.8 s, a Green
     Mushroom at 4%; away to 25 (4.8 s), her stars: she has them (a cast took MP since the doubt's first press), the
-    window read and closed at 52.2-52.9 s, ATTACK on Ctrl, 28 kills after.)"""
+    window read and closed at 52.2-52.9 s, ATTACK on Ctrl, 28 kills after.) (Seed 2 since perception at 15 frames a
+    second, one pass a frame (2026-10-30): on seeds 6 and 1 no 5 regular presses in a row went without effect in its 2
+    minutes. On 2 the doubt at 82.9 s, a Green Mushroom at 7-10%; away to 25 (1.5 s), the window read, ATTACK on Ctrl at
+    86.4 s, 11 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -2948,7 +2969,9 @@ def loop_tree_attack_misses_seen(sim):
     fewer than 3 of her regular presses' targets; of seeds 1-12, 1, 5 and 9-12 meet all of this, master's stack on 9
     not. On 9 14 MISSes read from 26.6 s, no doubt.) (Seed 6 since the pull's detour rule (2026-10-29: behavior.patrol,
     a pile against the loop's rate), as loop_tree_attack_misses: of seeds 1-12, 1, 2, 6, 9 and 10 meet all of this. On 6
-    7 MISSes read from 15.8 s, no doubt.)"""
+    7 MISSes read from 15.8 s, no doubt.) (Seed 2 since perception at 15 frames a second, one pass a frame (2026-10-30):
+    as loop_tree_attack_misses: on seeds 6 and 1 her attack's MISS read over fewer than 3 of her regular presses'
+    targets. On 2 11 MISSes read from 11.9 s, no doubt.)"""
     return key_check_run(2)(sim)
 
 

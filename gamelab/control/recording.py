@@ -4,8 +4,8 @@ its clip, `save-recent`, the status file), where that recorder grabbed the scree
 The user, that morning: "The recording should probably just take frames from within the same perception process to
 have a rolling window copy of things in memory, match fps or fps/2." So:
 
-- FPS frames a second, every other one of the service's 30 (service.HZ / 2), picked on their own times by a token
-  bucket (FPS tokens a second, BURST at most, a frame taken with one): handed over from the frame loop (`saw`, from
+- FPS frames a second, every one of the service's (localization.rate.HZ: 15 since 2026-10-30; every other one of its
+  30 until then), picked on their own times by a token bucket (FPS tokens a second, BURST at most, a frame taken with one): handed over from the frame loop (`saw`, from
   Service._emit: its picture by reference, its number and run) into a queue of QUEUE, never waited on (past it a frame
   is dropped, counted). With the frame loop slower than FPS, as many as it makes: on the replays' real frame times
   (D:/MapleHelper-scratch/pconst/finish/cadence_rules.py), a loop at 12-14 a second gave 11.6-13.2 kept, at 25-30 a
@@ -55,10 +55,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import paths
+from ..localization import rate
 from . import rolling
 from .rolling import Item
 
-FPS = 15.0          # frames a second kept: every other frame of the service's 30 (the user: "match fps or fps/2")
+FPS = rate.HZ       # frames a second kept: every frame of the service's (the user: "match fps or fps/2")
 # The token bucket's most (frames' worth): 2 lets a frame through after a short interval that follows a long one, so a
 # loop slower than FPS has all its frames kept, and after a stall one frame more at most (no catching up). On the
 # replays' frame times (cadence_rules.py, 77 runs): 0.1-0.2 a second more than the due grid first built (a frame due
@@ -143,10 +144,10 @@ class Recording:
     # --- the frame loop's side ------------------------------------------------------------------------------------
 
     def saw(self, st, frame, run: int) -> None:
-        """The frame loop's state of a frame and the frame (Service._emit; not a late state's): taken if it shows the
+        """The frame loop's state of a frame and the frame (Service._emit): taken if it shows the
         game (see the top) FPS times a second at most, handed to the encoder (a frame with a window over the game as a
         gap). Never waits. While the floor is taken, only counted."""
-        if self.recorder is None or frame is None or st.late or not frame.visible or frame.full is None:
+        if self.recorder is None or frame is None or not frame.visible or frame.full is None:
             return
         if (st.bad is not None and st.bad.kind in GAP_KINDS) or frame.over is None:
             return

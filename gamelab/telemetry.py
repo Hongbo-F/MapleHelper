@@ -31,9 +31,11 @@ Topics (map units; producers build the records, ui.state folds them):
             wide, looked [[platform, x0, x1]], view [x0, y0,   searched, for analysis.respawn; players only
             x1, y1], players [{id, kind, x, y, platform}]      when there are any: localization.players)
   tracks    list [{id, kind, state, x, y, vx, facing,          `watch` and the perception service, twice a
-            platform, bar, hits, seen, cause, gain, share}],   second (localization.tracking; gain: the frame
-            frames                                             time of her gain the track is bound to, share:
-                                                               a share's; from 2026-10-27)
+            pose, platform, bar, hits, seen, cause, gain,      second (localization.tracking; gain: the frame
+            share}], frames                                    time of her gain the track is bound to, share:
+                                                               a share's; from 2026-10-27; vx the game data's
+                                                               speed the way it heads, no measure, and pose,
+                                                               from 2026-10-30: its walk is x over time)
   exp       exp, level, gain, kinds, total, per_minute         each EXP gain (behavior.hunter; `watch`), her
                                                                number as read (localization.gains)
   drops     pending [{x, y, platform, mesos}], inventory_full  every look (behavior.hunter)
@@ -71,13 +73,14 @@ Topics (map units; producers build the records, ui.state folds them):
   log       text                                               every log line
   gc        collections [gen 0, 1, 2], pause_ms, longest_ms,   once a minute (the perception service, the commands
             frozen, seconds                                    that record telemetry: gcstats)
-  perf      s, fps, cores, wide_a_s, wide_asked_a_s, wide_ms   the perception service, with its 10 s console line
-            [median, p90, max], wide_age_ms [median, p90],     (service.Perf: the whole screens a second made and
-            wide_age_drops_ms [median, p90], busy,             asked, each one's search, its result's age in each
-            band_alone_a_s, band_alone_ms [median, p90],       frame's state as it went out and in each with the
-            tracks_a_min, flickers_a_min                       drops a look asked for, the searches' thread busy,
-                                                               her band's own searches and their wait past their
-                                                               frame; from 2026-10-28)
+  perf      s, fps, cores, pass_ms [median, p90, p99,      the perception service, with its 10 s console line
+            max], look_ms [median, p90], wide_ms [median,      (service.Perf: each frame's pass, her look and the
+            p90, max], detections_a_frame, tracks_a_frame,     whole screen's search in it, the monsters found and
+            strips_a_frame, age_ms [median, p90],              followed and the strips of drops a frame, a state's
+            tracks_a_min, flickers_a_min                       age as it went out; from 2026-10-30. From 2026-10-28
+                                                               until then wide_a_s, wide_asked_a_s, wide_ms,
+                                                               wide_age_ms, wide_age_drops_ms, busy, band_alone_*:
+                                                               the searches' thread's)
 """
 
 import atexit

@@ -16,13 +16,13 @@ Every look and glance is the latest of what perception, looking at the game all 
 localization.feed.Feed: for a command the perception service, localization.service, whose world step runs on every
 frame; in the simulator SyncFeed; on saved frames and the tests' made-up ones InlineFeed, the step run on the eyes' frame
 when asked). A look is the newest state of a frame newer than the last look's, shown KEY_EFFECT_S after her last key
-and MAX_AGE_S before the look at the most (`fresh_after`, KEYS_WAIT), with what it needs fresh (feed.fresh: her band
-searched within 0.3 s, the whole screen within 0.5 s, the drops on that very frame), the events since the last look
-with it (Scene.events); a look at her band has the monsters the feed follows off it too (`Scene.swept`, for her memory:
-Feed.look). Glances are the newest frames, GLANCE_EVERY_S apart at the soonest. (Until 2026-10-25 a command could look
-for itself, `--no-feed`, and such looks swept the screen a slice at a time for her memory; the user: "We should just
-remove the --no-feed mode, perception should just always run and the other modules just work based on latest
-perception result".)
+and MAX_AGE_S before the look at the most (`fresh_after`, KEYS_WAIT), with what it needs fresh (feed.fresh: the drops
+on that very frame; every frame's state has her place, the HUD and the whole screen's monsters), the events since the
+last look with it (Scene.events); a look at her band has the monsters off it too (`Scene.swept`, for her memory:
+Feed.look). Glances are the newest frames, every frame the feed looks at (localization.rate.HZ: 15 a second). (Until
+2026-10-25 a command could look for itself, `--no-feed`, and such looks swept the screen a slice at a time for her
+memory; the user: "We should just remove the --no-feed mode, perception should just always run and the other modules
+just work based on latest perception result".)
 
 No look is handed on that isn't of the game as expected: one whose state failed its checks (WorldState.bad: the eyes'
 own, perception.framecheck: the game window, the frame lined up with it, the minimap's picture found; her place on the
@@ -46,7 +46,7 @@ from collections.abc import Callable
 from .. import paths, telemetry
 from ..character import THIEF_SHAPE, Shape
 from ..perception.drops import items_for
-from ..perception.eyes import GLANCE_EVERY_S, Eyes, NoScreen, Observation, band_rows, tag_below_feet
+from ..perception.eyes import Eyes, NoScreen, Observation, band_rows, tag_below_feet
 from ..perception.framecheck import FIX_KINDS, LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..perception.touches import INVULNERABLE_S
@@ -66,15 +66,17 @@ from .scene import Scene
 # puts it from her refined position: the same ropes while her dot is within about 30 units. None
 # searches the whole screen.
 ROPE_PAD: int | None = ROPE_MATCH_PX + MAX_ROPE_WIDTH
-# Glances from a feed come this far apart at the soonest (their frames' times): GLANCE_EVERY_S, as glances taken here
-# (63 ms: about 15 a second); 0, every frame the feed looks at (30 a second). The navigator judges glances in time
-# (navigator.STILL_S, OFF_PATH_S), so what it makes of them means the same either way, but every frame didn't pay in
-# the simulator (2026-10-21; README, Continuous perception): the nav_* trips on 10 seeds of the game's noise were 2.9%
-# quicker but missed 16 landings of 290 against 11 (11 falls against 6), `recover` taking her for stopped once her
-# dot had stood 46 ms twice as often while she ran (at 149 units/s it can sit 76 ms in one of this map's 11.4-unit
-# minimap pixels), and over 20 seeds of 20 minutes the tour made 5.0% less EXP a minute (standard error 2.6%), the
-# hunt loop 2.4% more (1.6%). Not tried in game.
-FEED_GLANCE_EVERY_S = GLANCE_EVERY_S
+# Glances from a feed come this far apart at the soonest (their frames' times): 0, every frame the feed looks at (HZ a
+# second, localization.rate: 15 since 2026-10-30, glances asking for no frame of their own: Feed.glance), the pace
+# glances had at the feed's 30 a second until then (perception.eyes.GLANCE_EVERY_S, 63 ms: about 15 a second, as
+# glances taken here). (A frame's period itself would skip a frame shown a little early, the game's frames 16.7 ms
+# apart, and halve them.) The navigator judges glances in time (navigator.STILL_S, OFF_PATH_S), so what it makes of them
+# means the same either way, but every frame at 30 didn't pay in the simulator (2026-10-21; README, Continuous
+# perception): the nav_* trips on 10 seeds of the game's noise were 2.9% quicker but missed 16 landings of 290 against
+# 11 (11 falls against 6), `recover` taking her for stopped once her dot had stood 46 ms twice as often while she ran
+# (at 149 units/s it can sit 76 ms in one of this map's 11.4-unit minimap pixels), and over 20 seeds of 20 minutes the
+# tour made 5.0% less EXP a minute (standard error 2.6%), the hunt loop 2.4% more (1.6%).
+FEED_GLANCE_EVERY_S = 0.0
 # What a look from the feed is by default (2026-10-25; the user: "perception should just always run and the other
 # modules just work based on latest perception result"): the newest state of a frame
 # - newer than the last look's (a look never decides on a frame twice),

@@ -1,8 +1,9 @@
 """The continuous feed (localization.feed): the ring of frames in shared memory never holds more than its
 slots, a look is never handed a frame from before it was asked for nor one that failed its checks, every event is
-drained once, what's asked is done on the next frame (its searches off the frame loop, back their cost later), and
-Senses on it: every look and glance from it, standing still (LookLost) while it has nothing to act on, and going on
-after. The perception service that runs it live is test_service's."""
+drained once, one pass a frame at the one rate (localization.rate.HZ), what's asked done on the next frame (taken at
+once, the frames after it re-phased; one asked within ASK_GAP_S of the frame due waiting for that one), and Senses on
+it: every look and glance from it, standing still (LookLost) while it has nothing to act on, and going on after. The
+perception service that runs it live is test_service's."""
 
 import sys
 import time
@@ -15,13 +16,13 @@ from gamelab.localization import feed
 from gamelab.localization import senses as senses_mod
 from gamelab.localization.feed import Asks, Ring, SyncFeed, fresh, run
 from gamelab.localization.senses import Senses
-from gamelab.localization.worldstate import Schedule, SearchThread, WorldState, WorldStep
+from gamelab.localization.worldstate import Schedule, WorldState, WorldStep
 from gamelab.perception.frames import Frame, ListFrames
 from gamelab.sim.fakes import FakeDetector
 
 from test_worldstate import Drawn, pig, small_map
 
-FPS = 30
+FPS = feed.HZ
 
 
 def test_the_ring_holds_its_slots_frames_and_no_more():
@@ -46,42 +47,33 @@ def state(seq, t, **kw) -> WorldState:
     return WorldState(seq, t, True, **kw)
 
 
-def test_a_look_is_never_handed_a_frame_from_before_it_asked(monkeypatch):
+def test_a_look_is_never_handed_a_frame_from_before_it_asked():
     want = Asks(after=10.0)
     assert not fresh(state(1, 9.99), want) and fresh(state(2, 10.0), want)
     assert not fresh(WorldState(3, 10.5, False), want)  # the game wasn't on screen
-    band = Asks(after=10.0, band=True)
-    assert fresh(state(4, 10.1, band_at=10.0), band) and not fresh(state(5, 10.4, band_at=10.05), band)
-    # Reading the feed (ASK_ONLY_STALE, the default): any search of her band within MOBS_FRESH_S of the frame will do.
-    assert fresh(state(4, 10.1, band_at=9.95), band) and not fresh(state(5, 10.1, band_at=9.75), band)
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)  # asking for everything: the search it asked for, on a frame since
-    assert not fresh(state(5, 10.1, band_at=9.95), band)
-    assert not fresh(state(6, 10.1, band_at=10.1), Asks(after=10.0, wide=True))
+    # Her band and the whole screen are every state's (since 2026-10-30): asking for them asks for nothing more.
+    for band in (Asks(after=10.0, band=True), Asks(after=10.0, wide=True)):
+        assert fresh(state(4, 10.1, band_at=10.1, wide_at=10.1), band)
     loot = Asks(after=10.0, loot=True)
     assert not fresh(state(7, 10.1), loot) and fresh(state(8, 10.1, loot=[]), loot)
     assert not fresh(state(9, 10.1, loot=[]), Asks(after=10.0, loot_wide=True))
     assert not fresh(state(10, 10.1, loot=[], mesos_only=True), loot)  # it looked for mesos only
-    assert fresh(state(11, 10.1, tag=None), band)  # she isn't placed: as good as a look would be
+    assert fresh(state(11, 10.1, tag=None), loot)  # she isn't placed: as good as a look would be
     # A frame that failed its checks is never fresh, placed or not (it was served as an unplaced look, and the mover
     # tried 40 times, nudging the mouse, then stopped the command).
     from gamelab.perception.framecheck import Problem
     for kind in ("offset", "minimap", "hud", "picture", "tag", "place"):
-        assert not fresh(state(12, 10.1, band_at=10.1, bad=Problem(kind, kind)), band)
+        assert not fresh(state(12, 10.1, bad=Problem(kind, kind)), want)
         assert not fresh(state(12, 10.1, tag=None, where=None, bad=Problem(kind, kind)), Asks(after=10.0))
 
 
-def test_a_look_asks_for_what_the_next_frame_would_have_stale_though_its_after_is_older():
-    """A look's `after` is often before the newest frame (Senses.fresh_after: up to MAX_AGE_S before now). What it asks
-    is judged by the next frame after the newest: the whole screen searched 0.5 s before the newest frame (WIDE_FRESH_S)
-    is stale by the next, so it's asked, though a frame at `after` would have had it fresh. (Judged by `after` alone it
-    went unasked: in the simulator a hunt's wide look waited FEED_WAIT_S for nothing and failed its checks.)"""
-    newest = state(1, 7.733, wide_at=7.233, band_at=7.6)
-    ask = feed.to_ask(Asks(after=7.654, wide=True), newest)
-    assert ask.wide
-    assert not feed.to_ask(Asks(after=7.654, wide=True), state(1, 7.733, wide_at=7.5)).wide  # fresh by the next
-    assert feed.to_ask(Asks(after=7.654, band=True), state(1, 7.733, band_at=7.45)).band  # 0.3 s: MOBS_FRESH_S
-    assert not feed.to_ask(Asks(after=7.654, band=True), newest).band
-    assert feed.to_ask(Asks(after=8.0, band=True), newest).band  # (after the newest: by `after`, as before)
+def test_a_look_asks_for_a_frame_at_its_time_and_the_drops_it_wants_on_it():
+    """feed.to_ask: a frame shown at `after` or later and the drops wanted searched on it; never her band or the whole
+    screen (every state has them: until 2026-10-30 they were asked for when the newest state's would be stale)."""
+    ask = feed.to_ask(Asks(after=7.654, band=True, wide=True, loot=True, mesos_only=True))
+    assert (ask.after, ask.band, ask.wide, ask.loot, ask.loot_wide, ask.mesos_only) == (7.654, False, False, True,
+                                                                                         False, True)
+    assert feed.adds(Asks(loot_wide=True), Asks(loot=True)) and not feed.adds(Asks(band=True), Asks())
 
 
 def test_a_bad_newest_state_gives_no_look_at_once_and_says_why(sync):
@@ -98,13 +90,13 @@ def test_a_bad_newest_state_gives_no_look_at_once_and_says_why(sync):
         obs.bad, obs.tag, obs.dot = problem, None, None
         return obs
     f._look = look
-    clock.sleep(0.1)
+    clock.sleep(0.15)
     asked = clock.now
-    assert f.latest(Asks(asked - 0.05)) is None and clock.now - asked < 0.1 and f.problem() == problem
-    assert f.glance(asked - 0.05, timeout=0.0) is None
+    assert f.latest(Asks(asked - 0.07)) is None and clock.now - asked < 0.1 and f.problem() == problem
+    assert f.glance(asked - 0.07, timeout=0.0) is None
     f._look = real
-    clock.sleep(0.1)
-    assert f.latest(Asks(clock.now - 0.05)) is not None and f.problem() is None
+    clock.sleep(0.15)
+    assert f.latest(Asks(clock.now - 0.07)) is not None and f.problem() is None
 
 
 class Clock:
@@ -139,74 +131,59 @@ def sync(monkeypatch):
     return f, clock, eyes
 
 
-def test_the_sync_feed_hands_a_look_the_frame_after_it_asked_its_cost_later(sync, monkeypatch):
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)  # a look asking for all it wants, its band searched on its frame
+def test_the_sync_feed_looks_hz_times_a_second_each_state_its_pass_later(sync):
+    """Nothing asked: a frame every 1/HZ s (every 4th of the game's 60 at 15), each state ready its pass's cost after
+    its frame (Costs.of: the capture, her look and the whole screen at once, the bars, the strips of drops)."""
     f, clock, eyes = sync
     eyes.mobs = [pig(1100)]
+    clock.sleep(2.0)
+    frames = [st.t for _, st in f.states]
+    assert f.counts["frames"] == round(2.0 * FPS) + 1 and f.counts["asked"] == 0
+    assert all(round(b - a, 6) == round(1 / FPS, 6) for a, b in zip(frames, frames[1:]))
+    c = f.costs
+    for ready, st in f.states:
+        assert ready == pytest.approx(st.t + c.of(st))
+        assert c.of(st) == pytest.approx(c.capture + max(c.look, c.wide) + c.beside + c.bar * st.work["bars"]
+                                         + c.loot_strip * st.work["strips"])
+        assert [m.kind for m in st.monsters] == ["pig"] and st.band_at == st.wide_at == st.t
+
+
+def test_a_frame_asked_for_is_taken_at_once_and_the_next_a_period_after_it(sync):
+    """An ask (a look's: Senses.fresh_after, KEY_EFFECT_S after her key) takes the first frame shown at its time, the
+    frames after re-phased to it (never more than HZ a second on its account: until 2026-10-30 an asked frame came on top
+    of the regular ones); one asked within ASK_GAP_S of the frame due anyway waits for that one."""
+    f, clock, eyes = sync
+    clock.sleep(1.0)
+    last = max(st.t for _, st in f.states)
+    asked = last + 2 / feed.GAME_HZ  # 33 ms before the frame due (the game frame before: the pass on the last still
+    #                                  going, its cost)
+    clock.sleep(asked - clock.now - 1e-6)
+    st = f.latest(Asks(asked))
+    assert st.t == pytest.approx(asked) and f.counts["asked"] == 1
     clock.sleep(0.5)
-    c = feed.COSTS
-    for _ in range(20):
-        asked = clock.now
-        st = f.latest(Asks(asked, band=True))
-        # (a frame shown when asked counts, to 1e-9 s: the clock's 100.49999999999997 is 100.5's frame)
-        assert st is not None and st.t >= asked - 1e-9 and fresh(st, Asks(asked, band=True))
-        assert st.band_at >= asked - 1e-9  # her band searched on a frame shown after the look asked: its own search
-        # ready only once worked out: the searched frame's step, then the search on its thread
-        assert clock.now >= st.band_at + c.capture + c.look + c.band - 1e-9
-        assert clock.now - asked < 0.25  # (at worst a search of the whole screen was out, 0.11 s)
-        clock.sleep(0.037)
-    assert f.counts["frames"] >= 30  # it went on looking between the looks, 30 times a second
+    frames = sorted(s.t for _, s in f.states if s.t >= asked - 1e-9)
+    assert all(round(b - a, 6) == round(1 / FPS, 6) for a, b in zip(frames, frames[1:]))  # (re-phased to it)
+    last = frames[-1]
+    soon = last + 1 / FPS - feed.ASK_GAP_S + 0.004  # within ASK_GAP_S of the frame due
+    clock.sleep(soon - clock.now)
+    st = f.latest(Asks(soon))
+    assert st.t == pytest.approx(last + 1 / FPS) and f.counts["asked"] == 2  # the frame due, asked or not
 
 
-def test_a_look_reads_the_feeds_world_state_without_waiting_for_a_search_of_its_own(sync):
-    # Reading (ASK_ONLY_STALE, the default): the next frame placing her, its monsters those the feed follows (re-found in
-    # it) and a search of her band within MOBS_FRESH_S; it waits for that frame's step alone, not for a search.
+def test_a_look_reads_every_monster_on_screen_off_any_frame(sync):
+    """Every state has its own frame's whole screen (since 2026-10-30): a look waits for its frame's pass alone, never
+    for a search (until then its band or the screen were searched on a thread, back their cost later)."""
     f, clock, eyes = sync
-    eyes.mobs = [pig(1100)]
-    clock.sleep(0.5)  # (the pig found, and followed since)
-    c, waits, searched = feed.COSTS, [], 0
+    eyes.mobs = [pig(1100), pig(1200, 300)]
+    clock.sleep(0.5)
+    c, waits = f.costs, []
     for _ in range(20):
         asked = clock.now
-        st = f.latest(Asks(asked, band=True))
-        # (a frame shown when asked counts, to 1e-9 s: the clock's 100.49999999999997 is 100.5's frame)
-        assert st is not None and st.t >= asked - 1e-9 and fresh(st, Asks(asked, band=True))
-        assert [m.kind for m in st.monsters] == ["pig"] and st.t - st.band_at <= feed.MOBS_FRESH_S + 1e-9
+        st = f.latest(Asks(asked, band=True, wide=True))
+        assert st is not None and st.t >= asked - 1e-9 and sorted(round(m.y) for m in st.monsters) == [300, 500]
         waits.append(clock.now - asked)
-        searched += st.band_at >= asked
         clock.sleep(0.037)
-    # The next game frame (1/60 s at most) and its step (capture, her place, the pig re-found), now and then a frame's
-    # more while a search was out; never the band's own search on top (c.band, 26 ms), as asking had it.
-    assert max(waits) <= 2 / feed.GAME_HZ + c.capture + c.look + c.refind + c.beside + 1e-9
-    assert sorted(waits)[len(waits) // 2] < c.capture + c.look + c.band
-    assert searched < 20  # most looks read a search from before they asked
-
-
-def test_the_sync_feeds_searches_come_back_their_cost_later_merged_as_of_their_frame(sync, monkeypatch):
-    monkeypatch.setattr(feed, "ASK_ONLY_STALE", False)  # (the look waits for the search it asked for)
-    f, clock, eyes = sync
-    clock.sleep(0.5)  # (the first frame's search of the whole screen is back)
-    eyes.mobs = [pig(1100)]
-    clock.sleep(0.001)  # (asked after the frame shown at 100.5, drawn before the pig was there)
-    asked = clock.now
-    st = f.latest(Asks(asked, band=True))
-    c = feed.COSTS
-    searched = [(ready, s) for ready, s in f.states if s.late and s.t >= asked]
-    assert searched and searched[0][1].work["band"] == 1
-    ready, late = searched[0]
-    back = late.t + c.capture + c.look + c.band  # its frame's step, then the search on its thread
-    # Merged as it came (the frame loop idle), or by the frame it was on (placing her, then the re-finds)
-    assert back - 1e-9 <= ready <= back + c.capture + c.look + 2 * c.refind + 1e-9
-    assert [m.kind for m in late.monsters] == ["pig"] and [e.kind for e in late.events] == ["appeared"]
-    assert clock.now == pytest.approx(ready) and st.band_at == late.t  # the look had waited for it
-    clock.sleep(0.1)
-    # The frames stepped while it was out don't have the pig; the first after it does, re-found. (A frame whose step
-    # ended as it came back was stepped while it was out: its answers are looked for once she's placed, before that.)
-    between = [s for r, s in f.states if not s.late and late.t < s.t and r <= ready + 1e-9]
-    after = [s for r, s in f.states if not s.late and s.t > late.t and r > ready + 1e-9]
-    assert all(s.monsters == [] and (s.band_at or 0) < late.t for s in between)
-    assert after and [m.kind for m in after[0].monsters] == ["pig"] and after[0].band_at == late.t
-    (tr,) = f.step.tracker.tracks.values()
-    assert tr.first_seen == late.t
+    assert max(waits) <= feed.ASK_GAP_S + 1 / feed.GAME_HZ + c.of(st) + 2 * c.bar + 1e-9
 
 
 def test_every_event_is_drained_once(sync):
@@ -227,7 +204,7 @@ def test_what_a_look_asks_is_searched_on_the_next_frame(sync):
     eyes.drops = []
     asked = clock.now
     st = f.latest(Asks(asked, loot=True))
-    assert st is not None and st.loot == [] and st.t - asked <= 2 / feed.GAME_HZ + 1e-9  # the next it could take
+    assert st is not None and st.loot == [] and st.t - asked <= feed.ASK_GAP_S + 1 / feed.GAME_HZ + 1e-9
     assert f.counts["asked"] == 1
 
 
@@ -246,20 +223,42 @@ def test_asks_waiting_together_keep_what_each_wants_and_the_newest_mesos_only(sy
 def test_the_loop_does_what_was_asked_on_the_first_frame_at_its_time():
     model = small_map()
     eyes = Drawn(model)
-    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(drops_strips=0))
     frames = [np.zeros((4, 4, 3), np.uint8)] * 12
 
     class Eyes2:
         def look_at(self, full, t, ropes):
             return eyes.frame(t, ropes)
     runner = feed.Runner(ListFrames(frames, loop=False), Eyes2(), step)
-    out, asks = [], {2: Asks(0.0, band=True), 5: Asks(0.0, wide=True)}  # asked once 2 (5) frames are out
-    run(runner, 200.0, lambda wait: (asks.pop(sum(not s.late for s in out), None), False),
-        lambda st, fr: out.append(st))
-    assert [s.seq for s in out if not s.late] == list(range(1, 13))
-    late = [s for s in out if s.late]  # each frame searched, given again as its searches came back
-    assert [s.seq for s in late if s.work["band"]] == [3] and [s.seq for s in late if s.work["wide"]] == [6]
-    assert out.index(late[0]) < out.index(next(s for s in out if s.seq == 4))  # back before the next frame's
+    out, asks = [], {2: Asks(0.0, loot=True), 5: Asks(0.0, loot_wide=True)}  # asked once 2 (5) frames are out
+    run(runner, 200.0, lambda wait: (asks.pop(len(out), None), False), lambda st, fr: out.append(st))
+    assert [s.seq for s in out] == list(range(1, 13))
+    assert [(s.seq, s.loot_wide) for s in out if s.loot is not None] == [(3, False), (6, True)]
+
+
+def test_the_loop_takes_a_frame_asked_for_at_once_and_the_next_a_period_after_it():
+    """feed.run: at 10 a second, an ask for a frame 30 ms after the last one's taken then (well before the frame due:
+    ASK_GAP_S), the next frame a period after it, not after the one before."""
+    model = small_map()
+    eyes = Drawn(model)
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(drops_strips=0))
+
+    class Eyes2:
+        def look_at(self, full, t, ropes):
+            return eyes.frame(t, ropes)
+    runner = feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)] * 6, loop=False), Eyes2(), step)
+    out, sent = [], []
+
+    def poll(wait):
+        time.sleep(min(wait, 0.005))
+        if len(out) == 2 and not sent:
+            sent.append(Asks(out[-1] + 0.03))
+            return sent[-1], False
+        return None, False
+    run(runner, 10.0, poll, lambda st, fr: out.append(st.t))
+    gaps = np.diff(out)
+    assert len(out) == 6 and gaps[0] >= 0.09 and 0.025 <= gaps[1] <= 0.06, gaps  # (asked: at once)
+    assert all(0.09 <= g <= 0.14 for g in gaps[2:]), gaps  # (a period after it, re-phased)
 
 
 def test_a_rate_gone_up_takes_from_the_next_frame():
@@ -268,7 +267,7 @@ def test_a_rate_gone_up_takes_from_the_next_frame():
     frame due."""
     model = small_map()
     eyes = Drawn(model)
-    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
+    step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(drops_strips=0))
 
     class Eyes2:
         def look_at(self, full, t, ropes):
@@ -336,7 +335,7 @@ class _Look:
 
 
 class Slow(FakeDetector):
-    """A detector whose searches take `s` seconds (of the real clock); re-finds are as quick as ever."""
+    """A detector whose searches take `s` seconds (of the real clock)."""
 
     def __init__(self, s: float):
         super().__init__()
@@ -353,14 +352,14 @@ class Slow(FakeDetector):
 
 def drawn_runner(n: int = 0, slow: float = 0.0) -> feed.Runner:
     """A service's runner for its tests (test_service): a list of blank frames (a stand-in for the screen), read by eyes
-    that draw a pig walking (built in the service's process, from this module); its searches on their thread, as the
-    service's, each taking `slow` s."""
+    that draw a pig walking (built in the service's process, from this module); the whole screen in every pass, as the
+    service's, each search taking `slow` s."""
     model = small_map()
     eyes = Drawn(model)
     if slow:
         eyes.detector = Slow(slow)
     senses = Senses(eyes, model, band=(100, 100))
-    step = WorldStep(senses, searches=SearchThread(senses))
+    step = WorldStep(senses)
     return feed.Runner(ListFrames([np.zeros((4, 4, 3), np.uint8)] * 3), _Look(eyes), step)
 
 
@@ -426,7 +425,6 @@ def test_senses_look_and_glance_through_the_feed_and_stand_still_while_it_has_no
     # Every look and glance is the feed's (no eyes' look of their own); while it has nothing to act on (here: down),
     # a look is asked again RETRY_GAP_S apart and raises LookLost after LOST_S, a glance has no dot and the last HP,
     # and raises LookLost after GLANCE_LOST_S; once it's back, the look passes, said so.
-    from gamelab.perception.eyes import GLANCE_EVERY_S
     from gamelab.perception.framecheck import LookLost
     f, clock, eyes = sync
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
@@ -439,10 +437,12 @@ def test_senses_look_and_glance_through_the_feed_and_stand_still_while_it_has_no
     assert s.t >= asked - senses_mod.MAX_AGE_S and s.searched and [m.kind for m in s.monsters] == ["pig"]
     assert [e.kind for e in s.events] == ["appeared"]  # what the feed saw since: once
     assert senses.look(mobs=False).events == [] and getattr(eyes, "looks", 0) == 0
-    a, b = senses.glance(), senses.glance()
-    assert senses.counts["glances"] == 2 and senses._glanced - asked >= GLANCE_EVERY_S - 1e-9
+    a = senses.glance()
+    first = senses.glanced_at
+    b = senses.glance()
+    assert senses.counts["glances"] == 2 and senses.glanced_at > first  # (the next frame: a glance never takes one twice)
     real = f.latest
-    monkeypatch.setattr(f, "latest", lambda want, timeout=feed.FEED_WAIT_S: (clock.sleep(timeout), None)[1])
+    monkeypatch.setattr(f, "latest", lambda want, timeout=feed.FEED_WAIT_S, ask=True: (clock.sleep(timeout), None)[1])
     hp = a[1]
     assert senses.glance() == (None, hp)  # (0.25 s waited: no dot, the last HP)
     with pytest.raises(LookLost):
@@ -469,7 +469,7 @@ def test_a_command_standing_still_has_the_game_brought_forward_after_lost_s_too(
     senses.log = lambda m: None
     behind = Problem("window", "the game isn't in front")
     fronted = []
-    monkeypatch.setattr(f, "latest", lambda want, timeout=feed.FEED_WAIT_S: (clock.sleep(timeout), None)[1])
+    monkeypatch.setattr(f, "latest", lambda want, timeout=feed.FEED_WAIT_S, ask=True: (clock.sleep(timeout), None)[1])
     monkeypatch.setattr(f, "problem", lambda: behind)
     monkeypatch.setattr(f, "bring_forward", fronted.append)
     with pytest.raises(LookLost):
@@ -589,54 +589,43 @@ def test_a_look_after_a_glance_saw_her_still_takes_that_frame_and_waits_for_none
 
 
 def test_a_band_look_from_the_feed_has_what_it_follows_off_her_band(sync):
-    # Her memory takes what the feed follows off her band (Scene.swept), with the whole screen as searched while the
-    # feed's last search of it is fresh: at the old pace (a whole screen a second), only now and then; at the default's
-    # (15 a second, or as often as the searches' thread allows: worldstate.WIDE_SHARE), every look.
+    # Her memory takes the monsters off her band (Scene.swept), with the whole screen searched in every frame's pass:
+    # every look says it searched her band and the screen.
     from gamelab.localization.memory import Memory
     f, clock, eyes = sync
-    assert f.step.schedule.wide_s == 1 / 15
-    f.step.schedule = Schedule(wide_s=1.0)
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
     memory = Memory(f.step.model)
     senses.listeners.append(memory.on_look)
     eyes.mobs = [pig(1100), pig(1200, 300)]  # one in her band, one on the platform 200 above (off it)
-    clock.sleep(1.25)  # (the whole screen searched at 101.03, back by 101.2: the one above followed since)
+    clock.sleep(0.25)
     s = senses.look()
     above = f.step.model.platform_under(1200, 300).id
     assert [m.x for m in s.monsters] == [pytest.approx(1100, abs=3)]
     assert [(m.x, m.platform) for m in s.swept] == [(pytest.approx(1200, abs=3), above)]
     assert len(s.rows) == 2 and s.rows[1][0] < s.rows[0][0] and s.rows[1][1] >= s.rows[0][1]  # her band, the screen
     assert len(memory.alive(s.t)) == 2
-    clock.sleep(0.4)  # the whole screen's search over 0.6 s old now: her band's rows alone
-    assert len(senses.look().rows) == 1
-    f.step.schedule = Schedule()  # (the default)
-    clock.sleep(1.0)  # (the next whole screen was due a second after the last)
     for _ in range(20):
         clock.sleep(0.137)
         assert len(senses.look().rows) == 2
 
 
-def test_glances_from_the_feed_come_as_often_as_its_frames_or_63_ms_apart(sync, monkeypatch):
-    """Senses.glance from the feed, a frame waited for before each (as the navigator glances): with
-    FEED_GLANCE_EVERY_S 0, every frame it looks at (30 a second), with GLANCE_EVERY_S every other one; each glance's
-    frame time in `glanced_at`. At the feed's rate no frame is asked for on their account; 63 ms apart each glance
-    asks for its frame, the next one coming too soon."""
-    from gamelab.localization import senses as senses_mod
-    from gamelab.perception.eyes import GLANCE_EVERY_S
+def test_glances_from_the_feed_come_with_every_frame_asking_for_none(sync, monkeypatch):
+    """Senses.glance from the feed, a frame waited for before each (as the navigator glances): with FEED_GLANCE_EVERY_S
+    0, every frame it looks at (HZ a second: 15, the pace glances had at 30 frames a second, GLANCE_EVERY_S 63 ms), each
+    glance's frame time in `glanced_at`; no frame is asked for on their account (a frame's period between them would
+    skip a frame shown a little early, and halve them)."""
     f, clock, eyes = sync
     senses = Senses(eyes, f.step.model, band=(100, 100), feed=f)
     clock.sleep(0.5)
-    for every, apart in ((0.0, 1 / feed.HZ), (GLANCE_EVERY_S, 2 / feed.HZ)):
-        monkeypatch.setattr(senses_mod, "FEED_GLANCE_EVERY_S", every)
+    assert senses_mod.FEED_GLANCE_EVERY_S == 0.0
+    senses.glance()
+    times, asked = [], f.counts["asked"]
+    for _ in range(8):
+        senses.wait_frame(0.1)
         senses.glance()
-        times, asked = [], f.counts["asked"]
-        for _ in range(8):
-            senses.wait_frame(0.03)
-            senses.glance()
-            times.append(senses.glanced_at)
-        assert [round(b - a, 4) for a, b in zip(times, times[1:])] == [round(apart, 4)] * 7
-        assert f.counts["asked"] - asked == (0 if every == 0.0 else 8)
-    assert senses.counts["glances"] == 18
+        times.append(senses.glanced_at)
+    assert [round(b - a, 4) for a, b in zip(times, times[1:])] == [round(1 / feed.HZ, 4)] * 7
+    assert f.counts["asked"] == asked and senses.counts["glances"] == 9
 
 
 def test_looks_from_the_feed_teach_the_stacks_camera(sync):

@@ -19,6 +19,7 @@ from gamelab.perception.framecheck import BadLook, LookLost, Problem
 from gamelab.perception.minimap import MinimapPicture
 from gamelab.perception.nametag import RECUT_AFTER, NameTag
 from gamelab.screen import NATIVE, STRETCHED
+from gamelab.sim.fakes import FakeDetector
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TAG = FIXTURES / "native" / "tag_template_1366x768.npy"
@@ -325,7 +326,7 @@ class GameWindow(bench.SavedEyes):
     move scripted for the next look happens between reading where the window is and the capture's check after it."""
 
     def __init__(self, desktop: Desktop, picture: np.ndarray | None = None):
-        super().__init__(np.load(TAG), detector=object(), geo=NATIVE)
+        super().__init__(np.load(TAG), detector=FakeDetector(), geo=NATIVE)  # (no monsters: its whole screens)
         self.screen, self.client = desktop, (1366, 768)
         self.name_tag.full = np.load(TAG)
         self.minimap = MinimapPicture(picture, NATIVE) if picture is not None else None
@@ -650,8 +651,7 @@ def test_a_refused_frame_keeps_the_last_good_hp_and_the_feeds_step_reads_nothing
     """The reviewer's feedhp.py: the 16:48:45 offset frame read 0% HP, and the feed's world step made a hit of it."""
     from gamelab.localization.worldstate import Schedule, WorldStep
     eyes = GameWindow(Desktop(GOOD), tree_picture())
-    step = WorldStep(senses_module.Senses(eyes, tree_model(), band=(100, 100)),
-                     schedule=Schedule(band_s=None, wide_s=None))
+    step = WorldStep(senses_module.Senses(eyes, tree_model(), band=(100, 100)), schedule=Schedule(drops_strips=0))
     good = step.step(lambda ropes: eyes.look_at(GOOD, 1.0, ropes), 1.0, True)
     assert good.where is not None and good.hp > 0.5
     bad = step.step(lambda ropes: eyes.look_at(OFFSET, 1.1, ropes), 1.1, True)

@@ -1,27 +1,29 @@
-"""The continuous feed's step (localization.worldstate) on made-up frames: what it searches when (the whole screen 10
-times a second, her band with it, or at the old pace her band every few frames and the whole screen once a second; what's
-asked on the next frame; the whole screen held back while its searches take the thread), the freshness stamps, the
-monsters re-found every frame, her EXP gains and hits as events, and the Scene a look would have given. And
-the searches off the frame loop: an answer back frames after its own, merged as of its frame (one track, re-found
-from the next frame on, a new one's appearance at its own frame), a look's ask owed while one is out."""
+"""The perception's pass (localization.worldstate) on made-up frames, one a frame at the one rate (localization.rate:
+15 a second): every frame's state with its own frame's whole screen, each detection with its track's id and its speed
+the game data's, what's asked done on the next frame (the drops), the drops' rotation over the strips in view, the
+bars read by time, her EXP gains and hits as events, her look and the search at once giving what one after the other
+gives, and the Scene a look would have given."""
 
+import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from gamelab.localization import mapdata, tracking, worldstate
 from gamelab.localization.pose import Localizer
+from gamelab.localization.rate import HZ
 from gamelab.localization.senses import Senses
-from gamelab.localization.worldstate import Asks, Schedule, Searches, WorldStep, search, to_scene
+from gamelab.localization.worldstate import Asks, Schedule, WorldStep, to_scene
 from gamelab.perception.eyes import Eyes, Observation
 from gamelab.perception.loot import Item
 from gamelab.perception.minimap import OTHER_SHIFT, Marker
 from gamelab.perception.mobs import Mob
-from gamelab.screen import UNITS_PER_HALF_PX as U
+from gamelab.screen import STRETCHED, UNITS_PER_HALF_PX as U
 from gamelab.sim.fakes import FakeDetector, FakeLoot, Frame, Screen
 
-FPS = 30
+FPS = HZ
 SKY = (60, 140, 230)
 
 
@@ -58,242 +60,76 @@ class Drawn(Eyes):
         self.glances = getattr(self, "glances", 0) + 1
         return self.loc.to_dot(1000, 500), self.hp
 
-    def frame(self, t: float, ropes: bool) -> Observation:
+    def picture(self) -> np.ndarray:
         frame = np.empty((540, 960, 3), np.uint8).view(Frame)
         frame[:] = SKY
         frame.screen = Screen(list(self.mobs), list(self.drops))
+        return frame
+
+    def frame(self, t: float, ropes: bool, picture: np.ndarray | None = None) -> Observation:
         exp = np.zeros((26, 140), bool)
         exp[5:15, :self.exp] = True
-        return Observation(t=t, frame=frame, tag=(480, 308), hp=self.hp, mp=1.0, ground=(300, 700),
-                           dot=self.loc.to_dot(1000, 500), others=list(self.others), exp=exp)
+        return Observation(t=t, frame=self.picture() if picture is None else picture, tag=(480, 308), hp=self.hp,
+                           mp=1.0, ground=(300, 700), dot=self.loc.to_dot(1000, 500), others=list(self.others), exp=exp)
 
 
-def pig(x: float, y: float = 500.0, facing: int = 1) -> Mob:
+def pig(x: float, y: float = 500.0, facing: int = 1, pose: str = "move") -> Mob:
     """A pig with its feet at map (x, y), as drawn on screen."""
     sx, feet = round(480 + (x - 1000) / U), round(300 + (y - 500) / U)
-    return Mob("pig", sx, feet - 16, 48, 32, 0.9, float(sx), float(feet), facing, "move")
+    return Mob("pig", sx, feet - 16, 48, 32, 0.9, float(sx), float(feet), facing, pose)
 
 
 @pytest.fixture
 def step():
-    """At the pace these timings were written for, the whole screen once a second (`perceive --wide-every 1`); the
-    default's in test_the_whole_screen_10_times_a_second_her_band_with_it."""
     model = small_map()
-    eyes = Drawn(model)
-    return WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(wide_s=1.0))
+    return WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(drops_strips=0))
 
 
-def frames(step: WorldStep, n: int, start: float = 100.0, asks=None, each=None, late=None) -> list:
-    """`n` frames, 30 a second: their states; the late states of the frames searched go to `late`, as they come
-    back (the step's searches answer at once by default, so each right after its frame)."""
+def frames(step: WorldStep, n: int, start: float = 100.0, asks=None, each=None) -> list:
+    """`n` frames, FPS a second: their states."""
     out = []
     for k in range(n):
         t = start + k / FPS
         if each:
             each(k)
         out.append(step.step(lambda ropes, t=t: step.eyes.frame(t, ropes), t, asks=(asks or {}).get(k)))
-        got = step.came_back()
-        if late is not None:
-            late += got
     return out
 
 
-class Held(Searches):
-    """Searches whose answers come back only when let go (`back`): a search taking frames, as on the feed's
-    thread."""
-
-    def __init__(self, senses):
-        self.senses, self.out, self.ready = senses, None, False
-
-    def free(self):
-        return self.out is None
-
-    def submit(self, job):
-        self.out, self.ready = search(self.senses, job), False
-
-    def back(self):
-        self.ready = True
-
-    def take(self, by=None):
-        if not self.ready:
-            return None
-        out, self.out, self.ready = self.out, None, False
-        return out
-
-
-def test_at_a_whole_screen_a_second_her_band_5_times_a_second(step):
-    late = []
-    states = frames(step, 3 * FPS, late=late)
-    assert step.counts["frames"] == 90 and step.counts["placed"] == 90
-    assert all(s.late for s in late) and not any(s.late for s in states)
-    wide = [s.seq for s in late if s.work["wide"]]
-    band = [s.seq for s in late if s.work["band"]]
-    assert wide == [1, 31, 61]  # the first frame, then every 1 s
-    assert band == [k for k in range(7, 91, 6) if k not in wide]  # 0.2 s after the last search of it
-    slow = WorldStep(Senses(step.eyes, step.model, band=(100, 100)), schedule=Schedule(wide_s=1.0))
-    tenth = []
-    for t in (100 + k / 10 for k in range(20)):
-        slow.step(lambda ropes, t=t: step.eyes.frame(t, ropes), t)
-        tenth += slow.came_back()
-    assert [s.seq for s in tenth if s.work["band"]] == [k for k in range(3, 21, 2) if k != 11]  # (11: the screen)
-    for s in late:  # a frame searched, given again: its own frame's time
-        assert s.t == states[s.seq - 1].t and s.band_at == s.t and (s.wide_at == s.t) == bool(s.work["wide"])
-    for s in states:  # each frame's state says when her band and the screen were last searched (merged by then)
-        assert s.band_at == max((states[k - 1].t for k in wide + band if k < s.seq), default=None)
-        assert s.wide_at == max((states[k - 1].t for k in wide if k < s.seq), default=None)
-
-
-def test_the_whole_screen_15_times_a_second_her_band_with_it():
-    """The default (worldstate.WIDE_EVERY_S; the user, 2026-10-28: "Let's change whole screen search to 10FPS", then
-    "I'm trying to bump the fps to 15 from 10"): every other frame at 30 a second, her band never alone (a whole
-    screen's search counts as hers). Each due a period after the last was due: with frames stamped a hair early or
-    late (the capture's), still 15 (or 10) a second, where counting from the last one's frame waited for a fourth frame
-    each time three came a hair under 0.1 s apart."""
-    model = small_map()
-    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-    assert step.schedule.wide_s == worldstate.WIDE_EVERY_S == 1 / 15
-    late = []
-    states = frames(step, 3 * FPS, late=late)
-    assert [s.seq for s in late if s.work["wide"]] == list(range(1, 91, 2)) and not any(s.work["band"] for s in late)
-    assert all(s.t - s.band_at <= 1 / 15 + 1e-9 and s.band_at == s.wide_at for s in states[1:])
-    rng = np.random.default_rng(3)
-    for wide_s, least, most in ((1 / 15, 44, 46), (0.1, 29, 31), (1.0, 3, 3)):  # (3 s of frames, 30 a second, +-1 ms)
-        jitter = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(wide_s=wide_s))
-        late = []
-        for k in range(3 * FPS):
-            t = 100 + k / FPS + rng.uniform(-0.001, 0.001)
-            jitter.step(lambda ropes, t=t: jitter.eyes.frame(t, ropes), t)
-            late += jitter.came_back()
-        assert least <= sum(s.work["wide"] for s in late) <= most
-    # (counted from the last one's frame instead, as until 2026-10-28: 25 of 30 on these frames)
-
-
-class Paced(Searches):
-    """Searches on a thread of their own as far as the schedule knows (`paced`), each answer in at once, having taken
-    `took` s (its Found.took, as the feed's SearchThread times it)."""
-
-    def __init__(self, senses, took):
-        self.senses, self.took, self._box = senses, took, None
-
-    def free(self):
-        return self._box is None
-
-    def submit(self, job):
-        self._box = search(self.senses, job)
-        self._box.took = self.took
-
-    def take(self, by=None):
-        out, self._box = self._box, None
-        return out
-
-
-def test_the_whole_screen_waits_while_its_searches_take_more_than_half_the_thread():
-    """worldstate.WIDE_SHARE: the schedule's next whole screen waits until the last one's search took at most half the
-    time since its frame (on Tree Dungeon at 1366x768 a crowd's takes 14-20 ms there: 15 a second; one of 50 ms, 10 a
-    second; where one takes 80 ms, 6 a second, the thread left free half the time for what's asked). A look's ask
-    doesn't wait."""
-    model = small_map()
-    for took, every in ((0.015, 2), (0.05, 3), (0.08, 5)):
-        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), searches=None)
-        step.searches = Paced(step.senses, took)
-        late = []
-        frames(step, 3 * FPS, late=late)
-        wide = [s.seq for s in late if s.work["wide"]]
-        assert all(b - a >= every for a, b in zip(wide, wide[1:])) and len(wide) >= 3 * FPS // (every + 1)
-        assert (step.counts["wide put off"] > 0) == (took > 0.5 / 15)  # (half the period's 33 ms)
-    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-    step.searches = Paced(step.senses, 0.08)
-    late = []
-    frames(step, 3, asks={1: Asks(wide=True)}, late=late)  # (asked on the frame after one: done there all the same)
-    assert [s.seq for s in late if s.work["wide"]] == [1, 2]
-    worldstate_share = worldstate.WIDE_SHARE
-    try:
-        worldstate.WIDE_SHARE = None  # (none: as often as the schedule says, whatever it takes)
-        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-        step.searches = Paced(step.senses, 0.08)
-        late = []
-        frames(step, 30, late=late)
-        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 2))
-    finally:
-        worldstate.WIDE_SHARE = worldstate_share
-
-
-def test_a_slow_whole_screen_doesnt_stand_in_for_her_bands_own_search():
-    """worldstate.BAND_STAND_IN_S: a whole screen back within 0.05 s of its frame is her band's search too (at 1366x768
-    a crowd's takes 14-20 ms: her band never searched alone); a slower one (1920x1080's 78-100 ms, the simulator's
-    feed.COSTS), held to about 6 a second by WIDE_SHARE, covers her band in its state but her band's own search goes on
-    every 0.2 s between, as before 10 a second (the review, 2026-10-28: standing in, her band's monsters were known later
-    than with her band's own search where the whole screen takes 100 ms). Inline, any whole screen stands in. (At 15 a
-    second one of 50 ms stands in, held to 10 a second.)"""
-    model = small_map()
-    # (at 0.08 s, every 0.2 s from her band's last own search, or on the frame after a whole screen due with it)
-    for took, alone in ((0.015, []), (0.05, []), (0.08, [2, 8, 14, 20, 27, 33, 39, 45, 52, 58, 64, 70, 77, 83, 89])):
-        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-        step.searches = Paced(step.senses, took)
-        late = []
-        states = frames(step, 3 * FPS, late=late)
-        assert [s.seq for s in late if s.work["band"]] == alone, took
-        wide = [s.seq for s in late if s.work["wide"]]
-        every = {0.015: 2, 0.05: 3, 0.08: 5}[took]
-        assert all(b - a == every for a, b in zip(wide, wide[1:]))  # (WIDE_SHARE's as ever)
-        # (her band searched, alone or with the screen, at most 2, 3 or 5 frames before each frame's state)
-        assert max(s.t - s.band_at for s in states[1:]) == pytest.approx(every / FPS)
-    worldstate_share = worldstate.WIDE_SHARE
-    try:  # (inline, 0.08 s on the real clock: the step waited for it, its answer in the frame's own step)
-        worldstate.WIDE_SHARE = None
-        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-        step.searches = Paced(step.senses, 0.08)
-        step.searches.paced = False
-        late = []
-        frames(step, 30, late=late)
-        assert [s.seq for s in late if s.work["wide"]] == list(range(1, 31, 2))
-        assert not any(s.work["band"] for s in late)
-    finally:
-        worldstate.WIDE_SHARE = worldstate_share
-
-
-def test_drops_asked_for_go_first_alone_the_schedules_searches_on_the_next_free_frame():
-    """worldstate.ASKS_FIRST: a look's drops searched on its frame alone, the whole screen the schedule had due then
-    (and her band) on the next frame the searches are free, a period after the last as ever; asked with them, the whole
-    screen goes along. Off: the schedule's due ones ride with the drops, as until 2026-10-28."""
-    model = small_map()
-    for first in (True, False):
-        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)))
-        late = []
-        old = worldstate.ASKS_FIRST
-        try:
-            worldstate.ASKS_FIRST = first
-            frames(step, 12, asks={2: Asks(loot=True), 6: Asks(loot_wide=True), 8: Asks(wide=True, loot=True)},
-                   late=late)
-        finally:
-            worldstate.ASKS_FIRST = old
-        jobs = {s.seq: (bool(s.work["wide"]), s.loot is not None) for s in late}
-        if first:  # (the screen due on 3 and 7: on 4 and 8, the next frames, and on 5 as due; on 9 asked with them)
-            assert jobs == {1: (True, False), 3: (False, True), 4: (True, False), 5: (True, False), 7: (False, True),
-                            8: (True, False), 9: (True, True), 11: (True, False)}
-        else:
-            assert jobs == {1: (True, False), 3: (True, True), 5: (True, False), 7: (True, True), 9: (True, True),
-                            11: (True, False)}
-        assert step.wide_due == pytest.approx(100.4) and not any(s.work["band"] for s in late)
+def test_every_frame_has_its_own_frames_whole_screen(step):
+    """One pass a frame (the user, 2026-10-30: "make perception output the 15fps whole screen only"): each state's
+    monsters are its own frame's whole screen, her band's and the screen's searches stamped with its own time, no state
+    given again later."""
+    step.eyes.mobs = [pig(1100), pig(1200, 300)]  # (one on the platform 200 above: off her band)
+    states = frames(step, 3 * round(FPS))
+    assert step.counts["frames"] == step.counts["placed"] == step.counts["wide"] == len(states) == 45
+    assert all(s.band_at == s.wide_at == s.t and not s.late for s in states)
+    assert all(sorted(round(m.y) for m in s.monsters) == [300, 500] for s in states)
+    assert all("wide s" in s.work and s.work["detections"] == 2 for s in states)
+    assert [s.work["matched"] for s in states] == [0] + [2] * 44  # (the first frame's made the two tracks)
+    assert all({m.track for m in s.monsters} == {1, 2} for s in states)
 
 
 def test_what_is_asked_is_done_on_the_next_frame(step):
-    late = []
-    frames(step, 12, asks={2: Asks(band=True), 3: Asks(wide=True), 4: Asks(loot=True)}, late=late)
-    assert [s.seq for s in late if s.work["band"]] == [3, 10]  # asked, then 0.2 s after the screen's (4)
-    assert [s.seq for s in late if s.work["wide"]] == [1, 4]
-    assert [s.seq for s in late if s.loot is not None] == [5]  # drops only when asked (no schedule here)
+    """The drops a look asks for are searched on the frame asked for (one shown at the time asked or later), her band
+    and the whole screen being every frame's: asking for them changes nothing."""
+    states = frames(step, 12, asks={2: Asks(band=True), 3: Asks(wide=True), 4: Asks(loot=True),
+                                    6: Asks(1e9, loot_wide=True)})
+    assert [s.seq for s in states if s.loot is not None] == [5]  # (the drops only when asked: no rotation here)
+    assert step.owed is not None and step.owed.loot_wide  # (asked of a frame not shown yet: owed)
+    assert all(s.monsters == [] and s.work["detections"] == 0 for s in states)
 
 
-def test_a_monster_walking_is_refound_every_frame_with_one_id(step):
-    late = []
-    states = frames(step, 60, each=lambda k: setattr(step.eyes, "mobs", [pig(900 + 125 * k / FPS)]), late=late)
-    assert step.counts["re-found"] == 59 and step.tracker.counts["tracks"] == 1
-    assert states[0].monsters == [] and [m.kind for m in late[0].monsters] == ["pig"]  # found by the first search
-    assert all([m.kind for m in s.monsters] == ["pig"] for s in states[1:] + late)
-    tr = states[-1].tracks[0]
-    assert tr.id == 1 and tr.vx == pytest.approx(125, rel=0.2) and tr.facing == 1
-    assert [(e.kind, e.t) for s in states + late for e in s.events] == [("appeared", states[0].t)]
+def test_a_monster_walking_is_one_track_every_frame_walking_its_kinds_speed_the_way_it_faces(step):
+    """Its heading from the detection (facing and pose: the template that matched), its speed the game data's
+    (monsters.walk_vx: a pig's walkSpeed 125, the tables'), from its very first frame; a stand frame stands."""
+    def each(k):
+        step.eyes.mobs = [pig(900 + 125 * k / FPS, pose="move" if k < 30 else "stand")]
+    states = frames(step, 40, each=each)
+    assert step.tracker.counts["tracks"] == 1 and all([m.track for m in s.monsters] == [1] for s in states)
+    assert states[0].tracks[0].vx == 125.0 and states[29].tracks[0].vx == 125.0 and states[30].tracks[0].vx == 0.0
+    assert states[0].tracks[0].facing == 1
+    assert [(e.kind, e.t) for s in states for e in s.events] == [("appeared", states[0].t)]
 
 
 def test_her_exp_gains_and_hits_come_as_events_at_their_frames(step):
@@ -312,9 +148,7 @@ def test_a_scene_from_a_state_is_the_look_it_stands_for(step):
     above = pig(1200, 300)  # on the platform 200 above: out of her band (100 up)
     step.eyes.mobs = [pig(1100), above]
     step.eyes.drops = [Item("mesos", 480 + round(50 / U), 300 - 6, 13, 13, 0.9)]
-    late = []
-    frames(step, 1, asks={0: Asks(wide=True, loot=True)}, late=late)  # (drops asked go alone: the screen asked too)
-    (s,) = late  # the frame searched, with what was found in it
+    (s,) = frames(step, 1, asks={0: Asks(wide=True, loot=True)})
     model = step.model
     band = to_scene(s, model, (100, 100))
     assert [m.x for m in band.monsters] == [pytest.approx(1100, abs=2)] and band.searched and not band.wide
@@ -332,151 +166,26 @@ def test_nothing_is_read_from_a_frame_the_game_isnt_showing(step):
     assert not s.visible and s.why == "not in front" and step.counts["not visible"] == 1
 
 
-def test_watch_searches_the_drops_on_its_own_schedule():
+def test_the_drops_rotation_searches_every_strip_in_view_her_platforms_most_often():
+    """worldstate.DROPS_STRIPS a frame, unasked, the one searched longest ago first (her platform's counted DROPS_HER
+    times as old): every strip in view within a few frames, each one's last search in every state (`drops`: when, and
+    what it had), the state's `loot` still only what was asked for."""
     model = small_map()
-    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), throws=False, schedule=worldstate.WATCH)
-    late = []
-    states = frames(step, 3 * FPS, late=late)
-    assert not any(s.loot is not None for s in states)  # the drops come with the frames searched, given again
-    assert [s.seq for s in late if s.loot is not None and not s.loot_wide] == [16, 31, 46, 76]  # every 0.5 s
-    assert [s.seq for s in late if s.loot_wide] == [1, 61]
-
-
-# --- the searches off the frame loop: answers that come back frames later ---------------------------------
-
-def held_step():
-    model = small_map()
-    eyes = Drawn(model)
-    senses = Senses(eyes, model, band=(100, 100))
-    searches = Held(senses)
-    return WorldStep(senses, schedule=Schedule(band_s=None, wide_s=None), searches=searches), searches
-
-
-def one(step, k, asks=None):
-    t = 100.0 + k / FPS
-    return step.step(lambda ropes: step.eyes.frame(t, ropes), t, asks=asks)
-
-
-def test_a_monster_a_late_search_found_is_one_track_from_its_frame_re_found_from_the_next():
-    step, searches = held_step()
-    step.eyes.mobs = [pig(1100)]
-    first = one(step, 0, Asks(band=True))  # searched on frame 1 ...
-    assert first.monsters == [] and not searches.free()
-    for k in (1, 2):
-        step.eyes.mobs = [pig(1100 + 4 * k)]
-        assert one(step, k).monsters == [] and step.came_back() == []  # ... still out: nothing followed yet
-    searches.back()
-    step.eyes.mobs = [pig(1112)]
-    fourth = one(step, 3)  # back by frame 4: merged, and re-found in it
-    (late,) = step.came_back()
-    assert late.late and late.seq == 1 and late.t == first.t and late.band_at == first.t
-    assert [round(m.x) for m in late.monsters] == [1100]  # where it was in its own frame
-    assert [(e.kind, e.t) for e in late.events] == [("appeared", first.t)]
-    assert [round(m.x) for m in fourth.monsters] == [1112] and fourth.band_at == first.t and fourth.events == []
-    (tr,) = step.tracker.tracks.values()
-    assert tr.first_seen == first.t and tr.last_seen == fourth.t and tr.seen == 2
-    # Searched again, with it re-found in that frame: it's that track, no new one and no event
-    one(step, 4, Asks(band=True))
-    searches.back()
-    one(step, 5)
-    (again,) = step.came_back()
-    assert again.seq == 5 and [m.kind for m in again.monsters] == ["pig"] and again.events == []
-    assert step.tracker.counts["tracks"] == 1
-
-
-def test_a_search_out_when_one_is_asked_for_owes_it_and_hands_it_over_once_back_on_a_frame_at_its_time():
-    step, searches = held_step()
-    one(step, 0, Asks(wide=True))
-    assert not searches.free()
-    one(step, 1, Asks(1e9, band=True))  # asked of a frame after this one: not yet, whatever
-    assert step.owed is not None and step.owed.band
-    second = one(step, 2, Asks(band=True, loot=True))  # (merged with what was owed)
-    searches.back()
-    assert [s.seq for s in step.came_back()] == [1]  # the screen's, back between frames ...
-    assert searches.out is not None and searches.out.job.seq == 3 and searches.out.job.band  # ... then hers, at once
-    assert searches.out.job.loot and step.owed is None and second.seq == 3
-
-
-def test_a_late_search_doesnt_bring_back_a_monster_found_dead_since_nor_make_it_anew():
-    step, searches = held_step()
-    step.eyes.mobs = [pig(1100)]
-    one(step, 0, Asks(band=True))
-    searches.back()
-    one(step, 1)
-    step.came_back()
-    (tr,) = step.tracker.tracks.values()
-    one(step, 2, Asks(band=True))  # searched with the pig in view (and re-found in that frame) ...
-    tr.state, tr.judged, tr.died_at, tr.cause = "dead", 100.0 + 2.5 / FPS, 100.0 + 2.5 / FPS, "other"
-    known = searches.out.job.known
-    searches.out.job.known = {}  # ... as if its re-find had missed it in that frame
-    step.eyes.mobs = []
-    searches.back()
-    one(step, 3)
-    (late,) = step.came_back()
-    assert late.events == [] and step.tracker.counts["tracks"] == 1 and known
-    assert step.tracker.counts["late sightings of the dead"] == 1 and step.tracker.tracks[tr.id].state == "dead"
-
-
-def test_a_re_find_the_tracker_turned_down_doesnt_hide_that_monster_from_a_late_search():
-    # A fading pig's window catches another walking by, 18 units off: the tracker turns that re-find down (a dying
-    # one doesn't follow a walker through), so the search of that frame shows the walker as inline it would have:
-    # it's not taken for the fading one's re-find.
-    step, searches = held_step()
-    step.eyes.mobs = [pig(1100)]
-    one(step, 0, Asks(band=True))
-    searches.back()
-    for k in (1, 2, 3, 4, 5):
-        one(step, k)
-    step.came_back()
-    (tr,) = step.tracker.tracks.values()
-    tr.state = "dying"
-    step.eyes.mobs = [pig(1118)]  # the fading one gone, a walker in its window
-    one(step, 6, Asks(band=True))
-    assert tr.id not in step.tracker.refound_seen
-    searches.back()
-    one(step, 7)
-    (late,) = step.came_back()
-    assert [round(m.x) for m in late.monsters] == [1118]  # the walker, seen in that frame
-    # ... and matched to a track as the search's sighting (the nearest, the one that had been fading: as inline),
-    # not dropped as one of the frame's re-finds
-    (merged,) = [t for t in late.tracks if t.id == tr.id]
-    assert merged.last_seen == pytest.approx(100.0 + 6 / FPS)
-
-
-@pytest.mark.parametrize("out", ["drops", "band"])
-def test_a_hidden_track_waits_to_be_judged_for_a_search_for_monsters_out_and_not_for_one_for_the_drops(out):
-    # Its frame's search for monsters, inline, would have been merged before the track was judged; one for the
-    # drops alone can't see it. Once due, the track is judged at the next frame with only that out: someone else's
-    # kill, another player by it on the minimap (with nobody by it, it would be let go: tracking.OTHERS_BY_PLAYER).
-    step, searches = held_step()
-    step.eyes.mobs = [pig(1100)]
-    x, y = step.eyes.loc.to_dot(1250, 500)
-    step.eyes.others = [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
-    one(step, 0, Asks(band=True))
-    searches.back()
-    for k in range(1, 8):
-        one(step, k)
-        step.came_back()
-    (tr,) = step.tracker.tracks.values()
-    step.eyes.mobs = []  # out of sight: hidden, then due HIDE_S after it was last seen
-    due = tr.last_seen + tracking.HIDE_S
-    k = 8
-    while 100.0 + (k + 1) / FPS <= due:
-        one(step, k)
-        k += 1
-    one(step, k, Asks(loot=True) if out == "drops" else Asks(band=True))  # handed over on the frame before it's due
-    assert not searches.free()
-    while 100.0 + k / FPS < due + 0.2:
-        k += 1
-        one(step, k)
-    if out == "drops":
-        assert step.tracker.tracks[tr.id].state == "dead" and step.tracker.counts["died other"] == 1
-        assert step.tracker.tracks[tr.id].cause == "other"
-    else:
-        assert step.tracker.tracks[tr.id].state == "hidden" and step.tracker.counts["died other"] == 0
-        searches.back()
-        one(step, k + 1)  # it wasn't there: judged as soon as that search is merged
-        assert step.tracker.tracks[tr.id].state == "dead"
+    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), throws=False)
+    assert step.schedule.drops_strips == worldstate.DROPS_STRIPS == 2
+    step.eyes.drops = [Item("mesos", 480 + round(50 / U), 300 - 6, 13, 13, 0.9)]  # on her platform
+    states = frames(step, 8)
+    assert all(s.loot is None for s in states) and all(s.work["strips"] == 2 for s in states)
+    first = states[0].drops
+    assert len(first) == 2 and {d.platform for d in first} == {p.id for p in model.places}
+    assert all(d.at == states[0].t for d in first)  # (two strips in view, both searched on the first frame)
+    mine = model.platform_under(1000, 500).id
+    (strip,) = [d for d in states[-1].drops if d.platform == mine]
+    assert [d.item.kind for d in strip.loot] == ["mesos"] and strip.at == states[-1].t
+    # A look's drops asked for: searched whole on their frame, before the rotation, which takes the rest.
+    (asked,) = frames(step, 1, start=101.0, asks={0: Asks(loot=True)})
+    assert [d.item.kind for d in asked.loot] == ["mesos"] and asked.work["asked strips"] == 1
+    assert asked.work["strips"] == 2  # (the other platform's by rotation)
 
 
 def test_a_frame_that_fails_its_checks_says_why_in_its_state_and_is_neither_placed_nor_usable(step):
@@ -503,113 +212,108 @@ def test_a_frame_that_fails_its_checks_says_why_in_its_state_and_is_neither_plac
     assert step.step(None, good.t + 0.4, False, why="gone").bad == Problem("window", "gone")
 
 
-def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_every_5th_frame(monkeypatch):
-    # worldstate.BAR_EVERY, BAR_SHOWN_S: in between, its track's bar as last read. (The searches read the bars of what
-    # they find: none here but the first frame's.) BAR_UNSEEN_S: seen again after a while unseen, its bar is read in the
+def test_a_monsters_bar_is_read_while_it_shows_one_or_she_threw_its_way_else_every_bar_every_s(monkeypatch):
+    # worldstate.BAR_EVERY_S (0.2 s: every third frame at 15 a second), BAR_SHOWN_S: in between, its track's bar as last
+    # read. A new one's is read on its first frame. BAR_UNSEEN_S: seen again after a while unseen, its bar is read in the
     # frame it's back in (a pause between the batches below counts as one).
-    from gamelab.localization.worldstate import BAR_EVERY
+    from gamelab.localization.worldstate import BAR_EVERY_S
+    every = round(BAR_EVERY_S * FPS)
+    assert every == 3
     model = small_map()
-    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(band_s=None, wide_s=None))
+    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), schedule=Schedule(drops_strips=0))
     reads, bar = [], {"left": None}
 
     def read(obs, mob):
         reads.append(obs.t)
         return bar["left"]
     step.eyes.bar = read
-    step.eyes.mobs = [pig(1100)]
-    frames(step, 30, asks={0: Asks(band=True)})  # (found, and followed since)
+    step.eyes.mobs = [pig(1100, pose="stand")]
+    frames(step, 1)
+    assert len(reads) == 1  # (new: read on its first frame)
+    frames(step, 14, start=100.0 + 1 / FPS)
     (tr,) = step.tracker.tracks.values()
     reads.clear()
-    states = frames(step, 3 * BAR_EVERY, start=101.0)
-    assert len(reads) == 3  # unhurt, nobody throwing at it: every 5th frame
+    states = frames(step, 3 * every, start=101.0)
+    assert len(reads) == 3  # unhurt, nobody throwing at it: every third frame
     bar["left"] = 0.6  # hit by someone: its next read shows it, and from then on it's read every frame
-    states = frames(step, 2 * BAR_EVERY, start=102.0)
+    states = frames(step, 2 * every, start=101.0 + 3 * every / FPS)
     first = next(i for i, st in enumerate(states) if st.monsters[0].bar == 0.6)
-    assert first < BAR_EVERY and len(reads) == 3 + 1 + (2 * BAR_EVERY - first - 1)
+    assert first < every and len(reads) == 3 + 1 + (2 * every - first - 1)
     assert all(st.monsters[0].bar == 0.6 for st in states[first:])
-    # A track whose bar went (none shown for BAR_SHOWN_S) is read every 5th frame again, its last bar kept meanwhile;
+    # A track whose bar went (none shown for BAR_SHOWN_S) is read every third frame again, its last bar kept meanwhile;
     # one she threw at is read every frame.
     bar["left"] = None
-    frames(step, 30, start=103.0)
+    frames(step, 15, start=103.0)
     reads.clear()
-    states = frames(step, 2 * BAR_EVERY, start=104.0)
+    states = frames(step, 2 * every, start=104.0)
     assert len(reads) == 2 and all(st.monsters[0].bar == (None if st.t in reads else 0.6) for st in states)
     step.throw(105.0, "right")
     reads.clear()
-    frames(step, BAR_EVERY, start=105.01)
-    assert len(reads) == BAR_EVERY
-    # Hidden 0.3 s (under her damage numbers, say), then back: read in the frame it's back in, whatever BAR_EVERY says
-    # (its bar as last read is from before it hid), and not in the next.
-    from gamelab.localization import worldstate
-    monkeypatch.setattr(worldstate, "BAR_EVERY", 10_000)
-    frames(step, 30, start=110.0)
+    frames(step, every, start=105.01)
+    assert len(reads) == every
+    # Hidden 0.3 s (under her damage numbers, say), then back: read in the frame it's back in, whatever BAR_EVERY_S
+    # says (its bar as last read is from before it hid), and not in the next.
+    monkeypatch.setattr(worldstate, "BAR_EVERY_S", 10_000)
+    frames(step, 15, start=110.0)
     step.eyes.mobs = []
-    frames(step, 9, start=111.0)
-    step.eyes.mobs = [pig(1100)]
+    frames(step, 5, start=111.0)
+    step.eyes.mobs = [pig(1100, pose="stand")]
     reads.clear()
-    back = frames(step, 3, start=111.3)
+    back = frames(step, 3, start=111.4)
     assert len(reads) == 1 and reads[0] == back[0].t and back[0].monsters
 
 
-def test_a_frames_refinds_on_the_pool_give_the_states_of_one_thread():
-    # worldstate.REFIND_THREADS: several followed at once, each read its bar if due, placed in turn: the same states,
-    # tracks and events as one after another, the re-finds on the pool's threads. A fake detector re-finds in Python, on
-    # the frame loop's thread; the real one's matches let go of Python's lock, so it gets the pool.
-    import threading
+def test_her_look_and_the_whole_screen_at_once_give_what_one_after_the_other_gives(monkeypatch):
+    """worldstate.HALVES: with the real monster detector and the frame's picture handed with its look (the feed's Look,
+    at the game's own size), the whole screen is searched on the halves' thread while her look is taken, and the states
+    are the same, frame by frame, as with the search after her look (HALVES off)."""
     from gamelab.perception.mobs import MobDetector
-    model = small_map()
-    runs, where = {}, {}
-    for threads in (1, 4):
-        step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), refind_threads=threads)
-        refind, seen = step.eyes.refind, set()
-        step.eyes.refind = lambda *a, **k: seen.add(threading.current_thread().name) or refind(*a, **k)
 
-        def walk(k, eyes=step.eyes):
-            eyes.mobs = [pig(700 + 125 * k / FPS), pig(1000 - 90 * k / FPS, facing=-1), pig(1250 + 60 * k / FPS)]
-            if k >= 40:
-                eyes.mobs = eyes.mobs[1:]  # one goes
-        late = []
-        states = frames(step, 60, each=walk, late=late)
-        runs[threads] = [(repr(st.tracks), st.monsters, st.events, st.work.get("re-finds", 0))
-                         for st in states + late]
-        where[threads] = seen
+    class Real(FakeDetector, MobDetector):  # (a real detector as the step tells them, searching as the fake does)
+        def detect_wide(self, frame, rows, band=120, step=90):
+            self.threads.add(threading.current_thread().name)
+            return FakeDetector.detect_wide(self, frame, rows)
+
+    class Look:
+        def __init__(self, eyes, t):
+            self.eyes, self.t, self.full = eyes, t, eyes.picture()
+
+        def __call__(self, ropes):
+            return self.eyes.frame(self.t, ropes, self.full)
+
+    model = small_map()
+    runs = {}
+    for halves in (True, False):
+        monkeypatch.setattr(worldstate, "HALVES", halves)
+        eyes = Drawn(model)
+        eyes.detector = Real()
+        eyes.detector.threads = set()
+        step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(drops_strips=0))
+        eyes.geo = SimpleNamespace(look_scale=1, client=(960, 540), hud_top=STRETCHED.hud_top)  # (the look frame the
+        #                                                                                          capture itself)
+        assert (step._halves is not None) == halves
+        states = []
+        for k in range(30):
+            t = 100.0 + k / FPS
+            eyes.mobs = [pig(700 + 100 * k / FPS), pig(1300 - 100 * k / FPS, facing=-1)]
+            states.append(step.step(Look(eyes, t), t))
+        runs[halves] = [(repr(st.tracks), st.monsters, st.events) for st in states]
+        names = eyes.detector.threads
+        assert all(n.startswith("wide") for n in names) if halves else names == {threading.current_thread().name}
         step.close()
-    assert runs[4] == runs[1] and sum(r[3] for r in runs[1]) > 100
-    assert where[1] == {threading.current_thread().name} and where[4] and all(n.startswith("refinds") for n in where[4])
-    assert WorldStep(Senses(Drawn(model), model, band=(100, 100)))._refinds is None  # (FakeDetector)
-    real = Drawn(model)
-    real.detector = MobDetector.__new__(MobDetector)
-    assert WorldStep(Senses(real, model, band=(100, 100)))._refinds._max_workers == worldstate.REFIND_THREADS
+    assert runs[True] == runs[False]
 
 
-def test_with_a_real_detector_each_track_is_looked_for_near_first_with_a_memo_of_its_own(monkeypatch):
-    # MobDetector.refind's `near` (mobs.near_pad: its kind's fastest walk, the tracker's clamp, over the time since it
-    # was last seen) and `memo` (one dict a track, kept from frame to frame while it's followed); the simulator's fakes
-    # get neither, and re-find as they always did. (Each re-find asked on its own: ONE_CALL's, all in one call in C, are
-    # tests/test_refind.py's.)
-    from gamelab.perception.mobs import MobDetector, near_pad
-
-    monkeypatch.setattr(worldstate, "ONE_CALL", False)
-
-    class Real(FakeDetector, MobDetector):  # (a real detector as the step tells them, re-finding as the fake does)
-        def refind(self, frame, box, kind, template="", facing=0, bounds=None, fallback=True, near=None, memo=None):
-            self.asked.append((kind, near, memo))
-            return FakeDetector.refind(self, frame, box, kind, template, facing, bounds, fallback)
-
-    model = small_map()
-    assert WorldStep(Senses(Drawn(model), model, band=(100, 100)))._memos is None
-    eyes = Drawn(model)
-    eyes.detector = Real()
-    eyes.detector.asked = []
-    step = WorldStep(Senses(eyes, model, band=(100, 100)), refind_threads=1)
-    eyes.mobs = [pig(700), pig(1250)]
-    frames(step, 3)
-    asked = eyes.detector.asked
-    speed = tracking.SPEED_CLAMP * step.tracker.walking["pig"] / Drawn(model).geo.units_per_px
-    assert len(asked) == 4 and all(near == near_pad(speed, 1 / FPS) for _, near, _ in asked)
-    assert asked[0][2] is asked[2][2] and asked[1][2] is asked[3][2] and asked[0][2] is not asked[1][2]
-    assert set(step._memos) == {tr.id for tr in step.tracker.live()}
-    monkeypatch.setattr(worldstate, "NEAR_FIRST", False)
-    asked.clear()
-    frames(step, 1, start=101.0)
-    assert asked and all(near is None and memo is not None for _, near, memo in asked)
+def test_a_track_out_of_sight_too_long_with_another_player_by_it_is_their_kill(step):
+    """Hidden past tracking.HIDE_S with no gain of hers and another player's dot by it: someone else's kill, judged on
+    the first frame after it's due (until 2026-10-30 a search out of a frame after its last sighting held it back)."""
+    step.eyes.mobs = [pig(1100, pose="stand")]
+    x, y = step.eyes.loc.to_dot(1250, 500)
+    step.eyes.others = [Marker("stranger", x + OTHER_SHIFT, y + OTHER_SHIFT)]
+    frames(step, 8)
+    (tr,) = step.tracker.tracks.values()
+    step.eyes.mobs = []  # out of sight: hidden, then due HIDE_S after it was last seen
+    due = tr.last_seen + tracking.HIDE_S
+    states = frames(step, round((due - 100.0) * FPS) + 2 - 8, start=100.0 + 8 / FPS)
+    dead = next(st for st in states if any(e.kind == "died" for e in st.events))
+    assert dead.t > due and dead.t - due <= 1 / FPS + 1e-9 and step.tracker.tracks[tr.id].cause == "other"

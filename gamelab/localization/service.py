@@ -3,22 +3,21 @@ perceive`, kept up by the babysitter), the latest of what it saw handed to every
 the mini-map. (The user, 2026-10-25: "perception should just always run and the other modules just work based on
 latest perception result"; and, asked how: "run one shared perception process at all times".)
 
-What it runs is the feed's frame loop (localization.feed.run: the world step on every frame, its searches on a thread
-of their own, localization.worldstate) on the screen (perception.frames.ScreenFrames, the process's one DXGI
-duplication: capture.shared). It never sends a key and never brings the game forward; it waits for the game window
-when there's none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the
-user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is running as a
-constant thing and hunt is only a consumer of it"): HZ frames a second, the whole screen searched 15 times a second
-(every other frame; her band with it; on its own every 0.2 s only if the whole screen falls behind or takes longer
-than 0.05 s, as at 1920x1080: SCHEDULE, worldstate.WIDE_EVERY_S, BAND_STAND_IN_S);
-what a command asks is searched on the next frame besides, and changes neither. The
-drops are searched at `watch`'s rates while no command that hunts is attached (a hunt asks for those it wants on its
-frames: HUNTING). Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
+What it runs is the feed's frame loop (localization.feed.run: one pass of the world step a frame, localization.
+worldstate: her look and the whole screen's search at once, her place, the HUD and her touches, the monsters matched to
+their tracks, the drops) on the screen (perception.frames.ScreenFrames, the process's one DXGI duplication:
+capture.shared). It never sends a key and never brings the game forward; it waits for the game window when there's
+none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the user, 2026-10-26:
+"Run the perception at the same rate between hunt and idle. The idea is perception is running as a constant thing and
+hunt is only a consumer of it"): HZ frames a second (localization.rate: 15 since 2026-10-30, everything once a frame:
+"I meant everything at 15 fps"); a frame a command asks for is taken at once, the next a period after it (feed.run), and
+the drops it asks for are searched on it, besides DROPS_STRIPS strips in view by rotation on every frame (SCHEDULE,
+HUNTING alike). Her throws are known to the tracker while a command that tells them is attached. Its telemetry is
 `watch`'s was (a scene 10 times a second, the tracks twice, the events, her EXP: `Publisher`), in <time>-perceive.jsonl,
-and every 10 s the searches' pace and time (a 'perf' record, as its console line says them: `Perf`).
-It keeps the rolling recording too (control.recording, handed to it by `perceive`: its own frames, every other one,
-the last 5 minutes in memory; `perceive --no-record` without), which `gamelab recorder` kept with a capture of its own
-until 2026-10-26.
+and every 10 s the pass's pace and time (a 'perf' record, as its console line says them: `Perf`).
+It keeps the rolling recording too (control.recording, handed to it by `perceive`: its own frames, every one, the last 5
+minutes in memory; `perceive --no-record` without), which `gamelab recorder` kept with a capture of its own until
+2026-10-26.
 
 The commands are its clients (`ServiceClient`, a localization.feed.Feed: what Senses reads), attaching and detaching
 as they start and end, any number at once, none of them its children:
@@ -62,9 +61,9 @@ from .. import character, gcstats, paths, telemetry, window
 from ..perception.framecheck import BadLook, Problem
 from ..screen import Geometry, geometry
 from . import feed
-from .feed import Feed, Ring, Runner, frame_shape, newest_fresh, newest_frame, to_ask, adds
+from .feed import Feed, Ring, Runner, frame_shape, newest_fresh, newest_frame, to_ask
 from .tracking import Event
-from .worldstate import WATCH, Asks, Schedule, SearchThread, WorldState, WorldStep, to_scene
+from .worldstate import Asks, Schedule, WorldState, WorldStep, to_scene
 
 ADDRESS = r"\\.\pipe\gamelab-perceive"
 MUTEX = "Local\\gamelab-perceive"
@@ -74,12 +73,13 @@ MUTEX = "Local\\gamelab-perceive"
 SAVED_ADDRESS = ADDRESS + "-saved"
 SAVED_MUTEX = MUTEX + "-saved"
 WHICH = "GAMELAB_PERCEIVE"
-# Look frames kept in shared memory: at 30 frames a second the newest 533 ms (50 MB at 1366x768). A look's frame is
-# copied out as its state is taken, and one overwritten since comes out black (ServiceClient.frame_of: counted, `lost`).
-# 8 until 2026-10-26, 533 ms at the 15 frames a second live made then; at the 30 the native hot paths make, 267 ms, and
-# on the crowd's replays a look's frame was then overwritten 86-88 ms after the look had its state at the soonest
-# (whole-screen looks, their frames 254-268 ms old then: D:/MapleHelper-scratch/pconst/review-native-correct; master's
-# 153-324 ms). With 16, 346-356 ms (D:/MapleHelper-scratch/pconst/pnative-finish/margin.txt).
+# Look frames kept in shared memory: at 15 frames a second the newest 1.07 s (50 MB at 1366x768; at 30 a second until
+# 2026-10-30, 533 ms). A look's frame is copied out as its state is taken, and one overwritten since comes out black
+# (ServiceClient.frame_of: counted, `lost`). 8 until 2026-10-26, 533 ms at the 15 frames a second live made then; at the
+# 30 the native hot paths made, 267 ms, and on the crowd's replays a look's frame was then overwritten 86-88 ms after the
+# look had its state at the soonest (whole-screen looks, their frames 254-268 ms old then:
+# D:/MapleHelper-scratch/pconst/review-native-correct; master's 153-324 ms). With 16 at 30, 346-356 ms
+# (D:/MapleHelper-scratch/pconst/pnative-finish/margin.txt); twice that margin at 15.
 RING_SLOTS = 16
 FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a look frame is half size)
 # Frames a second, whoever is attached (a look's frame comes at once, whatever the rate). Until 2026-10-26 this was the
@@ -94,22 +94,24 @@ FULL_SLOTS = 2        # full-size frames, for the `full` asks (at 1920x1080 a lo
 # behind its step. Nor 5 between hunts with fewer searches (0.20 cores on the saved frames against 0.83): the user,
 # "Don't reduce perception fps please". Between hunts on the crowd's saved frames (D:/MapleHelper-scratch/pconst/plan,
 # replay.py, no client): 10 a second with `watch`'s searches took 1.00 core; 30 with the hunt's, 1.42 cores, the frame
-# loop saturated at 14.5 a second (README, Perception at one pace).
-HZ = 30.0
-# What's searched without being asked: the whole screen every 1/15 s whoever is attached, her band with it (its own
-# search every 0.2 s only when no search for monsters came in that long, a whole screen's counting if it took 0.05 s at
-# most: worldstate.BAND_EVERY_S, WIDE_EVERY_S, BAND_STAND_IN_S; every 0.1 s that day till the evening, once a
-# second and her band every 0.2 s until 2026-10-28; the hunt's schedule, until 2026-10-26 only while a command that hunts
-# was), and the drops at `watch`'s rates (her
+# loop saturated at 14.5 a second (README, Perception at one pace). Since 2026-10-30 the one rate of localization.rate
+# (15: everything once a frame, the whole screen's search in every frame's pass; README, Perception at 15 frames a
+# second, one pass a frame).
+HZ = feed.HZ
+# What's searched without being asked: since 2026-10-30 the whole screen in every frame's pass and DROPS_STRIPS strips
+# of drops in view by rotation (worldstate.DROPS_STRIPS), whoever is attached. Until then the whole screen every 1/15 s
+# on a thread of its own, her band with it (its own search every 0.2 s only when no search for monsters came in that
+# long; every 0.1 s on 2026-10-28 till the evening, once a second and her band every 0.2 s until then; the hunt's
+# schedule, until 2026-10-26 only while a command that hunts was), and the drops at `watch`'s rates (her
 # platform's every 0.5 s, every platform in view every 2 s: SCHEDULE) for the mini-map while none hunts. While one does,
 # the drops only when asked (HUNTING): the hunt asks for those it wants on the frames it takes (55% of the tours' looks),
 # published as any. Searched on schedule beside them (worldstate.WATCH whoever is attached, as first built), the
 # service took 0.20 cores more (1.86 against 1.67) and a look with her drops waited 31 ms longer (median: 177 against
 # 146; her band's 11 longer): the crowd's saved frames with a hunting client, 3 runs of each alternated, the machine
 # 73-89% busy (D:/MapleHelper-scratch/pconst/build1/replay, pooled.py; README, Perception at one pace).
-SCHEDULE = WATCH
-HUNTING = Schedule()  # the hunt's: the whole screen every 1/15 s (her band with it), the drops when asked
-QUEUE_KEEP = 64       # states a client's writer holds at most (2 s at HZ): older ones are dropped, a gap said
+SCHEDULE = Schedule()
+HUNTING = Schedule()  # the hunt's: the same (the drops it wants asked for on its frames)
+QUEUE_KEEP = 64       # states a client's writer holds at most (4.3 s at HZ): older ones are dropped, a gap said
 KEEP = 8              # states a client keeps (feed.KEEP)
 EVENTS_KEPT = 10_000  # events a client keeps for its next drain at most
 RECONNECT_S = 0.5     # s between a client's tries to reach the service
@@ -118,11 +120,11 @@ HELLO_WAIT_S = 3.0    # s a command waits at its start for the service's welcome
 FULL_WAIT_S = 1.0     # s a `full` ask waits for its frame
 STATUS_S = 10.0       # s between the service's lines on the console
 # A service whose frame loop hasn't gone round for STUCK_S (BUILD_STUCK_S while it makes a run: the map's templates
-# loaded), or whose search has been out that long, ends its process (EXIT_STUCK): its clients' `ensure` and the
-# babysitter start another. With the process and its pipe up and the loop hung, every look found nothing to act on and a
-# hunt stood still to its end, nothing restarting it. The loop goes round at least every 1/HZ s, and every
-# NOT_VISIBLE_S without the game; a search takes 0.03-0.3 s. A client that hears nothing for SILENT_S (a state comes
-# every 1/HZ s at the least, every 0.25 s without the game) drops its connection and reconnects.
+# loaded), a pass hung in it (the whole screen's search too: it's in the pass since 2026-10-30), ends its process
+# (EXIT_STUCK): its clients' `ensure` and the babysitter start another. With the process and its pipe up and the loop
+# hung, every look found nothing to act on and a hunt stood still to its end, nothing restarting it. The loop goes round
+# at least every 1/HZ s, and every NOT_VISIBLE_S without the game; a pass takes 10-60 ms. A client that hears nothing for
+# SILENT_S (a state comes every 1/HZ s at the least, every 0.25 s without the game) drops its connection and reconnects.
 STUCK_S = 10.0
 BUILD_STUCK_S = 60.0
 EXIT_STUCK = 3
@@ -137,14 +139,6 @@ TRACKS_S = 0.5
 # ('lv_read': level; perception.lv_number), from 2026-10-28; and her touches (worldstate's 'touch': MISS or damage,
 # perception.touches), each also said in the service's log
 EVENTS = ("died", "exp_gain", "victim", "let_go", "hp_read", "lv_read", "touch")
-
-
-def pace(wide_s: float) -> None:
-    """The whole screen searched every `wide_s` s without being asked, whoever is attached (both schedules: `perceive
-    --wide-every`, to try another pace than worldstate.WIDE_EVERY_S's 1/15 s; README, The whole screen 15 times a
-    second)."""
-    global SCHEDULE, HUNTING
-    SCHEDULE, HUNTING = replace(SCHEDULE, wide_s=wide_s), replace(HUNTING, wide_s=wide_s)
 
 
 def saved(which: str | None = None) -> bool:
@@ -284,7 +278,7 @@ def screen_world(map_id: int, title: str, template: np.ndarray, band: tuple[floa
     eyes = Eyes(title, template, detector_for(model, geo), screen=frames.grabber, geo=geo, minimap_picture=picture)
     eyes.log = log
     senses = Senses(eyes, model, band, shape=character.active().shape)  # (her Shape: who plays, the thief's by default)
-    return Runner(frames, eyes, WorldStep(senses, False, schedule, SearchThread(senses)), title)
+    return Runner(frames, eyes, WorldStep(senses, False, schedule), title)
 
 
 def serve_saved(files: list[str], map_id: int, template: np.ndarray, band: tuple[float, float], address: str,
@@ -617,15 +611,11 @@ class Service:
         self._beat = (time.monotonic(), limit if limit is not None else (self.stuck_s or STUCK_S))
 
     def stuck(self, now: float | None = None) -> str | None:
-        """Why the service is stuck (the frame loop not gone round in time, a search out too long), or None."""
+        """Why the service is stuck (the frame loop not gone round in time: a pass hung), or None."""
         now = time.monotonic() if now is None else now
         at, limit = self._beat
         if now - at > limit:
             return f"the frame loop hasn't gone round for {now - at:.1f} s"
-        searches = None if self.runner is None else self.runner.step.searches
-        since = getattr(searches, "since", None)
-        if since is not None and now - since > (self.stuck_s or STUCK_S):
-            return f"a search has been out for {now - since:.1f} s"
         return None
 
     def _watchdog(self) -> None:
@@ -664,7 +654,6 @@ class Service:
             self._why = Problem("picture", f"the perception service can't look at map {map_id}: {e}")
             return self.runner is not None
         self._went_round()
-        runner.step.searches.wake = self.wake  # (the frame loop may be waiting for a request or its next frame)
         if self.recording is not None and hasattr(runner.frames, "cover_check"):
             runner.frames.cover_check = True  # (the screen's frames say whether a window was over the game: Frame.over)
         old = (self.runner, self.ring, self.full_ring)
@@ -729,7 +718,7 @@ class Service:
 
     def _poll(self, wait: float) -> tuple[Asks | None, bool]:
         """feed.run's: what the clients asked (merged), and whether to stop (asked to, or a new run is due), waiting up
-        to `wait` s for a request or the searches' answer."""
+        to `wait` s for a request."""
         self._went_round()
         deadline = time.monotonic() + wait
         asks = None
@@ -741,20 +730,11 @@ class Service:
                 if self._stop or self._rebuild is not None:
                     return asks, True
                 left = deadline - time.monotonic()
-                if asks is not None or left <= 0 or self._woken:
-                    self._woken = False
+                if asks is not None or left <= 0:
                     break
                 self._cond.wait(left)
         self._tune()
         return asks, False
-
-    _woken = False
-
-    def wake(self) -> None:
-        """The searches' answer is in: the frame loop merges it (it may be waiting for a request or its next frame)."""
-        with self._cond:
-            self._woken = True
-            self._cond.notify_all()
 
     def _take(self, c: _Client, msg: tuple, asks: Asks | None) -> Asks | None:
         """A request for the frame loop: an ask merged into `asks` (mesos only if each client asked only for mesos), a
@@ -809,22 +789,18 @@ class Service:
 
     def _emit(self, st: WorldState, frame) -> None:
         """feed.run's: each frame's state into the ring and to every client (pickled once), and published."""
-        if st.frame is not None and not st.late:
+        if st.frame is not None:
             st.slot = self.ring.put(st.seq, st.t, st.frame)
-        elif st.frame is not None and st.slot is None:
-            st.slot = self.ring.slot_of(st.seq)  # (feed.serve's: a late state copied before its frame went in)
         if not st.visible:
             self._answer_fulls(None, st)
-        if self.recording is not None and not st.late:
+        if self.recording is not None:
             self.recording.saw(st, frame, self.epoch)  # (its picture by reference: never waits)
         self._send_state(replace(st, frame=None, epoch=self.epoch), st)
-        if not st.late:
-            self._frames_since += 1
+        self._frames_since += 1
         self._say()
 
     def _send_state(self, out: WorldState, st: WorldState | None = None) -> None:
-        if not out.late:
-            self._seq = max(self._seq, out.seq)  # (`_not_visible`'s go on from it)
+        self._seq = max(self._seq, out.seq)  # (`_not_visible`'s go on from it)
         data = pickle.dumps(("state", out))
         with self._lock:
             targets = [c for c in self.clients.values() if c.hello is not None]
@@ -908,24 +884,19 @@ def _ms(v: float | None) -> float | None:
 
 
 class Perf:
-    """What the searches did over a window, for the console's 10 s line and the 'perf' telemetry record (the user,
-    2026-10-28: the whole screen's search time on the line, with the pace at 15 a second): gathered off each state as
-    it goes out (Publisher.state: a float or two a state, nothing of its frame's), told and begun again at each line.
-    - each whole screen's search on the searches' thread (its late state's work 'mobs s': the monsters' search alone,
-      without any drops searched with it);
-    - how old the whole screen's result is in each frame's state as it goes out: its time then less the frame the
-      newest whole screen merged was searched on (Publisher.state is called as the state is handed to the clients'
-      writers, and a look takes the first frame's state after its time asked, 0.13-0.25 ms later down the pipe: her
-      band's looks);
-    - ... and in each state with the drops a look asked for (`drops_asked`: while a command that hunts is attached the
-      drops are searched only when asked, HUNTING), the late state of a frame gone by that a look wanting her drops
-      takes (55% of the tours' looks; the review, 2026-10-28: left out, the line's p90 read 87-105 ms where the looks'
-      was 146-148, those with the drops 154-190); other late states aren't counted (no look waits for them);
-    - the searches' thread's time (each late state's 's': its share of the window, 'busy');
-    - her band's own searches (not a whole screen's) and how long after its frame each one's state went out (what a
-      look asking for her band waits past that frame);
+    """What the frame loop did over a window, for the console's 10 s line and the 'perf' telemetry record (the user,
+    2026-10-28: the whole screen's search time on the line): gathered off each state as it goes out (Publisher.state: a
+    few floats a state, nothing of its frame's), told and begun again at each line.
+    - each frame's pass (its state's work 's': her look and the whole screen's search at once, worldstate.HALVES, then
+      her place, the monsters matched, their bars and deaths, the drops), and of it her look's ('look s') and the
+      search's ('wide s', on the halves' thread);
+    - the whole screen's detections, the monsters followed (alive) and the strips of drops searched, a frame;
+    - how old each frame's state is as it goes out: its time then less the frame's (the pass, and the capture's wait for
+      a frame; a look takes it 0.13-0.25 ms later down the pipe);
     - the process's CPU (time.process_time: all its threads), and the tracker's tracks made and flickers (a track
-      seen in a frame or two and dropped: tracking's 'flickers')."""
+      seen in a frame or two and dropped: tracking's 'flickers').
+    Until 2026-10-30, the whole screen's search on its thread and its result's age in each frame's state, her band's
+    own searches, the thread's busy share (`wide_a_s`, `wide_age_ms`, `band_alone_*`, `busy`)."""
 
     def __init__(self, now: float):
         self.begin(now, None)
@@ -933,38 +904,39 @@ class Perf:
     def begin(self, now: float, tracker_counts: dict | None) -> None:
         self.at, self.cpu = now, time.process_time()
         self.tracks = dict(tracker_counts) if tracker_counts is not None else None
-        self.wide: list[float] = []  # s: each whole screen's search
-        self.ages: list[float] = []  # s: the whole screen's result's age in each frame's state as it went out ...
-        self.drop_ages: list[float] = []  # ... and in each state with the drops a look asked for
-        self.band: list[float] = []  # s: each of her band's own searches' state out, after its frame
-        self.busy = 0.0              # s the searches' thread spent on the searches whose states went out
+        self.frames = 0
+        self.passes: list[float] = []  # s: each frame's pass ...
+        self.looks: list[float] = []   # ... her look in it ...
+        self.wides: list[float] = []   # ... and the whole screen's search
+        self.ages: list[float] = []    # s: each frame's state's age as it went out
+        self.detections = self.followed = self.strips = 0
 
-    def state(self, st: WorldState, now: float, drops_asked: bool = False) -> None:
-        if st.late:
-            w = st.work or {}
-            self.busy += w.get("s", 0.0)
-            if w.get("wide"):
-                self.wide.append(w.get("mobs s", w.get("s", 0.0)))
-            elif w.get("band"):
-                self.band.append(now - st.t)
-            if drops_asked and st.loot is not None and st.usable and st.wide_at is not None:
-                self.drop_ages.append(now - st.wide_at)
-        elif st.usable and st.wide_at is not None:
-            self.ages.append(now - st.wide_at)
+    def state(self, st: WorldState, now: float) -> None:
+        if not st.visible:
+            return
+        w = st.work or {}
+        self.frames += 1
+        for key, into in (("s", self.passes), ("look s", self.looks), ("wide s", self.wides)):
+            if key in w:
+                into.append(w[key])
+        self.detections += w.get("detections", 0)
+        self.followed += sum(1 for tr in st.tracks if tr.state != "dead")
+        self.strips += w.get("strips", 0)
+        self.ages.append(now - st.t)
 
-    def record(self, now: float, wide_s: float | None, tracker_counts: dict, fps: float | None = None) -> dict:
+    def record(self, now: float, tracker_counts: dict, fps: float | None = None) -> dict:
         """The window's numbers (the 'perf' record's fields), and a new window begun."""
         dt = max(1e-9, now - self.at)
+        n = max(1, self.frames)
+        p = self.passes
         out = {"s": round(dt, 2), "fps": None if fps is None else round(fps, 1),
                "cores": round((time.process_time() - self.cpu) / dt, 3),
-               "wide_a_s": round(len(self.wide) / dt, 2),
-               "wide_asked_a_s": None if not wide_s else round(1 / wide_s, 2),
-               "wide_ms": [_ms(_q(self.wide, 0.5)), _ms(_q(self.wide, 0.9)), _ms(max(self.wide, default=None))],
-               "wide_age_ms": [_ms(_q(self.ages, 0.5)), _ms(_q(self.ages, 0.9))],
-               "wide_age_drops_ms": [_ms(_q(self.drop_ages, 0.5)), _ms(_q(self.drop_ages, 0.9))],
-               "busy": round(self.busy / dt, 3),
-               "band_alone_a_s": round(len(self.band) / dt, 2),
-               "band_alone_ms": [_ms(_q(self.band, 0.5)), _ms(_q(self.band, 0.9))]}
+               "pass_ms": [_ms(_q(p, 0.5)), _ms(_q(p, 0.9)), _ms(_q(p, 0.99)), _ms(max(p, default=None))],
+               "look_ms": [_ms(_q(self.looks, 0.5)), _ms(_q(self.looks, 0.9))],
+               "wide_ms": [_ms(_q(self.wides, 0.5)), _ms(_q(self.wides, 0.9)), _ms(max(self.wides, default=None))],
+               "detections_a_frame": round(self.detections / n, 2), "tracks_a_frame": round(self.followed / n, 2),
+               "strips_a_frame": round(self.strips / n, 2),
+               "age_ms": [_ms(_q(self.ages, 0.5)), _ms(_q(self.ages, 0.9))]}
         if self.tracks is not None:
             for k in ("tracks", "flickers"):
                 out[f"{k}_a_min"] = round(60 * (tracker_counts.get(k, 0) - self.tracks.get(k, 0)) / dt, 1)
@@ -973,22 +945,20 @@ class Perf:
 
 
 def perf_line(r: dict) -> str:
-    """The 10 s line's part on the searches' time, from a 'perf' record: each whole screen's on the searches' thread,
-    its result's age in each frame's state as it went out and (when a look asked for drops) in the states with the
-    drops, her band's own searches' wait past their frame (when there were any), the thread's busy share, the
-    process's cores."""
+    """The 10 s line's part on the frame loop's time, from a 'perf' record: the pass's (median, p90, p99, the most), her
+    look's and the whole screen's in it, the detections, the monsters followed and the strips of drops a frame, a state's
+    age as it goes out, the process's cores."""
     def ms(v):
         return "-" if v is None else f"{v:.0f}"
-    w, age, band = r["wide_ms"], r["wide_age_ms"], r["band_alone_ms"]
-    drops = r.get("wide_age_drops_ms") or [None, None]
-    out = "" if w[0] is None else (f"; a whole screen {ms(w[0])} ms on the searches' thread (p90 {ms(w[1])}, max "
-                                   f"{ms(w[2])}), its result {ms(age[0])} ms old as a frame's state goes out (p90 "
-                                   f"{ms(age[1])})" + ("" if drops[0] is None else
-                                                       f", {ms(drops[0])} as one with the drops asked for does (p90 "
-                                                       f"{ms(drops[1])})"))
-    if band[0] is not None:
-        out += f"; her band alone out {ms(band[0])} ms after its frame (p90 {ms(band[1])})"
-    return out + f"; the searches' thread {100 * r['busy']:.0f}% busy; {r['cores']:.2f} cores"
+    p, look, w, age = r["pass_ms"], r["look_ms"], r["wide_ms"], r["age_ms"]
+    out = "" if p[0] is None else (f"; a pass {ms(p[0])} ms (p90 {ms(p[1])}, p99 {ms(p[2])}, max {ms(p[3])}): her look "
+                                   f"{ms(look[0])} and the whole screen {ms(w[0])} at once (p90 {ms(look[1])}, "
+                                   f"{ms(w[1])})")
+    out += (f"; {r['detections_a_frame']:.1f} monsters found and {r['tracks_a_frame']:.1f} followed a frame, "
+            f"{r['strips_a_frame']:.1f} strips of drops")
+    if age[0] is not None:
+        out += f"; a state {ms(age[0])} ms old as it goes out (p90 {ms(age[1])})"
+    return out + f"; {r['cores']:.2f} cores"
 
 
 class Publisher:
@@ -1003,8 +973,8 @@ class Publisher:
         self.model = None
         self.w = {"scene": -1e9, "tracks": -1e9, "visible": None, "loot": [], "looked": []}
         self.native, self.slow = "", False  # native.state() as the run started, and whether the C's not all in use
-        self._searched: tuple | None = None  # (when, the step, its searches' counts then) at the last console line
-        self.perf = Perf(time.monotonic())  # the searches' pace and time since then (the line's, the 'perf' record's)
+        self._paced: tuple | None = None  # (when, the step) at the last console line
+        self.perf = Perf(time.monotonic())  # the frame loop's pace and time since then (the line's, the 'perf' record's)
 
     def started(self, runner: Runner, map_id: int) -> None:
         from .. import native  # (whether its C is in use: a DLL that couldn't be built shows only as fewer frames)
@@ -1013,22 +983,15 @@ class Publisher:
         self.slow = not native.masked_in_c() or native.search_lib() is None
         sch = runner.step.schedule
         telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native,
-                       schedule={"wide_s": sch.wide_s, "band_s": sch.band_s, "hz": HZ})
-        every = "(only when asked)" if sch.wide_s is None else f"{sch.wide_s:.3g} s ({1 / sch.wide_s:.3g} a second)"
-        self.log(f"perception: gamelab's C pieces {self.native}; the whole screen searched every {every}")
+                       schedule={"hz": HZ, "drops_strips": sch.drops_strips})
+        self.log(f"perception: gamelab's C pieces {self.native}; {HZ:g} frames a second, the whole screen in every "
+                 f"frame's pass, {sch.drops_strips} strips of drops a frame by rotation")
 
     def state(self, st: WorldState) -> None:
         if self.runner is None:
             return
         w, now = self.w, time.monotonic()
-        self.perf.state(st, now, self.runner.step.schedule.loot_s is None)  # (HUNTING: the drops only when asked)
-        if st.late:  # a frame searched, given again with what its searches found: its drops, its events
-            if st.loot is not None:
-                w["loot"], w["looked"] = st.loot, st.looked
-            for e in st.events:
-                if e.kind in EVENTS:
-                    telemetry.emit("event", kind=e.kind, text=e.text(), track=e.track)
-            return
+        self.perf.state(st, now)
         if st.visible != w["visible"]:
             w["visible"] = st.visible
             self.log("the game is on screen: watching" if st.visible else f"not watching: {st.why} (nothing is read)")
@@ -1055,8 +1018,9 @@ class Publisher:
                              + why.get(e.data.get("why"), "seen alive"))
                 elif e.kind in ("touch", "touch_fix"):
                     self.log(f"  {touch_line(e.data, st.hp)}")
-            if st.loot is not None:
-                w["loot"], w["looked"] = st.loot, st.looked
+            if st.drops:  # (every strip in view as last searched: the rotation's, and what was asked for)
+                w["loot"] = [d for strip in st.drops for d in strip.loot]
+                w["looked"] = [(strip.platform, strip.x0, strip.x1) for strip in st.drops if strip.at is not None]
             if now - w["scene"] >= SCENE_S:
                 w["scene"] = now
                 s = to_scene(st, self.model, self.band, mobs=True, wide=True)
@@ -1077,10 +1041,9 @@ class Publisher:
         """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute, her touches, her
         place by the scene where it's used (localization.locate.Locator.line: the share of frames each cue placed her
         in, carried, covered (carried under the Lie Detector, her stat window or a portal's light), the views
-        registered, its time a
-        frame), the searches a second
-        and their time (`_searches`, also published as a 'perf' record; `fps`: the frames a second the line says, for
-        it); gamelab's C pieces
+        registered, its time a frame), the frame loop's time
+        (`_pace`, also published as a 'perf' record; `fps`: the frames a second the line says, for it); gamelab's C
+        pieces
         while they're not all in use (native.state: perception slower); if it ever happens, the monster search's noise
         bound broken (MobDetector.noise_over: a peak where OpenCV's score lay outside mobs.NOISE_K's bound of the exact
         one, at a shape worked out as master does; measured, not proven: README, A cheaper whole screen); and the
@@ -1106,28 +1069,22 @@ class Publisher:
         locator = getattr(getattr(step, "senses", None), "locator", None)  # (her place by the scene: locate.py)
         placed = "" if locator is None else locator.line()
         return (f"; {len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'"
-                f"{exp}{touched}" + (f"; {placed}" if placed else "") + self._searches(now, fps)
+                f"{exp}{touched}" + (f"; {placed}" if placed else "") + self._pace(now, fps)
                 + (f"; gamelab's C pieces {self.native}" if self.slow else "")
                 + (f"; the monster search's noise bound broken {over} times" if over else "")
                 + (f"; {gpu}" if gpu else ""))
 
-    def _searches(self, now: float, fps: float | None = None) -> str:
-        """The searches a second since the last console line (the whole screen's, against the pace asked; her band's
-        alone, the drops'): with the whole screen every 1/15 s (worldstate.WIDE_EVERY_S) it's 15 a second while it keeps
-        up. Then their time (`Perf`, `perf_line`), the same numbers published as a 'perf' record. '' at a run's first
-        line (and a new window begun)."""
+    def _pace(self, now: float, fps: float | None = None) -> str:
+        """The frame loop's time since the last console line (`Perf`, `perf_line`), the same numbers published as a
+        'perf' record. '' at a run's first line (and a new window begun)."""
         step = self.runner.step
-        c = step.counts
-        was, self._searched = self._searched, (now, step, c["wide"], c["band"], c["loot"])
+        was, self._paced = self._paced, (now, step)
         if was is None or was[1] is not step or now - was[0] <= 0:
             self.perf.begin(now, step.tracker.counts)
             return ""
-        dt, wide_s = now - was[0], step.schedule.wide_s
-        r = self.perf.record(now, wide_s, step.tracker.counts, fps)
+        r = self.perf.record(now, step.tracker.counts, fps)
         telemetry.emit("perf", **r)
-        asked = f" (asked {1 / wide_s:.3g})" if wide_s else ""
-        return (f"; searched a second: the whole screen {(c['wide'] - was[2]) / dt:.1f}{asked}, her band alone "
-                f"{(c['band'] - was[3]) / dt:.1f}, the drops {(c['loot'] - was[4]) / dt:.1f}" + perf_line(r))
+        return perf_line(r)
 
     def close(self) -> None:
         telemetry.stop()
@@ -1351,8 +1308,8 @@ class ServiceClient(Feed):
         w = self.welcome or {}
         return w.get("map") == w.get("next", w.get("map")) == self.hello.map
 
-    def latest(self, want: Asks, timeout: float = feed.FEED_WAIT_S) -> WorldState | None:
-        deadline, asked, seen = time.monotonic() + timeout, None, None
+    def latest(self, want: Asks, timeout: float = feed.FEED_WAIT_S, ask: bool = True) -> WorldState | None:
+        deadline, asked = time.monotonic() + timeout, None
         with self._cond:
             while True:
                 live = self.alive and self.on_map()
@@ -1365,13 +1322,10 @@ class ServiceClient(Feed):
                 if (newest is not None and newest.t >= want.after and not newest.usable) or left <= 0:
                     self.refused += 1
                     return None
-                if live:
-                    seq = newest.seq if newest is not None else 0
-                    ask = to_ask(want, newest) if asked is None or (feed.ASK_ONLY_STALE and seq != seen) else None
-                    if ask is not None and (asked is None or adds(ask, asked)):
-                        if self._send("ask", ask):
-                            asked = ask if asked is None else asked.merge(ask)
-                    seen = seq
+                if live and ask and asked is None:  # (once: a frame asked for comes, or the look asks again)
+                    wanted = to_ask(want)
+                    if self._send("ask", wanted):
+                        asked = wanted
                 self._cond.wait(left)
 
     def problem(self) -> Problem | None:

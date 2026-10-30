@@ -84,8 +84,9 @@ def test_only_tracks_re_found_under_their_good_score_or_lost_lately_are_looked_a
 
 
 def test_the_frame_step_tells_the_tracker_of_the_deaths_its_watch_sees():
-    """WorldStep._deaths: each track that may be dying, every EVERY-th frame (by its id), looked at where its feet are
-    (re-found: as found; lost: as last seen, the camera's move taken out), and those seen dying told (seen_dying)."""
+    """WorldStep._dying (the tracker's `dying`): each track that may be dying, at most every EVERY_S (once a frame at
+    15 a second), looked at where its feet are (found in the frame: as found; lost: as last seen, the camera's move
+    taken out), and those seen dying given back (tracking.seen_dying)."""
     from types import SimpleNamespace
 
     from gamelab.localization.monsters import Monster
@@ -103,13 +104,17 @@ def test_the_frame_step_tells_the_tracker_of_the_deaths_its_watch_sees():
             return refound is None
 
     step = WorldStep.__new__(WorldStep)
-    step.tracker, step.seq, step._refinds, step.counts, step._real = MonsterTracker(), 2, None, {}, False
+    step.tracker, step.seq, step.counts, step._real, step._death_at = MonsterTracker(), 2, {}, False, {}
     step.eyes = SimpleNamespace(deaths=Watch())
     mob = Mob("pig", 100, 90, 40, 30, 0.8, 100.0, 105.0, 1, "move")
     for tid, last in ((2, 9.95), (4, 9.6), (6, 9.0)):  # re-found now; lost 0.4 s ago; lost 1 s ago
         step.tracker.tracks[tid] = Track(tid, "pig", 1, 500.0 + tid, 300.0, mob, 0.0, last, state=LIVE, seen_x=500.0)
     s = SimpleNamespace(screen_x=lambda x: x - 400.0, screen_y=lambda y: y - 200.0, frame=None)
     work = {}
-    step._deaths(s, 10.0, {2: Monster(mob, 502.0, 300.0, 1, track=2)}, work)
+    dying = step._dying(s, 10.0, work)
+    matched = {2: Monster(mob, 502.0, 300.0, 1, track=2)}
+    assert dying(matched) == [4]
     assert asked == [("pig", 100, 105, 0.8), ("pig", 100, 100, None)] and work["deaths"] == 2
-    assert step.tracker.tracks[4].died_seen == 10.0 and step.tracker.tracks[2].died_seen is None
+    asked.clear()
+    assert step._dying(s, 10.0 + 0.03, work)(matched) == [] and asked == []  # (looked at once a frame at most)
+    assert step._dying(s, 10.0 + 1 / 15, work)(matched) == [4] and len(asked) == 2

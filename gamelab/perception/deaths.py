@@ -15,8 +15,8 @@ D:/MapleHelper-scratch/kplace/diag-signs, detect.py and evaluate.py): around the
 REFOUND_UNDER, or lost within RECENT_S, die1/1-3 scored DIE_GOOD or more on 110 of the 142 deaths (77%), and with
 die1/0 at DIE0_GOOD where no live picture is (a track not re-found in the frame) 118 (83%), 7 fires on no labelled
 death in 16.8 minutes, every one of them a real death on inspection; a median 0.14 s after die1 began (p10 0.04, p90
-0.42), 1.03 s after the killing key. Every EVERY-th frame a track (the frame loop's 30 a second: 15 looks a track a
-second at most), PAD around where its feet would be, both ways it can face (8 masked matches in one window, in C:
+0.42), 1.03 s after the killing key. A track at most every EVERY_S (once a frame at the perception service's 15 a
+second, as every other frame at its 30 until 2026-10-30: 15 looks a track a second at most), PAD around where its feet would be, both ways it can face (8 masked matches in one window, in C:
 match.best_matches). Built so and replayed in the service's frame step on the three recordings with her kills labelled
 (D:/MapleHelper-scratch/kplace/build: replay.py, eval_deaths.py), it saw 83 deaths, 73 of the 111 labelled there and
 the other 10 every one a real death by eye, 0.13 s after die1 began at the median (p10 0.04, p90 0.44); 0.83 ms a look
@@ -41,10 +41,16 @@ from .mobs import OPAQUE
 
 DIE_GOOD = 0.7      # die1/1-3 matched this well around a track's feet: it's dying
 DIE0_GOOD = 0.6     # die1/0 (the standing picture, eyes shut) this well, on a track not re-found in the frame
-REFOUND_UNDER = 0.9  # a track re-found this well (mobs.REFIND_GOOD) is alive: not looked at
+REFOUND_UNDER = 0.9  # a track found this well in the frame is alive: not looked at (tuned on the re-finds' scores,
+                     # mobs.REFIND_GOOD; since 2026-10-30 its whole-screen detection's)
 RECENT_S = 0.6      # a track lost this recently is looked at
 PAD = 16         # look-frame px at 1366x768 (a game px each) around where its feet would be: 8 lost 8 of 106
-EVERY = 2           # a track is looked at every this many frames (by its id: half the tracks a frame)
+# s at least between two looks at a track: once a frame at the perception service's 15 a second (66.7 ms apart; less than
+# that, so a frame a little early isn't skipped), the 15 looks a track a second every other frame gave at its 30 until
+# 2026-10-30 (EVERY = 2 frames: counted in frames at 15, the replay of the crowd's minute saw 13 deaths where 30 a second
+# saw 16; D:/MapleHelper-scratch/replan/p15/cpu15.py). By time, not frames: perception doesn't know the service's rate
+# (localization.rate.HZ).
+EVERY_S = 0.05
 # The kinds watched: those whose margins were measured, Tree Dungeon's mushrooms. Replayed on six recordings (the four
 # labelled and two of 2026-10-25 with other players' skills, pets and crowds, 25 minutes, the tracker left untold of the
 # deaths: D:/MapleHelper-scratch/kplace/review-perception), the monsters re-found alive later peaked at 0.37-0.48 of

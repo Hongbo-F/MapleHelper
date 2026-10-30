@@ -183,6 +183,16 @@ def test_the_frame_loop_hands_over_every_other_frame_and_never_waits_dropping_pa
         odd.saw(_st(k + 1), shown(k, t), 1)
     assert len(odd._q) + odd.dropped == 30
     odd.close()
+    # At the service's own rate (localization.rate.HZ, 15 a second since 2026-10-30: recording.FPS), its frames' times
+    # jittering a little: every one kept.
+    from gamelab.localization import rate
+    assert recording.FPS == rate.HZ
+    every = made(tmp_path, 5)
+    assert every.take()
+    for k in range(30):
+        every.saw(_st(k + 1), shown(k, t0 + k / rate.HZ + (0.004 if k % 2 else -0.004)), 1)
+    assert len(every._q) + every.dropped == 30
+    every.close()
 
 
 def test_only_frames_of_the_game_are_kept(tmp_path):
@@ -192,7 +202,6 @@ def test_only_frames_of_the_game_are_kept(tmp_path):
     one = shown(1, t0)
     rec.saw(_st(1), Frame.unfit(t0, Problem("window", "the game isn't in front")), 1)  # (not visible: no picture)
     rec.saw(_st(2, bad=Problem("offset", "the capture doesn't show the game where its window is")), one, 1)
-    rec.saw(_st(3, late=True), one, 1)  # (a late state: its frame was handed over before)
     rec.saw(_st(5), shown(1, t0, over=None), 1)  # (not asked whether a window was over it: never kept)
     assert not rec._q and rec._offered < 0
     rec.saw(_st(4, bad=Problem("hud", "the HUD's border isn't on row 615")), one, 1)  # the game's own picture

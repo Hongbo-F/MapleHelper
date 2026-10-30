@@ -126,16 +126,20 @@ def test_on_a_slope_a_jump_throw_at_one_lower_down_is_keyed_so_its_attack_picks_
 
 def test_pace_of_reads_a_monsters_walk_off_its_track():
     # A monster of the look matched to its track (kind, platform, within TRACK_MATCH): the track's speed once seen in
-    # TRACK_SEEN frames, not known before; one the look didn't see (hidden, remembered) stays where it was seen; with no
-    # feed, its pose.
+    # TRACK_SEEN frames (1 since 2026-10-30: the game data's speed the way it heads, from its first frame), not known
+    # before; one the look didn't see (hidden, remembered) stays where it was seen; with no feed, its pose.
+    from gamelab.attack import stance
+    assert stance.TRACK_SEEN == 1
     seen = mon(600)
     hidden = mon(700)
-    track = SimpleNamespace(kind=GREEN, platform=0, x=605.0, vx=-90.0, seen=5, state="live")
-    young = SimpleNamespace(kind=GREEN, platform=0, x=800.0, vx=-90.0, seen=1, state="live")
+    track = SimpleNamespace(kind=GREEN, platform=0, x=605.0, vx=-100.0, seen=5, state="live")
+    young = SimpleNamespace(kind=GREEN, platform=0, x=800.0, vx=-100.0, seen=1, state="live")
     s = SimpleNamespace(t=10.0, monsters=[seen, mon(800)], tracks=[track, young])
     h = SimpleNamespace(actions=SimpleNamespace(lock_until=0.0), model=None)
     pace = fight.pace_of(h, s)
-    assert pace.walk(seen) == -90.0 and pace.walk(s.monsters[1]) is None and pace.walk(hidden) == 0.0
+    assert pace.walk(seen) == -100.0 and pace.walk(s.monsters[1]) == -100.0 and pace.walk(hidden) == 0.0
+    young.seen = 0  # (a track seen in no frame yet: not known)
+    assert pace.walk(s.monsters[1]) is None
     s.tracks = []
     moving = Monster(Mob(GREEN, 0, 0, 30, 30, 0.9), 600, 500, 0, facing=1, pose="move")
     s.monsters = [moving]

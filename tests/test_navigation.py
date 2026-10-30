@@ -1930,3 +1930,24 @@ def test_a_fighting_trip_keeps_clear_of_the_feeds_hidden_monsters_and_of_the_one
     monkeypatch.setattr(nv, "UNSEEN_TRIPS", False)
     escort.threat = lambda kind: True
     assert nav.hidden_tracks(s, {c.id, d.id}, []) == [] and SimpleNamespace
+
+
+def test_a_glance_is_judged_against_the_plan_at_its_frames_time(monkeypatch):
+    """Navigator._placed: where the plan should have her as of the glance's frame (`seen_at`), not as of now: at the
+    perception's 15 frames a second a glance can be up to a period and a pass old (about 85 ms; 42 at 30 until
+    2026-10-30)."""
+    from types import SimpleNamespace
+
+    from gamelab.control import navigator as nav_mod
+    from gamelab.control.navigator import Navigator, _Running
+    asked = []
+    nav = Navigator.__new__(Navigator)
+    nav.flow = SimpleNamespace(expected=lambda legs, t: asked.append(round(t, 6)), airborne=lambda legs, t: True,
+                               span_at=lambda legs, t: None)
+    nav.senses = SimpleNamespace(localizer=SimpleNamespace(to_map=lambda dot: (0.0, 0.0)))
+    leg = SimpleNamespace(start=SimpleNamespace(t=0.0), end=SimpleNamespace(t=2.0))
+    running = _Running("p", [leg], 100.0, False)
+    monkeypatch.setattr(nav_mod, "time", SimpleNamespace(monotonic=lambda: 100.6))
+    nav._placed((0.0, 0.0), False, running, seen_at=100.52)
+    nav._placed((0.0, 0.0), False, running)
+    assert asked == [0.52, 0.6]

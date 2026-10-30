@@ -154,7 +154,6 @@ def test_the_feeds_step_reads_it_at_every_change_and_says_so():
         eyes.text = plan.get(k, eyes.text)
         t = 100 + k / 30
         states.append(step.step(lambda ropes, t=t: eyes.frame(t, ropes), t))
-        step.came_back()
     reads = [(s.seq, e.data) for s in states for e in s.events if e.kind == "hp_read"]
     assert reads == [(1, {"cur": 840, "max": 840, "before": None}), (11, {"cur": 723, "max": 840, "before": 840}),
                      (13, {"cur": 823, "max": 840, "before": 723}), (26, {"cur": 700, "max": 840, "before": None})]
@@ -196,7 +195,6 @@ def test_a_drop_over_frames_the_step_didnt_read_isnt_a_touch():
         eyes.text, eyes.bad = shown(cur, 840), bad
         st = step.step(lambda ropes, t=t: eyes.frame(t, ropes), t, visible=visible,
                        why="" if visible else "the game isn't in front")
-        step.came_back()
         reads.extend(e.data for e in st.events if e.kind == "hp_read")
         return st
     for _ in range(10):

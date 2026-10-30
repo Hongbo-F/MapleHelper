@@ -2410,7 +2410,7 @@ class Navigator:
             if touch is not None or now_hp < hp - HIT:
                 cut = _touch_text(touch, hp, now_hp)
             elif dot is not None:
-                on, want, leg, behind = self._placed(dot, seen_at - stood[0] >= STILL_S, current)
+                on, want, leg, behind = self._placed(dot, seen_at - stood[0] >= STILL_S, current, seen_at)
                 if on is not None and on.id not in (leg.start.platform.id, leg.end.platform.id):
                     # Standing where this leg doesn't go (e.g. a drop that fell one platform too far):
                     # stop sooner, before the plan's next keys fire there.
@@ -2653,14 +2653,18 @@ class Navigator:
         return MonsterTrack(tr.platform, tr.x, speed, heading, half, vx, tr.last_seen - start,
                             MONSTER_HEIGHT.get(tr.kind, top), tr.facing, tr.kind, top)
 
-    def _placed(self, dot, still: bool, running: _Running) -> tuple[Platform | None, int | None, Leg, float | None]:
+    def _placed(self, dot, still: bool, running: _Running,
+                seen_at: float | None = None) -> tuple[Platform | None, int | None, Leg, float | None]:
         """Where a glance at her dot puts her against the running plan: the platform she stands on
         (None if none, or her dot isn't `still`: it hasn't stood where it is for STILL_S), the
-        platform she should be on by now (None: in the air, or about to take off or land), the leg she's
+        platform she should be on by then (None: in the air, or about to take off or land), the leg she's
         on, and her x if she's standing where her run along that platform starts while the plan has her
         OFF_SPAN or more along it (else None). While the plan has her in the air (Flow.airborne) she stands
-        nowhere: near the top of a jump her dot can sit still over a platform she's flying past."""
-        t = time.monotonic() - running.start
+        nowhere: near the top of a jump her dot can sit still over a platform she's flying past. All of it as of
+        the glance's frame (`seen_at`, when it was shown; None: now): at the perception's 15 frames a second a glance
+        can be up to a period and a pass old (about 85 ms; 42 at 30 until 2026-10-30), and judged at now the plan had
+        her a few units on from where the frame showed her."""
+        t = (time.monotonic() if seen_at is None else seen_at) - running.start
         want = self.flow.expected(running.legs, t)
         # On a platform only when the dot sits at its height and has stopped: in the air the dot
         # passes 40-60 units under the platforms above, which read as "on" them before.

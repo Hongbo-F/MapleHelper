@@ -101,7 +101,6 @@ def test_the_world_step_reads_it_and_says_so():
         eyes.level = plan.get(k, eyes.level)
         t = 100 + k / 30
         states.append(step.step(lambda ropes, t=t: eyes.frame(t, ropes), t))
-        step.came_back()
     reads = [(s.seq, e.data) for s in states for e in s.events if e.kind == "lv_read"]
     assert reads == [(1, {"level": 25}), (11, {"level": 26}), (26, {"level": 26})]
     assert [s.level_of for s in states[9:12]] == [25, 26, 26] and states[22].level_of is None

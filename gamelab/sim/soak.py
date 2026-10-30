@@ -268,15 +268,16 @@ def soak_feed(meter: Meter) -> dict:
         proc.terminate()
         raise SystemExit(f"the perception service didn't start: {client.why}")
     child, n, missed, events, glanced, waits = [], 0, 0, 0, 0, {"band": [], "loot": [], "wide": []}
-    took: dict[str, list[float]] = {"step": [], "band": [], "wide": [], "drops": []}
+    took: dict[str, list[float]] = {"pass": [], "look": [], "wide": []}
     warm: list = []  # (time, the service's CPU seconds, its newest frame) once warmed up
 
     def seen(st) -> None:  # (the client's reader thread)
         if not warm or not st.visible:
             return
         w = st.work
-        kind = ("wide" if w.get("wide") else "band" if w.get("band") else "drops") if st.late else "step"
-        took[kind].append(w.get("s", 0.0))
+        for kind, key in (("pass", "s"), ("look", "look s"), ("wide", "wide s")):
+            if key in w:
+                took[kind].append(w[key])
     client.on_state = seen
     frames = None
     try:
@@ -316,7 +317,7 @@ def soak_feed(meter: Meter) -> dict:
             "not given in time": missed, "glances": glanced, "events drained": events,
             "dropped events": client.dropped, "the service's frames": frames,
             "its frames a second after the warm-up": rate, "its CPU (cores)": cpu,
-            "its frame step and searches (median, p90 ms; how many)": _ms(took, counts=True),
+            "its pass, her look and the whole screen in it (median, p90 ms; how many)": _ms(took, counts=True),
             "its private bytes": _trend(points) if len(points) >= 2 else "not read"}
 
 

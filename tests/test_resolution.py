@@ -15,6 +15,7 @@ from gamelab.perception.hud import bars
 from gamelab.perception.minimap import her_dot, markers_in_box, minimap_box, other_dots
 from gamelab.perception.nametag import NameTag
 from gamelab.screen import NATIVE
+from gamelab.sim.fakes import FakeDetector
 
 FIXTURES = Path(__file__).parent / "fixtures" / "native"
 TAG = FIXTURES / "tag_template_1366x768.npy"
@@ -84,7 +85,7 @@ def test_her_name_tag_is_found_with_the_template_made_at_this_size(tmp_path, nam
 def test_eyes_at_this_size_look_at_full_size(monkeypatch):
     from gamelab.analysis import bench
     from gamelab.perception import eyes as eyes_module
-    eyes = bench.SavedEyes(np.load(TAG), detector=object(), geo=NATIVE)
+    eyes = bench.SavedEyes(np.load(TAG), detector=FakeDetector(), geo=NATIVE)
     monkeypatch.setattr(eyes.name_tag, "full", np.load(TAG))
     eyes.show(cv2.cvtColor(frame("n28_000.png"), cv2.COLOR_RGB2BGRA))
     obs = eyes.look()
@@ -93,7 +94,7 @@ def test_eyes_at_this_size_look_at_full_size(monkeypatch):
     assert obs.dot == HER_DOT and len(obs.others) == 2 and (obs.hp, obs.mp) == (1.0, 1.0)
     assert obs.exp_box.shape == (12, 99, 3) and exp_number.read(obs.exp_box).exp == 31_736
     with pytest.raises(ValueError, match="1920x1080"):
-        bench.SavedEyes(np.load(TAG), detector=object()).look_at(frame("n28_000.png"))
+        bench.SavedEyes(np.load(TAG), detector=FakeDetector()).look_at(frame("n28_000.png"))
 
 
 @pytest.fixture(scope="module")
@@ -111,7 +112,7 @@ def _picture_eyes(rocky, monkeypatch, picture: bool = True):
     from gamelab.analysis import bench
     from gamelab.localization import mapdata
     from gamelab.perception.minimap import MinimapPicture
-    eyes = bench.SavedEyes(np.load(TAG), detector=object(), geo=NATIVE)
+    eyes = bench.SavedEyes(np.load(TAG), detector=FakeDetector(), geo=NATIVE)
     monkeypatch.setattr(eyes.name_tag, "full", np.load(TAG))
     if picture:
         if mapdata.minimap_picture(MAP) is None:

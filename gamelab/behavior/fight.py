@@ -33,7 +33,7 @@ from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
 from ..localization.memory import FADE_S
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster,
-                                     MonsterTrack, bodies, dead_one, seen_again, speeds)
+                                     MonsterTrack, bodies, dead_one, seen_again, speeds, walk_vx)
 from .ledger import dying
 from ..localization.scene import Scene
 from ..motion import physics
@@ -408,14 +408,15 @@ def walk_on(model: MapModel) -> reach.Where:
     walking = speeds(model)
 
     def where(m: Monster, t: float) -> float:
-        if m.pose != "move" or not m.facing or m.platform is None:
+        vx = walk_vx(m.kind, m.facing, m.pose, walking)
+        if not vx or m.platform is None:
             return m.x
         try:
             p = model.platform(m.platform)
         except (KeyError, IndexError):
             return m.x
         half = reach.body_of(m.kind)[1]
-        return MonsterTrack(m.platform, m.x, half=half, vx=m.facing * walking.get(m.kind, DEFAULT_SPEED)).at(t, p)
+        return MonsterTrack(m.platform, m.x, half=half, vx=vx).at(t, p)
     return where
 
 
@@ -423,7 +424,8 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
     """How soon her next attack picks after look `s`, and how its monsters walk meanwhile (attack.stance.Pace, the
     stance's `pace`: clearance kept ahead of time): `lead`, what's left of her attack lock (Actions.lock_until) and the
     look's age; a monster's walk, its track's speed (the feed's, Scene.tracks: its kind and platform, within
-    TRACK_MATCH, seen in TRACK_SEEN frames at least; one seen in fewer, or with no track, not known: where it was seen,
+    TRACK_MATCH, seen in TRACK_SEEN frames at least, its heading at its kind's speed from the game data; one seen in
+    fewer, or with no track, not known: where it was seen,
     or with stance.WALK_AT walking at her), else for one the look saw where no feed follows them its pose (walking the
     way it faces, else where it is: as before), and none for one the look didn't see (hidden under its damage numbers,
     or remembered: where it was seen, as before; had walking at her, a fight threw at the ghosts of the dead the camps

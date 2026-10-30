@@ -2101,30 +2101,26 @@ def cmd_bench_look(args) -> int:
             return 1
     from .localization.worldstate import Asks, Schedule, WorldStep
     senses = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN))
-    # The continuous feed's step on the same frames (localization.worldstate): her place and every monster it
-    # follows re-found, and with what a frame may also be asked for. Each frame is looked at several times in
-    # a row, as a still scene; the whole-screen one finds the monsters the others then re-find.
-    step = WorldStep(Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)),
-                     schedule=Schedule(band_s=None, wide_s=None))
+    # The continuous feed's pass on the same frames (localization.worldstate): her place and the whole screen's
+    # monsters, matched to their tracks, and with what a frame may also be asked for (the drops). Each frame is looked at
+    # several times in a row, as a still scene. Her look and the search one after the other here (the look has no
+    # picture of its own to search beside it: worldstate.HALVES), and no drops by rotation.
+    step = WorldStep(Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)), schedule=Schedule(drops_strips=0))
 
-    def frame_step(asks=None):  # the searches asked for at once, on this thread, and merged (InlineSearches)
+    def frame_step(asks=None):  # what's asked searched on the frame, on this thread
         full = eyes._capture()
-        st = step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
-        step.came_back()
-        return st
+        return step.step(lambda ropes: eyes.look_at(full, None, ropes), time.monotonic(), True, asks)
     # Senses.look on frames of its own: the step run inline on each when asked (feed.InlineFeed), what's asked searched
     # on it; then the step alone, as the perception service runs it on every frame.
     looks = {"Senses.look: no monsters": lambda: senses.look(mobs=False),
              "Senses.look: her band": lambda: senses.look(),
              "Senses.look: band + loot on her platform": lambda: senses.look(loot=True),
              "Senses.look: whole screen + all loot": lambda: senses.look(wide=True, loot=True),
-             "feed step: her place, monsters re-found": frame_step,
-             "feed step: ... and her band searched": lambda: frame_step(Asks(band=True)),
-             "feed step: ... and the whole screen": lambda: frame_step(Asks(wide=True))}
+             "feed pass: her place, the whole screen's monsters": frame_step,
+             "feed pass: ... and the drops on her platform": lambda: frame_step(Asks(loot=True))}
     timer = bench.run(eyes, senses.band, looks, frames, reps=args.reps, n=args.n)
-    timer.count("feed step: monsters re-found", step.counts["re-found"])
-    timer.count("... of the re-finds", step.counts["re-finds"])
-    timer.count("... that tried the kind's whole set", step.counts["fallbacks"])
+    timer.count("feed pass: monsters found", step.counts["detections"])
+    timer.count("... matched to a track", step.counts["matched"])
     from . import native
     where = f"{args.n} live captures" if frames is None else f"{len(frames)} saved frames x {args.reps}"
     w, h = geo.frame_size
@@ -2395,7 +2391,7 @@ def cmd_watch(args) -> int:
             now = time.monotonic()
             if perception.run != w["run"]:  # a new run (the map changed, the service started again): numbered from 1
                 w["run"], w["seq"] = perception.run, 0
-            states = [st for st in list(perception.states) if st.seq > w["seq"] and not st.late]
+            states = [st for st in list(perception.states) if st.seq > w["seq"]]
             for st in states:
                 w["seq"], w["frames"] = max(w["seq"], st.seq), w["frames"] + 1
                 usable = st.visible and st.bad is None
@@ -2478,7 +2474,7 @@ def cmd_perceive(args) -> int:
     GAMELAB_PERCEIVE=saved)."""
     from . import gcstats
     from .attack import reach
-    from .localization import feed, service, worldstate
+    from .localization import feed, service
     from .screen import of_frame
     on_saved = bool(args.frames)
     lock = service.only_one(service.SAVED_MUTEX if on_saved else service.MUTEX)  # held until the process ends
@@ -2487,10 +2483,6 @@ def cmd_perceive(args) -> int:
               "on the PC)")
         return 0
     service.settle()
-    if args.wide_every is not None:
-        service.pace(args.wide_every)
-        print(f"the whole screen searched every {args.wide_every:g} s (--wide-every; the default "
-              f"{worldstate.WIDE_EVERY_S:.3g}, {1 / worldstate.WIDE_EVERY_S:.3g} a second)")
     band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
     publish, glimpse, recording = None, None, None
     if args.frames:
@@ -3075,14 +3067,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
     s.add_argument("--no-record", action="store_true", help="without the rolling recording (`gamelab recorder` keeps "
                                                             "it then)")
-    s.add_argument("--wide-every", type=float, metavar="S", help="the whole screen searched every S s without being "
-                   "asked (default 1/15, 15 a second: worldstate.WIDE_EVERY_S), to try another pace")
     s.set_defaults(func=cmd_perceive)
 
     s = sub.add_parser("watch", help="look at the game every frame with no command running (her place, the monsters "
                                      "followed, deaths and who killed them), for the mini-map; never sends keys or "
                                      "brings the game forward")
-    s.add_argument("--hz", type=float, default=30.0, help="(none now: the perception service's rate is its own)")
+    s.add_argument("--hz", type=float, default=15.0, help="(none now: the perception service's rate is its own)")
     s.add_argument("--minutes", type=float, default=0, help="stop after this long (default: Ctrl+C)")
     s.add_argument("--lie-detector", action="store_true",
                    help="also check the screen for the Lie Detector and page whoever is at the PC")

@@ -187,13 +187,12 @@ class _Told:
 
 
 def _frames(step, n, hp_at, start=100.0):
-    from test_worldstate import FPS
+    FPS = 30  # (the scripted touches are at 30 frames a second: the step counts none of them in frames)
     out = []
     for k in range(n):
         t = round(start + k / FPS, 4)
         step.eyes.hp = hp_at(k)
         out.append(step.step(lambda ropes, t=t: step.eyes.frame(t, ropes), t))
-        step.came_back()
     return out
 
 

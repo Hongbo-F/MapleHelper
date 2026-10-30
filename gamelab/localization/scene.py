@@ -184,10 +184,25 @@ def _monster_record(m: Monster) -> dict:
             **({"facing": m.facing} if m.facing else {})}  # left out when not known
 
 
-def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_only: bool = False) -> list[Loot]:
-    """Drops lying on her platform (or, if `wide`, on every platform in view), placed on the map. Only
-    a strip just above each platform's top is searched: drops lie on the ground. Where it looked is
-    noted in `s.looked`."""
+@dataclass(frozen=True)
+class Strip:
+    """Where drops are looked for in a look's frame: a strip just above a stretch of a platform's level ground
+    (level_runs), as much of it as shows. `run`: the stretch's left end (map x), what it is from frame to frame;
+    `looked`: (platform, map x from, to), as Scene.looked notes it; `box`: look-frame px."""
+    platform: Platform
+    run: float
+    looked: tuple[int, float, float]
+    box: tuple[int, int, int, int]
+
+    @property
+    def key(self) -> tuple[int, float]:
+        return self.platform.id, self.run
+
+
+def drop_strips(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False) -> list[Strip]:
+    """The strips a search for drops looks in (find_loot): just above each stretch of level ground of her platform (or,
+    if `wide`, of every platform in view), as much as shows above the bottom bar and right of the minimap; none too
+    narrow or too short for an item."""
     if s.tag is None or s.where is None:
         return []
     h, w = s.frame.shape[:2]
@@ -197,7 +212,7 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
     mini_x, mini_y = box[2] // geo.look_scale, box[3] // geo.look_scale  # the minimap's bottom-right corner
     pad, above, below, narrow = geo.fpx(STRIP_PAD), geo.fpx(ABOVE), geo.fpx(BELOW), geo.fpx(MIN_STRIP)
     platforms = model.places if wide else [p for p in (s.platform,) if p is not None]
-    strips: list[tuple[Platform, tuple[int, int, int, int]]] = []
+    out: list[Strip] = []
     for p in platforms:
         for x0, x1, high, low in level_runs(p):
             left, right = max(0.0, s.screen_x(x0) - pad), min(float(w), s.screen_x(x1) + pad)
@@ -206,10 +221,24 @@ def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_o
                 left = max(left, float(mini_x))
             if right - left < narrow or under - top < eyes.item_height:
                 continue
-            s.looked.append((p.id, s.map_x(left), s.map_x(right)))
-            strips.append((p, (int(left), int(top), int(right), int(under))))
+            out.append(Strip(p, x0, (p.id, s.map_x(left), s.map_x(right)),
+                             (int(left), int(top), int(right), int(under))))
+    return out
+
+
+def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_only: bool = False,
+              strips: list[Strip] | None = None) -> list[Loot]:
+    """Drops lying on her platform (or, if `wide`, on every platform in view), placed on the map. Only
+    a strip just above each platform's top is searched: drops lie on the ground (drop_strips; `strips`: those alone).
+    Where it looked is noted in `s.looked`."""
+    if s.tag is None or s.where is None:
+        return []
+    geo = s.geo
+    strips = drop_strips(s, model, eyes, wide) if strips is None else strips
+    s.looked.extend(st.looked for st in strips)
     found: list[tuple[float, Loot]] = []  # (px between its bottom and the ground under it, loot)
-    for (p, _), items in zip(strips, eyes.items_in(s, [box for _, box in strips], mesos_only=mesos_only)):
+    for (p, _), items in zip(((st.platform, st.box) for st in strips),
+                             eyes.items_in(s, [st.box for st in strips], mesos_only=mesos_only)):
         for it in items:
             x = p.clamp(s.map_x(it.x))
             ground = p.y_at(x)

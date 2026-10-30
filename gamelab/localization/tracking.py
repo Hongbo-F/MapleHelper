@@ -2,23 +2,20 @@
 an id while it walks and turns, flinches out of sight under damage numbers, or leaves the screen and comes
 back, and what happens to it comes out as events.
 
-A frame's sightings come two ways: monsters re-found where their track says they should be (Eyes.refind,
-every frame), and monsters a search found (the whole screen 15 times a second, her band with it), which
-are matched to tracks not re-found: same kind, same platform, and where its track would be by then within
-10 + 1.3 x its speed x the time since + 25 units (knockback). Greedy, nearest first: there are only a few at a
-time. One no track explains is new: `entered` at the screen's edge (the camera moved, or it walked in),
-`spawned` near a spawn point of its kind, else `appeared` (found where no search had looked yet).
+A frame's sightings are the whole screen's detections of that very frame (since 2026-10-30, one pass a frame at the
+perception's one rate, localization.rate.HZ: 15 a second; until then each track was re-found around where it should
+be in every frame at 30 a second, and a search of the whole screen every other frame was merged frames after its own).
+Each is matched to a track (`update`, `_match`): same kind, same platform, and where its track should be by then
+(`predicted`: walking on its heading at its kind's speed, turning back at its platform's ends) within 10 + 1.3 x its
+speed x the time since + 25 units (knockback): 43.7 units a frame on at 15, against a frame's prediction 28 off at p99
+on the user's own play. Greedy, nearest first (a walking track met by a detection facing the other way, away from its
+platform's ends, FACING_COST farther: two of a kind passing within the gate, 2.1% of that clip's frames, keep their ids).
+One no track explains is new: `entered` at the screen's edge (the camera moved, or it walked in), `spawned` near a spawn
+point of its kind, else `appeared`. Which detection each track was this frame is left in `matched`.
 
-The searches run off the feed's frame loop (localization.worldstate), so what one found comes back a frame or
-a few after its own, the tracks followed meanwhile (`merge`): its sightings are matched to the tracks as they
-were at its frame (the tracks re-found in that frame are those sightings already). A track seen since learns
-nothing from it; one found dead since isn't brought back, nor made anew (it's the same monster: `late
-sightings of the dead`); one gone off screen since stays off; a new one is new as of the search's frame,
-re-found from the next frame on, and aimed at by her throws since that frame that went its way (as it would
-have been, followed from then; so is one back from off screen). And a track hidden too long isn't judged
-gone (dead, or lost in a crowd) while a search for monsters is out of a frame after it was last seen and by
-the frame it was due (`searching`, LATE_SEARCH_S): it may have been seen there, as that search inline would
-have shown before the track was judged.
+A track's place is its last detection's feet; its velocity is no measure of its own (the user, 2026-10-30: "Perception
+should only give mob heading, speed should come from data-mined game files"): its kind's speed from the game data the
+way it faces in a move frame, 0 standing or flinching (monsters.walk_vx), from its first detection on.
 
 A track not seen in a frame:
 - where it should be is off screen: `offscreen` (event `left`), remembered OFFSCREEN_S to know it again
@@ -43,7 +40,7 @@ first, out-of-sight ones where they should be): that track is bound to the gain 
 as it walks on until her star lands on it (STAR_LANDS_S: no farther than its kind walks till then, nor after it), its
 id in every state since (Monster.track), so whoever reads the state knows which monster is dead, where it walks, until
 it goes; `dead`, cause "hers", once out of sight CONFIRM_S after the gain, or at once when its death is seen
-(perception.deaths, `seen_dying`). One re-found still REBIND_S after the gain was another: let go, and the gain goes on
+(perception.deaths, `seen_dying`). One seen again still REBIND_S after the gain was another: let go, and the gain goes on
 the next its attack took that's gone, or one seen dying DEATH_AFTER_GAIN_S after the gain or later. A gain no throw
 explains so (none keyed in the window before it; `watch`, her throws unknown) waits as
 before, FADE_S + MISSING_S, for the monster it was to go out of sight: one she threw at (a throw toward it in the
@@ -57,12 +54,13 @@ on the monster hurt that her throws went at (`share`, SHARES: off), dying and de
 "other". A monster's HP bar going down is a `bar_hit`, by her when a throw of hers went its way ("other" otherwise;
 None with her throws unknown).
 
-A track seen in fewer than MIN_SEEN frames that goes is dropped without a death: a match on scenery for a
-frame or two isn't a monster someone killed. Nothing grows without bound: dead tracks go DEAD_KEEP_S after
-their death, offscreen ones after OFFSCREEN_S, gains and throws after their windows.
+A track seen in fewer frames than MIN_SEEN_S makes at the perception's rate that goes is dropped without a death: a
+match on scenery for a frame or two isn't a monster someone killed. Nothing grows without bound: dead tracks go
+DEAD_KEEP_S after their death, offscreen ones after OFFSCREEN_S, gains and throws after their windows.
 """
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from maplehelper.engine import RIGHT
@@ -71,20 +69,25 @@ from ..character import THIEF_SHAPE, Shape
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from .mapdata import MapModel
-from .monsters import DEFAULT_SPEED, GAIN_AFTER_KEY, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds
+from .monsters import DEFAULT_SPEED, GAIN_AFTER_KEY, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds, walk_vx
 from .players import Player, near_rival
+from .rate import HZ
 
 LIVE, HIDDEN, OFFSCREEN, DYING, DEAD = "live", "hidden", "offscreen", "dying", "dead"
 STATES = (LIVE, HIDDEN, OFFSCREEN, DYING, DEAD)
 
 MISSING_S = 0.3     # s unseen on screen before a track is `hidden`: the detector misses a monster in a look now and
-                    # then (the simulator's game preset: 1 look in 10), which at 30 frames a second is one frame
+                    # then (the simulator's game preset: 1 look in 10), 4.5 frames at 15 a second. On the user's own
+                    # play's clip the whole screen's chains of 5+ frames that went missing came back after 1 frame 83
+                    # times, 2 frames 35, 3 29, 4 25, of 483 ends (D:/MapleHelper-scratch/replan/p15/clip_gaps.py)
 HIDE_S = 3.5        # s a monster may stay out of sight on screen and still be the same one: hit, it hides under its
                     # damage numbers for 1-3 s (the README); longer, someone killed it
 FADE_S = 1.5        # s a killed monster may still be seen fading where it died (about a second, the README; the
                     # simulator's FADE 0.8 s): a gain waits this long (and MISSING_S) for the one it was to go
 EXTRAPOLATE_S = 0.5  # s an unseen monster is taken to walk on (a hit one flinches, knocked back, not walking)
-MIN_SEEN = 5        # frames a track must have been seen in for its going to count as a death
+# A track must have been seen in this long's frames (at the perception's rate: 3 at 15 a second) for its going to count
+# as a death: 5 frames at 30 a second until 2026-10-30 (0.17 s).
+MIN_SEEN_S = 0.2
 OFFSCREEN_S = 10.0  # s a track off screen is remembered, to know it again when it comes back
 DEAD_KEEP_S = 2.0   # s a dead track is kept (shown as dead) before it goes
 MATCH_BASE, MATCH_SPEED, MATCH_KNOCKBACK = 10.0, 1.3, 25.0  # units: a sighting within 10 + 1.3 speed dt + 25
@@ -176,46 +179,29 @@ CONFIRM_S = 1.5
 # left out without it): off.
 SHARES = False
 BAR_STEP = 0.03     # a bar this much lower than its lowest seen before: a hit
-# The velocity filter (alpha-beta on x, map units), for sightings whose pose isn't known. Simulated at 30 Hz
-# on a monster walking 125 units/s with 1.5 units of jitter and her dot stepping a minimap pixel (11.4 units)
-# as she walks: 0.35/0.08 gave 117 units/s after 0.5 s (106 at worst over 20 runs) and wavered 13 units/s rms
-# after that; 0.5/0.3 gave 53 (16 at worst) and 35 rms, the overshoot ringing against the clamp.
-ALPHA, BETA = 0.35, 0.08
-SPEED_CLAMP = 1.2   # x its kind's speed: the most the filter may say it walks (knockback is brief)
-# A monster seen in a move frame walks its kind's speed the way it faces, one in a stand frame stands: its
-# velocity is that at once. Monsters start, stop and turn at once, and the filter alone lagged so far behind
-# one setting off (0.5 s to its speed) that the re-find window lost it, another track took it, and the first
-# was then judged killed by someone else: in the simulator's tour of the basin, 32 such deaths against 49 of
-# hers. Its facing was the way it moved in 192 of 199 stretches of 0.6 s where it walked (`bodies`, two
-# recordings with the camera still; the misses at turns). A flinching one (hit1), knocked back, goes by the
-# filter.
-POSE_VELOCITY = True
-# ... but only while its sightings agree (POSE_GATE_S): a move frame's speed while it left a FADE_MOVE box in
-# the last POSE_GATE_S (or was first seen that recently), a stand frame's stop while it didn't. In game the
-# pose is the frame of the template that matched, wrong for 18% of the sightings of monsters walking and 22%
-# of those standing, for up to 1.4 s on end (`bodies` on 3 recordings with the camera still), and a standing
-# pig in a move frame was followed at 125 units/s, its track ahead of it. Over 7 simulated runs (feed_tour_
-# hunt_basin, feed_loop_basin, feed_loop_rival, and 4 minutes of preset game: the loop on seeds 3 and 5, the
-# tour on 2 and 4) the deaths judged someone else's that weren't, and tracks "lost in a crowd":
-#                              poses right    20% wrong (Noise.pose_wrong, 1 s spells)
-#   the filter alone           41, 46         41, 46
-#   the pose alone (None)      10, 7          34, 36
-#   gated, 0.25 s              13, 5          12, 19   (0.15 s: 12, 19 and 15, 22; 0.4 s: 16, 7 and 13, 28)
-# Her kills were judged right about as often every way (88-93%). With the feed's costs and asks as they are
-# now (feed.COSTS, ASK_ONLY_STALE): the filter alone 32, 34; the pose alone 10, 11 and 25, 38; gated 9, 12
-# and 14, 30; her kills 90-94%. And `bodies --tracks` on feed_loop_basin's tracks, 20% of poses wrong: a
-# track that stood said under 15 units/s 90% of the time gated, 76% with the pose alone; one that walked,
-# its speed 88% and 72% (with the poses right, 90% and 93%, 88% and 88%). Not checked in game.
-POSE_GATE_S: float | None = 0.25
-LONG_GAP_S = 1.0    # a track seen again after longer than this starts its velocity afresh
+# A track's velocity is its detection's heading at its kind's speed from the game data (monsters.walk_vx: a move frame
+# walks the way it faces, a stand or hit1 frame stands), as it was until 2026-10-30 for every sighting whose pose was
+# known (POSE_VELOCITY: monsters start, stop and turn at once, and an alpha-beta filter on x lagged 0.5 s behind one
+# setting off), the filter gone with it (a sighting whose pose isn't known keeps the velocity it had). POSE_GATE_S
+# (None: the pose alone, the default) takes a move frame's speed only while it left a FADE_MOVE box in the last
+# POSE_GATE_S (or was first seen that recently), a stand frame's stop only while it didn't: in game the pose is the frame
+# of the template that matched, and on the user's own play at 15 a second a move frame stood still over the next 0.2 s
+# 11% of the time, a stand frame moved 5% (D:/MapleHelper-scratch/replan/p15, clip_motion.py), where the earlier
+# recordings had 18% and 22% wrong for up to 1.4 s on end; there the pose alone predicted a frame, 0.2, 0.5 and 1 s on
+# best of the rules tried (the median 0.6, 1.0, 4.0 and 21.4 units off; with a move frame taken only where it moved in
+# the last 0.2 s, 0.6, 1.0, 6.0 and 23.5). Kept as a switch for the A/B. (At 0.25 s, the default until 2026-10-30, it
+# cut the deaths judged someone else's and the tracks lost in a crowd in the simulator with 20% of the poses wrong in
+# 1 s spells: 12, 19 against the pose alone's 34, 36.)
+POSE_GATE_S: float | None = None
+# A walking track met by a detection facing the other way, away from its platform's ends (FACING_END from the end its
+# centre turns at), is that much farther from it in the matching: a monster turns mid-platform 0.07 times a second
+# against 0.45 at an end (the user's own play, clip_turns_out.txt), and its facing is the way it walks 99.2% of the time,
+# so two of a kind passing within a track's gate (2.1% of the clip's frames) keep their ids.
+FACING_COST = 8.0
+FACING_END = 40.0
 FRAME_SLACK = 0.05  # s: a monster last seen this little before a gain went out of sight as it died
 FADE_MOVE = 10.0    # units a monster fading where it died may seem to move: a sighting farther off is another one
                     # walking through (it took the dying one's track, and starved its own, in the simulator)
-# A track hidden too long (HIDE_S) isn't judged gone while a search for monsters is out of a frame after it was last
-# seen and no later than this after it was due (about a frame): inline, that search was merged in its own frame,
-# before the track was judged, and could show it still there. A later frame's couldn't have saved it, so the wait
-# is bounded however often she searches. (A search for the drops alone can't see it, and isn't waited for.)
-LATE_SEARCH_S = 0.05
 # Other players on the minimap (localization.players: told each frame, `update`'s `players`). With OTHERS_BY_PLAYER, a
 # monster gone from sight on screen past HIDE_S is someone else's kill only with another player by it (near_rival:
 # 400 units across, 100 up or down); with nobody by it, nobody else can have killed it, and it's let go without a
@@ -250,12 +236,12 @@ class Track:
     id: int
     kind: str
     platform: int | None
-    x: float                 # map units, its feet (filtered)
+    x: float                 # map units, its feet (its last detection's)
     y: float
     mob: Mob                 # its last sighting: its picture's box on screen, the template that matched
     first_seen: float
     last_seen: float
-    vx: float = 0.0          # units/s (filtered)
+    vx: float = 0.0          # units/s: its heading at its kind's speed from the game data (monsters.walk_vx)
     facing: int = 0          # 1 right, -1 left, 0 not known (the template that matched)
     pose: str = ""
     seen: int = 1            # frames it was seen in
@@ -280,9 +266,10 @@ class Track:
     died_seen: float | None = None  # when its death was seen (perception.deaths: its die1 frames where it was)
 
     def record(self) -> dict:
-        """As telemetry data ('tracks')."""
+        """As telemetry data ('tracks'): its `vx` the game data's speed the way it heads (since 2026-10-30, no measure:
+        its walk over time is its x from record to record), its `pose` the last detection's."""
         return {"id": self.id, "kind": self.kind, "state": self.state, "x": round(self.x, 1), "y": round(self.y, 1),
-                "vx": round(self.vx, 1), "facing": self.facing, "platform": self.platform,
+                "vx": round(self.vx, 1), "facing": self.facing, "pose": self.pose, "platform": self.platform,
                 "bar": None if self.bar is None else round(self.bar, 2), "hits": self.hits, "seen": self.seen,
                 **({"cause": self.cause} if self.cause else {}),
                 **({"gain": round(self.gain, 3)} if self.gain is not None else {}),
@@ -359,14 +346,11 @@ class MonsterTracker:
         # ... its throw's key, her x then (when its star lands) and the gain's kind (bound again, `_retold`)
         self.keyed: dict[float, tuple[float, float, str | None]] = {}
         self.retold: list[float] = []  # the keys of throws told again the other way since the last frame (`throw`)
-        self.merged: list[int | None] = []  # the tracks the last merge's sightings were taken for (`merge`)
         self.her: tuple[float, float] | None = None  # where she was in the last frame placed
         self._last_t = -1e18                          # ... and when that was
-        self._path: deque[tuple[float, float, float]] = deque(maxlen=150)  # where she was, frame by frame (5 s)
-        # The frame time of a search for monsters out (localization.worldstate: its answer comes back a few frames
-        # later), or None (LATE_SEARCH_S).
-        self.searching: float | None = None
-        self.refound_seen: set[int] = set()  # the tracks the last frame's re-finds were taken for (`update`)
+        # where she was, frame by frame (5 s at the perception's rate)
+        self._path: deque[tuple[float, float, float]] = deque(maxlen=round(5 * HZ))
+        self.matched: dict[int, Monster] = {}  # the last frame's detections, by the track each was (`update`)
         self.players: list[Player] | None = None     # the other players on the map in the last frame (None: not told)
         self.counts = {"tracks": 0, "died hers": 0, "died other": 0, "lost in a crowd": 0, "flickers": 0,
                        "gains unexplained": 0, "late sightings of the dead": 0, "nobody by it": 0}
@@ -412,42 +396,30 @@ class MonsterTracker:
 
     # --- each frame ---------------------------------------------------------------------------------
 
-    def update(self, t: float, refound: dict[int, Monster], found: list[Monster], view: View | None,
-               her: tuple[float, float] | None, players: list[Player] | None = None) -> list[Event]:
-        """The frame shown at t: `refound`, the tracks re-found in it (id -> where), and `found`, what its
-        searches found (re-found ones among them are told apart); `view`, what it shows of the map (None:
-        she isn't placed, and nothing can be judged); `her`, where she is; `players`, the other players on the map
-        (localization.players; None: not known). Returns what happened."""
+    def update(self, t: float, found: list[Monster], view: View | None, her: tuple[float, float] | None,
+               players: list[Player] | None = None,
+               read: Callable[[Monster, "Track | None"], Monster] | None = None,
+               dying: Callable[[dict[int, Monster]], list[int]] | None = None) -> list[Event]:
+        """The frame shown at t: `found`, the whole screen's detections in it, placed on the map; `view`, what it shows
+        of the map (None: she isn't placed, and nothing can be judged); `her`, where she is; `players`, the other
+        players on the map (localization.players; None: not known). Each detection is matched to a track (`_match`) or
+        is a new one; `read(m, track)` (the world step's: its HP bar read if that's due, worldstate._bar_due; the track
+        None for a new one) gives the detection as the track takes it. Which detection each track was is left in
+        `matched`. `dying(matched)`: the tracks whose death this frame shows (perception.deaths, the world step's), told
+        before her gains and deaths are judged. Returns what happened."""
         events: list[Event] = []
         if players is not None:
             self.players = players
+        self.matched = {}
         if view is None:
             return events
         self.her = her
         if her is not None:
             self._path.append((t, her[0], her[1]))
         seen: set[int] = set()
-        strays: list[Monster] = []
-        # Two tracks may re-find one monster: a track seen in the last frame has first claim, then the nearer. One a
-        # gain of hers is bound to walks on until her star lands (`_bind`): followed as it walks, then where it stops;
-        # what its window finds farther off is another monster (a stray), matched to another track or new.
-        for tid, m in sorted(refound.items(), key=lambda kv: self._claim(kv[0], kv[1], t)):
-            tr = self.tracks.get(tid)
-            if tr is None or tr.state == DEAD or (tr.state == DYING and tr.gain is None
-                                                  and abs(m.x - tr.x) > FADE_MOVE):
-                continue
-            if self._stray(tr, m, t):
-                strays.append(m)  # (not it: STAR_LANDS_S)
-                continue
-            if any(same(m.mob, self.tracks[i].mob) for i in seen):
-                continue  # (two overlapping are two monsters, each found by its own track's window)
-            self._seen(tr, m, t, events)
-            seen.add(tid)
-        self.refound_seen = set(seen)
-        found = found + [m for m in strays if not any(overlap(m.mob, o.mob) and m.kind == o.kind for o in found)]
-        fresh = [m for m in found if not any(overlap(m.mob, self.tracks[i].mob) and m.kind == self.tracks[i].kind
-                                             for i in seen)]
-        for m, tr in self._match(t, fresh, seen):
+        for m, tr in self._match(t, found):
+            if read is not None:
+                m = read(m, tr)
             if tr is None:
                 tr = self._new(t, m, view)
                 events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform}))
@@ -456,44 +428,16 @@ class MonsterTracker:
                     events.append(Event("back", t, tr.id, {"kind": m.kind, "after": round(t - tr.last_seen, 2)}))
                 self._seen(tr, m, t, events)
             seen.add(tr.id)
+            self.matched[tr.id] = m
         for tr in list(self.tracks.values()):
             if tr.id not in seen:
                 self._unseen(tr, t, view, events)
+        if dying is not None:
+            for tid in dying(self.matched):
+                self.seen_dying(tid, t)
         self._resolve(t, events)
         self.throws = [th for th in self.throws if t - th.t <= self.shape.window_s + self.shape.hide_s]
         self._last_t = t
-        return events
-
-    def merge(self, t: float, found: list[Monster], known: set[int], view: View, now: View | None,
-              t_now: float | None) -> list[Event]:
-        """What a search of the frame shown at t found, merged once it's back, the frames since already followed:
-        `found`, its sightings that weren't any track re-found in that frame (`known`: the tracks that were),
-        each matched to another track where that track was at t (as `update` matches: nearest first, the same
-        reach); `view`, what that frame showed. One no track explains is new, as of t. A track seen since t
-        learns nothing from it; one found dead since t isn't brought back, nor made anew; one off screen now
-        (where it should be at `t_now`, in the newest view `now`) stays off, else it's `back`. The events are
-        of the frame at t. A new one (or one back) is put in the throws since t whose path it was in. Which track each
-        sighting was taken for (None: one found dead since) is left in `merged`, in `found`'s order."""
-        events: list[Event] = []
-        self.merged = []
-        for m, tr in self._match(t, found, known, late=True):
-            self.merged.append(None if tr is None else tr.id)  # (one found dead since: its corpse, its id)
-            if tr is None:
-                tr = self._new(t, m, view)
-                self.merged[-1] = tr.id
-                events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform}))
-                self._aimed_since(tr, t)
-            elif tr.state == DEAD:
-                self.counts["late sightings of the dead"] += 1
-            elif tr.last_seen < t - 1e-9:
-                was, after = tr.state, round(t - tr.last_seen, 2)
-                self._seen(tr, m, t, events)
-                if was == OFFSCREEN:
-                    if now is not None and t_now is not None and now.shows(tr.kind, self.predicted(tr, t_now), tr.y):
-                        events.append(Event("back", t, tr.id, {"kind": m.kind, "after": after}))
-                        self._aimed_since(tr, t)
-                    else:
-                        tr.state = OFFSCREEN  # in view at t, gone since
         return events
 
     def live(self) -> list[Track]:
@@ -501,56 +445,61 @@ class MonsterTracker:
         return [tr for tr in self.tracks.values() if tr.state != DEAD]
 
     def predicted(self, tr: Track, t: float) -> float:
-        """Where track `tr` should be at t (map x): walking on as it was, for EXTRAPOLATE_S at most, and on its
-        platform."""
-        x = tr.x + tr.vx * min(max(0.0, t - tr.last_seen), EXTRAPOLATE_S)
-        if self.model is not None and tr.platform is not None:
-            p = self.model.platform(tr.platform)
-            half = MONSTER_HALF.get(tr.kind, 34.0)
-            x = min(max(x, p.left + half), max(p.left + half, p.right - half))
-        return x
+        """Where track `tr` should be at t (map x): walking on its heading (its velocity: the game data's speed the way
+        it faces, 0 standing) for EXTRAPOLATE_S at most, turning back at its platform's ends as MonsterTrack.at plans it
+        (it never walks off them: 80% of the turns on the user's own play came within 40 units of the end it can reach,
+        and the tracker clamped it there until 2026-10-30)."""
+        return self._walked(tr, tr.vx * min(max(0.0, t - tr.last_seen), EXTRAPOLATE_S))
 
     # --- inside ---------------------------------------------------------------------------------------
+
+    def _ends(self, tr: Track) -> tuple[float, float] | None:
+        """The ends its centre turns at on its platform (map x), or None (no platform, or no map)."""
+        if self.model is None or tr.platform is None:
+            return None
+        p = self.model.platform(tr.platform)
+        half = MONSTER_HALF.get(tr.kind, 34.0)
+        return p.left + half, max(p.left + half, p.right - half)
+
+    def _walked(self, tr: Track, go: float) -> float:
+        """Track `tr`'s place `go` units walked on from its last sighting (+ right), turning back at its platform's ends
+        (`_ends`)."""
+        ends = self._ends(tr)
+        if ends is None:
+            return tr.x + go
+        lo, hi = ends
+        if hi <= lo:
+            return lo
+        k = (min(max(tr.x, lo), hi) + go - lo) % (2 * (hi - lo))
+        return lo + (k if k <= hi - lo else 2 * (hi - lo) - k)
 
     def _at(self, tr: Track, t: float) -> float:
         """Where track `tr` was (or should be) at t, also before it was last seen: walked back, as long as
         `predicted` walks it on."""
         if t >= tr.last_seen:
             return self.predicted(tr, t)
-        x = tr.x - tr.vx * min(tr.last_seen - t, EXTRAPOLATE_S)
-        if self.model is not None and tr.platform is not None:
-            p = self.model.platform(tr.platform)
-            half = MONSTER_HALF.get(tr.kind, 34.0)
-            x = min(max(x, p.left + half), max(p.left + half, p.right - half))
-        return x
+        return self._walked(tr, -tr.vx * min(tr.last_seen - t, EXTRAPOLATE_S))
 
-    def _claim(self, tid: int, m: Monster, t: float) -> tuple[bool, float]:
-        tr = self.tracks.get(tid)
-        if tr is None:
-            return True, 0.0
-        return tr.last_seen < self._last_t - 1e-9, abs(m.x - self.predicted(tr, t))
-
-    def _match(self, t: float, found: list[Monster], seen: set[int],
-               late: bool = False) -> list[tuple[Monster, Track | None]]:
-        """Each sighting and the track it is (None: a new monster): nearest pairs first, one each. `late`: the
-        sightings are of a frame the tracks have been followed past (merge): each track where it was at t, and
-        one found dead since t among them."""
+    def _match(self, t: float, found: list[Monster]) -> list[tuple[Monster, Track | None]]:
+        """Each detection and the track it is (None: a new monster): nearest pairs first, one each (see the top). A
+        track dying with no gain of hers on it (the likeliest of a waiting gain's, still seen fading) takes a detection
+        only within FADE_MOVE of where it was: one farther is another walking through."""
         pairs = []
         for i, m in enumerate(found):
             for tr in self.tracks.values():
-                if tr.id in seen or tr.kind != m.kind:
-                    continue
-                if tr.state == DEAD and not (late and tr.judged is not None and tr.judged > t):
+                if tr.kind != m.kind or tr.state == DEAD:
                     continue
                 if tr.platform is not None and m.platform is not None and tr.platform != m.platform:
                     continue
-                gap = abs(m.x - (self._at(tr, t) if late else self.predicted(tr, t)))
-                speed = self.walking.get(tr.kind, DEFAULT_SPEED)
-                dt = abs(t - tr.last_seen) if late else t - tr.last_seen
+                if tr.state == DYING and tr.gain is None and abs(m.x - tr.x) > FADE_MOVE:
+                    continue
                 if t > tr.last_seen and self._stray(tr, m, t):
                     continue  # (her kill's monster, lost where her star landed on it)
-                if gap <= MATCH_BASE + MATCH_SPEED * speed * dt + MATCH_KNOCKBACK:
-                    pairs.append((gap, i, tr.id))
+                x = self.predicted(tr, t)
+                gap = abs(m.x - x)
+                speed = self.walking.get(tr.kind, DEFAULT_SPEED)
+                if gap <= MATCH_BASE + MATCH_SPEED * speed * max(0.0, t - tr.last_seen) + MATCH_KNOCKBACK:
+                    pairs.append((gap + (FACING_COST if self._turned(tr, m, x) else 0.0), i, tr.id))
         out: dict[int, Track] = {}
         used: set[int] = set()
         for _, i, tid in sorted(pairs):
@@ -558,6 +507,14 @@ class MonsterTracker:
                 out[i] = self.tracks[tid]
                 used.add(tid)
         return [(m, out.get(i)) for i, m in enumerate(found)]
+
+    def _turned(self, tr: Track, m: Monster, x: float) -> bool:
+        """Whether detection `m` faces against walking track `tr`'s heading where `tr` should be now (x), away from the
+        ends it turns at (FACING_END): a turn mid-platform, rare (FACING_COST)."""
+        if not tr.vx or not m.facing or (m.facing > 0) == (tr.vx > 0):
+            return False
+        ends = self._ends(tr)
+        return ends is None or (x - ends[0] > FACING_END and ends[1] - x > FACING_END)
 
     def _in_path(self, th: _Throw, tr: Track) -> bool:
         """Whether a star of throw `th` could meet track `tr`: where it should be at the throw's key, ahead of
@@ -582,21 +539,15 @@ class MonsterTracker:
         walk = self.walking.get(tr.kind, DEFAULT_SPEED) * max(0.0, min(t, stop) - tr.last_seen)
         return abs(m.x - tr.x) > MATCH_BASE + MATCH_KNOCKBACK + MATCH_SPEED * walk
 
-    def _aimed_since(self, tr: Track, t: float) -> None:
-        """A track a late search made (or brought back) as of t, put in the throws since t whose path it was in:
-        followed from t, as inline it would have been, it was there for them (else her kill of it is someone
-        else's, and her gain unexplained: 3 tracks in about 7,500 merges of three feed scenarios)."""
-        for th in self.throws:
-            if th.t > t and self._in_path(th, tr):
-                th.aimed.add(tr.id)
-
     def _new(self, t: float, m: Monster, view: View) -> Track:
         how = "entered" if view.at_edge(m.mob) else "spawned" if self._near_spawn(m) else "appeared"
         for o in self.tracks.values():  # a hidden one where this one is was likely lost to a mix-up
             if o.state == HIDDEN and o.kind == m.kind and abs(o.x - m.x) <= 2 * (MATCH_BASE + MATCH_KNOCKBACK):
                 o.crowded = True
-        tr = Track(self.next_id, m.kind, m.platform, m.x, m.y, m.mob, t, t, facing=m.facing, pose=m.pose,
-                   bar=m.bar, bar_at=t if m.bar is not None else None, how=how, seen_x=m.x)
+        vx = walk_vx(m.kind, m.facing, m.pose, self.walking)
+        tr = Track(self.next_id, m.kind, m.platform, m.x, m.y, m.mob, t, t, vx=0.0 if vx is None else vx,
+                   facing=m.facing, pose=m.pose, bar=m.bar, bar_at=t if m.bar is not None else None, how=how,
+                   seen_x=m.x)
         self.next_id += 1
         self.counts["tracks"] += 1
         self.tracks[tr.id] = tr
@@ -607,26 +558,16 @@ class MonsterTracker:
                    for kind, p, x in self.spawns)
 
     def _seen(self, tr: Track, m: Monster, t: float, events: list[Event]) -> None:
-        """Track `tr` seen as `m` in the frame at t: where it is, how fast it walks, its bar."""
-        dt = t - tr.last_seen
-        speed = self.walking.get(tr.kind, DEFAULT_SPEED)
-        if dt <= 0:
-            tr.x = m.x
-        elif dt > LONG_GAP_S:
-            tr.x, tr.vx = m.x, 0.0
-        else:
-            predicted = tr.x + tr.vx * dt
-            r = m.x - predicted
-            tr.x = predicted + ALPHA * r
-            tr.vx = max(-SPEED_CLAMP * speed, min(SPEED_CLAMP * speed, tr.vx + BETA * r / dt))
+        """Track `tr` seen as `m` in the frame at t: where it is (its detection's feet), how fast it walks (its heading
+        at its kind's speed: monsters.walk_vx; POSE_GATE_S), its bar."""
+        tr.x = m.x
         # Whether its sightings say it walks: it left a FADE_MOVE box in the last POSE_GATE_S, or was first seen
         # that recently (nothing says yet that it stands). None: the pose alone decides.
         walks = None if POSE_GATE_S is None else (
             tr.still_x is None or abs(m.x - tr.still_x) > FADE_MOVE or t - tr.still_since < POSE_GATE_S)
-        if POSE_VELOCITY and m.pose == "move" and m.facing and walks is not False:
-            tr.vx = m.facing * speed
-        elif POSE_VELOCITY and m.pose == "stand" and not walks:
-            tr.vx = 0.0
+        vx = walk_vx(m.kind, m.facing, m.pose, self.walking)
+        if vx is not None and (walks is None or (walks if vx else not walks)):
+            tr.vx = vx
         tr.y, tr.mob = m.y, m.mob
         if m.platform is not None:
             tr.platform = m.platform
@@ -669,7 +610,7 @@ class MonsterTracker:
                 del self.tracks[tr.id]
             return
         if dt >= MISSING_S and tr.state == LIVE:
-            if tr.seen < MIN_SEEN:  # seen in a frame or two: a match on scenery, not a monster
+            if tr.seen < max(2, round(MIN_SEEN_S * HZ)):  # seen in a frame or two: a match on scenery, not a monster
                 self.counts["flickers"] += 1
                 del self.tracks[tr.id]
                 return
@@ -679,8 +620,6 @@ class MonsterTracker:
                 for o in self.tracks.values())
         due = max(tr.last_seen, self._last_hit(tr)) + self.shape.hide_s
         if tr.state == HIDDEN and t > due:
-            if self.searching is not None and tr.last_seen < self.searching <= due + LATE_SEARCH_S:
-                return  # a search out may have seen it before it was due: judged once its answer is merged
             if tr.crowded:
                 self.counts["lost in a crowd"] += 1
                 del self.tracks[tr.id]
