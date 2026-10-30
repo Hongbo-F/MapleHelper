@@ -1125,7 +1125,7 @@ To check in game (the report runs on any telemetry): the next hunt loop or tour 
 | ... by the time since the point's last death | 0.22 within 2 s, 0.28-0.32 at 2-30 s, 0.23-0.25 at 30-120 s, 0.17 past 2 minutes: no cooldown, no clock of its own |
 | ... by her distance | 0.20 within 100 units of her, 0.25-0.29 farther: no keeping out of her way |
 | ... by the free points in view | 0.24-0.28 with 1 to 9 free: each on its own, not a number a tick shared out |
-| ... by the other players on the map | none in the minute before: 0 births in 154 free point-ticks (24 ticks, her kills in them too); up to one a look: 0.10-0.17; more: 0.26-0.31 |
+| ... by the other players on the map | nobody else for a minute: 0.023 (11 births in 486 free point-ticks, each within two ticks of a kill of hers: the cap); nobody in the look 0.06-0.15; up to one a look: 0.10-0.17; more: 0.26-0.31 |
 | ... by her kills in the tick before | 0.26 with none, 0.27-0.29 with 1-2, 0.31 with 3 or more |
 | ... by 5 minutes, 2026-10-29 | 0.25-0.35 every 10 minutes of the night's grinds (2.4-4.9 others a look); in the afternoon 0.40 at 15:55, 0.08-0.16 at 16:05-16:30, 0.03 at 16:35, none at 16:40 (0.1 others a look), 0.31 at 16:45 |
 | the map's count | when 26 or more of its 31 points were seen within 30 s, 0.32-0.47 monsters a point (0.69 at the most) |
@@ -1133,7 +1133,7 @@ To check in game (the report runs on any telemetry): the next hunt loop or tour 
 | in view or out of it | of the free points she left, net back after 7-15 s out of view 0.32, 15-60 s 0.43-0.46, 1-10 minutes 0.43-0.53; in view all along 0.41, 0.46-0.48, 0.49-0.53 (net of her kills there): the same, no spawning only out of sight |
 | other players' kills | 77% of the deaths seen (2,825 hers, 9,391 others'); in her grinds 35-65%, at night others killing 1.5-3 times what she did |
 
-So the game respawns on the map's clock (MeowDB's 7.56 s tick, at 7.115), each free point's monster back with a chance at each tick, whenever it died, as long as the map is under its cap (MeowDB: 75% of its points with one player, 5% more for each other; here, alone, 14 of 31 at the most): with nobody else killing, a point she empties stays empty until something dies somewhere. Not per point, nothing for 5 s and then n x 12.8 s (the belief's until then), not 8 s after each death (the simulator's). Grinding learns the rate (Grinding: the belief); the simulator has it as `--world tick-respawn` (`Realism.respawn_tick`: the map's tick, a free point's monster back with a chance of 0.27, the map's cap 0.45 of its points and 0.05 more for each other player; the cap's share alone isn't measured) and `--world solo` (nobody else).
+So the game respawns on the map's clock (MeowDB's 7.56 s tick, at 7.115), each free point's monster back with a chance at each tick, whenever it died, as long as the map is under its cap (MeowDB: 75% of its points with one player, 5% more for each other; here, alone, 14 of 31 at the most): with nobody else killing, a point she empties stays empty until something dies somewhere, her own kills too (the alone row counted by look over all ten files, as the review of 2026-10-29 did, `D:/MapleHelper-scratch/respawn/fix/alone_all.py`: first counted by tick it had 0 births in 154 free point-ticks, but its ticks were placed only among births, few when she's alone). Not per point, nothing for 5 s and then n x 12.8 s (the belief's until then), not 8 s after each death (the simulator's). Grinding learns the rate (Grinding: the belief); the simulator has it as `--world tick-respawn` (`Realism.respawn_tick`: the map's tick, a free point's monster back with a chance of 0.27, the map's cap 0.45 of its points and 0.05 more for each other player; the cap's share alone isn't measured) and `--world solo` (nobody else).
 
 ## Route diversity
 
@@ -2191,10 +2191,15 @@ the time live). A point is emptied once and full again once a monster is seen th
 kill of a monster she had seen is never read as a respawn. **The refill** (from 2026-10-29: the respawn as measured,
 below) has no memory: a point watched empty is due its median (ln 2 over the rate, 15.7 s at the prior's) after the
 latest look, however long it has been empty, and nothing is waited out first. Its rate (`Belief.rate`) is learned from
-what the looks saw of the points they saw free: each looked at again within 20 s, free still or with a new monster at
-it (within 60 units of the point: tracking's `spawned`; a monster walking in, or one the looks had lost, isn't a
-refill), each the likelihood of a grid of rates by the model, weighed by exp(-age / 180 s), the prior a gamma about
-0.0442 a second (0.27 a tick) counting as 3 refills. Until 2026-10-29 each point had its own clock, nothing for 5 s and
+what the looks saw of the points they saw free: each looked at again within 20 s, free still or with a new monster
+where one born at the point since can be (`Belief.born_reach`: tracking's 60 units of a `spawned` one and what it can
+have walked since the look that saw the point free, as the memory matches a monster seen again; one farther, walking
+in or one the looks had lost, isn't a refill), each the likelihood of a grid of rates by the model, weighed by
+exp(-age / 180 s), the prior a gamma about 0.0442 a second (0.27 a tick) counting as 3 refills. (Until the review of
+2026-10-29 within 60 units whatever the gap: a monster born while she was away had mostly walked off its point by the
+time she was back, so that gap went uncounted where every gap that stayed free counted, and the rate came out low;
+replayed, pooled over a run, 27-30% under the perception service's own count on the 15:58 and 16:27 runs of that day,
+10% on 17:07's, and within 8-11% since: below.) Until 2026-10-29 each point had its own clock, nothing for 5 s and
 then a time constant of 12.8 s times the points on its platform, scaled by the refills she watched against the model's
 mean: a point that never came back never counted, so at 16:39-16:44 that day, the top of the map empty for minutes and
 nobody else there, each of its points was still expected back at the model's pace slowed 1.9 times, 45 EXP at stop 7
@@ -2209,21 +2214,26 @@ replayed on the user's recording it learns 0.50 and 0.33 (0.25 and 0.10 had coun
 saw again as left to her).
 
 **The loop** (`Patrol.best`): a round of 2 to 12 stops, by its EXP a minute in the long run. Going round every `cycle` s,
-she catches at a point 1 / sum over k of not_back(k cycle) monsters a round (`caught`: after a kill it's back R s later,
-and she kills it at her first round after that); the cycle is the round's route times, 1 s a stop, and her shooting:
+she catches at a point what's back a cycle after she found it free (`caught`: `back(cycle)` at the refill's rate
+learned, the same after her kill or a look that saw it free, the refill having no memory: about the cycle times the
+rate when she comes round far more often than it refills, all of it when far less; until 2026-10-29 1 / sum over k of
+not_back(k cycle) by the refill clock); the cycle is the round's route times, 1 s a stop, and her shooting:
 0.085 s a point of EXP (Lucky Seven live on Tree Dungeon: 3.85 throws a Horny Mushroom's kill, 2.95 a Green's, a throw
 every 0.84 s), learned from her throws and the EXP they gave (300 EXP's worth of the prior: with the regular attack it's
 about three times as long). Less what touches cost (`HP_PRICE`, 100 EXP a bar of HP, a guess) by the danger hook. Grown
 from each of the 8 stops worth the most on their own, adding the stop that raises the rate most at its cheapest place in
-the round. Camping, a round of one stop (`Patrol.camping`), isn't taken up: it's logged with each loop to compare. A new
-round replaces hers only when it's 15% better by the same belief and 60 s after the last change, looked for every 20 s
-at her next-stop decisions: no flip-flopping; but once 3 stops running gave her nothing (left with nothing in reach, no
-EXP there: `EMPTY_RUN`), a better round is looked for at once and taken whenever (live at 16:39-16:44 on 2026-10-29 her
-loop's stops came up empty 37 times running, and the refill learned lags by its 180 s). On Tree Dungeon before she has
-seen anything (`python -m gamelab patrol --map 10002073`): 10, 7 (the top cluster), 486 EXP a minute, a round of 24 s
-(5 of travel, 17 of shooting, 8 points; by the refill clock until 2026-10-29, 463; 14, 10, 8, 12 461; camping at 23, 228,
-where her hunt loop camping there made 283 live). Rounds that close are a coin toss: what she sees decides, and the
-refill she learns.
+the round (0.01-0.04 s a search on Tree Dungeon, the danger hook taken once a stop for it; 0.2-1.0 s until the review of
+2026-10-29, the most at a low refill rate, where the rounds grow to 12 stops). Camping, a round of one stop
+(`Patrol.camping`), isn't taken up: it's logged with each loop to compare. A new round replaces hers only when it's 15%
+better by the same belief and 60 s after the last change, looked for every 20 s at her next-stop decisions: no
+flip-flopping; but once 3 stops running gave her nothing (left with nothing in reach, no EXP there: `EMPTY_RUN`), a
+better round is looked for at once and taken whenever, once: another 3 before the next look out of turn (live at
+16:39-16:44 on 2026-10-29 her loop's stops came up empty 37 times running, and the refill learned lags by its 180 s;
+until the review of that day the run lifted the 20 s until a stop gave EXP, a search at every stop left). On Tree
+Dungeon before she has seen anything (`python -m gamelab patrol --map 10002073`): 10, 7 (the top cluster), 486 EXP a
+minute, a round of 24 s (5 of travel, 17 of shooting, 8 points; by the refill clock until 2026-10-29, 463; 14, 10, 8, 12
+461; camping at 23, 228, where her hunt loop camping there made 283 live). Rounds that close are a coin toss: what she
+sees decides, and the refill she learns.
 
 **The next stop** (`Patrol.choose`, when she leaves a stop, and every second of a trip to one): along the loop from the
 last loop stop she was at, the first expected to hold a quarter of what it holds full by the time she gets there
@@ -2381,46 +2391,84 @@ plans by (the loop's 463 EXP a minute, camping 23 at 228 against 283 live) do. J
 brought to the game's (respawn delays spread about 14 s, points 28% full, the upper tower contested, touches as often as
 live: the gaps in `D:/MapleHelper-scratch/wf-prior/wf_a8ab59d8-9df__understand_sim.md`), or the game.
 
-**With the respawn as measured** (2026-10-29, work/respawn: the refill learned from what she sees, the loop looked at
-again after 3 empty stops, nothing due on the loop; the thief, the standard loop-grind: `ab loop-grind --map 10002073
---preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers --minutes 5`, the
-base master's grinding, in the worlds the respawn's commit added its own commit 619a14b; EXP a minute,
-D:/MapleHelper-scratch/respawn/ab_*.txt):
+**With the respawn as measured** (2026-10-29, work/respawn after its review, on master afd62f4; rebased onto 2c5f14b
+since, whose pet tick and Bark's alerts change none of these runs, seeds spot-checked the same to the digit: the refill
+learned from what she sees, the loop looked at again after 3 empty stops, nothing due on the loop; the thief, the
+standard loop-grind: `ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world zero-walls
+--world near-misses --world walkers --minutes 5`, the base master's grinding in the worlds the respawn's own commit
+added, 9aa2b81; EXP a minute, D:/MapleHelper-scratch/respawn/fix/ab_*.txt):
 
 | world | seeds | master | branch | diff | se | touches |
 |---|---|---|---|---|---|---|
-| the walkers' (each monster back 17 s after its own death) | 24 | 315.5 | 322.9 | +7.3 (+2.3%) | 8.9 | 67.7 -> 69.6 (+2.9%, se 2.8) |
-| `tick-respawn`: the map's tick, a free point's monster back at it 0.27 of the time, the crowd's five camps, the cap 0.70 of the points | 24 | 309.2 | 312.0 | +2.9 (+0.9%) | 9.1 | 70.2 -> 65.5 (-6.6%, se 2.5) |
-| `tick-respawn`, `solo`: nobody else, the cap 0.45, what she kills alone coming back somewhere | 12 | 137.5 | 232.8 | +95.4 (+69.4%) | 25.4 | 30.3 -> 49.3 (+62.6%, se 6.0) |
+| the walkers' (each monster back 17 s after its own death) | 24 | 315.5 | 318.7 | +3.1 (+1.0%) | 7.6 | 67.7 -> 68.2 (+0.8%, se 3.1) |
+| `tick-respawn`: the map's tick, a free point's monster back at it 0.27 of the time, the crowd's five camps, the cap 0.70 of the points | 24 | 306.9 | 309.4 | +2.5 (+0.8%) | 6.9 | 66.7 -> 66.4 (-0.4%, se 2.1) |
+| `tick-respawn`, `solo`: nobody else, the cap 0.45, what she kills alone coming back somewhere | 12 | 113.5 | 231.0 | +117.5 (+103.6%) | 18.4 | 22.8 -> 49.8 (+118%, se 5.3) |
 
-No deaths, falls or stops in any; better on 16 of 24, 12 of 24 and 11 of 12 seeds. In the worlds where something keeps
-killing or each monster comes back on its own, the same within the noise (the 12 seeds' first look at `tick-respawn` was
--4.6%, se 10.8: the next 12 settled it); alone, where the cap has the map make only what she kills and at random free
-points, she makes 69% more (a touch for 4.7 EXP against 4.5). On solo's seed 2 master's grinding goes between 10 and 7
-for the whole run, each found empty (67 stops, a median 0.97 s at each, "the loop, nothing due ahead"; its refill scale
-never learned: nothing came back to be watched), 4 kills, 33 EXP a minute, as live at 16:39; the branch learns a free
-point refills at 8-10% a tick there, takes a round of 10 stops at 64 s ("440 EXP a minute against 270"), 37 kills, 258.
+No deaths, falls or stops in any; better on 11 of 24, 12 of 24 and 12 of 12 seeds. In the worlds where something keeps
+killing or each monster comes back on its own, the same within the noise; alone, where the cap has the map make only
+what she kills and at random free points, she makes twice as much (a touch for 23 EXP against 25): master's grinding
+33-223 EXP a minute by seed, going between stops it found empty, this 203-258. (Before the review, on master 34b6ffa:
++2.3%, se 8.9; +0.9%, se 9.1; +69.4%, se 25.4.) On solo's seed 2 master's grinding goes between 10 and 7 for the whole
+run, each found empty ("the loop, nothing due ahead"; its refill scale never learned: nothing came back to be watched),
+4 kills, none in the last 276 s, 33 EXP a minute, as live at 16:39; this one 33 kills, 26 s at the most without one,
+223. The live stopgap's rules on master's grinding (work/respawn-stopgap-ab, an A/B base only: `stopgap_tour.py`'s,
+below), seeds 1-12: `tick-respawn` 309.5 (this 313.3, +1.2%, se 9.4; master's 311.9), `solo` 228.9 (this 231.0, +0.9%,
+se 7.8; master's 113.5): in the simulator it makes as much as this, alone too; where they part is where she goes
+(below), which the simulator doesn't price (its bottom no worse than its top).
 
-**Replayed on her live runs of 2026-10-29** (D:/MapleHelper-scratch/respawn/replay.py, replays2: her looks fed to her
-memory and the belief as grinding feeds them, her stops left as she left them, each next stop she chose on leaving one
-asked again from where she was, the code's own loop replanned; the stopgap is `stopgap_tour.py`'s rules, live from 16:49
-that day, on master's: a stop left with nothing in reach expects nothing from its unseen points for 30 s, the refill at
-least 3 times slower than the clock):
+**Replayed on her live runs of 2026-10-29** (D:/MapleHelper-scratch/respawn/replay.py; D:/MapleHelper-scratch/respawn/
+fix/replays4, on afd62f4: her looks fed to her memory and the belief as grinding feeds them, her stops left as she left
+them, each next stop she chose on leaving one asked again from where she was, the code's own loop replanned; the
+stopgap is `stopgap_tour.py`'s rules, live from 16:49 that day, on master's: a stop left with nothing in reach expects
+nothing from its unseen points for 30 s, the refill at least 3 times slower than the clock; a trip's choices left out,
+their heading being live's):
 
-| run (choices) | to a stop left empty within 30 s: live, master, stopgap, branch | to the bottom (28-33): live, master, stopgap, branch |
-|---|---|---|
-| 16:27, the ping-pong (91) | 40, 40, 1, 1 | 0, 0, 18, 2 |
-| 01:11, the pull's case (32) | 6, 1, 5, 1 | 21, 1, 10, 1 |
-| 15:58, pulled to the middle (66) | 0, 2, 0, 0 | 0, 1, 9, 1 |
-| 16:49, the stopgap live (33) | 1, 1, 3, 1 | 8, 1, 5, 2 |
-| 17:07, the stopgap live (86) | 5, 1, 7, 2 | 42, 19, 43, 21 |
+| run (choices on leaving a stop; her EXP a minute live) | to a stop left empty within 30 s: live, master, stopgap, branch | to the bottom (28-33) | pulls |
+|---|---|---|---|
+| 01:11, the pull's case (24; 183) | 3, 1, 3, 0 | 15, 1, 6, 0 | 20, 2, 21, 1 |
+| 15:58, pulled to the middle (28; 264) | 0, 2, 0, 1 | 0, 0, 6, 0 | 8, 11, 12, 9 |
+| 16:27, the ping-pong (69; 223) | 38, 37, 0, 0 | 0, 0, 18, 7 | 8, 10, 24, 18 |
+| 16:49-20:42, the stopgap live (11 runs, 107; 241-512, 290-350 most) | 4, 1, 3, 0 | 20, 7, 24, 6 | 60, 33, 73, 40 |
+| all 14 runs (228) | 45, 41, 6, 1 | 35, 8, 54, 13 | 96, 56, 130, 68 |
 
-The stopgap ends the ping-pong as this does, but its slower refill lowers every loop's rate, the bar a pile must beat
-with it, and has her patrol the bottom on its piles again (live at 17:07 half her choices); the refill learned keeps the
-bar where what she sees puts it. On the 16:27 run her choices by zone (the top 6-14, the middle 15-24) go from master's
-70 and 21 to 21 and 68: down to the middle, where the monsters were, from 16:35 (a round of 9 stops taken up at
-16:34:51, of 12 at 16:40:31 when 3 stops running had given nothing). The refill she learned at the runs' ends: 0.23 a
-tick at 01:18, 0.13 at 16:24 and 16:49, 0.25 at 16:59, 0.36 at 17:37.
+The stopgap ends the ping-pong as this does, but its slower refill lowers every loop's rate and the bar a pile must beat
+with it: it pulls her twice as often as master's rule and sends her to the bottom 54 times (live 20 in the stopgap's
+own runs, 81-82% of her EXP from there at 17:07 and 17:56); the refill learned keeps the bar where what she sees puts
+it (13, of them 7 the one choice of the 16:27 run asked again and again from the top, where she stayed live: at 16:42:34
+the round of the whole map taken up, 3 stops running having given nothing). On the 16:27 run her choices by zone (the
+top 6-14, the middle 15-24) go from master's 70 and 21 to 25 and 58: down to the middle, where the monsters were, from
+16:35. The refill she learned at the runs' ends: 0.29 a tick at 01:18, 0.15 at 16:24 and 16:49, 0.22-0.45 in the
+stopgap's runs (others on the map; 0.36 at 21:21).
+
+**The review** (2026-10-29, D:/MapleHelper-scratch/respawn/review; what came of it, D:/MapleHelper-scratch/respawn/fix).
+(1) The branch was behind master by the evade work: rebased onto afd62f4 (the key-check scenarios' docstrings alone
+conflicted, master's kept), everything here measured again on it; then onto 2c5f14b (the pet's tick, Bark's alerts: 41
+of the 42 Tree goldens differing in their pet file alone, as on master). (2) The refill was learned low on her revisits:
+a new monster counted only within 60 units of its point whatever the gap, where one born while she was away had mostly
+walked off it by the time she was back, so that gap went uncounted while every gap that stayed free counted; now where
+one born there can have walked since (`Belief.born_reach`). Her looks replayed through the belief (the code's own loop),
+a free point's chance a tick by the gap between the two looks, and pooled over each run against the perception service's
+own count over it:
+
+| run | 0-1 s | 1-3 s | 3-8 s | 8-20 s | pooled | the service's |
+|---|---|---|---|---|---|---|
+| 15:58 | 0.179 -> 0.212 | 0.139 -> 0.166 | 0.124 -> 0.191 | 0.052 -> 0.068 | 0.137 -> 0.172 | 0.188 |
+| 16:27 | 0.112 -> 0.136 | 0.110 -> 0.150 | 0.038 -> 0.055 | 0.030 -> 0.042 | 0.071 -> 0.094 | 0.102 |
+| 17:07 | 0.366 -> 0.414 | 0.268 -> 0.360 | 0.239 -> 0.331 | 0.238 -> 0.319 | 0.305 -> 0.376 | 0.340 |
+
+Of the refills counted, those of a monster the service had tracked there since before the look that saw the point free
+(false ones): 12% -> 15%, 9% -> 11%, 14% -> 15% (`fix/refill_kinds2.py`). The 15:58 run's long gaps stay low: in a
+crowd what's back 8-20 s on is net of others' kills. (3) The prior's grid mean was taken once as the module loaded, so
+`REFILL_RATE` set after (a test, the replay's `--set`) counted squared: taken as the constants are. (4) A run of empty
+stops lifted the 20 s between looks for a better round until a stop gave EXP: a search at every stop left, about 1 s
+each at a low rate; now one search a run (another 3 empty stops for the next), and a search takes the danger hook once
+a stop: 0.03 s at the prior's rate, 0.04 s at 2% a tick, the same rounds. (5) This section's loop paragraph said
+`caught` was the clock's sum. And the respawn table's alone row (0 births in 154 free point-ticks) didn't hold: counted
+by look, 11 in 486 (Respawns). To watch, unchanged: alone, the refill learned low, a round costs little to travel, so
+she takes one over the whole map with the bottom's 29, 33 and 32 in it (147 EXP a minute at 2% a tick; the 16:27 run's
+replay at 16:42:34); what's back after minutes away is believed all of it (`Q_CEIL` off; about half measured); one rate
+for every point (with two or more others the bottom's free points refilled faster than the top's in the review's cut:
+0.40 against 0.23 a tick).
 
 **Merged** (2026-10-24, over positioning, the escorted trips and the capture checks; Tree Dungeon, `crowd`, zero-walls,
 seed by seed against the hunt loop as merged, which positioning made much stronger there: its grounds and spots by the

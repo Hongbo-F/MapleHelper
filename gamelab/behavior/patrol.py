@@ -111,8 +111,8 @@ from ..attack import danger as danger_model
 from ..attack import reach, spots
 from ..attack.reach import EDGE_MARGIN, SHOT_DOWN, SHOT_UP
 from ..localization.mapdata import SPAWN_REACH, MapModel
-from ..localization.memory import MEMORY_S, SURE
-from ..localization.monsters import Monster
+from ..localization.memory import MATCH_SPEED, MATCH_WALK_S, MEMORY_S, SURE
+from ..localization.monsters import DEFAULT_SPEED, Monster, speeds
 from ..localization.players import Player, near_rival
 from ..localization.tracking import SPAWN_NEAR
 from ..motion.physics import WALK_SPEED
@@ -136,14 +136,15 @@ STOP_S = 1.0           # guess: s a stop costs beyond its kills (the looks that 
 # 30 s), however many points its platform has, however near she stands (0.20 within 100 units, 0.25-0.29 farther): one
 # rate for every point, 22.6 s free on average, where until 2026-10-29 each point had its own clock, nothing for 5 s and
 # then n x 12.8 s on a platform of n points. And the chance is the map's state, not a constant: by 5-minute stretch it
-# went from 0.40 to none, with the other players (none on the map: 0 births in 154 free point-ticks; one: 0.10-0.17;
-# more: 0.26-0.31) and a little with her kills in the tick before (0.26 with none, 0.31 with 3 or more). The game caps
-# the map's monsters (MeowDB: by the players there; the map held 0.32-0.47 a point when most of it was seen within
-# 30 s) and makes what died: at 16:35-16:45 on 2026-10-29, nobody else there and nothing of hers dying, the top's 12
-# points and 3 more in view stayed free 4 to 9 minutes, no birth in 38 ticks. So the rate is learned (Belief.rate): what
-# her looks saw of the points they saw free, each looked at again within WATCH_GAP_S, free still or with a new monster
-# at it (within SPAWN_NEAR of the point), each the likelihood of RATE_GRID's rates by the model, weighed by
-# exp(-age / REFILL_MEMORY_S), the prior a gamma about REFILL_RATE counting as REFILL_PRIOR_N refills. Until 2026-10-29
+# went from 0.40 to none, with the other players (nobody else for a minute: 0.023, 11 births in 486 free point-ticks,
+# each within two ticks of a kill of hers; one: 0.10-0.17; more: 0.26-0.31) and a little with her kills in the tick
+# before (0.26 with none, 0.31 with 3 or more). The game caps the map's monsters (MeowDB: by the players there; the map
+# held 0.32-0.47 a point when most of it was seen within 30 s) and makes what died: at 16:35-16:45 on 2026-10-29,
+# nobody else there and nothing of hers dying, the top's 12 points and 3 more in view stayed free 4 to 9 minutes, no
+# birth in 38 ticks. So the rate is learned (Belief.rate): what her looks saw of the points they saw free, each looked
+# at again within WATCH_GAP_S, free still or with a new monster where one born at it can be by then (Belief.
+# born_reach), each the likelihood of RATE_GRID's rates by the model, weighed by exp(-age / REFILL_MEMORY_S), the prior
+# a gamma about REFILL_RATE counting as REFILL_PRIOR_N refills. Until 2026-10-29
 # the refills she watched were averaged against the model's mean and a point that never came back never counted: at
 # 16:39-16:44 the top's points, empty for minutes, were each expected back at the model's pace slowed 1.9 times, 45 EXP
 # at stop 7 9 s after she found it empty, and she went between 7 and 14 for 4 minutes for nothing (the user: "the
@@ -442,9 +443,18 @@ def _mean_rate(loglik: list[float]) -> float:
     return sum(wi * r for wi, r in zip(ws, RATE_GRID)) / sum(ws)
 
 
-# The grid's mean of the prior alone: Belief.rate is REFILL_RATE times the grid's mean over it, the prior's exactly
-# with nothing seen.
-_PRIOR_MEAN = _mean_rate([0.0] * len(RATE_GRID))
+_PRIOR_MEANS: dict[tuple, float] = {}
+
+
+def _prior_mean() -> float:
+    """The grid's mean of the prior alone, as REFILL_RATE, REFILL_PRIOR_N and RATE_GRID are now (a test or a replay may
+    set them): Belief.rate is REFILL_RATE times the grid's mean over it, the prior's exactly with nothing seen. (Until
+    the review of 2026-10-29 it was taken once, as the module loaded: REFILL_RATE set to a quarter after gave a
+    sixteenth.)"""
+    key = (REFILL_RATE, REFILL_PRIOR_N, RATE_GRID)
+    if key not in _PRIOR_MEANS:
+        _PRIOR_MEANS[key] = _mean_rate([0.0] * len(RATE_GRID))
+    return _PRIOR_MEANS[key]
 
 
 class Belief:
@@ -452,6 +462,7 @@ class Belief:
 
     def __init__(self, model: MapModel, points: list[Point]):
         self.model, self.points = model, points
+        self._speeds = speeds(model)             # kind -> how fast it walks (units/s: born_reach)
         self._by = {}
         for q in points:
             self._by.setdefault((q.platform, q.kind), []).append(q)
@@ -483,7 +494,7 @@ class Belief:
 
     def _learned(self) -> float:
         w = math.exp(-max(0.0, self.t - self._weighed_t) / REFILL_MEMORY_S)
-        return REFILL_RATE * _mean_rate([w * ll for ll in self._loglik]) / _PRIOR_MEAN
+        return REFILL_RATE * _mean_rate([w * ll for ll in self._loglik]) / _prior_mean()
 
     @property
     def scale(self) -> float:
@@ -538,6 +549,18 @@ class Belief:
         known = max(since, self.empty_seen.get(i, since))
         return known + refill_median(self.rate) - t
 
+    def born_reach(self, kind: str, dt: float) -> float:
+        """How far from its spawn point a monster of `kind` born there up to `dt` s before can be seen (a refill: see
+        the top): SPAWN_NEAR (tracking's: a new monster that near a point of its kind spawned there) and what it can
+        have walked meanwhile, as the memory matches a monster seen again (MATCH_SPEED times its kind's speed, over
+        MATCH_WALK_S at most). Until the review of 2026-10-29 SPAWN_NEAR whatever the gap: a monster born while she was
+        away had mostly walked off its point by the time she saw it, so the gap went uncounted where the gaps that
+        stayed free all counted, and the rate came out low (her looks of 2026-10-29 replayed, pooled over a run: 27-30%
+        under the perception service's own count on two runs, 10% on a third; within 8-11% so, of the refills counted
+        a monster the service had seen there before 11-15%, 9-14% before: D:/MapleHelper-scratch/respawn/fix)."""
+        walk = self._speeds.get(kind, DEFAULT_SPEED) * min(max(0.0, dt), MATCH_WALK_S)
+        return SPAWN_NEAR + MATCH_SPEED * walk
+
     # --- keeping it up ---------------------------------------------------------------------------------
 
     def update(self, t: float, memory, players: list[Player] | None = None) -> None:
@@ -567,10 +590,11 @@ class Belief:
             since = self.empty_since.get(i)
             if since is None or not any(e.seen > since for e in es):
                 continue
-            q = self.points[i]  # a new one where its point is: a refill, seen if a look saw it free lately
-            new = [e.first for e in es if e.first > since and abs(e.x - q.x) <= SPAWN_NEAR]
-            if new and 0.0 < min(new) - self.empty_seen.get(i, -1e18) <= WATCH_GAP_S:
-                self._seen(min(new), min(new) - self.empty_seen[i], True)
+            q, last = self.points[i], self.empty_seen.get(i, -1e18)  # a new one where one born at its point since the
+            # latest look that saw it free can be: a refill, seen if that look was lately
+            new = [e.first for e in es if e.first > since and abs(e.x - q.x) <= self.born_reach(q.kind, e.seen - last)]
+            if new and 0.0 < min(new) - last <= WATCH_GAP_S:
+                self._seen(min(new), min(new) - last, True)
             self.empty_since.pop(i, None)
             self.killed.pop(i, None)
         for cover in [c for c in memory.covers if c.t > self._covered_t]:  # a look that searched a point's monster
@@ -704,9 +728,11 @@ class Patrol:
 
     # --- a round's worth in the long run ---------------------------------------------------------------
 
-    def rate(self, loop: Iterable[int], t: float | None = None) -> Plan | None:
+    def rate(self, loop: Iterable[int], t: float | None = None, kept: dict[int, float] | None = None) -> Plan | None:
         """What going round `loop` gives in the long run (see the top), with the other players' shares as at time `t`
-        (None: the belief's latest); None if a leg has no way."""
+        (None: the belief's latest); None if a leg has no way. `kept`: stop -> hp_rate there, kept for a search (best:
+        the same for every round it weighs; the danger hook's sum over the map's spawn points was nine tenths of its
+        time, 0.9 s a search at a low refill rate, where the rounds grow to 12 stops)."""
         loop = tuple(loop)
         t = self.belief.t if t is None else t
         travel = 0.0
@@ -724,16 +750,22 @@ class Patrol:
                     cov[q] = (c, i)
         b = self.belief
         pts = [(self.points[q], c * b.share(q, t), i) for q, (c, i) in cov.items()]
-        hp_s = {i: self.hp_rate(self.stops[i].platform, self.stops[i].x) for i in loop}
+        kept = {} if kept is None else kept
+        for i in loop:
+            if i not in kept:
+                kept[i] = self.hp_rate(self.stops[i].platform, self.stops[i].x)
+        hp_s = {i: kept[i] for i in loop}
         refill = b.rate
+        full = sum(g * q.exp for q, g, _ in pts)  # EXP a round with every point back (hers) ...
+        full_hp = sum(g * q.exp * self.kill_s * hp_s[i] for q, g, i in pts)  # ... and the HP its shooting costs
         base = travel + STOP_S * len(loop)
-        cycle = base + sum(g * q.exp * self.kill_s for q, g, _ in pts)  # every point full: the longest a round takes
-        for _ in range(8):  # what's back in a round, and the round's shooting for it (cycle only shortens)
-            got = [(q, g * caught(cycle, refill), i) for q, g, i in pts]
-            shoot = sum(n * q.exp * self.kill_s for q, n, _ in got)
+        cycle = base + full * self.kill_s  # every point full: the longest a round takes
+        for _ in range(8):  # what's back in a round (the same share at every point: one rate), the round's shooting
+            # for it (cycle only shortens)
+            back_share = caught(cycle, refill)
+            shoot = back_share * full * self.kill_s
             cycle = max(base + shoot, 1e-6)
-        exp = sum(n * q.exp for q, n, _ in got)
-        hp = sum(n * q.exp * self.kill_s * hp_s[i] for q, n, i in got)
+        exp, hp = back_share * full, back_share * full_hp
         return Plan(loop, (exp - HP_PRICE * hp) / cycle, cycle, travel, shoot, exp, len(pts), hp)
 
     def camping(self, t: float | None = None) -> Plan | None:
@@ -745,7 +777,8 @@ class Patrol:
     def best(self, t: float | None = None) -> Plan | None:
         """The best round of LOOP_MIN stops or more (see the top): grown from each of the SEEDS stops worth the most on
         their own, by the stop that raises its rate most, the second stop taken whether it does or not."""
-        alone = [p for i in range(len(self.stops)) if (p := self.rate((i,), t)) is not None]
+        kept: dict[int, float] = {}  # (rate's, for the search)
+        alone = [p for i in range(len(self.stops)) if (p := self.rate((i,), t, kept)) is not None]
         seeds = [p.stops[0] for p in sorted(alone, key=lambda p: -p.rate)[:SEEDS]]
         top = None
         for seed in seeds:
@@ -758,7 +791,7 @@ class Patrol:
                     at = self._insert(loop, j)
                     if at is None:
                         continue
-                    p = self.rate(loop[:at] + [j] + loop[at:], t)
+                    p = self.rate(loop[:at] + [j] + loop[at:], t, kept)
                     if p is not None and (found is None or p.rate > found.rate):
                         found = p
                 if found is None or (cur is not None and found.rate <= cur.rate * (1 + 1e-3)):
@@ -784,10 +817,15 @@ class Patrol:
     def replan(self, t: float, force: bool = False) -> str | None:
         """Look for a better round (every REPLAN_S): taken up when it's LOOP_GAIN better than hers by the same belief
         and LOOP_MIN_S after the last change (or she has none, or hers has no way round). Why it changed, or None."""
-        empty = self.empty_run >= EMPTY_RUN
+        run = self.empty_run
+        empty = run >= EMPTY_RUN
         if not force and not empty and self.plan is not None and t - self.planned < REPLAN_S:
             return None
         self.planned = t
+        if empty:  # the run's look taken: another EMPTY_RUN stops with nothing before the next out of turn (until the
+            # review of 2026-10-29 the run lifted REPLAN_S until a stop gave EXP: a search at every stop left, about
+            # 1 s each at a low rate, where the loops grow to 12 stops)
+            self.empty_run = 0
         new = self.best(t)
         if new is None:
             return None
@@ -805,7 +843,7 @@ class Patrol:
             self.plan = now
             return None
         why = f"{new.rate * 60:.0f} EXP a minute against {now.rate * 60:.0f}"
-        return self._take(new, t, why + (f"; {self.empty_run} stops running gave nothing" if empty else ""))
+        return self._take(new, t, why + (f"; {run} stops running gave nothing" if empty else ""))
 
     def _take(self, plan: Plan, t: float, why: str) -> str:
         self.plan, self.changed, self.at_loop, self.pulled = plan, t, 0, None

@@ -954,8 +954,11 @@ def test_a_point_that_never_comes_back_counts_against_the_refill():
     mean: a point that never came back never counted, and the top of Tree Dungeon, free for minutes at 16:39-16:44,
     was believed to refill at 1.9 times the model's pace all along. Watched free for three minutes, no refill: the rate
     falls to under 0.4 of the prior's (three minutes of one point weigh as 114 s, the prior as 68: with the top's ten
-    points live, to 6%); and a new monster away from its point (one walking in, or one the looks had lost) isn't a
-    refill."""
+    points live, to 6%); a new monster farther from its point than one born there since the look before can have
+    walked (one walking in, or one the looks had lost) isn't a refill; one seen when she's back after a while is,
+    wherever it walked to meanwhile (until the review of 2026-10-29 only within SPAWN_NEAR of the point, so a gap away
+    with a birth in it mostly went uncounted, and every gap that stayed free counted: the rate low, 27-30% under the
+    perception service's count on two of that day's runs replayed)."""
     model, ids, far, p = _column()
     b, m = p.belief, Memory(model)
     q = next(q for q in p.points if q.platform == ids[0])
@@ -967,18 +970,28 @@ def test_a_point_that_never_comes_back_counts_against_the_refill():
     assert b.refills == 0 and b.watched_s == pytest.approx(180.0)
     assert b.rate < 0.4 * patrol.REFILL_RATE
     assert b.stock(q.id, 180.0 + 9.0) < 0.15  # (where by the prior it was 0.33 after 9 s)
-    # A Horny Mushroom 100 units off the point (SPAWN_NEAR is 60): the point is full again, but no refill is counted.
-    m.update(180.5, [_sight(model, HORNY, 250, 0)], Cover(180.5, look, -200.0, 600.0))
-    b.update(180.5, m)
+    # A Horny Mushroom 140 units off the point a quarter of a second after it was seen free (one born there could be
+    # 60 + 1.3 x 125 x 0.25 = 101 off at most): the point is full again, but no refill is counted.
+    assert b.born_reach(HORNY, 0.25) < 140.0
+    m.update(180.25, [_sight(model, HORNY, 290, 0)], Cover(180.25, look, -200.0, 600.0))
+    b.update(180.25, m)
     assert q.id not in b.empty_since and b.refills == 0
     # Seen free again and a new one at the point: one.
-    m.entries[-1].state, m.entries[-1].ended = "gone", 180.5  # (forgotten)
+    m.entries[-1].state, m.entries[-1].ended = "gone", 180.25  # (forgotten)
     for t in (181.0, 181.5):
         m.update(t, [], Cover(t, look, -200.0, 600.0))
         b.update(t, m)
     m.update(182.0, [_sight(model, HORNY, 160, 0)], Cover(182.0, look, -200.0, 600.0))
     b.update(182.0, m)
     assert b.refills == 1
+    # Seen free again, then not looked at for 10 s: a new one 120 units off it when she's back walked there since it
+    # was born (where until the review the gap went uncounted).
+    m.entries[-1].state, m.entries[-1].ended = "gone", 182.0
+    m.update(182.5, [], Cover(182.5, look, -200.0, 600.0))
+    b.update(182.5, m)
+    m.update(192.5, [_sight(model, HORNY, 270, 0)], Cover(192.5, look, -200.0, 600.0))
+    b.update(192.5, m)
+    assert b.refills == 2
 
 
 def test_a_run_of_empty_stops_has_the_loop_looked_at_again_at_once():
@@ -1003,6 +1016,37 @@ def test_a_run_of_empty_stops_has_the_loop_looked_at_again_at_once():
     why = p.replan(t + 1.0)
     assert why is not None and "stops running gave nothing" in why and set(p.plan.stops) != first
     assert p.empty_run == 0
+
+
+def test_a_run_of_empty_stops_looks_at_the_loop_once_until_another_run(monkeypatch):
+    """The run's look out of turn is one look: its round kept (nothing better), another EMPTY_RUN stops with nothing
+    before the next out of turn, REPLAN_S's in between (until the review of 2026-10-29 the run lifted REPLAN_S until a
+    stop gave EXP: a search at every stop left, about 1 s each at a low rate on Tree Dungeon)."""
+    model, a, b, p = _two_areas()
+    p.belief.update(0.0, Memory(model))
+    assert p.replan(0.0) == "the first"
+    searched = []
+    best = patrol.Patrol.best
+    monkeypatch.setattr(patrol.Patrol, "best", lambda self, t=None: searched.append(t) or best(self, t))
+    stops, t = list(p.plan.stops), 5.0
+    for k in range(patrol.EMPTY_RUN):
+        p.left(stops[k % len(stops)], t, True, 0.0)
+    assert p.replan(t) is None and searched == [t]  # (her round still the best)
+    assert p.empty_run == 0
+    p.left(stops[0], t + 2.0, True, 0.0)
+    assert p.replan(t + 2.0) is None and searched == [t]  # within REPLAN_S, the run not again yet
+    for k in range(patrol.EMPTY_RUN - 1):
+        p.left(stops[(k + 1) % len(stops)], t + 3.0, True, 0.0)
+    assert p.replan(t + 3.0) is None and searched == [t, t + 3.0]
+
+
+def test_the_prior_is_the_refill_rate_as_set(monkeypatch):
+    """With nothing seen the rate is REFILL_RATE exactly, as it is when asked: set to a quarter, a quarter (until the
+    review of 2026-10-29 the grid's mean of the prior was taken once as the module loaded: a sixteenth)."""
+    model, ids, far, p = _column()
+    assert patrol.Belief(model, p.points)._learned() == pytest.approx(patrol.REFILL_RATE, rel=1e-9)
+    monkeypatch.setattr(patrol, "REFILL_RATE", patrol.REFILL_RATE / 4)
+    assert patrol.Belief(model, p.points)._learned() == pytest.approx(patrol.REFILL_RATE, rel=1e-9)
 
 
 def test_with_nothing_due_on_the_loop_she_goes_where_the_most_is_expected():
@@ -1053,9 +1097,9 @@ def _live_looks(path):
 
 @pytest.mark.skipif(not scenarios.available(10002073), reason="needs Tree Dungeon's game data (gamedata/data)")
 def test_the_live_ping_pong_of_2026_10_29_between_two_empty_stops_is_gone():
-    """Live at 16:39-16:44 on 2026-10-29 (the magician, her loop 14, 13, 10, 7) she went between stops 14 and 7 every 4-9
-    s for 4 minutes, each found empty, each expected again 31-46 EXP a few seconds later (the user: "the character keeps
-    going up where no mobs are spawning"): the top's points were free 4 to 9 minutes, nothing born there (the
+    """Live at 16:39-16:44 on 2026-10-29 (the magician, her loop 14, 13, 10, 7) she went between stops 14 and 7 every
+    4-9 s for 4 minutes, each found empty, each expected again 31-46 EXP a few seconds later (the user: "the character
+    keeps going up where no mobs are spawning"): the top's points were free 4 to 9 minutes, nothing born there (the
     perception service: no birth in 38 ticks, nobody else on the map), and the belief had each point back on its own
     clock, 1.9 times the model's pace. Her looks of 16:34-16:44 replayed (her memory and the belief fed as grinding
     feeds them, her loop as logged and then as replanned, each stop she left as she left it), each next stop she chose

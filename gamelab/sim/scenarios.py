@@ -2292,7 +2292,9 @@ def loop_tree_grind(sim):
     it, the review of 2026-10-29, when a trip's look at 31.6 s had a pile pay and the choice after it, her kill time
     learned afresh, not). With the evade work (its integration, 2026-10-29: work/evade-int) the same loop and no pile
     pays either: up to 7 (stop 7 again at 41.8 s), round to 10 (102.1 s) and to 16 (168.9 s, 14 skipped as empty), the
-    one stop she reaches; 469 EXP by her EXP number (510 by the world's), touched 33 times (20 on master)."""
+    one stop she reaches; 469 EXP by her EXP number (510 by the world's), touched 33 times (20 on master). With the
+    refill learned from what she sees (2026-10-29: work/respawn, behavior.patrol: one rate for every free point) the
+    same run, but for the loop's numbers: 10, 7 at 483 EXP a minute, camping at 8 470."""
     return _grind(3)(sim)
 
 
@@ -2583,7 +2585,8 @@ def loop_tree_lie_detector_grind(sim):
     a Hunt), so it stops as the hunt loop does, at the next look or plan, and she retreats to a safe place within 10 s,
     her moves alone: on seed 1 down onto 25, a safe platform, at 5.6 s. (Of seeds 1-12, all 12 are on a safe place at
     10 s, 10 on 25 and 2 on 28; resting on 25 when it was seen, as she could until 2026-10-26, she stayed, the rest's
-    next look up to 5 s after it.)"""
+    next look up to 5 s after it.) (With the refill learned from what she sees, 2026-10-29: work/respawn, the grind
+    before it goes otherwise: on seed 1 onto 25 at x 119, 4.9 s after the sighting, safe at 10 s.)"""
     return lie_detector(75.0, grind=True)(sim)
 
 
@@ -2868,7 +2871,11 @@ def loop_tree_grind_attack_key(sim):
     on A: A from 62.1 s, paged once, 19 kills after.) (Seed 9 kept at the evade work's integration (2026-10-29:
     work/evade-int, her evade step and R7's dodge with the pull's detour rule): of seeds 1-13, 3, 6, 9, 11 and 12 meet
     all of this (the evade work alone had 6, 9, 11 and 12). On 9: the doubt at 55.9 s, away to 25 (6.8 s to get there),
-    her stars not known, the window read and closed at 64.0-64.7 s, ATTACK on A, paged once, 23 kills after.)"""
+    her stars not known, the window read and closed at 64.0-64.7 s, ATTACK on A, paged once, 23 kills after.) (With
+    the refill learned from what she sees, 2026-10-29: work/respawn, on 9 no pull to 19 at 39.9 s, the loop's rate as
+    learned higher in this world of monsters back 8 s after their deaths: on her way up to 7 the doubt at 50.7 s,
+    away to the rope at x -8 by 29 (no safe platform near; 4.9 s), the window read and closed at 76.9-77.6 s, ATTACK
+    on A, paged once, 11 kills after.)"""
     return key_check_run(2)(sim)
 
 
@@ -2891,7 +2898,8 @@ def loop_tree_attack_unbound(sim):
     and check as there, ATTACK on none at 62.1 s.) (Seed 9 kept at the evade work's integration (2026-10-29:
     work/evade-int, her evade step and R7's dodge with the pull's detour rule), as loop_tree_grind_attack_key: of seeds
     1-13, 3, 6, 9, 11 and 12 meet all of this. On 9 the same doubt and check as there, ATTACK on none at 64.7 s, 19 kills
-    after.)"""
+    after.) (With the refill learned from what she sees, 2026-10-29: work/respawn, as there: the doubt at 50.7 s,
+    ATTACK on none at 78.3 s, 11 kills after.)"""
     return key_check_run(2)(sim)
 
 
@@ -3053,7 +3061,9 @@ def loop_tree_grind_arrow_key(sim):
     window (master d9774e5, 2026-10-28): on seed 1 her runs' doubt came at 320 s, after the hunt; of seeds 1-12, 9,
     10 and 12 meet all of this, master's stack on 9 doubts at 236 s with too few runs after. On 9: the doubt at 42.7
     s, the window read at 43.8-44.5 s, MOVE RIGHT followed to E, 51 kills after; 55 since the pull's detour rule
-    (2026-10-29: behavior.patrol, a pile against the loop's rate), 54 since a pile's touches count against it.)"""
+    (2026-10-29: behavior.patrol, a pile against the loop's rate), 54 since a pile's touches count against it, 50 at
+    the evade work's integration, 40 with the refill learned from what she sees (2026-10-29: work/respawn), the doubt
+    and the window as before.)"""
     return key_check_run(4)(sim)
 
 
