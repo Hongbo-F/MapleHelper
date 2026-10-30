@@ -1116,6 +1116,25 @@ What it found (2026-10-21; the 72 live files of 2026-10-19 to 21: 14,869 looks p
 
 To check in game (the report runs on any telemetry): the next hunt loop or tour with `--feed` (`tour --loop --minutes 20 --feed`), by `respawn` on its file, now with every look saying what it searched and the feed's deaths of others' kills recorded ('died'): whether a platform she empties, watched without a gap, stays empty past 12.56 s as here (80% not back), or has a monster back within it (MeowDB's respawn at a spawn point); and how many of the platforms she empties someone else empties first (others' kills on them). If it stays empty, RESPAWN's wait (rules 8 and 9, and the fast exit's "due back") isn't worth its time in game, and the simulator needs the game's refill (MeowDB's cap, say) before the harness can weigh a shorter one. A hunt watches a platform only while she's near it, so for longer: `watch --minutes 20` (it sends no keys) while she, played by hand, clears a platform in full view (12 from 13, or 21 from 22) and stands still 3 minutes, twice, and `respawn` on its file: the feed records every death ('died', hers and others'), so each clearing is an episode watched throughout, and the other platforms in view say whether monsters come back elsewhere meanwhile (a cap). In the same watch, one kill's drops left lying on a quiet platform in view (a snail's on 22 or 20) and not picked up for 4 minutes: when they go is the drop life, which no hunt has left a drop long enough to show.
 
+**Tree Dungeon's respawn, measured (2026-10-29: the map's tick, a chance at each, a cap).** From the perception service's own telemetry (`lab/telemetry/*-perceive*.jsonl` of 2026-10-28 and 29: 10 files, about 16 hours, every look searching the whole screen; `D:/MapleHelper-scratch/respawn`: `extract.py`, `period.py`, `ticks_an.py` and the tables' scripts beside them). A birth is a new track at a spawn point of its kind (within 60 units, on its platform), its platform in view the 1.5 s before (no gap over 2 s), its kind's count there up from 1 s before to 1 s after, no death of its kind within 100 units in the 1.5 s before (a dying monster found again): 9,957 of them. A free point is one of a platform's points of a kind over its monsters of that kind then (live and hidden tracks), counted at each tick while all the platform stayed in view from 2 s before to 1.5 s after.
+
+| | measured |
+|---|---|
+| the map's tick | every 7.115 s (fitted on each stretch of looks: 7.09-7.13 s); 73-95% of the births within 0.6 s of a tick by stretch (the rest the detector's lag, or a phase reset); the births' pairwise gaps peak at 0, 7.1, 14.1, 21.1, 28.4, 35.4 s |
+| a free point at a tick, in view | gets a monster 0.27 of the time (5,775 births in 21,285 free point-ticks; 487 more births in full groups: the count's own misses) |
+| ... by the time since the point's last death | 0.22 within 2 s, 0.28-0.32 at 2-30 s, 0.23-0.25 at 30-120 s, 0.17 past 2 minutes: no cooldown, no clock of its own |
+| ... by her distance | 0.20 within 100 units of her, 0.25-0.29 farther: no keeping out of her way |
+| ... by the free points in view | 0.24-0.28 with 1 to 9 free: each on its own, not a number a tick shared out |
+| ... by the other players on the map | none in the minute before: 0 births in 154 free point-ticks (24 ticks, her kills in them too); up to one a look: 0.10-0.17; more: 0.26-0.31 |
+| ... by her kills in the tick before | 0.26 with none, 0.27-0.29 with 1-2, 0.31 with 3 or more |
+| ... by 5 minutes, 2026-10-29 | 0.25-0.35 every 10 minutes of the night's grinds (2.4-4.9 others a look); in the afternoon 0.40 at 15:55, 0.08-0.16 at 16:05-16:30, 0.03 at 16:35, none at 16:40 (0.1 others a look), 0.31 at 16:45 |
+| the map's count | when 26 or more of its 31 points were seen within 30 s, 0.32-0.47 monsters a point (0.69 at the most) |
+| 16:39-16:44 | the top's 12 points and 3 of the middle's free 4 to 9 minutes, in view at every stop she made: no birth in 38 ticks, no death, nobody else on the map; the map then held 14 monsters at the most |
+| in view or out of it | of the free points she left, net back after 7-15 s out of view 0.32, 15-60 s 0.43-0.46, 1-10 minutes 0.43-0.53; in view all along 0.41, 0.46-0.48, 0.49-0.53 (net of her kills there): the same, no spawning only out of sight |
+| other players' kills | 77% of the deaths seen (2,825 hers, 9,391 others'); in her grinds 35-65%, at night others killing 1.5-3 times what she did |
+
+So the game respawns on the map's clock (MeowDB's 7.56 s tick, at 7.115), each free point's monster back with a chance at each tick, whenever it died, as long as the map is under its cap (MeowDB: 75% of its points with one player, 5% more for each other; here, alone, 14 of 31 at the most): with nobody else killing, a point she empties stays empty until something dies somewhere. Not per point, nothing for 5 s and then n x 12.8 s (the belief's until then), not 8 s after each death (the simulator's). Grinding learns the rate (Grinding: the belief); the simulator has it as `--world tick-respawn` (`Realism.respawn_tick`: the map's tick, a free point's monster back with a chance of 0.27, the map's cap 0.45 of its points and 0.05 more for each other player; the cap's share alone isn't measured) and `--world solo` (nobody else).
+
 ## Route diversity
 
 With `--ways N` (`nav`, `tour`, `tour --loop`, and the harness's `run` and `coverage`; `route.ROUTES`, 1 by default) each trip chooses among the N best distinct ways to where it's going, not only the quickest. It still weighs every move's cost by a random 1 to 1.35 (`route.NOISE`, kept through its replans), so near-equal variants take turns (the basin's two ropes, a drop or a walk-off, which takeoff). Then, at its first plan:
@@ -2166,16 +2185,22 @@ Dungeon's tower is slow (24 to 6, 21 s by its ropes), down quick (6 to 24, 8 s).
 **The belief** (`patrol.Belief`, at every look, from her memory of the monsters). Each point's monsters now or at any
 time ahead (`stock`): those her memory has, each at the nearest point of its kind on its platform; else, for a point her
 kill emptied or a look saw empty (a look that searched a body of its kind standing at the point: `Memory.holds_body` on
-the looks' covers, `Memory.covers`), a refill clock: nothing for 5 s, then back with time constant 12.8 s times the
-platform's points (`not_back`, fitted on the live respawn report: a platform's first monster back a median 13.9 s after
-her kill emptied it, 0.74 not back at 8 s, 0.55 at 12.56 s), given that it wasn't back at the latest look that saw it
-empty (past the 5 s the clock has no memory: a point watched empty is due 8.9 s after the latest look, however long it
-has been empty); else, never seen, 0.35 (the uncamped 19-21 had a monster 31-39% of the time live). A point is emptied
-once and full again once a monster is seen there after that, so another player's kill of a monster she had seen is
-never read as a respawn (by the clock of an earlier miss, it had been, on 14-35% of the points emptied in the day's
-replays). The clock's scale is learned from the refills she watches (a point her kill emptied, seen empty within 2 s
-before the look that sees it back), against the model's mean (against its median, a world refilling as the model says
-came out at 1.25), 5 refills' worth of the model. What of a point is hers (`share`): all of it, but with another
+the looks' covers, `Memory.covers`), what's back since the latest look that saw it empty (`back`: the refill's rate a
+second, the same for every point, learned: below); else, never seen, 0.35 (the uncamped 19-21 had a monster 31-39% of
+the time live). A point is emptied once and full again once a monster is seen there after that, so another player's
+kill of a monster she had seen is never read as a respawn. **The refill** (from 2026-10-29: the respawn as measured,
+below) has no memory: a point watched empty is due its median (ln 2 over the rate, 15.7 s at the prior's) after the
+latest look, however long it has been empty, and nothing is waited out first. Its rate (`Belief.rate`) is learned from
+what the looks saw of the points they saw free: each looked at again within 20 s, free still or with a new monster at
+it (within 60 units of the point: tracking's `spawned`; a monster walking in, or one the looks had lost, isn't a
+refill), each the likelihood of a grid of rates by the model, weighed by exp(-age / 180 s), the prior a gamma about
+0.0442 a second (0.27 a tick) counting as 3 refills. Until 2026-10-29 each point had its own clock, nothing for 5 s and
+then a time constant of 12.8 s times the points on its platform, scaled by the refills she watched against the model's
+mean: a point that never came back never counted, so at 16:39-16:44 that day, the top of the map empty for minutes and
+nobody else there, each of its points was still expected back at the model's pace slowed 1.9 times, 45 EXP at stop 7
+nine seconds after she found it empty, and she went between 7 and 14 every 4-9 s for 4 minutes for nothing (the user:
+"the character keeps going up where no mobs are spawning"). Learned so, by 16:42 a free point there refills at 2.5% a
+tick, 7 and 14 are expected 2-4 EXP. What of a point is hers (`share`): all of it, but with another
 player's minimap dot by it (200 across, 100 up or down) within 20 s, what others leave of its kind (`take`), learned
 from her memory: of the monsters she saw by another player, those looks forgot without a kill of hers (not those
 forgotten by age: she never looked again) against those she killed or saw there 10 s after she first saw them, 0.5
@@ -2192,15 +2217,20 @@ about three times as long). Less what touches cost (`HP_PRICE`, 100 EXP a bar of
 from each of the 8 stops worth the most on their own, adding the stop that raises the rate most at its cheapest place in
 the round. Camping, a round of one stop (`Patrol.camping`), isn't taken up: it's logged with each loop to compare. A new
 round replaces hers only when it's 15% better by the same belief and 60 s after the last change, looked for every 20 s
-at her next-stop decisions: no flip-flopping. On Tree Dungeon before she has seen anything (`python -m gamelab patrol
---map 10002073`): 10, 7 (the top cluster), 463 EXP a minute, a round of 22 s (5 of travel, 15 of shooting, 8 points);
-14, 10, 8, 12 461; 19-24 round by the safe platforms, 347; camping at 23, 228, where her hunt loop camping there made
-283 live (with her kills on 22 and 24 from 23 and 24). Rounds that close are a coin toss: what she sees decides.
+at her next-stop decisions: no flip-flopping; but once 3 stops running gave her nothing (left with nothing in reach, no
+EXP there: `EMPTY_RUN`), a better round is looked for at once and taken whenever (live at 16:39-16:44 on 2026-10-29 her
+loop's stops came up empty 37 times running, and the refill learned lags by its 180 s). On Tree Dungeon before she has
+seen anything (`python -m gamelab patrol --map 10002073`): 10, 7 (the top cluster), 486 EXP a minute, a round of 24 s
+(5 of travel, 17 of shooting, 8 points; by the refill clock until 2026-10-29, 463; 14, 10, 8, 12 461; camping at 23, 228,
+where her hunt loop camping there made 283 live). Rounds that close are a coin toss: what she sees decides, and the
+refill she learns.
 
 **The next stop** (`Patrol.choose`, when she leaves a stop, and every second of a trip to one): along the loop from the
 last loop stop she was at, the first expected to hold a quarter of what it holds full by the time she gets there
-(`SKIP_FULL`, under the 0.35 of a point never seen: an emptied stretch is skipped until it's due, an unseen one never),
-or on a trip the stop she's on her way to; and a stop whose monsters she has seen (her memory's, not the belief's
+(`SKIP_FULL`, under the 0.35 of a point never seen: an emptied stretch is skipped until it's due, an unseen one never;
+with nothing due on the loop, from 2026-10-29, of the stops due elsewhere the one expected to give the most a second if
+that's more than the loop's next: "nothing due on the loop: the most expected"), or on a trip the stop she's on her way
+to; and a stop whose monsters she has seen (her memory's, not the belief's
 guesses; from one monster at even odds) pulls her there when it pays for its detour against the loop: what it's
 expected to give, less what touches there cost her while she shoots it (`Patrol.net`, as the loop's rate counts its
 stops'), 1.25 times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second
@@ -2292,7 +2322,9 @@ the way to stop 7, the loop's 7.7 EXP/s giving 58 EXP meanwhile)", or on a trip 
 s away: 66 EXP expected (0 seen), 3.1 EXP/s with its kills; back to the loop (stop 19's pile no longer pays for its
 detour: 11 EXP expected, 9 under what the loop gives meanwhile)",
 with the stops skipped and when each is due), each stop left ("leaving stop 24: nothing left in reach (16.0 s there,
-108 EXP)", or "... 4.1 EXP/s here, going on gives 7.7"), every 60 s and at the end what it did and learned: loops, stops, stays, pulls, skips, the refill scale,
+108 EXP)", or "... 4.1 EXP/s here, going on gives 7.7"), every 60 s and at the end what it did and learned: loops, stops,
+stays, pulls, skips, the refill as learned ("a free point refilling at 3% a tick lately (x9.10 the prior's pace; 75
+refills seen, 3002 s of points seen free)": the 'state' record's `refill_tick`, `refill_scale`, `refills`, `watched_s`),
 her kill time, what others take, HP a minute by platform, kills by platform. `python -m gamelab patrol FILE` runs a
 recorded run through her memory and the belief and prints, every few seconds, the next stop grinding would have taken
 from where she was (a look, not a choice: her place in the loop doesn't move; it had rotated the loop by itself every 5 s,

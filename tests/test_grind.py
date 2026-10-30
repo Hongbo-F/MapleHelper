@@ -80,16 +80,16 @@ def test_a_loop_timed_to_respawns_beats_camping():
     model, ids, far, p = _column()
     assert [len(s.cover) for s in p.stops] == [1] * 5  # each platform's own point, nothing across
     camp, loop = p.camping(0.0), p.best(0.0)
-    # Camping at one point gets a kill each time it's back (17.8 s on average: REFILL_D0 + REFILL_TAU), and stands
-    # idle the rest of the time.
-    assert len(camp.stops) == 1 and camp.rate == pytest.approx(41 / (patrol.REFILL_D0 + patrol.REFILL_TAU), rel=0.1)
+    # Camping at one point gets a kill each time it's back (the refill's rate, 22.6 s free on average), and stands idle
+    # the rest of the time.
+    assert len(camp.stops) == 1 and camp.rate == pytest.approx(41 * patrol.REFILL_RATE, rel=0.1)
     # The round of the column: each point passed again about when it's back (its cycle past the refill's median), for
     # a good deal more EXP a minute; the stop 30 s away isn't worth the trip.
     assert set(loop.stops) == {p.stop_on(i) for i in ids} and p.stop_on(far) not in loop.stops
-    assert loop.cycle >= patrol.refill_median(1)
+    assert loop.cycle >= patrol.refill_median()
     assert loop.rate > 1.5 * camp.rate
     # A round's worth is what comes back in it: the same round in a world refilling 4 times as slowly is worth less.
-    p.belief.refills = [4.0] * 100
+    p.belief._rate = patrol.REFILL_RATE / 4
     assert p.rate(loop.stops, 0.0).rate < 0.7 * loop.rate
 
 
@@ -110,7 +110,7 @@ def test_the_next_stop_goes_round_the_loop_and_skips_what_she_has_just_emptied()
     p.belief.empty_since[q] = 1.5
     skip, info = p.choose(2.0, p.platform_of(nxt), 150.0, current=nxt)
     assert skip != after and [s["stop"] for s in info["skipped"]] == [p.platform_of(after)]
-    assert info["skipped"][0]["due"] == pytest.approx(1.5 + patrol.refill_median(1) - 2.0, abs=0.1)
+    assert info["skipped"][0]["due"] == pytest.approx(1.5 + patrol.refill_median() - 2.0, abs=0.1)
 
 
 def _beside(off: float):
@@ -124,6 +124,8 @@ def _beside(off: float):
     right = _pid(model, 1200, -200)
     p = _patrol(model, lambda a, b: off if right in (a, b) else 2.0 * abs(left.index(a) - left.index(b)))
     p.belief.update(0.0, Memory(model))
+    p.belief._rate = 0.06  # (refilling at 0.06 a second: the loop's points not all back each round, its rate 4.5 EXP/s,
+    # as the refill clock until 2026-10-29 had it for a point alone on its platform; the prior's, 0.044, gives 3.8)
     p._take(p.rate([p.stop_on(i) for i in left], 0.0), 0.0, "test")
     return model, left, right, p
 
@@ -233,7 +235,7 @@ def test_no_flip_flopping_between_loops():
     for k in range(10):
         t += patrol.LOOP_MIN_S + patrol.REPLAN_S
         p.belief.rival_at = {}
-        p.belief.refills = [1.0 + 0.02 * (k % 2)]
+        p.belief._rate = patrol.REFILL_RATE * (1.0 + 0.02 * (k % 2))
         p.replan(t)
     assert set(p.plan.stops) == second and p.loops == loops
 
@@ -246,19 +248,22 @@ def test_the_belief_of_a_point_her_kill_emptied_refills_and_learns_how_fast():
     m.update(0.0, [seen], None)
     b.update(0.0, m)
     assert b.stock(q.id, 0.0) == pytest.approx(1.0, abs=0.01)
-    # Her kill: the point is empty, nothing back within REFILL_D0, even odds at the median.
+    # Her kill: the point is empty, coming back at the refill's rate from then (by the learned rate, the prior's so
+    # far), to Q_CEIL in the long run.
     m._killed(m.entries[0], 1.0, 150.0)
     b.update(1.0, m)
-    assert b.stock(q.id, 1.0 + patrol.REFILL_D0 - 0.1) == 0.0
-    assert b.stock(q.id, 1.0 + patrol.refill_median(1)) == pytest.approx(0.5)
-    assert p.expect(p.stop_on(ids[0]), 2.0)[0] == 0.0
-    # Watched back 7 s after the kill (a look saw it empty a moment before): refills come about twice as fast here.
+    assert b.stock(q.id, 1.0) == 0.0
+    assert b.stock(q.id, 1.0 + 5.0) == pytest.approx(patrol.back(5.0), abs=1e-9)
+    assert patrol.back(5.0) == pytest.approx(5.0 * patrol.REFILL_RATE, rel=0.25)  # (at first the rate)
+    assert b.stock(q.id, 1e4) == pytest.approx(patrol.Q_CEIL)
+    assert p.expect(p.stop_on(ids[0]), 1.0)[0] == 0.0
+    # Seen back 7 s after the kill, a look having seen it free a moment before (within WATCH_GAP_S): a refill seen,
+    # and refills are learned to come a little faster than the prior has them.
     b.empty_seen[q.id] = 7.5
     m.update(8.0, [_sight(model, HORNY, 140, 0)], None)
     b.update(8.0, m)
-    assert q.id not in b.empty_since and len(b.refills) == 1
-    assert b.refills[0] == pytest.approx((7.75 - 1.0) / patrol.refill_mean(1))
-    assert b.scale < 1.0
+    assert q.id not in b.empty_since and b.refills == 1
+    assert b.rate > patrol.REFILL_RATE and b.scale < 1.0
     # A point never seen: Q_UNKNOWN.
     other = next(q for q in p.points if q.platform == ids[1])
     assert b.stock(other.id, 8.0) == patrol.Q_UNKNOWN
@@ -322,16 +327,22 @@ def test_she_shoots_in_passing_what_a_star_reaches_on_another_platform():
 
 
 def test_a_world_refilling_as_the_model_says_is_learned_as_the_model():
-    # Watched refills drawn from the model itself: their scale comes out at 1 (against the model's median it came out at
-    # 1.25, the mean being 1.28 times the median).
-    import math
+    # A free point looked at again 0.5-20 s later, free still or with a new monster, drawn from the model itself at a
+    # rate (the prior's, a quarter of it, three times it): the rate learned comes out at it, within REFILL_MEMORY_S's
+    # worth of looks; and with nothing seen for long after, back at the prior's.
     import random
     model, ids, far, p = _column()
-    rng, n = random.Random(1), 1
-    tau = n * patrol.REFILL_TAU
-    p.belief.refills = [(patrol.REFILL_D0 - tau * math.log(1 - rng.random())) / patrol.refill_mean(n)
-                        for _ in range(2000)]
-    assert p.belief.scale == pytest.approx(1.0, abs=0.05)
+    for scale in (1.0, 0.25, 3.0):
+        b, rng, t = patrol.Belief(model, p.points), random.Random(1), 0.0
+        rate = patrol.REFILL_RATE * scale
+        for _ in range(3000):
+            gap = rng.uniform(0.5, patrol.WATCH_GAP_S)
+            t += 0.25
+            b._seen(t, gap, rng.random() < patrol.back(gap, rate))
+        b.t = t
+        assert b._learned() == pytest.approx(rate, rel=0.2)
+        b.t = t + 20 * patrol.REFILL_MEMORY_S
+        assert b._learned() == pytest.approx(patrol.REFILL_RATE, rel=0.2)
 
 
 def test_a_point_looks_saw_empty_is_believed_empty_however_long_since_it_was_emptied():
@@ -346,13 +357,12 @@ def test_a_point_looks_saw_empty_is_believed_empty_however_long_since_it_was_emp
     m.update(60.0, [], Cover(60.0, look.rows, look.x0, look.x1))
     b.update(60.0, m)
     assert b.empty_since[q.id] == 10.0 and b.stock(q.id, 60.0) == 0.0
-    # ... and from then on as a point just watched empty: the clock past REFILL_D0 has no memory.
-    tau = patrol.REFILL_TAU
-    assert b.stock(q.id, 60.0 + tau) == pytest.approx(1 - math.exp(-1), abs=1e-6)
-    assert b.due(q.id, 60.0) == pytest.approx(tau * math.log(2))
-    # Never watched since its kill, a point is due at the model's median after it, and is overdue after that.
+    # ... and from then on as a point just watched empty: the refill has no memory.
+    assert b.stock(q.id, 70.0) == pytest.approx(patrol.back(10.0, b.rate), abs=1e-9)
+    assert b.due(q.id, 60.0) == pytest.approx(patrol.refill_median(b.rate))
+    # Never watched since its kill, a point is due at the refill's median after it, and is overdue after that.
     b.empty_seen.pop(q.id)
-    assert b.due(q.id, 60.0) == pytest.approx(10.0 + patrol.refill_median(1) - 60.0)
+    assert b.due(q.id, 60.0) == pytest.approx(10.0 + patrol.refill_median(b.rate) - 60.0)
 
 
 def test_a_point_seen_full_again_takes_a_fresh_clock_when_it_is_next_emptied():
@@ -645,7 +655,7 @@ def test_her_loop_found_again_in_another_order_keeps_its_order_and_takes_its_rat
     # Refills watched four times as slow as the model's: the same round, its rate now lower; found again in its other
     # order, hers keeps her order (her place in it) and takes the rate (until 2026-10-29 it kept the one it was taken
     # up at: a 2-stop round's two orders are one round, so the pulls' bar and a stop's stayed where they started).
-    p.belief.refills = [4.0] * 100
+    p.belief._rate = patrol.REFILL_RATE / 4
     t = patrol.REPLAN_S + 1
     assert set(p.best(t).stops) == set(mine) and p.best(t).stops != mine
     assert p.replan(t) is None and p.plan.stops == mine
@@ -798,13 +808,13 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
         clock[0] += dt
         reason = g._leaving(s, g._held(s))
     assert reason == "11.8 EXP/s here, going on gives 20.0"
-    # Her kill emptied the point a moment ago: nothing comes back within REFILL_D0, so she doesn't wait for it; and
-    # watched empty after that, its respawn's few EXP a second (Patrol.wait_gain) don't hold her either.
+    # Her kill emptied the point a moment ago: what comes back meanwhile is a few EXP a second at the refill's rate
+    # (Patrol.wait_gain), so she doesn't wait for it; nor, watched empty after that, later.
     p.replan(0.0, force=True)
     g, s = _at_stop(model, p, ids[0], 150.0, [], 2.0)
     q = next(i for i, _ in p.stops[g.stop].cover)
     p.belief.empty_since[q] = p.belief.killed[q] = p.belief.empty_seen[q] = 1.9
-    assert p.wait_gain(g.stop, 2.0) == 0.0
+    assert 0 < p.wait_gain(g.stop, 2.0) < 0.5 * p.plan.rate
     assert g._leaving(s, []) is None  # (LEAVE_CONFIRM_S first)
     clock[0] += grind.LEAVE_CONFIRM_S + 0.01
     assert g._leaving(s, []) == "nothing left in reach"
@@ -814,6 +824,9 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
 
 def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch):
     from gamelab.behavior.hunt import Hunt
+    # (refilling at a quarter of the prior's rate: at the prior's, the pile's point shot in passing below has a tenth of
+    # a monster back 2 s later, 3.8 EXP, which pays for the 3 s to it against the loop's 1.2 EXP/s)
+    monkeypatch.setattr(patrol, "REFILL_RATE", patrol.REFILL_RATE / 4)
     model, ids, far, p = _column()
     p._take(p.rate([p.stop_on(ids[0]), p.stop_on(far)], 0.0), 0.0, "test")
     monkeypatch.setattr(Hunt, "_interrupt", lambda self, s: False)  # none of the hunt loop's reasons
@@ -933,3 +946,172 @@ def test_her_kill_and_another_players_seen_dead_in_one_look_both_reach_the_belie
     assert b.empty_since[hers.id] == b.empty_since[other.id] == 1.5
     assert hers.id in b.killed and other.id not in b.killed
     assert b.kept_by[HORNY] == 1 and b.gone_by[HORNY] == 1
+
+
+def test_a_point_that_never_comes_back_counts_against_the_refill():
+    """The refill is learned from what the looks saw (Belief.rate): a point seen free and seen again within WATCH_GAP_S,
+    free still or with a new monster at it. Until 2026-10-29 only the refills she watched counted, against the model's
+    mean: a point that never came back never counted, and the top of Tree Dungeon, free for minutes at 16:39-16:44,
+    was believed to refill at 1.9 times the model's pace all along. Watched free for three minutes, no refill: the rate
+    falls to under 0.4 of the prior's (three minutes of one point weigh as 114 s, the prior as 68: with the top's ten
+    points live, to 6%); and a new monster away from its point (one walking in, or one the looks had lost) isn't a
+    refill."""
+    model, ids, far, p = _column()
+    b, m = p.belief, Memory(model)
+    q = next(q for q in p.points if q.platform == ids[0])
+    look = ((-100.0, 50.0),)  # (the bottom platform's alone)
+    for k in range(361):  # a look every half second, nothing there
+        t = 0.5 * k
+        m.update(t, [], Cover(t, look, -200.0, 600.0))
+        b.update(t, m)
+    assert b.refills == 0 and b.watched_s == pytest.approx(180.0)
+    assert b.rate < 0.4 * patrol.REFILL_RATE
+    assert b.stock(q.id, 180.0 + 9.0) < 0.15  # (where by the prior it was 0.33 after 9 s)
+    # A Horny Mushroom 100 units off the point (SPAWN_NEAR is 60): the point is full again, but no refill is counted.
+    m.update(180.5, [_sight(model, HORNY, 250, 0)], Cover(180.5, look, -200.0, 600.0))
+    b.update(180.5, m)
+    assert q.id not in b.empty_since and b.refills == 0
+    # Seen free again and a new one at the point: one.
+    m.entries[-1].state, m.entries[-1].ended = "gone", 180.5  # (forgotten)
+    for t in (181.0, 181.5):
+        m.update(t, [], Cover(t, look, -200.0, 600.0))
+        b.update(t, m)
+    m.update(182.0, [_sight(model, HORNY, 160, 0)], Cover(182.0, look, -200.0, 600.0))
+    b.update(182.0, m)
+    assert b.refills == 1
+
+
+def test_a_run_of_empty_stops_has_the_loop_looked_at_again_at_once():
+    """EMPTY_RUN stops running left with nothing in reach and no EXP there lift LOOP_MIN_S (and REPLAN_S): a better
+    round is taken up at once; a stop that gave something ends the run."""
+    model, a, b, p = _two_areas()
+    m = Memory(model)
+    p.belief.update(0.0, m)
+    assert p.replan(0.0) == "the first"
+    first = set(p.plan.stops)
+    mine = {p.platform_of(i) for i in first}
+    t = 5.0  # another player by her area: the other is better, but within LOOP_MIN_S
+    p.belief.rival_at = {q.id: t for q in p.points if q.platform in mine}
+    assert p.replan(t, force=True) is None and set(p.plan.stops) == first
+    stops = list(p.plan.stops)
+    p.left(stops[0], t, True, 0.0)
+    p.left(stops[1], t, True, 41.0)  # something there: the run starts again
+    assert p.empty_run == 0
+    for k in range(patrol.EMPTY_RUN):
+        p.left(stops[k % len(stops)], t, True, 0.0)
+    assert p.empty_run == patrol.EMPTY_RUN
+    why = p.replan(t + 1.0)
+    assert why is not None and "stops running gave nothing" in why and set(p.plan.stops) != first
+    assert p.empty_run == 0
+
+
+def test_with_nothing_due_on_the_loop_she_goes_where_the_most_is_expected():
+    """Every stop of the loop emptied lately (none due: under SKIP_FULL of full): the next stop is where the most is
+    expected a second, off the loop if that's more than the loop's next (until 2026-10-29 the loop's next whatever)."""
+    model, ids, far, p = _column()
+    m = Memory(model)
+    p.belief.update(0.0, m)
+    p._take(p.rate([p.stop_on(i) for i in ids[:2]], 0.0), 0.0, "test")
+    for i in ids[:2]:  # the loop's points seen free a moment ago; the column's other two (4 and 6 s off) never seen
+        q = next(q for q in p.points if q.platform == i)
+        p.belief.empty_since[q.id] = p.belief.empty_seen[q.id] = 9.5
+    j, info = p.choose(10.0, ids[0], 150.0, current=p.stop_on(ids[0]))
+    assert j == p.stop_on(ids[2]) and info["why"] == "nothing due on the loop: the most expected"
+    # Those seen free too: nothing anywhere worth more, so the loop's next, as before.
+    for i in ids[2:] + [far]:
+        q = next(q for q in p.points if q.platform == i)
+        p.belief.empty_since[q.id] = p.belief.empty_seen[q.id] = 9.5
+    j, info = p.choose(10.0, ids[0], 150.0, current=p.stop_on(ids[0]))
+    assert j == p.stop_on(ids[1]) and info["why"] == "the loop, nothing due ahead"
+
+
+LIVE_PING_PONG = "fixtures/grind_live_2026-10-29.json"
+
+
+def _live_looks(path):
+    """The fixture's records as the telemetry has them (tests/fixtures/grind_live_2026-10-29.json: 16:34:00-16:44:10 of
+    lab/telemetry/20261029-162740-tour.jsonl, t from 16:34:00), in time order."""
+    import json
+    from pathlib import Path
+    d = json.loads((Path(__file__).parent / path).read_text(encoding="utf-8"))
+
+    def mon(v):
+        return {"kind": v[0], "x": v[1], "y": v[2], "platform": v[3]}
+    out = []
+    for t, pid, x, y, grounded, searched, wide, rows, view, ms, swept, players in d["looks"]:
+        r = {"t": t, "topic": "scene", "her": {"x": x, "y": y, "platform": pid, "grounded": grounded},
+             "searched": searched, "wide": wide, "rows": rows, "view": view, "monsters": [mon(v) for v in ms],
+             "players": [{"id": i, "kind": k, "x": px, "y": py, "platform": pp} for i, k, px, py, pp in players]}
+        if swept is not None:
+            r["swept"] = [mon(v) for v in swept]
+        out.append(r)
+    out += [{"t": t, "topic": "event", "kind": "kill", "text": text, "x": x} for t, text, x in d["kills"]]
+    out += [{"t": t, "topic": "grind", **g} for t, g in d["grind"]]
+    out += [{"t": t, "topic": "log", "text": text} for t, text in d["leaves"]]
+    return sorted(out, key=lambda r: (r["t"], r["topic"] != "log"))
+
+
+@pytest.mark.skipif(not scenarios.available(10002073), reason="needs Tree Dungeon's game data (gamedata/data)")
+def test_the_live_ping_pong_of_2026_10_29_between_two_empty_stops_is_gone():
+    """Live at 16:39-16:44 on 2026-10-29 (the magician, her loop 14, 13, 10, 7) she went between stops 14 and 7 every 4-9
+    s for 4 minutes, each found empty, each expected again 31-46 EXP a few seconds later (the user: "the character keeps
+    going up where no mobs are spawning"): the top's points were free 4 to 9 minutes, nothing born there (the
+    perception service: no birth in 38 ticks, nobody else on the map), and the belief had each point back on its own
+    clock, 1.9 times the model's pace. Her looks of 16:34-16:44 replayed (her memory and the belief fed as grinding
+    feeds them, her loop as logged and then as replanned, each stop she left as she left it), each next stop she chose
+    at 16:39-16:44 on leaving a stop asked again: the refill learned from what she saw falls to under 5% a tick, stops 7
+    and 14 are expected a few EXP where live had 45 and 31, and no choice goes to a stop she left with nothing in reach
+    within 30 s (live: most of them)."""
+    import math
+    import re
+
+    from gamelab.attack import danger
+    from gamelab.localization import memory
+    from gamelab.motion.route import Planner
+    from gamelab.perception.kinds import kind_of
+    model = mapdata.load(10002073)
+    exp = {kind_of(n): e for n, e in model.mob_exp.items()}
+    kinds = {k for k, e in exp.items() if e >= 0.25 * max(exp.values())}
+    d = danger.of_map(model, Her(628.0, 27.0, 75.0))
+    p = patrol.Patrol(model, kinds, exp, travel=Planner(model).arrive, danger=lambda pid, x: d.at(pid, x))
+    kept, kills = memory.Memory(model), []
+    kept.kills = lambda: kills
+    kill_re = re.compile(r"^(?P<kind>\S+) down on platform (?P<platform>-?\d+)")
+    leave_re = re.compile(r"leaving stop (\d+): (.*?) \((\d+\.\d) s there, (\d+) EXP\)")
+    band = (reach.LOOK_UP, reach.LOOK_DOWN)
+    her = at = None
+    left, last_leave, asked, live_back = {}, -1e18, [], 0
+    for r in _live_looks(LIVE_PING_PONG):
+        t, topic = r["t"], r["topic"]
+        if topic == "event" and (k := kill_re.match(r["text"])):
+            kills.append(memory._Kill(t, k["kind"], int(k["platform"]), float(r.get("x") or 0.0)))
+        elif topic == "log" and (k := leave_re.search(r["text"])):
+            j, last_leave = p.stop_on(int(k[1])), t
+            p.left(j, t, k[2] == "nothing left in reach", float(k[4]))
+            if k[2] == "nothing left in reach":
+                left[int(k[1])] = t
+        elif topic == "scene":
+            h = r["her"]
+            if not r["searched"] or h["x"] is None:
+                continue
+            players = [Player(q["id"], q["kind"], q["x"], q["y"], q["platform"], (0.0, 0.0), t, t)
+                       for q in r["players"]]
+            sights = [memory._monster(v) for v in [*r["monsters"], *r.get("swept", [])]]
+            kept.update(t, sights, memory.cover_of_record(r, band), players)
+            p.belief.update(t, kept, players)
+            her = h if h["platform"] is not None else her
+        elif topic == "grind" and r["what"] == "loop" and p.plan is None:
+            p._take(p.rate([p.stop_on(s) for s in r["loop"]], t), t, "logged")
+        elif topic == "grind" and r["what"] == "next" and p.plan is not None and her is not None:
+            if t >= 310.0 and t - last_leave <= 1.0 and at is not None:  # 16:39:10 on, on leaving a stop
+                p.replan(t)
+                j, info = p.choose(t, her["platform"], her["x"], current=p.stop_on(at), peek=True)
+                live_back += r["stop"] in left and t - left[r["stop"]] <= 30.0
+                got = p.platform_of(j)
+                asked.append((t, got, got in left and t - left[got] <= 30.0, info))
+                if 450.0 <= t <= 590.0:  # 16:41:30-16:43:50
+                    assert p.expect(p.stop_on(7), t + 9.0)[0] < 10.0 and p.expect(p.stop_on(14), t + 4.0)[0] < 10.0
+            at = r["stop"]
+    assert len(asked) >= 25 and live_back >= 25
+    assert not [a for a in asked if a[2]], [(a[0], a[1], a[3]["why"]) for a in asked if a[2]]
+    assert 1.0 - math.exp(-p.belief.rate * patrol.TICK_S) < 0.05

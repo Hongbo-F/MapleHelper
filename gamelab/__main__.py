@@ -7,6 +7,7 @@ the shared modules) is imported up here; the other layers are imported by the co
 
 import argparse
 import ctypes
+import math
 import os
 import random
 import sys
@@ -2800,7 +2801,8 @@ def cmd_patrol(args) -> int:
         if j is not None:
             why[info["why"]] += 1
             print(f"{t - start:7.1f}  on {her['platform']} at x {her['x']:.0f}: next {patrol.choice_text(info)}")
-    print(f"choices: {dict(why)}; refills x{p.belief.scale:.2f} of the model ({len(p.belief.refills)} watched); others "
+    print(f"choices: {dict(why)}; a free point refilling at {1 - math.exp(-p.belief.rate * patrol.TICK_S):.0%} a tick "
+          f"lately ({p.belief.refills} refills seen, {p.belief.watched_s:.0f} s of points seen free); others "
           f"take {({k: round(p.belief.take(k), 2) for k in sorted({q.kind for q in p.points})})}")
     return 0
 

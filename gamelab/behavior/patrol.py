@@ -17,72 +17,77 @@ The map, once (Patrol):
 - the route times between stops (motion.route.Planner.arrive: on Tree Dungeon up the tower is slow, 24 to 6 21 s by its
   ropes, down quick, 6 to 24 8 s).
 
-What she believes (Belief, from her memory of the monsters, localization.memory, at every look): how many monsters
-each spawn point has now and at any time ahead (`stock`): the monsters remembered there (each the nearest point of its
-kind on its platform), else, for a point a look has seen empty (one that searched a body of its kind standing at the
-point: Memory.holds_body) or her kill emptied, its refill clock (`not_back`: nothing for REFILL_D0, then back at
-REFILL_TAU per point on its platform), given that it wasn't back at the latest look that saw it empty; else, never seen,
-Q_UNKNOWN. A point is emptied once (her kill, or the first look to see it empty after a monster was seen there) and
-full again once a monster is seen there after that. And what of it is hers (`share`): by a point with another player
-by it (their minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as others leave of its kind, learned from
-her memory (`take`): of the monsters she saw by another player, those looks forgot (not those forgotten by age: she
-never looked again) without her kill, against those she killed or saw there TAKE_KEEP_S after she first saw them.
+What she believes (Belief, from her memory of the monsters, localization.memory, at every look): how many monsters each
+spawn point has now and at any time ahead (`stock`): the monsters remembered there (each the nearest point of its kind
+on its platform), else, for a point a look has seen empty (one that searched a body of its kind standing at the point:
+Memory.holds_body) or her kill emptied, what's back since the latest look that saw it empty (`back`: the game respawns
+on the map's tick, a free point's monster back at one with a chance, as measured on Tree Dungeon on 2026-10-29; at the
+refill's rate a second, the same for every point, learned from what she sees: `rate`); else, never seen, Q_UNKNOWN. A
+point is emptied once (her kill, or the first look to see it empty after a monster was seen there) and full again once a
+monster is seen there after that. The refill's rate (Belief.rate) is the map's state, not a constant (by the other
+players, the map's cap): from what her looks saw of the points they saw free, each seen again within WATCH_GAP_S free
+still or with a new monster at it, weighed by age, about the prior's REFILL_RATE (until 2026-10-29 a refill clock per
+point, nothing for 5 s and then 12.8 s times the points on its platform, scaled by the refills she watched alone: a
+point that never came back never counted). And what of it is hers (`share`): by a point with another player by it (their
+minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as others leave of its kind, learned from her memory
+(`take`): of the monsters she saw by another player, those looks forgot (not those forgotten by age: she never looked
+again) without her kill, against those she killed or saw there TAKE_KEEP_S after she first saw them.
 
 The loop (Patrol.best): a closed round of stops (LOOP_MIN to LOOP_MAX), chosen by its EXP a minute in the long run: each
-spawn point it reaches gives its EXP (times her share) each time she comes round and finds it back (`caught`: a round
-of cycle s catches 1 / sum over k of not_back(k cycle) monsters a point); the cycle is the round's route times, STOP_S
-a stop and her shooting (her kill time a point of EXP, KILL_S_PER_EXP, learned from her throws), less what the danger
-hook says touches would cost there (HP_PRICE EXP a bar of HP). Grown from each of the SEEDS best stops by adding the
-stop that raises the rate most (at its cheapest place in the round), the best round kept. Standing at one stop
-(camping) is a round of one (Patrol.camping), which grinding never takes up but logs, to compare. A new round
-replaces the one she follows only when it's LOOP_GAIN better by the same belief, and not within LOOP_MIN_S of the last
-change (no flip-flopping).
+spawn point it reaches gives its EXP (times her share) each time she comes round and finds it back (`caught`: what's
+back a cycle after she found it free, at the refill's rate); the cycle is the round's route times, STOP_S a stop and her
+shooting (her kill time a point of EXP, KILL_S_PER_EXP, learned from her throws), less what the danger hook says touches
+would cost there (HP_PRICE EXP a bar of HP). Grown from each of the SEEDS best stops by adding the stop that raises the
+rate most (at its cheapest place in the round), the best round kept. Standing at one stop (camping) is a round of one
+(Patrol.camping), which grinding never takes up but logs, to compare. A new round replaces the one she follows only when
+it's LOOP_GAIN better by the same belief, and not within LOOP_MIN_S of the last change (no flip-flopping), unless the
+last EMPTY_RUN stops she got to gave nothing: then at once.
 
-On Tree Dungeon, Forest Up North II, before she has seen anything (Lucky Seven's kill time): the loop 10, 7, 463 EXP a
-minute (a round of 22 s: 5 of travel, 15 of shooting; 8 spawn points), where the user grinding made 484 on 2026-10-24;
-14, 10, 8, 12 461 (a round of 50 s); 19-24 round the platforms by the safe ones, 347; camping at 23 228, where her hunt
-loop camping there made 283 live (her kills from 23 and 24 on 22, 23 and 24). Rounds this close are a coin toss: what
-she sees decides (the next stop, below).
+On Tree Dungeon, Forest Up North II, before she has seen anything (Lucky Seven's kill time, the refill at the prior's
+rate): the loop 10, 7, 486 EXP a minute (a round of 24 s: 5 of travel, 17 of shooting; 8 spawn points), where the user
+grinding made 484 on 2026-10-24 (with the refill clock until 2026-10-29: 463; 14, 10, 8, 12 461; camping at 23 228,
+where her hunt loop camping there made 283 live). Rounds this close are a coin toss: what she sees decides (the next
+stop, below), and the refill she learns.
 
 The next stop (Patrol.choose): along the loop from the last loop stop she was at, the first expected to hold SKIP_FULL
-of what it holds full when she gets there (an emptied stretch is skipped until it's due), or on a trip the stop she's
-on her way to; and a stop whose monsters she has seen (her memory, not the belief's guesses: a pile of one monster or
-more, PULL_MIN) pulls her off it when it pays for its detour against the loop: what it's expected to give (Patrol.
+of what it holds full when she gets there (an emptied stretch is skipped until it's due; with none due on the loop, of
+the stops due elsewhere the one expected to give the most a second, if more than the loop's next), or on a trip the stop
+she's on her way to; and a stop whose monsters she has seen (her memory, not the belief's guesses: a pile of one monster
+or more, PULL_MIN) pulls her off it when it pays for its detour against the loop: what it's expected to give (Patrol.
 expect: the monsters seen, and the belief's stock at its other points, her share), less what touches there cost her
 while she shoots it (Patrol.net: HP_PRICE a bar of HP, by hp_rate, as the loop's rate counts its stops'), PULL_GAIN
-times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second (Plan.rate, by the
-same belief: the spawn points' refill clocks, others' share; as of the latest replan, every REPLAN_S). The detour
+times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second (Plan.rate, by the same
+belief: the refill as learned, others' share; as of the latest replan, every REPLAN_S). The detour
 (Patrol.detour) is its kills (her kill time), STOP_S, and the travel there and on from there to the loop's next stop,
-beyond going to that one straight (none for a stop on her way). Of the stops that pay, the one that leaves her the
-most EXP over the loop's; on her way to a pile, another takes her there only when it leaves more over the loop's with
-the margin (PULL_GAIN times the loop's over its detour) than the pile she's going to does without (detoured to the
-loop's next stop alike: two piles each worth the other's detour had her turn from one to the other at every look, 30
-ms apart, in loop_tree_grind_jump_key), and when the pile she's going to no longer pays even without the margin (shot
-in passing, gone, taken) she goes back to the loop's next stop ("back to the loop"; it takes the margin to pull her
-again: until 2026-10-29 she went on to it and left it with nothing, loop_tree_grind_rope_top's 15, 7 of 26 stays in her
-01:11 run). After a pile the loop goes on from its next stop, the one the detour was costed to (Patrol.pulled: also
-when the pile is a stop of the loop further on; until 2026-10-29 she went round from the stop a pull took her to, and
-after a pull on a trip from the stop after the one she was heading to, which the round then missed). A loop worth
-nothing by the belief (its touches costing all it gives) has no bar for a pile to beat: no pulls. The marginal value
-theorem's bar, as at a stop (behavior.grind): her time is worth the loop's rate wherever she is, so a pile near her pays
-for the time it takes and the travel it adds, not for being nearer than the loop: what's standing in a region of poor
-spawns doesn't hold her there, the region's spawns being why the loop isn't there. Until 2026-10-29 a pile pulled at
-1.5 times the next stop's own EXP a second, its travel counted: far from the loop every pile around her beat the climb
-to it. Live on Tree Dungeon (the magician, 2026-10-29 01:11, mage-1029-0111.log), a Lie Detector's retreat having
-left her at the bottom, 28 pulls in 7 minutes, 21 to its stops 28-33 and 7 to 20-24 (13-101 EXP expected 1-11 s off,
-2.3-6.9 EXP/s), 25 of them from the loop's next stop up the tower (0.7-2.0 EXP/s, 11-31 s away), her loop 14, 13, 10,
-8, 6 at 447 EXP a minute: she never got up the tower, and her kills made 185 EXP a minute (the user: "keeps patrolling
-the bottom region which has worse spawn rate"). By this rule none of the 28 pulls (tests/test_grind.py, LIVE_PULLS: the
-loop's rate as the code had it at each, 383-479 EXP a minute, and the piles' EXP net of their touches; the most, 69 EXP
-2.8 s off on her way up from 31 to 29, and 97 on 23 on her way up to 7, 1.18 times what the loop gives over their 8.3
-and 12.6 s): she climbs, shooting in passing what's in reach on the way (with PULL_GAIN 5 on the old rule, live at
-01:26, she went up at once and made 349 EXP a minute over 8.5 minutes). With less margin only piles on her way would
-(5 at 1.1, 10 with none: going there and on up adds 0.5 s at most to the climb). A stop of the loop further on counts
-the same (going there first and on back to the loop's next): the loop's order holds unless a pile pays for leaving it.
-What a stop is expected to give (Patrol.expect) counts a monster her memory has only where she gets at it from there
-(on the stop's platform, or in a star's reach from somewhere along it: `gets`), and not one she left the stop with
-nothing in reach since (`left_at`: she'd been there to see it); a point her memory has none at, by the share of it a
-star reaches from the stop.
+beyond going to that one straight (none for a stop on her way). Of the stops that pay, the one that leaves her the most
+EXP over the loop's; on her way to a pile, another takes her there only when it leaves more over the loop's with the
+margin (PULL_GAIN times the loop's over its detour) than the pile she's going to does without (detoured to the loop's
+next stop alike: two piles each worth the other's detour had her turn from one to the other at every look, 30 ms apart,
+in loop_tree_grind_jump_key), and when the pile she's going to no longer pays even without the margin (shot in passing,
+gone, taken) she goes back to the loop's next stop ("back to the loop"; it takes the margin to pull her again: until
+2026-10-29 she went on to it and left it with nothing, loop_tree_grind_rope_top's 15, 7 of 26 stays in her 01:11 run).
+After a pile the loop goes on from its next stop, the one the detour was costed to (Patrol.pulled: also when the pile is
+a stop of the loop further on; until 2026-10-29 she went round from the stop a pull took her to, and after a pull on a
+trip from the stop after the one she was heading to, which the round then missed). A loop worth nothing by the belief
+(its touches costing all it gives) has no bar for a pile to beat: no pulls. The marginal value theorem's bar, as at a
+stop (behavior.grind): her time is worth the loop's rate wherever she is, so a pile near her pays for the time it takes
+and the travel it adds, not for being nearer than the loop: what's standing in a region of poor spawns doesn't hold her
+there, the region's spawns being why the loop isn't there. Until 2026-10-29 a pile pulled at 1.5 times the next stop's
+own EXP a second, its travel counted: far from the loop every pile around her beat the climb to it. Live on Tree Dungeon
+(the magician, 2026-10-29 01:11, mage-1029-0111.log), a Lie Detector's retreat having left her at the bottom, 28 pulls
+in 7 minutes, 21 to its stops 28-33 and 7 to 20-24 (13-101 EXP expected 1-11 s off, 2.3-6.9 EXP/s), 25 of them from the
+loop's next stop up the tower (0.7-2.0 EXP/s, 11-31 s away), her loop 14, 13, 10, 8, 6 at 447 EXP a minute: she never
+got up the tower, and her kills made 185 EXP a minute (the user: "keeps patrolling the bottom region which has worse
+spawn rate"). By this rule none of the 28 pulls (tests/test_grind.py, LIVE_PULLS: the loop's rate as the code had it at
+each, 383-479 EXP a minute, and the piles' EXP net of their touches; the most, 69 EXP 2.8 s off on her way up from 31 to
+29, and 97 on 23 on her way up to 7, 1.18 times what the loop gives over their 8.3 and 12.6 s): she climbs, shooting in
+passing what's in reach on the way (with PULL_GAIN 5 on the old rule, live at 01:26, she went up at once and made 349
+EXP a minute over 8.5 minutes). With less margin only piles on her way would (5 at 1.1, 10 with none: going there and on
+up adds 0.5 s at most to the climb). A stop of the loop further on counts the same (going there first and on back to the
+loop's next): the loop's order holds unless a pile pays for leaving it. What a stop is expected to give (Patrol.expect)
+counts a monster her memory has only where she gets at it from there (on the stop's platform, or in a star's reach from
+somewhere along it: `gets`), and not one she left the stop with nothing in reach since (`left_at`: she'd been there to
+see it); a point her memory has none at, by the share of it a star reaches from the stop.
 
 The danger hook (`Patrol.danger(platform, x)`): how badly she can be touched fighting at a place, in the positioning
 model's unit (attack.danger.Danger.at: the share of her HP touches would take there, each monster or spawn point weighed
@@ -101,7 +106,6 @@ import math
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from functools import lru_cache
 
 from ..attack import danger as danger_model
 from ..attack import reach, spots
@@ -110,6 +114,7 @@ from ..localization.mapdata import SPAWN_REACH, MapModel
 from ..localization.memory import MEMORY_S, SURE
 from ..localization.monsters import Monster
 from ..localization.players import Player, near_rival
+from ..localization.tracking import SPAWN_NEAR
 from ..motion.physics import WALK_SPEED
 from ..perception.kinds import kind_of
 
@@ -122,18 +127,43 @@ KILL_S_PER_EXP = 0.085
 THROW_S = 0.84         # s between her throws (her attack's lock and its margin: 0.79-0.85 s live)
 KILL_PRIOR_EXP = 300.0  # guess
 STOP_S = 1.0           # guess: s a stop costs beyond its kills (the looks that judge it, settling where she lands)
-# The refill of a spawn point she emptied (not_back): the live respawn report on Tree Dungeon (2026-10-24, six runs, 133
-# platforms her kills emptied): none back within 5 s in 91%, a median of 13.9 s for a platform's first monster back
-# (95% 11.3-16.2), 0.74 not back at 8 s, 0.55 at 12.56 s; nothing for REFILL_D0, then exp(-(dt - D0) / tau) fits it
-# with tau REFILL_TAU (0.79 at 8 s, 0.55 at 12.56 s). A platform's first monster back is the soonest of its points, so a
-# point on a platform with n of them comes back at n x REFILL_TAU (an assumption: as if each point refilled on its own
-# clock; the game may respawn map-wide). Scaled by what she sees (Belief.scale): of the points her kills emptied and
-# looks watched until a monster came back, the time it took against the model's mean (REFILL_D0 + n REFILL_TAU; against
-# its median, 1.28 times shorter, a world refilling just as the model says had come out at 1.25).
-REFILL_D0 = 5.0
-REFILL_TAU = 12.8
-REFILL_PRIOR_N = 5     # guess: ... the model counting as this many such refills
-WATCH_GAP_S = 2.0      # guess: ... watched: a look saw it empty at most this long before the one that saw it back
+# The refill of a spawn point she has seen empty (`back`, `not_back`), as the game respawns on Tree Dungeon (measured on
+# 2026-10-29 from the perception service's telemetry of 2026-10-28 and 29: 10 files, about 16 hours, 9,957 new monsters
+# at spawn points whose platform was in view before them; D:/MapleHelper-scratch/respawn): on the map's clock, a tick
+# every TICK_S (fitted on each stretch: 7.09-7.13 s; 73-95% of the births within 0.6 s of a tick, the rest the
+# detector's lag), at which a point with no monster gets one with a chance REFILL_P (21,285 free point-ticks in view,
+# 5,775 births) however long it has been free (0.22 within 2 s of its last death, 0.28-0.32 at 2-30 s, 0.23-0.25 past
+# 30 s), however many points its platform has, however near she stands (0.20 within 100 units, 0.25-0.29 farther): one
+# rate for every point, 22.6 s free on average, where until 2026-10-29 each point had its own clock, nothing for 5 s and
+# then n x 12.8 s on a platform of n points. And the chance is the map's state, not a constant: by 5-minute stretch it
+# went from 0.40 to none, with the other players (none on the map: 0 births in 154 free point-ticks; one: 0.10-0.17;
+# more: 0.26-0.31) and a little with her kills in the tick before (0.26 with none, 0.31 with 3 or more). The game caps
+# the map's monsters (MeowDB: by the players there; the map held 0.32-0.47 a point when most of it was seen within
+# 30 s) and makes what died: at 16:35-16:45 on 2026-10-29, nobody else there and nothing of hers dying, the top's 12
+# points and 3 more in view stayed free 4 to 9 minutes, no birth in 38 ticks. So the rate is learned (Belief.rate): what
+# her looks saw of the points they saw free, each looked at again within WATCH_GAP_S, free still or with a new monster
+# at it (within SPAWN_NEAR of the point), each the likelihood of RATE_GRID's rates by the model, weighed by
+# exp(-age / REFILL_MEMORY_S), the prior a gamma about REFILL_RATE counting as REFILL_PRIOR_N refills. Until 2026-10-29
+# the refills she watched were averaged against the model's mean and a point that never came back never counted: at
+# 16:39-16:44 the top's points, empty for minutes, were each expected back at the model's pace slowed 1.9 times, 45 EXP
+# at stop 7 9 s after she found it empty, and she went between 7 and 14 for 4 minutes for nothing (the user: "the
+# character keeps going up where no mobs are spawning"); learned so, by 16:42 a free point there refills at 2.5% a tick.
+# What's back may be net of others' kills and the cap: a point she left free filling to Q_CEIL in the long run, the
+# refill's rate at first (a chain of two states: in at the rate, out at (1 / Q_CEIL - 1) times it). Measured, out of her
+# view a minute to 10 minutes, the free points she left had a monster on 0.43-0.53 of them when she was back (in view,
+# 0.48-0.53 net of her kills), where the refill alone fills them all; but at 0.5 the loops' long-run rates halve for the
+# long rounds, so the bar a pile must beat (the pull) halves too, and replayed on her 01:11 run the pulls to the bottom
+# come back (10 of 32 choices, 1 at 1.0, 21 live before the pull's rule). Off (1), as the clock had it: other players'
+# share is by their dots (`share`).
+TICK_S = 7.115
+REFILL_P = 0.27
+REFILL_RATE = -math.log(1.0 - REFILL_P) / TICK_S  # 0.0442 a second
+REFILL_PRIOR_N = 3.0   # guess: the prior counting as this many refills seen ...
+REFILL_MEMORY_S = 180.0  # guess: ... what she saw weighed by exp(-age / this): the crowd changed within minutes
+WATCH_GAP_S = 20.0     # guess: a point seen free and looked at again within this long: evidence (her looks come in
+                       # bursts at the stops, a trip between: the top's 13 s apart when she went between 7 and 14)
+RATE_GRID = tuple(0.0005 * (0.3 / 0.0005) ** (k / 47) for k in range(48))  # the rates weighed (a resolution)
+Q_CEIL = 1.0
 Q_UNKNOWN = 0.35       # a point never seen: this full (live: the uncamped 19-21 had a monster 31-39% of the time, 28%
                        # of all points; the simulator's crowd fills every point)
 # Another player by a point (their minimap dot within RIVAL_X across and RIVAL_DY up or down: hunt.PLAYER_NEAR and
@@ -186,9 +216,12 @@ STAND_STEP = 20.0      # units between the places along a platform tried as a st
 # of a monster 8.6% more: its loops changed ([14, 10, 8, 12] for [10, 7] at loop_tree_grind's start) and the stops
 # farther from where the respawns come stood farther from what they shoot. Off (0), as before: the most EXP alone.
 STOP_SLACK = 0.0
-CAUGHT_TERMS = 400     # rounds summed at most for what she catches at a point (caught; a resolution)
 LOOP_GAIN = 0.15       # guess: a new round replaces hers only this much better by the same belief ...
-LOOP_MIN_S = 60.0      # guess: ... and not within this long of the last change
+LOOP_MIN_S = 60.0      # guess: ... and not within this long of the last change, unless ...
+EMPTY_RUN = 3          # guess: ... the last this many stops she got to gave nothing (left with nothing in reach, no
+                       # EXP there): then the round is looked at again at once and a better one taken whenever. Live at
+                       # 16:39-16:44 on 2026-10-29 her loop's stops came up empty 37 times running; the refill learned
+                       # from what she sees lags (REFILL_MEMORY_S), the round's own emptiness doesn't
 REPLAN_S = 20.0        # guess: s between two looks for a better round
 # The next stop.
 # A stop of the loop is skipped when it's expected to hold under this share of what it holds full when she gets there
@@ -340,41 +373,29 @@ def reaching(here, monsters: list[Monster]):
             yield x, n
 
 
-def not_back(dt: float, n: int = 1, scale: float = 1.0) -> float:
-    """The chance a spawn point emptied `dt` s ago has no monster yet, on a platform with `n` points (see the top)."""
-    d0 = REFILL_D0 * scale
-    return 1.0 if dt < d0 else math.exp(-(dt - d0) / (max(1, n) * REFILL_TAU * scale))
+def back(dt: float, rate: float = REFILL_RATE) -> float:
+    """The chance a spawn point seen free `dt` s ago has a monster now (see the top): the refill's `rate` (a second) at
+    first, Q_CEIL in the long run."""
+    if dt <= 0 or rate <= 0:
+        return 0.0
+    return Q_CEIL * (1.0 - math.exp(-rate * dt / Q_CEIL))
 
 
-def caught(cycle: float, n: int = 1, scale: float = 1.0) -> float:
-    """The monsters she kills at a point a round, going round every `cycle` s, in the long run (on a platform with `n`
-    points): after a kill it's back R s later (not_back), and she kills it at her first round after that, ceil(R /
-    cycle) rounds on; so one every cycle x sum over k >= 0 of not_back(k cycle) s on average. 1 a round when it's always
-    back in time; about cycle / its mean refill when she comes round far more often (waiting at one, camping, the same).
-    Kept by the cycle to a tenth of a second (a loop's search asks it thousands of times)."""
-    return _caught(round(cycle, 1), max(1, n), round(scale, 3))
+def not_back(dt: float, rate: float = REFILL_RATE) -> float:
+    """The chance a spawn point seen free `dt` s ago has no monster yet (1 - back)."""
+    return 1.0 - back(dt, rate)
 
 
-@lru_cache(maxsize=20000)
-def _caught(cycle: float, n: int, scale: float) -> float:
-    total, k = 0.0, 0
-    while k < CAUGHT_TERMS:
-        s = not_back(k * cycle, n, scale)
-        if s < 1e-4:
-            break
-        total += s
-        k += 1
-    return 1.0 / max(total, 1.0)
+def caught(cycle: float, rate: float = REFILL_RATE) -> float:
+    """The monsters she kills at a point a round, going round every `cycle` s, in the long run: what's back a cycle
+    after she found it free (her kill or nothing there: from free the refill has no memory, so it's the same whichever).
+    About cycle x rate when she comes round far more often than it refills, Q_CEIL when far less."""
+    return back(cycle, rate)
 
 
-def refill_median(n: int = 1, scale: float = 1.0) -> float:
-    """s until a point emptied is back with even odds (not_back's median)."""
-    return (REFILL_D0 + max(1, n) * REFILL_TAU * math.log(2)) * scale
-
-
-def refill_mean(n: int = 1, scale: float = 1.0) -> float:
-    """s a point emptied takes to be back on average (not_back's mean)."""
-    return (REFILL_D0 + max(1, n) * REFILL_TAU) * scale
+def refill_median(rate: float = REFILL_RATE) -> float:
+    """s until a point seen free has a monster with even odds by the refill alone (its rate; the ceiling aside)."""
+    return math.log(2) / rate if rate > 0 else math.inf
 
 
 def detour_s(exp: float, kill_s: float, far: float, on: float, far_next: float) -> float:
@@ -411,12 +432,26 @@ def default_danger(model: MapModel, points: list[Point], touch: dict[str, float]
     return danger
 
 
+def _mean_rate(loglik: list[float]) -> float:
+    """The mean of RATE_GRID's rates by `loglik` (the log likelihood of each) and the prior, a gamma about REFILL_RATE
+    counting as REFILL_PRIOR_N refills (on a log grid each rate weighs r d(log r))."""
+    a, b = REFILL_PRIOR_N, REFILL_PRIOR_N / REFILL_RATE
+    logs = [ll + (a - 1.0) * math.log(r) - b * r for r, ll in zip(RATE_GRID, loglik)]
+    top = max(logs)
+    ws = [math.exp(v - top) * r for v, r in zip(logs, RATE_GRID)]
+    return sum(wi * r for wi, r in zip(ws, RATE_GRID)) / sum(ws)
+
+
+# The grid's mean of the prior alone: Belief.rate is REFILL_RATE times the grid's mean over it, the prior's exactly
+# with nothing seen.
+_PRIOR_MEAN = _mean_rate([0.0] * len(RATE_GRID))
+
+
 class Belief:
     """How many monsters each spawn point has, from her memory (see the top). `update` at every look."""
 
     def __init__(self, model: MapModel, points: list[Point]):
         self.model, self.points = model, points
-        self.n_on = Counter(q.platform for q in points)
         self._by = {}
         for q in points:
             self._by.setdefault((q.platform, q.kind), []).append(q)
@@ -427,7 +462,11 @@ class Belief:
         self.rival_at: dict[int, float] = {}     # point id -> the latest look with another player by it
         self.gone_by: Counter = Counter()        # kind -> monsters by another player gone without her kill
         self.kept_by: Counter = Counter()        # kind -> ... killed by her, or seen there TAKE_KEEP_S on
-        self.refills: list[float] = []           # refills watched, against the model's mean
+        self.refills = 0                         # refills watched, in all (the log's)
+        self.watched_s = 0.0                     # ... and the s of points watched staying free, in all
+        self._loglik = [0.0] * len(RATE_GRID)    # what she saw, as the log likelihood of each of RATE_GRID ...
+        self._weighed_t = 0.0                    # ... weighed by age (REFILL_MEMORY_S) as of this
+        self._rate = REFILL_RATE                 # the rate as of the latest update (rate)
         self.t = 0.0
         self._events = 0
         self._kept_ids: set[int] = set()
@@ -436,21 +475,48 @@ class Belief:
     # --- what it holds ---------------------------------------------------------------------------------
 
     @property
+    def rate(self) -> float:
+        """The refill's rate (a second, a free point; see the top), as of the latest update: the mean over RATE_GRID
+        of what she saw (`_seen`), weighed by age (REFILL_MEMORY_S), and the prior, a gamma about REFILL_RATE counting
+        as REFILL_PRIOR_N refills."""
+        return self._rate
+
+    def _learned(self) -> float:
+        w = math.exp(-max(0.0, self.t - self._weighed_t) / REFILL_MEMORY_S)
+        return REFILL_RATE * _mean_rate([w * ll for ll in self._loglik]) / _PRIOR_MEAN
+
+    @property
     def scale(self) -> float:
-        """The refill model's time scale: 1, blended with the refills watched (REFILL_PRIOR_N)."""
-        return (REFILL_PRIOR_N + sum(self.refills)) / (REFILL_PRIOR_N + len(self.refills))
+        """The refill's pace against the prior's (REFILL_RATE over the rate learned): 1 as the prior has it, 2 twice
+        as slow (the log's)."""
+        return REFILL_RATE / self.rate
+
+    def _seen(self, t: float, gap: float, born: bool) -> None:
+        """At time `t`, a point seen free `gap` s before seen again: with a new monster (`born`) or free still."""
+        if gap <= 0:
+            return
+        if t > self._weighed_t:
+            w = math.exp(-(t - self._weighed_t) / REFILL_MEMORY_S)
+            self._loglik = [w * ll for ll in self._loglik]
+            self._weighed_t = t
+        for k, r in enumerate(RATE_GRID):
+            got = back(gap, r)
+            self._loglik[k] += math.log(max(1e-12, got if born else 1.0 - got))
+        if born:
+            self.refills += 1
+        else:
+            self.watched_s += gap
 
     def stock(self, i: int, t: float) -> float:
-        """How many monsters point `i` is expected to have at time `t` (now or ahead): for one empty, the chance it's
-        back by then, given it wasn't at the latest look that saw it empty."""
+        """How many monsters point `i` is expected to have at time `t` (now or ahead): for one empty, what's back by
+        then since the latest look that saw it empty (`back`, at the rate learned)."""
         es = self.at.get(i)
         if es:
             return sum(e.p(t) for e in es)
         since = self.empty_since.get(i)
         if since is not None:
-            n, scale = self.n_on[self.points[i].platform], self.scale
             known = max(since, self.empty_seen.get(i, since))
-            return 1.0 - not_back(max(t, known) - since, n, scale) / not_back(known - since, n, scale)
+            return back(t - known, self.rate)
         return Q_UNKNOWN
 
     def take(self, kind: str) -> float:
@@ -463,15 +529,14 @@ class Belief:
         return 1.0 - self.take(self.points[i].kind) if t - self.rival_at.get(i, -1e18) <= RIVAL_KEEP_S else 1.0
 
     def due(self, i: int, t: float) -> float | None:
-        """s from `t` until point `i`, empty, is back with even odds, given it wasn't at the latest look that saw it
-        empty (None: not known to be empty). Past REFILL_D0 the clock has no memory: a point watched empty is due its
-        platform's n REFILL_TAU ln 2 after the latest look (8.9 s for one point), however long it has been empty."""
+        """s from `t` until point `i`, empty, has a monster with even odds by the refill alone (refill_median after
+        the latest look that saw it empty, at the rate learned; None: not known to be empty). The refill has no memory:
+        a point watched empty is due that long after the latest look, however long it has been empty."""
         since = self.empty_since.get(i)
         if since is None or self.at.get(i):
             return None
-        n, scale = self.n_on[self.points[i].platform], self.scale
         known = max(since, self.empty_seen.get(i, since))
-        return max(since + REFILL_D0 * scale, known) + n * REFILL_TAU * scale * math.log(2) - t
+        return known + refill_median(self.rate) - t
 
     # --- keeping it up ---------------------------------------------------------------------------------
 
@@ -502,10 +567,10 @@ class Belief:
             since = self.empty_since.get(i)
             if since is None or not any(e.seen > since for e in es):
                 continue
-            back = [e.first for e in es if e.first > since]  # a new one: a refill, watched if a look saw it empty
-            if back and i in self.killed and min(back) - self.empty_seen.get(i, -1e18) <= WATCH_GAP_S:
-                watched = (self.empty_seen[i] + min(back)) / 2 - self.killed[i]
-                self.refills.append(max(0.0, watched) / refill_mean(self.n_on[self.points[i].platform]))
+            q = self.points[i]  # a new one where its point is: a refill, seen if a look saw it free lately
+            new = [e.first for e in es if e.first > since and abs(e.x - q.x) <= SPAWN_NEAR]
+            if new and 0.0 < min(new) - self.empty_seen.get(i, -1e18) <= WATCH_GAP_S:
+                self._seen(min(new), min(new) - self.empty_seen[i], True)
             self.empty_since.pop(i, None)
             self.killed.pop(i, None)
         for cover in [c for c in memory.covers if c.t > self._covered_t]:  # a look that searched a point's monster
@@ -513,9 +578,13 @@ class Belief:
                 if any(e.p(cover.t) >= 0.5 for e in at.get(q.id, ())) \
                         or not memory.holds_body(cover, q.platform, q.x, q.kind):
                     continue
+                last = self.empty_seen.get(q.id) if q.id in self.empty_since else None
+                if last is not None and 0.0 < cover.t - last <= WATCH_GAP_S:  # free still since a look lately
+                    self._seen(cover.t, cover.t - last, False)
                 self.empty_since.setdefault(q.id, cover.t)
                 self.empty_seen[q.id] = max(cover.t, self.empty_seen.get(q.id, -1e18))
             self._covered_t = cover.t
+        self._rate = self._learned()
         if players is not None:
             for q in self.points:
                 y = self.model.platform(q.platform).y_at(q.x)
@@ -578,6 +647,7 @@ class Patrol:
         self.avg_exp = sum(avg) / len(avg) if avg else 10.0
         self.min_exp = min(avg, default=10.0)  # the cheapest kind's EXP (PULL_MIN)
         self.left_at: dict[int, float] = {}    # stop -> when she last left it with nothing in reach there
+        self.empty_run = 0                     # stops she got to running that gave nothing (EMPTY_RUN)
         self._gets: dict[tuple, bool] = {}
         self.kill_s = KILL_S_PER_EXP   # s of shooting a point of EXP (learn_kills)
         self.plan: Plan | None = None  # the loop she follows
@@ -655,11 +725,11 @@ class Patrol:
         b = self.belief
         pts = [(self.points[q], c * b.share(q, t), i) for q, (c, i) in cov.items()]
         hp_s = {i: self.hp_rate(self.stops[i].platform, self.stops[i].x) for i in loop}
-        scale = b.scale
+        refill = b.rate
         base = travel + STOP_S * len(loop)
         cycle = base + sum(g * q.exp * self.kill_s for q, g, _ in pts)  # every point full: the longest a round takes
         for _ in range(8):  # what's back in a round, and the round's shooting for it (cycle only shortens)
-            got = [(q, g * caught(cycle, b.n_on[q.platform], scale), i) for q, g, i in pts]
+            got = [(q, g * caught(cycle, refill), i) for q, g, i in pts]
             shoot = sum(n * q.exp * self.kill_s for q, n, _ in got)
             cycle = max(base + shoot, 1e-6)
         exp = sum(n * q.exp for q, n, _ in got)
@@ -714,7 +784,8 @@ class Patrol:
     def replan(self, t: float, force: bool = False) -> str | None:
         """Look for a better round (every REPLAN_S): taken up when it's LOOP_GAIN better than hers by the same belief
         and LOOP_MIN_S after the last change (or she has none, or hers has no way round). Why it changed, or None."""
-        if not force and self.plan is not None and t - self.planned < REPLAN_S:
+        empty = self.empty_run >= EMPTY_RUN
+        if not force and not empty and self.plan is not None and t - self.planned < REPLAN_S:
             return None
         self.planned = t
         new = self.best(t)
@@ -730,15 +801,24 @@ class Patrol:
         now = self.rate(self.plan.stops, t)
         if now is None:
             return self._take(new, t, "hers has no way round")
-        if t - self.changed < LOOP_MIN_S or new.rate < (1 + LOOP_GAIN) * now.rate:
+        if (t - self.changed < LOOP_MIN_S and not empty) or new.rate < (1 + LOOP_GAIN) * now.rate:
             self.plan = now
             return None
-        return self._take(new, t, f"{new.rate * 60:.0f} EXP a minute against {now.rate * 60:.0f}")
+        why = f"{new.rate * 60:.0f} EXP a minute against {now.rate * 60:.0f}"
+        return self._take(new, t, why + (f"; {self.empty_run} stops running gave nothing" if empty else ""))
 
     def _take(self, plan: Plan, t: float, why: str) -> str:
         self.plan, self.changed, self.at_loop, self.pulled = plan, t, 0, None
         self.loops += 1
+        self.empty_run = 0
         return why
+
+    def left(self, i: int, t: float, nothing: bool, exp: float) -> None:
+        """She left stop i at time t: with nothing in reach there (`nothing`: `left_at`), `exp` EXP got there
+        (EMPTY_RUN counts the stops running that gave nothing)."""
+        if nothing:
+            self.left_at[i] = t
+        self.empty_run = self.empty_run + 1 if nothing and exp <= 0 else 0
 
     # --- the next stop -----------------------------------------------------------------------------------
 
@@ -763,9 +843,9 @@ class Patrol:
 
     def wait_gain(self, i: int, t: float, horizon: float = DUE_S) -> float:
         """EXP a second of waiting `horizon` s at stop i for what's expected back in reach meanwhile (her share; the
-        points her memory has no monster at), its kills included. Past REFILL_D0 a point watched empty comes back at
-        a steady rate (not_back has no memory), so this hardly changes as she waits: 1 - exp(-2 / 12.8) = 14% of a
-        Horny Mushroom in 2 s at a point alone on its platform, 1.6 EXP/s."""
+        points her memory has no monster at), its kills included. A point watched empty comes back at a steady rate
+        (the refill has no memory), so this hardly changes as she waits: at the prior's rate 8.5% of a Horny Mushroom
+        in 2 s, 1.5 EXP/s."""
         b, exp = self.belief, 0.0
         for q, c in self.stops[i].cover:
             if not b.at.get(q):
@@ -832,8 +912,14 @@ class Patrol:
                 break
             skipped.append(j)
         why = "the loop"
-        if nxt is None:
+        if nxt is None:  # nothing due on the loop: of the stops due elsewhere, where the most is expected a second, if
+            # more than the loop's next; else the loop's next (until 2026-10-29 the loop's next whatever: at 16:39-16:44
+            # on 2026-10-29 that was 14 and 7 in turn, both empty, with the middle unseen for minutes)
             nxt, skipped, why = order[0], [], "the loop, nothing due ahead"
+            due = [j for j in options if options[j][4] > 0 and options[j][1] >= SKIP_FULL * options[j][4]]
+            most = max(due, key=lambda j: (options[j][3], -options[j][0]), default=None)
+            if most is not None and options[most][3] > options[nxt][3]:
+                nxt, why = most, "nothing due on the loop: the most expected"
         ahead = nxt  # the loop's next stop: where a pile's detour goes on to
         to_pile = heading is not None and pulled is not None and heading == pulled[0]  # a pile of the loop's, pulled to
         if heading in options:

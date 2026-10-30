@@ -34,6 +34,7 @@ Every loop taken up and every next stop is logged with its numbers ("loop: ...",
 telemetry topic 'grind' (what "loop", "next", and "end" with the run's stays, pulls, skips and credit by platform).
 """
 
+import math
 import time
 from statistics import median
 
@@ -47,7 +48,7 @@ from ..localization.scene import Scene
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import Hunt, Objective, Visit
-from .patrol import Patrol, choice_text, reaching
+from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
 # s with nothing left in reach before she leaves a stop: one look's miss isn't enough (a hit monster hides under its
@@ -252,8 +253,8 @@ class Grind(Hunt):
         v = self.visit
         there = 0.0 if v.arrived is None else time.monotonic() - v.arrived
         self.log(f"  leaving stop {v.ground}: {reason} ({there:.1f} s there, {v.exp:.0f} EXP)")
-        if reason == "nothing left in reach" and self.stop is not None:
-            self.patrol.left_at[self.stop] = time.monotonic()
+        if self.stop is not None and v.arrived is not None:
+            self.patrol.left(self.stop, time.monotonic(), reason == "nothing left in reach", v.exp)
         self._next_ground(s)
         return self._travel("advance")
 
@@ -352,7 +353,8 @@ class Grind(Hunt):
         credit = sorted(self.credit.items(), key=lambda kv: (-kv[1][1], kv[0] if kv[0] is not None else -1))
         return {"loops": p.loops, "stops": len(st), "stay_median": round(median(st), 2) if st else None,
                 "stay_longest": round(st[-1], 2) if st else None, "pulls": self.pulls, "skips": self.skips,
-                "refill_scale": round(b.scale, 3), "refills": len(b.refills), "kill_s": round(p.kill_s, 4),
+                "refill_scale": round(b.scale, 3), "refill_tick": round(1.0 - math.exp(-b.rate * TICK_S), 3),
+                "refills": b.refills, "watched_s": round(b.watched_s), "kill_s": round(p.kill_s, 4),
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
                        if p.hp_time[pid] >= HP_LOG_S},
@@ -365,8 +367,9 @@ class Grind(Hunt):
         stays = (f" (a median {d['stay_median']:.1f} s at each, {d['stay_longest']:.1f} s at the longest)"
                  if d["stops"] else "")
         self.log(f"  grinding: {d['loops']} loops taken up, {d['stops']} stops{stays}, {d['pulls']} pulled off the "
-                 f"loop, {d['skips']} stops skipped; refills x{d['refill_scale']:.2f} of the model ({d['refills']} "
-                 f"watched), a kill {d['kill_s']:.3f} s a point of EXP, others take {d['takes']}; HP bars a minute by "
+                 f"loop, {d['skips']} stops skipped; a free point refilling at {d['refill_tick']:.0%} a tick lately "
+                 f"(x{d['refill_scale']:.2f} the prior's pace; {d['refills']} refills seen, {d['watched_s']} s of "
+                 f"points seen free), a kill {d['kill_s']:.3f} s a point of EXP, others take {d['takes']}; HP bars a minute by "
                  f"platform ({HP_LOG_S:.0f} s there at least) {d['hp']}; kills by platform: "
                  + ", ".join(f"{pid}: {n} ({e:.0f} EXP)" for pid, (n, e) in d["credit"].items()))
         telemetry.emit("grind", what="end", **d)
