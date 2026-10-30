@@ -56,7 +56,7 @@ from ..perception.eyes import Eyes
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from ..perception.touches import DAMAGE, HP, MISS, POPUP
-from . import fight
+from . import damage, fight
 from .attacks import Attacks
 from .darts import DartWatch, MpWatch, presses_for
 from .fight import Report
@@ -269,13 +269,22 @@ class Hunter:
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'. Her skill cast
         # only at a body seen that her search picks, not dead, not again where it took no effect, where her profile
         # casts nothing at nothing (Policy.unseen 'none': the magician's Magic Claw; Attacks.picks)
+        # Her skill's damage as the monsters' bars show it, learned as she hunts and kept in her own file between runs
+        # (behavior.damage: the user, 2026-10-29, "The fitted damage should be dynamically updated as grinding goes,
+        # and memorized between runs"): the magician's, whose profile has only the formula's prior; the thief's are as
+        # measured.
+        book = (damage.Book(paths.of().damage, log=log, level=lambda: self.level)
+                if spell is not None and keys.magic_claw is not None else None)
         self.attacks = Attacks(model, keys, mode, max_mp=c.mp, level=c.lucky_seven, log=log,
                                kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
                                **({} if spell is None else dict(
                                    skill=Attack(spell.key, spell.hits, int(spell.lo or 1), int(spell.hi or 1),
                                                 spell.mp) if keys.magic_claw is not None else None,
                                    magic=spell.defence == "mdd", no_regular=not profile.policy.finish_with_regular,
-                                   picks=profile.policy.unseen == "none")))
+                                   picks=profile.policy.unseen == "none", book=book,
+                                   her_level=lambda: self.level)))
+        if book is not None and (said := book.said(spell.key)):
+            log(f"her damage: {said}")
         self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
         if mode != "regular":
             self.actions.choose = self.attacks.key

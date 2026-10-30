@@ -49,7 +49,7 @@ forward or back, its attack key as soon in the jump as that pick is sure (JumpPl
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import MOVEMENT
@@ -169,6 +169,19 @@ ESCAPE_UP = True
 # spots.SPAWN_CLEAR, in the simulator as above: touches off her trips 7.85 a minute against 8.90 without both, 0.92 bars
 # of HP lost a minute against 1.02.
 TOUCHER_FIRST = True
+# Her wounds first (the magician's: `hurt`, from 2026-10-29). Live that night 166 of 1,497 first casts at a whole monster
+# left it alive with no second cast for 8 s (a Green Mushroom at about a tenth), and in the 3 s after, 58% of them she
+# cast at another, 39% she was touched: the one she hurt walks at her, and inside her search's first 50 her cast can't
+# pick it (D:/MapleHelper-scratch/castfollow). The user: "yes we should finish a monster, but we should also watch out for
+# inmennent danger from a close by mob". So with `hurt` (behavior.attacks.Attacks.hurt: what a monster she has thrown at
+# has left as she reckons it, alive), a throw goes the way of the most hurt in reach she casts at (_throw_side); and with
+# one she hurt unseen this look (`hidden_hurt`: under her hit's effect or the feed's lost track, seen within
+# WOUND_HIDDEN_S) in reach one way and none she casts at that way, she waits for it rather than turn to another. Unless a
+# monster on her platform that can touch her would be too close for a throw from the ground by the attack after her
+# next (`_imminent`: too_close's IMMINENT_S later): that one first where she casts at it, and no wait. Off: as before.
+WOUNDS_FIRST = True
+IMMINENT_S = 0.84        # s: her next throw's lock (attack.choice.THROW_S), so by the attack after it
+WOUND_HIDDEN_S = 0.8     # s unseen that a wound of hers is waited for (her hit's effect over it: 570 ms)
 
 # --- clearance, kept ahead of time (from 2026-10-27) -------------------------------------------------------------------
 # The user, 2026-10-27, watching her hunt Tree Dungeon: "I frequently find the player standing at the same X pos as the
@@ -662,7 +675,8 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
            jumps: Callable[[], reach.Coverage] | None = None, toward: int = 0, goal: float | None = None,
            edges: tuple[float, float] | None = None, up: Callable[[float], Platform | None] | None = None,
            pace: Pace = NO_PACE, touch: list[Monster] = (), limits: tuple[float, float] | None = None,
-           moves: int = 0, castable: Callable[[Monster], bool] | None = None) -> tuple:
+           moves: int = 0, castable: Callable[[Monster], bool] | None = None,
+           hurt: Callable[[Monster], float | None] | None = None, hidden_hurt: list[Monster] = ()) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units[, AWAY]) to step away,
@@ -700,7 +714,9 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     her casts' search is (ledger.in_path's: a mushroom 28 either side, where reach's table has a pig's 34), so the
     stance neither throws where that search picks nothing (a throw her cast would send none with) nor stays there: off
     her level, nearer than it picks one, she steps out from under it (_step_from_under; the review of 2026-10-29: 60
-    over her, the stance took one 116-122 off for in reach where her search picks from 123)."""
+    over her, the stance took one 116-122 off for in reach where her search picks from 123). `hurt`: what a monster she
+    has thrown at has left (its HP's share as she reckons it, alive; None: none of hers), and `hidden_hurt` hers unseen
+    this look as last seen: her wounds first, with the imminent danger before them (WOUNDS_FIRST)."""
     can_jump = can_jump or (lambda a, b: True)
     counts = danger is not None and danger.any
     moves = moves if counts else 0
@@ -732,7 +748,15 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
                               kinds=("forward",), why="passing", goal=goal, pace=pace, tops=tops, can_jump=can_jump)
             if jump is not None:
                 return jump
-        return ("throw", _throw_side(x, in_reach, facing, platform, danger))
+        imminent = _imminent(x, platform, body, danger, pace, halves) if WOUNDS_FIRST and hurt is not None else None
+        side = _throw_side(x, in_reach, facing, platform, danger, hurt if WOUNDS_FIRST else None, imminent)
+        if WOUNDS_FIRST and hidden_hurt and imminent is None:  # (hers unseen just now: waited for, not turned from)
+            waited = [m for m in hidden_hurt if reach.can_hit(platform, x, y, m, others=around, sizes=sizes)]
+            if waited:
+                way = _side_of(min(waited, key=lambda m: abs(m.x - x)), x)
+                if not any(_side_of(t, x) == way for t in in_reach):
+                    return ("wait",)
+        return ("throw", side)
     if jumps is not None:
         jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward, pace=pace,
                           tops=tops, can_jump=can_jump)
@@ -1210,11 +1234,20 @@ def _into(x: float, goal: float, platform: Platform, around: list[Monster], halv
 
 
 def _throw_side(x: float, in_reach: list[Monster], facing: str | None, platform: Platform | None = None,
-                danger: Danger | None = None) -> str:
-    """Which way to throw at the monsters in reach: with `danger`, toward the nearest of them on her `platform` whose
-    kind counts as a danger (it can touch her: live on 2026-10-25 her spot's own Green Mushroom on Tree Dungeon's 24
-    made 14 of her 34 touches, 3 while she shot 23's Horny Mushrooms the other way); else the way she faces while that
-    side has any, else the side with more of them, then the one with the nearer."""
+                danger: Danger | None = None, hurt: Callable[[Monster], float | None] | None = None,
+                imminent: Monster | None = None) -> str:
+    """Which way to throw at the monsters in reach: toward `imminent` if it's one of them (_imminent: about to be too
+    close); else, with `hurt` (her wounds: WOUNDS_FIRST), toward the one of them with the least of its HP left as she
+    reckons it, then the nearer; else with `danger`, toward the nearest of them on her `platform` whose kind counts as a
+    danger (it can touch her: live on 2026-10-25 her spot's own Green Mushroom on Tree Dungeon's 24 made 14 of her 34
+    touches, 3 while she shot 23's Horny Mushrooms the other way); else the way she faces while that side has any, else
+    the side with more of them, then the one with the nearer."""
+    if imminent is not None and any(t is imminent for t in in_reach):
+        return _side_of(imminent, x)
+    if hurt is not None:
+        wounds = [(share, t) for t in in_reach if (share := hurt(t)) is not None]
+        if wounds:
+            return _side_of(min(wounds, key=lambda w: (w[0], abs(w[1].x - x)))[1], x)
     if TOUCHER_FIRST and danger is not None and platform is not None:
         mine = [t for t in in_reach if t.platform == platform.id and danger.share(t.kind) > 0]
         if mine:
@@ -1228,6 +1261,17 @@ def _throw_side(x: float, in_reach: list[Monster], facing: str | None, platform:
         return len(group), -min((abs(t.x - x) for t in group), default=1e9)
 
     return RIGHT if score(right) > score(left) else LEFT
+
+
+def _imminent(x: float, platform: Platform, around: list[Monster], danger: Danger | None, pace: Pace,
+              halves: dict[str, float] | None) -> Monster | None:
+    """The nearest monster on her `platform` whose kind can touch her (`danger`'s share over 0; any without one) that
+    would be too close for a throw from the ground by the attack after her next (too_close, IMMINENT_S later: as `pace`
+    walks it), or None: the danger her wounds don't come before (WOUNDS_FIRST)."""
+    later = replace(pace, lead=pace.lead + IMMINENT_S)
+    near = [t for t in around if t.platform == platform.id and (danger is None or danger.share(t.kind) > 0)
+            and too_close(t, x, halves, danger, later, platform)]
+    return _nearest(near, x) if near else None
 
 
 def _step_from_under(x: float, y: float, platform: Platform, wanted: list[Monster], lo: float,

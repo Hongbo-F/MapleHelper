@@ -110,6 +110,13 @@ def offline(monkeypatch, tmp_path):
     # behavior.statcheck, nor a remembered key binding's stats key
     monkeypatch.setattr(paths, "STAT_WINDOW", tmp_path / "stat_window.json")
     monkeypatch.setattr(paths, "STAT_TEMPLATES", tmp_path / "stat_window")
+    # ... nor her damage as the bars showed it live (lab/characters/<hers>/damage.json, behavior.damage): a test's hunter
+    # learns from its own looks alone, its fits made at once (the same every run)
+    from gamelab.behavior import damage
+    monkeypatch.setattr(paths, "DAMAGE", tmp_path / "damage.json")
+    monkeypatch.setattr(paths.Files, "damage", property(
+        lambda self: paths.DAMAGE if not self.folder else tmp_path / f"damage-{self.folder}.json"), raising=False)
+    monkeypatch.setattr(damage, "THREADED", False)
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 

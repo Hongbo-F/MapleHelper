@@ -773,6 +773,8 @@ class Hunt:
                  f"{c['aged']} by age")
         if said := self.h.attacks.summary():  # her throws by attack (behavior.attacks)
             self.log(f"  attacks: {said}")
+        if (save := getattr(self.h.attacks, "save", None)) is not None:
+            save()  # (her damage as the bars showed it, kept: behavior.damage)
         if (darts := getattr(self.h, "darts", None)) is not None and (said := darts.summary()):
             self.log(f"  {said}")  # her presses that took no MP, the most in a row (behavior.darts)
         watch = getattr(getattr(self.h, "attacks", None), "watch", None)
@@ -964,7 +966,7 @@ class Hunt:
             can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
             around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward, goal=goal, edges=edges, up=up,
             pace=fight.pace_of(self.h, s), touch=self.fs.touch, limits=limits, moves=self.fs.moves,
-            castable=castable), s, castable)
+            castable=castable, **fight.wounds_of(self.h, s)), s, castable)
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something

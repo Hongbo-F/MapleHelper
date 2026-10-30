@@ -544,7 +544,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves, castable=castable)
+                 moves=st.moves, castable=castable, **wounds_of(h, s))
     act, refused = _cast_or_wait(h, act, s, castable)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
@@ -871,7 +871,8 @@ def _plain_stance(h: "Hunter", s: Scene, targets: list[Monster], around: list[Mo
     castable = castable_of(h)
     return cast_or_wait(h, stance(s.where.x, s.where.y, here, targets, approach, h.actions.facing,
                                   can_jump=lambda a, b: open_above(h.model, here, a, b), tops=tops, halves=halves,
-                                  around=around, danger=h.danger, pace=pace_of(h, s), castable=castable),
+                                  around=around, danger=h.danger, pace=pace_of(h, s), castable=castable,
+                                  **wounds_of(h, s)),
                         s, castable)
 
 
@@ -945,6 +946,16 @@ class Castable:
         if why is not None and not any(o is m for o, _ in self.refused):
             self.refused.append((m, why))
         return why is None
+
+
+def wounds_of(h: "Hunter", s: Scene) -> dict:
+    """The stance's `hurt` and `hidden_hurt` for hunter `h` at look `s` (behavior.attacks.Attacks.hurt, hidden_hurt:
+    her wounds finished first, attack.stance.WOUNDS_FIRST), where her casts go only at a body she sees (`picks`, the
+    magician's); none for the thief (as before)."""
+    attacks = getattr(h, "attacks", None)
+    if attacks is None or not getattr(attacks, "picks", False):
+        return {}
+    return {"hurt": attacks.hurt, "hidden_hurt": attacks.hidden_hurt(s)}
 
 
 def castable_of(h: "Hunter") -> Castable | None:

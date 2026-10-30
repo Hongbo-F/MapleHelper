@@ -105,6 +105,10 @@ her casts took, and 67 of the 363 that did something (18%) would have waited (be
 235 and 68); on 18 at 01:55:15-42, 3 of the 29 casts sent (a kill, the first at the mushroom and one test SPOT_HELD_S
 on) where the mark's hold alone sent 9. The thief's throws are as before (`picks` off).
 
+Her damage a throw, and the share of her throws that take nothing, as the monsters' bars show them (`book`: behavior.
+damage.Book, the magician's from 2026-10-29: her profile's prior until the bars say otherwise, learned look by look and
+kept in her own file between runs; `_learn_bar`, `_learn_kill`). The thief's attacks are as measured (no book).
+
 Each choice is logged with its numbers, and sent as a telemetry 'attack' record; `counts` keeps them for the run's
 report.
 
@@ -125,6 +129,7 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from ..attack import choice, reach
+from . import damage
 from ..attack.choice import Attack, Left
 from ..localization.mapdata import MapModel
 from ..localization.memory import FADE_S
@@ -204,6 +209,10 @@ HELD_LOST_S = 6.0     # s unseen before a held mark is forgotten (LOST_S for one
 # cast tests it again. A backstop: her move, a turn or an effect that way lifts it sooner. On 18 at 01:55:17-41 she
 # stood 24 s at one x by her minimap dot (26 casts); held so, a test every 6 s. A guess, as HELD_LOST_S.
 SPOT_HELD_S = 6.0
+# Another player this near a monster (map units, along and up or down): nothing learned of her damage there (`book`): a
+# bar shows whoever's damage, and another's isn't told from hers.
+OTHERS_DX = 400.0
+OTHERS_DY = 250.0
 # Whether a mark none of her casts has shown an effect on yet (Mark.proven) takes no second cast until the first one is
 # judged (rule 3, `refused`'s 'first cast unjudged'): her next throw's look comes about 0.48 s after its key
 # (Senses.shows: KILL_SHOWN_S), under LANDS_S, so every new mark took two casts before the first could be judged no
@@ -236,6 +245,8 @@ class Mark:
     bar: float | None = None  # its bar as a look last read it between empty and full (None: none yet)
     held: "Hold | None" = None  # her last cast at it took no effect: none at it until new evidence (`picks`)
     proven: bool = False  # a cast of hers at it has shown an effect since it was marked or its hold lifted (`picks`)
+    read: tuple[float, float] | None = None  # its bar as a look last read it between empty and full, and when (`book`)
+    keyed: list = field(default_factory=list)  # her throws at it, [key time, Attack] each, oldest first (`book`)
 
     @property
     def thrown(self) -> float:
@@ -311,13 +322,16 @@ class Attacks:
     def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 623.0, level: float = 16.0,
                  log: Callable[[str], None] = print, kills: Callable[[], list] | None = None,
                  dead: Callable[[], object] | None = None, skill: Attack | None = None, magic: bool = False,
-                 no_regular: bool = False, picks: bool = False):
+                 no_regular: bool = False, picks: bool = False, book: "damage.Book | None" = None,
+                 her_level: Callable[[], int | None] | None = None):
         """`skill`: her skill if not Lucky Seven at `level` (the magician's Magic Claw: behavior.hunter, her profile's),
         `magic` its damage against the monsters' defence against magic (MapModel.mob_mdd); `no_regular`: her regular
         attack never thrown (the magician's wand: no swing at range, none to finish a monster, none for MP: `key` says
         None, no throw, where it would be the regular attack); `picks`: her skill casts only at a body her search picks
         from where she stands, seen, not likely dead, not held (the magician's: Policy.unseen 'none'; the module's doc:
-        no cast at nothing, at a body unseen or dead, nor again where it took no effect)."""
+        no cast at nothing, at a body unseen or dead, nor again where it took no effect); `book`: her damage learned
+        from the bars (behavior.damage, the magician's), her skill's taken from it as it learns, and what it learns
+        from her looks kept there; `her_level`, her level as perception reads it (the book's reads are kept by it)."""
         if mode not in MODES:
             raise ValueError(f"no such attack mode: {mode!r} (one of {', '.join(MODES)})")
         self.keys, self.mode, self.max_mp, self.log = keys, mode, max_mp, log
@@ -326,6 +340,12 @@ class Attacks:
         self.regular = choice.REGULAR
         self.no_regular = no_regular
         self.picks = picks
+        self.book = book
+        self.her_level = her_level or (lambda: None)
+        self._prior = self.skill  # (her skill as her profile has it: the book's fit goes over it)
+        self.miss = choice.MISS  # the share of her throws that take nothing (the book's, once it knows)
+        self._book_version = -1
+        self._take_book()
         self._corpses: list[tuple[float, Monster]] = []  # (picks) her marks a kill of hers was placed on: (when, it)
         self._judged: Mark | None = None  # (picks) the mark `key` just put a cast on, until its throw says when
         self._spots: dict[str, Spot] = {}  # (picks) her spot held each way (rule 3: Spot)
@@ -349,7 +369,8 @@ class Attacks:
         # ... and her EXP's gains up to then, the last GAINS_KEPT_S: each one's frame time and the kinds of kill it can
         # be (None: any), those a kill of hers was placed on gone
         self._gains: dict[float, frozenset | None] = {}
-        self._keyed: tuple[Mark, int] | None = None  # the pending throw `key` just made, until its throw says when
+        self._keyed: tuple[Mark, int, int] | None = None  # the pending throw `key` just made (its mark, its index in
+        # the mark's pending and in its keyed), until its throw says when
         self._shows = -1e18  # when a frame shows her last throw at a target's kill, if it killed (`shown_by`)
         self._last: Scene | None = None  # the latest look that searched for monsters, placed
         self._kills = kills or (lambda: [])
@@ -391,6 +412,8 @@ class Attacks:
             self.mp = self._believed(read, s.t)
         if self.darts is not None:
             self.darts.see(s.t, s.mp)
+        if self.book is not None and self.book.version != self._book_version:
+            self._take_book()
         kills = self._kills()
         for k in kills[self._killed:]:
             if getattr(k, "placed", False):
@@ -400,6 +423,10 @@ class Attacks:
                         w.killed(k.t if gained is None else gained, k.kind, k.platform, k.x, getattr(k, "track", None))
                 if self.picks:  # (her: its body is drawn dying, then fades, FADE_S: no cast at it seen again)
                     self._corpses += [(s.t, mk.m) for mk in self.marks if is_kill(mk.m, k)]
+                if self.book is not None:  # (what the throw that killed it did at least: her damage learned)
+                    for mk in self.marks:
+                        if is_kill(mk.m, k):
+                            self._learn_kill(mk, k, s)
                 self.marks = [mk for mk in self.marks if not is_kill(mk.m, k)]
                 if (gained := getattr(k, "gained", None)) is not None:  # its gain was that monster's: no other's kill
                     for g in [g for g in self._gains if abs(g - gained) < GAIN_SAME_S][:1]:
@@ -422,9 +449,12 @@ class Attacks:
             if self.picks:  # (her casts at it judged, and a hold lifted, by what this look sees: rule 3)
                 self._lift(mk, again, s)
                 self._judge(mk, again, s)
+            if self.book is not None and _believable(again.bar):  # (what her throw since the bar before did)
+                self._learn_bar(mk, again, s)
             mk.m, mk.seen = again, s.t
             if _believable(again.bar):
                 mk.bar = again.bar
+                mk.read = (s.t, again.bar)
             landed = [a for t, a in mk.pending if t <= s.t - LANDS_S]
             mk.pending = [(t, a) for t, a in mk.pending if t > s.t - LANDS_S]
             if _believable(again.bar) and (stats := self.stats.get(again.kind)) is not None:
@@ -433,7 +463,7 @@ class Attacks:
             if landed:  # alive after them: what would have killed it ruled out
                 left = mk.left
                 for a in landed:
-                    left = left.after(a, choice.MISS)
+                    left = left.after(a, self.miss)
                 mk.left = left.alive() or mk.left  # (none alive: her throws did less than reckoned, taken as nothing)
             if again.bar is not None and mk.whole and not any(t <= s.t - SHOWS_S for t, _ in mk.pending):
                 mk.left = mk.left.hit() or mk.left  # her damage shows: not all of her throws reckoned in it missed
@@ -515,6 +545,33 @@ class Attacks:
         if WAIT_FIRST and mk is not None and mk.casts and not mk.proven:
             return "first cast unjudged"
         return None
+
+    def hurt(self, m: Monster) -> float | None:
+        """(`picks`) The share of its HP monster `m` has left as she reckons it, if she has thrown at it and it's under
+        its whole, alive (not likely dead: DEAD_LIKELY) and not held (rule 3): one of her wounds, finished first
+        (attack.stance's WOUNDS_FIRST); else None."""
+        if not self.picks:
+            return None
+        mk = self._mark_of(m)
+        stats = self.stats.get(m.kind)
+        if mk is None or not mk.keyed or mk.held is not None or stats is None:
+            return None
+        left = self.reckon(m)
+        if left is None or left.dead >= DEAD_LIKELY:
+            return None
+        share = (left.alive() or left).hp / stats[0]
+        return share if share < 0.999 else None
+
+    def hidden_hurt(self, s: Scene) -> list[Monster]:
+        """(`picks`) Her wounds (`hurt`'s) that look `s` doesn't see, as last seen within attack.stance.WOUND_HIDDEN_S
+        (under her hit's effect, 570 ms; the feed's track lost), not dying: waited for rather than turned from."""
+        if not self.picks:
+            return []
+        from ..attack.stance import WOUND_HIDDEN_S
+        now = time.monotonic()
+        return [mk.m for mk in self.marks
+                if mk.seen < s.t and s.t - mk.seen <= WOUND_HIDDEN_S and seen_again(mk.m, s.monsters) is None
+                and not self._dying(mk.m, now) and self.hurt(mk.m) is not None]
 
     def refusal(self, side: str) -> tuple[str, Monster | None] | None:
         """(`picks`) Why her cast that way would send none now, and the first body in her search's way if any
@@ -811,10 +868,14 @@ class Attacks:
             mk = self._mark_of(target)
             if mk is None:
                 mk = Mark(target, now, left, whole=not _believable(target.bar))
+                if _believable(target.bar) and self._last is not None:
+                    mk.read = (self._last.t, target.bar)  # (its bar as the look it was chosen on read it)
                 self.marks.append(mk)
             mk.pending.append((now, attack))
+            mk.keyed = mk.keyed[-15:] + [[now, attack]]
             mk.last = now
-            self._keyed = (mk, len(mk.pending) - 1)  # (its time its key's, once the throw says: on_throw)
+            self._keyed = (mk, len(mk.pending) - 1, len(mk.keyed) - 1)  # (its time its key's, once the throw says:
+            # on_throw)
             if self.picks and self._cast is not None and (s := self._last) is not None:  # (judged: rule 3)
                 if _believable(target.bar):
                     mk.bar = target.bar
@@ -852,8 +913,10 @@ class Attacks:
                 self._judged.casts[-1].t = at
             self._judged = None
         if self._keyed is not None:
-            mk, i = self._keyed
+            mk, i, j = self._keyed
             self._keyed = None
+            if j < len(mk.keyed):
+                mk.keyed[j][0] = at
             if i < len(mk.pending):
                 mk.pending[i] = (at, mk.pending[i][1])
                 mk.last = at
@@ -950,7 +1013,7 @@ class Attacks:
             return Left.of(m.bar * stats[0] if _believable(m.bar) else stats[0], stats[1])
         left = mk.left
         for t, a in mk.pending:
-            left = left.after(a, choice.MISS)
+            left = left.after(a, self.miss)
             if self._unkilled(t, m.kind):
                 left = left.alive() or left  # (none alive: her throws did less than reckoned, taken as nothing)
         return left
@@ -965,15 +1028,15 @@ class Attacks:
 
     def kill_s(self, m: Monster) -> float:
         """s she takes to kill monster `m` from what it has left if alive (`reckon`), with the attack she'd throw
-        (Lucky Seven while she has the MP for a cast in a mode that throws it), her misses (choice.MISS), her throws
+        (Lucky Seven while she has the MP for a cast in a mode that throws it), her misses (`miss`), her throws
         THROW_S apart."""
         left = self.reckon(m)
         attack = self.skill if (self.skill is not None and self.mode != "regular" and
                                 (self.mp is None or choice.can_cast(self.mp, self.max_mp, self.skill.mp))) \
             else self.regular
         if left is None:  # an unknown kind: three regular stars
-            return 3 * choice.REGULAR.mean() / attack.mean() / (1 - choice.MISS) * choice.THROW_S
-        return (left.alive() or left).throws(attack) / (1 - choice.MISS) * choice.THROW_S
+            return 3 * choice.REGULAR.mean() / attack.mean() / (1 - self.miss) * choice.THROW_S
+        return (left.alive() or left).throws(attack) / (1 - self.miss) * choice.THROW_S
 
     def summary(self) -> str:
         """Her throws by attack and why, for the end of a run's log ("" without a choice asked: mode 'regular')."""
@@ -985,13 +1048,96 @@ class Attacks:
         if self.skill is not None and self.skill.key != "lucky_seven":  # (the magician's: her skill, and her casts held)
             held = ", ".join(f"{k} {n}" for k, n in c.items() if k.startswith("no cast: "))
             judged = c["held: no effect"]
+            learned = "" if self.book is None else self.book.said(self.skill.key)
             return (f"{self.skill.name} {c[self.skill.key]}, the regular attack {c['attack']}"
                     + (f" ({held})" if held else "")
+                    + (f"; her damage {learned}" if learned else "")
                     + (f"; her casts that took no effect {judged} (holds lifted: her marks' {c['held: lifted']}, her "
                        f"spots' {c['held here: lifted']})" if judged else "")
                     + (f"; her MP bar's 0 under her pet's warning not believed {warned} times" if warned else ""))
         return (f"Lucky Seven {c['lucky_seven']}, the regular attack {c['attack']}" + (f" ({whys})" if whys else "")
                 + (f"; her MP bar's 0 under her pet's warning not believed {warned} times" if warned else ""))
+
+    # --- her damage learned (`book`: behavior.damage) -------------------------------------------------------------
+
+    def _take_book(self) -> None:
+        """Her skill's damage and her misses' share as the book has them now (its fit over her profile's prior)."""
+        if self.book is None:
+            return
+        self._book_version = self.book.version
+        if self._prior is not None:
+            self.skill = self.book.attack(self._prior)
+            self.miss = self.book.miss(self._prior.key, choice.MISS)
+
+    def _since(self, mk: Mark) -> tuple[float, float, bool] | None:
+        """Mark `mk`'s bar before (when read, its share, and whether one was read: `barred`) for what her throws since
+        did: its last read (Mark.read); with none, full from before her first throw at it where she first threw at it
+        with no bar up (Mark.whole); else None."""
+        if mk.read is not None:
+            return mk.read[0], mk.read[1], True
+        if mk.whole:
+            return -1e18, 1.0, False
+        return None
+
+    def _others_near(self, m: Monster, s: Scene) -> bool:
+        """Whether look `s` has another player within OTHERS_DX along and OTHERS_DY up or down of monster `m`."""
+        return any(abs(p.x - m.x) < OTHERS_DX and abs(p.y - m.y) < OTHERS_DY for p in getattr(s, "players", ()) or ())
+
+    def _learn_bar(self, mk: Mark, again: Monster, s: Scene) -> None:
+        """(`book`) What look `s`'s read of mark `mk`'s bar (`again`'s, between empty and full) says of the one throw of
+        hers whose damage surely shows since the bar before and by now (keyed from SHOWS_S before that read to LANDS_S
+        before this one), with none keyed where its damage may or may not have shown by either: its damage (the drop
+        x its HP before its defence: damage.EXACT, a bar px either way), or nothing (damage.MISS, under MISS_PX px
+        lower after a bar read before). None learned with another player near it, or another throw in that time."""
+        stats = self.stats.get(again.kind)
+        before = self._since(mk)
+        if stats is None or before is None or self._others_near(again, s):
+            return
+        t0, b0, barred = before
+        sure = [a for t, a in mk.keyed if t0 - SHOWS_S < t <= s.t - LANDS_S]
+        unsure = [a for t, a in mk.keyed if t0 - LANDS_S < t <= t0 - SHOWS_S or s.t - LANDS_S < t <= s.t - SHOWS_S]
+        if len(sure) != 1 or unsure:
+            return
+        hp, defence = stats
+        k = (100.0 + defence) / 100.0
+        tol = max(damage.TOL_MIN, hp * k / damage.BAR_PX)
+        drop = b0 - again.bar
+        a = sure[0]
+        if drop * damage.BAR_PX < damage.MISS_PX:
+            if barred and drop > -PICK_BAR_STEP:  # (higher by a step: another's bar or a misread, nothing learned)
+                self.book.add(a.key, a.stars, damage.Read(time.time(), again.kind, damage.MISS, 0.0, tol,
+                                                          self.her_level(), True))
+            return
+        self.book.add(a.key, a.stars, damage.Read(time.time(), again.kind, damage.EXACT, drop * hp * k, tol,
+                                                  self.her_level(), barred))
+
+    def _learn_kill(self, mk: Mark, k, s: Scene) -> None:
+        """(`book`) A kill of hers placed on mark `mk` (`k`: the ledger's) after exactly one throw of hers at it since
+        the bar before (keyed from SHOWS_S before that read to SHOWS_S before its gain), none keyed where its damage
+        may or may not have shown by that read: that throw did at least what it had left (damage.AT_LEAST, a bar px
+        under it). None learned with another player near it."""
+        stats = self.stats.get(mk.m.kind)
+        gained = getattr(k, "gained", None)
+        gained = k.t if gained is None else gained
+        before = self._since(mk)
+        if stats is None or before is None or self._others_near(mk.m, s):
+            return
+        t0, b0, barred = before
+        sure = [a for t, a in mk.keyed if t0 - SHOWS_S < t <= gained - SHOWS_S]
+        unsure = [a for t, a in mk.keyed if t0 - LANDS_S < t <= t0 - SHOWS_S]
+        if len(sure) != 1 or unsure:
+            return
+        hp, defence = stats
+        f = (100.0 + defence) / 100.0
+        tol = max(damage.TOL_MIN, hp * f / damage.BAR_PX)
+        a = sure[0]
+        self.book.add(a.key, a.stars, damage.Read(time.time(), mk.m.kind, damage.AT_LEAST, max(0.0, b0 * hp * f - tol),
+                                                  tol, self.her_level(), barred))
+
+    def save(self) -> None:
+        """Her damage as learned written to her file (the book's; at a run's end)."""
+        if self.book is not None:
+            self.book.save()
 
     def _dying(self, m: Monster, t: float, seen: list[Monster] = ()) -> bool:
         """Whether `m` is taken for dead or dying (ledger.dying: its track, or where a kill of hers was placed), at t,
