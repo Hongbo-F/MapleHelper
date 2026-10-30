@@ -863,15 +863,18 @@ def loop_tree_ore_waits(sim):
     map at its cap from the start, a kill back at the next pass; on 5 not all of this; of seeds 1-13, 13 alone (of 1-26)
     meet all of it.) (Seed 1 since the server's respawn and the chase together (respawn_tick and Realism.chase every
     world's, 2026-10-31): on seed 13 she never picked up the ore; of seeds 1-13, 1 and 6 meet all of this, with the
-    chase alone 1, 5, 8 and 12 (the old respawn).) (Seed 7 since walls stop her in the air by the game's rule
-    (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1
-    the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the
-    simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
-    right): on seed 7 the ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.)
-    (Seed 24 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in
-    the time, and hurt more than five times; none of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14
-    since the stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges),
-    2026-10-31: on seed 24 the ore not picked up in the time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
+    chase alone 1, 5, 8 and 12 (the old respawn).) (Seed 1 since a trip's chains are planned by the whole state's
+    monsters, each walking as perception has it head at its kind's speed from the game data, with no quick look after a
+    touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 5 she was hurt more than five times; of
+    seeds 1-3, 1 and 3 meet all of this.) (Seed 7 since walls stop her in the air by the game's rule (body.wall_table,
+    2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1 the ore never
+    picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the simulator's looks
+    have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 7 the
+    ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.) (Seed 24 since the
+    monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in the time, and hurt
+    more than five times; none of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14 since the stack's
+    monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 24 the
+    ore not picked up in the time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1481,12 +1484,16 @@ def loop_tree_attack_no_darts(sim):
     paged.) (Its monsters walk as with nobody there, hit or not, since the world's monsters chase her once she hits them
     (Realism.chase off, 2026-10-31): with their chase none of seeds 1-40 shows it; on 8 the first doubt at 100.7 s found
     ATTACK on Ctrl as configured with her stars' test not MAYBE OUT, so no Lucky Seven-only run nor out of darts' stop,
-    175 touches in its 344 s. To redo with the chase.) (Seed 6 since the simulator's looks have her place as the world
-    does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT;
-    of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the v83
-    client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of this.)
-    (Seed 4 since the stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges),
-    2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7, 10 and 12 show all of this.)"""
+    175 touches in its 344 s. To redo with the chase.) (Seed 3 since a trip's chains are planned by the whole state's
+    monsters, each walking as perception has it head at its kind's speed from the game data, with no quick look after a
+    touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 8 her stars' test didn't say MAYBE OUT;
+    of seeds 1-16 only 3 meets all of this.) (Seed 6 since the simulator's looks have her place as the world does
+    (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT; of
+    seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the v83
+    client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of
+    this.) (Seed 4 since the stack's monsters turn where the game turns them, 20 from a platform's end
+    (monsters.walk_edges), 2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7, 10 and 12 show all of
+    this.)"""
     return key_check_run(4)(sim)
 
 
@@ -1778,8 +1785,12 @@ def nav_tree_landing_shot_first(sim):
     screen 10 times a second with her band's own search beside it where a whole screen takes longer than 0.05 s
     (worldstate.BAND_STAND_IN_S, 2026-10-28): on seed 3 her throw went 2 ms later, the star pushed the mushroom back
     and it died at x 2, not by her landing, so nothing priced it; of seeds 1-16, 5, 8, 9, 15 and 16 meet all of this,
-    and on every seed she shoots it first from 24.) (Seed 8 since the monsters move as the v83 client's AI moves them,
-    2026-10-31: on seed 5 the Horny Mushroom not dying by her landing; of seeds 1-13 8 alone shows all of this.)"""
+    and on every seed she shoots it first from 24.) (Seed 3 since a trip's chains are planned by the whole state's
+    monsters, each walking as perception has it head at its kind's speed from the game data, with no quick look after a
+    touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 5 the jump's landing had no price once
+    the mushroom was shot, nothing to say; of seeds 1-9, 3 and 9 meet all of this.) (Seed 8 since the monsters move as
+    the v83 client's AI moves them, 2026-10-31: on seed 5 the Horny Mushroom not dying by her landing; of seeds 1-13 8
+    alone shows all of this.)"""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(23, mode=TRANSIT)
 
@@ -1819,9 +1830,10 @@ def _no_mover(tr: dict) -> bool:
 
 @tree((21, 60.0), monsters=[("Green Mushroom", 21, 130.0)], seed=2, limit=70,
       **dict(_LIVE, realism=Realism(zero_walls=True, chase=True, invulnerable=harness.INVULNERABLE_LIVE)),
-      expects=(ends("arrived"), logs("contact:"), logs("pass:"), logs("spot:"),
+      expects=(ends("arrived"), logs("contact:"),
                check("no move a monster blocks made by the mover", _no_mover),
-               check("on 19 by the end", lambda tr: tr["world"]["platform"] == 19)))
+               check("on 19 by the end", lambda tr: tr["world"]["platform"] == 19),
+               check("touched once at most", lambda tr: tr["world"]["touches"] <= 1)))
 def nav_tree_evade(sim):
     """A movement-only trip (no escort: navigator.AVOID) from 21 at x 60 up to 19, a Green Mushroom 70 off on 21 chasing
     her (hit before the trip: the walkers world's aggro, world.AGGRO_S; her invulnerability as live): the evade step of
@@ -1829,6 +1841,11 @@ def nav_tree_evade(sim):
     and the jump planned through it in the window after (the contact rule, "contact:"); knocked back, past it ("pass:
     NO_REFUGE"); on 22, the next jump blocked and her spot unsafe, a step along 22 to the nearest spot clear of it
     ("spot:"), and from there past it once EVADE_S has gone by ("pass: EVADE_S"). No move of the mover's (the move a
-    monster was in the way of went to control.mover, unwatched, before)."""
+    monster was in the way of went to control.mover, unwatched, before). Since a trip's chains are planned by the whole
+    state's monsters, each walking as perception has it head at its kind's speed, with no quick look after a touch
+    (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT), the chain after that first touch is planned from the
+    newest state in the window it leaves her and goes up past the mushroom: touched once, on 19 at 2.1 s where it took
+    8.2 s, three touches, the spot and the passes before; on none of seeds 1-16 is a spot or a pass needed (the evade
+    step's own tests: tests/test_evade.py)."""
     sim.world.monsters[0].aggro(sim.world.t)
     return _nav(19, seconds=60)(sim)

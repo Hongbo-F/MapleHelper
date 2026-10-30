@@ -1676,45 +1676,83 @@ def test_where_no_kind_counts_an_escorts_chains_are_planned_as_before(model, mon
     assert nav._chain(st, s, path, monsters, 0.0)[2] != "monster"
 
 
-def test_a_fighting_trip_searches_for_monsters_where_its_chain_goes(model):
-    """Navigator.trip_monsters: a band look (fights look at the band around her) is searched again, over the rows from
-    as high as she gets over the chain's highest platform (a jump, her body, the map's tallest monster) to as low as
-    its lowest, when its band doesn't take all of them in; a whole-screen look as it is."""
+def test_a_fighting_trip_plans_by_the_whole_states_monsters_with_no_second_search(model, monkeypatch):
+    """Navigator.trip_monsters (2026-10-30, the user: "make motion planing work on the 15fps whole screen result"): a
+    band look (a fight's) carries the state's monsters off its band (Scene.swept: every state has the whole screen's),
+    and the chain is planned by all of them, a band look's own and those off it, with no search of the frame again (the
+    eyes' monsters() never asked: until then a band look was searched again over the chain's platforms' rows, 23 ms);
+    a whole-screen look as it is. Each walks as the feed has it head at its kind's speed from the game data (_walking:
+    the feed's track over the tracker's look-to-look measure, with an escort too); one off the band is kept clear of
+    where the chain goes."""
+    from dataclasses import replace
     from types import SimpleNamespace
 
-    import numpy as np
-
-    from gamelab.localization.pose import Where
-    from gamelab.localization.scene import Scene
-    from gamelab.motion import bodies
-    from gamelab.motion.physics import JUMP_HEIGHT
+    from gamelab.localization.monsters import DEFAULT_SPEED
     c, d = by_y(model, 500, 400), by_y(model, 300, 700)
-    nav = _navigator(model)
     asked = []
-    nav.senses = SimpleNamespace(band=(300.0, 75.0),  # (taller than a fight's: reach.LOOK_UP is 140)
-                                 eyes=SimpleNamespace(monsters=lambda s, up, down: asked.append((up, down)) or [],
-                                                      bar=lambda s, m: None))
-    s = Scene(t=0.0, frame=np.zeros((1, 1, 3), np.uint8), tag=(0, 0), hp=1.0, mp=1.0, where=Where(200, 500, c, (0, 0)),
-              searched=True, monsters=[walker(300, platform=c.id)])
-    # Her own platform: the band takes in a jump's height over it (77), her body (65) and a snail's (33, as it flinches).
-    assert nav.trip_monsters(s, {c.id}) == s.monsters and not asked
-    # D, 200 above: searched again. The look's own monster is kept though the search finds none (a feed's frame gone).
-    assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters and len(asked) == 1
-    up, down = asked[0]
-    assert up == pytest.approx(200 + JUMP_HEIGHT + bodies.HER_TALL + nav._tallest()) and down == 75.0
-    # Below: as low as the lowest platform and the tallest monster under it (its head reaches her feet there).
-    from gamelab.control.navigator import TRIP_LOOK_BELOW
-    nav.senses.band = (300.0, 40.0)
-    nav.trip_monsters(s, {c.id})
-    assert asked[-1][1] == pytest.approx(nav._tallest() + TRIP_LOOK_BELOW)
-    # Found again on the same frame, it's one monster, not two; one more found is added.
-    from gamelab.perception.mobs import Mob
-    s.monsters = [s.place(Mob("pig", 1, 1, 30, 30, 0.9), model, None)]
-    nav.senses.eyes.monsters = lambda s, up, down: [Mob("pig", 1, 1, 30, 30, 0.9), Mob("pig", 120, 0, 30, 30, 0.9)]
-    got = nav.trip_monsters(s, {c.id, d.id})
-    assert [m.mob.x for m in got] == [1, 120] and got[0] == s.monsters[0]
-    s.wide = True
-    assert nav.trip_monsters(s, {c.id, d.id}) == s.monsters
+    nav, st, s, path, _ = _meeting(model, monkeypatch, _escort(), (c.id, 450))
+    speed = nav.tracker.walking.get("horny-mushroom", DEFAULT_SPEED)  # (the game data's, where the map has it)
+    nav.senses = SimpleNamespace(band=(140.0, 75.0), eyes=SimpleNamespace(
+        monsters=lambda *a, **k: asked.append(a) or [], bar=lambda s, m: None))
+    above = replace(walker(650, 1, kind="horny-mushroom", platform=d.id), track=7)  # on D, 200 above: off her band
+    s.wide, s.swept = False, [above]
+    s.tracks = [SimpleNamespace(id=7, vx=-speed, kind="horny-mushroom", state="live", platform=d.id)]
+    assert nav.trip_monsters(s) == s.monsters + [above] and not asked
+    monsters, tail = nav._chain_monsters(st, s, path)
+    assert [(m.platform, m.x) for m in monsters] == [(c.id, 450.0), (d.id, 650.0)] and not asked
+    walking = monsters[1]  # facing right in its picture, the feed's track heading left: the feed's
+    assert walking.vx == pytest.approx(-speed) and walking.heading == -1
+    assert walking.track == 7 and monsters[0].track is None  # (the look's own one has no track of the feed's)
+    s.wide, s.monsters, s.swept = True, s.monsters + [above], []
+    assert nav.trip_monsters(s) == s.monsters and not asked
+
+
+def test_after_a_touch_no_fight_starts_nor_is_until_asked_while_her_invulnerability_lasts(model, monkeypatch):
+    """navigator.POST_HIT (2026-10-30, in place of the quick look after a cut, TripState.quick): a chain cut short by a
+    touch leaves the trip in the window her invulnerability after it lasts (Senses.invulnerable_until, less
+    IMMUNE_MARGIN_S; INVULNERABLE_S from now where no popup was told), and while it lasts no fight starts on the way (the
+    escort's shot in reach) and `until` isn't asked, and the pass's sightings aren't kept (no shot first at one); the
+    pass still plans, from the look's monsters. Once it's over both are asked again."""
+    import time
+    from types import SimpleNamespace
+
+    import gamelab.control.navigator as nv
+    from gamelab.perception.touches import INVULNERABLE_S
+    c = by_y(model, 500, 400)
+    asked = []
+    escort = _escort()
+    escort.target = lambda s: asked.append("target")
+    nav, st, s, path, _ = _meeting(model, monkeypatch, escort, (c.id, 450), mode="hunt")
+    nav.actions.kind = "retreat"  # (the Lie Detector alarm file isn't read)
+    end = time.monotonic() + 1.0
+    nav.senses = SimpleNamespace(invulnerable_until=lambda: end)
+
+    class Planned(Exception):
+        pass
+
+    def plan(st, s, dst):
+        asked.append("plan")
+        raise Planned
+    monkeypatch.setattr(nav, "_look", lambda st: (s, 0.0))
+    monkeypatch.setattr(nav, "_onto_platform", lambda s: s)
+    monkeypatch.setattr(nav, "_plan", plan)
+    st.until = lambda s: asked.append("until") or False
+    nav._touched(st)
+    assert st.post_hit_until == pytest.approx(end - nv.IMMUNE_MARGIN_S)
+    with pytest.raises(Planned):
+        nav._pass(st)
+    assert asked == ["plan"]
+    nav._chain_monsters(st, s, path)
+    assert st.sighted == []  # (no shot first at what the look has, _meet's)
+    st.post_hit_until = time.monotonic() - 1e-3  # the window over
+    with pytest.raises(Planned):
+        nav._pass(st)
+    assert asked == ["plan", "until", "target", "plan"]
+    nav._chain_monsters(st, s, path)
+    assert len(st.sighted) == 1
+    nav.senses = SimpleNamespace(invulnerable_until=lambda: -1e18)  # her HP dropped, no popup told: from now
+    nav._touched(st)
+    assert st.post_hit_until == pytest.approx(time.monotonic() + INVULNERABLE_S - nv.IMMUNE_MARGIN_S, abs=0.05)
 
 
 def test_a_fighting_trip_keeps_clear_of_the_monsters_her_memory_has_where_its_chain_goes(model, monkeypatch):

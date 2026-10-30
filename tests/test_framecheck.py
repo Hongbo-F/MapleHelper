@@ -769,6 +769,40 @@ def test_a_trip_stands_still_no_later_than_its_caller_says():
     assert got["lost at"] is not None and 8.0 <= got["lost at"] < 10.0, got  # (its last look's retries: 8.96 s)
 
 
+def test_a_trip_paused_after_a_touch_looks_for_monsters_again():
+    """A chain cut short by a touch has the next pass look with the monsters (the newest state's: since 2026-10-30 no
+    quick look planning from the monsters seen before, navigator.POST_HIT). When that look is the one that fails, the
+    pass after the pause looks for monsters afresh, as Navigator.go's LookLost handler leaves it: not from those seen
+    before the pause (review, 2026-10-24: `paused` cleared the look taken before, but not the quick look's). On Tree
+    Dungeon since the first map's scenarios went (2026-10-31): the trip's own handling, not the map's."""
+    from gamelab.control.navigator import TripState
+    from gamelab.sim import scenarios
+    if scenarios.real_map(TREE) is None:
+        pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
+
+    def fn(sim):
+        nav = sim.navigator(sim.hunter())
+        real, asked = nav.mover.locate, []
+
+        def locate(*args, mobs=False, **kw):
+            asked.append(mobs)
+            if len(asked) == 1:
+                raise LookLost(Problem("picture", "the minimap doesn't show this map's picture"))
+            return real(*args, mobs=mobs, **kw)
+
+        nav.mover.locate = locate
+        st = TripState(17, deadline=100.0, post_hit_until=5.0)
+        st.sighted = [("a track", "a sighting")]
+        with pytest.raises(LookLost):
+            nav._look(st)
+        st.paused(30.0)
+        s, _ = nav._look(st)
+        return {"asked": asked, "sighted": st.sighted, "deadline": st.deadline, "placed": s.where is not None}
+
+    got = scenarios.run_scenario(scenarios.Scenario("paused after a touch", fn, (23, 0.0), map_id=TREE))["result"]
+    assert got == {"asked": [True, True], "sighted": [], "deadline": 130.0, "placed": True}
+
+
 # --- the name tag, the minimap picture and the capture -----------------------------------------------------------------
 
 def test_a_name_tag_template_that_no_longer_matches_is_cut_again(tmp_path):

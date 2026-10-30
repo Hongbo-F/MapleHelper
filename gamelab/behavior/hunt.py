@@ -1614,7 +1614,7 @@ class Hunt:
         chains = o.trip.trip.chains
         while not o.trip.over:
             self.nav.step(o.trip)
-            self._owe_move = o.trip.quick
+            self._owe_move = time.monotonic() < o.trip.post_hit_until  # (just touched: on first, navigator.POST_HIT)
             if o.trip.trip.chains > chains:
                 chains = o.trip.trip.chains
         result = o.trip.trip.result
