@@ -68,6 +68,12 @@ RETREAT_OVER = "the retreat's time after the Lie Detector is over: stopped press
 # frame of that minute (ShadowWorker: it may yet see a pattern board there); past it, a check that hangs (a GPU driver
 # stuck) no longer holds the end, nor the player's stop after `clear-alarm`.
 SHADOW_WAIT_S = 30.0
+# An answered Lie Detector (off the screen for lie_recorder.END_S, the Truth Booth never seen in its cycle) clears its
+# own alarm and the player takes plans again, with no start again (the user, 2026-10-29 ~20:00: "Stop requesting uac
+# after a lie detector. Just detect that I manually solved it and carry on"). A cycle that saw the Truth Booth stays
+# locked as before, for `clear-alarm` and a start again (she may be on another map); so does one whose alarm file
+# couldn't be written. Seen again after, it's a new cycle: input stops at once (Watchdog.tick).
+AUTO_RESUME = True
 # Past this, the player's log becomes player.log.1 (the one before goes) when the player starts. It writes
 # about 40 bytes a plan, some 150 KB an hour of hunting, and was never cut: 5 MB is about 30 hours.
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -229,8 +235,9 @@ def _alarm_age() -> float | None:
 
 
 class Alarm(threading.Event):
-    """The Lie Detector seen: set by the Watchdog, never cleared; `at`, when it was first set (time.monotonic()), from
-    which the player takes her retreat's moves for alarm.RETREAT_WINDOW_S (alarm_refusal)."""
+    """The Lie Detector seen: set by the Watchdog, cleared by it only once an answered one is over (AUTO_RESUME); `at`,
+    when it was first set (time.monotonic()), from which the player takes her retreat's moves for
+    alarm.RETREAT_WINDOW_S (alarm_refusal)."""
 
     def __init__(self):
         super().__init__()
@@ -240,6 +247,10 @@ class Alarm(threading.Event):
         if self.at is None:
             self.at = time.monotonic()
         super().set()
+
+    def clear(self) -> None:
+        self.at = None
+        super().clear()
 
 
 class ShadowWorker(threading.Thread):
@@ -366,8 +377,11 @@ class Watchdog(threading.Thread):
     the Lie Detector at that frame would (`_shadow_back`; the end waits for its check of the cycle's last minute,
     SHADOW_WAIT_S at most); it never starts a cycle, nor sends anything.
 
-    `alarm` is never cleared: the player takes plans again only once a person has started it again (`player
-    --elevate`: the user's UAC click), as when it shut down at the alarm. `cleared` is set, and the player stops
+    An answered Lie Detector (its cycle over, `end_s` off the screen, no Truth Booth seen in it) has its alarm cleared
+    here (`_resume`, with `auto_resume`: AUTO_RESUME by default): the alarm file goes, `alarm` is cleared, and the player
+    takes plans again with no start again (the user's word, 2026-10-29). Otherwise (the Truth Booth seen, the alarm
+    file never written, `auto_resume` off) `alarm` stays set: the player takes plans again only once a person has
+    started it again (`player --elevate`: the user's UAC click), as when it shut down at the alarm. `cleared` is set, and the player stops
     (serve), once both a person has cleared the alarm (the alarm file, paths.ALARM, gone: `python -m gamelab
     clear-alarm`) and the game has shown no Lie Detector for `end_s` since the cycle; until then it watches, and
     records a new cycle as any. Taking plans again by itself, a file any program can delete (`clear-alarm` is an
@@ -397,7 +411,7 @@ class Watchdog(threading.Thread):
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
                  interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None,
-                 shadow=False, pusher=None):
+                 shadow=False, pusher=None, auto_resume=None):
         super().__init__(name="lie-detector-watch", daemon=True)
         from ..perception.framecheck import anchors_off
         from ..perception.lie_detector import NATIVE_FRAME, WHOLE_EVERY, LieDetectorSpotter
@@ -422,6 +436,10 @@ class Watchdog(threading.Thread):
         self.cap_s = lie_recorder.CAP_S if cap_s is None else cap_s
         self.Recording = lie_recorder.Recording
         self.pusher = pusher                  # the phone's pushes of a cycle (control.notify.Pusher; None: none)
+        self.auto_resume = AUTO_RESUME if auto_resume is None else auto_resume
+        self.truth_booth = lie_recorder.TRUTH_BOOTH
+        self.cycle_forms: set[str] = set()    # the forms seen in the cycle in progress (the spotter's names)
+        self.resumed = 0                      # answered Lie Detectors whose alarm it cleared (_resume)
         self.stopped = threading.Event()
         self.looked = threading.Event()       # its first look is done: the player takes no plan before (serve)
         self.cleared = threading.Event()      # the alarm cleared by a person and the screen clear since: the player
@@ -491,13 +509,18 @@ class Watchdog(threading.Thread):
             self.alarm_written = alarm_up()
             self._say(f"LIE DETECTOR seen ({self.form}): input stopped; the player stays up refusing every plan (but a "
                       f"tap of her pet food, and her retreat's moves for {RETREAT_WINDOW_S:g} s), records it, and "
-                      f"stops once `clear-alarm` has been run and none has been on screen for {self.end_s:g} s "
-                      "(it takes plans again only once it's started again)"
+                      + (f"carries on by itself once it has been off the screen for {self.end_s:g} s without the "
+                         "Truth Booth (the Truth Booth: it stops once `clear-alarm` has been run, and takes plans "
+                         "again only once it's started again)" if self.auto_resume else
+                         f"stops once `clear-alarm` has been run and none has been on screen for {self.end_s:g} s "
+                         "(it takes plans again only once it's started again)")
                       + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until it's "
                                                        "stopped)"))
             self._start_recording(info)
         elif seen and self.alarm_written and not alarm_up():
             self._raise_again(frame)
+        if seen:
+            self.cycle_forms.update(name for name, score in scores.items() if score >= 1)
         if seen and self.pusher is not None:  # (after the alarm: the keys have stopped, the PC paged)
             self._pushed(lambda: self.pusher.seen(now, max(scores, key=scores.get)))
         number = None
@@ -516,8 +539,12 @@ class Watchdog(threading.Thread):
             self.cycle_t0 = None
             if self.pusher is not None:
                 self._pushed(lambda: self.pusher.ended(now))
-            self._say(f"the Lie Detector has been off the screen for {self.end_s:g} s: its cycle is over"
-                      + (" (waiting for `clear-alarm`, then the player stops)" if alarm_up() else ""))
+            answered, self.cycle_forms = self.truth_booth not in self.cycle_forms, set()
+            if self.auto_resume and answered and self.alarm.is_set() and self.alarm_written and alarm_up():
+                self._resume()
+            else:
+                self._say(f"the Lie Detector has been off the screen for {self.end_s:g} s: its cycle is over"
+                          + (" (waiting for `clear-alarm`, then the player stops)" if alarm_up() else ""))
         if self.alarm.is_set() and not self.cleared.is_set():
             if alarm_up():
                 self.alarm_written, self.filed_at = True, now
@@ -526,6 +553,22 @@ class Watchdog(threading.Thread):
                 self._say(f"the Lie Detector alarm was cleared and none has been on screen for {self.end_s:g} s: "
                           "the player stops (it takes plans again once it's started again: `python -m gamelab "
                           "player --elevate`)")
+
+    def _resume(self) -> None:
+        """An answered Lie Detector's cycle over (AUTO_RESUME): its alarm cleared here as `clear-alarm` would (the alarm
+        file gone), and the lock lifted: plans are taken again, no start again. An alarm file that can't go keeps it
+        locked as before."""
+        try:
+            ALARM.unlink(missing_ok=True)
+        except OSError as e:
+            self._trouble("clearing the answered Lie Detector's alarm failed (locked: `clear-alarm`, then a start "
+                          "again)", e)
+            return
+        self.alarm.clear()
+        self.alarm_written, self.filed_at = False, None
+        self.resumed += 1
+        self._say(f"the Lie Detector answered (off the screen for {self.end_s:g} s, no Truth Booth): its alarm "
+                  "cleared by the player, plans taken again (no start again); seen again, input stops at once")
 
     def _pushed(self, fn) -> None:
         """A push to the phone (control.notify), whatever goes wrong in it said, never raised."""

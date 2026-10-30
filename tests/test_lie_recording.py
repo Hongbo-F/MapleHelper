@@ -544,8 +544,9 @@ def refused(flag):
 
 
 def test_after_the_lie_detector_plans_are_refused_until_the_player_is_started_again(tmp_path, alarm_file, pages):
+    # (auto_resume off: as after a Truth Booth, or as it was until the user's word of 2026-10-29)
     screen = Screen()
-    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm)
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm, auto_resume=False)
     t = play(dog, screen, [0, 0])
     assert not refused(flag)
     t = play(dog, screen, [1, 1, 2], t)
@@ -562,6 +563,42 @@ def test_after_the_lie_detector_plans_are_refused_until_the_player_is_started_ag
     play(dog, screen, [0] * 8, t)
     assert refused(flag)
     assert len(written(dog)) == 1
+
+
+def test_an_answered_lie_detector_clears_its_own_alarm_and_the_player_carries_on_one_seen_again_locks_at_once(
+        tmp_path, alarm_file, pages):
+    # The user, 2026-10-29: "Stop requesting uac after a lie detector. Just detect that I manually solved it and carry
+    # on". Gone for the end stretch with no Truth Booth: the alarm file goes, plans are taken again, no start again.
+    screen = Screen()
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm)
+    t = play(dog, screen, [1, 1, 2, 2])  # the countdown, then the mini-game: answered
+    assert refused(flag) and alarm_file.exists()
+    t = play(dog, screen, [0, 0, 0], t)  # under the 1 s end stretch: still locked
+    assert refused(flag) and alarm_file.exists() and dog.resumed == 0
+    t = play(dog, screen, [0, 0], t)
+    assert dog.cycle_t0 is None and not refused(flag) and not alarm_file.exists() and dog.resumed == 1
+    assert not dog.cleared.is_set()  # (the player doesn't stop: it carries on)
+    assert any("answered (off the screen for 1 s, no Truth Booth): its alarm cleared by the player, plans taken "
+               "again" in m for m in said)
+    client.check_alarm()  # gamelab's commands run again (no LieDetectorAlarm)
+    # Seen again: a new cycle, locked at once, paged again.
+    t = play(dog, screen, [1], t)
+    assert refused(flag) and alarm_file.exists() and len(pages) == 2 and dog.cycle_t0 is not None
+    play(dog, screen, [0] * 6, t)
+    assert not refused(flag) and dog.resumed == 2 and len(written(dog)) == 2
+
+
+def test_a_lie_detector_that_reached_the_truth_booth_stays_locked_for_clear_alarm_and_a_start_again(
+        tmp_path, alarm_file, pages):
+    screen = Screen()
+    dog, flag, said, _ = make_dog(tmp_path, screen, on_alarm=alarm.raise_alarm)
+    t = play(dog, screen, [1, 2, 3, 3])  # the countdown, the mini-game, then the Truth Booth: missed
+    t = play(dog, screen, [0] * 8, t)
+    assert dog.cycle_t0 is None and dog.resumed == 0 and refused(flag) and alarm_file.exists()
+    assert any(m.endswith("its cycle is over (waiting for `clear-alarm`, then the player stops)") for m in said)
+    alarm.clear_alarm()
+    play(dog, screen, [0], t)
+    assert dog.cleared.is_set() and refused(flag)  # the player stops; only one started again takes plans
 
 
 def test_cleared_while_it_is_still_on_screen_it_is_raised_again(tmp_path, alarm_file, pages):
@@ -728,6 +765,7 @@ class Served:
 
 def test_the_player_stays_up_through_the_lie_detector_recording_it_and_stops_once_it_is_cleared(
         tmp_path, monkeypatch, alarm_file, pages):
+    monkeypatch.setattr(player_mod, "AUTO_RESUME", False)  # (the locked way: a Truth Booth's, or auto_resume off)
     screen = Screen()
     served = Served(tmp_path, monkeypatch, screen)
     try:
@@ -751,6 +789,23 @@ def test_the_player_stays_up_through_the_lie_detector_recording_it_and_stops_onc
     assert json.loads((folder / SUMMARY).read_text(encoding="utf-8"))["end"] == "gone"
     assert log.count("LIE DETECTOR seen") == 1 and log.count("recording the Lie Detector") == 1
     assert log.count("Lie Detector recording ended (gone)") == 1
+
+
+def test_the_served_player_carries_on_after_an_answered_lie_detector(tmp_path, monkeypatch, alarm_file, pages):
+    screen = Screen()
+    served = Served(tmp_path, monkeypatch, screen)
+    try:
+        assert "error" not in served.plan("before")
+        screen.kind = 2
+        served.wait_for(alarm_file.exists)
+        assert served.plan("during")["error"] == LIE_DETECTOR_ERROR
+        screen.kind = 0
+        served.wait_for(lambda: "plans taken again" in served.log())
+        assert served.thread.is_alive() and not alarm_file.exists()
+        assert "error" not in served.plan("after")  # no start again
+        assert "player stopped" not in served.log()
+    finally:
+        served.stop()
 
 
 def test_with_the_alarm_up_the_served_player_takes_her_pet_food_and_nothing_else(tmp_path, monkeypatch, alarm_file,
