@@ -45,10 +45,15 @@ def pixels(canvas: Canvas) -> np.ndarray:
     if fmt == 2:  # BGRA8888
         bgra = np.frombuffer(packed[: w * h * 4], dtype=np.uint8).reshape(h, w, 4)
         return bgra[..., [2, 1, 0, 3]].copy()
-    if fmt == 513:  # RGB565
-        px = np.frombuffer(packed[: w * h * 2], dtype="<u2").reshape(h, w).astype(np.uint16)
+    if fmt in (513, 517):  # RGB565; 517: one value a 16 x 16 block (MapleLib's form 517: backgrounds' plain fills)
+        bw, bh = (w, h) if fmt == 513 else (w // 16, h // 16)
+        px = np.frombuffer(packed[: bw * bh * 2], dtype="<u2").reshape(bh, bw).astype(np.uint16)
         r, g, b = (px >> 11) & 0x1F, (px >> 5) & 0x3F, px & 0x1F
         rgb = np.dstack([(r * 255 + 15) // 31, (g * 255 + 31) // 63, (b * 255 + 15) // 31]).astype(np.uint8)
+        if fmt == 517:  # each block's value over its 16 x 16 px (what the blocks don't reach: black, as MapleLib's)
+            blocks = rgb.repeat(16, axis=0).repeat(16, axis=1)
+            rgb = np.zeros((h, w, 3), np.uint8)
+            rgb[:blocks.shape[0], :blocks.shape[1]] = blocks
         return np.dstack([rgb, np.full((h, w), 255, np.uint8)])
     raise ValueError(f"picture format {fmt} isn't supported yet")
 
