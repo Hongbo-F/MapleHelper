@@ -67,3 +67,11 @@ lucky_seven = 16    # her Lucky Seven's skill level: its MP a cast in the game d
 method = "dxgi"
 fence = true        # true: DXGI's copy of a frame off the graphics card waited for on a fence's event, not by Map's
                     # spin (4 ms of CPU a frame less offline, the frame 0.15-0.2 ms later: capture.py's COPY_WAIT_MS)
+
+# Her place from the scene (gamelab/localization/locate.py, from 2026-10-30): the camera's view registered against the
+# map's own art drawn from the game data, her feet by her tag, her plate's colours or her body, a filter carrying her
+# where none does. Used at the game's own 1366x768 on a map whose art can be drawn, for a character whose plate model is
+# calibrated (lab/characters/<her>/plate_1366x768.npz; poses_1366x768.npz for her body); false: her minimap dot, her
+# name tag and the camera as before. The perception service reads it as it starts.
+[perception]
+scene = true

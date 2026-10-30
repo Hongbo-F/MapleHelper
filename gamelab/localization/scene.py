@@ -40,8 +40,13 @@ class Loot:
 @dataclass(kw_only=True)
 class Scene(Observation):
     """A look (Observation) placed on the map."""
-    where: Where | None = None    # her map position (minimap dot, snapped to the platform she's on)
-    how: str = "dot"              # how `where.x` was worked out: 'rope', 'edge' (on screen) or 'dot'
+    where: Where | None = None    # her map position (minimap dot, snapped to the platform she's on; by the scene, her
+                                  # feet: the view plus her place on screen)
+    how: str = "dot"              # how `where.x` was worked out: 'camera', 'rope', 'edge' (on screen) or 'dot'; by the
+                                  # scene (localization.locate) the cue that placed her: 'tag', 'plate', 'body', or
+                                  # 'carried' (none did: the filter's prediction, `tag_seen` False)
+    mode: str | None = None       # by the scene: 'ground', 'air' or 'rope' (None: placed as before)
+    confidence: float | None = None  # ... and how sure of her place (the cue's score; carried, less each frame)
     tag_seen: bool = True         # `tag` is her name tag as seen (False: where the camera puts her, the tag
                                   # being hidden; Senses fills `tag` in then, so `tag` is always her place
                                   # on screen once she's placed)
@@ -79,8 +84,10 @@ class Scene(Observation):
     @property
     def grounded(self) -> bool:
         """Whether she stands on the ground in this look: her name tag seen, on a platform, with ground under
-        her feet. In the air every monster's y is off by her height above where her dot puts her (up to her
-        77-unit jump)."""
+        her feet (by the scene: placed by a cue, standing by the filter). In the air every monster's y is off by her
+        height above where her dot puts her (up to her 77-unit jump), but where the view is registered."""
+        if self.mode is not None:
+            return self.tag_seen and self.mode == "ground" and self.platform is not None
         g = self.ground
         return (self.tag_seen and self.platform is not None and g is not None
                 and g[1] - g[0] >= self.geo.fpx(GROUNDED_PX))
@@ -93,27 +100,35 @@ class Scene(Observation):
         PLATFORM_SLACK past one; past the step at the end of platform 2, it would seem in front of the wall
         it's behind)."""
         x, y = self.map_x(m.foot_x), self.map_y(m.feet_y)
-        p = monster_platform(model, m.kind, x, y, exact=m.feet is not None and self.grounded)
+        p = monster_platform(model, m.kind, x, y, exact=m.feet is not None and (self.grounded or self.view_sure))
         if p is None:
             return Monster(m, x, y, None, bar, m.facing, m.pose)
         x = p.clamp(x)
         return Monster(m, x, p.y_at(x), p.id, bar, m.facing, m.pose)
 
-    # Look-frame px <-> map units, by the offset from her (the camera doesn't scale, so offsets
-    # from her hold anywhere on screen).
+    # Look-frame px <-> map units, by the view where the scene registered it (`view`: the map point at the frame's
+    # top-left), else by the offset from her (the camera doesn't scale, so offsets from her hold anywhere on screen).
 
     def screen_x(self, map_x: float) -> float:
         """Look-frame x of a map x."""
+        if self.view is not None:
+            return (map_x - self.view[0]) / self.geo.units_per_px
         return self.tag[0] + (map_x - self.where.x) / self.geo.units_per_px
 
     def screen_y(self, map_y: float) -> float:
         """Look-frame y of a map y."""
+        if self.view is not None:
+            return (map_y - self.view[1]) / self.geo.units_per_px
         return self.floor_y + (map_y - self.where.y) / self.geo.units_per_px
 
     def map_x(self, screen_x: float) -> float:
+        if self.view is not None:
+            return self.view[0] + screen_x * self.geo.units_per_px
         return self.where.x + (screen_x - self.tag[0]) * self.geo.units_per_px
 
     def map_y(self, screen_y: float) -> float:
+        if self.view is not None:
+            return self.view[1] + screen_y * self.geo.units_per_px
         return self.where.y + (screen_y - self.floor_y) * self.geo.units_per_px
 
     def in_view(self, platform: int, x: float) -> bool:
@@ -133,7 +148,9 @@ class Scene(Observation):
         her = None if self.where is None else {
             "x": round(self.where.x, 1), "y": round(self.where.y, 1),
             "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen,
-            "grounded": self.grounded}
+            "grounded": self.grounded,
+            **({"mode": self.mode, "conf": round(self.confidence, 2), "view_sure": self.view_sure}
+               if self.mode is not None and self.confidence is not None else {})}  # (by the scene)
         view = None
         if self.tag is not None and self.where is not None and getattr(self.frame, "shape", None) is not None:
             h, w = self.frame.shape[:2]

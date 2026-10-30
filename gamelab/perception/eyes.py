@@ -123,11 +123,23 @@ class Observation:
                                              # wasn't checked)
     picture: tuple[float, float, float] | None = None  # the map's minimap picture: its corner (full-size px) and how
                                                        # well it matched this look (None: no picture, or no search)
+    # Her place by the scene (localization.locate, where the eyes have a `locator`): her feet on screen (x her mirror
+    # axis, y her shoes' bottom; `tag` is then her tag's centre as matched, or where her feet put it), the map point at
+    # the frame's top-left (registered against the map's art, `view_sure`, or carried from the last registered), and
+    # the Locator's answer (in-process: Senses places her by it). None: placed as before (her tag, her dot, the camera).
+    feet: tuple[float, float] | None = None
+    view: tuple[int, int] | None = None
+    view_sure: bool = False
+    located: object | None = None
 
     @property
     def floor_y(self) -> int | None:
-        """The ground line she stands on (her name tag hangs just below it)."""
-        return None if self.tag is None else self.tag[1] - tag_below_feet(self.geo)
+        """The ground line she stands on (her name tag hangs just below it; by the scene, her feet's row)."""
+        if self.tag is None:
+            return None
+        if self.feet is not None:
+            return int(round(self.feet[1]))
+        return self.tag[1] - tag_below_feet(self.geo)
 
 
 class Eyes:
@@ -144,6 +156,10 @@ class Eyes:
     check_frames = True           # whether frames are checked (framecheck.frame_problem): not frames resampled from
                                   # another size (bench-look --shrink), whose 1-px anchors are blurred
     _hp, _mp = 1.0, 1.0           # the HP and MP the last frame that passed its checks read (a refused one's)
+    # Her place by the scene (localization.locate.Locator: the camera registered against the map's art, her tag, plate
+    # or body, a filter), which Senses gives eyes that look at frames of a map it can be used on; None: her name tag
+    # (NameTag) and the dot, as before.
+    locator = None
 
     def __init__(self, title: str, tag_template: np.ndarray, detector: MobDetector | None = None,
                  loot: LootDetector | None = None, screen=None, geo: Geometry = STRETCHED,
@@ -211,11 +227,6 @@ class Eyes:
                     "picture", f"the minimap doesn't show this map's picture ({score}, {PICTURE_MATCH} needed): "
                                f"another map, or the minimap covered"))
             picture = (*self.minimap.corner, -1.0 if self.minimap.score is None else round(self.minimap.score, 3))
-        try:
-            tag = self.name_tag.find(full)
-        except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
-            return self._refused(t, frame, Problem("tag", str(e)))
-        ground = ground_extent(frame, tag[0], tag[1] - tag_below_feet(geo), geo) if tag else None
         # Her dot only over the map's picture where it was found: on Ellinia (2026-10-29) the dot box reached past the
         # minimap window's right edge, and a house's yellow trim beside it was taken for her dot (off the map).
         right = None if picture is None else int(picture[0] + self.minimap.picture.shape[1]) + 2
@@ -224,6 +235,18 @@ class Eyes:
         if self.minimap is not None:
             sx, sy = self.minimap.shift()
             dot, others = self._shifted(dot), [replace(m, x=m.x - sx, y=m.y - sy) for m in others]
+        located = None
+        try:
+            if getattr(self, "locator", None) is not None:  # her place by the scene (localization.locate)
+                if self.name_tag.full is None:
+                    self.name_tag.full = self.name_tag._cut(full)
+                located = self.locator.see(full, time.monotonic() if t is None else t, dot)
+            tag = located.tag if located is not None else self.name_tag.find(full)
+        except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
+            return self._refused(t, frame, Problem("tag", str(e)))
+        feet = None if located is None else located.feet
+        floor = None if tag is None else (tag[1] - tag_below_feet(geo) if feet is None else int(round(feet[1])))
+        ground = ground_extent(frame, tag[0], floor, geo) if tag else None
         found = []
         if self.want_ropes if ropes is None else ropes:
             found = find_ropes(full, self.rope_columns(dot, tag) if self.rope_columns else None, geo)
@@ -236,7 +259,8 @@ class Eyes:
                            ground=ground, dot=dot, others=others, ropes=found,
                            exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy(),
                            hp_box=full[hy0:hy1, hx0:hx1].copy(), lv_box=full[ly0:ly1, lx0:lx1].copy(), geo=geo,
-                           picture=picture)
+                           picture=picture, feet=feet, view=None if located is None else located.view,
+                           view_sure=located is not None and located.view_sure, located=located)
 
     def _refused(self, t: float | None, frame: np.ndarray, bad: Problem) -> Observation:
         """A look that failed its checks: nothing read from it, its HP and MP the last good frame's (the bars of a frame
@@ -404,6 +428,8 @@ class Eyes:
             self.minimap.lose()
         if getattr(self, "name_tag", None) is not None:
             self.name_tag.lose()
+        if getattr(self, "locator", None) is not None:
+            self.locator.lose()
         screen, log = getattr(self, "screen", None), getattr(self, "log", print)
         if problem.kind not in framecheck.CAPTURE_KINDS:
             return

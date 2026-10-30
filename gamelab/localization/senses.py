@@ -1,7 +1,11 @@
 """Senses: every look at the game, placed on the map. Eyes (perception) says what's on screen; Senses
 works out where she is (her minimap dot, refined by a rope or her platform's end on screen), where she
 is on screen when her name tag is hidden (the camera), where the monsters and drops are, and where other
-players are (their minimap dots, followed from look to look: localization.players).
+players are (their minimap dots, followed from look to look: localization.players). At the game's own 1366x768 on a
+map whose art can be drawn, with her plate's model calibrated, her place comes from the scene instead (since
+2026-10-30: localization.locate, the camera registered against the map's art, her tag, plate or body, a filter):
+Senses gives the eyes their Locator (`_locator`) and places her by its answer (`_by_scene`), the scene's px <-> map
+then by its view (Scene.view).
 
 Every look anyone takes goes through `Senses.look`, and the listeners run after each one, in order:
 the hunter keeps count of her EXP and HP there, and the mini-map's telemetry is sent from there. Then its checks, which
@@ -39,19 +43,19 @@ right, the looks after have LOST_S afresh, and no look or glance is of a frame s
 import time
 from collections.abc import Callable
 
-from .. import telemetry
+from .. import paths, telemetry
 from ..character import THIEF_SHAPE, Shape
 from ..perception.drops import items_for
-from ..perception.eyes import GLANCE_EVERY_S, Eyes, Observation, band_rows, tag_below_feet
+from ..perception.eyes import GLANCE_EVERY_S, Eyes, NoScreen, Observation, band_rows, tag_below_feet
 from ..perception.framecheck import FIX_KINDS, LookLost, Problem
 from ..perception.terrain import MAX_ROPE_WIDTH
 from ..perception.touches import INVULNERABLE_S
-from ..screen import STRETCHED
+from ..screen import NATIVE, STRETCHED
 from .mapdata import MapModel
 from .monsters import Monster
 from .placecheck import off_map
 from .players import LOCAL_IDS, Players
-from .pose import ROPE_MATCH_PX, Camera, Localizer, refine
+from .pose import ROPE_MATCH_PX, Camera, Localizer, Where, refine
 from .scene import Scene
 
 # Full-size px (1920x1080; the look's geometry converts them) either side of where her minimap dot puts each of the
@@ -145,6 +149,10 @@ class Senses:
         eyes.want_ropes = True  # ropes in view pin down her x
         eyes.rope_columns = self._rope_columns
         eyes.drop_names = items_for(model)  # the drops looked for: the map's monsters' (perception.drops)
+        # Her place by the scene (localization.locate: the camera registered against the map's art, her tag, plate or
+        # body, a filter), for eyes that look at frames themselves (the perception service's, saved frames') at the
+        # game's own 1366x768 on a map whose art can be drawn, with her plate's model calibrated; else None, as before.
+        self.locator = self._locator(eyes, model)
         self._glanced = -1e18  # the frame time of the last glance
         self.glanced_at: float | None = None  # when the frame the last glance saw was shown (time.monotonic)
         self.glanced = None  # the state (worldstate.WorldState) the last glance came from; None: it had none
@@ -371,11 +379,28 @@ class Senses:
         """The whole screen above the bottom bar, as map y (from, to)."""
         return self._map_rows(s, (0, int(s.frame.shape[0] * s.geo.hud_top)))
 
+    @staticmethod
+    def _locator(eyes: Eyes, model: MapModel):
+        """The eyes' Locator for this map (localization.locate.build; one they have for it already kept), or None where
+        none can be (see __init__): eyes of another size, the simulator's (no name tag), a command's (no screen)."""
+        if (getattr(eyes, "geo", None) != NATIVE or getattr(eyes, "name_tag", None) is None
+                or isinstance(getattr(eyes, "screen", None), NoScreen)):
+            return None
+        have = getattr(eyes, "locator", None)
+        if have is not None and have.model is model:
+            return have
+        from . import locate
+        tag = eyes.name_tag
+        eyes.locator = locate.build(model, lambda: tag.full, paths.of().lab, eyes.geo, getattr(eyes, "log", print))
+        return eyes.locator
+
     def _learn(self, s: Scene) -> None:
-        """With her name tag seen and her placed, the camera learns where it keeps her."""
+        """With her name tag seen and her placed, the camera learns where it keeps her (her feet as her tag put them
+        when it was learnt: tag_below_feet)."""
         if s.tag is not None and s.tag_seen and s.where is not None:
             k = s.geo.look_scale
-            self.camera.learn((s.where.x, s.where.y), (k * s.tag[0], k * s.floor_y), geo=s.geo)
+            self.camera.learn((s.where.x, s.where.y), (k * s.tag[0], k * (s.tag[1] - tag_below_feet(s.geo))),
+                              geo=s.geo)
 
     def _rope_columns(self, dot: tuple[float, float] | None,
                       tag: tuple[int, int] | None) -> list[tuple[int, int]] | None:
@@ -394,7 +419,10 @@ class Senses:
     def _place_her(self, s: Scene) -> None:
         """Her map position (`s.where`, `s.how`) from her minimap dot, refined on screen. Then, with her
         name tag seen, the camera learns where it keeps her; with it hidden, the camera places her
-        on screen instead (`s.tag`, and `s.tag_seen` False)."""
+        on screen instead (`s.tag`, and `s.tag_seen` False). By the scene where the eyes placed her so (`_by_scene`)."""
+        if getattr(s, "located", None) is not None:
+            self._by_scene(s, s.located)
+            return
         if s.dot is not None:
             self.localizer.use(s.geo)
             s.where = self.localizer.where_dot(s.dot)
@@ -411,3 +439,31 @@ class Senses:
             k = s.geo.look_scale
             sx, sy = self.camera.to_screen(s.where.x, s.where.y, (s.where.x, s.where.y), s.geo)
             s.tag, s.tag_seen = (round(sx / k), round(sy / k) + tag_below_feet(s.geo)), False
+
+    def _by_scene(self, s: Scene, loc) -> None:
+        """Her place as the eyes' Locator gave it (localization.locate.Located): her feet's map place (the view plus her
+        place on screen), the platform she stands on, the cue that placed her (`how`: "tag", "plate", "body", or
+        "carried" where nothing did and the filter's prediction stands: `tag_seen` False then) and how sure
+        (`confidence`), her mode ("ground", "air", "rope"). Not found yet (the first frames): her dot places her, the
+        view puts her on screen (`how` "dot"). A place off the map isn't placed (placecheck)."""
+        if loc.feet is None:
+            if s.dot is None:
+                return
+            self.localizer.use(s.geo)
+            where = self.localizer.where_dot(s.dot)
+            if (off := off_map(self.model, where)) is not None:
+                s.bad = Problem("place", off)
+                return
+            dx, dy = self.locator.feet_dx, self.locator.feet_dy
+            fx, fy = where.x - loc.view[0], where.y - loc.view[1]
+            s.where, s.how, s.feet, s.mode, s.confidence = where, "dot", (fx, fy), None, 0.0
+            s.tag, s.tag_seen = (round(fx - dx), round(fy - dy)), False
+            return
+        where = Where(loc.x, loc.y, loc.platform, s.dot)
+        if (off := off_map(self.model, where)) is not None:
+            s.bad = Problem("place", off)
+            return
+        s.where, s.how, s.mode, s.confidence = where, loc.how or "carried", loc.mode, loc.confidence
+        s.tag_seen = loc.how is not None
+        if s.tag_seen:
+            self._learn(s)

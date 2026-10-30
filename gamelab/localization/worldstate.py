@@ -252,6 +252,11 @@ class WorldState:
     exp_shape: tuple = ()          # ... and their shape
     where: tuple | None = None     # her map position: x, y, platform id (None: none), dot
     how: str = "dot"
+    feet: tuple | None = None      # by the scene (localization.locate; Scene's): her feet on screen, the view (the map
+    view: tuple | None = None      # point at the frame's top-left), whether it was registered on this frame, her mode
+    view_sure: bool = False        # ('ground', 'air', 'rope') and how sure of her place; None: placed as before
+    mode: str | None = None
+    confidence: float | None = None
     monsters: list[Monster] = field(default_factory=list)  # every monster seen in this frame, placed
     band_at: float | None = None   # the frame time of the last search of her band (or the whole screen) come back ...
     wide_at: float | None = None   # ... and of the whole screen
@@ -570,7 +575,7 @@ class WorldStep:
         view = self._view(s) if placed else None
         if placed:
             self._newest = (view, t)
-            self._cam = (s.tag[0], s.floor_y, s.where.x, s.where.y)
+            self._cam = (s.screen_x(s.where.x), s.screen_y(s.where.y), s.where.x, s.where.y)  # (her tag x, feet y)
         self._merge(self.searches.take(by))  # before the re-finds: what they found anew is re-found in this frame
         job = None
         if placed:  # the searches due handed over now, beside the re-finds (they need only her place)
@@ -620,7 +625,8 @@ class WorldStep:
             self.seq, t, True, tag=s.tag, tag_seen=s.tag_seen, hp=s.hp, mp=s.mp, ground=s.ground, dot=s.dot,
             others=list(s.others), players=list(s.players), ropes=list(s.ropes),
             exp=np.packbits(exp).tobytes() if s.exp is not None else b"",
-            exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, monsters=seen,
+            exp_shape=exp.shape if s.exp is not None else (), where=where, how=s.how, feet=s.feet, view=s.view,
+            view_sure=s.view_sure, mode=s.mode, confidence=s.confidence, monsters=seen,
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo,
             bad=s.bad, hp_of=self.hp_number.of if s.bad is None else None,
@@ -1018,7 +1024,9 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
     s = Scene(t=st.t, frame=st.frame if frame is None else frame, tag=st.tag, hp=st.hp, mp=st.mp, ground=st.ground,
               dot=st.dot, others=list(st.others), ropes=list(st.ropes), exp=st.exp_pixels(), where=where, how=st.how,
               tag_seen=st.tag_seen, players=list(st.players), geo=st.geo, tracks=list(st.tracks),
-              hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None), touch=getattr(st, "touch", None))
+              hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None), touch=getattr(st, "touch", None),
+              feet=getattr(st, "feet", None), view=getattr(st, "view", None), view_sure=getattr(st, "view_sure", False),
+              mode=getattr(st, "mode", None), confidence=getattr(st, "confidence", None))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

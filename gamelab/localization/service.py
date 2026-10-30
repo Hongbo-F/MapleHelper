@@ -1074,7 +1074,9 @@ class Publisher:
                                total=meter.total, per_minute=None if rate is None else round(rate, 1))
 
     def status(self, now: float, fps: float | None = None) -> str:
-        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute, the searches a second
+        """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute, her touches, her
+        place by the scene where it's used (localization.locate.Locator.line: the share of frames each cue placed her
+        in, carried, the views registered, its time a frame), the searches a second
         and their time (`_searches`, also published as a 'perf' record; `fps`: the frames a second the line says, for
         it); gamelab's C pieces
         while they're not all in use (native.state: perception slower); if it ever happens, the monster search's noise
@@ -1099,8 +1101,11 @@ class Publisher:
         n = step.counts
         touched = f"; touches {n['touches']} ({n['misses']} MISS" + (
             f", {n['touches by HP']} by her HP bar alone)" if n["touches by HP"] else ")")
+        locator = getattr(getattr(step, "senses", None), "locator", None)  # (her place by the scene: locate.py)
+        placed = "" if locator is None else locator.line()
         return (f"; {len(live)} monsters followed; deaths seen: {c['died hers']} hers, {c['died other']} others'"
-                f"{exp}{touched}" + self._searches(now, fps) + (f"; gamelab's C pieces {self.native}" if self.slow else "")
+                f"{exp}{touched}" + (f"; {placed}" if placed else "") + self._searches(now, fps)
+                + (f"; gamelab's C pieces {self.native}" if self.slow else "")
                 + (f"; the monster search's noise bound broken {over} times" if over else "")
                 + (f"; {gpu}" if gpu else ""))
 
