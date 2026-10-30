@@ -2323,8 +2323,9 @@ s away: 66 EXP expected (0 seen), 3.1 EXP/s with its kills; back to the loop (st
 detour: 11 EXP expected, 9 under what the loop gives meanwhile)",
 with the stops skipped and when each is due), each stop left ("leaving stop 24: nothing left in reach (16.0 s there,
 108 EXP)", or "... 4.1 EXP/s here, going on gives 7.7"), every 60 s and at the end what it did and learned: loops, stops,
-stays, pulls, skips, the refill as learned ("a free point refilling at 3% a tick lately (x9.10 the prior's pace; 75
-refills seen, 3002 s of points seen free)": the 'state' record's `refill_tick`, `refill_scale`, `refills`, `watched_s`),
+stays, pulls, skips, the refill as learned ("a free point refilling at 18% a tick lately (x1.58 the prior's pace; 14
+refills seen, 579 s of points seen free)", loop_tree_grind's: the 'state' record's `refill_tick`, `refill_scale`,
+`refills`, `watched_s`),
 her kill time, what others take, HP a minute by platform, kills by platform. `python -m gamelab patrol FILE` runs a
 recorded run through her memory and the belief and prints, every few seconds, the next stop grinding would have taken
 from where she was (a look, not a choice: her place in the loop doesn't move; it had rotated the loop by itself every 5 s,
@@ -2379,6 +2380,47 @@ So her simulated patrol doesn't look like the user's (long stays where monsters 
 plans by (the loop's 463 EXP a minute, camping 23 at 228 against 283 live) do. Judging that needs the simulator's crowd
 brought to the game's (respawn delays spread about 14 s, points 28% full, the upper tower contested, touches as often as
 live: the gaps in `D:/MapleHelper-scratch/wf-prior/wf_a8ab59d8-9df__understand_sim.md`), or the game.
+
+**With the respawn as measured** (2026-10-29, work/respawn: the refill learned from what she sees, the loop looked at
+again after 3 empty stops, nothing due on the loop; the thief, the standard loop-grind: `ab loop-grind --map 10002073
+--preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers --minutes 5`, the
+base master's grinding, in the worlds the respawn's commit added its own commit 619a14b; EXP a minute,
+D:/MapleHelper-scratch/respawn/ab_*.txt):
+
+| world | seeds | master | branch | diff | se | touches |
+|---|---|---|---|---|---|---|
+| the walkers' (each monster back 17 s after its own death) | 24 | 315.5 | 322.9 | +7.3 (+2.3%) | 8.9 | 67.7 -> 69.6 (+2.9%, se 2.8) |
+| `tick-respawn`: the map's tick, a free point's monster back at it 0.27 of the time, the crowd's five camps, the cap 0.70 of the points | 24 | 309.2 | 312.0 | +2.9 (+0.9%) | 9.1 | 70.2 -> 65.5 (-6.6%, se 2.5) |
+| `tick-respawn`, `solo`: nobody else, the cap 0.45, what she kills alone coming back somewhere | 12 | 137.5 | 232.8 | +95.4 (+69.4%) | 25.4 | 30.3 -> 49.3 (+62.6%, se 6.0) |
+
+No deaths, falls or stops in any; better on 16 of 24, 12 of 24 and 11 of 12 seeds. In the worlds where something keeps
+killing or each monster comes back on its own, the same within the noise (the 12 seeds' first look at `tick-respawn` was
+-4.6%, se 10.8: the next 12 settled it); alone, where the cap has the map make only what she kills and at random free
+points, she makes 69% more (a touch for 4.7 EXP against 4.5). On solo's seed 2 master's grinding goes between 10 and 7
+for the whole run, each found empty (67 stops, a median 0.97 s at each, "the loop, nothing due ahead"; its refill scale
+never learned: nothing came back to be watched), 4 kills, 33 EXP a minute, as live at 16:39; the branch learns a free
+point refills at 8-10% a tick there, takes a round of 10 stops at 64 s ("440 EXP a minute against 270"), 37 kills, 258.
+
+**Replayed on her live runs of 2026-10-29** (D:/MapleHelper-scratch/respawn/replay.py, replays2: her looks fed to her
+memory and the belief as grinding feeds them, her stops left as she left them, each next stop she chose on leaving one
+asked again from where she was, the code's own loop replanned; the stopgap is `stopgap_tour.py`'s rules, live from 16:49
+that day, on master's: a stop left with nothing in reach expects nothing from its unseen points for 30 s, the refill at
+least 3 times slower than the clock):
+
+| run (choices) | to a stop left empty within 30 s: live, master, stopgap, branch | to the bottom (28-33): live, master, stopgap, branch |
+|---|---|---|
+| 16:27, the ping-pong (91) | 40, 40, 1, 1 | 0, 0, 18, 2 |
+| 01:11, the pull's case (32) | 6, 1, 5, 1 | 21, 1, 10, 1 |
+| 15:58, pulled to the middle (66) | 0, 2, 0, 0 | 0, 1, 9, 1 |
+| 16:49, the stopgap live (33) | 1, 1, 3, 1 | 8, 1, 5, 2 |
+| 17:07, the stopgap live (86) | 5, 1, 7, 2 | 42, 19, 43, 21 |
+
+The stopgap ends the ping-pong as this does, but its slower refill lowers every loop's rate, the bar a pile must beat
+with it, and has her patrol the bottom on its piles again (live at 17:07 half her choices); the refill learned keeps the
+bar where what she sees puts it. On the 16:27 run her choices by zone (the top 6-14, the middle 15-24) go from master's
+70 and 21 to 21 and 68: down to the middle, where the monsters were, from 16:35 (a round of 9 stops taken up at
+16:34:51, of 12 at 16:40:31 when 3 stops running had given nothing). The refill she learned at the runs' ends: 0.23 a
+tick at 01:18, 0.13 at 16:24 and 16:49, 0.25 at 16:59, 0.36 at 17:37.
 
 **Merged** (2026-10-24, over positioning, the escorted trips and the capture checks; Tree Dungeon, `crowd`, zero-walls,
 seed by seed against the hunt loop as merged, which positioning made much stronger there: its grounds and spots by the
