@@ -125,12 +125,13 @@ def minimap_box(geo: Geometry = STRETCHED) -> tuple[int, int, int, int]:
     return sizes(geo).box
 
 
-def her_dot(full: np.ndarray, geo: Geometry | None = None) -> tuple[float, float] | None:
+def her_dot(full: np.ndarray, geo: Geometry | None = None, right: int | None = None) -> tuple[float, float] | None:
     """Her yellow dot on the minimap, in game-window pixels (full size), or None if hidden. `geo`: the frame's
-    geometry (by default from its size)."""
+    geometry (by default from its size); `right`: the window x the search stops at (the map's picture's right edge,
+    where it was found: past it is the game's own picture, whose yellows aren't hers)."""
     geo = geo or of_frame(full)
     x0, y0, x1, y1 = minimap_box(geo)
-    return dot_in_box(full[y0:y1, x0:x1], geo)
+    return dot_in_box(full[y0:y1, x0:x1 if right is None else max(x0 + 1, min(x1, right))], geo)
 
 
 def dot_in_box(box: np.ndarray, geo: Geometry = STRETCHED) -> tuple[float, float] | None:

@@ -216,7 +216,10 @@ class Eyes:
         except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
             return self._refused(t, frame, Problem("tag", str(e)))
         ground = ground_extent(frame, tag[0], tag[1] - tag_below_feet(geo), geo) if tag else None
-        dot = her_dot(full, geo)
+        # Her dot only over the map's picture where it was found: on Ellinia (2026-10-29) the dot box reached past the
+        # minimap window's right edge, and a house's yellow trim beside it was taken for her dot (off the map).
+        right = None if picture is None else int(picture[0] + self.minimap.picture.shape[1]) + 2
+        dot = her_dot(full, geo, right)
         others = other_dots(full, geo)  # 0.4-0.6 ms (the 31 saved frames of this map)
         if self.minimap is not None:
             sx, sy = self.minimap.shift()
