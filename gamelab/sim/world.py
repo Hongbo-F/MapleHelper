@@ -83,7 +83,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; a killed monster is seen fading out where it
   died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
-  later where it spawned;
+  later where it spawned (Realism.respawn), or, with Realism.respawn_tick, at the map's tick with a chance, under the
+  map's cap (TICK_S: the game's as measured);
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
   HP potion key gives 30% HP; her pet (Her.pet), if she has one, drinks a potion for her right after a touch leaves
   her under its warning. (Until 2026-10-26 the chair key sat her down, +3% HP a second, until an arrow stood her up:
@@ -410,6 +411,18 @@ CLOSE_DX = 60.0          # (World.close_ms) a monster this near her, middle to m
 RESPAWN = 8.0
 RESPAWN_LIVE = 17.0  # ... and the live median on Tree Dungeon's 23 after her last kill there (1.7-57 s, telemetry of
                      # 2026-10-24: README, Positioning; harness preset crowd-17): `--world walkers` has it
+# The game's respawn as measured on Tree Dungeon (2026-10-29: behavior.patrol's top, D:/MapleHelper-scratch/respawn):
+# not a monster's own clock but the map's, a tick every TICK_S, at which each spawn point with no monster gets one with a
+# chance TICK_P (5,775 births in 21,285 free point-ticks in view), while the map has fewer than its cap: CAP_SHARE of its
+# spawn points with her alone, CAP_OTHER more for each other player there (MeowDB's 5%; the cap's share alone isn't
+# measured: with nobody else on the map and none of hers dying, the top's 12 points and 3 more stayed free 4 to 9
+# minutes, no birth in 38 ticks, the map then holding 14 monsters at most, 0.45 of its 31 points; when most of the map
+# was seen within 30 s it held 0.32-0.47 a point). Realism.respawn_tick (`--world tick-respawn`): the world's monsters
+# come back so, at random free points' monsters, the map starting at its cap; Realism.respawn's own clock otherwise.
+TICK_S = 7.115
+TICK_P = 0.27
+CAP_SHARE = 0.45
+CAP_OTHER = 0.05
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
 # A monster her attack killed is drawn alive, walking on with its bar up, until her star lands (Realism.dies_late): its
@@ -697,6 +710,13 @@ class Realism:
     knobs for comparing policies in a world closer to the game's; none of them is measured but lock_arrows (and the
     respawn, which the live telemetry says isn't the game's: RESPAWN)."""
     respawn: float = RESPAWN     # s from a kill until the monster is back at its spawn point
+    respawn_tick: float = 0.0    # s between the map's respawn ticks (TICK_S: the game's, as measured): a dead monster
+                                 # back at a tick with a chance respawn_p, the map under its cap (respawn_cap of its
+                                 # spawn points, respawn_cap_other more for each camp and rival); 0: `respawn` s after
+                                 # its death, each on its own (as until 2026-10-29)
+    respawn_p: float = TICK_P
+    respawn_cap: float = CAP_SHARE
+    respawn_cap_other: float = CAP_OTHER
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
     rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
@@ -1248,6 +1268,7 @@ class World:
         self._rival_rng = random.Random(f"rival:{seed}")
         self._drop_rng = random.Random(f"drops:{seed}")  # Realism.drops' draws (the others' unchanged by them)
         self._camp_rng = random.Random(f"camps:{seed}")  # Realism.camps' draws
+        self._tick_rng = random.Random(f"ticks:{seed}")  # Realism.respawn_tick's draws
         # What a kill drops (Realism.drops; with MAP_DROPS, the map's)
         self._drop_table = game_drops(model) if self.realism.drops == MAP_DROPS else tuple(self.realism.drops)
         self.potions_left = self.realism.potions
@@ -1414,6 +1435,13 @@ class World:
             self.rival = self._rival_start()
             self._push(self._rival_due(), "rival")
             self._push(self._rival_stays(), "rival_moves")
+        if self.realism.respawn_tick > 0 and self.monsters:  # the map's tick, from a phase of its own; the map at its
+            # cap from the start (the monsters over it there from the start, dead long since)
+            self.respawn_ticks = self.respawn_births = 0
+            over = len(self.monsters) - self._respawn_cap()
+            for m in self._tick_rng.sample(self.monsters, max(0, over)):
+                m.alive, m.died_at, m.died_x = False, -1e6, m.home
+            self._push(int(self._tick_rng.uniform(0.0, self.realism.respawn_tick) * 1000), "map_tick")
         for m in self.monsters:
             self._camps_watch(m)
         for at, side in self.noise.turned:
@@ -1618,13 +1646,10 @@ class World:
         elif e.kind == "loot":
             self.drops += e.data
         elif e.kind == "respawn":
-            m = e.data
-            m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
-            m.drawn_alive, m.bar_drawn, m.killed_by = None, 1.0, ""
-            m.life += 1
-            m.born = self.t
-            m.start(self.t, m.home)
-            self._camps_watch(m)
+            self._respawn(e.data)
+        elif e.kind == "map_tick":
+            self._map_tick()
+            self._push(self.ms + int(self.realism.respawn_tick * 1000), "map_tick")
         elif e.kind == "rival":
             self._push(self._rival_kill(), "rival")
         elif e.kind == "rival_moves":
@@ -2539,7 +2564,40 @@ class World:
             x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
-        self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
+        if self.realism.respawn_tick <= 0:
+            self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
+
+    def _respawn(self, m: SimMonster) -> None:
+        """Monster `m` back at its spawn point."""
+        m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
+        m.drawn_alive, m.bar_drawn, m.killed_by = None, 1.0, ""
+        m.life += 1
+        m.born = self.t
+        m.start(self.t, m.home)
+        self._camps_watch(m)
+
+    def _respawn_cap(self) -> int:
+        """The most monsters the map has at once (Realism.respawn_cap, respawn_cap_other for each other player)."""
+        r = self.realism
+        others = len(r.camps) + (1 if r.rival_every > 0 else 0)
+        return round(len(self.monsters) * min(1.0, r.respawn_cap + r.respawn_cap_other * others))
+
+    def _map_tick(self) -> None:
+        """The map's respawn tick (Realism.respawn_tick): each dead monster whose death is over (drawn and faded) back
+        with a chance respawn_p, in a random order, while the map is under its cap."""
+        t, rng = self.t, self._tick_rng
+        self.respawn_ticks += 1
+        room = self._respawn_cap() - sum(1 for m in self.monsters if m.alive or m.drawn_alive is not None and
+                                         t < m.drawn_alive)
+        free = [m for m in self.monsters if not m.alive and m.died_at is not None and t >= m.died_at + m.fade]
+        rng.shuffle(free)
+        for m in free:
+            if room <= 0:
+                break
+            if rng.random() < self.realism.respawn_p:
+                self._respawn(m)
+                self.respawn_births += 1
+                room -= 1
 
     def _drop_kinds(self, kind: str, rng: random.Random) -> list[str]:
         """What a kill of a monster of this kind drops: by Realism.drops' chances (drawn from `rng`), else mesos
@@ -2636,7 +2694,8 @@ class World:
             drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY, owner="rival"))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
         self._push(self.ms + int((DROP_DELAY + takes) * 1000), "rival_takes", drops)
-        self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
+        if self.realism.respawn_tick <= 0:
+            self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
 
     def _camps_watch(self, m: "SimMonster") -> None:
         """Monster `m` shows (at the start, or respawned): each camp hunting its platform and kind kills it CAMP_KILL

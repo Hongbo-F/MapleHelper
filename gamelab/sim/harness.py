@@ -156,7 +156,7 @@ from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
 from .world import (CHASE_TREE, DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
-                    OFF_SEEN, RESPAWN_LIVE, ROPE_REACH_CLIENT, TREE_AIR, Camp, Noise, Realism)
+                    OFF_SEEN, RESPAWN_LIVE, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, Camp, Noise, Realism)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -256,6 +256,12 @@ WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
 # (`walkers`: world.CHASE_TREE, INVULNERABLE_LIVE; Realism.chase, invulnerable), where the world's monsters walked as with
 # nobody there and a touch left her a second.
 WORLDS["walkers"] = {"chase": CHASE_TREE, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
+# ... and the game's respawn as measured on Tree Dungeon on 2026-10-29 (`tick-respawn`: world.TICK_S, TICK_P, CAP_SHARE,
+# CAP_OTHER; Realism.respawn_tick): the map's tick, a free point's monster back at it with a chance, under the map's cap
+# (by the other players there), where the other worlds bring each monster back on its own clock (`respawn` s after it
+# died: the walkers' 17); and with nobody else on the map (`solo`: no camps, no rival), as live on 2026-10-29 16:35-16:45.
+WORLDS["tick-respawn"] = {"respawn_tick": TICK_S}
+WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's

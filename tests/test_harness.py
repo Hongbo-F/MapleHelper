@@ -644,3 +644,40 @@ def test_her_stars_and_casts_can_be_her_own_as_measured_on_a_map(model):
     assert 192 <= w._damage(world_mod.LUCKY_SEVEN, False) * world_mod.STAR_MEAN <= 384
     w.mp = 20 / 623
     assert w._cast() and w.mp_used == 14.0 and w.mp * 623 == pytest.approx(6 + 100, abs=0.01)  # (the pet drank)
+
+
+def test_the_maps_tick_brings_its_free_points_monsters_back_under_its_cap(model):
+    """Realism.respawn_tick (`--world tick-respawn`, the game's respawn as measured on Tree Dungeon): a dead monster
+    isn't back on its own clock but at the map's ticks, each free point's with a chance respawn_p, never past the cap
+    (respawn_cap of the points, respawn_cap_other more for each other player); the map starts at its cap. Off (0), each
+    is back `respawn` s after it died, as before."""
+    c = plat(model, 500, 400)
+    snails = [("Snail", c.id, 100.0 + 60 * k) for k in range(10)]
+    w = world(model, c.id, 50.0, monsters=snails,
+              realism=Realism(respawn_tick=7.0, respawn_p=0.5, respawn_cap=0.6, respawn_cap_other=0.0))
+    w.invulnerable_ms = 10 ** 9
+    still(w)
+    assert sum(m.alive for m in w.monsters) == 6  # at its cap from the start
+    born, free = [], 0
+    for k in range(60):  # every 3.5 s: whatever is alive killed by another player
+        for m in [m for m in w.monsters if m.alive]:
+            w._others_kill(m, w._camp_rng, 1.0)
+        free += sum(not m.alive for m in w.monsters)
+        w.advance(3.5 * (k + 1))
+        born += [m.born for m in w.monsters if m.alive]
+        assert sum(m.alive for m in w.monsters) <= 6
+    phases = {round(t % 7.0, 2) for t in born}
+    assert len(phases) == 1  # only at the ticks
+    assert w.respawn_ticks == 30 and w.respawn_births == len(born)
+    assert 0.35 < w.respawn_births / (free / 2) < 0.65  # (a tick's free points: every other look's)
+    # With another player there, a cap of 0.75 (cap_other 0.15): the map starts with more.
+    w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0, respawn_cap=0.6,
+                                                                  respawn_cap_other=0.15, rival_every=1e6))
+    assert sum(m.alive for m in w.monsters) == round(10 * 0.75)
+    # Off: back 8 s after its death, every one.
+    w = world(model, c.id, 50.0, monsters=snails[:1])
+    w._others_kill(w.monsters[0], w._camp_rng, 1.0)
+    w.advance(7.9)
+    assert not w.monsters[0].alive
+    w.advance(8.1)
+    assert w.monsters[0].alive
