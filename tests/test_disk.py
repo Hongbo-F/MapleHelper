@@ -284,7 +284,7 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     assert "due to go now: 1 files (100 B)" in out and old.exists()  # told, not deleted
     assert "Lie Detector recordings: 1 cycles; the newest 10.0 GB are kept" in out
     assert "due to go when the next starts: 0" in out
-    assert "recent recordings (save-recent's): 1; the newest 5.0 GB are kept besides the next" in out
+    assert "recent recordings (save-recent's): 1; the newest 20.0 GB are kept besides the next" in out
     assert "alarm clips (the recorder's, 10 s before each alarm to 60 s after): 1; the newest 30.0 GB are kept" in out
     assert main(["lab-usage", "--prune-telemetry"]) == 0
     assert "deleted 1 telemetry files (100 B)" in capsys.readouterr().out
