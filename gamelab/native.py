@@ -237,6 +237,48 @@ def search_lib() -> ctypes.CDLL | None:
     return _search
 
 
+LOCATE_SOURCE = Path(__file__).with_name("locate.c")  # her plate's and her body's cues (`locate_lib`)
+LOCATE_SIGNATURES = {  # locate.c's functions: (return type, argument types)
+    "lc_ready": (_I, []),
+    "lc_plate": (_I, [_P, _P, _L, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P]),
+    "lc_plate_counts": (_I, [_P, _P, _L, _I, _I, _I, _I, _I, _P]),
+    "lc_pack": (_I, [_P, _I, _I, _L]),
+    "lc_agree": (_I, [_P, _P, _P, _P, _I, _I, _P, _I, _P, _P, _P, _I, _P]),
+    "lc_mass": (_I, [_P, _I, _I, _L, _P, _L, _P, _L, _P, _I, _P]),
+}
+_locate: ctypes.CDLL | None = None
+_locate_tried = False
+locate_why = ""  # why her cues' DLL isn't in use, if it isn't
+
+
+def locate_lib() -> ctypes.CDLL | None:
+    """Her cues' DLL (locate.c: her name plate's colour counts, her body's pose agreement), built and loaded on first
+    use; None if it can't be (`locate_why` says why), on a CPU without AVX2 (lc_ready), or with USE off: then
+    perception.plate and perception.poses work it out in numpy, the same answers."""
+    global _locate, _locate_tried, locate_why
+    if not USE:
+        locate_why = "turned off (native.USE)"
+        return None
+    if _locate_tried:
+        return _locate
+    with _lock:
+        if _locate_tried:
+            return _locate
+        try:
+            dll = ctypes.CDLL(str(build(LOCATE_SOURCE)))
+            for name, (restype, argtypes) in LOCATE_SIGNATURES.items():
+                f = getattr(dll, name)
+                f.restype, f.argtypes = restype, argtypes
+            if dll.lc_ready():
+                _locate, locate_why = dll, ""
+            else:
+                locate_why = "no AVX2 on this CPU"
+        except (OSError, RuntimeError, subprocess.SubprocessError, AttributeError) as e:
+            locate_why = str(e).splitlines()[0] if str(e) else type(e).__name__
+        _locate_tried = True
+    return _locate
+
+
 class SrUnit(ctypes.Structure):
     """A unit of the search (mobs.MobDetector.units, as a band's search filters them) for sr_step1 (search.c's)."""
     _fields_ = [("test", ctypes.c_int), ("bits", ctypes.c_uint), ("least", ctypes.c_double), ("first", ctypes.c_int),
@@ -644,10 +686,12 @@ def main() -> int:
     try:
         print(f"built: {build()}")
         print(f"built: {build(SEARCH_SOURCE)}")
+        print(f"built: {build(LOCATE_SOURCE)}")
     except RuntimeError as e:
         print(f"couldn't build gamelab's native pieces: {e}")
         return 1
-    print(f"gamelab's C pieces: {state()}; the monster search's step 1: {search_state()}")
+    print(f"gamelab's C pieces: {state()}; the monster search's step 1: {search_state()}; her plate's and her body's "
+          f"cues: {'in use' if locate_lib() is not None else f'off ({locate_why}): numpy instead'}")
     return 0
 
 
