@@ -23,7 +23,16 @@ also"; asked how, "My email via SMTP"): the cycle's first sight and the Truth Bo
 text a Lie Detector), mailed through the user's own account to the addresses in lab/smtp.json (git-ignored with the
 lab: {"host", "port", "starttls", "user", "password", "from", "to": [...]}), which `notify --setup-sms ADDRESS` makes
 with the login left for the user to fill in themselves; `notify --test-sms` sends one. Short (a carrier's gateway
-keeps about 160 characters), on a thread of its own, MAIL_TIMEOUT_S at most, never raised; the file read at each."""
+keeps about 160 characters), on a thread of its own, MAIL_TIMEOUT_S at most, never raised; the file read at each.
+
+A critical alert to the iPhone through Bark too (the user, 2026-10-29: "switch to something that can actually send
+urgent alert on iPhone"; asked which, "Bark"): ntfy's iOS app can't break through Focus or the mute switch (no
+Critical Alerts entitlement), Bark's `level=critical` is meant to (https://github.com/Finb/Bark: "Critical alerts will
+ignore silent and do not disturb modes"). Every push of a cycle goes to Bark as well, by lab/bark.json ({"server":
+"https://api.day.app", "key": "<the device key>"}, git-ignored with the lab; `notify --setup-bark KEY`, `--test-bark`):
+the first sight and the Truth Booth critical and ringing (`call`: its sound again and again for 30 s), the repeats
+critical, the cycle's end an ordinary one. Read at each push, on a thread of its own, SEND_TIMEOUT_S at most, never
+raised, as the others."""
 from __future__ import annotations
 
 import json
@@ -32,6 +41,7 @@ import secrets
 import smtplib
 import threading
 import time
+import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from pathlib import Path
@@ -40,6 +50,10 @@ from ..paths import LAB
 
 CONFIG = LAB / "ntfy.json"
 MAIL_CONFIG = LAB / "smtp.json"
+BARK_CONFIG = LAB / "bark.json"
+BARK_SERVER = "https://api.day.app"
+BARK_VOLUME = 10         # a critical alert's volume, Bark's 0-10
+BARK_SOUND = "alarm"     # one of Bark's sounds
 MAIL_TIMEOUT_S = 20.0    # s a text's mail may take
 SERVER = "https://ntfy.sh"
 REPEAT_S = 30.0          # s between pushes while a form she can answer is still seen
@@ -171,6 +185,78 @@ def mail(cfg: dict | None, subject: str, text: str, log=None) -> threading.Threa
     return t
 
 
+def load_bark(path: Path | None = None) -> dict | None:
+    """Bark's server and her device key ({"server", "key"}), or None (no file, or no key in it)."""
+    path = _lab_file(path, BARK_CONFIG)
+    if path is None:
+        return None
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cfg, dict) or not cfg.get("key"):
+        return None
+    return {"server": str(cfg.get("server") or BARK_SERVER).rstrip("/"), "key": str(cfg["key"]).strip()}
+
+
+def setup_bark(key: str, path: Path | None = None) -> dict:
+    """lab/bark.json with this device key (Bark's own server unless the file names another); returns what's in it."""
+    path = Path(path) if path is not None else BARK_CONFIG
+    try:
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except (OSError, ValueError):
+        cfg = {}
+    cfg = {"server": cfg.get("server") or BARK_SERVER, "key": key.strip()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
+    return cfg
+
+
+def bark_url(cfg: dict, title: str, text: str, level: str = "critical", call: bool = False) -> str:
+    """The Bark push's URL (its GET form, /:key/:title/:body?...): `level` critical at BARK_VOLUME, `call` its sound
+    again and again for 30 s; grouped as gamelab's."""
+    q = {"level": level, "sound": BARK_SOUND, "group": "gamelab"}
+    if level == "critical":
+        q["volume"] = BARK_VOLUME
+    if call:
+        q["call"] = 1
+    part = lambda s: urllib.parse.quote(s, safe="")
+    return f"{cfg['server']}/{part(cfg['key'])}/{part(title)}/{part(text)}?{urllib.parse.urlencode(q)}"
+
+
+def send_bark(cfg: dict, title: str, text: str, level: str = "critical", call: bool = False) -> None:
+    """One Bark push, now, on this thread (raises on failure, or if Bark's answer isn't its code 200)."""
+    with urllib.request.urlopen(urllib.request.Request(bark_url(cfg, title, text, level, call), method="GET"),
+                                timeout=SEND_TIMEOUT_S) as r:
+        body = r.read()
+    try:
+        code = json.loads(body.decode("utf-8")).get("code")
+    except (ValueError, AttributeError):
+        code = None
+    if code not in (None, 200):
+        raise RuntimeError(f"Bark answered {body[:200]!r}")
+
+
+def bark(cfg: dict | None, title: str, text: str, level: str = "critical", call: bool = False,
+         log=None) -> threading.Thread | None:
+    """`send_bark` on a thread of its own, its failure said through `log` (if given), never raised; None without
+    `cfg`."""
+    if cfg is None:
+        return None
+
+    def go():
+        try:
+            send_bark(cfg, title, text, level, call)
+        except Exception as e:  # (no network, a key Bark doesn't know: the other pushes still go)
+            if log is not None:
+                log(f"the Bark push failed: {type(e).__name__}: {e}")
+    t = threading.Thread(target=go, name="bark-push", daemon=True)
+    t.start()
+    return t
+
+
 class Pusher:
     """A Lie Detector cycle's pushes (see the top), as the Watchdog's looks tell it: `seen(now, form)` at each look that
     sees one (the cycle's first included), `ended(now)` at its end. `push` stands in for the network in tests:
@@ -185,12 +271,16 @@ class Pusher:
         self.missed = False               # the Truth Booth's push gone
 
     @classmethod
-    def from_lab(cls, log=None, path: Path | None = None, mail_path: Path | None = None) -> "Pusher":
-        """Pushes to lab/ntfy.json's topic and, `text_too`, a text through lab/smtp.json's account, each file read at
-        each push: none while there's none (nor ever under NO_PUSH_ENV unless named), and one set up or changed later
-        is used without the player starting again."""
+    def from_lab(cls, log=None, path: Path | None = None, mail_path: Path | None = None,
+                 bark_path: Path | None = None) -> "Pusher":
+        """Pushes to lab/ntfy.json's topic and lab/bark.json's iPhone (urgent and high critical, `text_too` ringing),
+        and, `text_too`, a text through lab/smtp.json's account, each file read at each push: none while there's none
+        (nor ever under NO_PUSH_ENV unless named), and one set up or changed later is used without the player starting
+        again."""
         def go(title, text, priority, text_too=False):
             push(load(path), title, text, priority, log=log)
+            bark(load_bark(bark_path), title, text, "critical" if priority in ("urgent", "high") else "active",
+                 call=text_too, log=log)
             if text_too:
                 mail(load_mail(mail_path), title, text, log=log)
         return cls(go)

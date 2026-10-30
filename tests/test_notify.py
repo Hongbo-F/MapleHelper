@@ -107,6 +107,53 @@ def test_the_tests_never_push_or_text_from_the_labs_own_files(tmp_path, monkeypa
     assert [w[0] for w in went] == ["push", "mail"] and went[0][1]["topic"] == "t" and went[1][1]["to"] == ["a"]
 
 
+def test_bark_gets_a_critical_ringing_alert_at_the_first_sight_critical_repeats_and_an_ordinary_end(tmp_path,
+                                                                                                    monkeypatch):
+    # The user, 2026-10-29: "switch to something that can actually send urgent alert on iPhone" ("Bark").
+    path = tmp_path / "bark.json"
+    assert notify.load_bark(path) is None
+    assert notify.setup_bark(" abc/def ", path) == {"server": "https://api.day.app", "key": "abc/def"}
+    cfg = notify.load_bark(path)
+    url = notify.bark_url(cfg, "Lie Detector up", "seen at 01:35:32: answer it", "critical", call=True)
+    assert url.startswith("https://api.day.app/abc%2Fdef/Lie%20Detector%20up/seen%20at%2001%3A35%3A32%3A%20answer%20it?")
+    assert "level=critical" in url and "volume=10" in url and "call=1" in url and "sound=alarm" in url
+    assert "call=" not in notify.bark_url(cfg, "t", "x", "critical") and "volume" not in notify.bark_url(cfg, "t", "x",
+                                                                                                          "active")
+    went = []
+    monkeypatch.setattr(notify, "push", lambda *a, **k: None)
+    monkeypatch.setattr(notify, "mail", lambda *a, **k: None)
+    monkeypatch.setattr(notify, "bark", lambda cfg, title, text, level="critical", call=False, log=None:
+                        went.append((title, level, call)))
+    p = Pusher.from_lab(path=tmp_path / "ntfy.json", mail_path=tmp_path / "smtp.json", bark_path=path)
+    p.seen(0.0, "mini-game notice")
+    p.seen(30.0, "mini-game")
+    p.seen(60.0, "truth booth")
+    p.ended(90.0)
+    assert went == [("Lie Detector up", "critical", True), ("Lie Detector still up", "critical", False),
+                    ("Lie Detector missed", "critical", True), ("Lie Detector gone", "active", False)]
+
+
+def test_a_bark_push_that_fails_or_is_refused_is_said_and_never_raised(monkeypatch):
+    said = []
+    t = notify.bark({"server": "http://127.0.0.1:9", "key": "k"}, "t", "x", log=said.append)
+    t.join(timeout=notify.SEND_TIMEOUT_S + 5)
+    assert len(said) == 1 and said[0].startswith("the Bark push failed")
+
+    class Answer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"code":400,"message":"failed to get device token"}'
+    monkeypatch.setattr(notify.urllib.request, "urlopen", lambda req, timeout: Answer())
+    import pytest
+    with pytest.raises(RuntimeError, match="Bark answered"):
+        notify.send_bark({"server": "https://api.day.app", "key": "k"}, "t", "x")
+
+
 def test_a_push_that_fails_is_said_and_never_raised():
     said = []
     t = notify.push({"server": "http://127.0.0.1:9", "topic": "x"}, "t", "x", log=said.append)

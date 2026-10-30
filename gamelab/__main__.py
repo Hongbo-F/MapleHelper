@@ -136,6 +136,23 @@ def cmd_stop(args) -> int:
 def cmd_notify(args) -> int:
     """The phone's pushes (control.notify): set up, say where they go, send a test."""
     from .control import notify
+    if args.setup_bark or args.test_bark:
+        if args.setup_bark:
+            notify.setup_bark(args.setup_bark)
+            print(f"critical alerts go to the Bark app through {notify.BARK_CONFIG} (its device key kept there)")
+        if args.test_bark:
+            bcfg = notify.load_bark()
+            if bcfg is None:
+                print(f"no Bark set up: {notify.BARK_CONFIG} missing or its key empty (`notify --setup-bark KEY`)")
+                return 1
+            try:
+                notify.send_bark(bcfg, "gamelab test", f"a test critical alert at {time.strftime('%H:%M:%S')}: a "
+                                                       "Lie Detector comes like this, ringing", "critical", call=True)
+            except Exception as e:
+                print(f"the test Bark push failed: {type(e).__name__}: {e}")
+                return 1
+            print("test critical alert sent through Bark")
+        return 0
     if args.setup_sms or args.test_sms:
         if args.setup_sms:
             got, ready = notify.setup_mail(args.setup_sms)
@@ -2851,6 +2868,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                            "Lie Detector's first sight and the Truth Booth's, mailed "
                                                            "through your account in lab/smtp.json (you fill its login)")
     s.add_argument("--test-sms", action="store_true", help="send one text through lab/smtp.json")
+    s.add_argument("--setup-bark", metavar="KEY", help="critical alerts to the iPhone's Bark app (its device key, the "
+                                                         "part after https://api.day.app/ in the app), kept in "
+                                                         "lab/bark.json")
+    s.add_argument("--test-bark", action="store_true", help="send one critical, ringing alert through lab/bark.json")
     s.set_defaults(func=cmd_notify)
     s = sub.add_parser("character", help="who plays: her profiles, the one a command plays and why; `use ID` plays ID "
                                          "when nothing names another (lab/character.json); `check`: her bottom bar "
