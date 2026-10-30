@@ -134,7 +134,7 @@ from ..control.actions import DAMAGE_SHOWS_MS, STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import PORTAL_BOX, PORTAL_EXIT, MapModel, Platform, Rope
 from ..motion import bodies as her_body
-from ..motion import body, flow
+from ..motion import body, flow, physics
 from ..motion.physics import (CLIMB_SPEED, DROP_LAG, GRAB_SURE, JUMP_HEIGHT, JUMP_LAG, LAGS, ROPE_REACH, SHOE,
                                WALK_SPEED)
 from ..perception import drops as drop_data
@@ -304,7 +304,7 @@ KNOCK_FALL_MS = 500
 # False: the arrow does nothing until she lands, as the fit had it (and the simulator before it ran on the
 # engine); on the ground it walks her as ever.
 KNOCK_STEERS = False
-KNOCK_VX, KNOCK_VY = 180.0, 220.0
+KNOCK_VX, KNOCK_VY = physics.KNOCK_VX, physics.KNOCK_VY  # (motion.physics has them since 2026-10-30: the navigator's)
 HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
 # A kind HITS doesn't have takes as many stars as hers need on average to kill it (stars_to_kill, rounded): a star of
 # hers did 30-70 damage on the first map (a claw swipe 9-11: README, Attack; at level 23 not measured yet), less the
@@ -2005,6 +2005,12 @@ class World:
         """Call fn(world) when the world gets to clock time `clock_t` (at its tick, before it moves her): a test's look
         at the world at a given moment, whatever the stack is doing then."""
         self._push(self.ms_of(clock_t), "call", fn, "", clock_t)
+
+    def withdraw_from(self, tag: str, clock_t: float) -> None:
+        """Forget the key events of plan `tag` at clock time `clock_t` or later, and its releases whenever (a splice took
+        over from it then: its end's letting go of every key doesn't come)."""
+        self._events = [v for v in self._events if not (v[2].tag == tag and (
+            v[2].kind == "release" or v[2].kind in ("down", "up", "click") and v[2].at >= clock_t - 1e-9))]
 
     def withdraw(self, tag: str) -> None:
         """Forget the key events of plan `tag` the world hasn't taken yet."""

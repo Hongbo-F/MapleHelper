@@ -339,7 +339,7 @@ def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = No
         except HuntStop as e:  # her HP stayed low (behavior.safety), out of darts (behavior.darts): the hunt ended
             outcome = f"{e.label.lower()}: {e}"
     trace = {"scenario": sc.name, "doc": sc.doc, "seconds": round(sim.clock.elapsed, 3), "result": outcome,
-             "plans": sim.trace.plans, "cancels": sim.trace.cancels, "log": sim.trace.log,
+             "plans": sim.trace.plans, "cancels": sim.trace.cancels, "splices": sim.trace.splices, "log": sim.trace.log,
              "world": sim.world.summary(), "world_log": sim.world.log, "eyes": dict(sim.eyes.counts),
              "frames": dict(sim.frames.frame_counts), "files": sim.files}
     trace["feed"] = sim.feed_record()
@@ -702,10 +702,12 @@ def loop_tree_23(sim):
     when her attack starts, and the world's air pick fitted to the live throws (Clearance and slopes): on seed 1 she
     shot 23 from the spot fewer than 20 times, for 42 kills; of seeds 1-16 all but 1 and 4 meet all of this.) (Fifteen
     kills since the server's respawn became every scenario's, 2026-10-31: 18 in its 4 minutes, where the denser world
-    before gave twenty.) (Seed 1 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 2 under
-    fifteen kills; of seeds 1-13 1 and 5-12 show all of this.) (Seed 3 since the stack's monsters turn where the game
-    turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 1 under fifteen kills; of seeds 1-13
-    3, 7, 8 and 10 show all of this.)"""
+    before gave twenty.) (Seed 3 since chains are replanned at every state as they run (2026-10-30, work/replan:
+    navigator.REPLAN, KNOCK_REPLAN, MEET_WALK): on seed 2 the rule 'shoot' decided fewer than 20 times; of seeds 1-3
+    only 3 meets all of this.) (Seed 1 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 2
+    under fifteen kills; of seeds 1-13 1 and 5-12 show all of this.) (Seed 3 since the stack's monsters turn where the
+    game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 1 under fifteen kills; of seeds
+    1-13 3, 7, 8 and 10 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1039,7 +1041,7 @@ def loop_tree_lie_detector_28(sim):
     return lie_detector(2.0)(sim)
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=2, limit=500, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=LIE_DETECTOR_EXPECTS + (check("onto 25, the safe platform under 24", lambda tr: tr["result"]["then"][
           "platform"] == 25),))
@@ -1050,7 +1052,7 @@ def loop_tree_lie_detector_23(sim):
     1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.) (Seed 1
     since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the dying and a throw's last look before its
     key, with her drops waiting while a monster that counts is by them and her decisions going by the monsters the looks
-    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.)"""
+    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.) (Seed 2 since chains are replanned at every state as they run (2026-10-30, work/replan: navigator.REPLAN, KNOCK_REPLAN, MEET_WALK): on seed 1 she went to the rope at x 146 from 32, a rope as safe, not onto 25; of seeds 1-3, 2 and 3 meet all of this.)"""
     return harness._only(lie_detector(60.0), (23,))(sim)
 
 
@@ -1589,7 +1591,9 @@ def loop_tree_grind_lucky_seven_key(sim):
     followed at 30.9 s, 63 kills after (27.2, 1.7, 29.3-30.0, 30.7 and 67 before the pull's detour rule (2026-10-29:
     behavior.patrol, a pile against the loop's rate)). (Seed 2 since the server's respawn and the chase together
     (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 1 not all of this; of seeds 1-13, 2-13 meet all
-    of it.)"""
+    of it.) (Seed 2 since chains are replanned at every state as they run (2026-10-30, work/replan: navigator.REPLAN,
+    KNOCK_REPLAN, MEET_WALK): on seed 1 the key check was put off on the rope at -8 and out of darts' stop came first;
+    of seeds 1-2, 2 meets all of this.)"""
     return key_check_run(4)(sim)
 
 

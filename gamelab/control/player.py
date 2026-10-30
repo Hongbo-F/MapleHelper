@@ -21,6 +21,8 @@ runs normally and talks to it through files. To keep that safe it only ever:
   itself: her retreat is the running hunt's, behavior.retreat, which knows the map and where she is; with no hunt
   running, nothing moves her),
 - records the game's client area while a plan runs,
+- takes a plan that takes over from the running one (a splice: `{id}.splice` beside it, control.client.splice), checked
+  as any plan and held to the alarm as any, at the moment it asks, the keys held then that it holds kept down,
 - writes results to gamelab/lab/outbox.
 
 Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears, after 24 idle
@@ -51,7 +53,7 @@ from maplehelper.keys import KEY_CODES, Key
 from maplehelper.keys import parse as parse_key
 
 from .. import window
-from ..paths import ALARM, ALARM_KEYS, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_LOG, STOP
+from ..paths import ALARM, ALARM_KEYS, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_INFO, PLAYER_LOG, STOP
 from .alarm import (ALARM_UNSAFE, LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS, RETREAT, RETREAT_WINDOW_S,
                     AlarmKeys)
 
@@ -190,6 +192,11 @@ def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: l
         return f"a retreat lets go of every key it presses ({', '.join(sorted(held))} held at its end)"
     return None
 
+
+# What the player can do, said in paths.PLAYER_INFO as it starts (control.client.can_splice): 1, it takes splices. A
+# player started before this code writes none, and the navigator cuts and sends at once instead.
+SPLICE = 1
+SPLICED = "spliced"  # a plan's result's problem once another took over from it (control.client.SPLICED)
 
 # The key thread waits for a key's time in 15 ms steps (the cancel file and a retreat's window looked at between), each
 # slept on the alarm (`halt.wait`: it ends at once when the alarm goes off), and the last FINAL_S before the key as ever
@@ -788,51 +795,140 @@ class Player:
 
         t0 = time.perf_counter() + lead_ms / 1000
         sent, held, problems = [], set(), []
-
-        cancel = INBOX / f"{plan['id']}.cancel"  # the client cut the plan short: stop pressing
+        # The plan playing (a splice takes over from it: `{id}.splice`, control.client.splice), its clock's start, what it
+        # sent and its problems; `pending`, a splice taken (its file claimed) to take over at its time; `answered`, the
+        # plans spliced away, answered as they're left.
+        cur = {"plan": plan, "t0": t0, "sent": sent, "problems": problems, "pending": None}
         halt = threading.Event() if during else self.alarm  # (let through with the alarm up: it plays on)
 
-        def wait(due: float) -> bool:
-            """Until `due`, unless the plan is cancelled, the alarm goes off, or a retreat's window ends."""
+        def splice_taken():
+            """A splice into the plan playing: the one taken already, or one waiting now, claimed and checked as any
+            plan (a refusal is answered under its id and it's dropped); None if none."""
+            if cur["pending"] is not None:
+                return cur["pending"]
+            path = INBOX / f"{cur['plan']['id']}.splice"
+            if not path.exists():
+                return None
+            claimed = path.with_suffix(".spliced")
+            try:
+                path.replace(claimed)  # claimed: the client can't withdraw it any more (client.unsplice)
+                new = _read_plan(claimed)
+            except (OSError, ValueError):
+                return None
+            finally:
+                claimed.unlink(missing_ok=True)
+            new_id = "".join(ch for ch in str(new.get("id", "")) if ch.isalnum() or ch in "-_")[:64] or "spliced"
+            new["id"] = new_id
+            if (refused := self._splice_refusal(new, during)) is not None:
+                self.log(f"refused the splice {new_id} into {cur['plan']['id']}: {refused}")
+                _answer(INBOX / f"{new_id}.running", {"error": refused})
+                return None
+            (INBOX / f"{new_id}.running").write_text("", encoding="utf-8")  # its own (client.cancel)
+            at = cur["t0"] + max(0, new.get("at_ms", 0)) / 1000
+            cur["pending"] = (new, at)
+            return cur["pending"]
+
+        def wait(due: float):
+            """Until `due` (True), unless the plan is cancelled, the alarm goes off, or a retreat's window ends (False),
+            or a splice taken comes before it ("splice", at its time)."""
             while True:
-                if cancel.exists():
-                    problems.append("cancelled")
+                pending = cur["pending"]
+                ids = [cur["plan"]["id"]] + ([pending[0]["id"]] if pending is not None else [])
+                if any((INBOX / f"{i}.cancel").exists() for i in ids):  # (the splice taken too: cut short now)
+                    cur["problems"].append("cancelled")
                     return False
                 if cutoff is not None and time.perf_counter() >= cutoff:
-                    problems.append(RETREAT_OVER)
+                    cur["problems"].append(RETREAT_OVER)
                     return False
-                end = min(due, cutoff) if cutoff is not None else due
+                pending = splice_taken()
+                to = min(due, pending[1]) if pending is not None else due
+                end = min(to, cutoff) if cutoff is not None else to
                 left = end - time.perf_counter()
                 if left > FINAL_S:  # slept (no spin), WAIT_STEP_S at most: the checks above between
                     stopped = halt.wait(min(WAIT_STEP_S, left - FINAL_S))
                 else:               # the last FINAL_S: to the key's time as ever
                     stopped = not _sleep_until(end, halt)
                 if stopped:
-                    problems.append(LIE_DETECTOR_ERROR)
+                    cur["problems"].append(LIE_DETECTOR_ERROR)
                     return False
+                if pending is not None and time.perf_counter() >= pending[1]:
+                    return "splice"
                 if time.perf_counter() >= due:
                     return True
 
+        def switch():
+            """The splice taken takes over now: the keys held that it doesn't hold let go, those it holds that aren't
+            pressed, the plan left answered (SPLICED: the new id, its at_ms, how late it took over), and the new one
+            plays from its time (its clock's start: the splice's time, so a key due already goes at once)."""
+            new, at = cur["pending"]
+            now = time.perf_counter()
+            want = {k for k in new.get("held", []) if k in self.allowed}
+            for name in sorted(held - want):
+                _press(self.allowed, name, False)
+                held.discard(name)
+            for name in sorted(want - held):
+                _press(self.allowed, name, True)
+                held.add(name)
+            old = cur["plan"]["id"]
+            late = round(max(0.0, now - at) * 1000, 1)
+            result = {"sent": cur["sent"], "problems": cur["problems"] + [SPLICED],
+                      "spliced": {"to": new["id"], "at_ms": new.get("at_ms", 0), "late_ms": late}}
+            try:
+                _answer(INBOX / f"{old}.running", result)
+            except OSError as e:
+                self.log(f"couldn't answer {old} (spliced): {e}")
+            (INBOX / f"{old}.cancel").unlink(missing_ok=True)
+            self.log(f"spliced {old} -> {new['id']} at {new.get('at_ms', 0)} ms ({late:.1f} ms late)")
+            cur.update(plan=new, t0=at, sent=[], problems=[], pending=None)
+
         def press_keys():
-            for event in plan.get("events", []):
-                if not wait(t0 + event[0] / 1000):
-                    return
-                if win32.foreground_title() != self.title:
-                    problems.append("game left the foreground; stopped pressing keys")
-                    return
-                if event[1] == "mouse":
-                    x, y = event[2], event[3]
-                    if x >= client_area["width"] or y >= client_area["height"]:
-                        problems.append(f"mouse {x},{y} is outside the game; skipped")
+            i = 0
+            while True:
+                events = cur["plan"].get("events", [])
+                if i < len(events):
+                    event = events[i]
+                    got = wait(cur["t0"] + event[0] / 1000)
+                    if got == "splice":
+                        switch()
+                        i = 0
                         continue
-                    window.move_cursor(client_area["left"] + x, client_area["top"] + y)
-                else:
-                    _, name, kind = event
-                    _press(self.allowed, name, kind == "down")
-                    (held.add if kind == "down" else held.discard)(name)
-                sent.append([round((time.perf_counter() - t0) * 1000, 1), *event[1:]])
-            if plan.get("end_ms") is not None:  # the plan lasts this long (the next one follows on)
-                wait(t0 + plan["end_ms"] / 1000)
+                    if not got:
+                        return
+                    if win32.foreground_title() != self.title:
+                        cur["problems"].append("game left the foreground; stopped pressing keys")
+                        return
+                    if event[1] == "mouse":
+                        x, y = event[2], event[3]
+                        if x >= client_area["width"] or y >= client_area["height"]:
+                            cur["problems"].append(f"mouse {x},{y} is outside the game; skipped")
+                            i += 1
+                            continue
+                        window.move_cursor(client_area["left"] + x, client_area["top"] + y)
+                    else:
+                        _, name, kind = event
+                        if not (kind == "down" and name in held):  # (held already: a splice's held key, left down)
+                            _press(self.allowed, name, kind == "down")
+                            (held.add if kind == "down" else held.discard)(name)
+                    cur["sent"].append([round((time.perf_counter() - cur["t0"]) * 1000, 1), *event[1:]])
+                    i += 1
+                    continue
+                if cur["plan"].get("end_ms") is not None:  # the plan lasts this long (the next one follows on)
+                    got = wait(cur["t0"] + cur["plan"]["end_ms"] / 1000)
+                    if got == "splice":
+                        switch()
+                        i = 0
+                        continue
+                    if not got:
+                        return
+                # Over: a splice taken, or one there now, carries it on from its time with no key let go between (the
+                # keys held until then).
+                if (pending := splice_taken()) is not None:
+                    got = wait(pending[1])
+                    if got == "splice":
+                        switch()
+                        i = 0
+                        continue
+                return
 
         presser = threading.Thread(target=press_keys, name="key-player")
         frames, times = [], []
@@ -851,14 +947,44 @@ class Player:
             presser.join()
             for name in held:
                 _press(self.allowed, name, False)
-            cancel.unlink(missing_ok=True)
-        result = {"sent": sent, "problems": problems, "region": region, "scale": scale, "client": client_area}
+            (INBOX / f"{cur['plan']['id']}.cancel").unlink(missing_ok=True)
+            if cur["pending"] is not None:  # (taken, never reached: cut short first) answered, nothing pressed
+                new = cur["pending"][0]["id"]
+                try:
+                    _answer(INBOX / f"{new}.running", {"sent": [], "problems": ["cancelled"]})
+                except OSError:
+                    pass
+                (INBOX / f"{new}.cancel").unlink(missing_ok=True)
+            (INBOX / f"{cur['plan']['id']}.splice").unlink(missing_ok=True)  # (one come too late: never taken)
+        result = {"sent": cur["sent"], "problems": cur["problems"], "region": region, "scale": scale,
+                  "client": client_area}
+        if cur["plan"] is not plan:  # spliced: this is the last plan's result (serve answers it under its id)
+            result["id"] = cur["plan"]["id"]
         if self.alarm.is_set() and not during:
             result["error"] = LIE_DETECTOR_ERROR
         if frames:
             np.savez_compressed(OUTBOX / f"{plan['id']}.npz", frames=np.stack(frames), times=np.array(times))
             result["frames"] = len(frames)
         return result
+
+    def _splice_refusal(self, new: dict, during: bool) -> str | None:
+        """Why a splice isn't taken (None: it is): checked as any plan (`validate`; no window resize nor recording, it
+        takes over in the middle), and with the alarm up (this player's, or the file's) only a kind that goes then
+        (alarm_refusal), as `run` holds any plan to it."""
+        try:
+            validate(new, self.allowed)
+        except ValueError as e:
+            return str(e)
+        if new.get("window_client") is not None or new.get("capture", {}).get("fps", 0):
+            return "a splice neither resizes the window nor records"
+        if during or self.alarm.is_set() or alarm_up():
+            if new.get("kind") not in PLAN_KINDS:
+                return LIE_DETECTOR_ERROR
+            at = getattr(self.alarm, "at", None)
+            since = time.monotonic() - at if self.alarm.is_set() and at is not None else _alarm_age()
+            if (refused := self._with_alarm(new, since, filed=not self.alarm.is_set())) is not None:
+                return refused["error"]
+        return None
 
     def _with_alarm(self, plan: dict, since: float | None, filed: bool = False) -> dict | None:
         """A plan of a kind that goes with the alarm up, `since` s after the sighting (None: when isn't known): its
@@ -944,7 +1070,8 @@ def serve() -> None:
     if alarm_up():
         _log("refusing to start: a Lie Detector alarm hasn't been cleared (python -m gamelab clear-alarm)")
         return
-    for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel"), *INBOX.glob("*.running")]:  # left over
+    for stale in [*INBOX.glob("*.json"), *INBOX.glob("*.cancel"), *INBOX.glob("*.running"), *INBOX.glob("*.splice"),
+                  *INBOX.glob("*.spliced")]:  # left over
         stale.unlink()
     cfg = config.load(CONFIG, (c.name for c in COMBOS))
     alarm = Alarm()
@@ -969,6 +1096,23 @@ def serve() -> None:
             "no Bark alerts yet (no lab/bark.json: `python -m gamelab notify --setup-bark KEY`)")
          + ("; texts through the mail" if notify.load_mail() is not None else "; no texts"))
     idle_since = time.monotonic()
+    try:  # what it can do (control.client.can_splice), while it runs
+        PLAYER_INFO.write_text(json.dumps({"splice": SPLICE, "pid": os.getpid(), "started": time.time()}),
+                               encoding="utf-8")
+    except Exception as e:  # (it plays plans all the same: the navigator cuts and sends again instead of splicing)
+        _log(f"couldn't write {PLAYER_INFO.name}: {e} (plans are cut and sent again, not spliced)")
+    try:
+        _serve(player, watchdog, idle_since)
+    finally:
+        try:
+            PLAYER_INFO.unlink(missing_ok=True)
+        except Exception as e:
+            _log(f"couldn't remove {PLAYER_INFO.name}: {e}")
+
+
+def _serve(player: "Player", watchdog: "Watchdog", idle_since: float) -> None:
+    """serve's loop, until it stops (see serve)."""
+    alarm = player.alarm
     with win32.precise_timers():
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
             if watchdog.recording is not None:  # a Lie Detector's recording goes on to its end, idle or not
@@ -994,6 +1138,8 @@ def serve() -> None:
                 result = player.run(plan)
             except Exception as e:
                 result = {"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()}
+            if (last := result.pop("id", None)) is not None:  # spliced: the last plan's result, under its own id
+                running = INBOX / f"{last}.running"
             try:
                 plan_id = _answer(running, result)
                 _log(f"ran {plan_id}: {result.get('error') or 'ok'}")

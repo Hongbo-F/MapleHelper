@@ -20,6 +20,8 @@ ALARM = LAB / "ALARM.json"       # the Lie Detector was seen; nothing runs until
 ALARM_KEYS = LAB / "alarm_keys.json"  # her moves' and pet food's keys as the running commands follow them: the player's
                                       # allowance with the alarm up (control.alarm.AlarmKeys)
 PLAYER_LOG = LAB / "player.log"
+PLAYER_INFO = LAB / "player.json"  # what the running player can do ({"splice": 1, "pid", "started"}: written as it starts,
+                                   # removed as it stops; control.client.can_splice)
 RECORDINGS = LAB / "recordings"  # saved frames + key events, by name
 LIE_RECORDINGS = LAB / "lie_detector"  # each Lie Detector's whole cycle as the player saw it (control.lie_recorder)
 RECENT = LAB / "recent"          # the rolling recording's last minutes, saved on demand (control.rolling)

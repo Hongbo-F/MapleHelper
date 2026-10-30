@@ -691,7 +691,8 @@ def fake_lab(tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0, keys=None):
     """serve() with everything outside faked: the lab in tmp_path (the inbox and outbox the client's, as
     tests/conftest.py points them), the game a fake screen, the config made up (her keys `keys`)."""
     for name, path in (("LAB", tmp_path), ("INBOX", client.INBOX), ("OUTBOX", client.OUTBOX),
-                       ("STOP", tmp_path / "STOP"), ("PLAYER_LOG", tmp_path / "player.log")):
+                       ("STOP", tmp_path / "STOP"), ("PLAYER_LOG", tmp_path / "player.log"),
+                       ("PLAYER_INFO", tmp_path / "player.json")):
         monkeypatch.setattr(player_mod, name, path)
     monkeypatch.setattr(player_mod.config, "load",
                         lambda path, combos: SimpleNamespace(keys=keys, game_window_title="MapleStory"))
@@ -878,6 +879,18 @@ def test_the_player_takes_no_plan_before_its_watchdog_has_looked_at_the_game(tmp
         assert client._read_result(out)["error"] == LIE_DETECTOR_ERROR  # seen before any key of it
     finally:
         served.stop()
+
+
+def test_the_served_player_says_it_takes_splices_while_it_runs(tmp_path, monkeypatch, alarm_file):
+    """paths.PLAYER_INFO (control.client.can_splice): written as serve starts (`splice`, its pid), removed as it stops; a
+    player started before it writes none, and the navigator cuts and sends at once instead of splicing."""
+    served = Served(tmp_path, monkeypatch, Screen())
+    try:
+        info = json.loads((tmp_path / "player.json").read_text(encoding="utf-8"))
+        assert info["splice"] == player_mod.SPLICE and info["pid"] == os.getpid()
+    finally:
+        served.stop()
+    assert not (tmp_path / "player.json").exists()
 
 
 def test_the_player_stops_if_its_watchdog_does(tmp_path, monkeypatch):

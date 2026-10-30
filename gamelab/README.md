@@ -1890,6 +1890,76 @@ Seeds re-picked (each docstring says why; D:/MapleHelper-scratch/replan/rp/out/s
 window the contact rule's touch leaves her, the chain after it goes up past the Green Mushroom (touched once, on 19 at
 2.1 s, where 8.2 s and three touches), on every seed of 1-16; it checks that now.
 
+**Replanned at every state while a chain runs** (`REPLAN`; the user's "regenerate motion plan at every frame so any
+hit/new spawn will cause motion plan to react immediately"). Every state perception gives (15 a second, each with the
+whole screen's monsters) is a glance of the running chain's watch (`Navigator._watching`), and on it:
+- *A monster coming into a leg still to come* (REACT's: one the plan didn't know, walked in or spawned; now wherever she
+  is, not only with room to stop) has the chain replanned from where she'll be when new keys can act (`_splice_point`:
+  `SPLICE_LEAD_S` on, 40 ms, the player's wait step and its last spin) against the newest state, all of it
+  (`_state_scene`: the glance's state as a look with the whole screen, her memory's and the feed's out of sight), its
+  route the trip's, its landings priced as the pass prices them, no wider takeoffs (`spread` off: a state's budget), and
+  handed over in place of the running plan's rest (`_take_over`). Only from the ground, where the state has her on the
+  platform the plan has her on then and within `SPLICE_DRIFT` (20 units) of where it has her, her start put where the
+  state measured her: in a flight, or past a takeoff's key less `KEY_COMMIT_S` (the game's key lag: `KEY_LEAD`, a jump's
+  `JUMP_LAG`, a drop's `DROP_LAG`, a walk-off's stop `STOP_S`), not yet: the next state asks again once she's down. (Built
+  first to take over at the predicted landing, as the design had it: on the tower down from 6 a drop spliced at a
+  landing she made late had its keys pressed in the air, and she ran to 29's end, the very thing `_queue_next` plans from
+  a look for.) Only where nothing chains does she stop, as before (REACT's cut, with room to stop).
+- *Every `BETTER_EVERY_S`* (5 states), the chain replanned so, and taken where the running chain stops short (for a
+  monster, a move it can't predict, or cut off for length with nothing to follow on) and the new one goes the same way on
+  past where it stops, unless where it stops the trip's pass would have her fight or end there (`_stop_calls`: the
+  trip's `until`, the hunt loop's `Hunt._interrupt`, or in hunt mode a target in reach); or where the new one's route
+  isn't the running one's and the route planner costs it `SWITCH_GAIN_S` less (`Planner.quickest` against
+  `Planner.through` the running way's next move: the same estimates both, where a chain's own times against the route's
+  estimates for the rest made every longer chain look 0.4-0.9 s "sooner"); `SWITCH_MIN_S` after the last switch at the
+  soonest; never the same way over again (the same moves of the route, `_same_moves`: a replan one state later took the
+  same route 99.2% of the time on the user's own play, its takeoffs moved by the flow's variety alone). `SWITCH_GAIN_S`
+  and `SWITCH_MIN_S` are guesses.
+- *A touch* still cuts the plan (the game knocks her about whatever is held), and the next pass plans at once from the
+  first state that has her on the ground again (`KNOCK_REPLAN`, `_knock_landing`: from `KNOCK_AIR_S` after the popup,
+  her knock's flight on flat ground by `physics.KNOCK_VX`/`KNOCK_VY`, moved there from the simulator's world; the scene's
+  mode 'ground', else her place on a platform at the height the state before had it), a look of that very state, not
+  once she's stood still and a look of its own (`recover`: 0.13 s median, p90 0.33, and its look's frame, live), with her
+  invulnerability's window (`POST_HIT`).
+
+Only a pass's own chain is replanned so: not an evade step's, a pass regardless or a hop (what they leave out on purpose,
+the replan wouldn't). A chain cut off for length runs on into the next as before (follow's tail, `_look_ahead`,
+`_queue_next`), a replanned one too. Each switch is said (the log's "replanned from ... (spliced)", a 'chain' and a
+'replan' record: why, kind, its plan time, spliced or not, its legs, its planning ms) and counted (`Trip.replans`).
+
+**Shot from along her platform** (`MEET_WALK`; the user's "in general you should kill all the mobs that are in the way").
+With the whole state, what's in her way is seen, and more of it out of a star's reach from where she stands: on the
+harness's standard grind (24 seeds) `MEET_S` fired 68 times where it hadn't, `NO_WAIT` 909 times against 419, touches
++19% (78.0 against 65.4, beyond 2 se) and EXP a minute -4.3% (within). `_meet`'s shot first now walks along her platform
+to where her attack reaches it, `SHOOT_WALK` at most (`Escort.shot_place`, `shoot_from`: the landing's shot first's),
+before a way around, a hop or a wait.
+
+**The splice** (`control.client.splice`, `control.player`'s `Player.run`). A plan handed to the player as
+`{running}.splice` (not a `*.json`: never a plan of its own) takes over from the running plan at its `at_ms` of that
+plan's clock (at once if that's gone by when the player sees it): the running plan's keys from then on don't come, the
+keys it holds then that the new one's `held` doesn't have are let go and those it has that aren't held are pressed, a
+'down' of a key held then is left out, and its events play from then on, its clock's start the splice's time. The player
+claims it (the file renamed), checks it as any plan (`validate`; no resize, no recording) and with the alarm up takes
+only a kind that goes then (`alarm_refusal`); the alarm halts a spliced plan as any. It answers the running plan at once
+with the problem `spliced` (`spliced`: the new id, its at_ms, how late it took over) and the new one as any, under its
+own id (its own `.running`, `.cancel`, `.splice`). One whose time is at or past the running plan's end carries it on with
+no key let go between (where the `end_ms` queue let go of every key between two plans). A splice the player never took
+(the running plan over first) is withdrawn (`client.taken`, `unsplice`), and cancelling one not taken yet cuts the plan it
+was for. The player says it takes splices in `lab/player.json` (`splice`, its pid: written as it starts, removed as it
+stops; `client.can_splice`); a player started before this code writes none, and the navigator cuts the running plan and
+sends the new one at once instead (every key let go for 15-35 ms). Live it needs the player started again, which takes
+the user's UAC click. The simulator's player takes splices as the real one does (`sim.fakes.FakePlayer.splice`: seen
+`SPLICE_SEEN_S` after it's handed over, the world's keys withdrawn from then on, `World.withdraw_from`).
+
+Seeds re-picked with the replanning (each docstring says why; rp/out/scan_B*.txt): `nav_fight_up` 1,
+`loop_tree_lie_detector_23` 2, `loop_tree_23` 3, `loop_tree_grind_lucky_seven_key` 2. Tree Dungeon's 42 goldens recorded
+again after each one's expectations were checked on its new trace (rp/golden_summary.py: 41 of 42 meet what they're there
+for, `nav_tree_landing_no_shot` not, expected to fail as before) and the hand-read ones read (`nav_tree_evade`'s contact
+rule and the chain after its touch planned from where the knock landed her; `nav_tree_rope_hit`'s "up again";
+`nav_tree_landing_shot_first`'s shot first and "it's dying"; the Lie Detector's four: no splice with the alarm up, none in
+them at all); 21 splices over the 42. Summed over them, the perception commit's traces / these: touches 1,008 / 1,063,
+kills 953 / 950.
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.

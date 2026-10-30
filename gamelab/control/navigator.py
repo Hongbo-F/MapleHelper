@@ -47,20 +47,22 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import ClassVar, NamedTuple, Protocol
 
-from .. import telemetry
+from .. import directions, telemetry
 from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.memory import EDGE, MATCH_SLACK, MATCH_SPEED, MATCH_WALK_S, SURE
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, Monster, MonsterTrack, Tracker, touch_box,
                                      tracks_record)
 from ..localization.pose import ROPE_TOP_X
 from ..localization.scene import Scene
+from ..localization.rate import HZ
 from ..localization.senses import Senses
 from ..localization.tracking import HIDDEN, HIDE_S, LIVE
 from ..localization.unseen import hidden
+from ..localization.worldstate import to_scene
 from ..motion import bodies as her_body
 from ..motion import route
 from ..motion.flow import END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow, Leg, Span, chain_record, ms
-from ..motion.physics import WALK_SPEED
+from ..motion.physics import DROP_LAG, GRAVITY, JUMP_LAG, KNOCK_VY, STOP_S, WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..perception.touches import INVULNERABLE_S, MISS
@@ -291,6 +293,47 @@ REACT_AGAIN_S = 3.0  # s
 STILL_VX = 15.0      # units/s: a followed monster slower than this stands (tracking's velocities, filtered frame to frame)
 REACT_ROOM = 50.0    # units of platform ahead of her run she needs to stop on (her 149 units/s for AFTER_STILL_S's
                      # slide: 39, and a little)
+# Replanning at every state while a chain runs (REPLAN, from 2026-10-30; the user: "ideally we probably want to regenerate
+# motion plan at every frame so any hit/new spawn will cause motion plan to react immediately"). Every state perception
+# gives (localization.rate.HZ: 15 a second, each with the whole screen's monsters) is a glance of the chain's watch
+# (_watching), and on it:
+# - a monster the running chain's legs still to come now meet (REACT's: one the plan didn't know, walked in or spawned),
+#   wherever she is, has the chain replanned from where she'll be when new keys can act (_splice_point: SPLICE_LEAD_S on,
+#   on the ground where the state has her; in a flight or past a takeoff's key, once she's down: the next state asks
+#   again) against the whole state and handed over in place of the running plan's rest (_take_over: client.splice, the
+#   arrow held kept held, no stop; a player without splices: cut and sent at once); only where nothing chains does she
+#   stop as before (REACT's cut, with room to stop);
+# - every BETTER_EVERY_S, the chain replanned so, taken where the running chain stops short (a monster, a move it can't
+#   predict, cut off for length with nothing to follow on) and the new one goes on past where it stops (a chain that
+#   stopped short of a monster gone since runs on), or where its route isn't the running one's and the route planner
+#   costs it SWITCH_GAIN_S less; SWITCH_MIN_S after the last switch at the soonest; never the same way over again (the
+#   same moves of the route: a replan one state later took the same route 99.2% of the time on the user's own play,
+#   its takeoffs moving by the flow's variety, which isn't a reason);
+# - a touch still cuts the plan (the game knocks her about whatever keys are held), and the next pass plans at once
+#   from the first state that has her on the ground again (KNOCK_REPLAN: _knock_landing), not after she has stood still
+#   and a look of its own (recover).
+# Only a pass's own chain is replanned so (not an evade step's, a pass regardless or a hop over a monster: what they
+# leave out on purpose, the replan wouldn't). The splice: control.client.splice, control.player (Player.run); the
+# simulator's fake player as the real one (sim.fakes.FakePlayer.splice). False: as before.
+REPLAN = True
+STATE_S = 1.0 / HZ           # s between perception's states (15 a second)
+SPLICE_LEAD_S = 0.04         # s after now new keys can take over at the soonest: the player sees a splice within its wait
+                             # step (player.WAIT_STEP_S, 15 ms) and its last spin (FINAL_S, 20 ms), the file ~2 ms
+KEY_COMMIT_S = 0.068         # s: a takeoff whose key goes this little after a splice's time is the game's already (it
+                             # acts on a key 66-68 ms after it's sent: senses.KEY_EFFECT_S): the splice goes from where it
+                             # lands her
+KEY_LEAD = {"jump": JUMP_LAG, "jump_up": JUMP_LAG, "hop": JUMP_LAG, "climb": JUMP_LAG, "drop": DROP_LAG,
+            "walk_off": STOP_S}  # s from a leg's takeoff key (a walk-off's: the arrow let go to stop short) to its flight
+BETTER_EVERY_S = 5 * STATE_S  # s between looks for a better way (a guess: 3 a second)
+SWITCH_GAIN_S = 0.25         # s sooner a better way must get her there (a guess) ...
+SWITCH_MIN_S = 0.5           # ... and s after the last switch at the soonest (a guess)
+SPLICE_DRIFT = 20.0          # map units: a replan goes from where the state has her if she's this near where the plan has
+                             # her (else her off-path checks deal with it: OFF_SPAN)
+KNOCK_REPLAN = True
+KNOCK_AIR_S = 2 * KNOCK_VY / GRAVITY - STATE_S  # s after a touch's popup her knock's flight lasts on flat ground (0.22 s)
+                                                # less a state: no state sooner has her landed
+KNOCK_LAND_S = 0.8           # s at most a landing is waited for (then as before: recover)
+LANDED_DY = 6.0              # map units: on a platform at the height the state before had her, she's landed
 COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigator._watch, _carry_out_chain)
 TOUCHED = "touched"  # ... and a touch's (or her HP dropping): _touch_text
 # Landings with clearance (from 2026-10-27; the user: "the character should actively try to move away from the mob to
@@ -317,6 +360,13 @@ LANDING_WALK = True  # ... from along her platform, where no star reaches it fro
 SHOOT_WALK = 150.0   # units: the longest walk along her platform to shoot the monster by a landing first (1.0 s: a
                      # guess; live a median 53 units' walk would have done, diag-landings)
 LAND_WAITS = 4       # guess: looks spent in a row waiting for one to clear a landing (WAIT_S apart), before going anyway
+# _meet's shot first at a monster in the way of the route's first move, where no star reaches it from where she stands:
+# from along her platform within SHOOT_WALK, where her attack reaches it (Escort.shot_place, shoot_from: as the landing's
+# shot first), before a way around, a hop or a wait (the user, 2026-10-30: "in general you should kill all the mobs that
+# are in the way"; since her chains are planned by the whole state's monsters, MEET_S fired 68 times in the harness's 24
+# seeds where it hadn't, NO_WAIT 909 against 419: what's in her way now is seen, and more of it out of a star's reach from
+# where she stands: D:/MapleHelper-scratch/replan/rp). False: from where she stands alone, as before.
+MEET_WALK = True
 # A chain planned on the move (_queue_next) prices its moves' landings by their own ways and the route's other moves
 # between the same platforms only, not wider takeoffs (flow.chain's `spread`): it must be planned before the running
 # plan ends (SEND_S), and with them a priced chain took a median 5.7 ms more, 20 at the most, 48 with the suite running
@@ -524,6 +574,7 @@ class Trip:
     kills: int = 0        # monsters shot dead on the way
     chains: int = 0       # key plans that carried out several moves in one go
     waits: int = 0        # looks spent waiting for a monster to move off
+    replans: int = 0      # chains replanned and handed over while one ran (REPLAN)
     time: dict = field(default_factory=lambda: {"look": 0.0, "think": 0.0, "move": 0.0})  # s spent
     short: ClassVar[str] = ""  # arrived short of the x she was sent to, and why (ARRIVE_STAND), set on the trip; "":
                                # not (no field: the trip's record as before)
@@ -560,6 +611,8 @@ class _Running(NamedTuple):
     tail: float = 0.0  # s its plan runs on past its last leg (time to place her before the next one)
     length: float | None = None  # s its plan lasts, as sent (its last key can come after its last leg)
     known: tuple = ()  # the monsters the look it was planned from had (MonsterTrack, in its plan's time): REACT
+    parent: str | None = None  # spliced in: the plan it takes over from, until the player has taken it (client.taken)
+    why: str = ""      # why its chain ended (flow.chain's: 'done', 'monster', 'long', 'unpredictable')
 
     @property
     def ends(self) -> float:
@@ -614,6 +667,7 @@ class TripState:
     # Touched (a chain or a move cut short by a touch, or her HP dropping): up to when her invulnerability after it lasts
     # (Senses.invulnerable_until less IMMUNE_MARGIN_S), no fight starts on the way and `until` isn't asked (POST_HIT)
     post_hit_until: float = -1e18
+    switched_at: float = -1e18  # when a running chain was last replanned and handed over (REPLAN: SWITCH_MIN_S)
     fresh: Scene | None = None  # a look taken for the next pass already (after a chain, or the caller's)
     last: Scene | None = None   # the last pass's look (the one `until` said 'in position' to, if it did)
     keep_off: frozenset = frozenset()  # platforms its routes go onto only at a cost (route.KEEP_OFF_S): the hunting
@@ -873,6 +927,7 @@ class Navigator:
             st.refuge = None
             if not BLOCK_MEMORY:
                 st.evade_since, st.refuges = None, 0
+        met = None
         if self.fight:
             met = self._meet(st, s, path, monsters, legs, why, planned_at, looked)
             if met is True:
@@ -897,7 +952,8 @@ class Navigator:
                 near = self.tracker.update(s.t, s.monsters, seen_at=s.t - time.monotonic())
             st.path = path
             self.chain_still = None
-            moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst, near)
+            moved, planned, after = self._carry_out_chain(st, s, path, legs, keys, why, st.dst, near,
+                                                          replan=REPLAN and met is None)
             still = self.chain_still is not None and (self.chain_still[1] >= STUCK_S or ROPE_CUT and self.cut_still)
         else:
             st.stopped = False
@@ -1061,7 +1117,8 @@ class Navigator:
             st.fights = 0  # nothing in her way
         return False
 
-    def _chain_monsters(self, st: TripState, s: Scene, path: list[Move]) -> tuple[list, list | None]:
+    def _chain_monsters(self, st: TripState, s: Scene, path: list[Move],
+                        start: float | None = None) -> tuple[list, list | None]:
         """The monsters the chain keeps clear of, and those its run on past its end mustn't take her into (follow's
         tail; None: not tracked here, so the caller tracks the look's if it needs them): the look's state's, all of them
         (trip_monsters: the whole screen's), each walking as perception has it head at its kind's speed from the game
@@ -1071,28 +1128,35 @@ class Navigator:
         map where no kind counts (the first map), none, as before: the chain is planned blind (it fights them instead);
         its tail and whether the next chain follows on (_queue_next) are judged against every one, by her box
         (motion.bodies). While her invulnerability after a touch lasts (POST_HIT) the pass's sightings aren't kept
-        (`st.sighted`: no shot first at one of them, _meet's, _shoot_ahead's or _clear_landing's)."""
+        (`st.sighted`: no shot first at one of them, _meet's, _shoot_ahead's or _clear_landing's). `start`: when the
+        chain's plan time 0 is (time.monotonic; now by default): a chain replanned while one runs (REPLAN: _switch), which
+        leaves the pass's own (its sightings, the cut's monster, the mover's plan time, the 'monsters' record) as they
+        are."""
         if self.fight and not self._threats():
             return [], None
+        replanned, start = start is not None, time.monotonic() if start is None else start
         platforms = _platforms(path)
         unseen = self.fight or UNSEEN_AVOID  # (without an escort too: R5)
         seen = self._on_platforms(self.trip_monsters(s)) if self.fight or UNSEEN_AVOID else s.monsters
-        tracks = self.tracker.update(s.t, seen, seen_at=s.t - time.monotonic())
+        tracks = self.tracker.update(s.t, seen, seen_at=s.t - start)
         placed = [m for m in seen if m.platform is not None]  # (as the tracker keeps them)
         if self.fight or UNSEEN_AVOID:  # walking as the feed has them head, at their kind's speed
             tracks = self._walking(s, tracks, placed)
-        st.sighted = [] if self._post_hit(st) else list(zip(tracks, placed))
+        if not replanned:
+            st.sighted = [] if self._post_hit(st) else list(zip(tracks, placed))
         if unseen:  # and those her memory has there that the look didn't find (not into the tracker's)
-            tracks = tracks + self.remembered(s, platforms, seen, s.t - time.monotonic())
+            tracks = tracks + self.remembered(s, platforms, seen, s.t - start)
         if unseen:  # and the feed's out of sight, and the one the last cut was for (not into the tracker's)
-            tracks = tracks + self.hidden_tracks(s, platforms, tracks, st.came)
-        st.came = None
+            tracks = tracks + self.hidden_tracks(s, platforms, tracks, None if replanned else st.came, start=start)
+        if not replanned:
+            st.came = None
         if (st.toucher or TOUCHER_ALL and not self.fight)                 and (toucher := self._toucher(s, tracks, standing=not st.toucher and TOUCHER_STAND)) is not None:
             # (R7: her retreat; TOUCHER_ALL, every trip without an escort)
             tracks = tracks + [toucher]
-        self._tracks_at = time.monotonic()  # (plan time 0 of these: the mover's checks, Mover.clear)
-        if telemetry.recording():
-            telemetry.emit("monsters", **tracks_record(tracks, self.model))
+        if not replanned:
+            self._tracks_at = start  # (plan time 0 of these: the mover's checks, Mover.clear)
+            if telemetry.recording():
+                telemetry.emit("monsters", **tracks_record(tracks, self.model))
         if not self.fight:
             return tracks, tracks
         return [t for t in tracks if self.escort.threat(t.kind)], tracks
@@ -1213,17 +1277,20 @@ class Navigator:
         until = getattr(self.senses, "invulnerable_until", None)
         return s.t - told > GHOST_S and (until is None or until() <= now)
 
-    def hidden_tracks(self, s: Scene, platforms, tracks: list[MonsterTrack], came=None) -> list[MonsterTrack]:
+    def hidden_tracks(self, s: Scene, platforms, tracks: list[MonsterTrack], came=None,
+                      start: float | None = None) -> list[MonsterTrack]:
         """The monsters the feed follows out of sight on screen as of look `s` that count as about (localization.unseen.
         hidden: last seen within its TRACK_S, none that a kill of hers is on: her memory's `kills`, the ledger's) on
         `platforms`, and `came` (the feed's track of the monster the last chain was cut for, kept for this one:
         TripState.came; seen within tracking.HIDE_S) wherever the feed has it, as tracks walking as followed
         (_track_of), of the kinds the chain keeps clear of; none that one of `tracks` (the look's and her memory's, by
-        kind and platform within what it can have walked since: memory.MATCH_SLACK) is."""
+        kind and platform within what it can have walked since: memory.MATCH_SLACK) is. `start`: when the plan they're
+        for starts (time.monotonic; now by default)."""
         out: list[MonsterTrack] = []
         if not UNSEEN_TRIPS:
             return out
         now = time.monotonic()
+        start = now if start is None else start
         kills = getattr(self.memory, "kills", None)
         cands = hidden(s, kills() if kills is not None else (), platforms)
         if came is not None and not any(tr.id == came.id for tr in cands) and 0 <= s.t - came.last_seen <= HIDE_S:
@@ -1241,7 +1308,7 @@ class Navigator:
             if any(mo.kind == tr.kind and mo.platform == tr.platform and abs(mo.at(0.0, p) - tr.x) <= slack
                    for mo in tracks + out):
                 continue
-            out.append(self._track_of(tr, now))
+            out.append(self._track_of(tr, start))
         return out
 
     def _start(self, st: TripState, s: Scene) -> Body:
@@ -1415,6 +1482,9 @@ class Navigator:
         for step in ("shoot", "around"):
             if step == "shoot" and seen is not None and st.shots < MAX_FIGHTS:
                 kills = self.escort.clear_for(s, seen, finish=st.mode != TRANSIT)
+                place = getattr(self.escort, "shot_place", None) if kills is None and MEET_WALK else None
+                if place is not None and place(s, seen, SHOOT_WALK)[0] is not None:  # (from along her platform)
+                    kills = self.escort.shoot_from(s, seen, SHOOT_WALK, finish=st.mode != TRANSIT)
                 if kills is not None:
                     st.shots += 1
                     st.trip.kills += kills
@@ -1935,15 +2005,15 @@ class Navigator:
             move = path[len(legs)]
 
     def _carry_out_chain(self, st: TripState, s: Scene, path: list[Move], legs: list[Leg], keys, why: str,
-                         dst: int, monsters=()) -> tuple[list[Move], Platform, Scene]:
-        """The chain in one plan, followed on by those planned on the move (follow). Returns the moves
-        made, the platform she should have ended on, and a look once it's over. Cut short, she replans
-        from where she is (from where a touch knocked her: POST_HIT)."""
+                         dst: int, monsters=(), replan: bool = False) -> tuple[list[Move], Platform, Scene]:
+        """The chain in one plan, followed on by those planned on the move (follow), and (`replan`: a pass's own
+        chain, REPLAN) replanned as it runs. Returns the moves made, the platform she should have ended on, and a look
+        once it's over. Cut short, she replans from where she is (from where a touch knocked her: POST_HIT)."""
         immune = self.flow.immune
         self.log(f"  {platform_text(s.where.platform)} at x {s.where.x:.0f} ({s.how}): "
                  + _chain_text(legs, len(path), why) + (f" (invulnerable for {immune:.2f} s)" if immune else ""))
         t2 = time.monotonic()
-        cut, legs = self.follow(legs, keys, s.hp, dst, why, st.trip, st, path, monsters, since=s.t)
+        cut, legs = self.follow(legs, keys, s.hp, dst, why, st.trip, st, path, monsters, since=s.t, replan=replan)
         st.trip.time["move"] += time.monotonic() - t2
         st.moved_at = time.monotonic()
         self.actions.facing = None
@@ -2224,6 +2294,14 @@ class Navigator:
         """A look once a chain's plan is over: once she's stopped moving if it was cut short (`cut`),
         else once she's on a platform. Not cut short, it's the look the next pass needs (with the monsters):
         two looks in a row there were half the stop between chains."""
+        landed, self._landed = getattr(self, "_landed", None), None
+        if cut and landed is not None:  # (KNOCK_REPLAN: the first state with her on the ground again, the next pass's)
+            touch = getattr(self.senses, "touch", None)
+            since = f" {landed.t - touch['at']:.2f} s after the touch" if isinstance(touch, dict) else ""
+            self.log(f"    {cut}: plan cut short; on {platform_text(landed.where.platform)} at x {landed.where.x:.0f}, "
+                     f"the knock over{since}: replanning from there at once")
+            st.fresh = landed
+            return landed
         if cut:
             after = self.recover()
             self.log(f"    {cut}: plan cut short; on {platform_text(after.where.platform)} at x "
@@ -2281,7 +2359,8 @@ class Navigator:
         return True
 
     def follow(self, legs, keys, hp: float, dst: int, why: str, trip: Trip, st: TripState | None = None,
-               path: list[Move] | None = None, monsters=(), since: float | None = None) -> tuple[str, list]:
+               path: list[Move] | None = None, monsters=(), since: float | None = None,
+               replan: bool = False) -> tuple[str, list]:
         """Run a chain's plan and keep going like a player, with no stop before the next chain: late in
         it, a look around decides whether one may follow (_look_ahead); once she's back on the ground for
         good, a look places her and the next chain is planned from there (_queue_next), queued so the
@@ -2290,7 +2369,7 @@ class Navigator:
         damage) or her HP lower than `hp` (HIT), or her being on another platform than planned for a few glances,
         cuts the running plan and the queued one short (the player lets go of every key). Returns why it was cut
         ('' if not) and all the legs sent. (`path`: the route the chain is from; `st`: its trip; `monsters`: the
-        ones the chain keeps clear of.)"""
+        ones the chain keeps clear of; `replan`: replanned as it runs, REPLAN.)"""
 
         def send(chain_legs, chain_keys, why: str, tail: float = 0.0) -> tuple[str, float]:
             """Hand a chain's plan to the player: its id, and how long it lasts (s)."""
@@ -2319,8 +2398,9 @@ class Navigator:
         # (A chain queued on the move starts when this one ends, past any lock.)
         self.actions.hold_back(keys.sorted())
         plan_id, length = send(legs, keys, why, tail)
-        current = _Running(plan_id, legs, time.monotonic() + PLAN_START_S, more, tail, length, tuple(monsters))
+        current = _Running(plan_id, legs, time.monotonic() + PLAN_START_S, more, tail, length, tuple(monsters), why=why)
         self._sent_plans = [current.plan_id]  # every plan this chain sent: cancelled if anything fails
+        self._replanning = replan and st is not None
         self.actions.pressed = True
         try:
             return self._watch(current, hp, dst, send, st, since)
@@ -2362,6 +2442,9 @@ class Navigator:
     def _watching(self, current, hp, dst, send, st, since, queued, sent, cut, stood, off_since, off_leg, ahead, over,
                   first, moved, first_at, last_at, dot, glanced, top, checked, withdrawn) -> tuple[str, list]:
         """_watch's loop, its state handed in (the queued chains it withdrew, `withdrawn`, waited for by _watch)."""
+        replan = getattr(self, "_replanning", False)
+        better_at = time.monotonic() + BETTER_EVERY_S  # (the next look for a better way: REPLAN)
+        touch = None
         while True:
             # The look around goes late in the chain: from where she starts, where she's going can be
             # off screen (from platform 34 the basin's slimes were under the status bar).
@@ -2411,6 +2494,14 @@ class Navigator:
             self.senses.wait_frame(GLANCE_S)
             dot, now_hp = self.senses.glance()
             seen_at = self.senses.glanced_at
+            if current.parent is not None and (taken := client.taken(current.plan_id)) is not None:
+                if not taken:  # (the plan it was to take over from was over first: she stopped where that ends)
+                    self.log("    the replanned chain wasn't taken in time (its plan was over): she stops there")
+                    telemetry.emit("event", kind="replan", text="not taken: the plan it was for was over first")
+                    self._ended(current.plan_id, cut=True)
+                    cut = "off the path (the replanned chain wasn't taken in time)"
+                    break
+                current = current._replace(parent=None)
             if QUEUE_CHECK and queued is not None and checked is not queued \
                     and queued.start - time.monotonic() <= 2 * GLANCE_S:
                 checked = queued
@@ -2450,10 +2541,33 @@ class Navigator:
                 if off_since is not None and seen_at - off_since >= (OFF_LEG_S if off_leg else OFF_PATH_S):
                     where = f"still at x {behind:.0f}" if behind is not None else f"on {on.id if on else 'nothing'}"
                     cut = f"off the path ({where}, planned {want or leg.end.platform.id})"
-            if not cut and REACT and (coming := self._coming(current)) is not None:
+            switched = None
+            if not cut and REACT and (coming := self._coming(current, room=not replan)) is not None:
                 mo, t, tid = coming
                 self._reacted[tid] = time.monotonic()
-                cut = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
+                why = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
+                switched = self._switch(st, current, dst, why, "monster") if replan else None
+                if switched is None and (not replan or self._room_to_stop(current, time.monotonic() - current.start)):
+                    cut = why
+            elif not cut and replan and time.monotonic() >= better_at:
+                better_at = time.monotonic() + BETTER_EVERY_S
+                switched = self._switch(st, current, dst, "a better way", "better")
+            if switched is not None:  # (handed over: the running plan's rest is the new chain's)
+                if not top:
+                    self._keys_seen(current, glanced, until=switched.start)
+                if queued is not None:  # (planned to follow the running plan's end: withdrawn)
+                    if not client.cancel(queued.plan_id):
+                        withdrawn.append(queued.plan_id)
+                    sent = sent[:len(sent) - len(queued.legs)]
+                    queued = None
+                at = (switched.start if switched.parent is not None else time.monotonic()) - current.start
+                kept = [leg for leg in current.legs if leg.end.t <= at + 1e-6]  # (made: the leg she's on is the new one's)
+                sent = sent[:len(sent) - len(current.legs)] + kept + list(switched.legs)
+                self._sent_plans.append(switched.plan_id)
+                current, ahead, checked, over, top = switched, None, None, False, False
+                stood, off_since, off_leg, glanced = None, None, False, []
+                first, moved = None, False
+                continue
             if cut:
                 if not top:
                     still = cut.startswith("off the path (still")  # (her dot standing where the plan runs her)
@@ -2470,6 +2584,8 @@ class Navigator:
                     sent = sent[:len(sent) - len(queued.legs)]
                 if climbing is not None:
                     self._climb_on(*climbing)
+                elif cut.startswith(TOUCHED) and REPLAN and KNOCK_REPLAN:  # (the next pass plans from where it lands her)
+                    self._landed = self._knock_landing(touch)
                 break
             if client.done(current.plan_id):
                 client.wait(current.plan_id)
@@ -2480,6 +2596,213 @@ class Navigator:
         if not cut and not top and not over:  # (the last chain's end: over, its glances seen through; cut: told above)
             self._keys_seen(current, glanced)
         return cut, sent
+
+    # --- replanning while a chain runs (REPLAN) ------------------------------------------------------
+
+    def _switch(self, st: TripState | None, running: _Running, dst: int, why: str, kind: str) -> _Running | None:
+        """REPLAN: the running chain replanned from where she'll be when new keys can act (_splice_point: SPLICE_LEAD_S
+        on), against the newest state's monsters, all of them (the glance's: `_state_scene`, its whole screen, each
+        walking as perception has it head at its kind's speed from the game data, her memory's and the feed's out of
+        sight), its route the trip's (_route), its landings priced as the pass prices them, no wider takeoffs (flow.chain's
+        `spread`: within a state's budget), and handed over in place of the rest of the running plan (`_take_over`).
+        Only from the ground, where the state has her on the platform the plan has her on then and within SPLICE_DRIFT
+        of where it has her, her start put where she is (the plan's place shifted by what the state measured): in a
+        flight, or past a takeoff's key (`_splice_point` past now's), not yet: the next state asks again once she's down
+        (planned from a predicted landing, a landing 12.5 units off made the next running jump leave 12.5 units early,
+        and one late put the next chain's keys in the air: _queue_next's). `kind` 'monster': a monster coming into the
+        running chain's way (REACT): taken if anything chains. 'better': taken where the running chain stops short
+        (for a monster, a move it can't predict, or cut off for length with nothing to follow on) and the new one goes
+        the same way on past where it stops; or the new one's route isn't the running one's and costs SWITCH_GAIN_S
+        less by the route planner's own costs (Planner.quickest against the running way, Planner.through its next
+        move: the same estimates both); SWITCH_MIN_S after the last switch at the soonest either way. None: nothing taken
+        (no state, she's in the air or not where the plan has her, no route, nothing chains, or not worth it)."""
+        state = getattr(self.senses, "glanced", None)
+        if st is None or state is None or not getattr(state, "placed", False):
+            return None
+        now = time.monotonic()
+        if kind == "better" and now - st.switched_at < SWITCH_MIN_S:
+            return None
+        soonest = now + SPLICE_LEAD_S - running.start
+        point = self._splice_point(running, soonest)
+        if point is None or point[0] > soonest + 1e-6:
+            return None  # (in a flight or past a takeoff's key: asked again once she's down)
+        at, body = point
+        if at > running.legs[-1].end.t + 1e-6 or body.platform.id == dst:
+            return None  # (past its end, or she gets there with it: the next pass goes on from there)
+        mx, _, on, _ = state.where
+        seen = self._splice_point(running, state.t - running.start)
+        if on != body.platform.id or seen is None or seen[1].platform is not body.platform                 or abs(mx - seen[1].x) > SPLICE_DRIFT:
+            return None  # (not where the plan has her: her off-path checks deal with it)
+        p = body.platform
+        body = replace(body, x=p.clamp(body.x + (mx - seen[1].x)))
+        s = self._state_scene(state, body)
+        if s is None:
+            return None
+        t0 = time.perf_counter()
+        start = running.start + at  # when the new plan's keys take over (its plan time 0)
+        kept = [leg.move for leg in running.legs if leg.end.t <= at + 1e-6]
+        self._gone_by(st, kept)  # (the moves she has set off on: the way the trip chose, Choice)
+        path, _ = self._route(st, p.id, body.x, dst)
+        if not path:
+            return None
+        rest = [leg.move for leg in running.legs if leg.end.t > at + 1e-6 and leg.move.kind != "hop"]
+        same = bool(rest) and _same_moves(path, rest)
+        if kind == "better":
+            stops = running.why in ("monster", "unpredictable") or running.why == "long" and not running.more
+            if same and not (stops and len(path) > len(rest)):
+                return None  # (the same way, and the running chain doesn't stop short of where this one goes)
+            if same and self._stop_calls(st, state, running):
+                return None  # (where it stops, the trip's pass has her fight or end there: no running on past it)
+            if not same:
+                penalty = self._penalty(st)
+                old = self.planner.through(p.id, body.x, dst, rest[0], penalty, self.weight) if rest else None
+                new = self.planner.quickest(p.id, body.x, dst, penalty, self.weight)
+                if old is None or new is None or not new.cost + SWITCH_GAIN_S < old.cost:
+                    return None
+                why = f"{why} ({old.cost - new.cost:.2f} s sooner by route)"
+        monsters, near = self._chain_monsters(st, s, path, start=start)
+        self._immunity(start)
+        price, alts, goal = self._pricing(st, monsters)
+        legs, keys, why_c = self.flow.chain(path, body, monsters, keep_going=True, hops=not self.fight, price=price,
+                                            alts=alts, goal=goal, spread=False)
+        if not legs:
+            return None
+        if kind == "better" and same:
+            done = sum(1 for leg in legs if leg.move.kind != "hop")
+            if done <= len(rest) and why_c == running.why:
+                return None  # (it stops where the running one does: nothing gained)
+            why = f"{why}: on past where it stopped ({running.why})"
+        think_ms = (time.perf_counter() - t0) * 1000
+        return self._take_over(st, running, at, path, legs, keys, why_c, why, kind, near if near is not None else monsters,
+                               think_ms)
+
+    def _take_over(self, st: TripState, running: _Running, at: float, path: list[Move], legs: list[Leg], keys,
+                   why_c: str, why: str, kind: str, known, think_ms: float) -> _Running:
+        """The new chain handed over in place of the running plan's rest at its plan time `at`: spliced (client.splice:
+        the arrow her new start holds kept held, no key let go between) where the player takes splices
+        (client.can_splice), else the running plan cut and the new one sent at once, its keys from `at` on (a player
+        started before splices: every key let go for the cut, 15-35 ms). Said (the log, a 'chain' and a 'replan' record),
+        and the running chain the new one's (_Running: `parent` the plan it takes over from, until the player has taken
+        it: client.taken)."""
+        trip = st.trip
+        # A chain cut off for length runs on into the next, planned on the move (follow's tail: _look_ahead,
+        # _queue_next), where there's room; else she stops where it ends, as follow has it.
+        tail = self._tail(legs, path, known) if why_c == "long" else None
+        if why_c == "long" and tail is None:
+            keys.set_arrow(legs[-1].end.t, 0)
+        events = keys.sorted()
+        last_key = max(e[0] for e in events)
+        end_ms = max(last_key, ms(legs[-1].end.t + (tail or 0.0)))
+        body = legs[0].start
+        held = [self.flow.key_names[directions.toward(body.run)]] if body.run else []
+        plan_kind = getattr(self.actions, "kind", None)
+        spliced = client.can_splice()
+        if spliced:
+            plan_id = client.splice(running.plan_id, events, ms(at), held, end_ms=end_ms, name="flow", kind=plan_kind)
+            start, parent = running.start + at, running.plan_id
+        else:
+            if not client.cancel(running.plan_id):
+                client.wait(running.plan_id)
+            self._ended(running.plan_id, cut=True)
+            begins = time.monotonic() + PLAN_START_S
+            shift = ms(max(0.0, running.start + at - begins))  # (a flight's landing: its keys from then on)
+            events = [[e[0] + shift, *e[1:]] for e in events]
+            plan_id = client.send(events, lead_ms=0, focus=True, name="flow", end_ms=end_ms + shift, kind=plan_kind)
+            start, parent = begins + shift / 1000, None
+        self.actions.sent_at = time.monotonic()
+        self._tails[plan_id] = (end_ms - last_key) / 1000  # (its run on past its last key: _ended)
+        trip.chains += 1
+        trip.replans += 1
+        st.switched_at = time.monotonic()
+        st.path = path
+        if telemetry.recording():
+            telemetry.emit("chain", **chain_record(legs, why_c))
+            telemetry.emit("replan", why=why, kind=kind, at=round(at, 3), spliced=spliced, legs=len(legs),
+                           think_ms=round(think_ms, 2), first=f"{legs[0].move.kind} {legs[0].move.src}->{legs[0].move.dst}")
+        self.log(f"    {why}: replanned from {at:.2f} s into the plan ({'spliced' if spliced else 'cut and sent'}), "
+                 f"on {body.platform.id} at x {body.x:.0f}: " + _chain_text(legs, len(path), why_c))
+        return _Running(plan_id, legs, start, tail is not None, tail or 0.0, end_ms / 1000, tuple(known), parent=parent,
+                        why=why_c)
+
+    def _splice_point(self, running: _Running, t: float) -> tuple[float, Body] | None:
+        """Where the running plan can be taken over from at its plan time t at the soonest: (its plan time then, her body
+        then as a new plan's start, at its time 0). On the ground in a run or standing on a leg (its spans and stands):
+        t, there, the arrow the run holds held (Body.run) at its speed; else, from where a flight or a climb the leg is
+        in lands her (its end), and from that leg's takeoff key on less KEY_COMMIT_S (the game has it before new keys
+        could act: KEY_LEAD: a jump's key, a drop's, a walk-off's stop) too: nothing changes a flight. None past the plan's
+        end."""
+        for leg in running.legs:
+            if leg.end.t <= t + 1e-9:
+                continue
+            off = [a.t0 for a in leg.air] + [c.t0 for c in leg.rope]
+            if off and t >= min(off) - KEY_LEAD.get(leg.move.kind, KEY_LEAD["jump"]) - KEY_COMMIT_S:
+                return leg.end.t, replace(leg.end, t=0.0, early_arrow=None)
+            for sp in leg.spans:
+                if sp.t0 - 1e-9 <= t <= sp.t1 + 1e-9:
+                    dx, dt = sp.x1 - sp.x0, sp.t1 - sp.t0
+                    d = 0 if abs(dx) < 1 else (1 if dx > 0 else -1)
+                    v = max(-WALK_SPEED, min(WALK_SPEED, dx / dt)) if d and dt > 0 else 0.0
+                    return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform), d, v=v)
+            for sp in leg.stands:
+                if sp.t0 - 1e-9 <= t <= sp.t1 + 1e-9:
+                    return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform))
+            if t < leg.start.t:
+                return leg.start.t, replace(leg.start, t=0.0, early_arrow=None)
+            return None
+        return None
+
+    def _stop_calls(self, st: TripState, state, running: _Running) -> bool:
+        """Whether, where the running chain stops (its last leg's end), what the trip's pass asks first would call for
+        her there: the trip's `until` (the hunt loop's: a target in reach she may shoot, a pile, close quarters:
+        Hunt._interrupt) or, in hunt mode, a monster in reach to shoot on the way (Escort.target), as the state has the
+        monsters; not while her invulnerability after a touch lasts (POST_HIT: neither is asked then). A chain that stops
+        there isn't run on past it (`_switch`'s 'better'): the pass decides there, as it would have."""
+        if self._post_hit(st):
+            return False
+        end = running.legs[-1].end
+        there = self._state_scene(state, end)
+        if there is None:
+            return True  # (not known: as it was, she stops)
+        if st.until is not None and st.until(there):
+            return True
+        return self._mode == HUNT and st.tries.get(end.platform.id, 0) < ON_WAY_TRIES             and self.escort is not None and self.escort.target(there) is not None
+
+    def _state_scene(self, state, body: Body) -> Scene | None:
+        """A glance's state (worldstate.WorldState) as a look with the whole screen's monsters (worldstate.to_scene), her
+        put where `body` has her; None where it can't place them (her name tag not found)."""
+        s = to_scene(state, self.model, self.senses.band, mobs=True, wide=True)
+        if s.where is None or not s.searched:
+            return None
+        p = body.platform
+        s.where = replace(s.where, x=body.x, y=p.y_at(p.clamp(body.x)), platform=p)
+        return s
+
+    def _knock_landing(self, touch: dict | None) -> Scene | None:
+        """KNOCK_REPLAN: after a touch cut the running plan, the first state that has her on the ground again, as a look
+        with the monsters (Senses.look of that very state: no wait), for the next pass to plan from at once (no wait for
+        her to stand still, no look of its own: recover's 0.13 s median, p90 0.33, and its look's frame, live): from
+        KNOCK_AIR_S after the touch's popup (her knock's flight), the scene's mode 'ground' where it has one, else her
+        place on a platform at the height the state before had it (LANDED_DY), and the look standing (`standing`).
+        None if none does within KNOCK_LAND_S (then she's waited for as before: recover)."""
+        since = touch.get("at", time.monotonic()) if isinstance(touch, dict) else time.monotonic()
+        end, prev = time.monotonic() + KNOCK_LAND_S, None
+        while time.monotonic() < end:
+            self.senses.wait_frame(GLANCE_S)
+            self.senses.glance()
+            state = getattr(self.senses, "glanced", None)
+            w = getattr(state, "where", None)
+            if state is None or w is None or not getattr(state, "placed", False):
+                continue
+            mode = getattr(state, "mode", None)
+            on = w[2] is not None and (mode == "ground" if mode is not None else
+                                       prev is not None and abs(prev[1] - w[1]) <= LANDED_DY)
+            prev = w
+            if state.t < since + KNOCK_AIR_S or not on:
+                continue
+            s = self.senses.look(mobs=True, wide=not self.fight, after=state.t)
+            if s.where is not None and s.where.platform is not None and standing(s):
+                return s
+        return None
 
     def _keys_seen(self, running: _Running, glanced: list, until: float | None = None, runs: bool = True) -> None:
         """What her dot showed of a chain's jumps and runs (the glances `glanced`: frame times and dots), told to
@@ -2607,17 +2930,18 @@ class Navigator:
         if hasattr(self.actions, "ended"):  # (a stand-in for Actions may not have it)
             self.actions.ended(0.0 if cut else tail)
 
-    def _coming(self, running: _Running) -> tuple[MonsterTrack, float, int] | None:
+    def _coming(self, running: _Running, room: bool = True) -> tuple[MonsterTrack, float, int] | None:
         """A monster the feed follows (the last glance's state: Senses.glanced) that the running chain's legs ahead of
-        her now meet, REACT_LEAD_S on at the soonest, while she's on the ground: it, when (plan time) and its track's
-        id; None if none, without a feed's glance, in the air or on a rope. Only the kinds the chain keeps clear of
-        (with an escort, those whose touch counts), each once in REACT_AGAIN_S (see REACT)."""
+        her now meet, REACT_LEAD_S on at the soonest, while she's on the ground with room to stop (`room`; else
+        wherever she is: REPLAN replans from where she'll be): it, when (plan time) and its track's id; None if none,
+        without a feed's glance, or (`room`) in the air or on a rope. Only the kinds the chain keeps clear of (with an
+        escort, those whose touch counts), each once in REACT_AGAIN_S (see REACT)."""
         state = getattr(self.senses, "glanced", None)  # (a stand-in for Senses may not have it)
         if state is None or not state.placed or (self.fight and not self._threats()):
             return None
         now = time.monotonic()
         t = now - running.start
-        if not self._room_to_stop(running, t):
+        if room and not self._room_to_stop(running, t):
             return None
         tracks, ids, raw, seen = [], [], [], state.t - running.start
         for tr in state.tracks:
@@ -2929,6 +3253,11 @@ def _after(running: "_Running", path: list[Move]) -> list[Move]:
     """The moves of `path` (the route the running chain was planned from) after the chain's: hops are the chain's own,
     not the route's."""
     return path[sum(1 for leg in running.legs if leg.move.kind != "hop"):]
+
+
+def _same_moves(a: list[Move], b: list[Move]) -> bool:
+    """Whether two routes go the same way as far as both go (each move's kind, from and onto: not where it takes off)."""
+    return all((m.kind, m.src, m.dst) == (n.kind, n.src, n.dst) for m, n in zip(a, b))
 
 
 def _ground_from(leg: Leg) -> float:

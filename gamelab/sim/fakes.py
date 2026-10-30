@@ -119,6 +119,9 @@ MISS_RISE = 30.0
 EXP_START = (LEVEL_19.level, LEVEL_19.exp)  # her level and EXP when a run starts on the first map (World.character's)
 START_LATENCY = 0.01      # a plan starts this long after it's handed over (the player polls its inbox)
 RESULT_LATENCY = 0.01     # ... and its result is seen this long after it ends
+# A splice (client.splice) is seen by the player within its wait step (player.WAIT_STEP_S, 15 ms) and read (~2 ms): it
+# takes over at its time, or then if that's sooner; one it sees only once the plan it's for is over is never taken.
+SPLICE_SEEN_S = 0.017
 
 
 _PLAIN: list = []
@@ -837,10 +840,14 @@ class Plan:
     sent: float
     start: float = 0.0
     end: float = 0.0
-    state: str = "queued"  # queued | withdrawn | cut
+    state: str = "queued"  # queued | withdrawn | cut | spliced (another took over from it) | untaken (a splice never
+                           # taken: the plan it was for was over first)
     error: str | None = None
     kind: str | None = None   # client.send's: what it is to the player with the Lie Detector alarm up
     alarm: str | None = None  # the Lie Detector error it's answered with: refused at its start, or stopped by the alarm
+    parent: str | None = None  # a splice's: the plan it takes over from (client.splice)
+    spliced: dict | None = None  # ... and that plan's: what took over from it, at what ms, how late (its result's)
+    held: tuple = ()           # a splice's keys held at its start (client.splice's `held`)
 
 
 @dataclass
@@ -848,6 +855,7 @@ class Trace:
     t0: float
     plans: list = field(default_factory=list)    # [t sent, name, events, end_ms]
     cancels: list = field(default_factory=list)  # [t, plan index, withdrawn (not started yet)]
+    splices: list = field(default_factory=list)  # [t, plan index, the index of the plan it takes over from, at_ms, taken]
     log: list = field(default_factory=list)
 
     def at(self, t: float) -> float:
@@ -871,6 +879,7 @@ class FakePlayer:
         self.pages: list[list] = []          # whoever is at the PC paged (control.alarm.page): [s, title, text]
         self.pointer = (683, 384)            # where the plans' mouse moves left the pointer (client px): a click's place
         self.kept: list[list] = []           # the recording's saves asked (control.alarm.keep_recent): [s, s, name]
+        self.splices = True                  # it takes splices (can_splice; False: a player started before them)
 
     # --- the Lie Detector (client.check_alarm, alarm_up, alarm_age) -------------------------------------------------
 
@@ -926,13 +935,93 @@ class FakePlayer:
         return self.wait(self.send(events, fps=fps, duration_ms=duration_ms, crop=crop, scale=scale, focus=focus,
                                    lead_ms=lead_ms, name=name, kind=kind), timeout)
 
+    def can_splice(self) -> bool:
+        """The player in a simulated run takes splices (client.can_splice), unless the run says otherwise
+        (`splices`: False, the fallback of a player started before them)."""
+        return self.splices
+
+    def splice(self, running_id: str, events=(), at_ms: int = 0, held=(), *, end_ms: int | None = None,
+               name: str = "plan", kind: str | None = None) -> str:
+        """client.splice: plan `running_id`'s keys from `at_ms` of its clock on withdrawn, and this plan's from then (or
+        from when the player sees it, SPLICE_SEEN_S after it's handed over, if that's later), the keys held then that
+        `held` doesn't have let go, those it has pressed, a 'down' of a key held then left out; never taken if the
+        plan it's for is over (or withdrawn) by the time the player sees it. A plan queued after that one would start
+        after it, as the real player's inbox has it: there mustn't be one (the navigator withdraws it first)."""
+        from ..control.player import validate
+        if kind is None:
+            self.check_alarm()
+        self.clock.charge()
+        now = self.clock.now
+        old = self.plans[running_id]
+        events = [list(e) for e in events]
+        last = max((e[0] for e in events), default=0)
+        p = Plan(f"{name}_{len(self.order):04d}", len(self.order), name, events, 0.0, max(last, end_ms or 0) / 1000,
+                 now, kind=kind, parent=old.id, held=tuple(held))
+        plan = {"events": events, "capture": {"fps": 0, "duration_ms": 0, "scale": 1, "lead_ms": 0}, "focus": False}
+        if end_ms is not None:
+            plan["end_ms"] = end_ms
+        try:
+            validate(plan, self.allowed)
+        except ValueError as e:
+            p.error = str(e)
+        self.trace.plans.append([self.trace.at(now), name, events, end_ms])
+        self.trace.splices.append([self.trace.at(now), p.index, old.index, at_ms, True])
+        self.plans[p.id] = p
+        self.order.append(p)
+        later = [q.id for q in self.order[old.index + 1:p.index] if q.state == "queued" and q.start > now]
+        if later:
+            raise RuntimeError(f"splice into {old.id} with {', '.join(later)} queued after it")
+        seen = max(now + SPLICE_SEEN_S, old.start)
+        if old.state in ("withdrawn", "untaken", "spliced") or seen >= old.end - 1e-9 or p.error:
+            # (over before the player sees it, or refused: the plan it's for ends as it was, this never starts)
+            p.state, p.start, p.end = "untaken", math.inf, math.inf
+            self.trace.splices[-1][4] = False
+            if p.error is None:
+                self.trace.log.append(f"{self.trace.at(now):9.3f} (splice {p.id} into {old.id} never taken)")
+            self.clock.mark()
+            return p.id
+        at = old.start + old.lead + at_ms / 1000
+        take = max(at, seen)
+        held_then = self._held_at(old, take)
+        self.world.withdraw_from(old.id, take)  # (its keys from then on, and its end's release, don't come)
+        want = set(p.held)
+        for k in sorted(held_then - want):
+            self.world.key(take, k, False, p.id)
+        for k in sorted(want - held_then):
+            self.world.key(take, k, True, p.id)
+        old.end, old.state = take, "spliced"
+        old.spliced = {"to": p.id, "at_ms": at_ms, "late_ms": round(max(0.0, take - at) * 1000, 1)}
+        self._schedule(p, take, held=want)
+        self.clock.mark()
+        return p.id
+
+    def taken(self, plan_id: str) -> bool | None:
+        """client.taken: whether splice `plan_id` was taken (None while the plan it's for still runs)."""
+        p = self.plans[plan_id]
+        if p.parent is None:
+            return p.state != "withdrawn"
+        old = self.plans[p.parent]
+        if p.state != "untaken" and self.clock.now < old.end:
+            return None
+        return old.state == "spliced" and (old.spliced or {}).get("to") == p.id
+
+    def _held_at(self, p: Plan, t: float) -> set:
+        """The keys plan `p` holds at clock time t, as it played them (its held keys at its start too: a splice's)."""
+        held = set(p.held)
+        for e in self.played.get(p.id, (None, []))[1]:
+            if e[0] >= t - 1e-9:
+                break
+            if len(e) == 3 and e[2] in ("down", "up"):
+                (held.add if e[2] == "down" else held.discard)(e[1])
+        return held
+
     def done(self, plan_id: str) -> bool:
         p = self.plans[plan_id]
-        return p.state != "withdrawn" and self.clock.now >= p.end
+        return p.state not in ("withdrawn", "untaken") and self.clock.now >= p.end
 
     def wait(self, plan_id: str, timeout: float = 120) -> dict:
         p = self.plans[plan_id]
-        if p.state == "withdrawn":
+        if p.state in ("withdrawn", "untaken"):
             raise client.PlayerError(f"plan {plan_id} was withdrawn: no result will come")
         self.clock.charge()
         self.clock.advance_to(p.end + RESULT_LATENCY)
@@ -941,6 +1030,9 @@ class FakePlayer:
             raise client.PlayerError(p.error)
         if p.alarm:
             raise client.LieDetectorAlarm(p.alarm)
+        if p.state == "spliced":
+            return {"sent": [[round(e[0]), *e[1:]] for e in p.events], "problems": [client.SPLICED],
+                    "spliced": dict(p.spliced or {})}
         return {"sent": [[round(e[0]), *e[1:]] for e in p.events],
                 "problems": ["cancelled"] if p.state == "cut" else []}
 
@@ -949,8 +1041,21 @@ class FakePlayer:
         to start at this very moment hasn't pressed anything yet (the world at time t has taken the key
         events before t, not those at t): it's withdrawn."""
         p, now = self.plans[plan_id], self.clock.now
-        if p.state == "withdrawn":
+        if p.state in ("withdrawn", "untaken"):
             return True
+        if p.parent is not None and now <= p.start:  # a splice not taking over yet: it and the plan it's for cut now
+            old = self.plans[p.parent]
+            if old.state == "spliced" and now < old.end:
+                self.world.advance(now)
+                self.world.withdraw(old.id)
+                self.world.withdraw(p.id)
+                self.world.release_all(now, p.id)
+                old.end, old.state = now, "cut"
+                p.start = p.end = now
+                p.state = "cut"
+                self.free_from = now + START_LATENCY
+                self.trace.cancels.append([self.trace.at(now), p.index, False])
+                return False
         if now <= p.start:  # not picked up yet: withdrawn
             self.world.withdraw(p.id)
             p.state = "withdrawn"
@@ -973,7 +1078,9 @@ class FakePlayer:
         before = [q.end for q in self.order[:p.index] if q.state != "withdrawn"]
         return max([p.sent + START_LATENCY, self.free_from] + before)
 
-    def _schedule(self, p: Plan, start: float) -> None:
+    def _schedule(self, p: Plan, start: float, held=()) -> None:
+        """Plan `p`'s keys on the world from `start` (`held`: the keys held then, a splice's: a 'down' of one held is
+        left out)."""
         p.start, p.end = start, start + p.length
         self.played.pop(p.id, None)
         self.fed.pop(p.id, None)
@@ -984,7 +1091,7 @@ class FakePlayer:
         if cutoff <= start:  # refused for the Lie Detector, nothing pressed
             p.end = start
             return
-        played = []
+        played, down = [], set(held)
         for e in p.events:
             at = start + p.lead + e[0] / 1000
             if at >= cutoff:  # stopped by the alarm (or her retreat's window): nothing after
@@ -995,6 +1102,9 @@ class FakePlayer:
                 if e[2] == "down":
                     self.world.click(at, *self.pointer, p.id)
             elif len(e) == 3 and e[2] in ("down", "up"):
+                if e[2] == "down" and e[1] in down:  # (held already: left down, as the player does)
+                    continue
+                (down.add if e[2] == "down" else down.discard)(e[1])
                 self.world.key(at, e[1], e[2] == "down", p.id)
             played.append([round(at, 4), *e[1:]])
         p.end = min(p.end, cutoff)
@@ -1065,7 +1175,8 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
     try:
         for name in ("monotonic", "sleep", "time", "perf_counter", "strftime"):
             put(time, name, getattr(clock, "monotonic" if name == "perf_counter" else name))
-        for name in ("submit", "send", "done", "wait", "cancel", "check_alarm", "alarm_up", "alarm_age"):
+        for name in ("submit", "send", "done", "wait", "cancel", "check_alarm", "alarm_up", "alarm_age", "splice",
+                     "taken", "can_splice"):
             put(client, name, getattr(player, name))
         from ..control import alarm
         put(alarm, "page", player.page)

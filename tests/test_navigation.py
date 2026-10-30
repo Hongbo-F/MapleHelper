@@ -1607,6 +1607,30 @@ def test_a_trip_with_an_escort_shoots_first_a_monster_that_could_touch_her_on_th
     assert st.shots == 0
 
 
+def test_a_monster_in_the_way_no_star_reaches_from_where_she_stands_is_shot_from_along_her_platform(model, monkeypatch):
+    """navigator.MEET_WALK (2026-10-30, the user: "in general you should kill all the mobs that are in the way"): where
+    no star reaches the monster in the way of the route's first move from where she stands (Escort.clear_for: None),
+    she walks along her platform to where her attack reaches it, SHOOT_WALK at most (Escort.shot_place, shoot_from: as
+    the landing's shot first), before a way around; where there's no such place, a way around as before; off, as
+    before."""
+    import gamelab.control.navigator as nv
+    c = by_y(model, 500, 400)
+    escort = _escort(shots=None)
+    walked = []
+    escort.shot_place = lambda s, m, most: (430.0, "") if most == nv.SHOOT_WALK else (None, "")
+    escort.shoot_from = lambda s, m, most, finish=True: walked.append((m, most, finish)) or 1
+    nav, st, s, path, monsters = _meeting(model, monkeypatch, escort, (c.id, 450))
+    legs, keys, why = nav._chain(st, s, path, monsters, 0.0)
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True
+    assert walked == [(s.monsters[0], nv.SHOOT_WALK, False)] and st.shots == 1 and st.trip.kills == 1 and not st.avoid
+    escort.shot_place = lambda s, m, most: (None, "no throw from the ground takes it")
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid and len(walked) == 1
+    monkeypatch.setattr(nv, "MEET_WALK", False)
+    st.avoid.clear()
+    escort.shot_place = lambda s, m, most: (430.0, "")
+    assert nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0) is True and st.avoid and len(walked) == 1
+
+
 def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(model, monkeypatch):
     """Navigator._meet with no star reaching it: the move costs extra so a way around is taken (st.avoid: here there's
     none, so the next pass plans the same move); then, one in the way of a run along her platform, she hops it
