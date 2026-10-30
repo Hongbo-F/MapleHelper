@@ -66,6 +66,7 @@ from .looting import Looter, worth_for
 from .pet import PetCare
 from .bootstrap import Defence, HerStats, session_of_feed
 from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
+from .chatcheck import ChatCheck, ChatDue
 from .statcheck import StatCheck, StatsDue
 from .safety import kinds_of as map_kinds
 
@@ -323,6 +324,9 @@ class Hunter:
         # Her stat window (behavior.statcheck): opened, read and closed at a hunt's start (read_stats, from gamelab.
         # __main__'s _hunter) for her W.DEF; put off there (not quiet), raised again in the hunt loop (StatsDue)
         self.stat_check: StatCheck | None = None
+        # Her chat box (behavior.chatcheck): collapsed at a hunt's start if it's expanded (collapse_chat, from gamelab.
+        # __main__'s _hunter, before her stat window); put off there (not quiet), raised again in the hunt loop (ChatDue)
+        self.chat_check: ChatCheck | None = None
         self.refused_dot = None  # her dot (minimap px) at the game's last refusal of her presses on a rope ...
         self.off_tries = 0       # ... and the tries since to get her off it with her dot there
         if LAST_LOOK:
@@ -608,11 +612,27 @@ class Hunter:
                 and (doubt := watch.again(time.monotonic())) is not None):
             self.log("  the key check put off: a quiet moment now")
             raise KeyDoubt(doubt)  # (a check put off: tried again at a quiet look, keycheck.KeyCheck._defer)
+        cc = getattr(self, "chat_check", None)  # (her chat box's collapse put off: behavior.chatcheck)
+        if (cc is not None and cc.pending and self.doubts_raise and cc.again(time.monotonic())
+                and unquiet(self, s) is None):
+            self.log("  the chat box's collapse put off: a quiet moment now")
+            raise ChatDue(s)  # (the hunt loop collapses it, this look its first: collapse_chat)
         sc = getattr(self, "stat_check", None)  # (her stat window's read put off: behavior.statcheck)
         if (sc is not None and sc.pending and self.doubts_raise and sc.again(time.monotonic())
                 and unquiet(self, s) is None):
             self.log("  her stat window put off: a quiet moment now")
             raise StatsDue()  # (the hunt loop reads it: read_stats)
+
+    # --- her chat box (behavior.chatcheck) --------------------------------------------------------------------------
+
+    def collapse_chat(self, at_start: bool = False, look=None):
+        """Her chat box collapsed if it's expanded (chatcheck.ChatCheck.run): at a hunt's start (`at_start`: gamelab.
+        __main__'s _hunter, before her stat window's read), and in the hunt loop when a collapse put off there comes due
+        (ChatDue: `look`, the quiet look it was raised at). Its outcome. Raises SafetyStop (at every look of it) and
+        client.LieDetectorAlarm."""
+        if self.chat_check is None:
+            self.chat_check = ChatCheck(self)
+        return self.chat_check.run(at_start=at_start, look=look)
 
     # --- her stat window (behavior.statcheck) ----------------------------------------------------------------------
 

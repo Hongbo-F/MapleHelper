@@ -285,6 +285,9 @@ class WorldState:
     # in, which a number's is up to touches.HP_WAIT_S after its popup's `at`); None: none yet. Every state has it, so a
     # glance at any state after it knows of it (the 'touch' event is the frame's that told it alone).
     touch: dict | None = None
+    # Her chat box as this frame showed it (perception.chatbox.ChatBox: expanded, collapsed or unknown; the look's,
+    # Observation.chat); None: not read (the simulator's eyes, a frame not visible)
+    chat: object | None = None
 
     @property
     def placed(self) -> bool:
@@ -630,7 +633,7 @@ class WorldStep:
             band_at=self.band_at, wide_at=self.wide_at, mesos_only=self.mesos_only,
             tracks=snapshot(list(self.tracker.tracks.values())), events=events, work=work, frame=s.frame, geo=s.geo,
             bad=s.bad, hp_of=self.hp_number.of if s.bad is None else None,
-            level_of=self.lv_number.level if s.bad is None else None, touch=self.touch)
+            level_of=self.lv_number.level if s.bad is None else None, touch=self.touch, chat=getattr(s, "chat", None))
         if job is not None:  # (its answer is merged only after this) the re-finds the tracker took, as inline
             job.known.update({tid: m for tid, m in refound.items() if tid in self.tracker.refound_seen})
             job.state = st
@@ -1026,7 +1029,8 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
               tag_seen=st.tag_seen, players=list(st.players), geo=st.geo, tracks=list(st.tracks),
               hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None), touch=getattr(st, "touch", None),
               feet=getattr(st, "feet", None), view=getattr(st, "view", None), view_sure=getattr(st, "view_sure", False),
-              mode=getattr(st, "mode", None), confidence=getattr(st, "confidence", None))
+              mode=getattr(st, "mode", None), confidence=getattr(st, "confidence", None),
+              chat=getattr(st, "chat", None))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

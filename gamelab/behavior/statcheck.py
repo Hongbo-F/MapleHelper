@@ -160,14 +160,23 @@ def stats_key(keys, character: str | None = None) -> tuple[str | None, str]:
     else KEY (S: ABILITY in her key bindings of 2026-10-28, lab/shots/keyconfig.png); refused where it's one of her own
     keys (config.toml [keys] as she plays them: `keys`, a GameKeys), Esc, the backslash or maplehelper's hotkeys
     (keycheck.NOT_ATTACK), or her remembered bindings have ABILITY on no key."""
+    return bound_key(sw.FUNCTION, sw.KEY, "S, ABILITY's in her key bindings of 2026-10-28 (none remembered since)", keys,
+                     character)
+
+
+def bound_key(function: str, default: str, default_source: str, keys,
+              character: str | None = None) -> tuple[str | None, str]:
+    """The key of the game's `function` (its name in the key bindings window: perception.keybindings.FUNCTIONS) and
+    where it's from, or (None, why not): its key in her remembered key bindings (`_remembered`), else `default` (said
+    as `default_source`); refused as `stats_key` says (behavior.chatcheck's CHAT+ too)."""
     fn, where = _remembered(character)
     if fn is not None:
-        on = sorted(k for k, f in fn.items() if f == sw.FUNCTION)
+        on = sorted(k for k, f in fn.items() if f == function)
         if not on:
-            return None, f"ABILITY on no key in her remembered key bindings ({where})"
-        key, source = on[0], f"ABILITY's in her remembered key bindings ({where})"
+            return None, f"{function} on no key in her remembered key bindings ({where})"
+        key, source = on[0], f"{function}'s in her remembered key bindings ({where})"
     else:
-        key, source = sw.KEY, "S, ABILITY's in her key bindings of 2026-10-28 (none remembered since)"
+        key, source = default, default_source
     if key in NOT_ATTACK:
         return None, f"{key.upper()} ({source}) isn't a key to press for it"
     mine = {}

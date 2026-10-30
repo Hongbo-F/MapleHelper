@@ -33,7 +33,7 @@ import numpy as np
 
 from .. import capture, paths, telemetry, window
 from ..screen import STRETCHED, Geometry
-from . import framecheck
+from . import chatbox, framecheck
 from .exp_number import read_box
 from .hp_number import read_box as hp_read_box
 from .lv_number import read_box as lv_read_box
@@ -131,6 +131,10 @@ class Observation:
     view: tuple[int, int] | None = None
     view_sure: bool = False
     located: object | None = None
+    # Her chat box, expanded or collapsed (perception.chatbox.ChatBox: its +/- button and input row, at 1366x768; its
+    # state UNKNOWN at other sizes, its button covered), read off every frame of the client's size, one that fails its
+    # checks too; None: not read (the simulator's eyes)
+    chat: chatbox.ChatBox | None = None
 
     @property
     def floor_y(self) -> int | None:
@@ -211,11 +215,12 @@ class Eyes:
             raise ValueError(f"a frame of {full.shape[1]}x{full.shape[0]}; these eyes are for "
                              f"{geo.client[0]}x{geo.client[1]}")
         hp, mp = bars(full)
+        chat = chatbox.read(full)  # (35-80 us; on a frame that fails its checks too: it's of the UI's own px)
         k = geo.look_scale
         frame = full if k == 1 else cv2.resize(full, (full.shape[1] // k, full.shape[0] // k),
                                                interpolation=cv2.INTER_AREA)
         if self.check_frames and (bad := framecheck.frame_problem(full, geo)) is not None:  # before her name tag,
-            return self._refused(t, frame, bad)                         # whose template is cut from the first look
+            return self._refused(t, frame, bad, chat)                   # whose template is cut from the first look
         self._fixes = 0  # the capture is fine
         picture = None
         if self.minimap is not None:
@@ -225,7 +230,7 @@ class Eyes:
                 score = "no search" if self.minimap.score is None else f"best match {self.minimap.score:.2f}"
                 return self._refused(t, frame, Problem(
                     "picture", f"the minimap doesn't show this map's picture ({score}, {PICTURE_MATCH} needed): "
-                               f"another map, or the minimap covered"))
+                               f"another map, or the minimap covered"), chat)
             picture = (*self.minimap.corner, -1.0 if self.minimap.score is None else round(self.minimap.score, 3))
         # Her dot only over the map's picture where it was found: on Ellinia (2026-10-29) the dot box reached past the
         # minimap window's right edge, and a house's yellow trim beside it was taken for her dot (off the map).
@@ -243,7 +248,7 @@ class Eyes:
                 located = self._located(full, t, dot)
             tag = located.tag if located is not None else self.name_tag.find(full)
         except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
-            return self._refused(t, frame, Problem("tag", str(e)))
+            return self._refused(t, frame, Problem("tag", str(e)), chat)
         feet = None if located is None else located.feet
         floor = None if tag is None else (tag[1] - tag_below_feet(geo) if feet is None else int(round(feet[1])))
         ground = ground_extent(frame, tag[0], floor, geo) if tag else None
@@ -260,7 +265,7 @@ class Eyes:
                            exp=full[y0:y1, x0:x1].max(axis=2) > EXP_TEXT, exp_box=full[by0:by1, bx0:bx1].copy(),
                            hp_box=full[hy0:hy1, hx0:hx1].copy(), lv_box=full[ly0:ly1, lx0:lx1].copy(), geo=geo,
                            picture=picture, feet=feet, view=None if located is None else located.view,
-                           view_sure=located is not None and located.view_sure, located=located)
+                           view_sure=located is not None and located.view_sure, located=located, chat=chat)
 
     def _located(self, full: np.ndarray, t: float | None, dot):
         """The locator's answer for this frame; if it raises anything but her tag's template missing (RuntimeError:
@@ -276,11 +281,13 @@ class Eyes:
                                         f"{e!r})")
             return None
 
-    def _refused(self, t: float | None, frame: np.ndarray, bad: Problem) -> Observation:
+    def _refused(self, t: float | None, frame: np.ndarray, bad: Problem,
+                 chat: chatbox.ChatBox | None = None) -> Observation:
         """A look that failed its checks: nothing read from it, its HP and MP the last good frame's (the bars of a frame
-        off the client area are read off something else: 0% on the 16:48:45 frame, a hit to the feed's world step)."""
+        off the client area are read off something else: 0% on the 16:48:45 frame, a hit to the feed's world step); its
+        chat box as read (`chat`: the UI's own px, which a frame of another map or with her tag hidden shows as ever)."""
         return Observation(t=time.monotonic() if t is None else t, frame=frame, tag=None, hp=self._hp, mp=self._mp,
-                           geo=self.geo, bad=bad)
+                           geo=self.geo, bad=bad, chat=chat)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         """Just her minimap dot and HP, from the newest frame (with DXGI 0.2 ms, with mss two grabs of 16.7

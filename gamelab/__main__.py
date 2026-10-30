@@ -1028,7 +1028,11 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
     hunts = throws and not viewer and hasattr(args, "low_hp")  # (`nav`'s trips have the stop as it is)
     wait = getattr(hunter, "wait_max_hp", None) if hunts and (args.low_hp is None or args.low_hp > 1) else None
     read = getattr(hunter, "read_stats", None) if hunts else None  # (her stat window: her W.DEF, behavior.statcheck)
-    if wait is not None and not wait():  # (--low-hp in HP needs her max HP too)
+    chat = getattr(hunter, "collapse_chat", None) if hunts else None  # (her chat box, behavior.chatcheck)
+    waited = wait is None or wait()  # (--low-hp in HP needs her max HP too)
+    if chat is not None:  # (collapsed if it's expanded: it hides the play area's bottom left, before her stat window's
+        chat(at_start=True)  # quiet moment looks for monsters)
+    if not waited:
         if read is not None:  # (her stat window shows her max HP too)
             read(at_start=True)
         if getattr(hunter, "max_hp", None) is None:

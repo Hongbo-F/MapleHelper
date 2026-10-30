@@ -107,6 +107,7 @@ from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from . import fight
 from .keycheck import Doubt, KeyDoubt
+from .chatcheck import ChatDue
 from .statcheck import StatsDue
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import DROP_LANDS, Pile
@@ -511,10 +512,13 @@ class Hunt:
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
-                except StatsDue:  # her stat window's read put off at the start: a quiet moment now (behavior.statcheck)
-                    paused, back = time.monotonic(), True
-                    try:
-                        self.h.read_stats()
+                except (ChatDue, StatsDue) as due:  # put off at the start, a quiet moment now: her chat box's
+                    paused, back = time.monotonic(), True  # collapse (behavior.chatcheck), her stat window's read
+                    try:                                   # (behavior.statcheck)
+                        if isinstance(due, ChatDue):
+                            self.h.collapse_chat(look=due.look)
+                        else:
+                            self.h.read_stats()
                     except LookLost as lost:  # (a look of the read's failed its checks: stand still, as above)
                         back = self.h.senses.regain(lost, end)
                     self._paused(time.monotonic() - paused)

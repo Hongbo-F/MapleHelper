@@ -51,6 +51,7 @@ from ..localization.pose import CAMERA_OFFSET, Camera, Localizer
 from ..paths import LAB
 from ..perception import exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes, Observation
+from ..perception.chatbox import ChatBox
 from ..perception.heading import Reading
 from ..perception.hud import bar_box, draw_hp_bar
 from ..perception.loot import Item
@@ -575,6 +576,8 @@ class FakeEyes(Eyes):
                         ropes=found)
         s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
         s.hp_box, s.lv_box = self._hp_box(), self._lv_box()
+        if w.chat_box is not None:  # her chat box as the game shows it (Realism.chat; None: not read, as before)
+            s.chat = ChatBox(w.chat_box)
         if Noise.during(self.noise.exp_hidden, w.t):  # the cursor over the number changes its pixels as it comes
             s.exp = s.exp.copy()                       # and goes, as in game (and a kill under it the rest)
             s.exp[:, 20:50] = True

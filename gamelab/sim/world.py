@@ -783,6 +783,11 @@ class Realism:
     stat_key: str | None = "s"
     stat_detail: bool = False
     stat_stuck: bool = False
+    # Her chat box (behavior.chatcheck): None, the simulator's eyes read none (sim.fakes.FakeEyes: Observation.chat None,
+    # as before); "expanded" or "collapsed", the box as the game shows it at the start (perception.chatbox.ChatBox in
+    # every look), her chat key (', CHAT+ as live) toggling it; `chat_stuck`: the key does nothing to it (a test's).
+    chat: str | None = None
+    chat_stuck: bool = False
 
 
 @dataclass(frozen=True)
@@ -1325,6 +1330,10 @@ class World:
         self.actions.setdefault("esc", "esc")
         if self.realism.stat_key is not None:
             self.actions.setdefault(self.realism.stat_key, "stat")  # (her stat window's key: _stat_window)
+        if self.realism.chat is not None:
+            self.actions.setdefault("'", "chat")  # (her chat key: _chat_box)
+        self.chat_box = self.realism.chat  # her chat box as the game shows it (Realism.chat), her chat key's presses
+        self.chat_presses = 0
         self.stat_window = False  # her stat window open (Realism.stat_key) ...
         self.stat_detail = False  # ... its DETAIL panel with it ...
         self.stat_windows = 0     # ... how often it was opened, and the clicks on its DETAIL button
@@ -1603,6 +1612,10 @@ class World:
                 if e.kind == "down":
                     self._stat_window()
                 return
+            if action == "chat":
+                if e.kind == "down":
+                    self._chat_box()
+                return
             if e.kind == "down":
                 if action not in self.held:
                     self.held[action] = self._sent(e)
@@ -1704,6 +1717,15 @@ class World:
         self.stat_window, self.stat_detail = True, self.realism.stat_detail
         self.stat_windows += 1
         self.note("her stat window opens" + (" with its DETAIL panel" if self.stat_detail else ""))
+
+    def _chat_box(self) -> None:
+        """Her chat key pressed: her chat box expanded or collapsed, the other way (not with Realism.chat_stuck)."""
+        self.chat_presses += 1
+        if self.realism.chat_stuck:
+            self.note(f"her chat key: her chat box stays {self.chat_box} (stuck)")
+            return
+        self.chat_box = "collapsed" if self.chat_box == "expanded" else "expanded"
+        self.note(f"her chat box {self.chat_box} (her chat key)")
 
     def click(self, clock_t: float, x: int, y: int, tag: str = "") -> None:
         """A left click at client px (x, y) at clock time `clock_t` (sim.fakes.FakePlayer: the pointer where the
@@ -2802,6 +2824,8 @@ class World:
                    if self.key_windows or self.menu_opened else {}),
                 **({"stat_windows": self.stat_windows, "stat_clicks": self.stat_clicks,
                     "stat_window_open": self.stat_window} if self.stat_windows or self.stat_clicks else {}),
+                **({"chat_box": self.chat_box, "chat_presses": self.chat_presses} if self.realism.chat is not None
+                   else {}),
                 "picked": dict(sorted(self.picked.items())),
                 "drops_left": sorted([d.kind, d.platform, round(d.x)] for d in self.live_drops())}
 
