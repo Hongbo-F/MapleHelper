@@ -2,7 +2,9 @@
 her tag's gray match, else her plate's colours, else her body, else carried by the filter, and the perception wired to
 it (Eyes.look_at with a locator, Senses placing her by it, the Scene's screen <-> map by the view, the WorldState and
 to_scene carrying it), behind its switch (config.toml [perception] scene), and nothing changed where it can't be used
-(1920x1080, no art, the simulator's eyes). Frames are Tree Dungeon's art (gamedata's copy) at a view, her plate (made
+(1920x1080, no art, the simulator's eyes); after BugBaby's review, her dot's lag allowed for in a fast fall, her body
+alone keeping her on her platform (no take-off, drop or walk-off on a look-alike pose's few px), carried far from her
+dot put there within DOT_TO_N frames. Frames are Tree Dungeon's art (gamedata's copy) at a view, her plate (made
 up, as tests/test_plate.py's) and her body (tests/test_poses.py's bank) drawn on it. The evaluation set's numbers:
 README, Her place from the scene."""
 
@@ -281,3 +283,87 @@ def test_a_locator_that_raises_is_put_away_and_she_is_placed_as_before(art, mode
     assert obs.bad is None and obs.located is None and eyes.locator is None
     assert len(said) == 1 and "ValueError" in said[0]
     assert eyes.look_at(frame, 1 / 30).bad is None and len(said) == 1
+
+
+# --- after BugBaby's review (2026-10-30; D:/MapleHelper-scratch/loc2build/bugbaby/final.txt, v2/) -------------------
+
+def placed(art, model, plate, mx: float = 43.5):
+    """A locator that has her standing on the lowest platform at map x `mx`, her tag seen once."""
+    loc = locator(art, model, plate)
+    frame, (fx, fy), _, p = scene(art, model, plate, mx)
+    loc.see(frame, 0.0, dot_of(loc, fx + VIEW[0], fy + VIEW[1]))
+    assert loc.mode == "ground" and loc.plat is p
+    return loc, p
+
+
+def test_her_dot_agrees_with_her_place_in_a_fast_fall_by_its_lag(art, model, plate):
+    """Falling at FALL_SPEED her dot shows her where she was DOT_LAG_S before, 44 units higher: her plate was refused
+    where it was exactly hers (BugBaby's held-out frames 2827, 3068)."""
+    loc, p = placed(art, model, plate)
+    y = p.y_at(43.5) + 100
+    loc.mode, loc.plat, loc.ky = "air", None, locate.KF1(y, locate.FALL_SPEED)
+    loc.kx.v = 0.0
+    fx, fy = 43.5 - VIEW[0], y - VIEW[1]
+    loc.dots = [(43.5, y - locate.FALL_SPEED * locate.DOT_LAG_S)]      # (map units, as `see` keeps them)
+    assert loc.dot_agrees(fx, fy) and loc.dot_agrees(fx, fy - 15)
+    assert not loc.dot_agrees(fx, fy + 70) and not loc.dot_agrees(fx + 50, fy)
+    loc.mode, loc.ky = "ground", None                                   # standing: no lag allowed for
+    assert not loc.dot_agrees(fx, fy) and loc.dot_agrees(fx, fy - 44 + 39)
+
+
+def test_her_body_alone_keeps_her_on_her_platform_unless_it_surely_says_she_left(art, model, plate):
+    """A look-alike pose's feet a few px over or under her platform's line were a take-off or a drop: the filter had
+    her in the air, gravity carrying her through her platform (BugBaby's held-out 2706, 2830-2852, her plate covered)."""
+    stands, air = {"grounded": 1.0, "score": 0.9}, {"grounded": 0.1, "score": 0.9}
+    for how, extra, dd, mode in (("body", stands, -6, "ground"),                       # kept
+                                 ("body", dict(air, score=0.7), -6, "ground"),          # an air pose, weakly: kept
+                                 ("body", stands, 6, "ground"),                         # a few px under it: kept
+                                 ("body", air, -6, "air"),                              # surely in the air: off it
+                                 ("body", stands, -locate.BODY_OFF_LINE - 4, "air"),    # a jump's rise: off it
+                                 ("body", stands, locate.BODY_OFF_LINE + 4, "air"),     # dropped through it
+                                 ("tag", None, -6, "air"),                              # her tag: as before
+                                 ("tag", None, 6, "air")):
+        loc, p = placed(art, model, plate)
+        info = {}
+        loc.update_y(p.y_at(loc.kx.p) + dd, 1.0, how, info, extra)
+        assert (loc.mode == "ground") == (mode == "ground"), (how, extra, dd)   # ("air": off it, a rope's top too)
+        assert ("body_kept" in info) == (mode == "ground" and abs(dd) > locate.TAKEOFF)
+
+
+def test_carried_past_her_platforms_end_she_stays_on_it_unless_her_tag_or_plate_saw_her_lately(art, model, plate):
+    """(Standing at platform 33's end with her plate covered, BugBaby's held-out frames walked off it again and again on
+    her body's x 5 px off, 270 units of fall each before her dot's alarm.)"""
+    for seen, mode in ((None, "ground"), (-1.0, "ground"), (-0.1, "air")):
+        loc, p = placed(art, model, plate)
+        loc.kx.p, loc.kx.v = p.right - 1, 100.0
+        loc.last_sure = None if seen is None else loc.t + seen
+        loc.predict(0.1)
+        assert loc.mode == mode, seen
+        if mode == "ground":
+            assert loc.plat is p and loc.kx.p <= p.right + 2 and loc.kx.v == 0.0
+
+
+def test_her_body_alone_a_few_px_under_a_line_she_fell_onto_lands_her_on_it(art, model, plate):
+    loc, p = placed(art, model, plate)
+    line = p.y_at(loc.kx.p)
+    stands = {"grounded": 1.0, "score": 0.9}
+    for before, how, extra, landed in ((line - 4, "body", stands, True),     # over it, then a few px under: landed
+                                       (line + 20, "body", stands, False),   # never over it (from under it)
+                                       (line - 4, "tag", None, False)):      # her tag 5 under it: past it, as before
+        loc.mode, loc.plat, loc.ky = "air", None, locate.KF1(before, 200.0, 1.0, 100.0)
+        loc.last_y = (before, loc.t)                                       # (measured there a frame before)
+        info = {}
+        loc.update_y(line + 5, 1.0, how, info, extra)
+        assert (loc.mode == "ground" and loc.plat is p) == landed, (before, how)
+
+
+def test_carried_far_from_her_dot_she_is_put_there_within_dot_to_n_frames(art, model, plate):
+    loc = locator(art, model, plate)
+    frame, (fx, fy), _, _ = scene(art, model, plate, 43.5)
+    loc.see(frame, 0.0, dot_of(loc, fx + VIEW[0], fy + VIEW[1]))
+    bare, _ = art.window(*VIEW)
+    far = (fx + VIEW[0] - 150, fy + VIEW[1])
+    for k in range(1, locate.DOT_TO_N + 1):
+        got = loc.see(bare, k / 15, dot_of(loc, *far))
+        assert got.info.get("to_dot", False) == (k == locate.DOT_TO_N)
+    assert got.x == pytest.approx(far[0], abs=1)

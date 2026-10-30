@@ -22,9 +22,13 @@ The cues, cheapest first, each tried only when the one before didn't place her:
 The filter: her x and its speed (a Kalman filter), y on her platform's line, in a flight under gravity, or on a rope;
 a take-off from a rise off the line, a landing on the first line crossed, a walk off a platform's end, a wall stopping
 her; a rope told from a flight by her last three measured places (constant speed against gravity); her minimap dot a box
-she must be in, and an alarm when it disagrees for long (then she's put where it is). Her feet from her tag's centre are
-her plate model's (PlateModel.feet: (+1.5, -16) for her orange-ribbon plate, measured at calibration, where
-eyes.tag_below_feet's 11 put her 5 px low).
+she must be in, and an alarm when it disagrees for long (carried DOT_TO_N frames far from it, she's put where it is);
+her dot's lag allowed for where a cue's place is checked against it (`dot_agrees`: her speed times DOT_LAG_S); her
+body alone (the body cue) taking her off her platform only by a jump's rise or surely in a pose she has in the air,
+never walking her off its end (BODY_OFF_LINE, WALK_OFF_SEEN_S: a look-alike pose's feet are a few px off). Her feet from
+her tag's centre are her plate model's (PlateModel.feet: (+1.5, -16) for RiceBaby's orange-ribbon plate, (-2.5, -16)
+for BugBaby's from the template cut from it, measured at calibration, where eyes.tag_below_feet's 11 put her 5 px
+low); her tag's match sure at SURE, or her model's lower level (PlateModel.sure).
 
 Counts of frames are the prototype's at its 15 frames a second (the clips): the service's 30 count `k` = 2 of them each
 (`_rate`: by the frames' gaps), and her vertical motion is read from every k-th measured place, so what they mean in time
@@ -77,12 +81,39 @@ SD = {"tag": 0.5, "plate": 0.5, "body": 1.0, "body-weak": 2.0}   # a cue's measu
 DOT_OFF = (-0.88, 5.52)    # her dot's map place less her feet's
 DOT_SD = (7.0, 6.0)
 DOT_LAG_S = 0.066          # her dot shows where she was this long before
+# A cue's place agrees with her dot (`dot_agrees`: the tag's whole-area peaks, her plate) within DOT_TOL (map units
+# across, down) of where the dot puts her, the dot's lag allowed for: her place DOT_LAG_S back by the filter's speed,
+# and DOT_LAG_SLACK of that move more. Without it, falling at FALL_SPEED (670 units a second, 44 in the lag) her plate
+# was refused where it was exactly hers (BugBaby's held-out 2827, 3068; at the service's 30 a second, 3 of the 5 frames
+# more than 10 px off were in these falls, 31-67 px: D:/MapleHelper-scratch/loc2build/bugbaby/final.txt).
+DOT_TOL = (30.0, 40.0)
+DOT_LAG_SLACK = 0.5
 DOT_BOX = (12.0, 12.0)     # the dot's box: she's in it
 DOT_ALARM, DOT_ALARM_N = 45, 3   # the dot this far (map units) for this many frames: the alarm (lost; then to it)
+DOT_TO_N = 3               # ... carried this many frames far from it: put where it is (the prototype's 6: with a chat
+                           # box over her plate and legs, BugBaby's held-out frames 101 more than 45 map units off, 74;
+                           # RiceBaby's clips, carried on 3 frames of 6,279, the same; v2/maperr.py, cmp_rice.py)
 ACC_SD_GROUND, ACC_SD_AIR, VY_SD_ROPE = 900.0, 150.0, 200.0
 GRAVITY, FALL_SPEED, JUMP_SPEED = 2000.0, 670.0, 555.0
 WALK_MAX = 140.0           # her walking speed's most (map units a second)
 TAKEOFF, LAND_SNAP = 2.5, 3.0
+# Her body alone (the body cue) takes her off her platform only BODY_OFF_LINE px or more off its line (a jump's first
+# frame rises 17 px at 30 a second, 32 at 15), unless it's surely in a pose she has in the air (seen on a platform's
+# line under BODY_STANDS of the time, the bank's `grounded`, agreeing SPRITE_SURE): TAKEOFF then, as for her tag; in a
+# pose she stands in, put up to BODY_OFF_LINE under a line she was over, it lands her on it. (Weak answers kept on the
+# line whatever they say were worse: with the chat box over her, her real jumps are seen weakly too, 172 frames more
+# than 45 units off, 101.) A look-alike pose's feet are 1-6 px off, some 25: taken for a take-off, the filter had her
+# in the air, gravity carrying her through her platform for frames until her dot's alarm (BugBaby's held-out frames
+# with a chat box over her plate, 2830, 2838, 2848-2852, 2862 (0.69, 25 px up): up to 300 px; with her plate partly
+# covered, 2706: an air pose agreeing 0.72, 6 px over her platform's line, 20-43 px off for 4 frames after;
+# D:/MapleHelper-scratch/loc2build/bugbaby/final.txt, the review's; v2/score_bug.py, maperr.py).
+BODY_STANDS, BODY_OFF_LINE = 0.5, 8.0
+# A walk off her platform's end only where her tag or her plate placed her within WALK_OFF_SEEN_S (a few frames at 15
+# a second; the clips' gaps reach 0.1 s): her x carried, or by her body alone (5 px off with a look-alike pose), past
+# its end is no walk-off, she's kept at its end (a real one shows: her body lower, a drop, or her dot's alarm).
+# Standing at platform 33's end with a chat box over her plate and legs, BugBaby's held-out frames walked off it again
+# and again, 270 units of fall each before her dot's alarm (2850-2887; v2/maperr.py).
+WALK_OFF_SEEN_S = 0.25
 ROPE_ACC, FALL_ACC = 700.0, 1200.0   # her vertical acceleration under ROPE_ACC: a rope; over FALL_ACC: a fall
 ROPE_VY = 220.0            # ... and her speed under this (climbing: 120)
 ROPE_END = 5               # her feet reach a rope's bottom + 1 while on it
@@ -176,6 +207,10 @@ class Locator:
         self.model, self.reg, self.plate, self.body, self.geo = model, reg, plate, body, geo
         self._template = template
         self.feet_dx, self.feet_dy = plate.feet           # her feet from her tag's centre (the plate model's)
+        # her tag's match sure at SURE, or lower where her plate's model says her template scores less on her (its
+        # bank level: calibration's, plate.sure_levels; a model without one, RiceBaby's of 10-30, SURE)
+        levels = getattr(plate.model, "sure", None)
+        self.sure = SURE if levels is None else min(SURE, float(levels[2]))
         self.letters = max(1, plate.sizes["letters"])
         self.frame_px = max(1, plate.sizes["frame"])
         self.dots_reader = Localizer(model, geo=geo)       # her dot -> the map
@@ -211,6 +246,7 @@ class Locator:
         self.dots: list = []
         self.ignore_plat = None
         self.last_x = self.last_y = None
+        self.last_sure = None        # when her tag or her plate last placed her
         self.ground = None
         self.since_wide = 99
         self.yhist: list = []        # (t, map y) of her measured places
@@ -367,10 +403,14 @@ class Locator:
             if abs(self.kx.v) > WALK_MAX:
                 self.kx.v = math.copysign(WALK_MAX, self.kx.v)
             p = self.plat
-            if p is not None and not p.covers(self.kx.p, 2):   # walked off its end: falling
-                self.mode = "air"
-                self.ky = KF1(p.y_at(p.clamp(self.kx.p)), 0.0, 1.0, 100.0)
-                self.plat = None
+            if p is not None and not p.covers(self.kx.p, 2):
+                if self.last_sure is not None and self.t - self.last_sure <= WALK_OFF_SEEN_S:
+                    self.mode = "air"                           # walked off its end: falling
+                    self.ky = KF1(p.y_at(p.clamp(self.kx.p)), 0.0, 1.0, 100.0)
+                    self.plat = None
+                else:   # (her x carried or by her body alone: at its end; a fall shows by her body or her dot)
+                    self.kx.p = min(max(self.kx.p, p.left - 2), p.right + 2)
+                    self.kx.v = 0.0
         if self.mode == "air":
             self.kx.predict(dt, ACC_SD_AIR)
             y0 = self.ky.p
@@ -392,11 +432,19 @@ class Locator:
         sy = (self.ky.sd if self.mode != "ground" and self.ky is not None else 0.5) + 1.0
         return int(np.clip(3 * sx + 14, WIN_MIN[0], 90)), int(np.clip(3 * sy + 12, WIN_MIN[1], 90))
 
-    def dot_agrees(self, fx: float, fy: float, tol: tuple[float, float] = (30, 40)) -> bool:
+    def dot_agrees(self, fx: float, fy: float, tol: tuple[float, float] = DOT_TOL) -> bool:
+        """Her feet at (fx, fy) on screen agree with her minimap dot (this frame's, else the one before; none: they
+        do): within `tol` of it, where she was DOT_LAG_S before by the filter's speed (a frame's gap more for the dot
+        before), and DOT_LAG_SLACK of that move more."""
+        back = 0 if self.dots and self.dots[-1] is not None else 1
         d = next((x for x in reversed(self.dots[-2:]) if x is not None), None)
         if d is None or self.v is None:
             return True
-        return abs(fx + self.vx - d[0]) <= tol[0] and abs(fy + self.v - d[1]) <= tol[1]
+        vx = 0.0 if self.kx is None else self.kx.v
+        vy = self.ky.v if (self.ky is not None and self.mode != "ground") else 0.0
+        lag = DOT_LAG_S + back * (self._gap or PROTO_DT)
+        return (abs(fx + self.vx - vx * lag - d[0]) <= tol[0] + DOT_LAG_SLACK * abs(vx) * lag and
+                abs(fy + self.v - vy * lag - d[1]) <= tol[1] + DOT_LAG_SLACK * abs(vy) * lag)
 
     def _box(self, frame, x0, y0, x1, y1):
         return plates.gray_best(frame, self.template(), (x0, y0, x1, y1), ROWS_MAX)
@@ -419,14 +467,14 @@ class Locator:
                           pt[1] + th // 2 + wy + 1)
             if m is not None:
                 info["tag"] = round(m[0], 3)
-                if m[0] >= SURE:
+                if m[0] >= self.sure:
                     sure.append(m)
             if not sure:
                 m = self._box(frame, pt[0] - tw // 2 - NEAR[0], pt[1] - th // 2 - NEAR[1], pt[0] + tw // 2 + NEAR[0],
                               pt[1] + th // 2 + NEAR[1])
                 if m is not None:
                     info["near"] = round(m[0], 3)
-                    if m[0] >= SURE:
+                    if m[0] >= self.sure:
                         sure.append(m)
         peaks = None
         if not sure and (lost or self.unsure % (FULL_EVERY * k) == FULL_EVERY * k - 1):
@@ -435,7 +483,7 @@ class Locator:
             peaks = plates.gray_peaks(frame, tpl, k=4, rows=ROWS_MAX, gray=gray)
             info["whole"] = [(round(p[0], 3), p[1], p[2]) for p in peaks[:2]]
             for p in peaks:
-                if p[0] >= SURE and (pt is None or self.dot_agrees(p[1] + self.feet_dx, p[2] + self.feet_dy)):
+                if p[0] >= self.sure and (pt is None or self.dot_agrees(p[1] + self.feet_dx, p[2] + self.feet_dy)):
                     sure.append(p)
         t0 = self._t("tag", t0)
         if sure:
@@ -496,7 +544,8 @@ class Locator:
         self._t("body", t0)
         if res is not None and res.agree >= SPRITE_OK:
             return ("body", res.fx, res.fy, SD["body"] if res.agree >= SPRITE_SURE else SD["body-weak"],
-                    {"score": round(res.agree, 3), "pose": res.pose.id, "facing": res.pose.facing, "box": res.box})
+                    {"score": round(res.agree, 3), "pose": res.pose.id, "facing": res.pose.facing, "box": res.box,
+                     "grounded": res.pose.grounded})
         return None
 
     # --- the state from a first measurement --------------------------------------------------------------------------
@@ -542,11 +591,13 @@ class Locator:
             else:
                 self.kx.update(mx, sd)
             self.last_x = (mx, self.t)
+            if how in ("tag", "plate"):
+                self.last_sure = self.t
             my = fy + self.v
             if "reset" in info:
                 self.yhist = []
             self.yhist = (self.yhist + [(self.t, my)])[-(2 * k + 2):]
-            self.update_y(my, sd, how, info)
+            self.update_y(my, sd, how, info, extra)
             self.last_y = (my, self.t)
         else:
             self.unseen += 1
@@ -566,14 +617,14 @@ class Locator:
                     info["dot_pull"] = round(ex, 1)
                 if self.mode in ("air", "rope") and box[1] < abs(ey) <= 60:
                     self.ky.update(self.ky.p + ey - math.copysign(box[1], ey), 3.0)
-                if far and self.dot_bad >= 2 * DOT_ALARM_N * k:
-                    info["to_dot"] = True
-                    self.kx = KF1(dmap[0], 0.0, DOT_SD[0] ** 2, 1e4)
-                    near = self.model.platform_under(dmap[0], dmap[1] - 25, reach=50)
-                    if near is not None:
-                        self.mode, self.plat, self.ky = "ground", near, None
-                    else:
-                        self.mode, self.plat, self.ky = "air", None, KF1(dmap[1], 0.0, DOT_SD[1] ** 2, 1e4)
+            if meas is None and far and self.dot_bad >= DOT_TO_N * k:
+                info["to_dot"] = True
+                self.kx = KF1(dmap[0], 0.0, DOT_SD[0] ** 2, 1e4)
+                near = self.model.platform_under(dmap[0], dmap[1] - 25, reach=50)
+                if near is not None:
+                    self.mode, self.plat, self.ky = "ground", near, None
+                else:
+                    self.mode, self.plat, self.ky = "air", None, KF1(dmap[1], 0.0, DOT_SD[1] ** 2, 1e4)
 
     @staticmethod
     def takeoff_v(rise: float) -> float:
@@ -582,12 +633,29 @@ class Locator:
         tau = (JUMP_SPEED - math.sqrt(JUMP_SPEED ** 2 - 2 * GRAVITY * rise)) / GRAVITY
         return -JUMP_SPEED + GRAVITY * tau
 
-    def update_y(self, my: float, sd: float, how: str, info: dict) -> None:
+    @staticmethod
+    def body_says(how: str, extra: dict | None) -> str | None:
+        """What her body alone (the body cue) says of her standing: "stands" in a pose she stands in (seen on a
+        platform's line BODY_STANDS of the time or more), "air" in one she has off the ground agreeing surely
+        (SPRITE_SURE), "unsure" in one of those agreeing less; None where another cue placed her."""
+        if how != "body":
+            return None
+        g, agree = (extra or {}).get("grounded"), (extra or {}).get("score", 0.0)
+        if g is None or g >= BODY_STANDS:
+            return "stands"
+        return "air" if agree >= SPRITE_SURE else "unsure"
+
+    def update_y(self, my: float, sd: float, how: str, info: dict, extra: dict | None = None) -> None:
+        body = self.body_says(how, extra)
+        stands = body == "stands"
         if self.mode == "ground":
             p = self.plat
             line = p.y_at(self.kx.p)
             dd = my - line
             info["off_line"] = round(dd, 1)
+            off = BODY_OFF_LINE if body in ("stands", "unsure") else TAKEOFF
+            if off > TAKEOFF and abs(dd) > TAKEOFF and -off <= dd <= off + 1:
+                info["body_kept"] = round(dd, 1)   # (on her platform: a look-alike pose's feet a few px off)
             if how in ("tag", "plate") and abs(dd) <= 3 and not self.view_sure:
                 # the view not registered: her feet on the line anchor it (the median of the last few)
                 self.v_anchor = (self.v_anchor + [-dd])[-9:]
@@ -598,11 +666,11 @@ class Locator:
                         self.v_corr += corr
                         self.v_anchor = []
                         info["v_anchor"] = round(corr, 2)
-            elif dd < -TAKEOFF:
+            elif dd < -off:
                 self.mode, self.plat = "air", None
                 self.ky = KF1(my, self.takeoff_v(-dd), sd * sd, 150.0 ** 2)
                 info["event"] = "takeoff"
-            elif dd > TAKEOFF + 1:
+            elif dd > off + 1:
                 near = self.platform_near(self.kx.p, my)
                 r = self.rope_at_top(self.kx.p, line)
                 if near is not None and near[1] is not p:
@@ -620,6 +688,7 @@ class Locator:
                     self.ky = KF1(my, 100.0, sd * sd, 200.0 ** 2)
                     info["event"] = "drop"
         elif self.mode in ("air", "rope"):
+            y_before = self.ky.p
             if abs(my - self.ky.p) > 3 * self.ky.sd + 4 and self.last_y is not None and self.t - self.last_y[1] <= 0.25:
                 dt = max(self.t - self.last_y[1], 0.02)
                 v = (my - self.last_y[0]) / dt + (0.5 * GRAVITY * dt if self.mode == "air" else 0.0)
@@ -629,7 +698,10 @@ class Locator:
                 info["surprise_y"] = round(v, 1)
             else:
                 self.ky.update(my, sd)
-            near = self.platform_near(self.kx.p, self.ky.p, up=1.5, down=2.5)
+            # (her body alone in a pose she stands in, put a few px under a line she was over: landed on it)
+            near = self.platform_near(self.kx.p, self.ky.p, up=1.5, down=BODY_OFF_LINE if stands else 2.5)
+            if near is not None and near[0] > 2.5 and y_before > near[1].y_at(self.kx.p) + 2.5:
+                near = None
             if near is not None and self.ky.v >= -50 and not (self.ignore_plat and near[1].id == self.ignore_plat[0]):
                 self.mode, self.plat, self.ky = "ground", near[1], None
                 info["event"] = "landed"

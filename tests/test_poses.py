@@ -1,8 +1,9 @@
 """Her body's search by her poses (gamelab/perception/poses.py; its pixel checks in C, gamelab/locate.c's lc_pack and
 lc_agree): every candidate's agreement the same share in C as in numpy at every offset (in the box and off it), her
 pose found where it's drawn by her anchor or, the anchor covered, by her colours' mass, darkened by the blink too, the
-prediction choosing between one picture at two origins, and the bank kept. (The prototype's answers on the evaluation
-set's frames: README, Her place by her plate and her body.)"""
+prediction choosing between one picture at two origins, behind the HUD her pixels above its top alone counted, the bank
+kept, and her mirror axis by her poses seen both ways. (The prototype's answers on the evaluation set's frames: README,
+Her place by her plate and her body.)"""
 
 import numpy as np
 import pytest
@@ -232,3 +233,59 @@ def test_her_bank_is_built_from_frames_where_her_tag_is_sure(tmp_path):
     draw(fr, seen[1], 650.5, 480)
     hit = finder.find(fr, (640, 660, 460, 500), view=view)
     assert hit.pose.id == seen[1].id and (hit.fx, hit.fy) == (650.5, 480.0) and finder.paths == ["head"]
+
+
+HUD = 700   # the HUD's top at 1366x768 (screen.HUD_TOP_GAME)
+
+
+def test_behind_the_huds_top_only_her_pixels_above_it_count(monkeypatch):
+    """BugBaby falling behind the HUD (her held-out frames 2528-2531, her legs below row 700): her own pose, its pixels
+    there counted as disagreeing, was under the 0.8 her head's answer needs, and a wrong pose 20 px right and 28 up
+    agreed 0.67-0.81 by her colours' mass; counted of those above it, her own agrees whole."""
+    b = bank()
+    finder = BodyFinder(b)
+    for i, p in enumerate(b.poses):
+        fr = frame(12 + i)
+        fy = HUD + 24                                   # her feet 24 px under the HUD's top ...
+        draw(fr, p, 640.5, fy)
+        fr[HUD:] = 0                                    # ... the HUD drawn over her legs
+        hidden = int(((p.ys + fy) >= HUD).sum()) / len(p.ys)
+        assert 0.2 < hidden < PO.SHOWN_LEAST
+        a, c = both(monkeypatch, lambda: finder.find(fr, (630, 650, fy - 20, fy + 6)))
+        assert key(a) == key(c)
+        assert a.pose.id == i and (a.fx, a.fy) == (640.5, fy) and a.agree == 1.0 and finder.paths == ["head"]
+        pic = PO._Picture(fr, 560, 560, 720, 768, None)  # (counted against her, as before: her hidden share lost)
+        r = pic.agree(finder.full, np.array([i], np.int32), np.array([80]), np.array([fy - 560]), 0)
+        assert abs(r[0, 0] - (1 - hidden)) < 1e-9
+
+
+def test_a_pose_mostly_behind_the_hud_counts_its_shown_pixels_against_at_least_half():
+    b = bank()
+    finder = BodyFinder(b)
+    p = b.poses[1]
+    for lib in (None, PO.native.locate_lib()):
+        for fy in (HUD + 10, HUD + 50):
+            fr = frame(15)
+            draw(fr, p, 700.5, fy)
+            fr[HUD:] = 0
+            pic = PO._Picture(fr, 600, 560, 800, 768, lib, HUD)
+            r = pic.agree(finder.full, np.array([1], np.int32), np.array([100]), np.array([fy - 560]), 0)[0, 0]
+            shown = int(((p.ys + fy) < HUD).sum())
+            assert abs(r - shown / max(shown, PO.SHOWN_LEAST * len(p.ys))) < 1e-9
+            assert (r == 1.0) == (shown >= PO.SHOWN_LEAST * len(p.ys))
+
+
+def test_her_mirror_axis_by_her_poses_seen_both_ways():
+    """Each pose seen facing right against the one seen facing left, mirrored about the bank's feet: where her feet's
+    x is e off in the bank, the left one sits 2e across from the right one's mirror image."""
+    b = bank(4, 3)
+    for e in (0.0, 2.5, -3.5):
+        poses = []
+        for p in b.poses:
+            w = p.picture.shape[1]
+            q = Pose(100 + p.id, np.ascontiguousarray(p.picture[:, ::-1]), np.ascontiguousarray(p.mask[:, ::-1]),
+                     -p.dx0 - w + 1 + 2 * e, p.dy0, n=5, places=5, facing="left")
+            poses += [Pose(p.id, p.picture, p.mask, p.dx0, p.dy0, n=5, places=5, facing="right"), q]
+        corr, votes = PO.mirror_axis(PoseBank(poses, b.anchors))
+        assert corr == e and votes > 0
+    assert PO.mirror_axis(PoseBank([b.poses[0]], b.anchors)) == (None, 0)

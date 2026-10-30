@@ -24,8 +24,16 @@ evaluation set's frames check it); the TOPK best over FLOOR, NMS apart; the firs
 BIN_WIDTH that show them all with no stray white: what of her name is surely hers). `decide` takes the best by
 evidence less W_DIST a px from the prediction, among those good enough (DEFAULTS' rules) whose clean letters are at
 least CLEAN_MIN (another wearer's plate showed at most 8 of the 143, hers 52 and more on every frame but 6 of 2,089,
-where the body cue placed her). `near` searches around a prediction (NEAR, wider by GROW a frame she went unplaced),
-`verify` checks the gray template's peaks anywhere (no prediction: her letters needed).
+where the body cue placed her) and that sit where the plate's pixels match best around them (`aligned`); without a
+prediction, white where her name has none weighs as much as a letter of hers shown (another wearer's longer name, and
+one that shares letters with hers, were taken for hers by the prototype's rules: DEFAULTS). `near` searches around a
+prediction (NEAR, wider by GROW a frame she went unplaced), `verify` checks the gray template's peaks anywhere (no
+prediction: her letters needed).
+
+Made at calibration (localization.her_cues): the model (`PlateModel.build` from `pick_centres`' sure frames), her tag's
+gray template cut from it (`tag_template`: her letters, as calibration cuts a tag from a frame) and the model re-centred
+on that (`PlateModel.recentred`), her mirror axis by the plate's own stable columns (`PlateModel.axis`), her tag's sure
+levels from its own scores (`sure_levels`; kept in the model, `PlateModel.sure`).
 
 In C where the DLL is (gamelab/locate.c's lc_plate: the index, the counts 32 places a step on AVX2, the peaks and the
 evidence), in numpy otherwise, the same candidates to the integer (tests/test_plate.py). A window around a prediction
@@ -67,13 +75,28 @@ NEAR = (60, 40)                # px across and down around the predicted centre 
 GROW, GROW_MAX = (25, 15), 4   # ... more per frame she went unplaced, up to this many frames' worth
 PEAK_REACH = (4, 3)            # `verify`: around each gray peak
 W_LETTERS, W_DIST = 4.0, 2.0
-DEFAULTS = dict(min_frame=150,  # the letters' rule: frame px at least this and letters - W_BAD bad at least l_min
+# The rules (`decide`). Without a prediction (`verify`, at the gray peaks anywhere) white where her name has none
+# (`bad`) weighs as much as a letter of hers shown (w_bad_far 1.0; the prototype's 0.5 let another wearer's longer name
+# through: on RiceBaby's frames of 10-29 BugBaby's model took AAABattery's plate, the same item, for hers on 30 of 483
+# frames at the gray peaks, letters 84, bad 75, clean 18 of the 16 needed: 84 - 37.5 passed `verify`'s 25, 84 - 75
+# doesn't; the review's D:/MapleHelper-scratch/loc2build/bugbaby/review/confuse.py). About a prediction it weighs half
+# as before (w_bad): what covers her plate is white there too (a damage number, a notice: on BugBaby's train frames
+# 572, 710, 711 bad 33-58 with 31-55 of her letters shown, refused at 1.0; RiceBaby's own up to 74 with 66 shown), and
+# another wearer must be where she's predicted and her dot agree. And a candidate must be where the plate's own pixels
+# match best around it (`align`, `aligned`): another wearer's plate whose name shares letters with hers ("Baby" of
+# RiceBaby's under BugBaby's model, 6 px off its frame: 43 of the 483 frames, clean 52-80, 0.83-0.96 of the most there;
+# her own plates 1.0 on every frame of BugBaby's held-out and RiceBaby's labelled ones) is placed where its letters
+# line up, not where its frame does (v2/plates_check.py).
+DEFAULTS = dict(min_frame=150,  # the letters' rule: frame px at least this and letters - w_bad bad at least l_min
                 w_bad=0.5, l_min=15,
                 near_only=280,  # the near rule: frame px at least this, within gate (1 + frames unplaced) of the
-                gate=8.0,       # prediction, letters - W_BAD bad at least l_near
+                gate=8.0,       # prediction, letters - w_bad bad at least l_near
                 l_near=-10,
-                l_far=25,       # `verify`'s (no prediction): letters - W_BAD bad at least this
-                clean_min=16)   # every rule: clean letters at least this (another wearer's plate showed 8 at most)
+                l_far=25,       # `verify`'s (no prediction): letters - w_bad_far bad at least this
+                w_bad_far=1.0,
+                clean_min=16,   # every rule: clean letters at least this (another wearer's plate showed 8 at most)
+                align=0.97)     # every rule: its stable px matched at least this share of the most within ALIGN_REACH
+ALIGN_REACH = (12, 6)          # px across, down around a candidate where the plate's best match is looked for
 MINIMAP = (0.3, 0.17)          # the minimap's share of the frame's height and width, top left: never her plate
 GRAY_SURE = 0.85               # the gray template's match this good is her tag
 GRAY_FLOOR = 0.3               # `gray_peaks`' least
@@ -98,26 +121,58 @@ def model_path(lab: Path, geo: Geometry = NATIVE) -> Path:
 class PlateModel:
     """Her plate as calibration saw it: the median picture (RGB) of the BOX around her tag's centre in `n` sure
     frames, the share of them that had each pixel's colour (`share`), its name's interior and her feet from its
-    centre."""
+    centre; `sure`: her tag's gray template's levels on her frames where calibration measured them (`sure_levels`:
+    typical, picks, bank), None in a model made before (RiceBaby's of 10-30)."""
     picture: np.ndarray
     share: np.ndarray
     box: tuple[int, int, int, int] = BOX
     interior: tuple[int, int, int, int] = INTERIOR
     feet: tuple[float, float] = FEET
     n: int = 0
+    sure: tuple[float, float, float] | None = None
 
     def save(self, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        extra = {} if self.sure is None else {"sure": np.array(self.sure, np.float64)}
         np.savez_compressed(path, picture=self.picture, share=self.share.astype(np.float32),
                             box=np.array(self.box), interior=np.array(self.interior), feet=np.array(self.feet),
-                            n=np.array(self.n))
+                            n=np.array(self.n), **extra)
 
     @classmethod
     def load(cls, path: Path) -> PlateModel:
         z = np.load(Path(path))
         return cls(z["picture"], z["share"].astype(np.float64), tuple(int(v) for v in z["box"]),
-                   tuple(int(v) for v in z["interior"]), tuple(float(v) for v in z["feet"]), int(z["n"]))
+                   tuple(int(v) for v in z["interior"]), tuple(float(v) for v in z["feet"]), int(z["n"]),
+                   tuple(float(v) for v in z["sure"]) if "sure" in z.files else None)
+
+    def recentred(self, dx: int, dy: int) -> PlateModel:
+        """The same picture about another centre, (dx, dy) from this one's (a tag template cut elsewhere on it:
+        `tag_template`): its box, interior and her feet's offset moved by -(dx, dy)."""
+        x0, x1, y0, y1 = self.box
+        ix0, ix1, iy0, iy1 = self.interior
+        return PlateModel(self.picture, self.share, (x0 - dx, x1 - dx, y0 - dy, y1 - dy),
+                          (ix0 - dx, ix1 - dx, iy0 - dy, iy1 - dy), (self.feet[0] - dx, self.feet[1] - dy), self.n,
+                          self.sure)
+
+    def letters(self) -> np.ndarray:
+        """Her name's letters in the picture: its stable pure white inside the interior (a bool mask)."""
+        x0, x1, y0, y1 = self.box
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        ix0, ix1, iy0, iy1 = self.interior
+        inside = (xx >= ix0) & (xx <= ix1) & (yy >= iy0) & (yy <= iy1)
+        return (self.share >= STABLE_SHARE) & (self.picture == 255).all(axis=2) & inside
+
+    def axis(self) -> float | None:
+        """Her mirror axis across from the centre, by the plate itself: the middle of its stable pixels' columns (those
+        with 2 or more, so a stray one doesn't count). The game draws her name plate centred on her: on both plates of
+        10-29/30 this is her feet's x as measured otherwise (RiceBaby's columns -46..49, +1.5; BugBaby's -50..43, -3.5:
+        her poses' mirror axis, the plate's symmetry and the sloped platforms' lines all agree, D:/MapleHelper-scratch/
+        loc2build/bugbaby/scripts/mirror_axis.py, feet_check.py). None where no column has 2."""
+        cols = np.nonzero((self.share >= STABLE_SHARE).sum(axis=0) >= 2)[0]
+        if not len(cols):
+            return None
+        return float((cols.min() + cols.max()) / 2 + self.box[0])
 
     @classmethod
     def build(cls, crops: Iterable[tuple[np.ndarray, tuple[int, int]]], box=BOX, interior=INTERIOR,
@@ -138,18 +193,72 @@ class PlateModel:
         return cls(med, (dev <= SAME_COLOUR).mean(axis=0), tuple(box), tuple(interior), tuple(feet), len(stack))
 
 
+TEMPLATE_MARGIN = 2   # her tag's template: her letters and this many px around them (track.make_template's 2)
+
+
+def tag_template(model: PlateModel, margin: int = TEMPLATE_MARGIN) -> tuple[np.ndarray, tuple[int, int]]:
+    """Her tag's gray template cut from her plate's median picture as calibration cuts one from a frame (her name's
+    white letters, `margin` px around them: track.make_template), but of her stable letters only (no sparkle's white)
+    and from the median of her sure frames (the interior's translucent dark as it is on average). -> (the template
+    (uint8 gray, the size NameTag and the locator use both its files at: at 1366x768 the half-size one is full size),
+    where its centre (its top-left + (w // 2, h // 2), as NameTag gives it) is from the model's centre). BugBaby's of
+    10-30 cut this way: 15 x 52, its centre (-1, 0) from her old text tag's; 0.993 median on her train frames' plates
+    (p25 0.990, the second peak 0.51 at most) where the old template had 0.879 (0.86-0.895, never the 0.9 her_cues
+    wanted: D:/MapleHelper-scratch/loc2build/bugbaby/v2/cut_probe.py)."""
+    ly, lx = np.nonzero(model.letters())
+    if not len(ly):
+        raise ValueError("her plate's model has no letters to cut her tag from")
+    h, w = model.picture.shape[:2]
+    r0, r1 = max(0, int(ly.min()) - margin), min(h, int(ly.max()) + margin + 1)
+    c0, c1 = max(0, int(lx.min()) - margin), min(w, int(lx.max()) + margin + 1)
+    gray = cv2.cvtColor(np.ascontiguousarray(model.picture), cv2.COLOR_RGB2GRAY)
+    t = np.ascontiguousarray(gray[r0:r1, c0:c1])
+    th, tw = t.shape
+    return t, (c0 + model.box[0] + tw // 2, r0 + model.box[2] + th // 2)
+
+
+# Her tag's sure levels from its template's own scores (`sure_levels`): the frames of a calibration recording show her
+# tag clear in most of them, so the best match's scores have a tight cluster at the template's typical score on her tag
+# (its 75th percentile) and a tail where it's covered. `picks` (the plate's median picture: sure_centres) and `bank`
+# (her pose bank, her_cues.sure_tag) go that cluster's spread (its scores within CLUSTER of the typical, their p25-p75)
+# times PICKS_SPREAD and BANK_SPREAD below it, at most the levels the prototype's template had (0.95, 0.9): RiceBaby's
+# template on her part1 frames typical 0.981, spread 0.006 (0.95, 0.9, as the constants were); BugBaby's old text tag's
+# on her train frames 0.882, 0.006 (0.857, 0.832); the one cut from her plate 0.996, 0.005 (0.95, 0.9)
+# (D:/MapleHelper-scratch/loc2build/bugbaby/v2: survey_rice.py, cut_probe.py, models/her_cues.log).
+CLUSTER, SPREAD_LEAST = 0.1, 0.004
+PICKS_SPREAD, BANK_SPREAD = 4.0, 8.0
+PICKS_MOST, BANK_MOST = 0.95, 0.9
+
+
+def sure_levels(best: Iterable[float]) -> tuple[float, float, float]:
+    """(typical, picks, bank) from her frames' best gray scores (the top)."""
+    b = np.asarray([float(v) for v in best], np.float64)
+    if not len(b):
+        raise ValueError("no scores")
+    typical = float(np.percentile(b, 75))
+    near = b[b >= typical - CLUSTER]
+    spread = max(SPREAD_LEAST, float(np.percentile(near, 75) - np.percentile(near, 25)))
+    return (round(typical, 4), round(min(PICKS_MOST, typical - PICKS_SPREAD * spread), 4),
+            round(min(BANK_MOST, typical - BANK_SPREAD * spread), 4))
+
+
 def sure_centres(frames: Iterable[tuple[object, np.ndarray]], template: np.ndarray, hud: int, best: float = 0.95,
                  second: float = 0.6, box=BOX, cell: int = 6, most: int = 400, seed: int = 1):
     """Her tag's centre in each frame (key, RGB) where the full gray template is sure: its best match at least `best`,
     no other peak `second` or more, the plate's box above the HUD's top `hud`; then one frame per `cell` x `cell` px of
     centres (seeded), at most `most`: [(key, (cx, cy))], for PlateModel.build (the prototype's build_plate.py)."""
-    th, tw = template.shape
+    return pick_centres(((key, gray_peaks(frame, template, k=2, rows=hud)) for key, frame in frames), hud, best,
+                        second, box, cell, most, seed)
+
+
+def pick_centres(peaks: Iterable[tuple[object, list]], hud: int, best: float = 0.95, second: float = 0.6, box=BOX,
+                 cell: int = 6, most: int = 400, seed: int = 1):
+    """`sure_centres` from each frame's gray peaks already found ((key, gray_peaks' list)): the same picks."""
     cells: dict = {}
-    for key, frame in frames:
-        peaks = gray_peaks(frame, template, k=2, rows=hud)
-        if not peaks or peaks[0][0] < best or (len(peaks) > 1 and peaks[1][0] >= second):
+    for key, peaks_ in peaks:
+        if not peaks_ or peaks_[0][0] < best or (len(peaks_) > 1 and peaks_[1][0] >= second):
             continue
-        _, cx, cy = peaks[0]
+        _, cx, cy = peaks_[0]
         if cy + box[3] >= hud:
             continue
         cells.setdefault((cx // cell, cy // cell), []).append((key, (cx, cy)))
@@ -427,37 +536,53 @@ class Plate:
 
     # --- the decision ----------------------------------------------------------------------------------------------
     def decide(self, cands: Iterable[Candidate], pred: tuple[float, float] | None, miss: int = 0,
-               far: bool = False) -> Hit | None:
+               far: bool = False, frame: np.ndarray | None = None) -> Hit | None:
         """The candidates' best by evidence less W_DIST a px from the prediction, of those good enough: clean letters
         CLEAN_MIN or more, and the letters' rule, or (with a prediction) the near rule (`miss`: frames she went
-        unplaced, widening its gate), or `far`'s (no prediction). None if none is."""
+        unplaced, widening its gate), or `far`'s (no prediction); with the `frame` they came from, also where her
+        plate matches best about them (`aligned`; the best that is, the next one where it isn't). None if none is."""
         p = self.p
-        best = None
+        good = []
         for c in cands:
             d = float(np.hypot(c.x - pred[0], c.y - pred[1])) if pred is not None else 0.0
             letters = c.letters - p["w_bad"] * c.bad
             if p["clean_min"] and c.clean < p["clean_min"]:
                 continue
             if far:
-                ok = c.frame >= p["min_frame"] and letters >= p["l_far"]
+                ok = c.frame >= p["min_frame"] and c.letters - p["w_bad_far"] * c.bad >= p["l_far"]
             else:
                 ok = (c.frame >= p["min_frame"] and letters >= p["l_min"]) or \
                      (pred is not None and c.frame >= p["near_only"] and d <= p["gate"] * (1 + miss)
                       and letters >= p["l_near"])
-            if not ok:
-                continue
-            sc = c.score - W_DIST * d
-            if best is None or sc > best[0]:
-                best = (sc, c, d)
-        if best is None:
-            return None
-        sc, c, d = best
-        return Hit(sc, c.x, c.y, (c.x + self.feet[0], c.y + self.feet[1]), c, d)
+            if ok:
+                good.append((c.score - W_DIST * d, c, d))
+        good.sort(key=lambda g: -g[0])   # (stable: of equal scores the first, as before)
+        for sc, c, d in good:
+            if frame is None or not p["align"] or self.aligned(frame, c) >= p["align"]:
+                return Hit(sc, c.x, c.y, (c.x + self.feet[0], c.y + self.feet[1]), c, d)
+        return None
+
+    def aligned(self, frame: np.ndarray, c: Candidate, hud: int | None = None) -> float:
+        """How well a candidate sits where her plate's pixels match best around it: its count of stable px matched (its
+        frame, its letters, its outline) over the most within ALIGN_REACH of it (1.0: there). Her own plate, covered or
+        not, matches best where it is; another wearer's is placed where her letters line up with his, its frame a few
+        px away matching more (RiceBaby's under BugBaby's model: about half)."""
+        hud = _hud(frame) if hud is None else hud
+        x0, y0, x1, y1 = self.window(frame.shape, (c.x, c.y), ALIGN_REACH)
+        res = self.counts(frame, (x0, y0, x1, y1), hud)
+        if res is None:
+            return 1.0
+        ry, rx = c.y + self.oy - y0, c.x + self.ox - x0
+        if not (0 <= ry < res.shape[0] and 0 <= rx < res.shape[1]):
+            return 1.0
+        most = int(res.max())
+        return 1.0 if most <= 0 else float(res[ry, rx]) / most
 
     def near(self, frame: np.ndarray, pred: tuple[float, float], miss: int = 0) -> Hit | None:
         """Her plate around its predicted centre (NEAR, GROW wider a frame she went unplaced up to GROW_MAX)."""
         m = min(max(0, miss), GROW_MAX)
-        return self.decide(self.candidates(frame, pred, (NEAR[0] + GROW[0] * m, NEAR[1] + GROW[1] * m)), pred, m)
+        return self.decide(self.candidates(frame, pred, (NEAR[0] + GROW[0] * m, NEAR[1] + GROW[1] * m)), pred, m,
+                           frame=frame)
 
     def verify(self, frame: np.ndarray, peaks: Iterable[tuple[float, int, int]]) -> Hit | None:
         """The gray template's peaks (score, cx, cy; `gray_peaks`) checked by her plate's evidence, the first three:
@@ -465,7 +590,7 @@ class Plate:
         cands = []
         for _, x, y in list(peaks)[:3]:
             cands += self.candidates(frame, (x, y), PEAK_REACH)
-        return self.decide(cands, None, far=True)
+        return self.decide(cands, None, far=True, frame=frame)
 
 
 def _hud(frame: np.ndarray) -> int:

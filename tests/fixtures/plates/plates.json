@@ -1,0 +1,50 @@
+{
+ "bugbaby_whole": {
+  "file": "bugbaby_whole.png",
+  "at": [
+   623,
+   536
+  ],
+  "centre": [
+   695,
+   562
+  ],
+  "what": "BugBaby's train frame 01200: her plate whole (her new tag sure)"
+ },
+ "bugbaby_covered": {
+  "file": "bugbaby_covered.png",
+  "at": [
+   582,
+   428
+  ],
+  "centre": [
+   654,
+   454
+  ],
+  "what": "BugBaby's train frame 00030: the expanded chat box over her plate"
+ },
+ "ricebaby": {
+  "file": "ricebaby.png",
+  "at": [
+   724,
+   481
+  ],
+  "centre": [
+   796,
+   507
+  ],
+  "what": "RiceBaby's frame part2/04411 of 10-29: her plate (her label's feet less her model's offset)"
+ },
+ "aaabattery": {
+  "file": "aaabattery.png",
+  "at": [
+   663,
+   86
+  ],
+  "centre": [
+   735,
+   112
+  ],
+  "what": "RiceBaby's frame quick-2min-1029/00105: AAABattery's plate, the same item (in BugBaby's model's convention, where its verify took it with the prototype's rule)"
+ }
+}

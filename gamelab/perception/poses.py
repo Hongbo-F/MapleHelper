@@ -22,8 +22,9 @@ A search (`BodyFinder.find`, the prototype's Localizer.find_her) of a box her fe
      leaning left, leaning right: a cast leans ahead), the best CENTRES; every pose there +-FINE_R by SCAN px, the best
      24 verified as in 1.
   A candidate's agreement: the share of its pixels within TOL on every channel (or within 2 of half its colour: the
-  blink), pixels off the window not agreeing. With a prediction, the motion's weight: MOTION_W lost a px of jump
-  beyond the slack (a cast draws one picture at two origins 25 px apart).
+  blink), pixels off the window not agreeing, those behind the HUD (its top row down) not counted (SHOWN_LEAST). With
+  a prediction, the motion's weight: MOTION_W lost a px of jump beyond the slack (a cast draws one picture at two
+  origins 25 px apart).
 In C where the DLL is (gamelab/locate.c's lc_pack, lc_agree: every candidate's agreement at its offsets, eight across
 a load on AVX2), in numpy otherwise, the same shares to the bit (tests/test_poses.py); the anchors' and the mass's
 correlations are OpenCV's both ways. Its answer is the prototype's on the evaluation set's frames (README).
@@ -71,6 +72,14 @@ WINDOW = (65, 66, 105, 10)   # the window around the feet box: px left, right, u
 REACH = (70, 20)         # the pixels' box around the window (across, down), the poses' reach
 FEET_ROWS = (30, 30)     # her feet at least this far down the frame, at most this far under the HUD's top
 MIN_WINDOW = 60
+# Behind the HUD (from its top row, 700 at 1366x768, down) her pixels are hidden, not hers missing: a candidate's
+# agreement is the share of its pixels above it that agree (its pixels counted at least SHOWN_LEAST of them, so a pose
+# mostly below it can't agree by a few), and her colours' mass doesn't count the HUD's rows against her. Counted
+# against her (the HUD as pixels that disagree), BugBaby falling behind it on the held-out frames of 10-30 (2528-2531,
+# her legs below row 700) had her own pose under the 0.8 her head's answer needs and a wrong one 20 px right and 28 up
+# agreeing 0.67-0.81 by her colours' mass: 29.5-33.8 px off for 4 frames (D:/MapleHelper-scratch/loc2build/bugbaby/
+# final.txt).
+SHOWN_LEAST = 0.5
 USE_C = True             # False: numpy's (the tests compare the two)
 
 
@@ -252,6 +261,19 @@ class _Sets:
         self.p0, self.p1 = _packed(self.c0), _packed(self.c1)
         self.ext = np.ascontiguousarray(np.array(ext, np.int32))
         self.first, self.n = self.ext[:, 0], self.ext[:, 1]
+        # each set's px by row: cum[s, j] of set s's px lie above row rmin + j from her feet (`shown`)
+        self.rmin = int(self.ys.min())
+        rows = int(self.ys.max()) - self.rmin + 1
+        self.cum = np.zeros((len(ext), rows + 1), np.int32)
+        for s, (a, n, *_rest) in enumerate(ext):
+            self.cum[s, 1:] = np.cumsum(np.bincount(self.ys[a:a + n] - self.rmin, minlength=rows))
+
+    def shown(self, which: np.ndarray, fy: np.ndarray, R: int, limit: int) -> np.ndarray:
+        """[C, (2R+1)^2]: of candidate c's pixels (set which[c], feet row fy[c]) at each offset within +-R (rows the
+        slower, as _Picture.agree's), how many lie above row `limit` (the same rows as fy)."""
+        oy = np.repeat(np.arange(-R, R + 1), 2 * R + 1)
+        j = np.clip(limit - (fy[:, None] + oy[None, :]) - self.rmin, 0, self.cum.shape[1] - 1)
+        return self.cum[np.asarray(which)[:, None], j]
 
 
 def _packed(c: np.ndarray) -> np.ndarray:
@@ -260,9 +282,13 @@ def _packed(c: np.ndarray) -> np.ndarray:
 
 
 class _Picture:
-    """A search's pixels: the frame's box (lc_pack's in C; planes for numpy)."""
+    """A search's pixels: the frame's box (lc_pack's in C; planes for numpy). `hud`: the HUD's top row where the box
+    reaches it (the box then ends there, and a candidate's agreement is of its pixels above it: `agree`)."""
 
-    def __init__(self, frame: np.ndarray, x0: int, y0: int, x1: int, y1: int, lib):
+    def __init__(self, frame: np.ndarray, x0: int, y0: int, x1: int, y1: int, lib, hud: int | None = None):
+        self.hud = hud if hud is not None and hud < y1 else None
+        if self.hud is not None:
+            y1 = max(y0 + 1, hud)
         self.x0, self.y0, self.w, self.h = x0, y0, x1 - x0, y1 - y0
         sub = frame[y0:y1, x0:x1]
         self.lib = lib
@@ -274,7 +300,16 @@ class _Picture:
 
     def agree(self, sets: _Sets, which: np.ndarray, fx: np.ndarray, fy: np.ndarray, R: int) -> np.ndarray:
         """[C, (2R+1)^2]: candidate c (set which[c], feet column fx[c], row fy[c] of this box) at each offset within
-        +-R (rows the slower), the share of its pixels agreeing, the better colour mode."""
+        +-R (rows the slower), the share of its pixels agreeing, the better colour mode; where the box ends at the
+        HUD's top (`hud`), the share of its pixels above it (at least SHOWN_LEAST of them counted)."""
+        out = self._agree(sets, which, fx, fy, R)
+        if self.hud is not None and len(out):
+            n = sets.n[np.asarray(which)][:, None].astype(np.float64)
+            shown = sets.shown(which, np.asarray(fy, np.int64), R, self.hud - self.y0)
+            out = np.where(shown < n, np.rint(out * n) / np.maximum(shown, SHOWN_LEAST * n), out)   # (counted)
+        return out
+
+    def _agree(self, sets: _Sets, which: np.ndarray, fx: np.ndarray, fy: np.ndarray, R: int) -> np.ndarray:
         which = np.ascontiguousarray(which, np.int32)
         fx, fy = np.ascontiguousarray(fx, np.int32), np.ascontiguousarray(fy, np.int32)
         side = 2 * R + 1
@@ -413,9 +448,11 @@ class BodyFinder:
         RX0, RY0 = max(0, X0 - REACH[0]), max(0, Y0 - REACH[1])
         RX1, RY1 = min(W, X1 + REACH[0]), min(H, Y1 + REACH[1])
         lib = native.locate_lib() if USE_C and frame.dtype == np.uint8 else None
-        pic = _Picture(frame, RX0, RY0, RX1, RY1, lib)
-        # 1. her anchors
-        g = cv2.cvtColor(np.ascontiguousarray(frame[Y0:Y1, X0:X1]), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        # (the HUD's top down is the HUD's: her pixels there are hidden, not hers missing, `_Picture`)
+        pic = _Picture(frame, RX0, RY0, RX1, RY1, lib, hud)
+        # 1. her anchors (above the HUD's top)
+        g = cv2.cvtColor(np.ascontiguousarray(frame[Y0:max(Y0 + 1, min(Y1, hud)), X0:X1]),
+                         cv2.COLOR_RGB2GRAY).astype(np.float32)
         hits = self.anchor_hits(g, g * g, X0, Y0)
         which, fx, fy = [], [], []
         for mn, k, hx, hy in hits:
@@ -428,8 +465,10 @@ class BodyFinder:
             self.paths.append("head")
             return best
         self.paths.append("mass(h=%s)" % ("none" if best is None else "%.2f" % best.agree))
-        # 2. her colours' mass
+        # 2. her colours' mass (the HUD's rows neither hers nor against her)
         sc = self.mass_picture(frame, X0, Y0, X1, Y1, view, lib)
+        if Y1 > hud:
+            sc[max(0, hud - Y0):] = 0.0
 
         def group_peaks(gi):
             G = self.groups[gi]
@@ -869,3 +908,34 @@ def _place(p: Pose, a: Anchor):
     if share[iy, ix] < 0:
         return None
     return float(share[iy, ix]), int(xs[ix]), int(ys[iy])
+
+
+def mirror_axis(bank: PoseBank, most: int = 12, reach: int = 24) -> tuple[float | None, int]:
+    """Her mirror axis by her poses seen facing both ways (the game mirrors her about her origin, her feet's x): each of
+    the `most` most seen facing left against each of those facing right, mirrored about the bank's feet and shifted s
+    px (within `reach`, a row either way), where they agree (MERGE: overlap, colour) the best s, voted by the fewer
+    frames of the two. Her feet's true x is the bank's + s/2 (a bank's mirror images are 2e off where its feet are e
+    off): (that correction, the votes for it), (None, 0) where no pair agrees. On BugBaby's bank of 10-30 built with
+    the magician's +1.5: +5 px, so her feet -3.5 from her old tag's centre (D:/MapleHelper-scratch/loc2build/bugbaby/
+    scripts/mirror_axis.py), as her plate's own axis says (plate.PlateModel.axis)."""
+    seen = [p for p in bank.poses if not p.mirrored]
+    left = sorted((p for p in seen if p.facing == "left"), key=lambda p: -p.n)[:most]
+    right = sorted((p for p in seen if p.facing == "right"), key=lambda p: -p.n)[:most]
+    votes: dict[int, int] = {}
+    for a in left:
+        da = {"px": a.picture, "mask": a.mask, "dx0": a.dx0, "dy0": a.dy0}
+        for b in right:
+            w = b.picture.shape[1]
+            mb = {"px": b.picture[:, ::-1], "mask": b.mask[:, ::-1], "dx0": -b.dx0 - w + 1, "dy0": b.dy0}
+            best = None
+            for s in range(-reach, reach + 1):
+                for dy in (-1, 0, 1):
+                    ov, ag = _overlap_agree(da, dict(mb, dx0=mb["dx0"] + s, dy0=mb["dy0"] + dy))
+                    if ov >= OVERLAP and ag >= MERGE[1] - 0.03 and (best is None or (ag, ov) > best[1:]):
+                        best = (s, ag, ov)
+            if best is not None:
+                votes[best[0]] = votes.get(best[0], 0) + min(a.n, b.n)
+    if not votes:
+        return None, 0
+    s = max(votes, key=lambda k: (votes[k], -abs(k)))
+    return s / 2, votes[s]
