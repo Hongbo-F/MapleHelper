@@ -13,8 +13,9 @@ asked which, "Bark"; then "Let's remove ntfy notification all along"): ntfy's iO
 Focus or the mute switch (no Critical Alerts entitlement); Bark's `level=critical` is meant to
 (https://github.com/Finb/Bark: "Critical alerts will ignore silent and do not disturb modes"). By lab/bark.json
 ({"server": "https://api.day.app", "key": "<the device key>"}, git-ignored with the lab: the key is the only secret;
-`notify --setup-bark KEY`, `--test-bark`): the first sight and the Truth Booth critical and ringing (`call`: its sound
-again and again for 30 s), the repeats critical, the cycle's end an ordinary one.
+`notify --setup-bark KEY`, `--test-bark`): the first sight, the repeats and the Truth Booth critical, each its alarm sound
+once (a few seconds; Bark's `call`, its sound again and again for 30 s, was too much: the user, "just 5s is enough"),
+the cycle's end an ordinary one.
 
 A text message too (the user, 2026-10-29 ~02:00: "Send lie detector alert to <their carrier's email-to-text address>
 also"; asked how, "My email via SMTP"): the cycle's first sight and the Truth Booth's, once each (not the repeats: a
@@ -129,7 +130,8 @@ def mail(cfg: dict | None, subject: str, text: str, log=None) -> threading.Threa
 
 
 def load_bark(path: Path | None = None) -> dict | None:
-    """Bark's server and the device key ({"server", "key"}), or None (no file, or no key in it)."""
+    """Bark's server, the device key and whether the first sight and the Truth Booth ring 30 s (`ring`, off unless the
+    file says "ring": true) ({"server", "key", "ring"}), or None (no file, or no key in it)."""
     path = _lab_file(path, BARK_CONFIG)
     if path is None:
         return None
@@ -139,7 +141,8 @@ def load_bark(path: Path | None = None) -> dict | None:
         return None
     if not isinstance(cfg, dict) or not cfg.get("key"):
         return None
-    return {"server": str(cfg.get("server") or BARK_SERVER).rstrip("/"), "key": str(cfg["key"]).strip()}
+    return {"server": str(cfg.get("server") or BARK_SERVER).rstrip("/"), "key": str(cfg["key"]).strip(),
+            "ring": bool(cfg.get("ring", False))}
 
 
 def setup_bark(key: str, path: Path | None = None) -> dict:
@@ -204,7 +207,7 @@ class Pusher:
     """A Lie Detector cycle's pushes (see the top), as the Watchdog's looks tell it: `seen(now, form)` at each look that
     sees one (the cycle's first included), `ended(now)` at its end. `push` stands in for the network in tests:
     push(title, text, priority, text_too): `priority` urgent, high or default; `text_too` the cycle's first sight and
-    the Truth Booth's, ringing and a text as well."""
+    the Truth Booth's, a text as well."""
 
     def __init__(self, push_fn=None, every_s: float = REPEAT_S, clock=time.strftime):
         self.push = push_fn
@@ -216,12 +219,13 @@ class Pusher:
 
     @classmethod
     def from_lab(cls, log=None, mail_path: Path | None = None, bark_path: Path | None = None) -> "Pusher":
-        """Pushes to lab/bark.json's iPhone (urgent and high critical, `text_too` ringing) and, `text_too`, a text
+        """Pushes to lab/bark.json's iPhone (urgent and high critical: its sound once) and, `text_too`, a text
         through lab/smtp.json's account, each file read at each push: none while there's none (nor ever under
         NO_PUSH_ENV unless named), and one set up or changed later is used without the player starting again."""
         def go(title, text, priority, text_too=False):
-            bark(load_bark(bark_path), title, text, "critical" if priority in ("urgent", "high") else "active",
-                 call=text_too, log=log)
+            bcfg = load_bark(bark_path)
+            bark(bcfg, title, text, "critical" if priority in ("urgent", "high") else "active",
+                 call=bool(text_too and bcfg and bcfg["ring"]), log=log)
             if text_too:
                 mail(load_mail(mail_path), title, text, log=log)
         return cls(go)

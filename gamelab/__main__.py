@@ -147,7 +147,7 @@ def cmd_notify(args) -> int:
                 return 1
             try:
                 notify.send_bark(bcfg, "gamelab test", f"a test critical alert at {time.strftime('%H:%M:%S')}: a "
-                                                       "Lie Detector comes like this, ringing", "critical", call=True)
+                                                       "Lie Detector comes like this", "critical")
             except Exception as e:
                 print(f"the test Bark push failed: {type(e).__name__}: {e}")
                 return 1
@@ -2859,7 +2859,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--setup-bark", metavar="KEY", help="critical alerts to the iPhone's Bark app (its device key, the "
                                                          "part after https://api.day.app/ in the app), kept in "
                                                          "lab/bark.json")
-    s.add_argument("--test-bark", action="store_true", help="send one critical, ringing alert through lab/bark.json")
+    s.add_argument("--test-bark", action="store_true", help="send one critical alert through lab/bark.json")
     s.set_defaults(func=cmd_notify)
     s = sub.add_parser("character", help="who plays: her profiles, the one a command plays and why; `use ID` plays ID "
                                          "when nothing names another (lab/character.json); `check`: her bottom bar "

@@ -91,19 +91,20 @@ def test_the_tests_never_push_or_text_from_the_labs_own_files(tmp_path, monkeypa
     assert notify.load_bark() is None and notify.load_mail() is None
     Pusher.from_lab().seen(0.0, "countdown")
     assert went == [("push", None), ("mail", None)]
-    assert notify.load_bark(lab_push) == {"server": "https://api.day.app", "key": "t"}  # (named: read)
+    assert notify.load_bark(lab_push) == {"server": "https://api.day.app", "key": "t", "ring": False}  # (named: read)
     monkeypatch.delenv(notify.NO_PUSH_ENV)  # the player's own: the lab's files, looked up at each push
     went.clear()
     Pusher.from_lab().seen(0.0, "countdown")
     assert [w[0] for w in went] == ["push", "mail"] and went[0][1]["key"] == "t" and went[1][1]["to"] == ["a"]
 
 
-def test_bark_gets_a_critical_ringing_alert_at_the_first_sight_critical_repeats_and_an_ordinary_end(tmp_path,
+def test_bark_gets_a_critical_alert_at_the_first_sight_critical_repeats_and_an_ordinary_end(tmp_path,
                                                                                                     monkeypatch):
     # The user, 2026-10-29: "switch to something that can actually send urgent alert on iPhone" ("Bark").
     path = tmp_path / "bark.json"
     assert notify.load_bark(path) is None
     assert notify.setup_bark(" abc/def ", path) == {"server": "https://api.day.app", "key": "abc/def"}
+    assert notify.load_bark(path)["ring"] is False
     cfg = notify.load_bark(path)
     url = notify.bark_url(cfg, "Lie Detector up", "seen at 01:35:32: answer it", "critical", call=True)
     assert url.startswith("https://api.day.app/abc%2Fdef/Lie%20Detector%20up/seen%20at%2001%3A35%3A32%3A%20answer%20it?")
@@ -119,8 +120,9 @@ def test_bark_gets_a_critical_ringing_alert_at_the_first_sight_critical_repeats_
     p.seen(30.0, "mini-game")
     p.seen(60.0, "truth booth")
     p.ended(90.0)
-    assert went == [("Lie Detector up", "critical", True), ("Lie Detector still up", "critical", False),
-                    ("Lie Detector missed", "critical", True), ("Lie Detector gone", "active", False)]
+    # (no `call`, Bark's 30 s of ringing: the user, "Don't ring 30s that feels a lot, just 5s is enough")
+    assert went == [("Lie Detector up", "critical", False), ("Lie Detector still up", "critical", False),
+                    ("Lie Detector missed", "critical", False), ("Lie Detector gone", "active", False)]
 
 
 def test_a_bark_push_that_fails_or_is_refused_is_said_and_never_raised(monkeypatch):
