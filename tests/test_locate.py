@@ -230,3 +230,54 @@ def test_after_a_gap_without_frames_she_is_placed_afresh(art, model, plate):
     frame, (fx, fy), centre, _ = scene(art, model, plate, 120.5)
     got = loc.see(frame, 1 / 15 + 2 * locate.GAP_S + 1 / 15, None)
     assert got.how == "tag" and got.tag == centre
+
+
+def test_her_dot_hints_the_cameras_cold_search_whenever_its_read(art, model, plate):
+    """(Only before the first registered view, it was: on a map the camera moves across too, every lost frame after
+    searched the whole map, 80-900 ms.)"""
+    loc = locator(art, model, plate)
+    hints = []
+    see = loc.reg.see
+    loc.reg.see = lambda frame, t, hint=None: hints.append(hint) or see(frame, t, hint)
+    frame, _, _, p = scene(art, model, plate, 43.5)
+    dot = dot_of(loc, 43.5, p.y_at(43.5))
+    for k in range(3):
+        loc.see(frame, k / 30, dot)
+    loc.see(frame, 3 / 30, None)
+    assert hints == [loc.camera.corner(*loc.dot_map(dot))] * 3 + [None]
+
+
+def test_whatever_building_her_locator_raises_gives_her_place_as_before(art, model, plate, tmp_path, monkeypatch):
+    """Not the service's run for the map failing ("can't look at map"): a model file cut short, the art's drawing out
+    of memory (a big map's first: 0.4-0.5 GB at its peak), anything; said."""
+    monkeypatch.setattr(locate, "configured", lambda path=None: True)
+    monkeypatch.setattr(mapart, "load", lambda map_id: art)
+    plate.save(P.model_path(tmp_path))
+    bank = Path(tmp_path) / "poses_1366x768.npz"
+    pose_bank(0, 3).save(bank)
+    said = []
+    for path in (bank, Path(P.model_path(tmp_path))):
+        whole = path.read_bytes()
+        path.write_bytes(whole[:len(whole) // 2])
+        assert locate.build(model, template_of(plate), tmp_path, log=said.append) is None
+        path.write_bytes(whole)
+    monkeypatch.setattr(mapart, "load", lambda map_id: (_ for _ in ()).throw(MemoryError("Unable to allocate")))
+    assert locate.build(model, template_of(plate), tmp_path, log=said.append) is None
+    assert len(said) == 3 and all("can't be built" in s for s in said) and "MemoryError" in said[2]
+    monkeypatch.setattr(mapart, "load", lambda map_id: art)
+    assert locate.build(model, template_of(plate), tmp_path, log=said.append) is not None
+
+
+def test_a_locator_that_raises_is_put_away_and_she_is_placed_as_before(art, model, plate):
+    eyes = saved_eyes(model, plate, art)
+    said = []
+    eyes.log = said.append
+
+    def broken(*a, **k):
+        raise ValueError("cr_costs refused its arguments")
+    eyes.locator.see = broken
+    frame, _, _, _ = scene(art, model, plate, 43.5)
+    obs = eyes.look_at(frame, 0.0)
+    assert obs.bad is None and obs.located is None and eyes.locator is None
+    assert len(said) == 1 and "ValueError" in said[0]
+    assert eyes.look_at(frame, 1 / 30).bad is None and len(said) == 1

@@ -241,3 +241,66 @@ def test_a_frame_of_another_size_is_refused_and_none_placed_before_the_first_sur
     assert camreg.for_map(TREE, (960, 540)) is None  # (1920x1080's half-size look frames)
     monkeypatch.setattr(mapart, "load", lambda map_id: tree)
     assert camreg.for_map(TREE).art is tree
+
+
+def test_a_lost_view_searches_the_whole_of_a_map_the_camera_moves_both_ways_seldom(rocky, tree):
+    """The whole of such a map unhinted is 80-900 ms (the frame loop's 33 a frame): with her dot's view as the hint
+    each lost frame searches about it alone, the whole map every COLD_WHOLE_S (a misread dot's hint found nothing);
+    without one at once, then as seldom; where the camera moves one way only (Tree Dungeon, 4-6 ms) every lost frame."""
+    if camreg.lib() is None:
+        pytest.skip(f"camreg.c isn't built: {camreg.why}")
+    calls = []
+
+    def spied(reg):
+        cold = reg.cold
+        reg.cold = lambda frame, g, hint=None: calls.append(hint is not None) or cold(frame, g, hint)
+        return reg
+
+    real = rgb(ROCKY_FRAMES[0])
+    black = np.zeros_like(real)
+    reg = spied(Registration(rocky))
+    assert reg.see(real, t=0.0, hint=(ROCKY_VIEW[0] + 40, ROCKY_VIEW[1] - 50)).sure
+    calls.clear()
+    for i in range(1, 31):   # a second of frames that aren't the map, her dot read
+        assert reg.see(black, t=i / 30, hint=ROCKY_VIEW).how == "carried"
+    assert calls == [True] * 30
+    calls.clear()
+    for i in range(31, 91):   # two more seconds
+        reg.see(black, t=i / 30, hint=ROCKY_VIEW)
+    assert calls.count(True) == 60 and calls.count(False) == 1
+    assert reg.see(real, t=91 / 30, hint=ROCKY_VIEW).how == "near"   # (and found again at once)
+    calls.clear()
+    for i in range(92, 122):   # her dot not read: the whole map at once, then not for COLD_WHOLE_S
+        reg.see(black, t=i / 30)
+    assert calls == [False]
+    assert reg.see(real, t=122 / 30).how == "near"
+    far = (ROCKY_VIEW[0] + 300, ROCKY_VIEW[1] - 300)   # a hint off the view (a misread dot)
+    reg = spied(Registration(rocky))
+    assert reg.see(real, t=0.0, hint=far).how == "none"
+    assert reg.see(real, t=camreg.COLD_WHOLE_S, hint=far).how == "cold"   # (the whole map searched, found)
+    reg = spied(Registration(tree))
+    assert reg.see(window_frame(tree, -658, -1200), t=0.0).sure
+    calls.clear()
+    for i in range(1, 6):
+        reg.see(np.zeros((768, 1366, 3), np.uint8), t=i / 30, hint=(-658, -1200))
+    assert calls == [False] * 5
+
+
+def test_the_latest_maps_art_alone_is_kept_in_memory(monkeypatch, tmp_path):
+    """A service going map after map kept every one's art for its life (Tree Dungeon 14 MB, Henesys 33, Ellinia 56)."""
+    def draw(map_id, copy=None):
+        return mapart.MapArt(map_id, 0, 0, np.zeros((4, 4, 3), np.uint8), np.ones((4, 4), bool))
+    monkeypatch.setattr(mapart, "draw", draw)
+    monkeypatch.setattr(mapart, "_key", lambda map_id, copy: {"map": map_id})
+    monkeypatch.setattr(mapart, "CACHE", tmp_path)
+    monkeypatch.setattr(mapart, "_LOADED", {})
+    a = mapart.load(1, cache=tmp_path)
+    assert mapart.load(1, cache=tmp_path) is a and list(mapart._LOADED) == [1]
+    mapart.load(2, cache=tmp_path)
+    assert list(mapart._LOADED) == [2]
+    again = mapart.load(1, cache=tmp_path)   # (from its file)
+    assert again is not a and again.map_id == 1 and list(mapart._LOADED) == [1]
+    mapart.load(3, cache=tmp_path / "other")   # another cache's (a test's, a tool's): not kept
+    assert list(mapart._LOADED) == [1]
+    mapart.forget()
+    assert mapart._LOADED == {}

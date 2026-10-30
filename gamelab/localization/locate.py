@@ -294,10 +294,9 @@ class Locator:
         self.t = t
         info: dict = {}
         dmap = None if dot is None else self.dot_map(dot)
-        # 1. the camera
-        hint = None
-        if dmap is not None and self.reg.sure_at is None:
-            hint = self.camera.corner(*dmap)
+        # 1. the camera (her dot's view the hint of a cold search, whenever her dot is read: on a map the camera moves
+        # across too the whole map unhinted is 80-900 ms, within the hint's reach 5-8; camreg's COLD_WHOLE_S)
+        hint = None if dmap is None else self.camera.corner(*dmap)
         v = self.reg.see(frame, t, hint)
         t1 = self._t("cam", T0)
         if v.how == "none":
@@ -743,7 +742,10 @@ class Locator:
 def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None) -> Locator | None:
     """A Locator for map `model` at geometry `geo` with her models from her lab folder (`lab`: plate_1366x768.npz,
     poses_1366x768.npz), her tag's gray template (or what gives it); None where it can't be (the top: not 1366x768, no
-    plate model, the map's art can't be drawn, or turned off: `configured`)."""
+    plate model, the map's art can't be drawn, or turned off: `configured`). Whatever drawing the art or loading her
+    models raises (a truncated model file, an allocation failing as a big map's art is drawn the first time: 0.4-0.5 GB
+    at its peak for Ellinia, Lith Harbor, Kerning City) is logged and gives None, her place as before: never the
+    service's run for the map failing with it."""
     from . import camreg, mapart
     if geo != NATIVE or not configured():
         return None
@@ -752,20 +754,20 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
         return None
     try:
         art = mapart.load(model.id)
-    except (OSError, KeyError, ValueError) as e:
+        reg = camreg.Registration(art)
+        body = None
+        bank = poses.bank_path(lab, geo)
+        if Path(bank).exists():
+            body = poses.BodyFinder(poses.PoseBank.load(bank), poses.Background(art.rgb, (art.x0, art.y0), art.static))
+        loc = Locator(model, reg, template, plates.Plate(plates.PlateModel.load(path)), body, geo)
+    except Exception as e:  # noqa: BLE001 (her place as before, whatever it was)
+        mapart.forget()
         if log is not None:
-            log(f"  her place from the dot and her tag: the map's art can't be drawn ({e!r})")
+            log(f"  her place from the dot and her tag: the scene's locator can't be built ({e!r})")
         return None
-    reg = camreg.Registration(art)
-    body = None
-    bank = poses.bank_path(lab, geo)
-    if Path(bank).exists():
-        body = poses.BodyFinder(poses.PoseBank.load(bank), poses.Background(art.rgb, (art.x0, art.y0), art.static))
-    loc = Locator(model, reg, template, plates.Plate(plates.PlateModel.load(path)), body, geo)
     if log is not None:
         from .. import native
-        c = "in C" if reg.lib is not None and native.locate_lib() is not None else \
-            f"partly in numpy (camreg {camreg.why or 'C'}, locate {native.locate_why or 'C'})"
+        c = "in C" if reg.lib is not None and native.locate_lib() is not None else             f"partly in numpy (camreg {camreg.why or 'C'}, locate {native.locate_why or 'C'})"
         log(f"  her place by the scene (localization.locate): the camera on the map's art ({art.rgb.shape[1]}x"
             f"{art.rgb.shape[0]}), her plate's model, " + (f"her pose bank ({len(body.poses)} poses)" if body is not None
                                                             else "no pose bank (no body cue)") + f"; {c}")

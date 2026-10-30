@@ -13,7 +13,11 @@ place on screen plus it (screen = map - view at 1366x768, a map unit a px).
 - Searched FIRST px about the view predicted (the last sure one moved on as it last moved, by time with frames' times:
   on the clips it was there or 1-3 px off), then NEAR, then WIDE, then every view the camera can take (`cold`: the first
   frame, or after one it couldn't place; on a map the camera moves across too, within HINT_R of `hint`, her dot's view,
-  where given). Where the camera can't move across (or up and down), that way isn't searched (mapart's `fixed`).
+  where given). Where the camera can't move across (or up and down), that way isn't searched (mapart's `fixed`). On a
+  map the camera moves both ways the whole of it unhinted (no hint given, or the hint's search found nothing) costs
+  80-900 ms a frame (West Rocky Mountain II 80, Henesys 340, Ellinia and Lith Harbor 900; within HINT_R of a hint 5-8
+  ms): while the view is lost it's searched at most every COLD_WHOLE_S, the first time at once only where no hint was
+  given (where the camera moves one way only, Tree Dungeon's 4-6 ms, every lost frame).
 - A view is `sure` with its cost at most COST_OK and the best view 2 px or more from it MARGIN_OK dearer (the margin:
   the clips 2.9-3.3; half the play area painted over 0.9-1.7; a capture shifted off the client, a black frame or another
   map's 0.004-0.06), else the view is carried (the prediction, `sure` False, how "carried") and the next frame searches
@@ -57,6 +61,8 @@ COST_OK = 16.0      # the most a sure view costs (two thirds of TRUNC: Tree Dung
                     # painted over 12-13, West Rocky Mountain II's frames 5.3-5.6 under the clouds it draws over itself)
 MARGIN_OK = 0.6     # the least the best view 2 px or more from it costs more (above: 10 times the bad frames' most)
 HINT_R = 64         # px about a hint searched on a map the camera moves across too (cold)
+COLD_WHOLE_S = 2.0  # ... and the whole of such a map searched without one at most this often (s of the frames'
+                    # times) while the view is lost: 80-900 ms a search, where the frame loop has 33 a frame
 
 _lib: ctypes.CDLL | None = None
 _tried = False
@@ -157,6 +163,8 @@ class Registration:
         self.sure_at: tuple[int, int, float | None] | None = None  # the last sure view and its time
         self.move = (0.0, 0.0)            # its last move (px a frame, or px a second with times)
         self.lost = 0                     # frames since the last sure one
+        self.both = vx0 != vx1 and vy0 != vy1   # the camera moves both ways (a cold search's hint used)
+        self.whole_at: float | None = None       # when the whole map was last searched unhinted, the view lost
         self.counts = {"near": 0, "wide": 0, "cold": 0, "carried": 0}
         self._cache: dict[tuple[int, int], tuple[float, int]] = {}  # this frame's views worked out (`_eval`)
 
@@ -348,6 +356,22 @@ class Registration:
         k = (t - at) if (t is not None and at is not None) else (self.lost + 1)
         return self._clamp(x + self.move[0] * k, y + self.move[1] * k)
 
+    def _whole_due(self, t: float | None, hinted: bool) -> bool:
+        """Whether this lost frame searches the whole map unhinted: always where the camera moves one way only (or not
+        at all); else every COLD_WHOLE_S (of `t`, else the clock's) from the first lost frame, at once on it if it had
+        no hint (`hinted`: a search about the hint found nothing; the hint wrong, a misread dot, is what that's for).
+        `whole_at`: when it last was, or was put off."""
+        if not self.both:
+            return True
+        now = time.monotonic() if t is None else t
+        if self.whole_at is None:
+            self.whole_at = now
+            return not hinted
+        if 0 <= now - self.whole_at < COLD_WHOLE_S:
+            return False
+        self.whole_at = now
+        return True
+
     def see(self, frame: np.ndarray, t: float | None = None, hint: tuple[float, float] | None = None) -> View:
         """This frame's view (the top), `t` its time (s; None: frames taken as evenly spaced), `hint` a rough view
         (her minimap dot's camera) for a cold search on a map the camera moves across too."""
@@ -365,9 +389,17 @@ class Registration:
                     break
         if found is None:
             how = "cold"
-            got = self.cold(frame, g, hint)
-            if got[2] <= COST_OK and got[3] >= MARGIN_OK:
-                found = got
+            got = None
+            if hint is not None and self.both:   # (where it moves one way only, the hint isn't used: the whole is cheap)
+                got = self.cold(frame, g, hint)
+                if got[2] <= COST_OK and got[3] >= MARGIN_OK:
+                    found = got
+            if found is None and self._whole_due(t, got is not None):
+                got = self.cold(frame, g, None)
+                if got[2] <= COST_OK and got[3] >= MARGIN_OK:
+                    found = got
+            if got is None:   # (the whole map searched too lately: carried)
+                got = (0, 0, float("inf"), 0.0, 0.0)
         ms = 1e3 * (time.perf_counter() - t0)
         if found is None:
             self.lost += 1
@@ -384,6 +416,7 @@ class Registration:
             self.move = ((x - px) / k, (y - py) / k)
         self.sure_at = (x, y, t)
         self.lost = 0
+        self.whole_at = None
         self.counts[how] += 1
         view = View(x, y, True, how, round(cost, 3), round(min(margin, 99.0), 3), round(share, 4), ms)
         self.last = view

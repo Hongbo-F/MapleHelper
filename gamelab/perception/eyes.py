@@ -240,7 +240,7 @@ class Eyes:
             if getattr(self, "locator", None) is not None:  # her place by the scene (localization.locate)
                 if self.name_tag.full is None:
                     self.name_tag.full = self.name_tag._cut(full)
-                located = self.locator.see(full, time.monotonic() if t is None else t, dot)
+                located = self._located(full, t, dot)
             tag = located.tag if located is not None else self.name_tag.find(full)
         except RuntimeError as e:  # her name tag's full-size template can't be cut: she isn't on screen
             return self._refused(t, frame, Problem("tag", str(e)))
@@ -261,6 +261,20 @@ class Eyes:
                            hp_box=full[hy0:hy1, hx0:hx1].copy(), lv_box=full[ly0:ly1, lx0:lx1].copy(), geo=geo,
                            picture=picture, feet=feet, view=None if located is None else located.view,
                            view_sure=located is not None and located.view_sure, located=located)
+
+    def _located(self, full: np.ndarray, t: float | None, dot):
+        """The locator's answer for this frame; if it raises anything but her tag's template missing (RuntimeError:
+        she isn't on screen), it's said and the locator is put away: her place as before (NameTag, the dot) from then
+        on, never a look failing with it."""
+        try:
+            return self.locator.see(full, time.monotonic() if t is None else t, dot)
+        except RuntimeError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            self.locator = None
+            getattr(self, "log", print)(f"  her place by the scene stopped, as before from now on (the locator raised "
+                                        f"{e!r})")
+            return None
 
     def _refused(self, t: float | None, frame: np.ndarray, bad: Problem) -> Observation:
         """A look that failed its checks: nothing read from it, its HP and MP the last good frame's (the bars of a frame

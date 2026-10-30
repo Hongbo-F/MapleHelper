@@ -320,14 +320,27 @@ def _key(map_id: int, copy: Path) -> dict:
     return {"version": VERSION, "map": map_id, "files": stamp}
 
 
-_LOADED: dict[int, MapArt] = {}
+_LOADED: dict[int, MapArt] = {}   # the latest map's art loaded (one map's only: Tree Dungeon's 14 MB, Ellinia's 56)
+
+
+def forget() -> None:
+    """The art kept for the latest map let go (its locator's own reference aside)."""
+    _LOADED.clear()
+
+
+def _keep(art: MapArt) -> None:
+    _LOADED.clear()   # (a service visiting map after map would keep every one's for its life)
+    _LOADED[art.map_id] = art
 
 
 def load(map_id: int, copy: Path = COPY, cache: Path | None = CACHE) -> MapArt:
     """The map's art: from the cache (lab/mapart/<map>.npz) if it was drawn from this game data by this code, else
-    drawn (draw) and cached. Raises what reading the game data raises (KeyError, OSError, ValueError) if it can't."""
+    drawn (draw) and cached. Raises what reading the game data raises (KeyError, OSError, ValueError) if it can't. The
+    latest map's is kept in memory (`_LOADED`), another map's loaded letting it go."""
     if map_id in _LOADED and cache is CACHE:
         return _LOADED[map_id]
+    if cache is CACHE:
+        forget()   # (before the next is read or drawn: the two not in memory at once here)
     key = _key(map_id, copy)
     path = None if cache is None else Path(cache) / f"{map_id}.npz"
     if path is not None and path.exists():
@@ -337,7 +350,8 @@ def load(map_id: int, copy: Path = COPY, cache: Path | None = CACHE) -> MapArt:
                     meta = json.loads(str(z["meta"]))
                     art = MapArt(map_id, meta["x0"], meta["y0"], z["rgb"], z["static"],
                                  tuple(meta["fixed"]), tuple(meta["views"]), meta["left_out"])
-                    _LOADED[map_id] = art
+                    if cache is CACHE:
+                        _keep(art)
                     return art
         except (OSError, ValueError, KeyError):
             pass
@@ -350,7 +364,7 @@ def load(map_id: int, copy: Path = COPY, cache: Path | None = CACHE) -> MapArt:
         np.savez_compressed(tmp, rgb=art.rgb, static=art.static, key=json.dumps(key), meta=json.dumps(meta))
         tmp.replace(path)
         if cache is CACHE:
-            _LOADED[map_id] = art
+            _keep(art)
     return art
 
 
