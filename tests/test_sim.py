@@ -1322,7 +1322,9 @@ def test_a_real_map_scenario_is_deterministic():
 @REAL
 @pytest.mark.parametrize("name,topics", [
     ("nav_tree_evade", {"session", "scene", "route", "chain", "monsters", "glance", "trip", "log"}),
-    ("nav_tree_rope_hit", {"session", "scene", "drops", "stance", "event", "log"}),
+    # (a fight's: since work/replan's rebase onto master 0fd374a nav_tree_rope_hit's trip shoots nothing, touched twice
+    # on the rope and up to 16 all the same, so it records no 'stance')
+    ("loop_tree_rope_top", {"session", "scene", "drops", "stance", "event", "log"}),
 ])
 def test_recording_telemetry_changes_nothing_she_does(name, topics):
     from gamelab import telemetry

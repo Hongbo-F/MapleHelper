@@ -34,7 +34,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
 | `control` | Keys out | `Actions` (her key plans: throws, walking, pick-up, potions), `Mover` (one move, closed loop), `Navigator` (a route: chains, glances, cut-offs, replans), `client` (plans to the key player), `player` (the key player itself), `alarm`, `lie_recorder` (the Lie Detector's cycle recorded), `rolling` (the game's last 5 minutes kept: The rolling recording), `recording` (that recording kept by the perception service, from its own frames) | perception, localization, motion |
 | `behavior` | What to do next | `Hunter` (the agent: senses, actions, a looter, her vitals and health), `fight` (`clear`, `kill`, fighting on the way), `Looter` (sweeps, mop-ups, drops remembered), `Tour`, `probe` (the in-game probes of what a star hits, and their scorer), `PetCare` (her pet fed), `retreat` (on the Lie Detector, away to a safe place within 10 s; and at the safety stop), `safety` (her HP staying low ends the hunt: No resting; under her profile's hits of the map's largest touch, in HP: The safety stop in HP), `darts` (her presses taking no MP and killing nothing for long end it: Out of darts; the game's refusals don't count: The top of a rope) | all of the above |
 | `ui` | The mini-map window | `MapView` (draws a state; pure), `State` (the latest record per topic), sources (live, replay, a planned route), `MapWindow` | localization, motion, attack |
-| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer` (the Lie Detector too: `alarm_at`), 42 scenarios on Tree Dungeon, golden traces | everything but ui |
+| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer` (the Lie Detector too: `alarm_at`), 43 scenarios on Tree Dungeon, golden traces | everything but ui |
 | `analysis` | Combo tests and her movement on recordings; how her routes are used | `track`, `scroll`, `analyze`, `calibration`, `recordings`, `physics_check` (her tracked movement against the physics models), `coverage` (each route move planned, taken and missed, and why the others lose: Route coverage), `respawn` (how soon a platform she empties has a monster again, how long drops lie, how full the platforms are, from the telemetry: Respawns and drop life) | perception, motion, control |
 
 How a look becomes keys:
@@ -2361,6 +2361,18 @@ pricing and isn't checked in the simulator. Live: not run (the perception servic
 the latter with the user's UAC click). Master has moved on since (0fd374a, 2026-10-31 14:10: walls in the air and the
 tower's walls by the game's rule, the old maps' scenarios gone, Tree's scenarios reworked): another rebase, `ab` and the
 goldens again before this goes onto master.
+
+**Rebased onto master 0fd374a (2026-10-31, ~16:30; the brief and its check: D:/MapleHelper-scratch/replan/rebase-scout,
+brief.md and check.md; this round's D:/MapleHelper-scratch/replan/loot/rebase).** Every figure in this section and the
+four before it was measured with the planner blind to the tower's walls from floating platforms (master's 0b743ff counts
+them: `body.wall_table`, five new walk-offs along a tower wall on Tree Dungeon), most in the world before the server's
+respawn and the chase: history, as master keeps its own. The conflicts were the scenarios' and tests' alone: master's side
+at every hunk (the first map's scenarios and tests it removed, Tree's seeds and its set-ups of the Lie Detector's and the
+key checks' moments), but `loop_tree_grind_drops` kept and `loop_tree_ore_waits`' docstring with both sides' notes (its
+seed the branch's, 10); tests/test_sim.py master's with `DYING_AWAY` and no `TOWER_TRIPS`; the paused trip's test
+(tests/test_framecheck.py) on Tree Dungeon, where master moved its neighbours. Seeds aren't re-picked nor goldens
+recorded here (the loot work next changes her behaviour again); the harness's standard grind against 0fd374a, 12 seeds,
+is `ab.txt` there.
 
 ## Localization
 
