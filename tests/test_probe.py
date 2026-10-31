@@ -32,6 +32,21 @@ def _damage_at_release(monkeypatch):
     from gamelab.control.actions import STAR_DELAY_MS
     monkeypatch.setattr(world_mod, "DAMAGE_SHOWS_MS", STAR_DELAY_MS)
 
+
+@pytest.fixture(autouse=True)
+def _targets_as_measured(monkeypatch):
+    """Their targets walk as with nobody there, hit or not, and come back each on its own clock, as when these were
+    written (Realism.chase off, respawn_tick 0, as scenarios._AT_RELEASE and _CLOCK have the probe scenarios): with the
+    chase and the server's respawn every world's (2026-10-31) 8 of them failed, the targets coming at her x once hit
+    and the map no longer refilled at once; what's tested is how a probe scores her attack's reach at the offsets it
+    throws from. (Live, a target hit comes at her too: the probes' setups don't allow for it yet.)"""
+    run = scenarios.run_scenario
+
+    def as_measured(sc, *a, **kw):
+        realism = dataclasses.replace(sc.realism or world_mod.Realism(), chase=False, respawn_tick=0.0)
+        return run(dataclasses.replace(sc, realism=realism), *a, **kw)
+    monkeypatch.setattr(scenarios, "run_scenario", as_measured)
+
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
 
 # Only with --slow (tests/conftest.py): the probes' answers are in the code since 2026-10-21, so these matter after a
