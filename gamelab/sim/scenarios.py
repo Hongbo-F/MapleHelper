@@ -3362,16 +3362,17 @@ def _no_mover(tr: dict) -> bool:
 
 
 @tree((21, 60.0), monsters=[("Green Mushroom", 21, 130.0)], seed=2, limit=70,
-      **dict(_LIVE, realism=Realism(zero_walls=True, chase=harness.CHASE_TREE, invulnerable=harness.INVULNERABLE_LIVE)),
+      **dict(_LIVE, realism=Realism(zero_walls=True, chase=True, invulnerable=harness.INVULNERABLE_LIVE)),
       expects=(ends("arrived"), logs("contact:"), logs("pass:"), logs("spot:"),
                check("no move a monster blocks made by the mover", _no_mover),
                check("on 19 by the end", lambda tr: tr["world"]["platform"] == 19)))
 def nav_tree_evade(sim):
-    """A movement-only trip (no escort: navigator.AVOID) from 21 at x 60 up to 19, a Green Mushroom 70 off on 21 walking
-    at her (the walkers world: world.CHASE_TREE, her invulnerability as live): the evade step of 2026-10-28
-    (navigator.EVADE). It can touch her within CONTACT_S whatever she does, so the touch is taken as given and the jump
-    planned through it in the window after (the contact rule, "contact:"); knocked back, past it ("pass: NO_REFUGE"); on
-    22, the next jump blocked and her spot unsafe, a step along 22 to the nearest spot clear of it ("spot:"), and from
-    there past it once EVADE_S has gone by ("pass: EVADE_S"). No move of the mover's (the move a monster was in the way
-    of went to control.mover, unwatched, before)."""
+    """A movement-only trip (no escort: navigator.AVOID) from 21 at x 60 up to 19, a Green Mushroom 70 off on 21 chasing
+    her (hit before the trip: the walkers world's aggro, world.AGGRO_S; her invulnerability as live): the evade step of
+    2026-10-28 (navigator.EVADE). It can touch her within CONTACT_S whatever she does, so the touch is taken as given
+    and the jump planned through it in the window after (the contact rule, "contact:"); knocked back, past it ("pass:
+    NO_REFUGE"); on 22, the next jump blocked and her spot unsafe, a step along 22 to the nearest spot clear of it
+    ("spot:"), and from there past it once EVADE_S has gone by ("pass: EVADE_S"). No move of the mover's (the move a
+    monster was in the way of went to control.mover, unwatched, before)."""
+    sim.world.monsters[0].aggro(sim.world.t)
     return _nav(19, seconds=60)(sim)

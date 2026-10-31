@@ -155,7 +155,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
-from .world import (CHASE_TREE, DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
+from .world import (DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
                     OFF_SEEN, RESPAWN_LIVE, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, Camp, Noise, Realism)
 
 FOLDER = LAB / "harness"
@@ -252,10 +252,10 @@ WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 # farther; one on another platform 70% (the live hunt of 2026-10-25), where the presets find it 90% of the time wherever
 # it is.
 WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
-# ... and the monsters on her platform walking at her as live, and her invulnerability after a touch as live
-# (`walkers`: world.CHASE_TREE, INVULNERABLE_LIVE; Realism.chase, invulnerable), where the world's monsters walked as with
-# nobody there and a touch left her a second.
-WORLDS["walkers"] = {"chase": CHASE_TREE, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
+# ... and the monsters she hits chasing her (aggro, as the game has it), and her invulnerability after a touch as live
+# (`walkers`: world.AGGRO_S, INVULNERABLE_LIVE; Realism.chase, invulnerable), where the world's monsters walk as with
+# nobody there, hit or not.
+WORLDS["walkers"] = {"chase": True, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
 # ... and the game's respawn as measured on Tree Dungeon on 2026-10-29 (`tick-respawn`: world.TICK_S, TICK_P, CAP_SHARE,
 # CAP_OTHER; Realism.respawn_tick): the map's tick, a free point's monster back at it with a chance, under the map's cap
 # (by the other players there), where the other worlds bring each monster back on its own clock (`respawn` s after it

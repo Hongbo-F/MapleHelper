@@ -241,25 +241,54 @@ def test_grind_stops_stand_clear_of_their_platforms_spawn_points(tree_map, monke
     assert sum(clear(pid, now[pid]) > clear(pid, before[pid]) + 1 for pid in now) >= 8
 
 
-def test_the_worlds_monsters_walk_at_her_once_hurt(model):  # noqa: F811
-    # Realism.chase: a monster on her platform within range walks its stretches at her, by its chance unhurt or hurt;
-    # off, as with nobody there. Hurt (her stars), a Snail 300 off on C walks at her every stretch with chance 1.
+def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: F811
+    # Realism.chase (aggro, as the game has it: world.AGGRO_S): unhurt, a monster walks as with nobody there, the knob on
+    # or off (its chase draws from its own rng); hit by her, it walks at her every stretch (AGGRO_THINK s each, never
+    # standing), on past her AGGRO_PASS and a stretch's walk at the most before turning back, until its aggro's end, a
+    # hit again starting it anew; then its own walk again.
     c = plat(model, 500, 400)
-    for chase, at in (((), None), ((400.0, 0.0, 1.0), True)):
-        w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right",
+    walks = []
+    for chase in (False, True):
+        w = world(model, c.id, 400.0, monsters=[("Snail", c.id, 700.0)], facing="right",
                   realism=world_mod.Realism(chase=chase, invulnerable=1.25))
         m = w.monsters[0]
-        m.hp = m.hp_max / 2
-        m.t1 = 0.0  # (its next stretch drawn now: hurt)
-        m.at(0.001)
-        if at:
-            assert m.d == -1 and m.chase_into == pytest.approx(world_mod.HER_HALF + m.half - world_mod.CHASE_OVERLAP)
-        else:
-            assert m.chase is None
+        assert (m.chase is None) is not chase
+        walks.append([(m.at(i * 0.1), m.d) for i in range(600)])
+    assert walks[0] == walks[1] and any(d == 0 for _, d in walks[1])
+    t = 60.0
+    x0 = m.at(t)
+    m.aggro(t)
+    assert t + world_mod.AGGRO_S[0] <= m.aggro_until <= t + world_mod.AGGRO_S[1]
+    xs, stretches = [], set()
+    for i in range(1, 1201):  # (two minutes of it)
+        xs.append(m.at(t + i * 0.1))
+        stretches.add((m.t0, m.t1, m.d))
+    assert all(d != 0 and t1 - t0 <= world_mod.AGGRO_THINK[1] + 1e-9 for t0, t1, d in stretches)
+    met = next(i for i, x in enumerate(xs) if abs(x - 400.0) <= m.speed * 0.1)
+    assert (met + 1) * 0.1 <= abs(x0 - 400.0) / m.speed + 0.2  # (straight at her)
+    after = [x - 400.0 for x in xs[met:]]
+    past = world_mod.AGGRO_PASS + m.speed * world_mod.AGGRO_THINK[1]
+    assert max(abs(dx) for dx in after) <= past + 1e-6
+    assert min(after) < -world_mod.AGGRO_PASS + 5 and max(after) > world_mod.AGGRO_PASS - 5  # (on past her, both ways)
+    # A hit again starts it anew; once it's over, its own walk (standing too).
+    m.aggro(t + 100.0)
+    until = m.aggro_until
+    assert t + 100.0 + world_mod.AGGRO_S[0] <= until <= t + 100.0 + world_mod.AGGRO_S[1]
+    ends, own = set(), set()
+    for i in range(1, int((until - t - 100.0 + 60.0) * 10)):
+        m.at(t + 100.0 + i * 0.1)
+        (own if m.t0 >= until else ends).add((m.t0, m.t1, m.d))
+    assert max(t1 for _, t1, _ in ends) == pytest.approx(until)
+    assert any(d == 0 for _, _, d in own) and all(d != 0 for _, _, d in ends)
+    # Her x wherever she is (it walks along its own platform at it); none once she's dead.
+    w.x = 123.0
+    assert w._chase_at(m, w.t) == 123.0
+    w.dead = True
+    assert w._chase_at(m, w.t) is None
     # Her invulnerability after a touch is the knob's (INVULNERABLE_LIVE in `walkers`, with the live median respawn),
     # and the harness has the world. Since her popups were read (2026-10-28) it's the frames' 1.45 s everywhere
     # (perception.touches.INVULNERABLE_S), the default world's too.
-    assert harness.WORLDS["walkers"] == {"chase": world_mod.CHASE_TREE, "invulnerable": world_mod.INVULNERABLE_LIVE,
+    assert harness.WORLDS["walkers"] == {"chase": True, "invulnerable": world_mod.INVULNERABLE_LIVE,
                                          "respawn": world_mod.RESPAWN_LIVE}
     assert (world_mod.INVULNERABLE_LIVE, world_mod.RESPAWN_LIVE) == (1.45, 17.0)
     assert world_mod.INVULNERABLE == world_mod.Realism().invulnerable == 1.45
@@ -523,24 +552,24 @@ def test_her_escape_and_jump_back_keep_off_spawn_points_nobody_accounts_for(tree
     assert esc(jump + [(60.0 - s, 0.0) for s in range(40, 160, 20)]) == ("throw", RIGHT)
 
 
-def test_the_worlds_walkers_hover_on_reaching_her_then_walk_off(model):  # noqa: F811
-    # Realism.chase: one that has walked into her (or is on her) stands there CHASE_HOVER s, then walks a stretch away
-    # from her (CHASE_LEAVE): live, those that reached her hovered 0-40 off for 0.5-1.5 s and walked back (by eye).
+def test_a_monster_she_hits_chases_her_after_its_flinch_and_forgets_it_when_back(model):  # noqa: F811
+    # Realism.chase: her star's hit (World._struck) starts its chase; pushed, it flinches first (knock: FLINCH_S
+    # standing), then walks at her. Back after its death, it walks its own way. The knob off, a hit changes nothing.
     c = plat(model, 500, 400)
-    w = world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right",
-              realism=world_mod.Realism(chase=(400.0, 0.0, 1.0), invulnerable=1.25))
-    m = w.monsters[0]
-    m.hp = m.hp_max / 2
-    m.x0, m.t1 = w.x + m.chase_into, 0.0  # (on her: its body CHASE_OVERLAP into hers)
-    m.at(0.001)
-    assert m.d == 0 and m.chase_next == 2
-    assert world_mod.CHASE_HOVER[0] <= m.t1 - m.t0 <= world_mod.CHASE_HOVER[1]
-    m.at(m.t1 + 0.001)
-    assert m.d == 1 and world_mod.CHASE_LEAVE[0] <= m.t1 - m.t0 <= world_mod.CHASE_LEAVE[1]
-    # A hit (her star's knock) has it decide afresh.
-    m.chase_next = 2
-    m.knock(m.t0 + 0.1, 1)
-    assert m.chase_next == 0
+    for chase in (False, True):
+        w = world(model, c.id, 400.0, monsters=[("Snail", c.id, 600.0)], facing="right",
+                  realism=world_mod.Realism(chase=chase, invulnerable=1.25))
+        m = w.monsters[0]
+        m.at(0.0)
+        w._struck(m, False, "star")
+        assert (m.aggro_until is not None) is chase
+    assert m.flinch_at == 0.0 and m.pushed is not None and m.d == 0  # (pushed: its hit's damage this Snail's)
+    assert m.t1 == pytest.approx(world_mod.monster_data.FLINCH_S)
+    m.at(m.t1 + 0.01)
+    assert m.d == -1 and m.chase_dir == -1  # (at her, from its flinch's end)
+    m.alive, m.died_at = False, 1.0
+    w._respawn(m)
+    assert m.aggro_until is None and m.chase_dir == 0
 
 
 def test_a_fall_right_after_a_knocks_landing_is_the_knocks(model):  # noqa: F811

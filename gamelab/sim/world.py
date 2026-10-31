@@ -252,32 +252,24 @@ INVULNERABLE_LIVE = INVULNERABLE_S
 # and 600 fading (RustMS DamageLayout.h:16-24); unconfirmed in this game. The stack tells a touch the frame it first
 # shows.
 POPUP_S = 1.0
-# Monsters walking at her (Realism.chase): (range, whole, hurt), a monster on the platform she's about within `range` of
-# her (middle to middle) walks its next stretch at her with chance `whole` (unhurt) or `hurt` (her stars have hurt it),
-# else as ever, for CHASE_STRETCH s at most; at her, it walks until its body is CHASE_OVERLAP into hers (a touch, unless
-# she's invulnerable), stands there CHASE_HOVER s, and then walks a stretch of its own away from her (CHASE_LEAVE s). Live
-# within 100 of her (the perception service's tracks of the same hunts, diag-move-away/walkers.py), monsters walked at her
-# 50% of the time unhurt (away 21%, standing 29%), 63% hurt (26%, 11%); 100-200 off 39% and 51% (and in MapleStory one
-# hurt goes after who hurt it); by eye (diag-move-away, 41 cases) one that reached her hovered 0-40 off for 0.5-1.5 s and
-# walked back. The simulator's monsters walked as they would with nobody there (35% of their stretches standing 0.5-2.5
-# s, the rest walking either way 1-4 s): within 100 of her, in master's stack's runs, unhurt 46/30/23 (at her, away,
-# standing), hurt 36/33/31. As first built (the reviews of 2026-10-27) a hurt one walked at her every stretch and pushed
-# on into her on reaching her (0.1-0.3 s, again and again): its stays within 45 of her lasted a median 1.33 s, 18 of 74
-# over 3 s (master's world 0.84, 4 of 103), and walkers 60-110 and 110-160 off at a decision were within 60 of her at
-# her lock's end 81% and 80% of the time, where live 55% and 30%. Now (sim.harness `--world walkers`: CHASE_TREE, with the
-# live invulnerability and respawns; master's stack, the hunt loop, 12 runs of 5 minutes: D:/MapleHelper-scratch/land/fix/
-# calib, simcal.py and table.py, c2) its stays a median 0.50 s, 1 of 663 over 3 s, and those walkers within 60 at her
-# lock's end 77% (n 114) and 42% (n 38); hurt ones within 100 walk at her 35% of the time, stand 35% (live 63% and 11%:
-# here a hit's flinch stands it, where live its push reads as walking away). Of the tries (a hurt one's chance 0.6 or 1.0,
-# 0.8 with 0.3 unhurt; hovers of 0.5-1.5 s or 0.3-0.8; stretches at her and away of 1-4 s or 0.5-2), the walkers within 60
-# at her lock's end came 67-77% and 42-58% in every one (n 29-38 for the second): the world's own walks (stretches of 1-4
-# s) keep them coming on more than live's filtered tracks show, chase or none (master's world 70% and 55%).
-CHASE_OVERLAP = 5.0   # units into her body one walking at her stops (a guess: a touch, its boxes met)
-CHASE_REACHED = 15.0  # units: a walk at her ending this near where it meets her reached her (her slide since: a guess)
-CHASE_STRETCH = (1.0, 4.0)
-CHASE_HOVER = (0.5, 1.5)
-CHASE_LEAVE = (1.0, 4.0)
-CHASE_TREE = (300.0, 0.2, 0.6)
+# Monsters chasing her once she hits them (Realism.chase): aggro, as the game has it. A player's hit gives the monster to
+# that player's client "with chase" (OrionAlpha, a replica of Nexon's early Korean server: Mob.onMobHit,
+# LifePool.changeMobController, MobCtrl.Active_Req; once its controller hasn't hurt it for 5 s, to whoever else did in
+# those 5 s: Mob.onMobMove), and that client chases its player (HeavenClient, a reimplementation of the v83 client from
+# its code: Mob::chase, FUN_007f73d8) AGGRO_S from then, 3 to 4 minutes: every AGGRO_THINK it decides which way to walk,
+# at her, or on the way it's going while she's within AGGRO_PASS across (so it walks past her that far and more before
+# turning back: Mob::think), never standing, at its walk speed (info/chaseSpeed is for a kind with a chase animation:
+# none of Tree Dungeon's or the first map's kinds has one, nor info/firstAttack, a kind's chase on sight: gamedata),
+# along its own platform wherever she is (turning at its ends as its walks do). Each hit of hers starts it anew, after
+# the hit's flinch (knock). Unhurt it walks as ever. The user, 2026-10-31: "Mobs move on their own until you hit them,
+# then you draw their aggro and they will charge towards until certain period, hit the mob again refreshes that
+# period". Until then any monster on her platform within 300 of her walked its stretches at her by chance, 0.2 unhurt
+# and 0.6 hurt, stood 0.5-1.5 s on her and walked a stretch away (CHASE_TREE, fitted to the perception service's tracks
+# of 2026-10-27: within 100 of her, monsters walked at her 50% of the time unhurt, 63% hurt): the unhurt ones' 50% is
+# their own walk's (the world's walks with nobody there had 46%).
+AGGRO_S = (180.0, 240.0)
+AGGRO_THINK = (0.8, 1.2)
+AGGRO_PASS = 100.0
 # Her landings as the live diagnosis counted them (World.land_log): an attack played in the flight if keyed from
 # ATTACK_BEFORE_TAKEOFF_MS before she left the ground (a jump throw's key comes 40-120 ms after the jump key, and
 # her feet leave the ground about JUMP_LAG after it), and a fall within KNOCK_FALL_MS of a knock's landing the knock's
@@ -765,8 +757,8 @@ class Realism:
                                  # DIE_FLIGHT), then dying where it got to, and her frames lose it DIE_LOST_S on, as
                                  # live on 2026-10-26; False: drawn dying where it was at the kill (the server's time),
                                  # its bar gone, from then (as until 2026-10-27)
-    chase: tuple = ()            # (range, whole, hurt): monsters on her platform walking at her (CHASE_TREE: as live); ()
-                                 # they walk as with nobody there, as before
+    chase: bool = False          # monsters she hits chase her AGGRO_S, each hit anew (aggro, as the game has it; the
+                                 # harness's `--world walkers`); False: they walk as with nobody there
     invulnerable: float = INVULNERABLE  # s a touch leaves her invulnerable (INVULNERABLE_LIVE: as live)
     # The game's own key bindings where they aren't her keys' (behavior.keycheck): (her GameKeys field, the key the game
     # has it on, None: on no key), e.g. (("attack", "a"),): her configured attack key then does nothing (as live on
@@ -1078,14 +1070,13 @@ class SimMonster:
     pushed: tuple[float, float] | None = None  # a hit's (when, from x): pushed from there to x0 (knock)
     life: int = 0              # how often it has come back (a camp's kill is for the life it was drawn in)
     born: float | None = None  # when it last came back (None: there from the start)
-    # Walking at her (Realism.chase): her x for a stretch starting at t (World._chase_at; None: not on its platform, or
-    # out of range), the chance a stretch walks at her (unhurt, hurt), how far into her body it walks, and the draws'
-    # own rng (its walk with the knob off as before)
+    # Chasing her once she hits it (Realism.chase): her x for a stretch starting at t (World._chase_at; None: no her to
+    # chase), until when it chases her (None: not hit this life), the way its chase goes (0: to be decided), and its
+    # chase's own rng (its walk otherwise as ever)
     chase: Callable[["SimMonster", float], float | None] | None = None
-    chase_at: tuple[float, float] = (0.0, 0.0)
-    chase_into: float = 0.0
+    aggro_until: float | None = None
+    chase_dir: int = 0
     chase_rng: random.Random | None = None
-    chase_next: int = 0        # 1: its walk at her reaches her, it hovers next (CHASE_HOVER); 2: then it walks away
 
     @property
     def lo(self) -> float:
@@ -1100,38 +1091,42 @@ class SimMonster:
         self._draw()
 
     def _draw(self) -> None:
+        if self.aggro_until is not None and self.t0 < self.aggro_until and self._chase_her():
+            return
         r = self.rng.random()
         self.d = 0 if r < 0.35 else (-1 if r < 0.675 else 1)
         self.t1 = self.t0 + (self.rng.uniform(0.5, 2.5) if self.d == 0 else self.rng.uniform(1.0, 4.0))
-        if self.chase is not None:
-            self._at_her()
 
-    def _at_her(self) -> None:
-        """Realism.chase: with its chance (by whether her stars have hurt it), this stretch walks at her, CHASE_STRETCH s
-        at most, until its body is `chase_into` into hers; on her (reached, or there already) it stands CHASE_HOVER s,
-        then walks away from her a stretch (CHASE_LEAVE)."""
+    def _chase_her(self) -> bool:
+        """Realism.chase (AGGRO_S): this stretch, AGGRO_THINK long (to its aggro's end at the most), walks at her, or on
+        the way it's going while she's within AGGRO_PASS across; False with no her to chase (its own walk then)."""
         hx = self.chase(self, self.t0)
-        after, self.chase_next = self.chase_next, 0
-        if after == 2:  # (hovered: off it goes, away from her)
-            if hx is not None:
-                self.d = -1 if hx > self.x0 else 1
-                self.t1 = self.t0 + self.chase_rng.uniform(*CHASE_LEAVE)
-            return
         if hx is None:
+            return False
+        if self.chase_dir == 0 or abs(hx - self.x0) > AGGRO_PASS:
+            self.chase_dir = 1 if hx >= self.x0 else -1
+        else:
+            self.chase_dir = self.facing  # (the way it's going: back, if its platform's end turned it)
+        self.d = self.chase_dir
+        self.t1 = min(self.t0 + self.chase_rng.uniform(*AGGRO_THINK), self.aggro_until)
+        return True
+
+    def aggro(self, t: float) -> None:
+        """Hit by her at t (Realism.chase): it chases her AGGRO_S from now, which way decided afresh if it wasn't
+        chasing her; it decides at once, or once a hit's flinch is over (knock)."""
+        if self.chase is None:
             return
-        gap = abs(hx - self.x0) - self.chase_into
-        if (after == 1 and gap <= CHASE_REACHED) or (gap <= 1.0 and self.chase_rng.random()
-                                                       < self.chase_at[self.hp < self.hp_max - 1e-9]):
-            self.d, self.chase_next = 0, 2  # on her: it hovers there (a touch, unless she's invulnerable)
-            self.facing = 1 if hx > self.x0 else -1
-            self.t1 = self.t0 + self.chase_rng.uniform(*CHASE_HOVER)
-            return
-        if gap <= 1.0 or self.chase_rng.random() >= self.chase_at[self.hp < self.hp_max - 1e-9]:
-            return
-        self.d = 1 if hx > self.x0 else -1
-        walk, reach = self.chase_rng.uniform(*CHASE_STRETCH), gap / max(self.speed, 1.0)
-        self.t1 = self.t0 + min(walk, reach)
-        self.chase_next = 1 if reach <= walk else 0
+        self.at(t)
+        if self.aggro_until is None or t >= self.aggro_until:
+            self.chase_dir = 0
+        self.aggro_until = t + self.chase_rng.uniform(*AGGRO_S)
+        if self.pushed is not None and self.pushed[0] == self.t0:
+            return  # (flinching: it chases from the flinch's end)
+        (x, d), walked = self._fold(t), self.d
+        self.t0, self.x0, self.facing = t, x, d or self.facing
+        self._draw()
+        if bool(self.d) != bool(walked):
+            self.anim0 = t
 
     def _fold(self, t: float) -> tuple[float, int]:
         """Where it is at t within the current segment, and which way it's then going (bouncing at the ends)."""
@@ -1154,7 +1149,7 @@ class SimMonster:
         g = copy.copy(self)
         g.rng = random.Random()
         g.rng.setstate(self.rng.getstate())
-        if self.chase_rng is not None:  # (and its walks at her: Realism.chase)
+        if self.chase_rng is not None:  # (and its chase's: Realism.chase)
             g.chase_rng = random.Random()
             g.chase_rng.setstate(self.chase_rng.getstate())
         return g
@@ -1187,7 +1182,6 @@ class SimMonster:
         self.pushed, self.anim0, self.facing = (t, x), t, d or self.facing
         self.t0, self.x0, self.d = t, min(max(x + away * KNOCK_MOB, self.lo), self.hi), 0
         self.t1 = t + monster_data.FLINCH_S
-        self.chase_next = 0  # (hurt, it decides afresh: Realism.chase)
 
     def body(self, t: float, flinching: bool = False) -> tuple[float, float, float, float]:
         """Its body at t: from `lo` to `hi` sideways of its feet and from `bottom` to `top` above them. With
@@ -1427,7 +1421,6 @@ class World:
             self._grab(min(model.ropes, key=lambda r: abs(r.x - start[1])))
             self.y = min(max(hanging, self.rope.top), self.rope.bottom)
             self.log.clear()
-        self.on_plat_since = 0.0        # when she last came down onto a platform (a landing, a rope's top): Realism.chase
         # Her landings (_land), as the live diagnosis counted them: (t, the platform she took off from or None off a rope
         # or with no takeoff seen, its x, the platform she landed on, x, "knock", "fight" (an attack played in the
         # flight) or "trip", the nearest live monster on the platform she landed on, middle to middle, or None, its kind,
@@ -1489,10 +1482,8 @@ class World:
                 m.flinch_top = bodies[kind].flinch_top
                 m.fade = bodies[kind].die_s or FADE
             m.info = info
-            if self.realism.chase:  # (walking at her: Realism.chase, CHASE_OVERLAP into her body)
-                m.chase, m.chase_at = self._chase_at, (self.realism.chase[1], self.realism.chase[2])
-                m.chase_into = (self.realism.her_box or (HER_HALF, HER_HEIGHT))[0] + half - CHASE_OVERLAP
-                m.chase_rng = random.Random(f"chase:{self.seed}:{i}")
+            if self.realism.chase:  # (chasing her once she hits it: Realism.chase)
+                m.chase, m.chase_rng = self._chase_at, random.Random(f"chase:{self.seed}:{i}")
             m.start(0.0, float(x))
             self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
@@ -2030,7 +2021,6 @@ class World:
                 self.knock_log.append((t0, src, q.id, round(q.y_at(x) - y0, 1)))
         self._knocked_from = None
         self._log_landing(q, x)
-        self.on_plat_since = self.t
         self.mode, self.plat, self.flight, self.last_plat, self.group, self.knocked = "ground", q, None, q, q.group, False
         self.x, self.y = x, q.y_at(x)
         start, end = self.attack_ms
@@ -2060,12 +2050,9 @@ class World:
                                                          (round(near[0], 1), near[1], near[2]))))
 
     def _chase_at(self, m: SimMonster, t: float) -> float | None:
-        """Realism.chase: her x for monster m's stretch starting at t, if she's about its platform then (on it, or in the
-        air off it: the platform she last stood on) since before t, within the knob's range of it; else None."""
-        if (self.dead or self.mode == "rope" or self.last_plat.id != m.platform.id or t < self.on_plat_since - 1e-9
-                or abs(self.x - m.x0) > self.realism.chase[0]):
-            return None
-        return self.x
+        """Realism.chase: her x for monster m's chase stretch starting at t, wherever she is (it walks along its own
+        platform at her x), None once she's dead."""
+        return None if self.dead else self.x
 
     def _grab_from_ground(self) -> bool:
         """Up at a rope's foot: onto it."""
@@ -2109,7 +2096,6 @@ class World:
                 if top is not None and r.from_platform:
                     self._leave_rope()
                     self.mode, self.plat, self.last_plat, self.group = "ground", top, top, top.group
-                    self.on_plat_since = self.t
                     self.x = min(max(r.x, top.left), top.right)
                     self.y, self.vx, self.glide = top.y_at(self.x), 0.0, 0.0
                     self.still_ms = self.ms + int(round(CLIMB_OVER * 1000))
@@ -2488,7 +2474,7 @@ class World:
     def _struck(self, m: SimMonster, swipe: bool, what: str) -> None:
         """A hit's star lands on monster `m` (STAR_DELAY after its key, its damage the server's already: _attack): its
         damage numbers (it hides under them: Noise.hit_hidden), and its flinch and push if its damage reaches its
-        `pushed` (PUSH_BY_DAMAGE). Nothing if it's dead by then."""
+        `pushed` (PUSH_BY_DAMAGE), and its chase of her (Realism.chase). Nothing if it's dead by then."""
         if not m.alive:
             return
         m.hit_at = self.t
@@ -2499,6 +2485,7 @@ class World:
                 m.knock(self.t, 1 if mx >= self.x else -1)
         else:
             self.note(f"the {what} at {m.kind} #{m.idx}: not pushed")
+        m.aggro(self.t)  # (Realism.chase: it chases her from now)
 
     def _logged(self, how: tuple | None, outcome: str) -> None:
         """An attack's outcome into attack_log (`how`: _aim's (key time, plan, ground or air, her rise, the kind picked,
@@ -2593,6 +2580,7 @@ class World:
         """Monster `m` back at its spawn point."""
         m.alive, m.hp, m.died_at, m.hit_at, m.flinch_at = True, m.hp_max, None, None, None
         m.drawn_alive, m.bar_drawn, m.killed_by = None, 1.0, ""
+        m.aggro_until, m.chase_dir = None, 0
         m.life += 1
         m.born = self.t
         m.start(self.t, m.home)
