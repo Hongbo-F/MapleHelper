@@ -104,16 +104,15 @@ def test_the_bases_filler_gets_the_environment_its_key_resolved(monkeypatch, tmp
 
 def test_a_run_imports_no_installed_package_the_key_hasnt():
     """The key has the versions of PACKAGES' distributions: a run of the standard command (Tree Dungeon, the feed's
-    measured costs) or of the first map's importing any other installed package needs it added there."""
-    if not scenarios.available(10002073) or not scenarios.available():
-        pytest.skip("needs Tree Dungeon's and the first map's data")
+    measured costs) importing any other installed package needs it added there."""
+    if not scenarios.available(10002073):
+        pytest.skip("needs Tree Dungeon's data")
     code = (
         "import json, sys\n"
         "before = set(sys.modules)\n"
         "from gamelab.sim import harness\n"
         "harness.run_one('loop-grind', 1, 'crowd', 0.1, 0.0, 'measured', None, 10002073,\n"
         "                ('zero-walls', 'near-misses', 'walkers'), (), 'choice')\n"
-        "harness.run_one('tour', 1, 'game', 0.1)\n"
         "new = {m.split('.')[0] for m in sys.modules} - {m.split('.')[0] for m in before}\n"
         "site = sorted(t for t in new if 'site-packages' in (getattr(sys.modules.get(t), '__file__', '') or ''))\n"
         "print(json.dumps(site))\n")
@@ -194,11 +193,11 @@ def test_a_cache_keeps_a_seed_a_file_and_a_folder_of_them_loads_as_a_run(tmp_pat
 
 
 def test_a_cached_run_is_the_same_as_an_uncached_one(monkeypatch, tmp_path):
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
+    if not scenarios.available(harness.TREE):
+        pytest.skip("needs Tree Dungeon's data")
     monkeypatch.setattr(baseline, "ROOT", tmp_path)
     monkeypatch.setattr(baseline, "identity", lambda repo=None: ("c" * 40, ""))
-    args = ("game", 0.25, 1, 0.0, "coded", None, harness.FIRST_MAP, (), (), None)
+    args = ("game", 0.25, 1, 0.0, "coded", None, harness.TREE, (), (), None)
     plain = harness.run_seeds("tour", [1, 2], *args)
     said = []
     first = harness.cached_run("tour", [1, 2], *args, say=said.append)  # run, and kept

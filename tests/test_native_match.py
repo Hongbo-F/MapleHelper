@@ -17,10 +17,21 @@ from gamelab.analysis import pasted
 from gamelab.perception import loot, match, mobs, sprites
 from gamelab.screen import NATIVE, STRETCHED
 
-from test_native_search import first_map, needs_game_data  # noqa: F401 (a fixture)
+from test_native_search import needs_game_data
 from test_pasted import FRAMES, frame
 
 pytestmark = pytest.mark.skipif(native.lib() is None, reason=f"gamelab's C pieces aren't built: {native.why}")
+
+
+@pytest.fixture(scope="module")
+def first_map():
+    """The first map's model: its monsters' pictures are what's drawn on the frames here (the C matched against
+    OpenCV on them; nothing about the map is checked)."""
+    from gamelab.localization import mapdata
+    try:
+        return mapdata.load(10000012)
+    except (OSError, KeyError):
+        pytest.skip("needs Thicket Around the Beach II's game data")
 
 
 def opencv(image, template, mask):
@@ -91,7 +102,7 @@ def tallies(result: dict) -> dict:
             for name, steps in result.items()}
 
 
-def test_the_c_scores_what_a_search_and_its_refinds_match_as_opencv_does(first_map, monkeypatch):  # noqa: F811
+def test_the_c_scores_what_a_search_and_its_refinds_match_as_opencv_does(first_map, monkeypatch):
     needs_game_data()
     rec = Recorder(monkeypatch)
     native_det = sprites.detector_for(first_map, NATIVE)
@@ -106,7 +117,7 @@ def test_the_c_scores_what_a_search_and_its_refinds_match_as_opencv_does(first_m
     assert result["native"]["unchanged"].found == result["native"]["unchanged"].n > 10
 
 
-def test_the_c_scores_the_drops_strips_on_brightness_as_opencv_does(first_map, monkeypatch):  # noqa: F811
+def test_the_c_scores_the_drops_strips_on_brightness_as_opencv_does(first_map, monkeypatch):
     needs_game_data()
     rec = Recorder(monkeypatch)
     backgrounds = [frame(n) for n in FRAMES]
@@ -117,7 +128,7 @@ def test_the_c_scores_the_drops_strips_on_brightness_as_opencv_does(first_map, m
     assert all(t.found == t.drawn for t in result["tally"]["native"].values())
 
 
-def test_with_the_c_off_the_refinds_come_out_the_same(first_map, monkeypatch):  # noqa: F811
+def test_with_the_c_off_the_refinds_come_out_the_same(first_map, monkeypatch):
     needs_game_data()
     backgrounds = [frame(n) for n in FRAMES]
 
@@ -384,7 +395,7 @@ def test_by_transform_a_call_stops_at_the_first_picture_reaching_stop_and_ties_g
     assert ways("transform", lambda: native.best_matches(flat, ready[:1])) == [(-1.0, 0, 0)]
 
 
-def test_the_refinds_matches_by_transform_are_place_by_places_and_plain_cs_to_the_bit(first_map, monkeypatch,  # noqa: F811
+def test_the_refinds_matches_by_transform_are_place_by_places_and_plain_cs_to_the_bit(first_map, monkeypatch,
                                                                                      ways):
     needs_game_data()
     rec = Recorder(monkeypatch)

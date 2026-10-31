@@ -274,10 +274,7 @@ def test_tied_scores_are_left_to_opencvs_noise_as_master_leaves_them(tmp_path, m
     assert det.redone == 1 and det.noise_over == 0  # (the shape of the two worked out as master does)
 
 
-@pytest.mark.parametrize("name, map_id, geo, only", [
-    ("thicket_plateau_a.png", 10004021, NATIVE, None), ("thicket_plateau_b.png", 10004021, NATIVE, None),
-    ("thicket_window.png", 10004021, NATIVE, ("red-snail",)), ("thicket_half.png", 10004021, STRETCHED, None),
-    ("tree_half_order.png", 10002073, STRETCHED, None)])
+@pytest.mark.parametrize("name, map_id, geo, only", [("tree_half_order.png", 10002073, STRETCHED, None)])
 def test_where_opencvs_noise_decided_the_answer_is_masters(monkeypatch, name, map_id, geo, only):
     from gamedata.paths import COPY
     if not (COPY / "Packs" / "Mob_00000.ms").is_file():
@@ -444,8 +441,8 @@ def test_tree_dungeons_sprites_find_what_they_found_without_the_c(monkeypatch):
     det = sprites.detector_for(mapdata.load(10002073), NATIVE)
     assert det._step1_in_c(None) is not None
     found = 0
-    # every other one of its 24 frames (all 8 platforms they were saved on), and one of West Rocky Mountain II's
-    for path in sorted(tree.values())[::2] + [Path(__file__).parent / "fixtures" / "native" / FRAMES[0]]:
+    # every other one of its 24 frames (all 8 platforms they were saved on)
+    for path in sorted(tree.values())[::2]:
         scene = np.asarray(Image.open(path).convert("RGB"))
         for search in (lambda: det.detect_wide(scene, (0, 700)), lambda: det.detect(scene, (300, 520))):
             a, b = both(monkeypatch, search)

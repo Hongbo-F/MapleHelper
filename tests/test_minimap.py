@@ -14,7 +14,6 @@ from gamedata.paths import COPY
 from gamelab.localization import mapdata
 from gamelab.localization.players import CONFIRM, MISS_S, MISSES, Players
 from gamelab.localization.pose import Localizer
-from gamelab.perception import minimap
 from gamelab.perception.minimap import MARKER_COLOURS, MINIMAP_BOX, OTHER_SHIFT, Marker, dot_in_box, markers_in_box
 from gamelab.screen import SCREEN_SCALE
 
@@ -25,28 +24,14 @@ X0, Y0 = MINIMAP_BOX[:2]  # where the fixtures' crops start on the 1920x1080 scr
 
 
 def crop(name: str) -> np.ndarray:
-    """A saved minimap (the screen's MINIMAP_BOX, RGB): `stranger`, another player on this map (hover_D.png of
-    2026-10-18); `party`, a leader of her party on the safe platform 32, her dot over a portal's (calibrate.png);
-    `crowd`, nine strangers and an NPC in Kerning City Construction Site, whose minimap reaches further right
-    (lie_detector_025439.png, 330 px wide); `rocky` and `rocky_stairs`, West Rocky Mountain II with her on the floating
-    step 24 and on stair 29 (D:/MapleHelper-scratch/newmap/frames/p24_000.png and stuck_000.png of 2026-10-23)."""
+    """A saved minimap (the screen's MINIMAP_BOX, RGB): `stranger`, another player on the first map (hover_D.png of
+    2026-10-18); `party`, a leader of her party on its safe platform 32, her dot over a portal's (calibrate.png): the
+    backgrounds the game's markers are pasted on; `crowd`, nine strangers and an NPC in Kerning City Construction
+    Site, whose minimap reaches further right (lie_detector_025439.png, 330 px wide)."""
     return np.asarray(Image.open(FIXTURES / f"minimap_{name}.png").convert("RGB")).copy()
 
 
 # --- real minimaps ------------------------------------------------------------------------------------------
-
-def test_another_player_on_this_map_is_a_stranger_and_her_dot_stays_hers():
-    box = crop("stranger")
-    (m,) = markers_in_box(box)
-    assert m.kind == "stranger" and abs(m.x - 122.46) < 0.1 and abs(m.y + Y0 - 254.8) < 0.1
-    assert dot_in_box(box) == pytest.approx((172.31, 237.15), abs=0.01)  # as before the markers were looked for
-
-
-def test_a_leader_of_her_party_is_party_and_her_dot_over_a_portal_is_still_found():
-    box = crop("party")
-    assert markers_in_box(box) == [Marker("party", 160.5, 243.5 - Y0)]  # its crown (yellow) isn't her dot
-    assert dot_in_box(box) == pytest.approx((89.5, 248.5), abs=0.01)
-
 
 def test_a_crowd_of_strangers_side_by_side_are_each_found_and_the_npc_among_them_isnt():
     box = crop("crowd")
@@ -58,142 +43,6 @@ def test_a_crowd_of_strangers_side_by_side_are_each_found_and_the_npc_among_them
         assert any(abs(m.x - x) < 0.2 and abs(m.y - y) < 0.2 for m in found), (x, y)
     # and one cut off by the minimap's right edge (half its core); none where the green NPC stands (282, 79)
     assert len(found) == len(whole) + 1 and not any(abs(m.x - 282) < 6 and abs(m.y - 79) < 6 for m in found)
-
-
-def _full_size(path: Path) -> bool:
-    try:
-        return Image.open(path).size == (1920, 1080)
-    except OSError:  # one of them is cut short (written as the player shut down)
-        return False
-
-
-@pytest.mark.skipif(mapdata.minimap_picture(10004021) is None, reason="needs the game data copy (gamedata/data/copy)")
-def test_the_maps_picture_is_found_in_the_minimap_window_wherever_its_name_puts_it():
-    # The window is as wide as the map's name needs and centres the picture (its miniMap canvas) under it: on Thicket
-    # Around the Beach II (121 x 134 game px) its top-left corner is at game px (47, 72), where DOT_ORIGIN was fitted,
-    # on West Rocky Mountain II (109 x 133; `rocky`, from the floating step 24, and `rocky_stairs`, from stair 29, of
-    # 2026-10-23) at (42, 72), 5 game px left: 7.03 px of the 1920x1080 window, 80 map units at mag 4. The game draws
-    # it at whole game px (the motion track's edge fit put its corner at 46.95-46.96 on all 30 saved frames of the
-    # first map, 41.96-41.98 on all 133 of the second at 1920x1080 and 42.03-42.04 on all 31 at 1366x768), so the
-    # shift is by whole game px (MinimapPicture.shift).
-    from gamelab.perception.minimap import MinimapPicture
-    first, second = mapdata.minimap_picture(10000012), mapdata.minimap_picture(10004021)
-    for name in ("stranger", "party"):
-        finder = MinimapPicture(first)
-        assert finder.find(crop(name)) == (66, 101) and finder.shift() == (0.0, 0.0)
-        assert MinimapPicture(second).find(crop(name)) is None
-    for name in ("rocky", "rocky_stairs"):
-        finder = MinimapPicture(second)
-        assert finder.find(crop(name)) == (59, 101) and finder.shift() == (-5 * 1.40625, 0.0)
-        assert MinimapPicture(first).find(crop(name)) is None
-    # Nor on a map whose minimap fills a wider window (Kerning City Construction Site's), nor on nothing at all.
-    for picture in (first, second):
-        assert MinimapPicture(picture).find(crop("crowd")) is None
-        assert MinimapPicture(picture).find(np.zeros((205, 300, 3), np.uint8)) is None
-
-
-def test_saved_frames_of_this_map_show_no_other_player_but_the_two_seen():
-    lab = Path(__file__).resolve().parents[1] / "gamelab" / "lab"
-    frames = sorted(lab.glob("*.png")) if lab.is_dir() else []
-    full = [p for p in frames if _full_size(p) and "lie_detector_025439" not in p.name]
-    if len(full) < 20:
-        pytest.skip("needs the saved 1920x1080 screenshots (gamelab/lab)")
-    seen = {p.name: minimap.other_dots(np.asarray(Image.open(p).convert("RGB"))) for p in full}
-    with_others = {name: [m.kind for m in ms] for name, ms in seen.items() if ms}
-    # A stranger in the two frames of 2026-10-18 (17:29) taken while the user hovered over the key bindings; the
-    # party leader on platform 32 in two frames of 2026-10-21 five minutes apart; nothing in the other 27.
-    assert with_others == {"hover_D.png": ["stranger"], "hover_G.png": ["stranger"], "calibrate.png": ["party"],
-                           "lie_detector_012504.png": ["party"]}
-
-
-# The saved half-size (960x540) frames of this map that show other players (the rest, 93 of them, show none: checked by
-# eye on enlarged crops of every one, with what was found marked), and what is found on each, enlarged back to full
-# size bilinearly (the stack itself reads the minimap at full size): of 2026-10-18 to 2026-10-21. A leader of her party
-# is in 42: standing on the safe platform 32 in 37 (LEADER), at another spot in 5 of 2026-10-20; strangers in 43, two at
-# once in 3 (kick2_140_l: one touching the leader's marker on either side), one touching her dot in 2 (esc_walk,
-# kick2_120_r: 7-8 game px apart).
-LEADER = ("party", 161.0, 245.0)
-HALF_SIZE = {
-    "act": [LEADER], "back_up": [("stranger", 89.3, 176.1)], "do_turn3": [("stranger", 197.5, 242.1)],
-    "drop2": [("stranger", 120.3, 160.6)], "dropthru": [("stranger", 118.6, 185.9)],
-    "esc_climb": [("stranger", 205.9, 250.6)], "esc_walk": [("stranger", 155.3, 254.7)],
-    "hunt_descend": [("stranger", 172.3, 181.7)], "hunt_end": [("party", 160.3, 244.5)],
-    "hunt_look": [("stranger", 118.4, 229.1)],
-    "kick2_100_l": [("stranger", 201.7, 242.3), LEADER], "kick2_100_r": [("stranger", 148.4, 239.4), LEADER],
-    "kick2_120_l": [LEADER, ("stranger", 154.0, 266.0)], "kick2_120_r": [LEADER, ("stranger", 110.4, 250.7)],
-    "kick2_130_l": [LEADER, ("stranger", 172.3, 254.8)], "kick2_130_r": [LEADER, ("stranger", 177.8, 266.2)],
-    "kick2_140_l": [("stranger", 154.2, 236.1), LEADER, ("stranger", 172.3, 254.8)],
-    "kick2_140_r": [("stranger", 127.3, 245.0), LEADER, ("stranger", 172.3, 254.8)],
-    "kick2_150_l": [("stranger", 189.0, 245.0), LEADER],
-    "kick2_150_r": [("stranger", 203.1, 239.3), LEADER, ("stranger", 172.3, 254.8)],
-    "kick2_160_l": [LEADER], "kick2_160_r": [LEADER], "kick2_40_l": [LEADER], "kick2_40_r": [LEADER],
-    "kick2_60_l": [LEADER], "kick2_60_r": [LEADER], "kick2_80_l": [LEADER, ("stranger", 102.0, 250.6)],
-    "kick2_80_r": [LEADER], "kick_0_l": [LEADER, ("stranger", 172.2, 246.4)],
-    "kick_0_r": [LEADER, ("stranger", 183.5, 265.9)],
-    "kick_100_l": [("stranger", 193.3, 187.4), LEADER], "kick_100_r": [("stranger", 173.7, 181.6), LEADER],
-    "kick_120_l": [("stranger", 156.6, 187.4), LEADER], "kick_120_r": [("stranger", 176.4, 181.6), LEADER],
-    "kick_160_l": [("stranger", 156.6, 187.4), LEADER], "kick_160_r": [("stranger", 156.6, 187.4), LEADER],
-    "kick_20_l": [("stranger", 208.6, 187.4), LEADER], "kick_20_r": [("stranger", 190.5, 209.6), LEADER],
-    "kick_40_l": [("stranger", 179.2, 181.7), LEADER], "kick_40_r": [("stranger", 193.3, 187.4), LEADER],
-    "kick_60_l": [("stranger", 193.3, 187.4), LEADER], "kick_60_r": [("stranger", 180.6, 181.6), LEADER],
-    "kick_80_l": [("stranger", 187.7, 187.4), LEADER], "kick_80_r": [("stranger", 179.2, 181.7), LEADER],
-    "loot_0_after": [("stranger", 173.0, 239.0)], "loot_check_3_after": [("stranger", 136.5, 265.6)],
-    "loot_check_3_debug": [("stranger", 206.7, 129.3)], "nav_end": [("stranger", 152.2, 265.5)],
-    "snail_jt100a": [("party", 173.8, 239.3)], "snail_jt100b": [("party", 173.8, 239.3)],
-    "snail_jt40a": [("party", 173.8, 239.3)], "snail_jt40b": [("party", 173.8, 239.3)], "snap": [LEADER],
-    "w0": [("stranger", 97.0, 201.0)], "w1": [("stranger", 109.9, 181.4)], "w2": [("stranger", 94.4, 172.9)],
-    "walk_to_snail": [("party", 173.8, 239.3)], "where": [("stranger", 142.3, 238.9)],
-}
-NOT_THIS_MAP = {"early_snap", "desktop", "screen"}  # Kerning City's crowd (the full-size one is `crowd`), and no game
-
-
-def enlarged(path: Path) -> np.ndarray:
-    """A saved half-size frame's minimap (MINIMAP_BOX), enlarged back to full size bilinearly."""
-    a = np.asarray(Image.open(path).convert("RGB"))
-    x0, y0, x1, y1 = MINIMAP_BOX
-    up = cv2.resize(a[y0 // 2:y1 // 2 + 1, x0 // 2:x1 // 2 + 1], None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
-    return np.ascontiguousarray(up[:y1 - y0, :x1 - x0])
-
-
-def test_the_half_size_frames_other_players_are_each_found_and_nothing_else(monkeypatch):
-    """Every saved half-size frame of this map, enlarged back: the other players' markers found are those seen there
-    (HALF_SIZE), of the right kind, within 0.3 px of where they were found when checked; none where there are none.
-    Her dot is found in each, and where a stranger's marker touches it (esc_walk, kick2_120_r) it isn't pulled off:
-    taking it from its side that shows (DOT_UNCOVER: there her yellow, blurred by the shrinking, is narrower than
-    DOT_FULL) moves it 0.75 px across and down at most (1.06 px)."""
-    lab = Path(__file__).resolve().parents[1] / "gamelab" / "lab"
-    frames = []
-    for path in sorted(lab.glob("*.png")) if lab.is_dir() else []:
-        try:
-            if Image.open(path).size == (960, 540) and path.stem not in NOT_THIS_MAP:
-                frames.append(path)
-        except OSError:
-            pass
-    if len(frames) < 100:
-        pytest.skip("needs the saved half-size screenshots (gamelab/lab)")
-    seen = {}
-    for path in frames:
-        box = enlarged(path)
-        found = markers_in_box(box)
-        if found:
-            seen[path.stem] = found
-        uncovered = dot_in_box(box)
-        monkeypatch.setattr(minimap, "DOT_UNCOVER", False)
-        plain = dot_in_box(box)
-        monkeypatch.setattr(minimap, "DOT_UNCOVER", True)
-        if path.stem == "now":  # (a window over the top of the minimap and her: no dot)
-            assert uncovered is None and plain is None
-            continue
-        assert uncovered is not None and np.hypot(uncovered[0] - plain[0], uncovered[1] - plain[1]) < 1.1, path.stem
-    assert set(seen) == set(HALF_SIZE)
-    for name, want in HALF_SIZE.items():
-        got = sorted(seen[name], key=lambda m: (m.x, m.y))
-        want = sorted(want, key=lambda m: (m[1], m[2]))
-        assert len(got) == len(want), name
-        for m, (kind, x, y) in zip(got, want):
-            assert m.kind == kind and abs(m.x - x) < 0.3 and abs(m.y + Y0 - y) < 0.3, (name, m)
-    strangers = sum(1 for ms in HALF_SIZE.values() if any(m[0] == "stranger" for m in ms))
-    assert len(HALF_SIZE) == 58 and strangers == 43
 
 
 # --- the game's own markers pasted on them ------------------------------------------------------------------
@@ -240,7 +89,7 @@ def her_game_px(dot: tuple[float, float]) -> tuple[int, int]:
     return round((dot[0] + 0.5) / SCREEN_SCALE), round((dot[1] + 0.5) / SCREEN_SCALE)
 
 
-# Spots on this map's minimap picture (game px) clear of her dot, the portals and the markers already there, in
+# Spots on the first map's minimap picture (game px) clear of her dot, the portals and the markers already there, in
 # both crops: over the sky, the cliffs, the trees, platforms and their grass.
 SPOTS = [(55, 80), (70, 95), (92, 77), (120, 82), (150, 76), (160, 100), (52, 130), (75, 120), (100, 140),
          (130, 128), (150, 150), (58, 160), (95, 165), (140, 190), (160, 175), (63, 200), (110, 202)]

@@ -27,7 +27,6 @@ FRAMES = {
 }
 HER_DOT = (94.5, 172.5)   # her yellow core, 6 px across, its middle
 HER_TAG = (685, 528)      # her name tag's middle
-MAP = 10004021
 
 
 def frame(name: str) -> np.ndarray:
@@ -95,76 +94,6 @@ def test_eyes_at_this_size_look_at_full_size(monkeypatch):
     assert obs.exp_box.shape == (12, 99, 3) and exp_number.read(obs.exp_box).exp == 31_736
     with pytest.raises(ValueError, match="1920x1080"):
         bench.SavedEyes(np.load(TAG), detector=FakeDetector()).look_at(frame("n28_000.png"))
-
-
-@pytest.fixture(scope="module")
-def rocky():
-    from gamelab.localization import mapdata
-    try:
-        return mapdata.load(MAP)
-    except (OSError, KeyError):
-        pytest.skip("needs West Rocky Mountain II's game data")
-
-
-def _picture_eyes(rocky, monkeypatch, picture: bool = True):
-    """bench's saved-frame eyes on n28_000.png, with this map's minimap picture to find (as `_eyes` makes them in game:
-    mapdata.minimap_picture) or without."""
-    from gamelab.analysis import bench
-    from gamelab.localization import mapdata
-    from gamelab.perception.minimap import MinimapPicture
-    eyes = bench.SavedEyes(np.load(TAG), detector=FakeDetector(), geo=NATIVE)
-    monkeypatch.setattr(eyes.name_tag, "full", np.load(TAG))
-    if picture:
-        if mapdata.minimap_picture(MAP) is None:
-            pytest.skip("needs the game data copy (gamedata/data/copy)")
-        eyes.minimap = MinimapPicture(mapdata.minimap_picture(MAP), NATIVE)
-    eyes.show(cv2.cvtColor(frame("n28_000.png"), cv2.COLOR_RGB2BGRA))
-    return eyes
-
-
-def test_her_place_at_this_size(rocky, monkeypatch):
-    """Her dot alone puts her 88 units left of stair 28 at 1366x768, as at 1920x1080 on this map (80 there, on step
-    24): the minimap's picture starts 5 game px further left than on the first map, where DOT_ORIGIN was fitted. A look
-    finds the picture (minimap.MinimapPicture: its corner at game px (42, 72)) and reads her dot as if it were where the
-    first map's was: she's on stair 28, and the two ropes in view (at x -536 and -303, seen at screen x 941 and 1174,
-    her tag at 685) put her at -792."""
-    from gamelab.localization.senses import Senses
-    eyes = _picture_eyes(rocky, monkeypatch)
-    senses = Senses(eyes, rocky, band=(100, 100))
-    s = senses.look(mobs=False)
-    assert s.geo == NATIVE and senses.localizer.per_px == 16.0 and eyes.minimap.corner == (42, 72)
-    assert s.where.platform.id == 28 and s.how == "rope" and s.where.x == pytest.approx(-792, abs=1)
-    assert s.where.y == 2685
-    assert [(r.x, r.top) for r in s.ropes] == [(941, 0), (1174, 71)]
-    # Without the picture, her dot alone: 88 left, on no platform.
-    eyes = _picture_eyes(rocky, monkeypatch, picture=False)
-    s = Senses(eyes, rocky, band=(100, 100)).look(mobs=False)
-    assert s.where.x == pytest.approx(-880.4, abs=0.1) and s.where.platform is None and s.how == "dot"
-
-
-@pytest.mark.parametrize("picture", [True, False])
-def test_the_map_command_places_her_dot_at_this_size(rocky, monkeypatch, capsys, tmp_path, picture):
-    """`map` (not --offline) places her dot as Senses does, through the minimap's picture: with 1920x1080's Localizer
-    it put her at (-1319, 1897), and at this size without the picture at (-880, 2697), on no platform. (Its state is
-    the perception service's newest: here the step on the eyes' frame, feed.InlineFeed.)"""
-    from types import SimpleNamespace
-
-    from gamelab import __main__ as cli
-    from gamelab.localization import mapdata
-    from gamelab.localization.feed import InlineFeed
-    eyes = _picture_eyes(rocky, monkeypatch, picture)
-    monkeypatch.setattr(cli, "_perception", lambda model, title, name, acts, throws=False: InlineFeed(
-        eyes, model, (100, 100)))
-    monkeypatch.setattr(cli, "_game_title", lambda: "MapleStory")
-    monkeypatch.setattr(cli.client, "check_alarm", lambda: None)
-    monkeypatch.setattr(cli, "LAB", tmp_path)
-    drawn = []
-    monkeypatch.setattr(mapdata, "render", lambda model, path, marks=(): drawn.extend(marks))
-    assert cli.cmd_map(SimpleNamespace(map=MAP, offline=False)) == 0
-    there = (-800, 2685) if picture else (-880, 2697)
-    on = "platform 28" if picture else "air/rope"
-    assert f"she's at map ({there[0]}, {there[1]}) on {on}" in capsys.readouterr().out
-    assert [(round(x), round(y), label) for x, y, label in drawn] == [(*there, "her")]
 
 
 # --- the game's own markers pasted at this size, pixel for pixel -------------------------------------------------

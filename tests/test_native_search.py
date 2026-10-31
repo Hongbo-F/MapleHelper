@@ -285,30 +285,3 @@ def test_sprites_at_the_games_own_size_are_its_pictures_with_their_alpha(tmp_pat
     t = MobDetector(tmp_path, threads=1, frame_scale=1.0).templates["slime"][0]
     alpha = np.asarray(Image.open(tmp_path / f"{t.name}.png"))[..., 3]
     assert t.mask3[..., 0].sum() == (alpha == 255).sum() < (alpha >= 128).sum()  # see-through: opaque pixels only
-
-
-@pytest.fixture(scope="module")
-def first_map():
-    from gamelab.localization import mapdata
-    try:
-        return mapdata.load(10000012)
-    except (OSError, KeyError):
-        pytest.skip("needs Thicket Around the Beach II's game data")
-
-
-def test_the_first_maps_sprites_drawn_at_the_games_own_size_are_found(first_map):
-    needs_game_data()
-    from gamelab.perception import loot
-    detector = sprites.detector_for(first_map, NATIVE)
-    backgrounds = [frame(n) for n in FRAMES]
-    result = pasted.monsters(backgrounds, {"native": (detector, NATIVE)}, sprites.folder_for(1.0), (140, 75), 1, 0)
-    tallies = result["tally"]["native"]
-    assert set(tallies) == {"orange-mushroom", "pig", "slime", "snail"}
-    assert sum(t.found for t in tallies.values()) >= 0.9 * sum(t.drawn for t in tallies.values())
-    assert all(t.extra == 0 for t in tallies.values()) and result["clean"]["native"] == []
-    errors = [e for t in tallies.values() for err in t.errors for e in err]
-    assert sum(abs(e) > 1 for e in errors) <= 2  # where they stand, to the px but for a frame or two
-    drops = pasted.drops(backgrounds, {"native": (loot.LootDetector(geo=NATIVE), NATIVE)}, loot.folder_for(1.0), 1, 1)
-    found = drops["tally"]["native"]
-    assert all(t.found == t.drawn and min(t.scores) == 1.0 for t in found.values()), found
-    assert drops["clean"]["native"] == []

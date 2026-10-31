@@ -836,7 +836,7 @@ def test_watch_counts_the_frames_of_a_new_run_numbered_from_1_again(monkeypatch)
         def status(self):
             return {}
     monkeypatch.setattr(cli, "_perception", lambda model, title, name, acts: Perception())
-    assert cli.main(["watch", "--minutes", "0.01", "--map", "10000012"]) == 0
+    assert cli.main(["watch", "--minutes", "0.01", "--map", "10002073"]) == 0
     assert logged[:2] == ["the game is on screen: watching", "not watching: the game is minimized"]
 
 

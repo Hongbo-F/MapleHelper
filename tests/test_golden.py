@@ -19,7 +19,7 @@ def test_golden_takes_jobs_and_a_folder():
             golden._options(bad)
 
 
-SMALL = ("move_walk_off", "hunt_kill_unreachable", "move_jump")  # three of the shortest recorded scenarios
+SMALL = ("nav_tree_up_by_29", "nav_tree_rope_miss", "nav_tree_top_cluster")  # three of the shortest recorded scenarios
 
 
 def _golden(*args: str) -> subprocess.CompletedProcess:
@@ -28,8 +28,8 @@ def _golden(*args: str) -> subprocess.CompletedProcess:
 
 
 def test_golden_on_a_pool_records_and_checks_as_one_process_does(tmp_path):
-    if not scenarios.available() or any(n not in scenarios.SCENARIOS for n in SMALL):
-        pytest.skip("needs the first map's game data and its scenarios")
+    if not scenarios.available(scenarios.TREE) or any(n not in scenarios.SCENARIOS for n in SMALL):
+        pytest.skip("needs Tree Dungeon's game data and its scenarios")
     one, two = tmp_path / "one", tmp_path / "two"
     a = _golden("record", *SMALL, "--folder", str(one))
     b = _golden("record", *SMALL, "--folder", str(two), "--jobs", "2")

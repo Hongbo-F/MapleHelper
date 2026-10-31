@@ -327,46 +327,6 @@ def test_route_weights_let_near_equal_routes_take_turns(model):
     assert other[0].kind != first.kind
 
 
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_the_ways_a_trip_chooses_among_are_each_the_best_route_through_a_move():
-    """Planner.alternatives on the real map: the quickest first (plan's own), then the best route through each other
-    move, cheapest first, none more than STRETCH dearer, onto no platform twice, each a way of its own (its platforms
-    and the ropes it takes); `through` its move costs the same from there. From 23 by its right end (x 903) to 17:
-    the climb past its end at 1040's rope, 3.79 s, then the two rope hops off 959's, 4.87 s (+29%). From 19 to 3:
-    by 18, 16, 14 and 6, 13.0 s, then up the map's left side through 12, 16.0 s (+23%)."""
-    from gamelab.motion import route
-    from gamelab.sim import scenarios
-    planner = Planner(scenarios.real_map())
-    hops, = planner.alternatives(23, 903, 17, n=4)[1:]
-    climb = planner.alternatives(23, 903, 17, n=4)[0]
-    assert [(m.kind, m.src, m.dst) for m in climb.moves] == [("climb", 23, 17)] and climb.via is None
-    assert climb.cost == pytest.approx(3.79, abs=0.01) and hops.cost == pytest.approx(4.87, abs=0.01)
-    assert [(m.kind, m.rope_x) for m in hops.moves] == [("rope_jump", 959)] and hops.via is hops.moves[0]
-    for src, x, dst in ((23, 903, 17), (19, 3, 3), (36, 300, 3), (13, -10, 4), (2, -100, 21)):
-        ways = planner.alternatives(src, x, dst, n=4)
-        assert list(ways[0].moves) == planner.plan(src, x, dst) and ways[0].cost == planner.travel(src, x, dst)
-        assert [w.cost for w in ways] == sorted(w.cost for w in ways)
-        assert ways[-1].cost <= (1 + route.STRETCH) * ways[0].cost
-        assert len({route.way_of(w.moves) for w in ways}) == len(ways)
-        for w in ways:
-            platforms = [w.moves[0].src] + [m.dst for m in w.moves]
-            assert platforms[0] == src and platforms[-1] == dst and all(
-                a.dst == b.src for a, b in zip(w.moves, w.moves[1:]))
-            assert len(set(platforms)) == len(platforms) or w is ways[0]
-            if w.via is not None:
-                assert w.via in w.moves and planner.through(src, x, dst, w.via).cost == pytest.approx(w.cost)
-    up, left = planner.alternatives(19, 3, 3, n=4)
-    assert 12 not in [m.dst for m in up.moves] and 12 in [m.dst for m in left.moves]
-    assert up.cost == pytest.approx(13.02, abs=0.01) and left.cost == pytest.approx(16.04, abs=0.01)
-    assert planner.alternatives(23, 903, 17, n=1) == [climb]
-    # No way is through a move of the quickest: with no weights a tie gave one (from 0 at x 1290 to 18, through
-    # walk_off 0->1 at no cost more), and `through` that move gave back the quickest itself.
-    for src, x, dst in ((0, 1290, 18), (3, 765, 31), (15, 135, 31)):
-        ways = planner.alternatives(src, x, dst, n=4)
-        assert all(w.via not in ways[0].moves for w in ways[1:])
-
-
 def test_a_trip_takes_a_way_by_a_softmax_over_their_times_with_a_floor_for_stale_moves():
     """route.chances: a way dearer than the quickest by the temperature's share of its time weighs 1/e of it; a way
     through a move she hasn't made for STALE_S (and the quickest doesn't make) has the floor at least, the others
@@ -453,41 +413,6 @@ def test_arriving_keeps_off_what_a_trip_keeps_off(model):
                     planner.travel(p.id, p.left + 20, q.id, keep_off=(k.id,))
 
 
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_a_pile_on_the_way_is_weighed_against_the_route_the_trip_takes():
-    # The hunt loop's trip to 17's spot on 16 keeps off 17 (route.KEEP_OFF_S): from the basin it goes up the left
-    # side, where the planner's plain routes go up the right, past 17. A stop at a pile 330 along 36 from her costs
-    # 1.3 s more by the right side, 3.8 s by the left (hunt._detour gives arrive the trip's keep_off). And from 2,
-    # going to 4's spot on 3, a pile on 10 lies on the way that keeps off 4: 1.2 s more, not 5.6.
-    from gamelab.behavior import hunt
-    from gamelab.sim import scenarios
-    planner = Planner(scenarios.real_map())
-
-    def extra(here, x, pid, px, spot, sx, keep=()):
-        return (planner.arrive(here, x, pid, px) + hunt.PICK_S + planner.arrive(pid, px, spot, sx, keep_off=keep)
-                - planner.arrive(here, x, spot, sx, keep_off=keep))
-    assert extra(36, 449, 36, 779, 16, 636) == pytest.approx(1.3, abs=0.05)
-    assert extra(36, 449, 36, 779, 16, 636, keep=(17,)) == pytest.approx(3.8, abs=0.05) and 3.8 > hunt.DETOUR_S
-    assert extra(2, -109, 10, 51, 3, 706) == pytest.approx(5.6, abs=0.05)
-    assert extra(2, -109, 10, 51, 3, 706, keep=(4,)) == pytest.approx(1.2, abs=0.05) and 1.2 < hunt.DETOUR_S
-
-
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_route_times_on_the_real_map_are_each_platforms_own_search():
-    import random
-    from gamelab.sim import scenarios
-    model = scenarios.real_map()
-    planner, rng = Planner(model), random.Random(1)
-    for _ in range(60):
-        p = rng.choice(model.platforms)
-        x = rng.uniform(p.left, p.right)
-        for q in model.platforms:
-            found = planner._search(p.id, x, q.id, None, None)
-            assert planner.travel(p.id, x, q.id) == (None if found is None else found[1])
-
-
 def flights(model, rng, n):
     """Random flights on a map: from on, above and beside its platforms (at their ends and at walls too), walking,
     running, jumping and falling (past the fall cap too), through a platform or not, with the arrow held her way,
@@ -542,15 +467,16 @@ def test_her_flight_in_c_is_pythons(model, monkeypatch):
     same_flights(model, flights(model, random.Random(2), 1500), monkeypatch)
 
 
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
+@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(10002073),
+                    reason="needs Tree Dungeon's game data (gamedata/data)")
 def test_her_flight_in_c_is_pythons_on_the_real_map(monkeypatch):
     import random
     from gamelab import native
     from gamelab.sim import scenarios
     if native.lib() is None:
         pytest.skip(f"gamelab's C pieces aren't here: {native.why}")
-    same_flights(scenarios.real_map(), flights(scenarios.real_map(), random.Random(3), 1500), monkeypatch)
+    tree = scenarios.real_map(scenarios.TREE)
+    same_flights(tree, flights(tree, random.Random(3), 1500), monkeypatch)
 
 
 def test_jumps_need_a_sure_landing(model):
@@ -559,61 +485,6 @@ def test_jumps_need_a_sure_landing(model):
     land, _, _ = fly(model, 167, 300, WALK_SPEED, -JUMP_SPEED)
     assert land is not None and sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, land)
     assert not sure_landing(model, 167, 300, WALK_SPEED, -JUMP_SPEED, a)  # it doesn't land back on A
-
-
-def landing_room(model, a, x, sign, q):
-    """How far in from q's nearer end a running jump off a at x lands (None: not on q)."""
-    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly
-    got, lx, _ = fly(model, x, a.y_at(x), sign * WALK_SPEED, -JUMP_SPEED, group=a.group)
-    return min(lx - q.left, q.right - lx) if got is q else None
-
-
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_a_jump_up_a_staircase_step_takes_off_near_the_end_with_room_to_land():
-    """32 -> 29: 60 up, 29's end 12 across from 32's. Taking off 33 back, she lands 16 in, 4 when flow takes off
-    12 further back (tonight's misses, coming down short); placed, she takes off 15 back and lands 34 in, and
-    still 20 or more in taking off flow's spread earlier."""
-    from gamelab.motion import route
-    from gamelab.sim import scenarios
-    model = scenarios.real_map()
-    a, q = model.platform(32), model.platform(29)
-    jump, = [m for m in route.moves(model) if (m.kind, m.src, m.dst) == ("jump", 32, 29)]
-    assert jump.takeoff - a.left == route.TAKEOFF_EDGE
-    assert landing_room(model, a, a.left + route.JUMP_FROM, -1, q) < 17
-    assert landing_room(model, a, jump.takeoff, -1, q) >= 30
-    assert landing_room(model, a, jump.takeoff + route.TAKEOFF_SPREAD, -1, q) >= route.TAKEOFF_ROOM_WANTED
-    assert jump.x - jump.takeoff == route.RUN_UP  # the run-up starts before it
-
-
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_every_route_jump_takes_off_where_it_lands_with_the_most_room_nearby():
-    """No running jump on the map takes off nearer its end than TAKEOFF_EDGE, each lands on its platform taking
-    off its slop late or early (as sure_landing has it), and none could land with more room under its spread by
-    taking off a few units away (where it was found)."""
-    from gamelab.motion import route
-    from gamelab.sim import scenarios
-    model = scenarios.real_map()
-    jumps = [m for m in route.moves(model) if m.kind == "jump"]
-    assert len({(m.src, m.dst, m.direction, m.takeoff) for m in jumps}) == len(jumps)  # no two the same
-    for m in jumps:
-        a, q, sign = model.platform(m.src), model.platform(m.dst), 1 if m.direction == "right" else -1
-        edge = a.right if sign > 0 else a.left
-        assert (edge - m.takeoff) * sign >= route.TAKEOFF_EDGE
-        assert all(landing_room(model, a, m.takeoff + sign * o, sign, q) is not None
-                   for o in (route.TAKEOFF_SLOP, -route.TAKEOFF_SLOP)), m
-
-        def worst(x):
-            rooms = [landing_room(model, a, x - sign * o, sign, q) for o in route._SPREAD if a.covers(x - sign * o)]
-            return None if None in rooms else min(min(rooms), route.TAKEOFF_ROOM_WANTED)
-        here = worst(m.takeoff)
-        for dx in (-4, -2, 2, 4):
-            x = m.takeoff + dx
-            sure = route._sure_running_jump(model, a, x, sign)
-            if a.covers(x) and (edge - x) * sign >= route.TAKEOFF_EDGE and sure is not None and sure[0] is q \
-                    and (there := worst(x)) is not None:
-                assert here is not None and there <= here, (m, dx)
 
 
 def test_a_rope_just_past_a_platforms_end_is_jumped_at_from_it():
@@ -651,50 +522,6 @@ def test_a_rope_jump_from_under_a_rope_beyond_a_sure_grab_lands_by_the_grabs_cha
         jumps[bottom], = [m for m in route.moves(model) if (m.kind, m.src, m.dst) == ("rope_jump", floor.id, f.id)]
     assert (jumps[450].chance, jumps[410].chance) == (1.0, route.GRAB_CHANCE)
     assert jumps[410].seconds - jumps[450].seconds == pytest.approx(route.MISS_S - 18 / route.CLIMB_SPEED, abs=0.01)
-
-
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_from_23_to_17_by_the_rope_past_its_end_or_two_rope_hops(monkeypatch):
-    """23 -> 17: a running jump off 23's right end at the rope hanging from 17 at x 1040, 11 units past it (taking off
-    at 999), or (the user's way) a jump at the rope under 17's block at 959, up it and off it to the right onto 1040,
-    held from between 959's top and 120 above 23 (from lower she comes down under 1040's bottom). The planner takes
-    the first; without the climb past the end, the hops."""
-    from gamelab.motion import route
-    from gamelab.sim import scenarios
-    model = scenarios.real_map()
-    moves = route.moves(model)
-    climb, = [m for m in moves if (m.kind, m.src, m.dst) == ("climb", 23, 17)]
-    assert climb.rope_x == 1040 and climb.x == pytest.approx(1040 - route.GRAB_LEAD)
-    hop, = [m for m in moves if (m.kind, m.src, m.dst) == ("rope_jump", 23, 17)]
-    assert hop.rope_x == 959 and hop.onto.x == 1040 and hop.direction == "right"
-    assert -240 + route.HANG_SLOP <= hop.hang <= -120 - route.HANG_SLOP
-    assert [m.kind for m in Planner(model).plan(23, 945, 17)] == ["climb"]
-    assert [m.kind for m in Planner(model).plan(23, 945, 17, penalty=lambda m: 9.0 if m.kind == "climb" else 0.0)] \
-        == ["rope_jump"]
-    monkeypatch.setattr(route, "ROPE_HOPS", False)
-    assert not [m for m in route.moves(model) if m.kind == "rope_jump" and m.onto is not None]
-
-
-@pytest.mark.skipif(not __import__("gamelab.sim.scenarios", fromlist=["available"]).available(),
-                    reason="needs the map's game data (gamedata/data)")
-def test_a_jump_off_a_rope_grabs_the_next_where_the_engines_flight_does():
-    """side_jump works out her arc off a rope where she passes another (no wall stops her off a rope): the rope and
-    the height she grabs it at are those of the engine's flight (route.grabbed, body.fly's path), from every height
-    on 959 to the right, and from 1040 to the left."""
-    from gamelab.motion import body, route
-    from gamelab.sim import scenarios
-    model = scenarios.real_map()
-    for x, sign in ((959, 1), (1040, -1)):
-        rope = next(r for r in model.ropes if r.x == x)
-        for y in range(int(rope.top), int(rope.bottom) + 1, 10):
-            mine = route.side_jump(model, rope, y, sign)
-            engine = route.grabbed(model, rope.x, y, sign * route.ROPE_VX, -route.ROPE_VY, body.ROPE_GROUP,
-                                   leaving=rope)
-            if engine is None:
-                assert mine is None or mine[0] == "land"
-            else:
-                assert mine[0] == "rope" and mine[1] is engine[0] and mine[2] == pytest.approx(engine[1], abs=0.5)
 
 
 def test_a_landing_is_worked_out_from_the_rounded_start_so_the_cache_never_changes_it(model, monkeypatch):

@@ -1,7 +1,7 @@
 """The movement engine (motion.body): her shoe from the game's Physics.img, one step on the ground and in
 the air, the jump's kick, the closed forms the planner uses against the steps they stand for, and flights
 over a map. The numbers are the measured ones (gamelab/README.md, Motion planning); a small made-up map
-needs no game data, the real map's tests are skipped without it."""
+needs no game data, the real map's test (Tree Dungeon's) is skipped without it."""
 
 import random
 
@@ -19,7 +19,7 @@ from test_navigation import by_y, seg, tree
 
 SHOE = Shoe.from_physics(body.PHYSICS_IMG, speed=119.2, jump=100)  # config.toml's defaults
 LAGS = Lags()
-REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
+REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE), reason="needs the map's game data (gamedata/data)")
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def mean_replay(events, until, dt=0.001):
 
 @REAL
 def test_the_physics_is_the_game_datas():
-    assert scenarios.real_map().physics == body.PHYSICS_IMG
+    assert scenarios.real_map(scenarios.TREE).physics == body.PHYSICS_IMG
 
 
 def test_her_shoe_from_physics_img_and_her_stats():
@@ -359,17 +359,6 @@ def test_a_step_through_a_platforms_corner_lands_on_it(model):
         assert physics.fly(model, x0, 355.0, 180.0, 0.0)[0] is f.platform  # the planner's is the engine's
 
 
-@REAL
-def test_a_knock_in_the_air_by_the_basins_end_lands_in_the_basin():
-    # Harness tour seed 10: knocked mid jump-throw at x 887, 46 units up, she went through the corner of
-    # 36's right end (951) under the foot of the wall above it, and fell out of the map for good.
-    m = scenarios.real_map()
-    f = body.fly(m, 887.45, 529.46, 180.0, -220.0, shoe=physics.SHOE)
-    assert f.platform.id == 36 and 950 < f.land_x <= 951
-    land, x, _ = physics.fly(m, 887.45, 529.46, 180.0, -220.0)  # (its own integration had none: out of the map)
-    assert land.id == 36 and 950 < x <= 951
-
-
 def test_long_falls_with_the_arrow_let_go_land_shorter():
     t = tree()
     t["foothold"]["5"] = {"9": dict([seg(1, 9, 30, -2000, 1000, 3000, 1000)])}  # a floor 500 below C
@@ -381,85 +370,6 @@ def test_long_falls_with_the_arrow_let_go_land_shorter():
     # arrow: 0.58 s more down to the floor, 16.8 units shorter.
     assert held.land_x - free.land_x == pytest.approx(16.9, abs=1)
     assert held.vx_land == 149 and free.vx_land == pytest.approx(149 - 0.3 - 58, abs=1.5)
-
-
-@REAL
-@pytest.mark.parametrize("own_group", [True, False])
-def test_the_planners_moves_land_where_the_engine_has_them(own_group, monkeypatch):
-    """Every move the route planner finds lands where the engine has it, on the same platform within 0.05
-    units, by either wall rule: the planner flies her by the engine (physics.flight is body.fly from its
-    start rounded to 0.01 units, with the arrow held the way she leaves). It had an integration of its own
-    before, by the speed at each step's start (a unit higher at the top: 78.1 for 77.0), which took no
-    notice of the arrow: with every wall stopping her, its walk-off off platform 3 slid down platform 1's
-    wall into the basin (36), where the engine's arrow steers her round the wall's foot onto 17. In game
-    she went through that wall (OWN_GROUP_WALLS)."""
-    monkeypatch.setattr(body, "OWN_GROUP_WALLS", own_group)
-    m = scenarios.real_map()
-    far, other = [], []
-    for mv in route.moves(m):
-        a, sign = m.platform(mv.src), 1 if mv.direction == "right" else -1
-        edge = a.right if sign > 0 else a.left
-        if mv.kind == "jump":
-            x = mv.takeoff if mv.takeoff is not None else edge - sign * route.JUMP_FROM
-            start, arrow, skip = (x, a.y_at(x), sign * physics.WALK_SPEED, -physics.JUMP_SPEED), sign, None
-        elif mv.kind == "jump_up":
-            start, arrow, skip = (mv.x, a.y_at(mv.x), 0.0, -physics.JUMP_SPEED), 0, None
-        elif mv.kind == "drop":
-            start, arrow, skip = (mv.x, a.y_at(mv.x) + 1, 0.0, 0.0), 0, a
-        elif mv.kind == "walk_off":
-            level = a.y_at(edge)
-            rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
-                         for w in body.walls_for(m, a.group))
-            x = edge + sign * (-1 if rising else 0.5)
-            start, arrow, skip = (x, level - 1, sign * physics.WALK_SPEED, 0.0), sign, None
-        else:
-            continue
-        f = body.fly(m, *start, shoe=physics.SHOE, arrow=arrow, skip=skip, group=a.group)
-        if f.platform is None or f.platform.id != mv.dst:
-            other.append((mv.kind, mv.src, mv.dst, f.platform and f.platform.id))
-        elif abs(f.land_x - mv.land_x) > 0.05:
-            far.append((mv.kind, mv.src, mv.dst))
-    assert other == [] and far == []
-
-
-@REAL
-def test_a_drop_lands_her_well_inside_the_platform_it_lands_on():
-    """Every drop goes from the middle of where her platform overlaps the one it lands on (LAND_MARGIN in from
-    both ends). Taken from its overlap with any platform, 27 -> 36 went from 27's overlap with 2 (above it), 6
-    units from the basin's cliff at 36's left end, and 33 -> 36 from 6 units off its right one. In the air there
-    the walls of 36's group don't stop her (body.OWN_GROUP_WALLS), and a touch's knock carried her through them
-    and out of the map (harness, tour seed 25 and loop seed 19). From 27 only the 12 units by that cliff drop
-    her onto 36 (28 is under the rest), so 27 has no drop to 36. Nor does one come down within KNOCK_CARRY (70)
-    of those cliffs, 36's ends, the only ends here with nothing under them: dropped from 33 at 907, 44 from the
-    right one, a pig's knock still took her through it."""
-    m = scenarios.real_map()
-    assert [(q.id, end) for q in m.platforms for end in route.void_ends(m, q)] == [(36, 129), (36, 951)]
-    drops = [mv for mv in route.moves(m) if mv.kind == "drop"]
-    for mv in drops:
-        q = m.platform(mv.dst)
-        assert q.left + physics.LAND_MARGIN <= mv.land_x <= q.right - physics.LAND_MARGIN, mv
-        assert all(abs(mv.land_x - end) >= route.KNOCK_CARRY for end in route.void_ends(m, q)), mv
-    into_basin = {mv.src: mv.x for mv in drops if mv.dst == 36}
-    assert 27 not in into_basin and into_basin[33] == 881 and into_basin[31] == 225
-    assert route.drop_spots(m, m.platform(33), m.platform(36)) == [879, 881]
-
-
-@REAL
-def test_off_platform_3s_right_end_she_goes_through_platform_1s_wall_onto_17():
-    # Three times out of three in game (telemetry, 2026-10-20), landing at 1,005-1,015 by her dot.
-    m = scenarios.real_map()
-    p3 = m.platform(3)
-    assert p3.group != m.platform(1).group
-    f = body.fly(m, 849.5, -926, 149.0, 0.0, shoe=physics.SHOE, arrow=1, group=p3.group)
-    assert f.platform.id == 17 and f.land_x == pytest.approx(1008, abs=2)
-    assert physics.fly(m, 849.5, -926, 149.0, 0.0, group=p3.group)[0].id == 17
-    # Every wall stopping her: down it into the basin with the arrow let go, or (held) round its foot onto 17
-    # at 869, 140 units short of where she came down in game.
-    assert physics.fly(m, 849.5, -926, 149.0, 0.0, arrow=0)[0].id == 36
-    land, x, _ = physics.fly(m, 849.5, -926, 149.0, 0.0)
-    assert land.id == 17 and x == pytest.approx(869, abs=2)
-    kinds = {(mv.kind, mv.dst) for mv in route.moves(m) if mv.src == 3 and mv.direction == "right"}
-    assert ("walk_off", 17) in kinds and ("walk_off", 36) not in kinds
 
 
 def test_physics_fly_and_body_fly_land_alike_on_random_running_jumps(model):

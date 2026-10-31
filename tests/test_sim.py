@@ -4,7 +4,6 @@ reaching the real player or gamelab/lab), and scenarios that give the same trace
 what they're there for. Synthetic maps need no game data; the real-map tests are skipped without it, and
 fail (not skip) when it's there but doesn't load."""
 
-import dataclasses
 import os
 import random
 import sys
@@ -28,9 +27,7 @@ from gamelab.sim.world import DROP_LIFE, Noise, SimDied, SimFellOut, World, exp_
 from maplehelper.config import GameKeys
 from maplehelper.keys import parse as K
 from gamelab.attack import reach
-from gamelab.behavior import hunter
 from gamelab.localization import monsters
-from gamelab.perception.kinds import kind_of
 
 KEYS = GameKeys(left=K("left"), right=K("right"), jump=K("alt"), attack=K("f"), up=K("up"), down=K("down"),
                 pick_up=K("z"), chair=K("d"), hp_potion=K("r"))
@@ -903,20 +900,6 @@ def test_a_touch_takes_hp_by_the_monsters_touch_damage_and_is_evaded_by_its_accu
     assert world_mod.evade_chance(None) == world_mod.EVADE
 
 
-def test_the_game_data_gives_each_kind_its_touch_damage_and_accuracy():
-    m = scenarios.real_map()
-    if m is None:
-        pytest.skip("the map's game data isn't on this computer")
-    infos = {kind_of(s.name): world_mod.mob_info(s.mob_id) for s in m.spawns}
-    if any(i is None for i in infos.values()):
-        pytest.skip("the monsters' game data isn't on this computer")
-    assert {k: (i.pad, i.acc, i.hp, i.pdd) for k, i in infos.items()} == {
-        "snail": (3, 33, 45, 0), "slime": (13, 53, 115, 10), "pig": (15, 54, 128, 0), "orange-mushroom": (17, 62, 142, 0)}
-    w = World(m, KEYS, (36, 300.0), monsters="all")
-    assert {mo.kind: mo.info for mo in w.monsters} == infos
-    assert infos["slime"] == SLIME and infos["orange-mushroom"] == MUSHROOM  # the frames the tests above use
-
-
 F = world_mod.Frame
 # The slime's and the Orange Mushroom's frames as the game data has them (Mob/0000007.img, 0000009.img):
 # a slime's walk lifts it 16-17 units for its 300 ms hop (and 10 for 100 ms), and is 66 tall then.
@@ -1284,37 +1267,26 @@ def test_map_data_that_is_there_but_fails_to_load_fails_instead_of_skipping(monk
     monkeypatch.setattr(scenarios, "_MODEL", {})
     monkeypatch.setattr(mapdata, "load", broken)
     with pytest.raises(TypeError):
-        scenarios.real_map()
+        scenarios.real_map(scenarios.TREE)
     monkeypatch.setenv("PYTHONHASHSEED", "0")  # golden.main runs here, not in a fresh process
     with pytest.raises(TypeError):
-        golden.main(["check", "hunt_kill"])
+        golden.main(["check", "nav_tree_down"])
     monkeypatch.setattr(scenarios, "available", lambda map_id=scenarios.MAP_ID: False)
-    assert scenarios.real_map() is None
+    assert scenarios.real_map(scenarios.TREE) is None
     assert golden.main(["check"]) == 2  # nothing could be compared: never a pass
 
 
-REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
-# Run only with --slow (tests/conftest.py): the tours end to end (their grounds' tour_* and loop_* stay in), on each map:
-# on West Rocky Mountain II 19 and 17 s, on Tree Dungeon, Forest Up North II 9 and 9 s (2026-10-24, 8 workers); and since
-# every scenario's looks are perception's (the feed: SyncFeed, 30 frames a second of the world step), those over 15 s
-# (2026-10-25, 8 workers; the shorter of each kind stay in: hunt_clear_basin, loop_tree_lie_detector, nav_fight_up).
-SLOW_SCENARIOS = {"tour_run", "loop_run", "tour_rocky_run", "loop_rocky_run", "tour_tree_run", "loop_tree_run",
-                  "tour_hunt_from_safe_spot", "loop_rocky_bridge", "loop_basin", "loop_tree_walls", "tour_hunt_basin",
-                  "tour_hunt_platform_12", "loop_tree_crowd", "nav_rocky_fight_bridge", "loop_tree_23", "nav_fight_basin",
-                  "loop_tree_grind", "loop_noisy", "nav_fight_across_runs_out", "loop_tree_wait", "loop_spot_off_ground",
-                  "nav_fight_up_runs_out", "loop_tree_23_near_misses",
+REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE),
+                          reason="needs Tree Dungeon's game data (gamedata/data)")
+# Run only with --slow (tests/conftest.py): the tours end to end (their grounds' tour_* and loop_* stay in), 9 and 9 s
+# on Tree Dungeon, Forest Up North II (2026-10-24, 8 workers); and since every scenario's looks are perception's (the
+# feed: SyncFeed, 30 frames a second of the world step), those over 15 s (2026-10-25, 8 workers; the shorter of each
+# kind stay in: loop_tree_lie_detector).
+SLOW_SCENARIOS = {"tour_tree_run", "loop_tree_run", "loop_tree_walls", "loop_tree_crowd", "loop_tree_23",
+                  "loop_tree_grind", "loop_tree_wait", "loop_tree_23_near_misses",
                   # her keys followed (2026-10-28): 45-50 s each; loop_tree_grind_jump_key and loop_tree_remembered_keys
                   # stay in
                   "loop_tree_grind_arrow_key", "loop_tree_grind_lucky_seven_key"}
-# Not met since her escorted trips keep clear of the monsters whose touch counts (Escort.threat), tuned on Tree
-# Dungeon only until the work is taken to other maps: on West Rocky Mountain II the Axe Stump (75) counts, and
-# loop_rocky_run fell out of the map at 536 s (work/safe-travel, 2026-10-24).
-NOT_YET = {"nav_rocky_fight_bridge", "loop_rocky_run", "tour_rocky_run"}
-# What these showed came of a kill put on the wrong monster: with her kill on the one her attack took (the README: Her
-# kill's monster, 2026-10-27), no seed or layout tried shows it (each one's docstring says what was tried).
-# Since the rebase onto clearance and slopes nav_fight_across_runs_out shows it again on master's seed 3, and
-# nav_fight_up_runs_out doesn't: she arrives on every seed 1-16.
-AFTER_KILL_PLACE = {"tour_hunt_other_spot", "nav_fight_up_runs_out"}
 # Since perception at 15 frames a second, one pass a frame (2026-10-30), the Horny Mushroom isn't by her landing on 23 at
 # her plan's look on any of seeds 1-40 (nor with it at -10, 0, 10, 34, 44 or 54 on 1-6: at 54 on seed 2 she says why
 # and is touched): she drops when the way is clear, so there's no shot to say there's none of; on master's code seed 2
@@ -1325,10 +1297,6 @@ NO_LANDING_SHOT = {"nav_tree_landing_no_shot"}
 @pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(
     not scenarios.available(sc.map_id), reason=f"needs map {sc.map_id}'s game data (gamedata/data)")]
     + ([pytest.mark.slow] if name in SLOW_SCENARIOS else [])
-    + ([pytest.mark.xfail(reason="escorted trips keep clear of the Axe Stump: not tuned on West Rocky Mountain II "
-                                 "yet")] if name in NOT_YET else [])
-    + ([pytest.mark.xfail(reason="no seed shows it with her kills on the monsters her attacks took (its docstring)")]
-       if name in AFTER_KILL_PLACE else [])
     + ([pytest.mark.xfail(reason="no seed of 1-40 has the walker by her landing at her plan's look (NO_LANDING_SHOT)")]
        if name in NO_LANDING_SHOT else []))
     for name, sc in scenarios.SCENARIOS.items()])
@@ -1338,276 +1306,14 @@ def test_real_map_scenarios_show_what_they_are_there_for(name):
 
 
 @REAL
-def test_a_trip_goes_the_way_it_chose_through_its_replans(monkeypatch):
-    """With route.ROUTES over 1 a trip chooses among the planner's ways at its first plan (route.choose), and replanned
-    goes the one it took (Planner.through its move) until she has set off on that move. From 23 by its right end to
-    17, of the climb past the end and the two rope hops, the hops drawn: she goes by the hops, and the first route
-    record has the ways she chose among. Replanned from 13, across the map, the hops would cost more than the ways
-    offered could (route.STRETCH of the quickest's time when it chose): the quickest, and the choice is dropped. A trip
-    with a deadline (`vary` False: drops, a rest) goes the quickest way. From 19 to 3 up the left side through 12 (the
-    way through walk_off 5->9, made in a chain the next is planned from on the move): each move once. (No random
-    weights: drawn, they can put the hops past STRETCH.)"""
-    from gamelab import telemetry
-    from gamelab.control.navigator import TripState
-    from gamelab.motion import route
-    monkeypatch.setattr(route, "ROUTES", 2)
-    monkeypatch.setattr(route, "NOISE", 0.0)
-    monkeypatch.setattr(route, "choose", lambda ways, rng, **kw: (len(ways) - 1, [1.0 / len(ways)] * len(ways)))
-
-    def hops(sim):
-        return sim.navigator(sim.hunter()).go(17)
-    with telemetry.captured() as records:
-        trace = scenarios.run_scenario(scenarios.Scenario("hops", hops, (23, 900.0)))
-    assert trace["result"]["result"] == "arrived"
-    routes = [r for r in records if r["topic"] == "route"]
-    assert [w["via"] for w in routes[0]["ways"]] == [None, ["rope_jump", 23, 17, 959]] and routes[0]["chose"] == 1
-    assert all("ways" not in r for r in routes[1:])
-    assert [[(m["kind"], m["src"], m["dst"]) for m in r["moves"]] for r in records if r["topic"] == "moved"] == [
-        [("rope_jump", 23, 17)]]
-
-    def replans(sim):
-        nav = sim.navigator(sim.hunter())
-        st = TripState(17)
-        first, _ = nav._route(st, 23, 903.0, 17)
-        again, _ = nav._route(st, 23, 903.0, 17)
-        via = st.choice.via
-        far, _ = nav._route(st, 13, 0.0, 17)
-        quickest = nav.planner.plan(13, 0.0, 17, weight=nav.weight)
-        st2 = TripState(17)
-        nav._route(st2, 23, 903.0, 17)
-        nav._made(st2, [m for m in first])
-        hurried, offered = nav._route(TripState(17, vary=False), 23, 903.0, 17)
-        return {"first": [m.kind for m in first], "again": [m.kind for m in again], "via": via.kind,
-                "far": far == quickest, "dropped": st.choice.via is None, "made": st2.choice.via is None,
-                "hurried": [m.kind for m in hurried], "offered": offered}
-    got = scenarios.run_scenario(scenarios.Scenario("replans", replans, (23, 900.0)))["result"]
-    assert got == {"first": ["rope_jump"], "again": ["rope_jump"], "via": "rope_jump", "far": True, "dropped": True,
-                   "made": True, "hurried": ["climb"], "offered": None}
-
-    def through_12(sim):  # its move in a chain the next is planned on the move from: gone that way, it goes on
-        trip = sim.navigator(sim.hunter()).go(3)
-        return {"result": trip.result, "moves": [m.split(":")[0] for m in trip.moves]}
-    got = scenarios.run_scenario(scenarios.Scenario("through 12", through_12, (19, 3.0)))["result"]
-    assert got["result"] == "arrived" and got["moves"].count("walk_off 5->9") == 1 and "jump 13->12" in got["moves"]
-
-
-@REAL
-def test_a_way_chosen_is_dropped_once_she_is_past_its_move_or_it_would_take_her_back(monkeypatch):
-    """Replanned, a trip keeps to the way it chose only while it takes her on: not once she stands on a platform the
-    way reaches from its move on (got there another way), nor when the way from there goes onto a platform twice or
-    back onto one she has set off from that the quickest doesn't go onto. From 34 at x -180 to 2, the way by the rope
-    hops from 23 chosen (29.96 s, the quickest 28.88): the climb past 23's end made instead, then from 17 (and then 14)
-    the quickest, where kept it went down to 23 to hop back onto 17 (and from 14 walked back off onto 17 for it).
-    Knocked from 25 back down to 30 before the hops, the way on up through 25 is still hers (the quickest goes over
-    25 again too)."""
-    from gamelab.control.navigator import TripState
-    from gamelab.motion import route
-    monkeypatch.setattr(route, "ROUTES", 3)
-    monkeypatch.setattr(route, "NOISE", 0.0)
-    monkeypatch.setattr(route, "choose", lambda ways, rng, **kw: (
-        next(i for i, w in enumerate(ways) if w.via is not None and w.via.kind == "rope_jump"), [1 / len(ways)] * 3))
-
-    def fn(sim):
-        nav = sim.navigator(sim.hunter())
-        kinds = lambda path: [(m.kind, m.src, m.dst) for m in path]  # noqa: E731
-        st = TripState(2)
-        first, _ = nav._route(st, 34, -180.0, 2)
-        chosen = st.choice.via
-        out = {"first": kinds(first), "beyond": sorted(st.choice.beyond)}
-        hop = first.index(chosen)
-        nav._gone_by(st, first[:hop])  # 34 -> ... -> 23: all of it but the hops
-        climb = next(m for m in nav.planner.moves if m.kind == "climb" and (m.src, m.dst) == (23, 17))
-        nav._gone_by(st, [climb])
-        out["kept"] = st.choice.via is chosen
-        path, _ = nav._route(st, 17, climb.land_x, 2)
-        out["from 17"] = kinds(path) == kinds(nav.planner.plan(17, climb.land_x, 2, weight=nav.weight))
-        out["dropped"] = st.choice.via is None
-        st = TripState(2)
-        nav._route(st, 34, -180.0, 2)
-        nav._gone_by(st, first[:hop])
-        back = next(m for m in first if (m.src, m.dst) == (30, 25))
-        path, _ = nav._route(st, 30, back.x, 2)  # knocked from 25 down to 30
-        out["from 30"] = kinds(path)
-        out["still"] = st.choice.via is chosen
-        return out
-    got = scenarios.run_scenario(scenarios.Scenario("past it", fn, (34, -180.0)))["result"]
-    assert got["first"][6] == ["rope_jump", 23, 17] and got["beyond"] == [2, 3, 4, 6, 14, 17]
-    assert got["kept"] and got["from 17"] and got["dropped"]
-    assert got["from 30"][:3] == [["climb", 30, 25], ["jump", 25, 23], ["rope_jump", 23, 17]] and got["still"]
-
-
-@REAL
-def test_the_navigator_records_where_each_route_was_planned_from_and_how_each_chain_ended():
-    """For the coverage report (analysis.coverage): a route's record says where it was planned from (and what its
-    trip keeps off and the moves it avoided for a monster, when there are any), and after each chain or move made
-    alone a 'moved' record says what was made, where it was to end and where she did. nav_rope_past_end: 23 -> 17
-    by the climb past 23's end, in one chain."""
-    from gamelab import telemetry
-    from gamelab.motion.route import route_record
-    with telemetry.captured() as records:
-        trace = scenarios.run("nav_rope_past_end")
-    assert trace["result"]["result"] == "arrived"
-    routes = [r for r in records if r["topic"] == "route"]
-    assert routes[0]["from"] == {"platform": 23, "x": 900.0}
-    assert "keep_off" not in routes[0] and "avoid" not in routes[0]
-    assert [(r["planned"], r["landed"], r["hit"], [(m["kind"], m["src"], m["dst"], m["x"]) for m in r["moves"]])
-            for r in records if r["topic"] == "moved"] == [(17, 17, False, [("climb", 23, 17, 998.7)])]
-    assert route_record(17, [], start=(36, 512.34), keep_off={17, 4}, avoid=[("jump", 32, 29, 536)]) == {
-        "dst": 17, "moves": [], "from": {"platform": 36, "x": 512.3}, "keep_off": [4, 17],
-        "avoid": [["jump", 32, 29, 536]]}
-
-
-@REAL
-def test_a_scene_record_says_what_its_look_searched():
-    """From 2026-10-21's evening each scene record says whether the look searched for monsters and how, where it looked
-    for drops, what the screen showed, and whether she stood: analysis.respawn then needs to infer none of it. The screen
-    is where the camera's model puts it, with her standing in the basin."""
-    from gamelab import telemetry
-    from gamelab.localization.pose import VIEW, Camera
-
-    def fn(sim):
-        h = sim.hunter()
-        h.look(loot=True)
-        h.look(mobs=False)
-        return {}
-
-    sc = scenarios.Scenario("record", fn, (36, 500.0), monsters=[("Pig", 36, 800.0)])
-    with telemetry.captured() as records:
-        _, sim = scenarios.run_sim(sc)
-    looks = [r for r in records if r["topic"] == "scene"]
-    a, b = looks[-2], looks[-1]
-    assert a["searched"] and not a["wide"] and a["her"]["grounded"]
-    assert a["looked"] and all(lk[0] == 36 for lk in a["looked"])
-    assert not b["searched"] and b["looked"] == []
-    cx, cy = Camera(sim.model.bounds).corner(a["her"]["x"], a["her"]["y"])
-    assert abs(a["view"][0] - cx) <= 2 and abs(a["view"][1] - cy) <= 2
-    assert abs(a["view"][2] - a["view"][0] - VIEW[0]) <= 2
-
-
-@REAL
-def test_without_the_arrows_hold_back_the_walk_off_right_after_a_kill_doesnt_move_her(monkeypatch):
-    """nav_walk_off_after_kill with no wait for her attack to stop swallowing arrows (actions.ARROW_LOCK_MS 0):
-    the walk-off goes 0.34 s after her last throw's key, she stays on 3 as in game, and only the walk-off sent
-    again once she's seen there lands."""
-    from gamelab.behavior import fight, hunter
-    from gamelab.control import actions
-    monkeypatch.setattr(actions, "ARROW_LOCK_MS", 0)
-    # (her throw at the mushroom dying, keyed as decided, as until 2026-10-26: what put the walk-off right after a
-    # throw's key here. Now no throw goes at one a kill was placed on, fight._shoot_at by ledger.dying, and one decided
-    # before the kill came in is dropped at its last look before the key, hunter.LAST_LOOK: the walk-off then comes
-    # 1.2 s after her last key, and lands)
-    monkeypatch.setattr(hunter, "LAST_LOOK", False)
-    monkeypatch.setattr(fight, "dying", lambda kills, m, t, *a, **k: False)
-    trace = scenarios.run("nav_walk_off_after_kill")
-    assert set(scenarios.unmet(trace)) == {"the walk-off right after the kill lands",
-                                           "no log line says 'instead of platform 4'"}
-    assert trace["result"]["moves"] == ["walk_off 3->4: landed on 3", "walk_off 3->4: landed on 4"]
-
-
-def _after_kill_landings(monkeypatch) -> dict[int, list[str]]:
-    """nav_jump_after_kill on seeds 1-8, the chain's first arrow held back to 0.6 and to 0.8 s after her last
-    throw's key (actions.ARROW_LOCK_MS): where each trip that killed the pig ended up ('6': arrived)."""
-    from gamelab.behavior import hunter
-    from gamelab.control import actions
-    sc = scenarios.SCENARIOS["nav_jump_after_kill"]
-    landed = {600: [], 800: []}
-    monkeypatch.setattr(hunter, "LAST_LOOK", False)  # (as in nav_walk_off_after_kill's: a throw right before the chain)
-    for lock in landed:
-        monkeypatch.setattr(actions, "ARROW_LOCK_MS", lock)
-        for seed in range(1, 9):
-            r = scenarios.run_scenario(dataclasses.replace(sc, seed=seed))["result"]
-            if r["killed"] == "killed":
-                landed[lock].append(r["moves"][1].split(": landed on ")[-1] if r["misses"] else "6")
-    return landed
-
-
-@REAL
-def test_the_jump_onto_14_right_after_a_kill_falls_short_with_the_arrows_held_back_only_to_0_6_s(
-        monkeypatch, old_route_takeoffs):
-    """nav_jump_after_kill at the route's takeoffs of that night (old_route_takeoffs: 16 -> 14 off 16's right end
-    from 33-45 units back), with the chain's first arrow held back only to 0.6 s after her last throw's key (as
-    played in game from 00:49 on 2026-10-21): she sets off about 0.12 s late, the jump goes at its planned time
-    from short of where it was meant to, and she falls to 25 on every one of seeds 1-8 (all of which kill the pig;
-    6 of them before her looks were perception's newest frames, Senses.fresh_after), as 8 of 10 such chains did in
-    game. (With the swallowed arrow seen at 0.835 s, as fitted to her dot's first move
-    before, 3 of the 7 that killed it then fell to 25 and 4 were cut short on 16, standing still where the run
-    starts while the plan had her on: navigator.OFF_SPAN. Before her facing was read off the frame,
-    perception.heading, 7 seeds killed it and all 7 fell: her first throw no longer taps the arrow she faces
-    already, and the pig dies elsewhere.) Held back to 0.8 s (actions.ARROW_LOCK_MS), every one lands on 14."""
-    landed = _after_kill_landings(monkeypatch)
-    assert landed[800] == ["6"] * 8
-    assert landed[600] == ["25"] * 8
-
-
-@REAL
-def test_with_the_placed_takeoffs_the_jump_onto_14_lands_even_with_the_arrows_held_back_only_to_0_6_s(monkeypatch):
-    """nav_jump_after_kill at the route's takeoffs placed for room (route._placed: 16 -> 14 takes off 15 units
-    from 16's right end, at 654, landing with room if she leaves up to 22 units early): set off late, held back
-    only to 0.6 s, the jump from 15-30 units short still lands on 14 on every seed of 1-8 that kills the pig, as
-    held back to 0.8 s. Each of the night's two fixes alone keeps her off 25 here; the hold-back is for every
-    other plan that sets off right after a throw. (Every seed of 1-8 kills the pig since her facing is read off the
-    frame: 7 of them before.)"""
-    landed = _after_kill_landings(monkeypatch)
-    assert landed[800] == ["6"] * 8 and landed[600] == ["6"] * 8
-
-
-def _climb_then_jump(seed: int, x: float) -> dict:
-    """nav_climb_then_jump from (36, x) on `seed`: its result."""
-    sc = scenarios.SCENARIOS["nav_climb_then_jump"]
-    return scenarios.run_scenario(dataclasses.replace(sc, seed=seed, start=(36, x)))["result"]
-
-
-@REAL
-@pytest.mark.slow
-def test_a_climb_a_step_back_and_two_jumps_land_on_every_seed():
-    """nav_climb_then_jump on seeds 1-32 from x 300, 470 and 760 (under the rope from either side), the lags
-    spread: every trip climbs 36 -> 32 and jumps on to 29 and 28 without a miss (28 of 144 trips missed one at
-    the branch before: flow.STEP_EARLY_MAX_MS, TAKEOFF_SLOP). With the route's takeoffs placed for room
-    (route._placed) she runs at the jump onto 29 from the top, with no step back."""
-    for x in (300.0, 470.0, 760.0):
-        for seed in range(1, 33):
-            r = _climb_then_jump(seed, x)
-            assert r["result"] == "arrived" and r["misses"] == 0, (x, seed, r["moves"])
-
-
-@REAL
-@pytest.mark.slow
-def test_a_climb_from_under_its_rope_then_a_run_to_a_jump_lands_on_every_seed():
-    """From standing under a rope, the climb and a run off its top to a jump taking off 15 units from the end
-    (route.TAKEOFF_EDGE), the lags spread as in nav_climb_then_jump, seeds 1-16: every trip arrives without a
-    miss. With the grab timed 0.15 s after leaving the ground (it comes 0.045 s up under these ropes, 40 above
-    her: route.ROPE_ARMS), the plan had her at the top 0.09-0.10 s late, and she went off the end before the
-    jump's key: 11, 10 and 11 of seeds 1-24 missed (Flow._climb)."""
-    sc = scenarios.SCENARIOS["nav_climb_then_jump"]
-    for (src, x, dst) in ((6, 723.0, 1), (30, 795.0, 17), (36, 539.0, 28)):
-        for seed in range(1, 17):
-            r = scenarios.run_scenario(dataclasses.replace(sc, seed=seed, start=(src, x), fn=scenarios._nav(dst),
-                                                           expects=()))["result"]
-            assert r["result"] == "arrived" and r["misses"] == 0, (src, x, dst, seed, r["moves"])
-
-
-@REAL
-def test_a_step_after_a_climb_pressed_before_the_top_throws_the_jumps_after_it(monkeypatch, old_route_takeoffs):
-    """At the route's takeoffs of that night (old_route_takeoffs: the jump 32 -> 29 from 33-45 units in from 32's
-    left end, which after the climb from 36 needs a step back), with every arrow after a climb pressed before the
-    top again, the step back on 32 included (flow.STEP_EARLY_MAX_MS -1), some of nav_climb_then_jump's seeds miss
-    28 again: the step walks from the climb-over on, and the run on 29 to the jump onto 28 starts further on (7 of
-    seeds 1-48, as in game). At the takeoffs placed for room (route._placed) there is no step there: she runs at
-    the jump from the top (test_flow), and test_a_climb_a_step_back_and_two_jumps_land_on_every_seed lands them."""
-    monkeypatch.setattr(flow, "STEP_EARLY_MAX_MS", -1)
-    missed = [seed for seed in range(1, 25) if _climb_then_jump(seed, 470.0)["misses"]]
-    assert missed, "every seed landed every move"
-
-
-@REAL
 def test_a_real_map_scenario_is_deterministic():
-    assert scenarios.run("nav_monsters_long_way") == scenarios.run("nav_monsters_long_way")
+    assert scenarios.run("nav_tree_evade") == scenarios.run("nav_tree_evade")
 
 
 @REAL
 @pytest.mark.parametrize("name,topics", [
-    ("nav_monsters_basin", {"session", "scene", "route", "chain", "monsters", "glance", "trip", "log"}),
-    ("hunt_clear_basin", {"session", "scene", "drops", "stance", "event", "log"}),
+    ("nav_tree_evade", {"session", "scene", "route", "chain", "monsters", "glance", "trip", "log"}),
+    ("nav_tree_rope_hit", {"session", "scene", "drops", "stance", "event", "log"}),
 ])
 def test_recording_telemetry_changes_nothing_she_does(name, topics):
     from gamelab import telemetry
@@ -1622,14 +1328,14 @@ def test_recording_telemetry_changes_nothing_she_does(name, topics):
 def test_a_telemetry_failure_stops_recording_not_the_run():
     """A record that can't be written (a full disk, say) stops recording; the run goes on unchanged."""
     from gamelab import telemetry
-    plain = scenarios.run("nav_monsters_basin")
+    plain = scenarios.run("nav_tree_evade")
 
     def full_disk(record):
         if record["topic"] == "glance":
             raise OSError(28, "No space left on device")
     before, telemetry._sink = telemetry._sink, full_disk
     try:
-        recorded = scenarios.run("nav_monsters_basin")
+        recorded = scenarios.run("nav_tree_evade")
         assert not telemetry.recording()  # recording stopped at the first failure
     finally:
         telemetry._sink = before
@@ -1644,14 +1350,14 @@ def _stepped_go(self, dst, x=None, seconds=180, max_misses=6, until=None, *, mod
     return trip
 
 
-# Without --slow, one trip of each kind: shooting on the way, waiting for monsters, a transit's follow-ons, off a rope.
-STEPPED = {"nav_fight_short", "nav_monsters_long_way", "nav_transit_follows_on", "nav_off_rope_jump"}
+# Without --slow, one trip of each kind: shooting on the way, keeping clear of a monster, off a rope.
+STEPPED = {"nav_tree_landing_shot_first", "nav_tree_evade", "nav_tree_rope_top_15"}
 
 
 @pytest.mark.parametrize("name", [n if n in STEPPED else pytest.param(n, marks=pytest.mark.slow)
                                   for n in scenarios.SCENARIOS if n.startswith("nav_")])
 def test_a_trip_stepped_one_pass_at_a_time_is_the_same_trip(name, monkeypatch):
-    if scenarios.real_map() is None:
+    if not scenarios.available(scenarios.SCENARIOS[name].map_id):
         pytest.skip("needs the real map's data")
     from gamelab.control.navigator import Navigator
     want = scenarios.as_json(scenarios.run(name))

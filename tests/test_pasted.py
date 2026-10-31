@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from gamelab.__main__ import main
 from gamelab.analysis import pasted
 from gamelab.perception.loot import LootDetector
 from gamelab.perception.mobs import ASSETS, INDEX, SCALE_FILE, MobDetector
@@ -121,27 +120,6 @@ def test_drops_drawn_are_found_in_the_strip_above_where_they_lie(tmp_path):
     t = result["tally"]["native"]["mesos"]
     assert (t.drawn, t.found, t.as_drawn, t.extra) == (4, 4, 4, 0) and min(t.scores) == 1.0
     assert result["clean"]["native"] == []
-
-
-@pytest.fixture(scope="module")
-def rocky():
-    from gamedata.paths import COPY
-    from gamelab.localization import mapdata
-    if not (COPY / "Item").is_dir():
-        pytest.skip("needs the game data copy (gamedata/data/copy)")
-    try:
-        return mapdata.load(10004021)
-    except (OSError, KeyError):
-        pytest.skip("needs West Rocky Mountain II's game data")
-
-
-def test_bench_paste_says_when_none_of_a_maps_monsters_has_a_colour_gate(rocky, capsys, monkeypatch):
-    from gamelab.perception import gates
-    monkeypatch.setattr(gates, "load_background", lambda map_id: None)  # (as before one was learned for it)
-    assert main(["bench-paste", "--map", "10004021", "--each", "1"]) == 0
-    out = capsys.readouterr().out
-    assert "monsters: none of map 10004021's has a colour gate" in out
-    assert "drops:" in out and "1366x768, full size" in out
 
 
 def test_refinds_follow_a_monster_into_its_next_frame(tmp_path):

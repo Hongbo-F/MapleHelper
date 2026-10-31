@@ -88,9 +88,9 @@ tests instead, saying the same. And never in the lab's folders the recorders pru
 `lab/lie_detector`, `lab/alarm_clips`): the rolling recorder's clips the 1366x768 HP bars were labelled on went that
 way. `tests/test_testdata.py` fails if a test names a scratch folder or one of those. Every run's summary lists the
 skips with their reasons (`-rfEs` in `pyproject.toml`). Lost and to be captured again, their tests skipping with
-"NEEDS A NEW CAPTURE": West Rocky Mountain II's labelled frames (31 at 1366x768, of which the three in
-`tests/fixtures/native` still run, and 42 at 1920x1080) and those HP-bar clips (609 frames; the 3 left in `lab/shots`
-still run). `tests/testdata.py` says what each set is and what its capture would be.
+"NEEDS A NEW CAPTURE": those HP-bar clips (609 frames; the 3 left in `lab/shots` still run). `tests/testdata.py` says
+what each set is and what its capture would be. (The tests on the first map's and West Rocky Mountain II's data went on
+2026-10-31: the bot plays only Tree Dungeon.)
 
 ## Adding a combo
 

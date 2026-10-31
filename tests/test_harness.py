@@ -182,15 +182,9 @@ def test_potions_run_out_and_arrows_can_be_swallowed_after_an_attack(model):
     assert harness.PRESETS["game"][1].lock_arrows and not harness.PRESETS["plain"][1].lock_arrows
 
 
-def test_the_knobs_are_off_by_default_and_spawn_share_thins_the_monsters():
+def test_the_knobs_are_off_by_default():
     assert Noise() == Noise(hit_hidden=(), detect_miss=0.0, pose_wrong=0.0)
     assert Realism().respawn == world_mod.RESPAWN and Realism().rival_every == 0 and Realism().potions is None
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
-    model = scenarios.real_map()
-    full = World(model, KEYS, (36, 300.0), monsters="all")
-    half = World(model, KEYS, (36, 300.0), monsters="all", realism=Realism(spawn_share=0.5))
-    assert len(full.monsters) == 48 and 14 <= len(half.monsters) <= 34
 
 
 def test_sim_timeout_isnt_caught_by_a_loop_that_recovers_from_errors():
@@ -512,22 +506,23 @@ def test_her_box_can_be_the_clients_in_the_simulated_world(model):
 
 
 def test_a_short_harness_run_on_the_real_map():
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
+    if not scenarios.available(harness.TREE):
+        pytest.skip("needs Tree Dungeon's data")
     from gamelab.motion import route
-    out = harness.run_one("tour", 1, "game", minutes=1.0)
+    out = harness.run_one("tour", 1, "game", minutes=1.0, map_id=harness.TREE)
     assert out["policy"] == "tour" and "SimTimeout" in out["result"] and out["exp_per_min"] >= 0
     assert set(harness.COLUMNS) - {"seed"} <= set(out) and out["ways"] == route.ROUTES
-    ways = harness.run_one("tour", 1, "game", minutes=1.0, ways=3)  # (--ways: route.ROUTES for the run, put back)
+    # (--ways: route.ROUTES for the run, put back)
+    ways = harness.run_one("tour", 1, "game", minutes=1.0, ways=3, map_id=harness.TREE)
     assert ways["ways"] == 3 and route.ROUTES == out["ways"]
 
 
 def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
+    if not scenarios.available(harness.TREE):
+        pytest.skip("needs Tree Dungeon's data")
     from gamelab.sim import fakes
     coded = fakes.LOOK_S
-    out = harness.run_one("loop", 1, "game", minutes=0.5, costs="measured")
+    out = harness.run_one("loop", 1, "game", minutes=0.5, costs="measured", map_id=harness.TREE)
     assert out["feed"] and out["costs"] == "measured" and fakes.LOOK_S == coded  # put back after the run
     rec = out["feed_record"]
     assert rec["frames"] > 0 and rec["senses"]["looks"] > 0 and out["looks"] == rec["senses"]["looks"]
@@ -537,15 +532,15 @@ def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
 def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch):
     # --costs measured-1366: the fakes' look costs as `measured`'s, and the feed made for the run takes
     # feed.COSTS_1366 (SyncFeed's costs are COSTS as it is when it's made); both put back after the run.
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
+    if not scenarios.available(harness.TREE):
+        pytest.skip("needs Tree Dungeon's data")
     from gamelab.localization import feed
     from gamelab.sim import fakes
     seen = []
     monkeypatch.setattr(scenarios, "run_sim", lambda sc: seen.append((feed.COSTS, fakes.LOOK_S)) or 1 / 0)
     coded, look = feed.COSTS, fakes.LOOK_S
     with pytest.raises(ZeroDivisionError):
-        harness.run_one("loop", 1, "game", minutes=0.5, costs="measured-1366")
+        harness.run_one("loop", 1, "game", minutes=0.5, costs="measured-1366", map_id=harness.TREE)
     assert seen == [(feed.COSTS_1366, harness.COSTS["measured"]["LOOK_S"])]
     assert feed.COSTS is coded and fakes.LOOK_S == look
     # (since 2026-10-30 COSTS are the one pass's at 1366x768, the live size: COSTS_1366 is them, the whole screen 8.4
@@ -555,21 +550,6 @@ def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch)
     monkeypatch.setattr(feed, "COSTS", feed.COSTS_1366)
     made.__init__(type("Step", (), {"senses": None})(), lambda ropes: None)
     assert made.costs is feed.COSTS_1366
-
-
-def test_the_stacks_computing_is_timed_between_its_calls_and_the_run_is_as_it_was():
-    """sim.latency times the stack's own computing between two calls to the game, by the call that ended
-    it, without charging it to the fake clock: the run is the harness's own."""
-    from gamelab.sim import latency
-    if not scenarios.available():
-        pytest.skip("needs the real map's data")
-    found, (timed,) = latency.measure("loop", [1], 0.5)
-    assert timed == harness.run_one("loop", 1, "game", minutes=0.5)
-    assert found.times["send"] and found.times["sleep"] and min(min(xs) for xs in found.times.values()) >= 0
-    assert fakes.Clock.charge is Clock.charge and Clock.charge.__module__ == "gamelab.sim.fakes"  # put back
-    lines = found.table()
-    assert lines[0].startswith("before") and lines[-1].startswith("any call")
-    assert sum(int(line.split()[-6]) for line in lines[1:-1]) == int(lines[-1].split()[-6])
 
 
 def test_stretches_are_timed_from_a_mark_to_the_next_charge():
@@ -605,17 +585,16 @@ def test_her_trips_are_counted_from_the_stacks_log(model):
 
 
 def test_a_world_drops_what_its_maps_monsters_drop(model):
-    """The harness's `game-drops` (Realism.drops MAP_DROPS): on the first map what was seen there in game (GAME_DROPS);
-    on another a monster seen in game drops as it did there, and its other drops (perception.drops) at OSMLib's
-    reference rates; one not seen in game its drops at those rates (an item with none as its rarest), and mesos."""
+    """The harness's `game-drops` (Realism.drops MAP_DROPS): a monster seen in game drops as it did there (GAME_DROPS),
+    and its other drops (perception.drops) at OSMLib's reference rates; one not seen in game its drops at those rates
+    (an item with none as its rarest), and mesos."""
     from types import SimpleNamespace
-    from gamelab.perception.drops import FIRST_MAP, MONSTERS
+    from gamelab.perception.drops import MONSTERS
     from gamelab.sim.world import GAME_DROPS, MAP_DROPS, MESOS_SHARE, NO_RATE, game_drops
 
     def a_map(map_id, *names):
         return SimpleNamespace(id=map_id, spawns=[SimpleNamespace(name=n) for n in names])
 
-    assert game_drops(a_map(FIRST_MAP, "Pig", "Slime")) == GAME_DROPS
     tree = game_drops(a_map(10002073, "Horny Mushroom", "Slime", "Horny Mushroom"))
     assert tree[:3] == (("horny-mushroom", "mesos", MESOS_SHARE), ("horny-mushroom", "horny-mushroom-cap", 0.40),
                         ("horny-mushroom", "orange-potion", 0.01))
@@ -698,9 +677,9 @@ def test_the_maps_cap_is_the_servers_formula(model):
     snails = [("Snail", c.id, 100.0 + 60 * k) for k in range(10)]
     w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0))
     assert sum(m.alive for m in w.monsters) == 3
-    # The maps': Tree Dungeon II 22 (its 31 points), Thicket Around the Beach II 26 (48), West Rocky Mountain II 23
-    # (49), Tree Dungeon III 20 (its mobRate 0.9); Tree Dungeon II with 20 players 28, 44 or more 44.
-    for map_id, cap in ((10002073, 22), (10000012, 26), (10004021, 23), (10002074, 20)):
+    # The maps': Tree Dungeon II 22 (its 31 points), Tree Dungeon III 20 (its mobRate 0.9); Tree Dungeon II with 20
+    # players 28, 44 or more 44.
+    for map_id, cap in ((10002073, 22), (10002074, 20)):
         if scenarios.available(map_id):
             assert mapdata.load(map_id).mob_cap() == cap
     if scenarios.available(10002073):

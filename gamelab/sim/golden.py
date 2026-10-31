@@ -15,7 +15,7 @@ gamelab/lab/golden (a scratch folder, to compare two recordings byte for byte).
 
 `check` exits 0 only when every scenario asked for ran and matched: 1 when one differs (or has no
 recorded trace), 2 when nothing could be run (no game data for the map on this computer). Scenarios on a map
-whose data isn't here (West Rocky Mountain II's, say) are named and left out.
+whose data isn't here are named and left out.
 
 The traces hold map-derived data, so they stay in gamelab/lab (git-ignored), like all game data.
 Runs are made with PYTHONHASHSEED=0 (the command restarts itself with it), so nothing depends on the
@@ -80,7 +80,6 @@ def _run_in_worker(name: str) -> Ran:
 def _ready(map_ids: tuple[int, ...]) -> None:
     """A worker made ready as main() makes the command: the scenarios imported and every map they're on loaded."""
     from . import scenarios
-    scenarios.real_map()
     for map_id in map_ids:
         scenarios.real_map(map_id)
 
@@ -229,10 +228,6 @@ def main(argv: list[str] | None = None) -> int:
         print(e)
         return 2
     from . import scenarios
-    if not scenarios.available():
-        print(f"map {scenarios.MAP_ID} isn't available on this computer (gamedata/data): nothing to run")
-        return 2
-    scenarios.real_map()  # data that's there but fails to load is an error, raised here
     names = argv[1:] or list(scenarios.SCENARIOS)
     unknown = [n for n in names if n not in scenarios.SCENARIOS]
     if unknown:
@@ -242,6 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     if away and argv[0] != "list":
         print(f"left out, their map's game data isn't on this computer: {', '.join(away)}")
         names = [n for n in names if n not in away]
+        if not names:
+            print("nothing to run")
+            return 2
     for map_id in {scenarios.SCENARIOS[n].map_id for n in names}:
         scenarios.real_map(map_id)  # (each map's: one that fails to load raises here)
     if argv[0] == "list":

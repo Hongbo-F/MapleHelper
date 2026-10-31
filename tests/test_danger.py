@@ -103,14 +103,12 @@ def test_a_kind_that_hops_from_a_platform_over_hers_leaves_it_by_an_end():
 def test_no_kind_whose_touch_counts_hops_on_her_maps():
     """Her trips' monster tracks never leave their platforms (localization.monsters.MonsterTrack.reach) while the danger
     model has a kind that hops leave its own (Danger.walk): that holds only while no kind whose touch counts hops. On
-    her three maps at her level there: Tree Dungeon's mushrooms and West Rocky Mountain II's Axe Stump count and walk;
-    the slimes, pigs and Orange Mushrooms hop and count for nothing. A map where one does fails here first."""
+    her map at her level there, Tree Dungeon's mushrooms count and walk. A map where one does fails here first."""
     from gamelab.sim import scenarios
-    for map_id, her in ((10002073, Her(752.0, 24.0)), (10004021, Her(730.0, 23.0)), (10000012, Her(642.0, 19.0))):
-        if not scenarios.available(map_id):
-            continue
-        d = Danger(mapdata.load(map_id), her)
-        assert not [k for k, t in d.threats.items() if t.share > 0 and t.hops], map_id
+    if not scenarios.available(10002073):
+        pytest.skip("needs Tree Dungeon's game data (gamedata/data)")
+    d = Danger(mapdata.load(10002073), Her(752.0, 24.0))
+    assert not [k for k, t in d.threats.items() if t.share > 0 and t.hops]
 
 
 def test_a_map_whose_touch_damage_cant_be_read_says_so(monkeypatch, capsys):

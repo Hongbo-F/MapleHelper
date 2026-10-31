@@ -429,9 +429,6 @@ def test_monster_tables_match_the_game_data():
         assert dying[mob_id] == monsters.MONSTER_DIE_S[kind]  # its death animation: 0.66 s for a pig
     assert monsters.bodies()["snail"].top == 24  # without a map: the tables
     assert monsters.bodies()["snail"].die_s == 1.26
-    # The map's cache is read again when it was made before bodies kept their death animations (a key of
-    # its own, so code from before reads the new cache as it did).
-    assert mapdata.load(10000012).mob_bodies["Pig"].die_s == 0.66
     stats = mapdata._mob_speeds({"2", "7", "8", "9"})
     assert stats == {"2": -65, "7": -20, "8": 0, "9": 0}
     for mob_id, kind in (("2", "snail"), ("7", "slime"), ("8", "pig"), ("9", "orange-mushroom")):
@@ -662,85 +659,6 @@ def test_spots_are_worked_out_again_when_reach_s_other_answers_are_switched(monk
     assert spots.spots(model, a.id) == v83
 
 
-def test_what_stops_a_star_on_the_real_map():
-    """Thicket Around the Beach II (skipped without its parsed game data): from platform 4 a star never
-    reaches 2, behind the step wall of their group (3, 63); the shots that hit in the live logs, past other
-    groups' walls and down past her own platform's end (from near it), are clear."""
-    if not (mapdata.CACHE / "10000012.json").is_file():
-        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
-    model = mapdata.load(10000012)
-    p = model.platform
-    assert p(2).group == p(4).group == (3, 63)
-    for line in reach.LINES:
-        assert all(reach.wall_between(p(4), x, p(4).y_at(x), tx, target=p(2), line=line) is not None
-                   for x in range(219, 670, 10) for tx in range(-309, 220, 10)), line
-    # By the v83 line, at a pig on 2 within 22 of its end, 368 off or more (the star's reach ends 400 ahead of
-    # her), the row ends inside its body, and the client's hit point, the middle of the body's part within the
-    # row, is past the step's edge, on 4's side of the wall (hit_point, as RustMS has it). It's taken on 2, as
-    # the pig is (reach._hit_on): there the wall stops it.
-    pig = reach.PIG
-    assert reach.hit_point(609, -893, -1, 211, -925, *pig)[0] == 227  # 209-245 of the pig's 177-245
-    assert reach.sight_stop(p(4), 609, -893, 227, -925) is None
-    assert reach.wall_between(p(4), 609, -865, 211, target=p(2), ty=-925, body=pig) is not None
-    # So do her decisions, which take the pig on 2 by its id (reach.wall_to): from 4 at 600 no throw at one at 207.
-    on_2 = target(207, p(2).y_at(207), platform=2)
-    assert not reach.can_hit(p(4), 600, p(4).y_at(600), on_2) and stance(600, p(4).y_at(600), p(4), [on_2])[0] != "throw"
-    # The logged hits (research/terrain's 299 decided throws): up past other groups' walls, and down from near
-    # her platform's end.
-    for her, x, there, txs in ((19, -14, 18, (150, 300, 380)), (19, 52, 18, (300, 439)), (3, 706, 1, (870, 930)),
-                               (3, 723, 1, (900, 950)), (14, 735, 17, (1153,)), (14, 737, 17, (918, 1032, 1097)),
-                               (2, 197, 4, (511,)), (2, 211, 4, (377, 446)), (20, -28, 21, (-215, -236)),
-                               (16, 516, 18, (203, 248)), (22, 16, 21, (-150, -300))):
-        for tx in txs:
-            assert reach.wall_in_way(p(her), x, p(her).y_at(x), tx, target=p(there)) is None, (her, x, there, tx)
-
-
-def test_her_own_platform_stops_a_star_down_past_its_end_on_the_real_map():
-    """Thicket Around the Beach II (skipped without its parsed game data): as the user saw in game on 2026-10-21,
-    her own platform stops a star at a monster below her, down a step (2 at 4) and from a higher platform (14 at
-    17), unless she stands near enough its end (the v83 line, reach's): from 14 at x 690, 159 from its end, a pig
-    on 17 up to 238 off; from 25 inside its end none. Her decisions walk her there."""
-    if not (mapdata.CACHE / "10000012.json").is_file():
-        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
-    model = mapdata.load(10000012)
-    p = model.platform
-    y14 = p(14).y_at(690)
-
-    def pig(tx, there=17):
-        return target(tx, p(there).y_at(tx), platform=there)
-
-    for tx in range(861, 1101):
-        clear = reach.can_hit(p(14), 690, y14, pig(tx))
-        assert clear == (tx - 690 >= 239), tx  # in reach by distance from 151 off (shot_dx)
-        assert reach.wall_between(p(14), 690, y14, tx, target=p(17), line="level") is None
-    assert all(reach.can_hit(p(14), 824, y14, pig(tx)) for tx in range(975, 1235))  # 151-410 off
-    # From 2 at x 50 (169 from its end) at a pig on 4: under 254 off out of reach; from x 195, none.
-    y2 = p(2).y_at(50)
-    assert [tx for tx in range(219, 461) if reach.can_hit(p(2), 50, y2, pig(tx, 4))] == list(range(304, 461))
-    assert all(reach.can_hit(p(2), 195, y2, pig(tx, 4)) for tx in range(346, 606))
-    # From 14 at 690: a pig on 17 at 900 (210 off) is out of reach from all of 14 (but from x 747 to 749, between
-    # her floor and the search's 151), so neither policy walks for it; one at 1000 is in reach from there already;
-    # for one at 1130 (440 off) she closes in to 370 from it, 89 from her platform's end, where the line clears.
-    assert decide(690, y14, p(14), pig(900), []) == ("skip", "a floor in the way from all along her platform")
-    assert stance(690, y14, p(14), [pig(900)]) == ("wait",)
-    assert stance(690, y14, p(14), [pig(1000)]) == ("throw", RIGHT)
-    assert stance(690, y14, p(14), [pig(1130)]) == ("approach", RIGHT, 70)
-    assert reach.can_hit(p(14), 760, y14, pig(1130))
-    # From 700 at a pig on 17 at 910 (210 off: her floor stops it under 224): decide walks her to its near goal, 171
-    # from it (shot_dx 151 and a band), 110 from her platform's end, where the line clears (from 165 off there).
-    assert not reach.can_hit(p(14), 700, y14, pig(910)) and reach.can_hit(p(14), 739, y14, pig(910))
-    assert decide(700, y14, p(14), pig(910), []) == ("walk", RIGHT, 39)
-    # A pig at 880, in her floor's shadow, takes the stars at one at 1000 from 690 (picked first, stopped): from
-    # 729 on it's under 151 off, not picked, and the one at 1000 gets them. stance closes in to 736, decide to 824.
-    shade, far = pig(880), pig(1000)
-    assert reach.can_hit(p(14), 690, y14, far) and not reach.can_hit(p(14), 690, y14, far, others=[shade, far])
-    assert stance(690, y14, p(14), [shade, far]) == ("approach", RIGHT, 46)
-    assert decide(690, y14, p(14), far, [], around=[shade, far]) == ("walk", RIGHT, 134)
-    # Where to shoot 17 from: the place on 14 the most of 17 is in reach from, the first of them from the left: 756
-    # (from 716 by the level line, where her floor stops a star at a pig on 17 under 200 off).
-    assert spots.spots(model, 17)[0] == spots.Spot(14, 756.0, 0.491, True)
-
-
 def test_she_doesnt_throw_at_or_walk_for_a_monster_behind_a_wall_of_her_group(monkeypatch):
     model, a, b, c = step_map()
     up = target(300, 440, platform=b.id)  # up on B: in reach by distance from A at 100, behind the step
@@ -775,25 +693,6 @@ def test_a_wall_stops_a_star_only_going_in_at_its_outer_face():
     # The step map's step wall is drawn upward, from A up to B: its face looks left, at A, below it.
     model, a, b, c = step_map()
     assert [reach.faces(w) for w in a.walls] == [-1] and sorted(reach.faces(w) for w in c.walls) == [-1, 1]
-
-
-def test_on_the_real_map_every_wall_faces_out_from_the_platform_it_hangs_from():
-    """Thicket Around the Beach II (skipped without its parsed game data): every wall hangs below the end of
-    one platform of its foothold group, and its outer face looks away from it, out of the block: so the step
-    between 2 and 4 faces 4, below it, and the basin's sides face its floor (36). One-sided walls change
-    nothing here: a star thrown from a platform never meets the back of a wall of its group across its line."""
-    if not (mapdata.CACHE / "10000012.json").is_file():
-        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
-    model = mapdata.load(10000012)
-    for w in model.walls:
-        ends = [(p, 1 if x == p.right else -1) for p in model.platforms if p.group == w.group
-                for x in (p.left, p.right) if x == w.x1 and min(w.y1, w.y2) >= p.y_at(x)]
-        assert len(ends) == 1, w
-        p, out = ends[0]
-        assert reach.faces(w) == out, (w, p.id)
-    p = model.platform
-    assert {reach.faces(w) for w in p(4).walls if w.x1 == 219} == {1}
-    assert {(w.x1, reach.faces(w)) for w in p(36).walls if w.x1 in (129, 951)} == {(129, 1), (951, -1)}
 
 
 def ledge_map():
@@ -870,7 +769,7 @@ def test_with_the_v83_line_a_spot_covers_only_what_her_floor_lets_a_star_down_to
 def test_clear_length_answers_as_its_lines_one_at_a_time():
     # reach.clear_length tries every star's line at once (reach._sight_clear): the length of the target, tried in
     # the middle of every 2 units, that a star gets to by the v83 line, as wall_between has it one line at a time,
-    # with every answer the same (the ledge map's floors, corners and another group's ledge, and the real map's).
+    # with every answer the same (the ledge map's floors, corners and another group's ledge).
     def one_at_a_time(here, x, y, there, lo, hi, body=reach.PIG):
         n = max(1, math.ceil((hi - lo) / 2))
         width = (hi - lo) / n
@@ -882,12 +781,6 @@ def test_clear_length_answers_as_its_lines_one_at_a_time():
     cases = [(h, x, 500, there, lo, hi, body) for x in (0, 25, 100, 160, 240, 290, 300)
              for there, lo, hi in ((low, -200, 0), (low, 150, 560), (low, 300, 800), (up, 350, 700))
              for body in (reach.PIG, (25, 19))]
-    if (mapdata.CACHE / "10000012.json").is_file():
-        p = mapdata.load(10000012).platform
-        cases += [(p(her), x, p(her).y_at(x), p(there), lo, hi, reach.PIG)
-                  for her, there, xs, lo, hi in ((14, 17, (690, 706, 756, 824), 861, 1389), (2, 4, (50, 195), 219, 669),
-                                                 (4, 2, (260, 500, 609), -309, 219), (20, 21, (-7, 30), -399, -51))
-                  for x in xs]
     for here, x, y, there, lo, hi, body in cases:
         assert reach.clear_length(here, x, y, there, lo, hi, body) == one_at_a_time(here, x, y, there, lo, hi, body)
 
@@ -964,17 +857,6 @@ def test_her_floor_s_shadow_shields_those_behind_it():
     assert [g for g in range(25, 276) if reach.can_hit(h, g, 500, far, others=[shade, far])] == list(range(179, 270))
     assert stance(100, 500, h, [shade, far]) == ("approach", RIGHT, 85)
     assert decide(100, 500, h, far, [], around=[shade, far]) == ("walk", RIGHT, 149)
-
-
-def test_no_spot_on_platform_4_for_platform_2():
-    """On the real map (skipped without its parsed game data): by distance a spot on 4 (x 244) has 57% of
-    platform 2 in reach, but it's all behind the step wall; 2 is shot from itself."""
-    if not (mapdata.CACHE / "10000012.json").is_file():
-        pytest.skip("needs the map's parsed game data (gamedata/data/out/maps)")
-    model = mapdata.load(10000012)
-    assert [sp.platform for sp in spots.spots(model, 2)] == [2]
-    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244)) == pytest.approx(0.566, abs=0.002)
-    assert spots.coverage(model.platform(2), 244, model.platform(4).y_at(244), model.platform(4)) == 0
 
 
 def test_a_monster_seen_past_its_platforms_end_is_placed_on_it():
@@ -1056,25 +938,3 @@ def test_a_monster_with_its_feet_on_a_platform_goes_on_it_whatever_spawns_there(
     assert s.place(Mob("pig", 470, round(feet) - 15, 46, 30, 0.9), model, None).platform == low.id  # its bottom
     s.ground = (400, 402)  # in the air: no ground under her
     assert not s.grounded and s.place(pig, model, None).platform == low.id
-
-
-def test_the_pig_off_its_spawn_platform_in_after_rest_is_put_where_it_stands():
-    """after_rest.png (a saved frame of the game): a pig walks platform 26, which spawns nothing. By the spawn
-    rule it went nowhere (60 units under it there's no pig platform); by where its feet are, on 26."""
-    from pathlib import Path
-
-    from gamedata.paths import COPY
-    from gamelab import paths
-    from gamelab.analysis import bench, calibration
-    from gamelab.localization.senses import Senses
-    from gamelab.perception.sprites import detector_for
-    frame = paths.LAB / "after_rest.png"
-    if not frame.is_file() or not paths.CALIBRATION.is_file() or not (COPY / "Packs" / "Mob_00000.ms").is_file():
-        pytest.skip("needs the saved frame and calibration (gamelab/lab) and the game data copy")
-    model = mapdata.load(10000012)
-    eyes = bench.SavedEyes(calibration.load().template, detector_for(model))
-    eyes.show(bench.load([Path(frame)])[0][1])
-    s = Senses(eyes, model, band=(reach.LOOK_UP, reach.LOOK_DOWN)).look(wide=True)
-    pigs = [m for m in s.monsters if m.kind == "pig"]
-    assert s.grounded and [m.platform for m in pigs] == [26] and 26 not in model.spawn_platforms
-    assert abs(pigs[0].y - model.platform(26).y_at(pigs[0].x)) < 1

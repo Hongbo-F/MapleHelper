@@ -11,20 +11,11 @@ The sets (each one's labels in tests/fixtures, in git):
   and pet; no drop on any).
 - `tree_dungeon_drops`: 7 frames of the hunts there of 2026-10-24 with drops lying (hp0_*.png, as saved in lab/shots;
   tree_dungeon_drops.json; three of them have labelled HP bars too, hp_bars/labelled.json's "shots/").
-- `hp_bars_1920x1080`: the first map's frames with labelled HP bars at 1920x1080 (hp_bars/labelled.json): its 9
-  screenshots as saved in gamelab/lab, and the 20 recordings of lab/recordings that it names, each with only its
-  labelled frames (`frames`, and `index`: their numbers in the recording; 237 in all).
-Lost, to be captured again (`lost`): West Rocky Mountain II's (10004021) 31 frames at 1366x768 and 42 at 1920x1080 of
-2026-10-23 (west_rocky_native_monsters.json, west_rocky_monsters.json); three of the 31 are in tests/fixtures/native.
-And `tree_dungeon_clips`: the rolling recorder's clips of her Tree Dungeon hunts of 2026-10-24 and 25 (609 frames,
-JPEG) with labelled HP bars at 1366x768, pruned from lab/recent.
-What a new capture would be (each then labelled offline, as tree_dungeon_native's were, into a new labels file):
-- West Rocky Mountain II at 1366x768 (`west_rocky_native`): lossless PNGs of the game window as tree_dungeon_native's
-  (`snap --scale 1`, copied off lab/shots/snap.png), her standing still on a few platforms with its Stumps, Dark
-  Stumps, Axe Stumps and Red Snails in view, 3 frames a platform a second or two apart (the lost ones: on stair 28,
-  another player fighting the bridge's stumps).
-- West Rocky Mountain II at 1920x1080 (`west_rocky`): the same with the game stretched to a 1920x1080 window, only if
-  she is to play that way again (she plays at the game's own 1366x768 now).
+(The first map's `hp_bars_1920x1080` and West Rocky Mountain II's sets, `west_rocky_native` and `west_rocky`, are no
+test's since 2026-10-31, when those maps' tests went.)
+Lost, to be captured again (`lost`): `tree_dungeon_clips`, the rolling recorder's clips of her Tree Dungeon hunts of
+2026-10-24 and 25 (609 frames, JPEG) with labelled HP bars at 1366x768, pruned from lab/recent.
+What a new capture would be (then labelled offline, as tree_dungeon_native's were, into a new labels file):
 - HP bars at 1366x768 (`tree_dungeon_clips`): frames of a hunt of hers on Tree Dungeon (a monster's bar shows only once
   she has hit it): `save-recent` during one, its folder copied here, the bars labelled as hp_bars/labelled.json's.
 

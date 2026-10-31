@@ -89,10 +89,10 @@ def test_the_reserve_is_her_hits_of_the_maps_largest_touch_in_hp():
 def test_on_her_maps_from_their_game_data():
     from gamelab.localization import mapdata
     from gamelab.sim import scenarios
-    want = {10002073: ("Horny Mushroom", 110), 10004021: ("Axe Stump", 75), 10000012: ("Orange Mushroom", 17)}
+    want = {10002073: ("Horny Mushroom", 110)}
     have = {m: v for m, v in want.items() if scenarios.available(m)}
     if not have:
-        pytest.skip("needs the maps' game data (gamedata/data)")
+        pytest.skip("needs the map's game data (gamedata/data)")
     for map_id, (name, pad) in have.items():
         r = reserve_of(kinds_of(mapdata.load(map_id)), 3, FIT_28, 28)
         assert (r.touch.name, r.touch.pad, r.hp(840)) == (name, pad, 3 * top(pad)), map_id

@@ -1,10 +1,8 @@
 """Her EXP gains from her EXP number read (localization.gains): a gain's size names the kind killed, a gain of two kills
 is split, one no kill explains is flagged; jumps and falls wait for a second reading; level-ups; changes that can't be
 read wait for a reading to say what they were (a cursor passing over the number is no kill); sizes that aren't the
-game data's (another EXP rate) turn the sizes off. And in the simulator, where FakeEyes draws her number with the
-game's glyphs: the hunter's count of her EXP is the world's, every kill named by its kind."""
-
-import dataclasses
+game data's (another EXP rate) turn the sizes off. And the simulator's number, which FakeEyes draws with the game's
+glyphs, reads back as her EXP."""
 
 import pytest
 
@@ -13,8 +11,7 @@ from gamelab.localization import gains
 from gamelab.localization.gains import ExpMeter, Gain
 from gamelab.perception import exp_number
 from gamelab.perception.exp_number import ExpReading
-from gamelab.sim import fakes, scenarios
-from gamelab.sim.world import Noise
+from gamelab.sim import fakes
 
 THICKET = {"Orange Mushroom": 15, "Slime": 12, "Snail": 2, "Pig": 13}  # MapModel.mob_exp on Thicket Around the Beach II
 
@@ -205,8 +202,8 @@ def test_with_the_kinds_off_every_change_is_one_kill(monkeypatch):
 
 # --- in the simulator --------------------------------------------------------------------------------------------
 
-needs_map = pytest.mark.skipif(not (COPY / "UI" / "UI_000.wz").is_file() or scenarios.real_map() is None,
-                               reason="needs the game data copy (the map and the bar's glyphs)")
+needs_map = pytest.mark.skipif(not (COPY / "UI" / "UI_000.wz").is_file(),
+                               reason="needs the game data copy (the bar's glyphs)")
 
 
 @needs_map
@@ -216,68 +213,3 @@ def test_the_simulators_number_reads_as_her_exp_and_level_ups_carry_over():
     for level, exp in ((19, 421), (20, 13), (19, 16679)):
         reading = exp_number.read(exp_number.draw(exp_number.shown(exp, level)))
         assert reading.exp == exp and level in reading.levels
-
-
-def _hunt(name: str, **changes):
-    made = []
-    real = scenarios.Sim.hunter
-
-    def hunter(self, **kw):
-        made.append(real(self, **kw))
-        return made[-1]
-    scenarios.Sim.hunter = hunter
-    try:
-        trace, sim = scenarios.run_sim(dataclasses.replace(scenarios.SCENARIOS[name], **changes))
-    finally:
-        scenarios.Sim.hunter = real
-    return made[0], sim
-
-
-@needs_map
-def test_in_the_simulator_her_exp_off_the_number_is_the_worlds_and_each_kill_is_named():
-    h, sim = _hunt("hunt_clear_basin")
-    world = [k for k in sim.world.kill_log if k[3] == "her"]
-    assert h.meter.total == sim.world.exp and h.meter.counts["unread"] == 0 and h.meter.counts["odd"] == 0
-    named = [k for _, k in h.told]
-    assert len(named) == len(world) and None not in named
-    assert sorted(named) == sorted(kind for _, kind, _, _ in world)
-
-
-@needs_map
-def test_in_the_simulator_a_number_covered_for_a_while_counts_its_kills_and_not_the_cover():
-    """The number covered for 20 s (its pixels changing as the cover comes and goes, as in game): every kill counted
-    once, the cover's coming and going none; those under it a kind not known, at the time its change came. (From 2 s
-    to 22, 7 kills under it, since her facing is read off the frame, perception.heading: from 6 to 24.5 s two kills a
-    second apart now come just before it goes, and the meter counts 23 of her 24 kills, as it counted 30 of 31 with
-    the cover from 6 to 25 s before: kills that close at the cover's end are its weakness, not this test's. Since her
-    jump throws turn in the air and her attacks reach as the windows widen, 2026-10-25, the 5 under it come by 18.6 s,
-    each counted late.)"""
-    h, sim = _hunt("hunt_clear_basin", noise=Noise(exp_hidden=((2.0, 22.0),)))
-    world = [k for k in sim.world.kill_log if k[3] == "her"]
-    hidden = [k for k in world if 2.0 <= k[0] < 22.0]
-    unknown = [t for t, k in h.told if k is None]
-    # each counted late (UNREAD_WAIT_S on), but the last if the cover goes before then: counted when it's read
-    assert hidden and len(unknown) == len(hidden) and h.meter.counts["late"] in (len(hidden) - 1, len(hidden))
-    for (t, *_), told in zip(hidden, unknown):
-        assert 0 <= told - fakes.START - t < 0.8  # (the look after the kill: 0.76 s on, after a throw's lock)
-    assert h.exp_gains == len(world) and h.meter.total == sim.world.exp  # every kill counted once, and the EXP
-    assert h.meter.counts["over"] == 0
-
-
-@needs_map
-def test_hunt_look_reads_her_number_on_a_look_the_feed_served():
-    """`hunt look`: a look of perception's state has no box for the number (it's read off a full-size frame), so `hunt
-    look` reads it off the eyes' own look at the whole frame (the service's, live); it had printed "EXP number not
-    read: no box"."""
-    from gamelab import __main__ as cli
-    got = {}
-
-    def fn(sim):
-        h = sim.hunter()
-        s = h.look()
-        got[sim.scenario.name] = (s.exp_box is None, s.events is not None, cli._exp_reading(h, s))
-        return {}
-    scenarios.run_sim(dataclasses.replace(scenarios.SCENARIOS["hunt_kill"], fn=fn, expects=()))
-    assert got["hunt_kill"][:2] == (True, True)
-    for name, (*_, reading) in got.items():
-        assert reading is not None and reading.exp == fakes.EXP_START[1] and fakes.EXP_START[0] in reading.levels, name

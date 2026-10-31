@@ -2,9 +2,8 @@
 `background`), kinds that share a body searched as one and told apart by their pictures (mobs._pick_kind) and re-found
 as their own kind only (MobDetector.refind), and a map's background colours learned from saved frames
 (sprites.learn_background, `learn-colours`). Made-up kinds are drawn onto
-tests/fixtures/native (West Rocky Mountain II at 1366x768); the maps' labelled frames are test data (tests/testdata.py:
-gamelab/lab/testdata; a test without them fails, saying so), West Rocky Mountain II's but those three lost (the tests on
-all of them say they need a new capture)."""
+tests/fixtures/native (West Rocky Mountain II at 1366x768); Tree Dungeon's labelled frames are test data
+(tests/testdata.py: gamelab/lab/testdata; a test without them fails, saying so)."""
 
 import json
 from pathlib import Path
@@ -19,15 +18,10 @@ from gamelab.__main__ import main
 from gamelab.analysis import pasted
 from gamelab.perception import gates, match, mobs, sprites
 from gamelab.perception.mobs import INDEX, SCALE_FILE, MobDetector
-from gamelab.screen import NATIVE, STRETCHED
+from gamelab.screen import NATIVE
 
 import testdata
-from test_pasted import FIXTURES as NATIVE_FIXTURES, FRAMES, frame
-
-LABELS = Path(__file__).parent / "fixtures"
-WEST_ROCKY_NATIVE_LABELS = "west_rocky_native_monsters.json"  # 10004021 at 1366x768: 31 frames of 2026-10-23 (lost but
-                                                               # FRAMES, in tests/fixtures/native)
-WEST_ROCKY_LABELS = "west_rocky_monsters.json"  # ... at 1920x1080: 42 frames of 2026-10-23 (lost)
+from test_pasted import FRAMES, frame
 
 
 # --- made-up kinds --------------------------------------------------------------------------------------------------
@@ -317,19 +311,6 @@ def tree_dungeon():
     return (model, *testdata.labelled(testdata.TREE_DUNGEON))
 
 
-def west_rocky_native(frames: str):
-    """West Rocky Mountain II's labelled 1366x768 frames (WEST_ROCKY_NATIVE_LABELS): (the map, the labels by file, each
-    file's path): `frames` "kept" the three in tests/fixtures/native (FRAMES), "all" the 31 (lost: the test skips,
-    saying it needs a new capture)."""
-    model = game(10004021)
-    labels = json.loads((LABELS / WEST_ROCKY_NATIVE_LABELS).read_text(encoding="utf-8"))["frames"]
-    if frames == "kept":
-        return model, {name: labels[name] for name in FRAMES}, {name: NATIVE_FIXTURES / name for name in FRAMES}
-    root = testdata.lost("west_rocky_native", labels, "West Rocky Mountain II's 31 labelled frames at 1366x768",
-                         f"tests/fixtures/{WEST_ROCKY_NATIVE_LABELS}")
-    return model, labels, {name: root / name for name in labels}
-
-
 def _match(found, labels, tol):
     """Each label's nearest monster found within `tol` px of its feet, one each: {label index: monster}."""
     pairs = sorted((abs(m.foot_x - lab["x"]) + abs(m.feet_y - lab["y"]), i, j) for i, m in enumerate(found)
@@ -345,8 +326,7 @@ def _match(found, labels, tol):
 
 def whole(m) -> bool:
     """A label whose picture is all inside the frame and above the chat bar (row 700): Tree Dungeon's visible_rows 1
-    (its labels of 2026-10-28 count the frame's top edge too: 12 of their 118 are cut by it); West Rocky Mountain II's
-    labels have none cut by the top."""
+    (its labels of 2026-10-28 count the frame's top edge too: 12 of their 118 are cut by it)."""
     return m.get("visible_rows", 1.0) >= 1 and m["y"] <= 700
 
 
@@ -406,19 +386,18 @@ def test_horny_and_green_mushrooms_are_told_apart_wherever_the_sprite_fit_saw_on
     assert (len(cut), sum(cut)) == (2 * 11, 12)
 
 
-TWINS = {"horny-mushroom": ("green-mushroom",), "green-mushroom": ("horny-mushroom",),
-         "stump": ("dark-stump", "axe-stump"), "axe-stump": ("stump", "dark-stump")}
+TWINS = {"horny-mushroom": ("green-mushroom",), "green-mushroom": ("horny-mushroom",)}
 
 
 def _refound(det, labels, paths) -> dict:
-    """Each mushroom and stump whose frame the labels give, wholly in the frame, re-found where it stands as WorldStep
+    """Each mushroom whose frame the labels give, wholly in the frame, re-found where it stands as WorldStep
     re-finds (above the chat box, the fallback on) by a track of its own kind and by one of each kind that shares its
     body (TWINS), each with the picture that matched it last (its frame, facing its way): {"own"/"other": [asked,
     re-found within 3 px]}."""
     tally = {"own": [0, 0], "other": [0, 0]}
     for name, e in labels.items():
         scene = np.asarray(Image.open(paths[name]).convert("RGB"))
-        for m in e["monsters"] if isinstance(e, dict) else [m for m in e if not m["flags"]]:
+        for m in e["monsters"]:
             if m["kind"] not in TWINS or not whole(m) or not m["frame"].startswith(("stand", "move", "hit1")):
                 continue
             for role, kinds in (("own", (m["kind"],)), ("other", TWINS[m["kind"]])):
@@ -439,60 +418,3 @@ def test_a_mushrooms_track_re_finds_it_only_if_of_its_kind():
     model, labels, paths = tree_dungeon()
     det = sprites.detector_for(model, NATIVE)
     assert _refound(det, labels, paths) == {"own": [88, 81], "other": [88, 0]}  # (on 2026-10-24's 55: 53 and 0)
-
-
-@pytest.mark.parametrize("frames", ["kept", "all"])
-def test_a_stumps_track_re_finds_it_only_if_of_its_kind(frames):
-    # Each Stump and Axe Stump in plain view whose frame the labels give (_refound). Without the kind check the other
-    # kinds' tracks re-found 13 of the 14 on the three frames kept, 115 of the 116 on all 31.
-    model, labels, paths = west_rocky_native(frames)
-    det = sprites.detector_for(model, NATIVE)
-    # an Axe Stump's move/1 and move/3 lie a px across from a Stump's on their feet
-    assert {(a, b) for (a, _, b), d in det.aligned.items() if d != (0, 0)} >= {
-        ("axe-stump_move1", "stump_move1"), ("stump_move3", "axe-stump_move3")}
-    assert all(abs(d[0]) == 1 and d[1] == 0 for d in det.aligned.values() if d != (0, 0))
-    want = {"kept": {"own": [7, 7], "other": [14, 0]}, "all": {"own": [58, 58], "other": [116, 0]}}
-    assert _refound(det, labels, paths) == want[frames]
-
-
-@pytest.mark.parametrize("frames", ["kept", "all"])
-def test_west_rocky_mountains_stumps_and_snails_are_found_at_the_games_own_size(frames):
-    model, labels, paths = west_rocky_native(frames)
-    det = sprites.detector_for(model, NATIVE)
-    assert det.learned == {"stump", "dark-stump", "axe-stump", "red-snail"}
-    plain, found_plain, wrong, extra = 0, 0, 0, []
-    for name, ms in labels.items():
-        found = det.detect_wide(np.asarray(Image.open(paths[name]).convert("RGB")), (0, 700))
-        hit = _match(found, ms, 10)
-        for j, m in enumerate(ms):
-            plain += not m["flags"]
-            if j in hit and not m["flags"]:
-                found_plain += 1
-                wrong += hit[j].kind != m["kind"]
-                assert abs(hit[j].foot_x - m["x"]) <= 1 and abs(hit[j].feet_y - m["y"]) <= 1
-        extra += [(name, m.kind, m.foot_x) for m in found if m not in hit.values()]
-    # (in plain view, found at least: on the three kept 6 of 7, a Stump on native_first.png missed; on all 31, 56 of 58)
-    least = {"kept": (7, 6), "all": (58, 56)}[frames]
-    assert (plain, wrong, extra) == (least[0], 0, []) and found_plain >= least[1], (plain, found_plain, wrong, extra)
-
-
-def test_west_rocky_mountains_monsters_are_found_on_its_1920x1080_frames():
-    model = game(10004021)
-    labels = json.loads((LABELS / WEST_ROCKY_LABELS).read_text(encoding="utf-8"))["frames"]
-    root = testdata.lost("west_rocky", labels, "West Rocky Mountain II's 42 labelled frames at 1920x1080",
-                         f"tests/fixtures/{WEST_ROCKY_LABELS}")
-    det = sprites.detector_for(model, STRETCHED)
-    plain, found_plain, wrong, extra = 0, 0, 0, []
-    for name, ms in labels.items():
-        full = np.asarray(Image.open(root / name).convert("RGB"))
-        half = cv2.resize(full, (960, 540), interpolation=cv2.INTER_AREA)  # as a look shrinks it
-        found = [m for m in det.detect_wide(half, (0, 475)) if m.kind in det.learned]
-        half_px = [dict(m, x=m["x"] / 2, y=m["y"] / 2) for m in ms]
-        hit = _match(found, half_px, 7)
-        for j, m in enumerate(ms):
-            plain += not m["flags"]
-            if j in hit and not m["flags"]:
-                found_plain += 1
-                wrong += hit[j].kind != m["kind"]
-        extra += [(name, m.kind) for m in found if m not in hit.values()]
-    assert plain == 203 and found_plain >= 165 and wrong <= 3 and extra == []

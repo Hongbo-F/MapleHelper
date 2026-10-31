@@ -668,7 +668,7 @@ def test_watch_says_each_change_of_her_facing(monkeypatch):
             return Reading(RIGHT if obs.t - self.first < 0.3 else LEFT, 0.6, 0.4)
     monkeypatch.setattr(cli, "_perception", lambda model, title, name, acts: Perception())
     monkeypatch.setattr(cli, "_heading_eyes", lambda title: Turning())
-    assert cli.main(["watch", "--minutes", "0.012", "--heading", "--map", "10000012"]) == 0
+    assert cli.main(["watch", "--minutes", "0.012", "--heading", "--map", "10002073"]) == 0
     said = [line.strip() for line in logged if "her frame" in line]
     assert said == ["her frame: faces right (matched 0.60, 0.40 ahead)",
                     "her frame: faces left (matched 0.60, 0.40 ahead)"]

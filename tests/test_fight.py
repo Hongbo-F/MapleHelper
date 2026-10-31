@@ -212,24 +212,6 @@ def test_a_fight_finishes_one_she_has_hurt_before_it_ends(monkeypatch):
     assert not walks and not throws
 
 
-def test_a_probe_fights_off_one_close_to_her_without_finishing_its_own_targets(monkeypatch):
-    # probe._keep_clear's fights (probe._fight): one off a monster close to her on her platform, up to one kill,
-    # and a clear of her platform first, both leaving the monsters she has hurt alone (the probe's own targets:
-    # its stars at them would be outside the probe's log).
-    from gamelab.behavior import probe
-    asked = {}
-    h = SimpleNamespace(log=lambda *a: None, clear=lambda kinds, **kw: asked.update(kw))
-    p = probe.PROBES["step-down"]
-    s = SimpleNamespace(where=SimpleNamespace(x=50.0, y=0.0), platform=SimpleNamespace(id=2),
-                        monsters=[target(70, 0.0, platform=2, kind="orange-mushroom")])
-    report = probe.ProbeReport(p.name)
-    assert probe._keep_clear(h, p, s, probe._Guard(False, p.x), report)
-    assert asked["finish_wounds"] is False and asked["max_kills"] == 1
-    asked.clear()
-    assert probe._keep_clear(h, p, s, probe._Guard(True, p.x), report)  # clears_first: step-down from 2
-    assert asked["finish_wounds"] is False and asked["max_kills"] == probe.CLEAR_KILLS and report.fights == 2
-
-
 def test_the_escorts_fight_in_her_way_finishes_wounds_only_when_asked():
     # FightOnTheWay.clear_way: a fight off the monster in her way, up to two kills, finishing what she has hurt
     # (clear's finish_wounds) unless `finish` is off, as the navigator has it in transit.
@@ -247,15 +229,13 @@ def test_the_escorts_fight_in_her_way_finishes_wounds_only_when_asked():
 
 def test_the_escort_keeps_her_trips_clear_of_the_kinds_whose_touch_counts():
     # FightOnTheWay.threat: the kinds the danger model counts (Hunter.danger: a touch taking DANGER_MIN of her HP or
-    # more, at her level): on Tree Dungeon at level 24 the two mushrooms, not its slimes; on the first map at level 19
-    # nothing (an Orange Mushroom takes 2.0% of her 642 HP).
+    # more, at her level): on Tree Dungeon at level 24 the two mushrooms, not its slimes.
     from gamelab.attack.danger import Danger, Her
     shares = {"horny-mushroom": 0.161, "green-mushroom": 0.072}
     escort = fight_mod.FightOnTheWay(SimpleNamespace(danger=SimpleNamespace(share=lambda k: shares.get(k, 0.0))))
     assert escort.threat("horny-mushroom") and escort.threat("green-mushroom")
     assert not escort.threat("slime") and not escort.threat("pig")
-    for map_id, her, counted in ((10002073, Her(752.0, 24.0), {"horny-mushroom", "green-mushroom"}),
-                                 (10000012, Her(642.0, 19.0), set())):
+    for map_id, her, counted in ((10002073, Her(752.0, 24.0), {"horny-mushroom", "green-mushroom"}),):
         if (mapdata.CACHE / f"{map_id}.json").exists() and (model := mapdata.load(map_id)).mob_damage:
             escort = fight_mod.FightOnTheWay(SimpleNamespace(danger=Danger(model, her)))
             kinds = {kind for kind in Danger(model, her).threats}

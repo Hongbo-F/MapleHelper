@@ -126,15 +126,6 @@ def test_the_planner_gets_onto_7_from_8_and_up_from_the_bottom_by_29():
     assert [mv for mv in planner.moves if mv.kind == "climb" and mv.chance < 1] == [climb]
 
 
-def test_on_the_other_maps_every_climb_is_a_sure_grab():
-    from gamelab.motion.route import Planner
-    for map_id in (scenarios.MAP_ID, scenarios.ROCKY):
-        m = scenarios.real_map(map_id)
-        if m is None:
-            continue
-        assert all(mv.chance == 1.0 for mv in Planner(m).moves if mv.kind == "climb")
-
-
 def test_jumping_for_the_rope_from_30_at_the_clients_reach_she_misses_and_lands_on_29():
     m = tree_map()
     p29, p27 = m.platform(29), m.platform(27)
@@ -315,9 +306,6 @@ def test_other_players_dots_show_in_the_minimap_windows_view_and_not_under_hers(
     w.y = m.platform(13).top  # up on 13 the window has scrolled: 13 in view, 28 and 29 not
     assert eyes.in_window(-1190) and not eyes.in_window(-49)
     assert [eyes.in_window(y) for y in (-1200, -50)] == [True, False]
-    if (rocky := scenarios.real_map(scenarios.ROCKY)) is not None:  # its whole picture shows
-        eyes = fakes.FakeEyes(World(rocky, KEYS, (22, -700.0), monsters=None, origin=clock.now), clock, rocky)
-        assert eyes.in_window(-5000) and eyes.in_window(5000)
 
 
 def test_the_camera_keeps_her_529_down_there_so_from_28_the_horny_mushrooms_on_31_are_behind_the_chat_bar():

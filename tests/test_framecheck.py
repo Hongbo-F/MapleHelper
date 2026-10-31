@@ -58,9 +58,8 @@ def tree_picture():
 
 # --- the frame's own checks ------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("i", range(4))
-def test_good_frames_of_either_map_pass(i):
-    assert framecheck.frame_problem(([GOOD] + ROCKY)[i], NATIVE) is None
+def test_a_good_frame_passes():
+    assert framecheck.frame_problem(GOOD, NATIVE) is None
 
 
 def test_the_frame_of_16_48_45_is_offset_as_the_window_moved():
@@ -157,7 +156,7 @@ def test_the_good_frames_are_never_drawn_off_whatever_the_windows_frame():
     143 (30 distinct: black map changes, the drag of 16:48, 16:55:33, countdown frames shrunk from 1920x1080) was,
     with no frame given or at (8, 31), (10, 38), (11, 45), (13, 52), (15, 59) or (18, 85) (the review's scan,
     D:/MapleHelper-scratch/winfix/review-detect/fp_lab.csv, fp_scratch.csv); here the fixtures, and shifted copies."""
-    for good in [GOOD, OFFSET] + ROCKY:
+    for good in [GOOD, OFFSET]:
         for inset in (None, (18, 85), (8, 31), (11, 45), (0, 0)):
             assert framecheck.drawn_problem(good, NATIVE, inset) is None
     # A capture lagging a drag is off within OFFSET_REACH: drawn only at the window's own frame, to the px.
@@ -188,13 +187,12 @@ def test_the_hud_is_seen_on_a_client_of_another_size_where_its_border_is_lost(si
     rows don't survive the game's stretch and the service's bringing it to 1920x1080 (perception.frames.glimpse), its
     buttons do: 0.77 or more on the 69 good frames at these sizes, the Lie Detector's notice over them the lowest; not
     the game, 0.52 at most (D:/MapleHelper-scratch/winfix/build/hud_template.py)."""
-    for good in [GOOD] + ROCKY:
-        shown = cv2.resize(good, size, interpolation=cv2.INTER_LINEAR)
-        to = cv2.INTER_AREA if size[0] >= 1920 and size[1] >= 1080 else cv2.INTER_LANCZOS4
-        picture = cv2.resize(shown, (1920, 1080), interpolation=to)
-        assert framecheck.hud_share(cv2.resize(picture, (1366, 768), interpolation=cv2.INTER_AREA)) < 0.5
-        seen, at = framecheck.hud_seen(picture)
-        assert seen >= framecheck.HUD_SEEN and abs(at[0]) <= 2 and abs(at[1]) <= 2
+    shown = cv2.resize(GOOD, size, interpolation=cv2.INTER_LINEAR)
+    to = cv2.INTER_AREA if size[0] >= 1920 and size[1] >= 1080 else cv2.INTER_LANCZOS4
+    picture = cv2.resize(shown, (1920, 1080), interpolation=to)
+    assert framecheck.hud_share(cv2.resize(picture, (1366, 768), interpolation=cv2.INTER_AREA)) < 0.5
+    seen, at = framecheck.hud_seen(picture)
+    assert seen >= framecheck.HUD_SEEN and abs(at[0]) <= 2 and abs(at[1]) <= 2
     covered = GOOD.copy()
     covered[300:768] = GOOD[0:468]  # (the play area over the HUD: no HUD)
     assert framecheck.hud_seen(covered)[0] < framecheck.HUD_SEEN
@@ -769,38 +767,6 @@ def test_a_trip_stands_still_no_later_than_its_caller_says():
                              expects=(), limit=300)
     got = scenarios.run_scenario(sc)["result"]
     assert got["lost at"] is not None and 8.0 <= got["lost at"] < 10.0, got  # (its last look's retries: 8.96 s)
-
-
-def test_a_trip_paused_on_its_quick_look_looks_for_monsters_again():
-    """A chain cut short has the next pass take a quick look, planning from the monsters seen before (TripState.quick).
-    When that quick look is the one that fails, the pass after the pause looks for monsters afresh, as Navigator.go's
-    LookLost handler leaves it: not from those seen before the pause, nor with none that came during it (review,
-    2026-10-24: `paused` cleared the look taken before, but not `quick`)."""
-    from gamelab.control.navigator import TripState
-    from gamelab.sim import scenarios
-
-    def fn(sim):
-        nav = sim.navigator(sim.hunter())
-        real, asked = nav.mover.locate, []
-
-        def locate(*args, mobs=False, **kw):
-            asked.append(mobs)
-            if len(asked) == 1:
-                raise LookLost(Problem("picture", "the minimap doesn't show this map's picture"))
-            return real(*args, mobs=mobs, **kw)
-
-        nav.mover.locate = locate
-        st = TripState(17, deadline=100.0, quick=True)
-        st.sighted = [("a track", "a sighting")]
-        with pytest.raises(LookLost):
-            nav._look(st)
-        st.paused(30.0)
-        s, _ = nav._look(st)
-        return {"asked": asked, "quick": st.quick, "sighted": st.sighted, "deadline": st.deadline,
-                "placed": s.where is not None}
-
-    got = scenarios.run_scenario(scenarios.Scenario("paused quick", fn, (23, 900.0)))["result"]
-    assert got == {"asked": [False, True], "quick": False, "sighted": [], "deadline": 130.0, "placed": True}
 
 
 # --- the name tag, the minimap picture and the capture -----------------------------------------------------------------

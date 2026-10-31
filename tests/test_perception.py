@@ -289,22 +289,20 @@ _BAR_CASES = json.loads((BARS / "bars.json").read_text(encoding="utf-8"))
 @pytest.mark.parametrize("case", _BAR_CASES, ids=[c["file"][:-4] for c in _BAR_CASES])
 def test_labelled_bars_read_their_share(case):
     # Crops of frames of the game (tests/fixtures/hp_bars/README.md): at 1366x768 the saved frames of 2026-10-24 and the
-    # rolling recorder's clips of 24-25 (JPEG), at 1920x1080 half-size looks of the first map's recordings; each a bar
-    # over its monster with the share of its fill green by pixel count, or where something hides its end the range it's
-    # in, or none to read. Until 2026-10-25 hp_bar read 0 off every bar at 1366x768 but these crops' 3.
+    # rolling recorder's clips of 24-25 (JPEG); each a bar over its monster with the share of its fill green by pixel
+    # count, or where something hides its end the range it's in, or none to read. Until 2026-10-25 hp_bar read 0 off
+    # every bar at 1366x768 but these crops' 3. (The first map's at 1920x1080 went on 2026-10-31.)
     frame = np.asarray(Image.open(BARS / case["file"]).convert("RGB"))
-    geo = NATIVE if case["size"] == "1366x768" else STRETCHED
-    got = hud.hp_bar(frame, case["x"], case["top"], geo)
+    got = hud.hp_bar(frame, case["x"], case["top"], NATIVE)
     if case["share"] is None:
         assert got is None, case["what"]
     elif case["hi"] is None:
-        assert got == pytest.approx(case["share"], abs=0.5 / 46 if geo is NATIVE else 1 / 46), case["what"]
+        assert got == pytest.approx(case["share"], abs=0.5 / 46), case["what"]
     else:
         assert case["share"] <= got <= case["hi"], case["what"]
 
 
-BAR_FRAMES_1920 = "hp_bars_1920x1080"  # (the test data set of labelled.json's 1920x1080 frames)
-BAR_CLIPS = "tree_dungeon_clips"     # (and of its 1366x768 clips, lost)
+BAR_CLIPS = "tree_dungeon_clips"  # (the test data set of labelled.json's 1366x768 clips, lost)
 
 
 def _bar_frames(case: str) -> tuple[dict, dict]:
@@ -312,19 +310,15 @@ def _bar_frames(case: str) -> tuple[dict, dict]:
     the test data keeps them (tests/testdata.py): {name: its rows}, {name: its file}. "1366x768-kept": the 3 saved in
     lab/shots, in the set tree_dungeon_drops (the same files); "1366x768-all": all 612, the other 609 the rolling
     recorder's clips of 2026-10-24 and 25 in lab/recent, gone (the recorder keeps its newest 5 GB there, and lab/recent
-    has only 2026-10-28's now): the test skips, saying they need a new capture; "1920x1080": the first map's 255, the
-    set hp_bars_1920x1080 (the 9 screenshots as saved in gamelab/lab, and each recording of lab/recordings with only
-    its labelled frames: `frames`, and `index`, their numbers in it); "tree_dungeon_native": the 24 frames of
-    2026-10-28, the set tree_dungeon_native. A set that isn't here fails the test, saying which (testdata.missing)."""
+    has only 2026-10-28's now): the test skips, saying they need a new capture; "tree_dungeon_native": the 24 frames
+    of 2026-10-28, the set tree_dungeon_native. A set that isn't here fails the test, saying which (testdata.missing).
+    (Its "1920x1080", the first map's 255 in the set hp_bars_1920x1080, went on 2026-10-31.)"""
     if case == "tree_dungeon_native":
         _, files = testdata.labelled(testdata.TREE_DUNGEON)
         return json.loads((BARS / "labelled.json").read_text(encoding="utf-8"))[case], files
     size, _, which = case.partition("-")
     labelled = json.loads((BARS / "labelled.json").read_text(encoding="utf-8"))[size]
     files = sorted({name.split("#")[0] for name in labelled})
-    if size == "1920x1080":
-        root = testdata.folder(BAR_FRAMES_1920, files, "the first map's frames with labelled HP bars at 1920x1080")
-        return labelled, {name: root / name.split("#")[0] for name in labelled}
     shots = [f for f in files if f.startswith("shots/")]
     drops = testdata.folder(testdata.TREE_DUNGEON_DROPS, [f[len("shots/"):] for f in shots],
                             testdata.WHAT[testdata.TREE_DUNGEON_DROPS])
@@ -340,43 +334,36 @@ def _bar_frames(case: str) -> tuple[dict, dict]:
         {name: out[name.split("#")[0]] for name in labelled if name.split("#")[0] in out}
 
 
-def _bar_frame(name: str, path: Path, geo) -> np.ndarray:
-    """A labelled frame as a look sees it: a recording's frame (`name` "<recording>#<its number>"), else the picture,
-    shrunk to half size at 1920x1080."""
-    if "#" in name:
-        z = np.load(path)
-        at = int(name.split("#")[1])
-        return z["frames"][list(z["index"]).index(at) if "index" in z.files else at]
-    full = np.asarray(Image.open(path).convert("RGB"))
-    return full if geo is NATIVE else cv2.resize(full, (960, 540), interpolation=cv2.INTER_AREA)
+def _bar_frame(path: Path) -> np.ndarray:
+    """A labelled frame as a look sees it at 1366x768: the picture, full size."""
+    return np.asarray(Image.open(path).convert("RGB"))
 
 
-@pytest.mark.parametrize("case", ["1366x768-kept", "1366x768-all", "1920x1080", "tree_dungeon_native"])
+@pytest.mark.parametrize("case", ["1366x768-kept", "1366x768-all", "tree_dungeon_native"])
 def test_the_labelled_bars_in_the_saved_frames(case):
     # Every labelled bar over its monster as the detector found it (574 at 1366x768 on the rolling recorder's clips of
-    # 2026-10-24 and 25, 178 at 1920x1080 on the first map's recordings and screenshots), and monsters with no bar of
-    # their own; on the frames of the test data (_bar_frames: every one of a case's, or it fails). Measured 2026-10-25
-    # (two labels put right on review: tests/fixtures/hp_bars/README.md): at 1366x768 564 of the 565 with their end in
-    # view read within half a px of the fill (0.001 off on average; the old reader 0.540 off, 487 of them 0.0 and 63
-    # none), 1 of 1 with it covered within its range, and none of 408 monsters with no bar (the old reader 47); at
-    # 1920x1080 161 of 162 within a px (0.003 off; the old reader 0.518, 111 of them 0.0), 16 of 16 covered, 0 of 131
-    # with none. Of the 1366x768 ones only the 3 frames saved in lab/shots are left ("1366x768-kept": 2 bars, 4 with
-    # none). On Tree Dungeon's 24 frames of 2026-10-28 ("tree_dungeon_native") none of the 118 monsters has a bar: she
-    # didn't attack, and the bar of a monster others hit isn't shown to her (none found by the bar's frame anywhere on
-    # them), though 18 are flinching or dying under others' hits with damage numbers, skills and tags over them.
+    # 2026-10-24 and 25), and monsters with no bar of their own; on the frames of the test data (_bar_frames: every one
+    # of a case's, or it fails). Measured 2026-10-25 (two labels put right on review: tests/fixtures/hp_bars/README.md):
+    # at 1366x768 564 of the 565 with their end in view read within half a px of the fill (0.001 off on average; the
+    # old reader 0.540 off, 487 of them 0.0 and 63 none), 1 of 1 with it covered within its range, and none of 408
+    # monsters with no bar (the old reader 47). (The first map's at 1920x1080, which went on 2026-10-31: 161 of 162
+    # within a px, 16 of 16 covered, 0 of 131 with none.) Of the 1366x768 ones only the 3 frames saved in lab/shots are
+    # left ("1366x768-kept": 2 bars, 4 with none). On Tree Dungeon's 24 frames of 2026-10-28 ("tree_dungeon_native") none
+    # of the 118 monsters has a bar: she didn't attack, and the bar of a monster others hit isn't shown to her (none
+    # found by the bar's frame anywhere on them), though 18 are flinching or dying under others' hits with damage
+    # numbers, skills and tags over them.
     labelled, files = _bar_frames(case)
-    geo = STRETCHED if case == "1920x1080" else NATIVE
     seen = good = hidden = hidden_n = none_ok = none_n = 0
     for name, rows in labelled.items():
-        frame = _bar_frame(name, files[name], geo)
+        frame = _bar_frame(files[name])
         for x, top, share, hi in rows:
-            got = hud.hp_bar(frame, x, top, geo)
+            got = hud.hp_bar(frame, x, top, NATIVE)
             if share is None:
                 none_n += 1
                 none_ok += got is None
             elif hi is None:
                 seen += 1
-                good += got is not None and abs(got - share) <= (0.5 if geo is NATIVE else 1) / 46 + 1e-9
+                good += got is not None and abs(got - share) <= 0.5 / 46 + 1e-9
             else:
                 hidden_n += 1
                 hidden += got is not None and share - 0.03 <= got <= hi + 0.03
@@ -386,7 +373,7 @@ def test_the_labelled_bars_in_the_saved_frames(case):
     elif case == "tree_dungeon_native":
         assert tally == (0, 0, 0, 0, 118, 118)
     else:  # (every labelled frame read: _bar_frames fails without one)
-        assert (seen, hidden_n, none_n) == {"1366x768-all": (565, 1, 408), "1920x1080": (162, 16, 131)}[case]
+        assert (seen, hidden_n, none_n) == (565, 1, 408)
         assert good / seen >= 0.98
         assert hidden / hidden_n >= 0.9
         assert none_ok / none_n >= 0.98

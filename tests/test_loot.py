@@ -149,12 +149,7 @@ def _map(map_id, *names):
 
 
 def test_each_map_looks_for_its_own_monsters_drops():
-    from gamelab.perception import drops, loot
-    # The first map's, as they were: what was seen there in game, and the potions.
-    first = _map(drops.FIRST_MAP, "Snail", "Slime", "Pig", "Orange Mushroom")
-    assert drops.items_for(first) == loot.ITEMS == (
-        "Squishy Liquid", "Slime Bubble", "Leather", "Pig's Head", "Pig's Ribbon", "Orange Mushroom Cap",
-        "Snail Shell", "Red Potion", "Orange Potion", "White Potion", "Blue Potion")
+    from gamelab.perception import drops
     # Tree Dungeon's: its monsters' drops in the order they spawn (each item once), then the potions not named yet.
     tree = _map(10002073, "Horny Mushroom", "Green Mushroom", "Horny Mushroom", "Slime")
     assert drops.items_for(tree) == (
@@ -165,7 +160,7 @@ def test_each_map_looks_for_its_own_monsters_drops():
     # A monster the table doesn't know adds nothing, and is named.
     odd = _map(5, "Stump", "Jr. Necki")
     assert drops.items_for(odd) == drops.MONSTERS["Stump"].items + ("Orange Potion", "White Potion", "Blue Potion")
-    assert drops.unknown(odd) == ["Jr. Necki"] and drops.unknown(first) == []
+    assert drops.unknown(odd) == ["Jr. Necki"]
     assert drops.unknown_note(odd).startswith("drops not known for Jr. Necki ") and drops.unknown_note(tree) is None
 
 
@@ -525,19 +520,11 @@ def test_a_drop_is_worth_its_shop_price_and_mesos_by_their_coin():
 def test_on_each_map_mesos_are_worth_what_its_monsters_drop():
     """looting.coins_for: a coin stands for the mean of the amounts it's drawn for (bronze under 50, gold 50-99) that the
     map's monsters drop (perception.drops), by their spawn points; a drop is valuable at twice a bronze coin."""
-    from gamelab.behavior.hunt import VALUABLE
-    from gamelab.behavior.looting import COINS, FIRST, VALUABLE_COINS, coins_for, worth_for
-    from gamelab.perception.drops import FIRST_MAP
-    first = _map(FIRST_MAP, *["Pig"] * 18, *["Slime"] * 12, *["Snail"] * 9, *["Orange Mushroom"] * 9)
-    assert worth_for(first) is FIRST and FIRST.valuable == VALUABLE == VALUABLE_COINS * COINS["bronze"]
-    assert coins_for(first) == {"bronze": 15.0, "gold": 75}  # its slimes' 10-20, as seen there: the same as COINS
+    from gamelab.behavior.looting import worth_for
     tree = worth_for(_map(10002073, *["Horny Mushroom"] * 15, *["Green Mushroom"] * 14, *["Slime"] * 2))
     assert tree.coins == {"bronze": 33.4, "gold": 51.5} and tree.valuable == 66.8
     assert tree("mesos") == 33.4 and tree("mesos", "gold") == 51.5 and tree("sapphire-ore") == 120
     assert tree("slime-bubble") < tree.valuable < tree("topaz-ore")  # a bubble is under two of its coins there
-    rocky = worth_for(_map(10004021, *["Stump"] * 20, *["Red Snail"] * 12, *["Dark Stump"] * 10, *["Axe Stump"] * 7))
-    assert rocky.coins == {"bronze": 25.9, "gold": 75} and rocky.valuable == 51.8  # no amount reported for a Red Snail
-    assert rocky("garnet-ore") < rocky.valuable < rocky("adamantium-ore")
 
 
 def test_every_maps_drops_have_a_price():
@@ -611,7 +598,7 @@ def test_finds_the_drops_in_frames_saved_in_game():
 # tests/testdata.py) -----------------------------------------------------------------------------------------------
 
 TREE_DUNGEON = testdata.TREE_DUNGEON  # 10002073 at 1366x768: 24 frames of 2026-10-28 (a test data set), no drop on any
-WEST_ROCKY = ROOT / "tests" / "fixtures" / "native"  # 10004021 at 1366x768: 3 frames, no drop on any
+WEST_ROCKY = ROOT / "tests" / "fixtures" / "native"  # 10004021 at 1366x768: 3 frames, no drop on any (a background)
 
 
 def frames_of(where) -> list[Path]:
@@ -621,7 +608,7 @@ def frames_of(where) -> list[Path]:
 
 
 @pytest.mark.skipif(not (COPY / "Item").is_dir(), reason="needs the game data copy")
-@pytest.mark.parametrize("map_id,frames", [(10004021, WEST_ROCKY), (10002073, TREE_DUNGEON)])
+@pytest.mark.parametrize("map_id,frames", [(10002073, TREE_DUNGEON)])
 def test_a_new_maps_drops_drawn_as_the_game_draws_them_are_found_and_nothing_else_is(map_id, frames):
     """Each of the map's drops (perception.drops) and the coins' frames, the game's own pictures drawn 1:1 onto frames
     of the map at the game's own 1366x768, is found in the strip above where it lies, as its kind and where drawn; and

@@ -1,8 +1,8 @@
-"""The simulator on a second map, West Rocky Mountain II (10004021): her as she plays there (level 23, HP 730, her
-keys from 2026-10-23, her pet drinking her potions), a touch's damage by her defence, the pet's potions, and the
-map's monsters (Stump, Dark Stump, Axe Stump, Red Snail: their stars to kill, speeds and bodies from the game data).
-The first map's world is as it was: her at level 19, a touch a share of PADamage, HITS. Synthetic maps need no game
-data; the real-map tests are skipped without it."""
+"""The simulator's her: as she plays on each map (sim.scenarios.HER: her keys from 2026-10-23, her pet drinking her
+potions), a touch's damage by her defence, the pet's potions and food, a kind's stars to kill by its HP and defence;
+and a scenario, golden, the harness and the coverage report on a map of their own. Synthetic maps need no game data;
+the real-map tests (Tree Dungeon's) are skipped without it. (West Rocky Mountain II's, this file's first subject, and
+the first map's went on 2026-10-31.)"""
 
 import dataclasses
 from types import SimpleNamespace
@@ -12,15 +12,14 @@ import pytest
 from gamelab.behavior.hunter import Hunter
 from gamelab.control.timeline import SIM_KEYS, SIM_KEYS_PET
 from gamelab.localization import mapdata
-from gamelab.perception import exp_number
-from gamelab.sim import fakes, golden, harness, scenarios
+from gamelab.sim import golden, harness, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.world import LEVEL_19, LEVEL_23, Her, MobInfo, Realism, World
 from maplehelper.keys import parse as K
 
 from test_sim import plat, still, tap, tree
 
-ROCKY = scenarios.ROCKY
+TREE = scenarios.TREE
 KEYS = dataclasses.replace(SIM_KEYS_PET)
 
 
@@ -29,21 +28,19 @@ def model():
     return mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail", "8": "Pig"}, {"2": 2})
 
 
-def rocky() -> mapdata.MapModel:
-    m = scenarios.real_map(ROCKY)
+def tree_map() -> mapdata.MapModel:
+    m = scenarios.real_map(TREE)
     if m is None:
-        pytest.skip("needs West Rocky Mountain II's game data (gamedata/data)")
+        pytest.skip("needs Tree Dungeon's game data (gamedata/data)")
     return m
 
 
 # --- her on each map -----------------------------------------------------------------------------------------
 
-def test_she_is_level_19_on_the_first_map_and_level_23_with_her_pet_on_west_rocky_mountain_ii():
-    assert scenarios.her_on(scenarios.MAP_ID) == (SIM_KEYS, LEVEL_19)
-    assert scenarios.her_on(ROCKY) == (SIM_KEYS_PET, LEVEL_23)
-    assert scenarios.her_on(1) == (SIM_KEYS, LEVEL_19)  # any other map (a synthetic one): the first map's
+def test_on_a_made_up_map_she_is_level_19_and_with_her_pet_her_keys_are_her_bindings_of_2026_10_23():
+    assert scenarios.her_on(1) == (SIM_KEYS, LEVEL_19)  # any map but hers (a synthetic one): the first map's
     assert (LEVEL_19.max_hp, LEVEL_19.level, LEVEL_19.exp, LEVEL_19.defence, LEVEL_19.pet) == (642, 19, 421, None, None)
-    assert (LEVEL_23.max_hp, LEVEL_23.level, LEVEL_23.exp, LEVEL_23.pet) == (730, 23, 31_736, 0.45)
+    assert scenarios.her_on(TREE)[0] == SIM_KEYS_PET
     # Her bindings from 2026-10-23: attack ctrl, Lucky Seven shift (its own: world.Her.skill), no potion keys (her pet
     # drinks them), pet food u
     assert SIM_KEYS_PET == dataclasses.replace(SIM_KEYS, attack=K("ctrl"), lucky_seven=K("shift"), hp_potion=None,
@@ -54,11 +51,11 @@ def test_she_is_level_19_on_the_first_map_and_level_23_with_her_pet_on_west_rock
 
 
 def test_a_scenario_runs_on_its_own_map_with_her_as_she_is_there():
-    sc = scenarios.Scenario("rocky", lambda sim: {"keys": sim.keys.attack.name, "her": sim.world.character.level,
-                                                  "map": sim.model.id}, (22, -700.0), map_id=ROCKY)
-    trace = scenarios.run_scenario(sc, rocky())
-    assert trace["result"] == {"keys": "ctrl", "her": 23, "map": ROCKY}
-    assert scenarios.run_scenario(dataclasses.replace(sc, her=LEVEL_19), rocky())["result"]["her"] == 19
+    sc = scenarios.Scenario("tree", lambda sim: {"keys": sim.keys.attack.name, "her": sim.world.character.level,
+                                                 "map": sim.model.id}, (28, 247.0), map_id=TREE)
+    trace = scenarios.run_scenario(sc, tree_map())
+    assert trace["result"] == {"keys": "ctrl", "her": 25, "map": TREE}
+    assert scenarios.run_scenario(dataclasses.replace(sc, her=LEVEL_19), tree_map())["result"]["her"] == 19
 
 
 # --- a touch by her defence --------------------------------------------------------------------------------------
@@ -155,49 +152,12 @@ def test_a_kind_the_first_map_hasnt_takes_as_many_stars_as_its_hp_and_defence_ne
     assert hits("stump", None) == hits("stump", MobInfo(9.0, 45.0)) == world_mod.HITS_UNKNOWN
 
 
-def test_west_rocky_mountain_ii_s_monsters_are_as_the_game_data_has_them():
-    m = rocky()
-    w = World(m, SIM_KEYS_PET, (22, -700.0), monsters="all", character=LEVEL_23)
-    if any(mo.info is None for mo in w.monsters):
-        pytest.skip("the monsters' game data isn't on this computer")
-    kinds = {}
-    for mo in w.monsters:
-        kinds.setdefault(mo.kind, set()).add((mo.hp_max, round(mo.speed, 2), mo.half, mo.height, mo.info.pad,
-                                              mo.info.acc))
-    assert kinds == {"stump": {(4, 37.5, 33.0, 51.0, 11, 45)}, "dark-stump": {(7, 37.5, 33.0, 51.0, 34, 61)},
-                     "axe-stump": {(10, 62.5, 33.0, 51.0, 75, 72)}, "red-snail": {(2, 62.5, 20.5, 34.0, 9, 45)}}
-    count = {k: sum(mo.kind == k for mo in w.monsters) for k in kinds}
-    assert count == {"stump": 20, "red-snail": 12, "dark-stump": 10, "axe-stump": 7}  # the map's 49 spawn points
-    assert not any(mo.platform.id in m.twins for mo in w.monsters)  # a twin's spawns go with the platform it lies on
-
-
-def test_the_fake_detector_knows_the_maps_kinds_and_her_number_starts_at_her_level():
-    assert fakes.detector_kinds(scenarios.real_map() or pytest.skip("needs the first map")) == fakes.KINDS
-    m = rocky()
-    assert fakes.detector_kinds(m) == fakes.KINDS + ("axe-stump", "dark-stump", "red-snail", "stump")
-
-    def fn(sim):
-        box = sim.eyes._exp_box()
-        reading = exp_number.read(box)
-        return {"exp": reading.exp, "level": 23 in reading.levels, "kinds": sorted(sim.eyes.kinds)}
-    try:
-        got = scenarios.run_scenario(scenarios.Scenario("number", fn, (22, -700.0), map_id=ROCKY), m)["result"]
-    except (OSError, ValueError) as e:  # the bar's glyphs come from the game data copy
-        pytest.skip(f"the game data copy isn't here ({e})")
-    assert got["exp"] == 31_736 and got["level"]
-    assert {"stump", "dark-stump", "axe-stump", "red-snail"} <= set(got["kinds"])
-
-
 def test_golden_leaves_out_the_scenarios_of_a_map_whose_data_isnt_here(monkeypatch, capsys):
-    rocky_names = [n for n, sc in scenarios.SCENARIOS.items() if sc.map_id == ROCKY]
-    if not rocky_names:
-        pytest.skip("no scenario on West Rocky Mountain II")
+    tree_names = [n for n, sc in scenarios.SCENARIOS.items() if sc.map_id == TREE]
     monkeypatch.setenv("PYTHONHASHSEED", "0")  # golden.main runs here, not in a fresh process
     real = scenarios.available
-    monkeypatch.setattr(scenarios, "available", lambda map_id=scenarios.MAP_ID: map_id != ROCKY and real(map_id))
-    if not real():
-        pytest.skip("needs the first map's game data")
-    assert golden.main(["check", rocky_names[0]]) == 2  # nothing could be compared: never a pass
+    monkeypatch.setattr(scenarios, "available", lambda map_id=scenarios.MAP_ID: map_id != TREE and real(map_id))
+    assert golden.main(["check", tree_names[0]]) == 2  # nothing could be compared: never a pass
     assert "left out" in capsys.readouterr().out
 
 
@@ -219,45 +179,34 @@ def test_her_pet_goes_hungry_in_time_a_pet_food_fills_it_and_too_hungry_it_drink
 
 
 def test_in_the_simulator_her_pet_care_reads_the_worlds_pet_and_feeds_it_once_at_the_start():
-    sc = scenarios.Scenario("pet", lambda sim: sim.hunter().feed_pet_if_due(), (22, -700.0), map_id=ROCKY)
-    trace = scenarios.run_scenario(sc, rocky())
+    sc = scenarios.Scenario("pet", lambda sim: sim.hunter().feed_pet_if_due(), (28, 247.0), map_id=TREE)
+    trace = scenarios.run_scenario(sc, tree_map())
     assert trace["result"] is True  # its fullness known
     assert [p[1] for p in trace["plans"]] == ["pet_food"]  # no click, no Esc: the panel read off the world
     assert any("pet: fullness 60, fed 1 -> 90" in line for line in trace["log"])
     assert trace["world_log"] and "feeds her pet" in trace["world_log"][0]
 
 
-# --- the harness on either map ------------------------------------------------------------------------------------
+# --- the harness on a map of its own -------------------------------------------------------------------------------
 
 def _run(k: int, exp: float, **kw) -> dict:
     return dict(seed=k, exp_per_min=exp, drops_share=0.5, hp_lost=0.5, died_at=None, fell_out_at=None, **kw)
 
 
-def test_the_harness_runs_on_either_map_and_compares_runs_of_one_map_only():
-    sc = harness.scenario("loop", 3, map_id=ROCKY)
-    assert (sc.map_id, sc.start, sc.name) == (ROCKY, harness.ROCKY_START_AT[3], "loop:game:3:10004021")
-    first = harness.scenario("loop", 3)
-    assert (first.map_id, first.start, first.name) == (scenarios.MAP_ID, harness.START_AT[3], "loop:game:3")
-    assert harness.STARTS == {scenarios.MAP_ID: harness.START_AT, ROCKY: harness.ROCKY_START_AT,
-                              scenarios.TREE: harness.TREE_START_AT}
+def test_the_harness_runs_on_a_map_of_its_own_and_compares_runs_of_one_map_only():
+    sc = harness.scenario("loop", 3, map_id=TREE)
+    assert (sc.map_id, sc.start, sc.name) == (TREE, harness.TREE_START_AT[3], "loop:game:3:10002073")
     base, better = [_run(k, 50.0) for k in range(1, 11)], [_run(k, 60.0) for k in range(1, 11)]
     assert harness.compare(base, better)[0]  # runs saved before the map was kept are the first map's
-    there = [dict(r, map=ROCKY) for r in better]
+    there = [dict(r, map=TREE) for r in better]
     ok, lines = harness.compare(base, there)
-    assert not ok and lines[0] == "the runs are on different maps ([10000012] and [10004021])"
-    assert harness.compare([dict(r, map=ROCKY) for r in base], there)[0]
-
-
-def test_a_short_harness_run_on_west_rocky_mountain_ii():
-    rocky()
-    out = harness.run_one("loop", 1, "game", minutes=0.5, map_id=ROCKY)
-    assert out["map"] == ROCKY and "SimTimeout" in out["result"] and out["coverage"]["platforms"]
-    assert harness.run_one("loop", 1, "game", minutes=0.5)["map"] == scenarios.MAP_ID
+    assert not ok and lines[0] == "the runs are on different maps ([10000012] and [10002073])"
+    assert harness.compare([dict(r, map=TREE) for r in base], there)[0]
 
 
 def test_the_coverage_report_asks_the_first_maps_questions_on_the_first_map_only():
     from gamelab.analysis import coverage
-    graph = coverage.graph_for(rocky())
+    graph = coverage.graph_for(tree_map())
     lines = coverage.report(graph, [("none", coverage.merge([], graph))])
     assert not any(line.startswith("== Platform") or line.startswith("== 23 -> 17") for line in lines)
     assert coverage.FOCUS == {scenarios.MAP_ID: (12,)}

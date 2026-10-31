@@ -1,7 +1,7 @@
 """The map's art drawn from the game data (localization.mapart) and the camera registered against it frame by frame
 (localization.camreg, its costs in C: camreg.c). The frames: tests/fixtures/capture (Tree Dungeon, Forest Up North II,
-1366x768: a good frame high on the map, and captures shifted off the client) and tests/fixtures/native (West Rocky
-Mountain II, a map the camera moves across); the art needs the game data copy (gamedata/data/copy)."""
+1366x768: a good frame high on the map, and captures shifted off the client); the art needs the game data copy
+(gamedata/data/copy)."""
 
 import struct
 import zlib
@@ -17,12 +17,10 @@ from gamelab.localization import camreg, mapart
 from gamelab.localization.camreg import Registration, costs_np, gray_of, shrink
 
 FIXTURES = Path(__file__).with_name("fixtures")
-TREE, ROCKY = 10002073, 10004021
+TREE = 10002073
 GOOD = FIXTURES / "capture" / "tree_135315.png"   # her on platform 23, high up the map: view (-658, -948)
 SHIFTED = [FIXTURES / "capture" / n for n in ("tree_164845_offset.png", "tree_234040_drawn.png",
                                               "tree_002902_drawn.png")]
-ROCKY_FRAMES = [FIXTURES / "native" / n for n in ("n28_000.png", "n28_008.png", "native_first.png")]
-ROCKY_VIEW = (-1477, 2167)  # its ropes at screen x 941 and 1174 are map x -536 and -303 (fixtures/native/README.md)
 
 
 def needs_game_data():
@@ -35,12 +33,6 @@ def needs_game_data():
 def tree(tmp_path_factory):
     needs_game_data()
     return mapart.load(TREE, cache=tmp_path_factory.mktemp("mapart"))
-
-
-@pytest.fixture(scope="module")
-def rocky(tmp_path_factory):
-    needs_game_data()
-    return mapart.load(ROCKY, cache=tmp_path_factory.mktemp("mapart"))
 
 
 def rgb(path: Path) -> np.ndarray:
@@ -68,11 +60,9 @@ def test_tree_dungeons_art_spans_every_view_the_camera_takes_and_is_all_fixed(tr
     assert tree.left_out == {} and tree.static.all()  # its backgrounds move with it (rx = ry = -100)
 
 
-def test_backgrounds_that_dont_move_with_the_map_are_drawn_but_left_out(rocky):
+def test_a_background_moves_with_the_map_only_at_rx_ry_minus_100_and_not_of_a_type_that_moves_by_itself():
     assert mapart.back_moves(-100, -100, 2) and not mapart.back_moves(0, 0, 0)
     assert not mapart.back_moves(-100, -100, 4)  # (it moves by itself)
-    assert rocky.left_out == {"parallax": 18} and rocky.fixed == (None, None)
-    assert 0.5 < rocky.static.mean() < 0.7  # the sky behind its rocks
 
 
 def test_the_art_is_the_frame_wherever_nothing_is_drawn_over_it(tree):
@@ -218,21 +208,6 @@ def test_numpy_alone_places_the_frame_as_the_c_does(tree):
     assert (va.x, va.y, va.cost, va.margin) == (vb.x, vb.y, vb.cost, vb.margin) == (-658, -1200, vb.cost, vb.margin)
 
 
-def test_on_a_map_the_camera_moves_across_the_view_is_found_both_ways(rocky):
-    if camreg.lib() is None:
-        pytest.skip(f"camreg.c isn't built: {camreg.why}")  # (numpy's cold search of the whole map takes seconds)
-    reg = Registration(rocky)
-    for path in ROCKY_FRAMES:  # the real frames: her, other players, the clouds the map draws over itself
-        reg.sure_at = None
-        view = reg.see(rgb(path), hint=(ROCKY_VIEW[0] + 40, ROCKY_VIEW[1] - 50))
-        assert (view.x, view.y, view.sure) == (*ROCKY_VIEW, True)
-    reg = Registration(rocky)
-    path = [(-1400, 2000), (-1395, 2000), (-1388, 1996), (-1380, 1990), (-1371, 1990), (-1362, 1992)]
-    for i, (x, y) in enumerate(path):
-        view = reg.see(window_frame(rocky, x, y, seed=i), hint=(x - 30, y + 30) if i == 0 else None)
-        assert (view.x, view.y, view.sure) == (x, y, True)
-
-
 def test_a_frame_of_another_size_is_refused_and_none_placed_before_the_first_sure_one(tree, monkeypatch):
     with pytest.raises(ValueError, match="1366x768"):
         Registration(tree).see(np.zeros((540, 960, 3), np.uint8))
@@ -243,10 +218,10 @@ def test_a_frame_of_another_size_is_refused_and_none_placed_before_the_first_sur
     assert camreg.for_map(TREE).art is tree
 
 
-def test_a_lost_view_searches_the_whole_of_a_map_the_camera_moves_both_ways_seldom(rocky, tree):
-    """The whole of such a map unhinted is 80-900 ms (the frame loop's 33 a frame): with her dot's view as the hint
-    each lost frame searches about it alone, the whole map every COLD_WHOLE_S (a misread dot's hint found nothing);
-    without one at once, then as seldom; where the camera moves one way only (Tree Dungeon, 4-6 ms) every lost frame."""
+def test_a_lost_view_on_a_map_the_camera_moves_one_way_searches_the_whole_map_every_frame(tree):
+    """Where the camera moves one way only (Tree Dungeon: the whole map 4-6 ms) every lost frame searches all of it,
+    her dot's view as the hint or not (camreg.COLD_WHOLE_S holds back only the search of a map it moves across both
+    ways)."""
     if camreg.lib() is None:
         pytest.skip(f"camreg.c isn't built: {camreg.why}")
     calls = []
@@ -256,28 +231,6 @@ def test_a_lost_view_searches_the_whole_of_a_map_the_camera_moves_both_ways_seld
         reg.cold = lambda frame, g, hint=None: calls.append(hint is not None) or cold(frame, g, hint)
         return reg
 
-    real = rgb(ROCKY_FRAMES[0])
-    black = np.zeros_like(real)
-    reg = spied(Registration(rocky))
-    assert reg.see(real, t=0.0, hint=(ROCKY_VIEW[0] + 40, ROCKY_VIEW[1] - 50)).sure
-    calls.clear()
-    for i in range(1, 31):   # a second of frames that aren't the map, her dot read
-        assert reg.see(black, t=i / 30, hint=ROCKY_VIEW).how == "carried"
-    assert calls == [True] * 30
-    calls.clear()
-    for i in range(31, 91):   # two more seconds
-        reg.see(black, t=i / 30, hint=ROCKY_VIEW)
-    assert calls.count(True) == 60 and calls.count(False) == 1
-    assert reg.see(real, t=91 / 30, hint=ROCKY_VIEW).how == "near"   # (and found again at once)
-    calls.clear()
-    for i in range(92, 122):   # her dot not read: the whole map at once, then not for COLD_WHOLE_S
-        reg.see(black, t=i / 30)
-    assert calls == [False]
-    assert reg.see(real, t=122 / 30).how == "near"
-    far = (ROCKY_VIEW[0] + 300, ROCKY_VIEW[1] - 300)   # a hint off the view (a misread dot)
-    reg = spied(Registration(rocky))
-    assert reg.see(real, t=0.0, hint=far).how == "none"
-    assert reg.see(real, t=camreg.COLD_WHOLE_S, hint=far).how == "cold"   # (the whole map searched, found)
     reg = spied(Registration(tree))
     assert reg.see(window_frame(tree, -658, -1200), t=0.0).sure
     calls.clear()
