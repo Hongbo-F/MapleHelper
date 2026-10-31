@@ -299,6 +299,10 @@ class MonsterTrack:
                               # (control.navigator: which monster a plan knew, by id)
     trust: float | None = None  # s from its sighting its walk (vx) is taken as seen; past that it may have turned or
                                 # set off either way at its speed (reach); None: all along
+    unsure: float | None = None  # its heading not known (vx None): s of walking either way at its speed it's planned
+                                 # for at the most (reach), where what plans against it watches it at every state and
+                                 # reacts once it sets off (control.navigator: STAND_UNSURE_S, a monster perception has
+                                 # standing or flinching); None: all along (seen once, or out of sight)
 
     @property
     def tall(self) -> float:
@@ -330,7 +334,7 @@ class MonsterTrack:
             sure = dt if self.trust is None else min(dt, self.trust)
             c, spread = self.at(self.seen_at + sure, p), TURN_SLACK + 20.0 * sure + self.speed * (dt - sure)
             return max(p.left, c - spread), min(p.right, c + spread)
-        go = self.speed * dt
+        go = self.speed * (dt if self.unsure is None else min(dt, self.unsure))
         lo = self.x - (go if self.heading <= 0 else min(go, TURN_SLACK))
         hi = self.x + (go if self.heading >= 0 else min(go, TURN_SLACK))
         return max(p.left, lo), min(p.right, hi)

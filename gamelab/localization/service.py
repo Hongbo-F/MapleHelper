@@ -10,9 +10,9 @@ capture.shared). It never sends a key and never brings the game forward; it wait
 none. Only one runs on the PC (a named mutex, MUTEX). It looks at one pace whoever is attached (the user, 2026-10-26:
 "Run the perception at the same rate between hunt and idle. The idea is perception is running as a constant thing and
 hunt is only a consumer of it"): HZ frames a second (localization.rate: 15 since 2026-10-30, everything once a frame:
-"I meant everything at 15 fps"); a frame a command asks for is taken at once, the next a period after it (feed.run), and
-the drops it asks for are searched on it, besides a strip of drops in view by rotation every third frame
-(worldstate.DROPS_STRIPS, DROPS_EVERY_S; SCHEDULE, HUNTING alike). Her throws are known to the tracker while a command
+"I meant everything at 15 fps"); what a command asks for goes into the next frame due (feed.run: no frame of its own),
+and the drops it asks for are searched on it, besides a strip of drops in view by rotation every third frame placed
+firmly in height (worldstate.DROPS_STRIPS, DROPS_EVERY_S; SCHEDULE, HUNTING alike). Her throws are known to the tracker while a command
 that tells them is attached. Its telemetry is `watch`'s was (a scene 10 times a second, the tracks twice, the events,
 her EXP: `Publisher`), in <time>-perceive.jsonl, and every 10 s the pass's pace and time (a 'perf' record, as its
 console line says them: `Perf`).

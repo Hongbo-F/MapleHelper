@@ -51,6 +51,7 @@ class Drawn(Eyes):
         self.drops: list[Item] = []
         self.others: list[Marker] = []  # other players' minimap dots
         self.hp, self.exp = 1.0, 0
+        self.tag_at, self.grass = (480, 308), (300, 700)  # her tag on screen, the grass under her ((x, x): in the air)
 
     def look(self) -> Observation:
         self.looks = getattr(self, "looks", 0) + 1
@@ -69,8 +70,8 @@ class Drawn(Eyes):
     def frame(self, t: float, ropes: bool, picture: np.ndarray | None = None) -> Observation:
         exp = np.zeros((26, 140), bool)
         exp[5:15, :self.exp] = True
-        return Observation(t=t, frame=self.picture() if picture is None else picture, tag=(480, 308), hp=self.hp,
-                           mp=1.0, ground=(300, 700), dot=self.loc.to_dot(1000, 500), others=list(self.others), exp=exp)
+        return Observation(t=t, frame=self.picture() if picture is None else picture, tag=self.tag_at, hp=self.hp,
+                           mp=1.0, ground=self.grass, dot=self.loc.to_dot(1000, 500), others=list(self.others), exp=exp)
 
 
 def pig(x: float, y: float = 500.0, facing: int = 1, pose: str = "move") -> Mob:
@@ -189,6 +190,32 @@ def test_the_drops_rotation_searches_every_strip_in_view_her_platforms_most_ofte
     (asked,) = frames(step, 1, start=101.0, asks={0: Asks(loot=True)})
     assert [d.item.kind for d in asked.loot] == ["mesos"] and asked.work["asked strips"] == 1
     assert asked.work["strips"] == 2  # (the other platform's by rotation)
+
+
+def test_the_rotation_waits_for_a_frame_placed_firmly_and_a_strip_cut_short_is_not_sure():
+    """The review of 2026-10-30: a frame placed by her offset in the air (no grass under her, no view registered) puts
+    the strips as high above their ground as she is, and searched so they had the drop store see her piles gone with
+    their coins there. The rotation waits for a frame placed firmly in height (worldstate._firm: her standing, or the
+    view registered) and takes its turn there; a look's drops asked for are searched on its frame, not sure of anything
+    gone (DropStrip.sure); a strip cut short by the bottom bar (scene.Strip.whole) isn't sure either."""
+    model = small_map()
+    step = WorldStep(Senses(Drawn(model), model, band=(100, 100)), throws=False)
+    mine = model.platform_under(1000, 500).id
+    step.eyes.grass = (480, 480)  # (in the air)
+    states = frames(step, 6)
+    assert [s.work["strips"] for s in states] == [0] * 6 and all(d.at is None for d in states[-1].drops)
+    (asked,) = frames(step, 1, start=100.4, asks={0: Asks(loot=True)})
+    assert asked.work["asked strips"] == asked.work["strips"] == 1  # (the look's own: searched, no rotation)
+    assert [(d.platform, d.sure) for d in asked.drops if d.at is not None] == [(mine, False)]
+    step.eyes.grass = (300, 700)  # (standing again: the rotation's turn at once)
+    (firm,) = frames(step, 1, start=100.4 + 1 / FPS)
+    assert firm.work["strips"] == 1 and all(d.sure for d in firm.drops if d.at == firm.t)
+    step.eyes.tag_at = (480, 480)  # her feet a few rows over the bottom bar: her platform's strip cut short by it
+    states = frames(step, 9, start=101.0)
+    last = {d.platform: d for d in states[-1].drops}
+    assert last[mine].at is not None and last[mine].at >= 101.0 and not last[mine].sure
+    (other,) = [d for p, d in last.items() if p != mine]
+    assert other.at is not None and other.at >= 101.0 and other.sure
 
 
 def test_a_frame_that_fails_its_checks_says_why_in_its_state_and_is_neither_placed_nor_usable(step):

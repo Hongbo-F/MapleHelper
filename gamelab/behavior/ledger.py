@@ -25,7 +25,9 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
   the piles' worth listed live was the same drops counted by 2-3 piles). Every look's drops count, and every strip of
   drops perception searched since the look before (the state's rotation, worldstate.WorldState.drops: Scene.strips), at
   its own time. A pile is gone as the Looter forgets drops: never before SETTLE after the kill, and only
-  after two empty looks EMPTY_LOOKS apart, because monsters are drawn over drops. Gone piles are dropped from the
+  after two empty looks EMPTY_LOOKS apart, because monsters are drawn over drops, each a strip sure of it (worldstate.
+  DropStrip.sure: whole, on a frame placed firmly in height); a pile of hers seen gone that a sighting shows drops at
+  again is hers again (`_sighting`). Gone piles are dropped from the
   store GONE_KEEP_S later; what the hunt loop counts of them is kept in counters (`gone_tried`). How likely a pile is
   to lie there still is `survival` (by its age, hers or another's: the live Kaplan-Meier), not a fixed life.
 - **Her wounds** (`Wounds`): the monsters she has hurt and not killed. A monster in the path of a throw of
@@ -94,6 +96,10 @@ OWN_S = 15.0
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
 # forever, every kill added a pile, and every look went through all of them.
 GONE_KEEP_S = 300.0
+# s: a pile of hers seen gone that a sighting this soon after shows drops at again was missed, not taken (`_sighting`): a
+# strip's search misses drops under a monster or another player (74 of 962 whole strips over the simulator's drops, the
+# review of 2026-10-30), and the rotation is back on a strip in 1.2-2.4 s. Later, they may be another's kill's.
+REVIVE_S = 30.0
 # What a pile no look has seen yet is worth (Pile.value), in mesos: a kill's pile is coins most often (63-80% of
 # each kind's piles seen where her kills died on 2026-10-21; looting.COINS), and its item is worth less than they are
 # but for the Slime Bubble (looting.PRICES). That's the first map's; on another a bronze coin of its own (Pile.unseen,
@@ -507,35 +513,48 @@ class DropStore:
 
     def on_look(self, s: Scene) -> None:
         """A look: the strips of drops perception searched since the look before (Scene.strips: the state's rotation,
-        each at its own time), then the look's own if it searched for loot (`looked`, `loot`): each a sighting
-        (`_sighting`)."""
+        each at its own time, and the look's own asked for), then the look's own if it searched for loot (`looked`,
+        `loot`): each a sighting (`_sighting`). A strip sees a pile empty only where it's sure (worldstate.DropStrip.sure:
+        whole, and its frame's map placed firmly in height: 15 of 49 of her piles were seen gone with their coins there
+        on the harness's seed 3 where the rotation searched strips on any frame, the review of 2026-10-30); with the
+        state's strips the look's own strips are among them, so the look's sighting confirms what it saw and no more."""
         self.piles = [p for p in self.piles if p.gone_at is None or s.t - p.gone_at <= GONE_KEEP_S]
         ground = not looting.STANDING_ONLY or standing(s)
-        new = [st for st in getattr(s, "strips", None) or () if st.at is not None
+        strips = getattr(s, "strips", None) or ()
+        new = [st for st in strips if st.at is not None
                and st.at > self._strips.get((st.platform, round(st.x0)), -1e18)]
         for st in sorted(new, key=lambda st: st.at):
             self._strips[(st.platform, round(st.x0))] = st.at
             self._sighting(st.at, list(st.loot), lambda pid, x, st=st: pid == st.platform and st.x0 <= x <= st.x1,
-                           ground and not st.mesos_only)
+                           ground and not st.mesos_only and getattr(st, "sure", True))
         if s.looked:
-            self._sighting(s.t, list(s.loot), s.in_view, ground)
+            self._sighting(s.t, list(s.loot), s.in_view, ground and not any(st.at == s.t for st in strips))
 
     def _sighting(self, t: float, seen: list[Loot], in_view, ground: bool) -> None:
         """Drops seen at t where `in_view(platform, x)` was searched: each in one pile, the nearest within LOOT_REACH of
         it, which they confirm (or, none, piles of their own, a LOOT_REACH of them from the left: another's, or one no
         kill of hers placed); a pile in view that two sightings EMPTY_LOOKS apart see empty, SETTLE after its kill, is
         gone. `ground`: whether this sighting can see one empty (with looting.STANDING_ONLY only a look showing her
-        standing: looting.standing, from mid-jump a look's strips miss the drops on the ground). A strip searched before
-        a pile was last seen says nothing of it."""
+        standing: looting.standing, from mid-jump a look's strips miss the drops on the ground; a strip not sure of it:
+        on_look). A strip searched before a pile was last seen says nothing of it. Drops no pile known takes, within
+        LOOT_REACH of a pile of hers seen gone REVIVE_S ago at most, are that pile's, seen again: it was missed, not
+        taken (until 2026-10-30 they made a pile of another's, a bronze coin's worth, and not a candidate for OWN_S:
+        hunt)."""
         known = self.known
+        again = [p for p in self.piles if p.status == "gone" and p.hers and p.gone_at is not None
+                 and 0.0 <= t - p.gone_at <= REVIVE_S]
         mine: dict[int, list[Loot]] = {}
         loose = []
         for d in seen:
-            near = [p for p in known if _in_pile(p, d)]
+            near = [p for p in known if _in_pile(p, d)] or [p for p in again if _in_pile(p, d)]
             if near:
                 mine.setdefault(id(min(near, key=lambda p: abs(p.x - d.x))), []).append(d)
             else:
                 loose.append(d)
+        for p in again:
+            if id(p) in mine and t > p.gone_at:
+                p.status, p.gone_at, p.empty_since = "seen", None, None  # (missed, not taken: hers again, below)
+                known.append(p)
         for p in known:
             if (inside := mine.get(id(p))) is not None:
                 if p.last_seen is not None and t < p.last_seen:

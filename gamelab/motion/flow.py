@@ -1007,7 +1007,8 @@ class Flow:
     def chain(self, moves: list[Move], start: Body, monsters=(), keep_going: bool = False,
               hops: bool = True, price: Callable[[Leg], float] | None = None,
               alts: Callable[[Move], list[Move]] | None = None,
-              goal: tuple[int, float] | None = None, spread: bool = True) -> tuple[list[Leg], Keys, str]:
+              goal: tuple[int, float] | None = None, spread: bool = True,
+              held: int = 0) -> tuple[list[Leg], Keys, str]:
         """As many of `moves` as can be done in one go from `start`: their legs, the keys, and why
         the chain stopped ('done', 'unpredictable', 'monster' or 'long'). Each move is done the way
         (variant) the next move can follow on from. A monster in the way of a run is hopped over
@@ -1024,6 +1025,7 @@ class Flow:
         move, not only the route's last (PRICE_EVERY_MOVE): a chain's landings by monsters in the simulator came at
         moves before the route's last, its chain cut there or not, as often as at it (the reviews of 2026-10-27)."""
         k, legs, b, why = Keys(self.key_names), [], start, "done"
+        k.arrow = held  # (`held`: the arrow already held as it starts, a splice's: let go by its keys where it isn't run on)
         monsters = list(monsters)
         marks = []  # (legs so far, keys, body) as each move begins: where a chain stopped for a monster may end
         for i, m in enumerate(moves):

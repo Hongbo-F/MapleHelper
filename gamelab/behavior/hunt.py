@@ -249,6 +249,13 @@ VALUABLE = 30.0
 # of her way at rate / MESO_EXP: at 0.5 and the live thief's 6.9 EXP a second, 13.9 mesos (about 2 s for the drops she
 # lost live, sweep.BUDGET_MIN); at 1.0, 6.9 (about 3 s).
 MESO_EXP = 0.5
+# Leaving a ground, the sweep's piles on her way out (`_leave`) within this many of the sweep's budgets over the whole
+# way (sweep.budget_for of the straight way from where she decided to go: DEPART_BUDGETS x max(BUDGET_MIN, half of it)
+# more than it, from then on), not one budget at each solve from wherever she is: re-solved at every pass with a fresh
+# budget, every pile picked on the way (and every kill's) made room for another, as master's guard had it of the old
+# rules ("every kill on a trip made another trip, and she never left"; the review of 2026-10-30: tour_tree_run took 628
+# s against master's 534). None: a budget at each solve, as the sweep's first version.
+DEPART_BUDGETS: float | None = 2.0
 RIVAL_TAKES = 0.5      # guess: the chance another player by a pile that isn't hers alone takes it before she's there
 EXP_FIRST = True       # EXP before loot on; off, the piles' fixed priorities as before (6a and 6 ahead of shooting)
 VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (the urgent piles' 12 s, and a little),
@@ -400,6 +407,8 @@ class Hunt:
         # (until 2026-10-30 every pile left when she decided, and only those: going after the drops of monsters shot on
         # the way to them too, every kill on a trip made another trip, and she never left).
         self._exit_reason: str | None = None
+        self._depart: tuple[float, float] | None = None  # ... and when she decided, the s her way out may take from then
+        # (DEPART_BUDGETS: the straight way and the sweep's budgets)
         self._sweeper = sweep.Sweeper()      # the loot sweep's itinerary she's on (`_sweep`) ...
         self._swept_for, self._swept = None, None  # ... the look (kept: its id is never another's meanwhile) and the
         # way it was solved for last, and its first stop
@@ -628,7 +637,7 @@ class Hunt:
         away = here not in (v.ground, v.spot.platform)
         reason = self._exit_reason if leaving and away else self._leaving(wide)
         if reason is None:
-            self._exit_reason = None  # staying after all
+            self._exit_reason = self._depart = None  # staying after all
             if (stop := self._sweep(wide, (v.spot.platform, v.spot.x))) is not None:  # piles worth a round trip
                 return self._sweep_act(wide, stop, visible, hidden, now)
             return self._wait(wide, targets)
@@ -636,9 +645,13 @@ class Hunt:
         return self._leave(wide, reason, visible, hidden, now)
 
     def _leave(self, s: Scene, reason: str, visible=(), hidden=(), now: float | None = None) -> None:
-        """Leaving the ground: the sweep's piles on her way to the next one first (`_next_dest`: its spot), then rule 11,
-        the next ground."""
-        if (stop := self._sweep(s, self._next_dest(s))) is not None:
+        """Leaving the ground: the sweep's piles on her way to the next one first (`_next_dest`: its spot, within
+        DEPART_BUDGETS over the whole way: `_sweep_terms`), then rule 11, the next ground."""
+        dest = self._next_dest(s)
+        if DEPART_BUDGETS is not None and getattr(self, "_depart", None) is None and s.platform is not None:
+            direct = (self._arrive(s.platform.id, s.where.x, *dest) or 0.0) if dest is not None else 0.0
+            self._depart = (time.monotonic(), direct + DEPART_BUDGETS * sweep.budget_for(direct))
+        if (stop := self._sweep(s, dest)) is not None:
             return self._sweep_act(s, stop, list(visible), list(hidden), time.monotonic() if now is None else now)
         self.log(f"  leaving platform {self.visit.ground}: {reason}")
         self._next_ground(s)
@@ -1085,6 +1098,11 @@ class Hunt:
                 and self._nothing_here(s) \
                 and (due := self._due_back()) is not None and due > 0.0 and self._shoot_rate(s, list(s.monsters))[0] <= 0:
             return 0.0, max(sweep.BUDGET_MIN, due)
+        depart = getattr(self, "_depart", None)
+        if depart is not None and getattr(self, "_exit_reason", None) is not None and s.platform is not None:
+            # (leaving: what's left of her way out's allowance, less the straight way on from here: DEPART_BUDGETS)
+            direct = (self._arrive(s.platform.id, s.where.x, *dest) or 0.0) if dest is not None else 0.0
+            return self._time_worth(s, dest), max(0.0, depart[1] - (time.monotonic() - depart[0]) - direct)
         return self._time_worth(s, dest), None
 
     def _time_worth(self, s: Scene, dest: tuple[int, float] | None = None) -> float:
@@ -1162,14 +1180,26 @@ class Hunt:
     def _sweep_calls(self, s: Scene) -> bool:
         """Whether the sweep has something else for her than the trip she's on (`_interrupt`): on a trip to a spot, a
         pile on her way; on a trip to one of its piles, another (or none any more, or a guard to shoot first). Taken at
-        the next pass."""
+        the next pass. On a look made up from another (Scene.what_if: the navigator's, her put where a chain ends) the
+        sweep's itinerary, its piles and what it said stay as they were: until the review of 2026-10-30 such a solve
+        took the itinerary she was on (sweep.Sweeper: kept unless another is clearly better) for one from a place she
+        wasn't at, and logged its "later, ..." from there."""
         o = self.obj
         if o is None or o.kind not in ("spot", "pile") or (o.kind == "pile" and o.why != "sweep"):
             return False
-        first = self._sweep(s, self._dest(o) if o.kind == "spot" else self._after_pile(), say=False)
-        if o.kind == "spot":
-            return first is not None
-        return first is None or self._pile_of.get(first.spot.key) is not o.pile or bool(first.spot.guards)
+        keep = None
+        if getattr(s, "what_if", False) and hasattr(self, "_sweeper"):
+            keep = (self._sweeper.current, self._sweeper.dest, self._pile_of, getattr(self, "_swept_for", None),
+                    getattr(self, "_swept", None), getattr(self, "_sweep_said", None))
+        try:
+            first = self._sweep(s, self._dest(o) if o.kind == "spot" else self._after_pile(), say=False)
+            if o.kind == "spot":
+                return first is not None
+            return first is None or self._pile_of.get(first.spot.key) is not o.pile or bool(first.spot.guards)
+        finally:
+            if keep is not None:
+                (self._sweeper.current, self._sweeper.dest, self._pile_of, self._swept_for, self._swept,
+                 self._sweep_said) = keep
 
     def _after_pile(self) -> tuple[int, float] | None:
         """Where she goes on to after the sweep's pile she's going for: where the itinerary it's of goes on to
@@ -1213,7 +1243,7 @@ class Hunt:
             stand = self._stand_s(p)
             lands = max(0.0, p.since + DROP_LANDS - now) if p.status == "expected" else 0.0
             guards, why = self._guards(s, p, max(self._travel_to_pile(s, p), lands), stand)
-            said = getattr(self, "_block_said", None)
+            said = None if getattr(s, "what_if", False) else getattr(self, "_block_said", None)  # (made up: unsaid)
             was = None if said is None else said.get(id(p))
             if said is not None and (was is None or was[0] is not p or was[1] != (why is not None)):
                 said[id(p)] = (p, why is not None)  # (said as it starts waiting, and when it ends)
@@ -1247,11 +1277,14 @@ class Hunt:
     def _reach_of(self, m: Monster) -> tuple:
         """Monster `m`'s walk for the sweep's checks (sweep.meets): its velocity the way perception says it heads at its
         kind's speed from the game data (monsters.walk_vx; None, its heading not known: either way), its speed, half its
-        body's width (monsters.touch_box), its platform's ends."""
+        body's width (monsters.touch_box), its platform's ends. One standing or flinching (walk_vx 0) may set off either
+        way any time, as one whose heading isn't known (sweep.UNSURE_S of it at most): taken as staying put, a stand
+        passed its check at 58 units from a standing one where PILE_CLEAR had kept her 100 off, and on the user's own
+        play a standing monster set off at about 0.61 a second (the review of 2026-10-30)."""
         if getattr(self, "_speeds", None) is None:
             self._speeds, self._bodies = speeds(self.model), bodies(self.model)
         speed = self._speeds.get(m.kind, DEFAULT_SPEED)
-        vx = walk_vx(m.kind, getattr(m, "facing", 0), getattr(m, "pose", ""), self._speeds)
+        vx = walk_vx(m.kind, getattr(m, "facing", 0), getattr(m, "pose", ""), self._speeds) or None
         q = self.model.platform(m.platform)
         return vx, speed, touch_box(m.kind, self._bodies.get(m.kind))[0], q.left, q.right
 
@@ -1656,7 +1689,7 @@ class Hunt:
         """The ground to hunt next: the best EXP per second, travel included (varied a little; of those about as good,
         GROUND_TIE, the one she left longest ago), and its spot."""
         self._leave_ground()
-        self._exit_reason = None
+        self._exit_reason = self._depart = None
         now, values, best, scored = time.monotonic(), self.tour.ground_values(), None, []
         here = s.where.platform if s.where is not None else None
         for g in self.tour.hunting_grounds(self._visit_s):

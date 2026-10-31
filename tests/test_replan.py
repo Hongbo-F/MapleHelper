@@ -57,6 +57,31 @@ def test_the_splice_point_is_where_she_runs_or_where_a_flight_or_a_takeoff_whose
     assert nav._splice_point(_running([walk]), 0.2)[0] == 0.2
 
 
+def test_the_splice_point_holds_the_arrow_the_running_plans_keys_hold_not_the_way_she_slides():
+    """Its review's fix (2026-10-30): a splice point on a span she slides along after letting go of the arrow (a
+    landing's run-out) was taken for a run that way (the span's dx), the new chain spliced in holding that arrow, and
+    its keys, made as if no arrow were held, never let it go: up the tower from 13 she ran off 11's end and out of the
+    map. The arrow is the running plan's keys' (_Running.arrows: _arrow_at), and a chain spliced in starts with it held
+    (flow.chain's `held`), letting it go where it doesn't run on."""
+    a, b, model = _platforms()
+    nav = nv.Navigator.__new__(nv.Navigator)
+    nav.model = model
+    slide = Span(1, 0.6, 0.9, 200.0, 186.0)  # (a landing's run-out leftward, no arrow held from 0.64 s)
+    leg = Leg(Move("jump", 1, 1, 249.0, 200.0, "left"), Body(0.0, 300.0, a), Body(0.9, 186.0, a), [slide], [])
+    held_left = ((0, -1, True), (640, -1, False), (893, 1, True))
+    t, body = nav._splice_point(nv._Running("p", [leg], 100.0, False, arrows=held_left), 0.7)
+    assert t == 0.7 and body.run == 0 and body.v == 0.0
+    assert nav._splice_point(nv._Running("p", [leg], 100.0, False, arrows=((0, -1, True),)), 0.7)[1].run == -1
+    assert nav._splice_point(_running([leg]), 0.7)[1].run == -1  # (no keys known: by the span, as before)
+    assert [nv._arrow_at(held_left, t) for t in (0.0, 0.5, 0.7, 0.9)] == [-1, -1, 0, 1]
+    assert nv._arrow_at(((0, -1, True), (100, 1, True)), 0.2) == 1  # (both held: the one pressed last)
+    from gamelab.motion.flow import Keys
+    k = Keys({"left": "left", "right": "right"})
+    k.arrow = -1  # (a splice's start with left held: turning right lets it go first)
+    k.set_arrow(0.25, 1)
+    assert k.events == [[250, "left", "up"], [251, "right", "down"]]
+
+
 def test_the_same_way_is_the_same_moves_of_the_route_wherever_they_take_off():
     """navigator._same_moves: a replan whose route goes the running one's way (each move's kind, from and onto, as far
     as both go) is the same way, however far apart its takeoffs (the flow's variety moves them from chain to chain):
@@ -161,6 +186,121 @@ def test_a_new_spawn_into_a_leg_is_replanned_within_a_state_and_spliced_with_no_
     assert not any("plan cut short" in line and nv.COMING in line for line in trace["log"])
     assert any("replanned from" in line and nv.COMING in line for line in trace["log"])
     assert trace["result"]["replans"] >= 1
+
+
+def _spawn_run(wrap=None, realism=None):
+    """The spawn into a later landing (_spawn_into_landing) up the tower from the floor's right, `wrap(sim, nav)` on the
+    navigator first: (trace, sim, the spawn's state)."""
+    state: dict = {}
+    hook = _spawn_into_landing(state)
+
+    def go(sim):
+        nav = sim.navigator(sim.hunter())
+        hook(sim, nav)
+        if wrap is not None:
+            wrap(sim, nav)
+        return nav.go(6, seconds=90)
+
+    sc = scenarios.Scenario("replan spawn", None, (33, 300.0), monsters=None, seed=1, limit=120, map_id=scenarios.TREE,
+                            realism=realism)
+    trace, sim = _run(sc, go)
+    assert state, "no chain with a later landing to spawn into"
+    return trace, sim, state
+
+
+@REAL
+def test_a_monster_coming_she_cant_act_on_yet_is_asked_about_again_at_the_next_state():
+    """The review of 2026-10-30: the monster a running chain's legs now meet was marked reacted-to (REACT_AGAIN_S) before
+    `_switch` was asked, so where nothing could be done (in a flight, past a takeoff's key, not where the plan has her,
+    and no room to stop) it went unheeded for 3 s, against _switch's "the next state asks again". Now it's marked only
+    when acted on (a switch, a cut) or replanned: here the first ask is made to find nothing to do, and the next state
+    asks about it again and splices."""
+    asks: list = []
+
+    def wrap(sim, nav):
+        real_switch, real_room = nav._switch, nav._room_to_stop
+
+        def switch(st, running, dst, why, kind):
+            if kind == "monster":
+                asks.append(sim.clock.now - sim.clock.start)
+                if len(asks) == 1:
+                    nav._no_room = True
+                    return None  # (as in a flight: nothing replanned)
+            return real_switch(st, running, dst, why, kind)
+
+        def room(running, t):
+            if getattr(nav, "_no_room", False):
+                nav._no_room = False
+                return False
+            return real_room(running, t)
+        nav._switch, nav._room_to_stop = switch, room
+    trace, sim, state = _spawn_run(wrap)
+    assert len(asks) >= 2 and asks[1] - asks[0] <= 2 * nv.STATE_S + 1e-6, asks
+    assert any(sp[0] >= asks[1] - 1e-6 for sp in trace["splices"]), (asks, trace["splices"])
+
+
+@REAL
+def test_a_replan_done_too_late_for_its_splice_point_is_dropped():
+    """The review of 2026-10-30: nothing checked a replan's deadline once it was computed, so one slower than about 108
+    ms would have been spliced in past the running plan's next takeoff key (let go by the switch while the new plan has
+    her running on). A replan the player would take more than SPLICE_LATE_S past its plan time 0 is dropped: said,
+    nothing spliced for it (here every replan's chain made to take 0.15 s of the clock)."""
+    def wrap(sim, nav):
+        real_switch, real_chain = nav._switch, nav.flow.chain
+        inside = {"on": False}
+
+        def chain(*a, **k):
+            if inside["on"]:
+                sim.clock.sleep(0.15)
+            return real_chain(*a, **k)
+
+        def switch(*a, **k):
+            inside["on"] = True
+            try:
+                return real_switch(*a, **k)
+            finally:
+                inside["on"] = False
+        nav.flow.chain, nav._switch = chain, switch
+    trace, sim, state = _spawn_run(wrap)
+    assert any("replanned too late" in line for line in trace["log"]), trace["log"][:60]
+    assert not trace["splices"]
+
+
+@REAL
+def test_a_player_without_splices_has_a_replanned_chain_cut_and_sent():
+    """The elevated player live until it's restarted on this code takes no splices (client.can_splice; the simulator's
+    Realism.splices False, the harness's `--world no-splices`): the spawn's replan cuts the running plan and sends the
+    new chain at once, its keys from its plan time 0 on; she still gets there, nothing spliced."""
+    trace, sim, state = _spawn_run(realism=Realism(splices=False))
+    assert not sim.player.splices and not trace["splices"]
+    assert any("replanned from" in line and "cut and sent" in line for line in trace["log"]), trace["log"][:60]
+    assert trace["result"]["replans"] >= 1 and trace["result"]["result"] == "arrived"
+
+
+def test_a_monster_standing_is_planned_either_way_a_while_and_one_set_off_since_isnt_as_planned():
+    """The review of 2026-10-30: a monster in a stand or flinch frame was planned within TURN_SLACK and 20 units a second
+    of its spot (45 units at 1 s), where one sets off at about 0.61 a second. Now as one whose heading isn't known (vx
+    None), either way at its speed STAND_UNSURE_S at the most (MonsterTrack.unsure, Navigator._walking); and the chain's
+    watch takes one it planned standing that walks now, or planned walking that turned or stopped, as not the one it
+    planned against (_as_planned: REACT and the replan look at it again)."""
+    from types import SimpleNamespace as NS
+
+    from gamelab.localization.monsters import MonsterTrack
+    a, b, model = _platforms()
+    stands = MonsterTrack(1, 200.0, 100.0, 0, 30.0, None, 0.0, unsure=nv.STAND_UNSURE_S)
+    assert stands.reach(0.5, a) == (150.0, 250.0) and stands.reach(3.0, a) == (100.0, 300.0)
+    assert MonsterTrack(1, 200.0, 100.0, 0, 30.0, 0.0, 0.0).reach(1.0, a) == (155.0, 245.0)  # (as it was)
+    nav = nv.Navigator.__new__(nv.Navigator)
+    s = NS(tracks=[NS(id=7, vx=0.0), NS(id=8, vx=-100.0)])
+    looked = [MonsterTrack(1, 200.0, 100.0, 1, 30.0, 100.0, 0.0), MonsterTrack(1, 300.0, 100.0, 0, 30.0, None, 0.0)]
+    still, walks = nav._walking(s, looked, [NS(track=7), NS(track=8)])
+    assert (still.vx, still.heading, still.unsure, still.track) == (None, 0, nv.STAND_UNSURE_S, 7)
+    assert (walks.vx, walks.heading, walks.unsure) == (-100.0, -1, None)
+    walking = MonsterTrack(1, 200.0, 100.0, 1, 30.0, 100.0, 0.0)
+    assert nv._as_planned(stands, NS(vx=0.0)) and not nv._as_planned(stands, NS(vx=100.0))
+    assert nv._as_planned(walking, NS(vx=100.0))
+    assert not nv._as_planned(walking, NS(vx=-100.0)) and not nv._as_planned(walking, NS(vx=0.0))
+    assert nv._as_planned(MonsterTrack(1, 200.0, 100.0, 0, 30.0, None, 0.0), NS(vx=100.0))  # (planned either way)
 
 
 @REAL

@@ -145,6 +145,16 @@ DEATHS = True
 # to tune. What a look asks for (Asks: her platform's drops, or every platform's) is searched on the frame asked for,
 # whole (a pile just picked up must not be seen again, and an item in two platforms' strips goes to the one it lies on:
 # scene.find_loot), before the rotation, whatever its pace.
+# A strip's search finding nothing says its drops are gone only where its frame placed it right (DropStrip.sure): the
+# frame's map placed firmly in height (the view registered against the map's art, Scene.view_sure, or her standing on
+# the ground, Scene.grounded) and the strip whole (scene.Strip.whole: not cut short by the bottom bar or the screen's top).
+# Placed by her offset in the air (her y put on the platform under her, the simulator's eyes' and a look's without the
+# view), the strips sit as high above their ground as she is and miss the drops on it: the rotation's strips, searched on
+# any frame at first, had the drop store see 15 of 49 and 15 of 53 of her piles gone with their coins still there in the
+# harness's standard grind (seeds 3 and 9; master's looks 1 of 41 and 2 of 34: the review of 2026-10-30,
+# D:/MapleHelper-scratch/replan/review: probe.py), all by the rotation's strips, her true y 14-28 units over where the
+# frame had her on all 8 looked at by hand. So the rotation takes its turn only on a frame placed firmly in height (one
+# that isn't waits: the next one that is takes it), and an asked-for strip that isn't sure still tells what it found.
 DROPS_STRIPS = 1
 DROPS_EVERY_S = 0.2
 DROPS_HER = 2.0
@@ -184,13 +194,16 @@ class Asks:
 @dataclass(frozen=True)
 class DropStrip:
     """A strip of drops in view (scene.Strip) as last searched: its platform, how much of it (map x from, to), when
-    (the frame's time; None: not searched yet), whether for mesos alone, and what it had. Plain data."""
+    (the frame's time; None: not searched yet), whether for mesos alone, what it had, and whether its finding nothing
+    says its drops are gone (`sure`: the strip whole and its frame's map placed firmly in height, as DROPS_STRIPS'
+    note has it). Plain data."""
     platform: int
     x0: float
     x1: float
     at: float | None = None
     mesos_only: bool = False
     loot: tuple[Loot, ...] = ()
+    sure: bool = True
 
 
 @dataclass
@@ -508,12 +521,13 @@ class WorldStep:
             before = len(s.looked)
             loot = find_loot(s, self.model, self.eyes, wide, self.mesos_only, strips)
             looked = list(s.looked[before:])
-            self._searched(strips, loot, t)
+            self._searched(strips, loot, t, _firm(s))
             done = {st.key for st in strips}
             work["asked strips"] = len(strips)
             self.counts["loot"] += 1
             self.counts["loot wide"] += wide
-        if self.schedule.drops_strips > 0 and t - self._rotated >= self.schedule.drops_every_s - 0.5 / HZ:
+        if self.schedule.drops_strips > 0 and t - self._rotated >= self.schedule.drops_every_s - 0.5 / HZ \
+                and _firm(s):  # (a frame placed by her offset in the air: the next firm one takes the turn)
             mine = s.platform.id if s.platform is not None else None
 
             def stale(st: Strip) -> float:  # (how long ago it was searched, her platform's counted DROPS_HER times)
@@ -523,7 +537,7 @@ class WorldStep:
             todo = sorted((st for st in inview if st.key not in done), key=lambda st: (stale(st), st.key))
             pick = todo[:self.schedule.drops_strips]
             if pick:
-                self._searched(pick, find_loot(s, self.model, self.eyes, False, self.mesos_only, pick), t)
+                self._searched(pick, find_loot(s, self.model, self.eyes, False, self.mesos_only, pick), t, True)
                 self._rotated = t
             work["strips"] = len(pick)
         work["strips"] += work["asked strips"]
@@ -531,13 +545,15 @@ class WorldStep:
         drops = [self._strips.get(st.key) or DropStrip(st.platform.id, st.looked[1], st.looked[2]) for st in inview]
         return loot, looked, wide and loot is not None, drops
 
-    def _searched(self, strips: list[Strip], loot: list[Loot], t: float) -> None:
+    def _searched(self, strips: list[Strip], loot: list[Loot], t: float, firm: bool = True) -> None:
         """Strips searched in the frame shown at t, and what they had (`loot`: each on the strip of its platform that
-        holds it), kept as each one's last search."""
+        holds it), kept as each one's last search; `firm`: the frame's map placed firmly in height (`_firm`), each sure
+        where it's whole too (DropStrip.sure)."""
         for st in strips:
             _, x0, x1 = st.looked
             mine = tuple(d for d in loot if d.platform == st.platform.id and x0 - 1.0 <= d.x <= x1 + 1.0)
-            self._strips[st.key] = DropStrip(st.platform.id, x0, x1, t, self.mesos_only, mine)
+            self._strips[st.key] = DropStrip(st.platform.id, x0, x1, t, self.mesos_only, mine,
+                                             sure=firm and getattr(st, "whole", True))
 
     def _vitals(self, s: Scene, t: float) -> list[Event]:
         """Her EXP number changed since the last frame (`exp_gain`, with the number as read: the kills its size was go
@@ -692,6 +708,13 @@ class WorldStep:
         mx, my = box[2] / s.geo.look_scale, box[3] / s.geo.look_scale
         return View(s.map_x(0), s.map_x(w), s.map_y(0), s.map_y(bottom), w, bottom,
                     (s.map_x(0), s.map_y(0), s.map_x(mx), s.map_y(my)), s.geo.fpx(EDGE_PX))
+
+
+def _firm(s: Scene) -> bool:
+    """Whether look `s`'s map is placed firmly in height on its frame: by the view registered against the map's art
+    (`view_sure`), or by her offset with her standing on the ground (`grounded`); in the air by her offset everything is
+    off by her height above the platform under her (DROPS_STRIPS' note)."""
+    return bool(getattr(s, "view_sure", False)) or s.grounded
 
 
 def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: bool = True, wide: bool = False,

@@ -22,9 +22,11 @@ What the stack asks of a feed (`Feed`):
 - `wait_frame(timeout)`: until a new frame's state comes; `drain_events(upto)`: every event since the last
   drain of a frame up to the one a look shows, each once; `throw`: her throw, for the tracker.
 
-A frame asked for is taken at once and the next is due a period after it (`run`: re-phased, so asks never make more
-than HZ frames a second, where until 2026-10-30 an asked frame came on top of the 30), unless the frame due is within
-ASK_GAP_S: that one is the frame asked for.
+Frames are HZ a second whatever is asked (`run`, SyncFeed.tick: the user, 2026-10-30, "I meant everything at 15 fps"):
+what a look asks for (a frame shown at its time or later, the drops on it) goes into the next frame due, and the look
+waits for it. Until the review of 2026-10-30 a frame asked for was taken at once and the next re-phased a period after
+it, so a look between two frames had one of its own: 15.7-15.9 frames a second in the simulator's standard grind
+(560-643 asked in 5 minutes), every look that wanted drops a pass of its own.
 
 `SyncFeed` is the same thing in-process for the simulator: its clock calls `tick` at every frame the game
 shows, the pass runs on the fake eyes there, and each state is ready its measured cost (COSTS) after its frame, the
@@ -64,11 +66,6 @@ KEEP = 8             # states the stack's side keeps
 EVENTS_KEPT = 10_000  # events kept for the next drain at most (the oldest go: a stack that never drains)
 BELOW_NORMAL = 0x4000  # Windows' BELOW_NORMAL_PRIORITY_CLASS (quiet: the harness's and soak's workers)
 IDLE_CLASS = 0x40      # ... and IDLE_PRIORITY_CLASS (a process started at it stays there)
-# s: an ask for a frame shown within this of the frame due anyway waits for that one (`run`, SyncFeed.tick): its frame is
-# the one asked for, and the rate stays HZ. A look asks for a frame KEY_EFFECT_S after her last key (senses), any time
-# between two frames, and one that waits is at most this late (7 ms on average, the asks spread over the period), where
-# taken at once the frame due right after would make two passes back to back.
-ASK_GAP_S = 0.025
 
 
 # --- frames in shared memory --------------------------------------------------------------------------
@@ -193,9 +190,8 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
         shown: Callable[[Frame], None] | None = None) -> None:
     """Frame after frame, `hz` a second (or as often as `hz()` says, asked at each frame; the perception service's is
     one rate, whoever is attached, since 2026-10-26: rate.HZ), one pass each: `poll(wait)` waits up to `wait` s for
-    what's asked (asks, stop), and a frame asked for is taken at once when it's due (shown at the time asked for), the
-    next one due a period after it; one asked within ASK_GAP_S of the frame due anyway waits for that one. Each frame's
-    state goes to `emit`. `shown(frame)`, if given, sees each frame showing the game as soon as it's taken, before the
+    what's asked (asks, stop), and what's asked goes into the next frame due shown at the time asked for or later (no
+    frame of its own: HZ a second whatever is asked). Each frame's state goes to `emit`. `shown(frame)`, if given, sees each frame showing the game as soon as it's taken, before the
     pass. Ends on stop, at `until` (time.monotonic), or when the frames run out. A rate gone up takes from the next frame
     (its due brought forward to a period after the last frame's: the service's went from 10 to 30 as a command that
     hunts attached, until 2026-10-26)."""
@@ -205,20 +201,15 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
         if taken is not None:
             due = min(due, taken + period)
         now = time.monotonic()
-        wake = due
-        if pending is not None and due - max(now, pending.after) > ASK_GAP_S:
-            wake = max(now, pending.after)  # (asked well before the frame due: at once then)
-        asks, stop = poll(max(0.0, wake - now))
+        asks, stop = poll(max(0.0, due - now))
         if stop or (until is not None and time.monotonic() >= until):
             return
         if asks is not None:
             pending = asks if pending is None else pending.merge(asks)
-        now = time.monotonic()
-        early = pending is not None and now >= pending.after - 1e-9 and due - now > ASK_GAP_S
-        if now < due and not early:
-            continue
+        if time.monotonic() < due:
+            continue  # (an ask waits for the frame due)
         taken = time.monotonic()
-        frame = runner.frames.next(pending.after if early else due)
+        frame = runner.frames.next(due)
         if frame is None:
             return
         if not frame.visible:
@@ -237,8 +228,7 @@ def run(runner: Runner, hz: float | Callable[[], float], poll: Callable[[float],
                 runner.recover(st.bad)
         if use is not None:
             pending = None
-        # (an asked frame re-phases the frames: the next a period after it; else on the grid, or now if it's behind)
-        due = taken + period if early else max(due + period, time.monotonic())
+        due = max(due + period, time.monotonic())  # (on the grid, or now if it's behind)
 
 
 def quiet() -> None:
@@ -441,9 +431,9 @@ GAME_HZ = 60.0  # frames a second the game shows
 class SyncFeed(Feed):
     """The feed in-process, stepped by whoever keeps time: `tick(t)` at every frame the game shows (the
     simulator's clock calls it, GAME_HZ), `look(ropes)` reading the screen then (FakeEyes.observe). A frame is
-    taken `hz` times a second, or at once when something was asked (the next one a period after it; one asked within
-    ASK_GAP_S of the frame due waits for that one, as `run`); its state is ready its cost later (`costs`: Costs.of), the
-    next frame not before. Waiting goes through time.sleep, the simulator's own."""
+    taken `hz` times a second, what's asked going into the next one due (as `run`: no frame of its own); its state is
+    ready its cost later (`costs`: Costs.of), the next frame not before. Waiting goes through time.sleep, the
+    simulator's own."""
 
     def __init__(self, step: WorldStep, look: Callable[[bool], Observation], costs: Costs | None = None,
                  hz: float = HZ, guard: Callable[[], None] | None = None):
@@ -461,12 +451,9 @@ class SyncFeed(Feed):
 
     def tick(self, t: float) -> None:
         """The game shows a frame at t."""
-        if t < self.busy_until - 1e-9:
-            return
+        if t < self.busy_until - 1e-9 or t < self.next_due - 1e-9:
+            return  # (not due: what's asked waits for the frame due)
         asked = self.asks is not None and t >= self.asks.after - 1e-9
-        due = t >= self.next_due - 1e-9
-        if not due and (not asked or self.next_due - t <= ASK_GAP_S + 1e-9):
-            return  # (not due, and nothing asked or the frame due soon takes it)
         asks, self.asks = (self.asks, None) if asked else (None, self.asks)
         st = self.step.step(self._look, t, True, asks)
         cost = self.costs.of(st)

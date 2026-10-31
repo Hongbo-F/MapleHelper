@@ -831,6 +831,9 @@ class Realism:
     drop_takers: bool = False    # her drops taken by others at a life drawn from the live curve (HER_DROPS_LAST: the
                                  # harness's `--world drop-takers`), from a generator of its own; False: they lie
                                  # DROP_LIFE
+    splices: bool = True         # the player takes splices (sim.fakes.FakePlayer.splices, control.client.can_splice);
+                                 # False: a player started before them, every replanned chain a cut and a resend (the
+                                 # harness's `--world no-splices`: the elevated player live until it's restarted)
     camps: tuple = ()            # other players camping (Camp, CAMP_KILL): each kills the monsters of its kinds on
                                  # its platforms soon after they show
     shared_exp: bool = False     # another player's kill of a monster she hurt gives her its EXP times the share of its

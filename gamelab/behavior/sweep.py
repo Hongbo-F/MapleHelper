@@ -50,7 +50,8 @@ KEEP_S = 0.5         # ... and this many s of it (at the rate) more
 STAND_PAST_S = 0.5   # s after a stand that its check covers (she steps off, a monster walking in meanwhile)
 CONTACT_MARGIN = 10.0  # units more between her body's box and a monster's than touching, for a stand
 STEP_S = 0.1         # s between the times a stand's check looks at a monster's place
-# s a monster whose heading isn't known (her memory's, about though the look missed it, or a frame that doesn't tell)
+# s a monster whose heading isn't known (her memory's, about though the look missed it, a frame that doesn't tell, or
+# one standing or flinching, which may set off any time: hunt._reach_of, since the review of 2026-10-30)
 # is taken to walk, either way at its kind's speed, for a stand's check: the next looks tell (the sweep is solved again
 # at every one, and the stand is checked again from the look she's there on). Taken for as long as a stand 3 s off is
 # away, it was anywhere within 300 units of where it was last seen, and in the simulator's camping hunt loop

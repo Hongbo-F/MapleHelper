@@ -10,7 +10,7 @@ import pytest
 
 from gamedata.paths import COPY
 from gamelab.attack.spots import Spot
-from gamelab.behavior import hunt
+from gamelab.behavior import hunt, sweep
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.hunt import Hunt, Objective, Visit
 from gamelab.behavior.ledger import DROP_LANDS, Pile
@@ -589,8 +589,9 @@ def test_a_monster_walking_at_where_she_would_stand_is_shot_first_or_the_pile_le
     for picking up loots". Drops at x 745-755 on the ground (500..900), she on her spot beside it (her trip there 1.1 s:
     the planner's 0.1 and 1 to get off): a Horny Mushroom at 890 walking left at its 100 units a second is by them as she
     stands there: shot first where a star from her spot hits it (its kill time and EXP the pile's), else the pile is
-    left; one at 600 walking left, away, guards nothing; one standing at 870 nothing either; one the look didn't find
-    (about: her memory's) leaves it, never thrown at."""
+    left; one at 600 walking left, away, guards nothing; one standing at 870 may set off either way any time (its
+    heading not known: sweep.UNSURE_S of walking, the review of 2026-10-30, where until then it stayed put and guarded
+    nothing): a guard too; one the look didn't find (about: her memory's) leaves it, never thrown at."""
     m, ground, spot = _ground()
     pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True, status="seen", xs=(745.0, 755.0),
                 last_seen=time.monotonic())
@@ -600,8 +601,12 @@ def test_a_monster_walking_at_where_she_would_stand_is_shot_first_or_the_pile_le
     assert why is None and [g.monster.x for g in guards] == [890.0] and guards[0].kill_s == 4.0
     h._hits = lambda s, m: False
     assert h._guards(s, pile, 1.1, h._stand_s(pile)) == ((), f"a horny-mushroom at x 890 on {ground} would meet her there")
-    for walker in (_walker("horny-mushroom", ground, 600.0, -1, m), _walker("horny-mushroom", ground, 870.0, 0, m, "stand")):
-        assert _priced(m, [pile], travel=0.1)._guards(_on(spot, 1000.0, m, [walker]), pile, 1.1, 0.5) == ((), None)
+    away = _walker("horny-mushroom", ground, 600.0, -1, m)
+    assert _priced(m, [pile], travel=0.1)._guards(_on(spot, 1000.0, m, [away]), pile, 1.1, 0.5) == ((), None)
+    stands = _walker("horny-mushroom", ground, 870.0, 0, m, "stand")
+    standing = _priced(m, [pile], travel=0.1)
+    assert standing._reach_of(stands)[0] is None  # (either way, as one whose heading isn't known)
+    assert [g.monster.x for g in standing._guards(_on(spot, 1000.0, m, [stands]), pile, 1.1, 0.5)[0]] == [870.0]
     about = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.0, m)], travel=0.1)
     assert about._guards(_on(spot, 1000.0, m), pile, 1.1, 0.5)[1].startswith("a horny-mushroom unseen at x 765")
     first = _priced(m, [pile], travel=0.1)  # where nothing counts as a danger (the first map): nothing guards
@@ -716,3 +721,40 @@ def test_on_her_way_to_a_sweeps_pile_she_goes_on_while_it_is_first_else_takes_wh
     first[0] = other
     h._on_sweep(_scene(), [], [], 0.0)
     assert acted == [other.key] and h.obj.kind == "spot"
+
+
+def test_a_made_up_look_leaves_the_sweeps_itinerary_as_it_was():
+    """The navigator asks the hunt's `until` on a look made up from another, her put where a chain ends (its
+    _stop_calls, _look_ahead: Scene.what_if): the sweep's answer there is given, but its itinerary (sweep.Sweeper), its
+    piles and what it said stay as they were, and its "later, ..." isn't said from a place she isn't at (the review of
+    2026-10-30)."""
+    coins = _pile(5, platform=2, items=("mesos",), worth=33.4, xs=(300.0,), status="seen")
+    coins.x, coins.last_seen = 300.0, time.monotonic()
+    h = _line_hunt([coins])
+    h.obj = SimpleNamespace(kind="spot", why="travel", platform=3, x=600.0)
+    real = _on_line(1, 0.0)
+    assert h._sweep_calls(real)  # (the pile on her way)
+    before = (h._sweeper.current, h._sweeper.dest, dict(h._pile_of), h._swept_for, h._sweep_said, list(h.said))
+    there = _on_line(3, 590.0)  # (where a chain ends: past the pile)
+    there.what_if = True
+    h._sweep_calls(there)
+    assert (h._sweeper.current, h._sweeper.dest, dict(h._pile_of), h._swept_for, h._sweep_said, list(h.said)) == before
+
+
+def test_leaving_a_ground_the_sweep_has_its_budgets_over_the_whole_way_out():
+    """DEPART_BUDGETS: the piles on her way out within twice the sweep's budget over the whole way from when she
+    decided (sweep.budget_for of the straight way then), less the straight way on from where she is, not a fresh
+    budget at each solve (the review of 2026-10-30: master's "she never left" guard gone, tour_tree_run 534 -> 628 s);
+    spent, nothing more is worth a detour; staying after all, as before."""
+    h = _line_hunt([])
+    h.visit = None
+    s = _on_line(1, 0.0)
+    h._exit_reason = "nothing came into reach"
+    decided = time.monotonic() - 3.0  # (she decided 3 s ago, her way out then 1.5 s straight: 1.5 + 2 x 2.0 = 5.5 s)
+    h._depart = (decided, 1.5 + hunt.DEPART_BUDGETS * sweep.budget_for(1.5))
+    rate, budget = h._sweep_terms(s, (2, 0.0))  # (1.5 s straight on from here)
+    assert budget == pytest.approx(5.5 - 3.0 - 1.5, abs=0.05)
+    h._depart = (decided - 10.0, h._depart[1])
+    assert h._sweep_terms(s, (2, 0.0))[1] == 0.0
+    h._exit_reason = None  # (not leaving: the sweep's own budget)
+    assert h._sweep_terms(s, (2, 0.0))[1] is None

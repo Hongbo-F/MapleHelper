@@ -1,8 +1,7 @@
 """The continuous feed (localization.feed): the ring of frames in shared memory never holds more than its
 slots, a look is never handed a frame from before it was asked for nor one that failed its checks, every event is
-drained once, one pass a frame at the one rate (localization.rate.HZ), what's asked done on the next frame (taken at
-once, the frames after it re-phased; one asked within ASK_GAP_S of the frame due waiting for that one), and Senses on
-it: every look and glance from it, standing still (LookLost) while it has nothing to act on, and going on after. The
+drained once, one pass a frame at the one rate (localization.rate.HZ), what's asked done on the next frame due (no
+frame of its own: HZ a second whatever is asked), and Senses on it: every look and glance from it, standing still (LookLost) while it has nothing to act on, and going on after. The
 perception service that runs it live is test_service's."""
 
 import sys
@@ -148,26 +147,25 @@ def test_the_sync_feed_looks_hz_times_a_second_each_state_its_pass_later(sync):
         assert [m.kind for m in st.monsters] == ["pig"] and st.band_at == st.wide_at == st.t
 
 
-def test_a_frame_asked_for_is_taken_at_once_and_the_next_a_period_after_it(sync):
-    """An ask (a look's: Senses.fresh_after, KEY_EFFECT_S after her key) takes the first frame shown at its time, the
-    frames after re-phased to it (never more than HZ a second on its account: until 2026-10-30 an asked frame came on top
-    of the regular ones); one asked within ASK_GAP_S of the frame due anyway waits for that one."""
+def test_a_frame_asked_for_is_the_next_frame_due_never_one_of_its_own(sync):
+    """An ask (a look's: Senses.fresh_after, KEY_EFFECT_S after her key) waits for the frame due, wherever it falls
+    between two (the user, 2026-10-30: "I meant everything at 15 fps"): the frames stay on their grid, HZ a second
+    whatever is asked. Until the review of 2026-10-30 an ask well before the frame due had a frame of its own at once and
+    the frames after re-phased to it: 15.7-15.9 a second in the harness's standard grind."""
     f, clock, eyes = sync
+    t0 = clock.now
     clock.sleep(1.0)
     last = max(st.t for _, st in f.states)
-    asked = last + 2 / feed.GAME_HZ  # 33 ms before the frame due (the game frame before: the pass on the last still
-    #                                  going, its cost)
-    clock.sleep(asked - clock.now - 1e-6)
-    st = f.latest(Asks(asked))
-    assert st.t == pytest.approx(asked) and f.counts["asked"] == 1
+    for k, early in enumerate((2, 3, 1)):  # 33, 50 and 17 ms after the frame before
+        asked = last + early / feed.GAME_HZ
+        clock.sleep(asked - clock.now - 1e-6)
+        st = f.latest(Asks(asked, loot=True))
+        assert st.t == pytest.approx(last + 1 / FPS) and st.loot is not None and f.counts["asked"] == k + 1
+        last = st.t
     clock.sleep(0.5)
-    frames = sorted(s.t for _, s in f.states if s.t >= asked - 1e-9)
-    assert all(round(b - a, 6) == round(1 / FPS, 6) for a, b in zip(frames, frames[1:]))  # (re-phased to it)
-    last = frames[-1]
-    soon = last + 1 / FPS - feed.ASK_GAP_S + 0.004  # within ASK_GAP_S of the frame due
-    clock.sleep(soon - clock.now)
-    st = f.latest(Asks(soon))
-    assert st.t == pytest.approx(last + 1 / FPS) and f.counts["asked"] == 2  # the frame due, asked or not
+    frames = sorted(s.t for _, s in f.states)
+    assert all(round(b - a, 6) == round(1 / FPS, 6) for a, b in zip(frames, frames[1:]))  # (on the grid throughout)
+    assert f.counts["frames"] == int((clock.now - t0) * FPS + 1e-6) + 1  # (HZ a second, the asked ones among them)
 
 
 def test_a_look_reads_every_monster_on_screen_off_any_frame(sync):
@@ -183,7 +181,7 @@ def test_a_look_reads_every_monster_on_screen_off_any_frame(sync):
         assert st is not None and st.t >= asked - 1e-9 and sorted(round(m.y) for m in st.monsters) == [300, 500]
         waits.append(clock.now - asked)
         clock.sleep(0.037)
-    assert max(waits) <= feed.ASK_GAP_S + 1 / feed.GAME_HZ + c.of(st) + 2 * c.bar + 1e-9
+    assert max(waits) <= 1 / FPS + 1 / feed.GAME_HZ + c.of(st) + 2 * c.bar + 1e-9  # (the frame due, its pass)
 
 
 def test_every_event_is_drained_once(sync):
@@ -204,7 +202,7 @@ def test_what_a_look_asks_is_searched_on_the_next_frame(sync):
     eyes.drops = []
     asked = clock.now
     st = f.latest(Asks(asked, loot=True))
-    assert st is not None and st.loot == [] and st.t - asked <= feed.ASK_GAP_S + 1 / feed.GAME_HZ + 1e-9
+    assert st is not None and st.loot == [] and st.t - asked <= 1 / FPS + 1e-9  # (the next frame due)
     assert f.counts["asked"] == 1
 
 
@@ -236,9 +234,9 @@ def test_the_loop_does_what_was_asked_on_the_first_frame_at_its_time():
     assert [(s.seq, s.loot_wide) for s in out if s.loot is not None] == [(3, False), (6, True)]
 
 
-def test_the_loop_takes_a_frame_asked_for_at_once_and_the_next_a_period_after_it():
-    """feed.run: at 10 a second, an ask for a frame 30 ms after the last one's taken then (well before the frame due:
-    ASK_GAP_S), the next frame a period after it, not after the one before."""
+def test_the_loop_takes_what_was_asked_on_the_frame_due_and_keeps_its_pace():
+    """feed.run: at 10 a second, an ask for a frame 30 ms after the last one waits for the frame due (no frame of its
+    own: HZ a second whatever is asked), which carries it; the frames keep their period."""
     model = small_map()
     eyes = Drawn(model)
     step = WorldStep(Senses(eyes, model, band=(100, 100)), schedule=Schedule(drops_strips=0))
@@ -252,13 +250,14 @@ def test_the_loop_takes_a_frame_asked_for_at_once_and_the_next_a_period_after_it
     def poll(wait):
         time.sleep(min(wait, 0.005))
         if len(out) == 2 and not sent:
-            sent.append(Asks(out[-1] + 0.03))
+            sent.append(Asks(out[-1] + 0.03, loot=True))
             return sent[-1], False
         return None, False
-    run(runner, 10.0, poll, lambda st, fr: out.append(st.t))
+    took = []
+    run(runner, 10.0, poll, lambda st, fr: (out.append(st.t), took.append(st.seq) if st.loot is not None else None))
     gaps = np.diff(out)
-    assert len(out) == 6 and gaps[0] >= 0.09 and 0.025 <= gaps[1] <= 0.06, gaps  # (asked: at once)
-    assert all(0.09 <= g <= 0.14 for g in gaps[2:]), gaps  # (a period after it, re-phased)
+    assert len(out) == 6 and all(0.09 <= g <= 0.14 for g in gaps), gaps  # (the asked frame the one due: its period)
+    assert took == [3]
 
 
 def test_a_rate_gone_up_takes_from_the_next_frame():

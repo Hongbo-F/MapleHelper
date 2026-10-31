@@ -456,6 +456,44 @@ def test_the_states_strips_of_drops_count_each_at_its_own_time():
     assert p.status == "gone" and p.gone_at == SETTLE + 6.0 + EMPTY_LOOKS
 
 
+def test_only_a_strip_sure_of_it_sees_a_pile_empty_and_a_missed_pile_is_hers_again():
+    """The review of 2026-10-30: the rotation's strips, searched mid-hop (placed by her offset in the air, as high above
+    their ground as she is) or cut short by the bottom bar, had 15 of 49 of her piles seen gone with their coins still
+    there (seed 3; master 1 of 41). A strip that isn't sure of it (worldstate.DropStrip.sure) sees no pile empty, however
+    often; with the state's strips the look's own sighting confirms what it saw and no more (its strips are among them);
+    drops seen again within LOOT_REACH of a pile of hers seen gone REVIVE_S ago at most are that pile's again (hers,
+    worth what's seen), not another's; later, another's."""
+    from gamelab.behavior.ledger import REVIVE_S
+    from gamelab.localization.worldstate import DropStrip
+    store = DropStore()
+    store.on_kill(Kill(0.0, "slime", 3, 500.0, 300.0, 3))
+    (p,) = store.piles
+    for t in (SETTLE + 1.0, SETTLE + 1.0 + EMPTY_LOOKS, SETTLE + 1.0 + 2 * EMPTY_LOOKS):
+        s = _look(t + 0.1, looked=[(3, 400.0, 600.0)])  # (the look's own search: its strip unsure among the state's)
+        s.strips = [DropStrip(3, 400.0, 600.0, t + 0.1, sure=False), DropStrip(3, 600.0, 700.0, t)]
+        store.on_look(s)
+    assert p.status == "expected" and p.empty_since is None
+    for t in (SETTLE + 6.0, SETTLE + 6.0 + EMPTY_LOOKS):  # sure ones see it empty as before
+        s = _look(t + 0.5)
+        s.strips = [DropStrip(3, 400.0, 600.0, t)]
+        store.on_look(s)
+    assert p.status == "gone"
+    gone = p.gone_at
+    s = _look(gone + 2.5)
+    s.strips = [DropStrip(3, 400.0, 600.0, gone + 2.4, False, (Loot(Item("mesos", 0, 0, 13, 13, 0.9), 520.0, 300.0, 3),))]
+    store.on_look(s)
+    assert store.piles == [p] and p.hers and p.status == "seen" and p.xs == (520.0,) and p.gone_at is None
+    for t in (gone + 4.0, gone + 4.0 + EMPTY_LOOKS):  # gone again ...
+        s = _look(t + 0.5)
+        s.strips = [DropStrip(3, 400.0, 600.0, t)]
+        store.on_look(s)
+    later = p.gone_at + REVIVE_S + 1.0  # ... and drops there past REVIVE_S: another's
+    s = _look(later + 0.1)
+    s.strips = [DropStrip(3, 400.0, 600.0, later, False, (Loot(Item("mesos", 0, 0, 13, 13, 0.9), 510.0, 300.0, 3),))]
+    store.on_look(s)
+    assert p.status == "gone" and [q.hers for q in store.piles if q is not p] == [False]
+
+
 def test_a_pile_lies_by_the_live_survival_not_a_fixed_life():
     """ledger.SURVIVAL (the live Kaplan-Meier): a pile of hers 100 s old is still there more often than not given it
     was seen at 60 s (0.36 / 0.55), where DROP_LIFE (90 s) had dropped it; given it was seen a moment ago, about all of

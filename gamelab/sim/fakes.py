@@ -879,7 +879,9 @@ class FakePlayer:
         self.pages: list[list] = []          # whoever is at the PC paged (control.alarm.page): [s, title, text]
         self.pointer = (683, 384)            # where the plans' mouse moves left the pointer (client px): a click's place
         self.kept: list[list] = []           # the recording's saves asked (control.alarm.keep_recent): [s, s, name]
-        self.splices = True                  # it takes splices (can_splice; False: a player started before them)
+        # it takes splices (can_splice; False: a player started before them, Realism.splices: the harness's
+        # `--world no-splices`)
+        self.splices = bool(getattr(getattr(world, "realism", None), "splices", True))
 
     # --- the Lie Detector (client.check_alarm, alarm_up, alarm_age) -------------------------------------------------
 

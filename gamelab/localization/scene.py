@@ -77,6 +77,8 @@ class Scene(Observation):
                                                 # searched it, each at its own time (worldstate.DropStrip: the rotation's
                                                 # and the asked-for; the drop store takes them, behavior.ledger); []
                                                 # without
+    what_if: bool = False         # a look made up from another (her put where a chain ends: the navigator's _stop_calls,
+                                  # _look_ahead) for what a trip's `until` would say there: nothing it decides is kept
 
     @classmethod
     def of(cls, obs: Observation) -> "Scene":
@@ -201,11 +203,15 @@ def _monster_record(m: Monster) -> dict:
 class Strip:
     """Where drops are looked for in a look's frame: a strip just above a stretch of a platform's level ground
     (level_runs), as much of it as shows. `run`: the stretch's left end (map x), what it is from frame to frame;
-    `looked`: (platform, map x from, to), as Scene.looked notes it; `box`: look-frame px."""
+    `looked`: (platform, map x from, to), as Scene.looked notes it; `box`: look-frame px; `whole`: none of its height
+    cut off by the bottom bar or the screen's top (a drop lies on its ground: in a strip cut short under the bar the
+    drop may be under the bar, and its search finding none doesn't say it's gone: the review of 2026-10-30, strips cut
+    by the bar found none where the simulator's world had drops 10 times in 26, whole ones 74 in 962)."""
     platform: Platform
     run: float
     looked: tuple[int, float, float]
     box: tuple[int, int, int, int]
+    whole: bool = True
 
     @property
     def key(self) -> tuple[int, float]:
@@ -229,13 +235,14 @@ def drop_strips(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False) -> li
     for p in platforms:
         for x0, x1, high, low in level_runs(p):
             left, right = max(0.0, s.screen_x(x0) - pad), min(float(w), s.screen_x(x1) + pad)
-            top, under = max(0.0, s.screen_y(high) - above), min(float(bottom), s.screen_y(low) + below)
+            high_y, low_y = s.screen_y(high) - above, s.screen_y(low) + below
+            top, under = max(0.0, high_y), min(float(bottom), low_y)
             if top < mini_y and left < mini_x:  # the minimap covers the strip's left end
                 left = max(left, float(mini_x))
             if right - left < narrow or under - top < eyes.item_height:
                 continue
             out.append(Strip(p, x0, (p.id, s.map_x(left), s.map_x(right)),
-                             (int(left), int(top), int(right), int(under))))
+                             (int(left), int(top), int(right), int(under)), whole=high_y >= 0.0 and low_y <= bottom))
     return out
 
 

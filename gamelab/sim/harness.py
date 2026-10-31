@@ -278,6 +278,11 @@ WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
 # world the simulator credited her with 94% of her drops (master's crowd baseline) where live she picked 67-71%.
 WORLDS["map-drops"] = {"drop_mix": TREE_DROP_MIX}
 WORLDS["drop-takers"] = {"drop_takers": True}
+# ... and the player started before splices (`no-splices`: Realism.splices, sim.fakes.FakePlayer.splices): every chain
+# replanned while one runs (control.navigator.REPLAN) a cut and a resend, every key let go between, as live until the
+# elevated player is restarted on this code (control.client.can_splice: lab/player.json); the review of 2026-10-30
+# found the path exercised by nothing.
+WORLDS["no-splices"] = {"splices": False}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's

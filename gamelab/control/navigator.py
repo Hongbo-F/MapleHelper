@@ -284,6 +284,15 @@ UNSEEN_TRIPS = True  # those in view, the feed's hidden tracks and the cut's tra
 # against 75.6, on her trips 20.3 against 18.8: more chains stopped short and passed regardless; D:/MapleHelper-scratch/
 # replan/rp/out/var_HEADING_TRUST_S=0.6_13.txt).
 HEADING_TRUST_S: float | None = None
+# A monster perception has standing or flinching (a stand or hit1 frame: monsters.walk_vx 0, under STILL_VX) is planned
+# as one whose heading isn't known: either way at its kind's speed, STAND_UNSURE_S of it at the most (MonsterTrack.unsure),
+# not as standing where it was (until the review of 2026-10-30 it was planned within TURN_SLACK and 20 units a second of
+# its spot, 45 units at 1 s, where on the user's own play a standing monster set off at about 0.61 a second, 46% within
+# 1 s, and the predictor was 68 units off at 1 s at p90: D:/MapleHelper-scratch/replan/p15/clip_motion_out.txt). Capped,
+# since the chain's watch sees it set off at the next state and reacts (_known: not as the plan had it): a jump's flight
+# and the reaction (a state, the splice's lead, the game's key effect) take about this long, where nothing she does can
+# keep clear of it. None: all along, as a look's monster seen once.
+STAND_UNSURE_S: float | None = 1.0
 # With a continuous feed (Senses.glanced) her glances while a chain runs carry the monsters it follows, re-found in
 # every frame with which way and how fast they walk (localization.tracking). A monster one of the chain's legs ahead of
 # her now meets (flow.danger over the rest of the plan, REACT_LEAD_S on at the soonest), of the kinds the chain keeps
@@ -337,6 +346,11 @@ SWITCH_GAIN_S = 0.25         # s sooner a better way must get her there (a guess
 SWITCH_MIN_S = 0.5           # ... and s after the last switch at the soonest (a guess)
 SPLICE_DRIFT = 20.0          # map units: a replan goes from where the state has her if she's this near where the plan has
                              # her (else her off-path checks deal with it: OFF_SPAN)
+SPLICE_LATE_S = 0.05         # s: a replan done so late that the player would take it this much past its plan time 0, or
+                             # past a takeoff's key of the running plan's (KEY_COMMIT_S), is dropped (_switch: the next
+                             # state asks again): its start would be behind her (7.5 units at her run), or the takeoff's
+                             # key let go by the splice while its plan has her running on (the review of 2026-10-30: a
+                             # replan slower than about 108 ms; measured p99 36 ms, the most 51 at Idle priority)
 KNOCK_REPLAN = True
 KNOCK_AIR_S = 2 * KNOCK_VY / GRAVITY - STATE_S  # s after a touch's popup her knock's flight lasts on flat ground (0.22 s)
                                                 # less a state: no state sooner has her landed
@@ -621,6 +635,8 @@ class _Running(NamedTuple):
     known: tuple = ()  # the monsters the look it was planned from had (MonsterTrack, in its plan's time): REACT
     parent: str | None = None  # spliced in: the plan it takes over from, until the player has taken it (client.taken)
     why: str = ""      # why its chain ended (flow.chain's: 'done', 'monster', 'long', 'unpredictable')
+    arrows: tuple = ()  # its arrow keys' events as sent ((ms, -1 left / +1 right, down)), and the one held at its start
+                        # ((0, d, True) first): which arrow is held when (_splice_point; () not known: by the legs)
 
     @property
     def ends(self) -> float:
@@ -779,6 +795,7 @@ class Navigator:
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
         self._siblings: dict[tuple[int, int], list[Move]] | None = None  # (src, dst) -> the route's moves (_pricing)
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
+        self._replanned = False  # whether the last _switch got as far as replanning (REPLAN: _watching marks so)
         self._came = None  # the feed's track of the monster the last cut was for (REACT: _coming), for TripState.came
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
@@ -1255,9 +1272,10 @@ class Navigator:
         Scene.tracks): the way perception has it head at its kind's speed from the game data (tracking's velocity,
         monsters.walk_vx: 0 in a stand frame or flinching; under STILL_VX it stands), as _track_of has a track, over
         what the tracker measured between looks (the user, 2026-10-30: "Perception should only give mob heading, speed
-        should come from data-mined game files"); one the feed doesn't follow as the tracker has it. Until 2026-10-30
-        only without an escort (R5), and only where the tracker couldn't tell yet (vx None): a fighting trip's monster
-        seen once was planned for wherever it could walk either way."""
+        should come from data-mined game files"); one standing or flinching, either way at its speed STAND_UNSURE_S at
+        the most (its heading not known: it may set off any time); one the feed doesn't follow as the tracker has it.
+        Until 2026-10-30 only without an escort (R5), and only where the tracker couldn't tell yet (vx None): a fighting
+        trip's monster seen once was planned for wherever it could walk either way."""
         feed = {tr.id: tr for tr in (getattr(s, "tracks", None) or ())}
         if not feed:
             return tracks
@@ -1265,8 +1283,13 @@ class Navigator:
         for t, m in zip(tracks, placed):
             tr = feed.get(getattr(m, "track", None))
             if tr is not None and getattr(tr, "vx", None) is not None:
-                vx = max(-t.speed, min(t.speed, tr.vx)) if abs(tr.vx) > STILL_VX else 0.0
-                t = replace(t, vx=vx, heading=(1 if vx > 0 else -1) if vx else 0, track=tr.id, trust=HEADING_TRUST_S)
+                if abs(tr.vx) > STILL_VX:
+                    vx = max(-t.speed, min(t.speed, tr.vx))
+                    t = replace(t, vx=vx, heading=1 if vx > 0 else -1, track=tr.id, trust=HEADING_TRUST_S)
+                elif _may_set_off(tr):  # (standing or flinching: either way, STAND_UNSURE_S at the most)
+                    t = replace(t, vx=None, heading=0, track=tr.id, unsure=STAND_UNSURE_S)
+                else:  # (dying, or its pose not told: where it was, as before)
+                    t = replace(t, vx=0.0, heading=0, track=tr.id, trust=HEADING_TRUST_S)
             out.append(t)
         return out
 
@@ -2406,7 +2429,8 @@ class Navigator:
         # (A chain queued on the move starts when this one ends, past any lock.)
         self.actions.hold_back(keys.sorted())
         plan_id, length = send(legs, keys, why, tail)
-        current = _Running(plan_id, legs, time.monotonic() + PLAN_START_S, more, tail, length, tuple(monsters), why=why)
+        current = _Running(plan_id, legs, time.monotonic() + PLAN_START_S, more, tail, length, tuple(monsters), why=why,
+                           arrows=self._arrows(keys.sorted()))
         self._sent_plans = [current.plan_id]  # every plan this chain sent: cancelled if anything fails
         self._replanning = replan and st is not None
         self.actions.pressed = True
@@ -2552,11 +2576,16 @@ class Navigator:
             switched = None
             if not cut and REACT and (coming := self._coming(current, room=not replan)) is not None:
                 mo, t, tid = coming
-                self._reacted[tid] = time.monotonic()
                 why = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
+                self._replanned = False
                 switched = self._switch(st, current, dst, why, "monster") if replan else None
                 if switched is None and (not replan or self._room_to_stop(current, time.monotonic() - current.start)):
                     cut = why
+                if switched is not None or cut or self._replanned:
+                    # (acted on, or replanned with nothing to take: not again for REACT_AGAIN_S; else, in a flight or
+                    # past a takeoff's key, not where the plan has her, the next state asks again, as _switch says:
+                    # marked first, it went unheeded for 3 s, 1-3 times a 5-minute run: the review of 2026-10-30)
+                    self._reacted[tid] = time.monotonic()
             elif not cut and replan and time.monotonic() >= better_at:
                 better_at = time.monotonic() + BETTER_EVERY_S
                 switched = self._switch(st, current, dst, "a better way", "better")
@@ -2646,6 +2675,7 @@ class Navigator:
         s = self._state_scene(state, body)
         if s is None:
             return None
+        self._replanned = True  # (from here on it's replanned: a monster it was for isn't asked about again at once)
         t0 = time.perf_counter()
         start = running.start + at  # when the new plan's keys take over (its plan time 0)
         kept = [leg.move for leg in running.legs if leg.end.t <= at + 1e-6]
@@ -2671,8 +2701,12 @@ class Navigator:
         monsters, near = self._chain_monsters(st, s, path, start=start)
         self._immunity(start)
         price, alts, goal = self._pricing(st, monsters)
+        spliced = client.can_splice()
+        # (spliced, the arrow her start holds stays held: the chain's keys let it go where it doesn't run on; until its
+        # review a chain that turned or stopped at once pressed the other arrow with this one held on, and ran her off
+        # 11's end: flow.chain's `held`. Cut and sent, every key is let go and the chain presses its own.)
         legs, keys, why_c = self.flow.chain(path, body, monsters, keep_going=True, hops=not self.fight, price=price,
-                                            alts=alts, goal=goal, spread=False)
+                                            alts=alts, goal=goal, spread=False, held=body.run if spliced else 0)
         if not legs:
             return None
         if kind == "better" and same:
@@ -2681,11 +2715,21 @@ class Navigator:
                 return None  # (it stops where the running one does: nothing gained)
             why = f"{why}: on past where it stopped ({running.why})"
         think_ms = (time.perf_counter() - t0) * 1000
+        late = time.monotonic() + SPLICE_LEAD_S - start  # (s past its plan time 0 the player would take it)
+        if late > 0.0:
+            gone = self._splice_point(running, at + late)
+            if late > SPLICE_LATE_S or gone is None or gone[0] > at + late + 1e-6:
+                self.log(f"    {why}: replanned too late ({think_ms:.0f} ms, {late * 1000:.0f} ms past its start): "
+                         "dropped, the next state asks again")
+                if telemetry.recording():
+                    telemetry.emit("event", kind="replan", text="dropped: too late", think_ms=round(think_ms, 2),
+                                   late_ms=round(late * 1000, 1))
+                return None
         return self._take_over(st, running, at, path, legs, keys, why_c, why, kind, near if near is not None else monsters,
-                               think_ms)
+                               think_ms, spliced)
 
     def _take_over(self, st: TripState, running: _Running, at: float, path: list[Move], legs: list[Leg], keys,
-                   why_c: str, why: str, kind: str, known, think_ms: float) -> _Running:
+                   why_c: str, why: str, kind: str, known, think_ms: float, spliced: bool | None = None) -> _Running:
         """The new chain handed over in place of the running plan's rest at its plan time `at`: spliced (client.splice:
         the arrow her new start holds kept held, no key let go between) where the player takes splices
         (client.can_splice), else the running plan cut and the new one sent at once, its keys from `at` on (a player
@@ -2704,7 +2748,7 @@ class Navigator:
         body = legs[0].start
         held = [self.flow.key_names[directions.toward(body.run)]] if body.run else []
         plan_kind = getattr(self.actions, "kind", None)
-        spliced = client.can_splice()
+        spliced = client.can_splice() if spliced is None else spliced  # (as the chain was planned for: `held`)
         if spliced:
             plan_id = client.splice(running.plan_id, events, ms(at), held, end_ms=end_ms, name="flow", kind=plan_kind)
             start, parent = running.start + at, running.plan_id
@@ -2730,7 +2774,18 @@ class Navigator:
         self.log(f"    {why}: replanned from {at:.2f} s into the plan ({'spliced' if spliced else 'cut and sent'}), "
                  f"on {body.platform.id} at x {body.x:.0f}: " + _chain_text(legs, len(path), why_c))
         return _Running(plan_id, legs, start, tail is not None, tail or 0.0, end_ms / 1000, tuple(known), parent=parent,
-                        why=why_c)
+                        why=why_c, arrows=self._arrows(events, body.run if spliced else 0))
+
+    def _arrows(self, events, held: int = 0) -> tuple:
+        """A plan's arrow keys' events ((ms, -1 left / +1 right, down)), the arrow held at its start (`held`: a splice's
+        start body's run) first: _Running.arrows."""
+        names = {self.flow.key_names.get(directions.LEFT): -1, self.flow.key_names.get(directions.RIGHT): 1}
+        out = [(0, held, True)] if held else []
+        for e in events:
+            d = names.get(e[1])
+            if d is not None and len(e) >= 3 and e[2] in ("down", "up"):
+                out.append((int(e[0]), d, e[2] == "down"))
+        return tuple(out)
 
     def _splice_point(self, running: _Running, t: float) -> tuple[float, Body] | None:
         """Where the running plan can be taken over from at its plan time t at the soonest: (its plan time then, her body
@@ -2748,9 +2803,14 @@ class Navigator:
             for sp in leg.spans:
                 if sp.t0 - 1e-9 <= t <= sp.t1 + 1e-9:
                     dx, dt = sp.x1 - sp.x0, sp.t1 - sp.t0
-                    d = 0 if abs(dx) < 1 else (1 if dx > 0 else -1)
-                    v = max(-WALK_SPEED, min(WALK_SPEED, dx / dt)) if d and dt > 0 else 0.0
-                    return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform), d, v=v)
+                    v = max(-WALK_SPEED, min(WALK_SPEED, dx / dt)) if abs(dx) >= 1 and dt > 0 else 0.0
+                    d = (0 if abs(dx) < 1 else (1 if dx > 0 else -1)) if not running.arrows \
+                        else _arrow_at(running.arrows, t)
+                    # (the arrow the plan's keys hold then, not the way the span goes: she slides on after letting
+                    # go, and a splice there that took the slide for a run held its arrow on with no key to let it go
+                    # in the new plan: up the tower from 13 she ran off 11's end and out of the map, its review's
+                    # fix of 2026-10-30)
+                    return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform), d, v=v if d else 0.0)
             for sp in leg.stands:
                 if sp.t0 - 1e-9 <= t <= sp.t1 + 1e-9:
                     return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform))
@@ -2771,6 +2831,7 @@ class Navigator:
         there = self._state_scene(state, end)
         if there is None:
             return True  # (not known: as it was, she stops)
+        there.what_if = True  # (made up: what the hunt's until decides there isn't kept, Hunt._sweep_calls)
         if st.until is not None and st.until(there):
             return True
         return self._mode == HUNT and st.tries.get(end.platform.id, 0) < ON_WAY_TRIES             and self.escort is not None and self.escort.target(there) is not None
@@ -2992,27 +3053,33 @@ class Navigator:
     def _known(self, tr, known: tuple, t: float) -> bool:
         """Whether the look the running chain was planned from had the monster the feed follows as `tr` (tracking.Track),
         as of plan time t: one of its kind on its platform (`known`) that, walking as that look had it, can be within
-        MATCH_SLACK of where the feed has it. The chain was planned against it then, or past it on purpose (a way
+        MATCH_SLACK of where the feed has it, and walks as the plan had it (`_as_planned`: one planned standing that has
+        set off since, or planned walking one way that now walks the other or stands, isn't: the plan's walk of it no
+        longer holds, the review of 2026-10-30: one that set off was within its reach and MATCH_SLACK, 85 units at 1 s,
+        long after it had left the plan's spread). The chain was planned against it then, or past it on purpose (a way
         through after waiting for it, or regardless: _meet); REACT is for those the look hadn't."""
         p = self.model.platform(tr.platform)
         for mo in known:
             if mo.platform == tr.platform and mo.kind == tr.kind:
                 lo, hi = mo.reach(t, p)
-                if lo - MATCH_SLACK <= tr.x <= hi + MATCH_SLACK:
+                if lo - MATCH_SLACK <= tr.x <= hi + MATCH_SLACK and _as_planned(mo, tr):
                     return True
         return False
 
     def _track_of(self, tr, start: float) -> MonsterTrack:
         """A monster the feed follows (tracking.Track) as the move planner sees it, as of its last sighting in the plan
         that started at `start` (time.monotonic): walking at its velocity as followed (to its kind's speed at most), or
-        standing (under STILL_VX: where it may start walking either way, as a look's standing one)."""
+        standing (under STILL_VX: where it may start walking either way, STAND_UNSURE_S of it at the most, as a look's
+        standing one: _walking)."""
         speed = self.tracker.walking.get(tr.kind, DEFAULT_SPEED)
         half, top = touch_box(tr.kind, self.tracker.body.get(tr.kind))
-        vx = max(-speed, min(speed, tr.vx)) if abs(tr.vx) > STILL_VX else 0.0
-        heading = (1 if vx > 0 else -1) if vx else 0
+        walks = abs(tr.vx) > STILL_VX
+        unsure = not walks and _may_set_off(tr)
+        vx = max(-speed, min(speed, tr.vx)) if walks else None if unsure else 0.0
+        heading = (1 if vx > 0 else -1) if walks else 0
         return MonsterTrack(tr.platform, tr.x, speed, heading, half, vx, tr.last_seen - start,
                             MONSTER_HEIGHT.get(tr.kind, top), tr.facing, tr.kind, top, track=getattr(tr, "id", None),
-                            trust=HEADING_TRUST_S)
+                            trust=HEADING_TRUST_S, unsure=STAND_UNSURE_S if unsure else None)
 
     def _placed(self, dot, still: bool, running: _Running,
                 seen_at: float | None = None) -> tuple[Platform | None, int | None, Leg, float | None]:
@@ -3108,7 +3175,7 @@ class Navigator:
         if s.where is None:
             return None
         p = end.platform
-        there = replace(s, where=replace(s.where, x=end.x, y=p.y_at(end.x), platform=p))
+        there = replace(s, where=replace(s.where, x=end.x, y=p.y_at(end.x), platform=p), what_if=True)
         threats = self.fight and self._threats()  # (where the next chain's legs go: trip_monsters)
         ahead = {p.id} | _platforms(_after(running, st.path))
         seen = self._on_platforms(self.trip_monsters(s)) if threats else s.monsters
@@ -3117,8 +3184,8 @@ class Navigator:
             tracks += tuple(self.remembered(s, ahead, seen, s.t - running.ends))
         if not self.fight:  # avoiding them: the next chain keeps clear of them
             return _Ahead(there, tracks)
-        if st.until is not None and st.until(there):
-            return _no_follow("the trip's until, where it ends")
+        if st.until is not None and not self._post_hit(st) and st.until(there):  # (not while she's invulnerable after a
+            return _no_follow("the trip's until, where it ends")                  # touch: POST_HIT, as _pass)
         if self._mode == HUNT and st.tries.get(p.id, 0) < ON_WAY_TRIES and self.escort.target(there):
             return _no_follow("a monster in reach where it ends")
         keep = tuple(t for t in tracks if self.escort.threat(t.kind)) if threats else ()
@@ -3183,7 +3250,7 @@ class Navigator:
             telemetry.emit("route", **_route_record(st, dst, path, p.id, x))
         plan_id, length = send(legs, keys, why, tail or 0.0)
         return _Running(plan_id, legs, start, tail is not None, tail or 0.0, length,
-                        tuple(watch if self.fight else tracks))
+                        tuple(watch if self.fight else tracks), arrows=self._arrows(keys.sorted()))
 
     def _landed_on(self, p: Platform, until: float) -> Scene | None:
         """Looks until one places her standing on platform `p` (now and then she lands later than predicted,
@@ -3264,9 +3331,45 @@ def _after(running: "_Running", path: list[Move]) -> list[Move]:
     return path[sum(1 for leg in running.legs if leg.move.kind != "hop"):]
 
 
+def _arrow_at(arrows: tuple, t: float) -> int:
+    """The arrow a plan's keys hold at its plan time t (s): -1 left, +1 right, 0 none (_Running.arrows; both held, the
+    one pressed last)."""
+    held: dict[int, int] = {}
+    for k, (ms_, d, down) in enumerate(arrows):
+        if ms_ / 1000 > t + 1e-9:
+            break
+        if down:
+            held[d] = k
+        else:
+            held.pop(d, None)
+    return max(held, key=held.get) if held else 0
+
+
 def _same_moves(a: list[Move], b: list[Move]) -> bool:
     """Whether two routes go the same way as far as both go (each move's kind, from and onto: not where it takes off)."""
     return all((m.kind, m.src, m.dst) == (n.kind, n.src, n.dst) for m, n in zip(a, b))
+
+
+def _may_set_off(tr) -> bool:
+    """Whether a monster the feed follows standing (tracking.Track: vx under STILL_VX) may set off any time: alive, its
+    last detection a stand or flinch frame (monsters.walk_vx 0). Not one dying (the tracker's DYING: a kill of hers on
+    it, or its death seen; a corpse never walks, and planned so the landing by one dying of her star became a move in
+    the way of her jump, shot at again and again with nothing to shoot: nav_tree_landing_shot_first, its review's fix),
+    nor one whose pose the frame didn't tell (its vx kept from before)."""
+    return getattr(tr, "state", LIVE) in (LIVE, HIDDEN) and getattr(tr, "pose", "stand") in ("stand", "hit1")
+
+
+def _as_planned(mo: MonsterTrack, tr) -> bool:
+    """Whether the feed's track `tr` (tracking.Track) walks as a plan's monster `mo` had it: planned either way (its
+    heading not known: standing, as perception had it, or seen once), so far as it hasn't set off since (one planned
+    standing, `unsure`, that walks now hasn't: STAND_UNSURE_S); planned walking (vx), the same way still, not standing
+    (one stopped is where the plan has it gone by)."""
+    walks = abs(getattr(tr, "vx", 0.0) or 0.0) > STILL_VX
+    if mo.vx is None:
+        return not (walks and mo.unsure is not None)
+    if not mo.vx:
+        return not walks
+    return walks and (tr.vx > 0) == (mo.vx > 0)
 
 
 def _ground_from(leg: Leg) -> float:
