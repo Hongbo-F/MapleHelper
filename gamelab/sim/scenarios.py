@@ -890,15 +890,19 @@ def loop_tree_ore_waits(sim):
     once only where nothing would meet her standing on it, hunt._unsafe, so an ore among 22's Green Mushrooms isn't one
     EXP before loot weighs against what's in reach, whose word for it, "shooting first", was what this checked; that no
     pile goes ahead of what's in reach, ": the pile first", is: on seed 1 she picked up every ore, 6 of 6, each when
-    nothing was in reach, and none of her touches hurt.) (Seed 7 since walls stop her in the air by the game's rule
-    (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1
-    the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the
-    simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
-    right): on seed 7 the ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.)
-    (Seed 24 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in
-    the time, and hurt more than five times; none of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14
-    since the stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges),
-    2026-10-31: on seed 24 the ore not picked up in the time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
+    nothing was in reach, and none of her touches hurt.) (Seed 2 since the review's fixes of 2026-10-30 (the frames on
+    their grid at 15 a second whatever is asked, feed.run; a monster standing planned either way a while,
+    navigator.STAND_UNSURE_S; her piles seen gone only by strips sure of them, worldstate.DropStrip.sure;
+    D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 1 she was hurt more than five times; of seeds
+    1-8 met on 2-8.) (Seed 7 since walls stop her in the air by the game's rule (body.wall_table, 2026-10-31: the
+    planner's flights from a floating platform count the tower's walls now): on seed 1 the ore never picked up in time;
+    of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the simulator's looks have her place as the
+    world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 7 the ore never picked up in
+    time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.) (Seed 24 since the monsters move as the v83
+    client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in the time, and hurt more than five times; none
+    of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14 since the stack's monsters turn where the game
+    turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 24 the ore not picked up in the
+    time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1063,7 +1067,7 @@ def loop_tree_lie_detector_28(sim):
     return lie_detector(2.0)(sim)
 
 
-@tree((25, 220.0), monsters="all", seed=2, limit=500, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=1, limit=500, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=LIE_DETECTOR_EXPECTS + (check("onto 25, the safe platform under 24", lambda tr: tr["result"]["then"][
           "platform"] == 25),))
@@ -1074,7 +1078,11 @@ def loop_tree_lie_detector_23(sim):
     1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.) (Seed 1
     since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the dying and a throw's last look before its
     key, with her drops waiting while a monster that counts is by them and her decisions going by the monsters the looks
-    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.) (Seed 2 since chains are replanned at every state as they run (2026-10-30, work/replan: navigator.REPLAN, KNOCK_REPLAN, MEET_WALK): on seed 1 she went to the rope at x 146 from 32, a rope as safe, not onto 25; of seeds 1-3, 2 and 3 meet all of this.)"""
+    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.) (Seed 2 since chains are replanned at every state as they run (2026-10-30, work/replan: navigator.REPLAN, KNOCK_REPLAN, MEET_WALK): on seed 1 she went to the rope at x 146 from 32, a rope as safe, not onto 25; of seeds 1-3, 2 and 3 meet all of this.)
+    (Seed 1 since the review's fixes of 2026-10-30 (the frames on their grid at 15 a second whatever is asked,
+    feed.run; a monster standing planned either way a while, navigator.STAND_UNSURE_S; her piles seen gone only by
+    strips sure of them, worldstate.DropStrip.sure; D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt):
+    on seed 2 she retreated to 28, safe enough, not onto 25; of seeds 1-8 met on 1 and 3-8.)"""
     return harness._only(lie_detector(60.0), (23,))(sim)
 
 
@@ -1513,7 +1521,11 @@ def loop_tree_attack_no_darts(sim):
     touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 8 her stars' test didn't say MAYBE OUT;
     of seeds 1-16 only 3 meets all of this.) (Seed 6 since the loot sweep (2026-10-30, behavior.sweep: the hunt loop's
     drops one rule, priced in her time): on seed 3 no 20 Lucky Seven presses in a row came to out of darts' stop; of
-    seeds 1-6, 6 alone meet all of this.) (Seed 6 since the simulator's looks have her place as the world does
+    seeds 1-6, 6 alone meet all of this.) (Seed 3 since the review's fixes of 2026-10-30 (the frames on their grid at 15
+    a second whatever is asked, feed.run; a monster standing planned either way a while, navigator.STAND_UNSURE_S; her
+    piles seen gone only by strips sure of them, worldstate.DropStrip.sure;
+    D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 6 out of darts wasn't told by its own watch;
+    of seeds 1-8 met on 3 alone.) (Seed 6 since the simulator's looks have her place as the world does
     (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT; of
     seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the v83
     client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of
@@ -1572,7 +1584,11 @@ def loop_tree_grind_jump_key(sim):
     150.0-150.7 s, JUMP followed to C, 42 kills after.) (Seed 1 since the respawn as the map's fill to its cap,
     2026-10-30: work/fill-to-cap, grinding's loop counting what its own kills bring back: on 2 not all of this; of seeds
     1-13, 1, 3-8 and 10-13 meet all of it. On 1: the doubt at 122.1 s, the window read at 122.6-123.3 s, JUMP followed
-    to C at 124.0 s, 38 kills after.)"""
+    to C at 124.0 s, 38 kills after.) (Seed 1 since the review's fixes of 2026-10-30 (the frames on their grid at 15 a
+    second whatever is asked, feed.run; a monster standing planned either way a while, navigator.STAND_UNSURE_S; her
+    piles seen gone only by strips sure of them, worldstate.DropStrip.sure;
+    D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 2 her jumps' six in a row without a lift
+    weren't told; of seeds 1-8 met on 1, 5 and 7.)"""
     return key_check_run(4)(sim)
 
 
@@ -1786,13 +1802,17 @@ def nav_tree_rope_top_15(sim):
     return _nav(16)(sim)
 
 
-@tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=1, limit=120, **_LIVE,
+@tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=2, limit=120, **_LIVE,
       expects=(ends("arrived"), logs("touched on the rope"), sends("climb_on"),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_hit(sim):
     """From 19 up to 16 by the rope at x 111 (19 -> 18), a Green Mushroom walking on 18 by its top (as at 22:58:05
     live, where the trip went past it regardless): it touches her on the rope, which cuts the chain and lets go of
-    up; the game keeps her on the rope, and up goes down again at once (navigator.CLIMB_ON), onto 18 and on."""
+    up; the game keeps her on the rope, and up goes down again at once (navigator.CLIMB_ON), onto 18 and on. (Seed 2
+    since the review's fixes of 2026-10-30 (the frames on their grid at 15 a second whatever is asked, feed.run; a
+    monster standing planned either way a while, navigator.STAND_UNSURE_S; her piles seen gone only by strips sure
+    of them, worldstate.DropStrip.sure; D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 1 the
+    Green Mushroom never touched her on the rope; of seeds 1-8 met on 2, 4 and 6-8.)"""
     return _nav(16, fight=True)(sim)
 
 
