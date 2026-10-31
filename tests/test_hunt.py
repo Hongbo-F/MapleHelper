@@ -614,6 +614,39 @@ def test_a_monster_walking_at_where_she_would_stand_is_shot_first_or_the_pile_le
     assert first._guards(s, pile, 1.1, 0.5) == ((), None)
 
 
+def test_a_monster_on_the_platform_just_under_a_pile_guards_it_as_one_on_the_pile_s_own(monkeypatch):
+    """Her full box against theirs (the review of 2026-10-31: BESIDE_GUARDS): a Horny Mushroom walking left at 880 on a
+    platform 30 under the ground (its top, 51, reaches into her standing there) is by the drops at 745-755 as she
+    stands there, as one on the ground would be: shot first, or the pile left. One on a platform 70 under it walks
+    under her feet: nothing. Until then the pile's own platform's alone guarded it. And rule 1, with her fights'
+    BESIDE (off by default), counts the one under her, too close (inside its keep-off), as one on her platform."""
+    from test_danger import build
+    m = build([(500, 500, 900, 500), (900, 480, 1100, 480), (400, 530, 900, 530), (400, 570, 900, 570)],
+              [("19", 800, 500)])
+    ground, spot = m.platform_under(700, 500).id, m.platform_under(1000, 480).id
+    low, deep = m.platform_under(600, 531).id, m.platform_under(600, 571).id
+    pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True, status="seen", xs=(745.0, 755.0),
+                last_seen=time.monotonic())
+    s = _on(spot, 1000.0, m, [_walker("horny-mushroom", low, 880.0, -1, m)])
+    h = _priced(m, [pile], travel=0.1)
+    assert [g.monster.x for g in h._guards(s, pile, 1.1, h._stand_s(pile))[0]] == [880.0]
+    h._hits = lambda s, m: False
+    assert h._guards(s, pile, 1.1, h._stand_s(pile)) == ((), f"a horny-mushroom at x 880 on {low} would meet her there")
+    deeper = _on(spot, 1000.0, m, [_walker("horny-mushroom", deep, 880.0, -1, m)])
+    assert _priced(m, [pile], travel=0.1)._guards(deeper, pile, 1.1, 0.5) == ((), None)
+    monkeypatch.setattr(hunt, "BESIDE_GUARDS", False)
+    assert _priced(m, [pile], travel=0.1)._guards(s, pile, 1.1, 0.5) == ((), None)
+    # Rule 1 with her fights' BESIDE (off by default): the one under her 120 off (its keep-off 169) is too close; 70
+    # under her it isn't on her level.
+    from gamelab.attack import stance
+    monkeypatch.setattr(stance, "BESIDE", True)
+    h = _priced(m, [], travel=0.1)
+    h._halves = {"horny-mushroom": 28.0}
+    h.h.actions = SimpleNamespace(facing="right", lock_until=0.0, attack_at=None)
+    assert h._close_quarters(_on(ground, 760.0, m), [_walker("horny-mushroom", low, 880.0, -1, m)])
+    assert not h._close_quarters(_on(ground, 760.0, m), [_walker("horny-mushroom", deep, 880.0, -1, m)])
+
+
 def test_her_own_kill_dying_by_its_drops_guards_nothing():
     """Live on 2026-10-30 12-28% of the piles' waits (PILE_CLEAR) were for the pile's own monster, drawn dying where it
     dropped them: her kill placed on it (ledger.dying) guards nothing, nor a track the feed has taken for dead."""

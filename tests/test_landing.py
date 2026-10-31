@@ -235,10 +235,12 @@ def test_grind_stops_stand_clear_of_their_platforms_spawn_points(tree_map, monke
     before = stops()  # (off by default: in the harness it cost grinding 4.3% of its EXP, patrol.STOP_SLACK)
     monkeypatch.setattr(patrol, "STOP_SLACK", 0.05)
     now = stops()
-    # 24's stop from 221 (51 from its Green's point at 272) to 201 (71); none nearer its own points than before.
-    assert before[24] == 221 and now[24] == 201
+    # 16's stop from 89 (13 from its Green's point at 76) to 166 (90); none nearer its own points than before. (With the
+    # stops weighing danger as the hunt loop's grounds since 2026-10-31, patrol.STOP_DANGER, 24's stays at 221, 51 from
+    # its Green's point: 201 is in 23's Horny Mushrooms' reach, 0.23, where until then it went there.)
+    assert before[16] == 89 and now[16] == 166 and before[24] == now[24] == 221
     assert all(clear(pid, now[pid]) >= clear(pid, before[pid]) - 1e-6 for pid in now)
-    assert sum(clear(pid, now[pid]) > clear(pid, before[pid]) + 1 for pid in now) >= 8
+    assert sum(clear(pid, now[pid]) > clear(pid, before[pid]) + 1 for pid in now) >= 5
 
 
 def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: F811

@@ -100,8 +100,8 @@ from .. import telemetry
 from ..attack import reach, ropes, spots
 from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
-from ..attack.stance import (MIN_MOVE, act_text, close_to, drop_limits, jump_hits, open_above, overhead, stance,
-                             too_close)
+from ..attack.stance import (MIN_MOVE, act_text, beside, close_to, drop_limits, jump_hits, open_above, overhead,
+                             stance, too_close)
 from ..control.actions import PILE_EVERY_MS
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import ARRIVE_TOLERANCE, RUN_SEEN, RUN_UNITS, TRANSIT, Choice, TripState
@@ -256,6 +256,10 @@ MESO_EXP = 0.5
 # rules ("every kill on a trip made another trip, and she never left"; the review of 2026-10-30: tour_tree_run took 628
 # s against master's 534). None: a budget at each solve, as the sweep's first version.
 DEPART_BUDGETS: float | None = 2.0
+# The sweep's guards (`_about`, `_guards`) count the monsters on a platform just under or over a pile's whose bodies
+# meet hers standing on it (Danger.beside: her full box against theirs, as attack.stance's BESIDE), from 2026-10-31;
+# False: the pile's own platform's alone, as before.
+BESIDE_GUARDS = True
 RIVAL_TAKES = 0.5      # guess: the chance another player by a pile that isn't hers alone takes it before she's there
 EXP_FIRST = True       # EXP before loot on; off, the piles' fixed priorities as before (6a and 6 ahead of shooting)
 VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (the urgent piles' 12 s, and a little),
@@ -344,6 +348,7 @@ class Visit:
     spot_since: float = 0.0
     kills: list[float] = field(default_factory=list)  # when her kills there were (respawns due back)
     empty_since: float | None = None  # since when looks covering the ground have seen nothing wanted on it
+    backs: int = 0                 # trips back to the stop from where she was worse off (behavior.grind: BACK_TRIES)
 
 
 @dataclass
@@ -768,15 +773,23 @@ class Hunt:
         a kind that counts as a danger among the targets too, so a fight keeps off them and shoots them (rule 1 and
         stance: one on her platform that can touch her first). Not those on other platforms: thrown at where they were
         last seen, they'd be the throws at what's dead or gone that the live hunt of 2026-10-25 wasted 52 of 325 on
-        (jumps-perception-skeptic). Where nothing counts as a danger (the first map), as they were."""
+        (jumps-perception-skeptic). And the monsters seen on a platform just under or over hers whose bodies meet hers
+        (stance's `beside`, BESIDE) among the targets, whatever her ground: her fights keep off them as off one on hers
+        (rule 1, the stance's close quarters) and throw at them where a star reaches. Where nothing counts as a danger
+        (the first map), as they were."""
         d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
         if s.platform is None or s.where is None or d is None or not d.any:
             return targets, visible, hidden
+        here, x = s.platform, s.where.x
+        near = [m for m in visible if m.platform != here.id and beside(m, here, x, d)
+                and not any(m is t for t in targets)]
+        if near:
+            targets = targets + near
         more = [m for m in self._unseen(s) if not any(_same(m, h) for h in [*hidden, *visible])]
         if not more:
             return targets, visible, hidden
-        here = s.platform.id
-        mine = [m for m in more if m.platform == here and d.share(m.kind) > 0 and not any(_same(m, t) for t in targets)]
+        mine = [m for m in more if m.platform == here.id and d.share(m.kind) > 0
+                and not any(_same(m, t) for t in targets)]
         return targets + mine, visible, hidden + more
 
     def _unseen_here(self, s: Scene) -> list[Monster]:
@@ -873,12 +886,13 @@ class Hunt:
     # --- shooting -----------------------------------------------------------------------------------
 
     def _close_quarters(self, s: Scene, monsters) -> bool:
-        """Rule 1: one of `monsters` on her platform is as close as stance's own threshold, where it will be when her
-        next attack starts (too_close, fight.pace_of: the claw would swipe it, by its size; or nearer than its danger
-        warrants: Danger.keep_off)."""
+        """Rule 1: one of `monsters` on her platform (or on one just under or over it whose body meets hers: stance's
+        `beside`, BESIDE) is as close as stance's own threshold, where it will be when her next attack starts
+        (too_close, fight.pace_of: the claw would swipe it, by its size; or nearer than its danger warrants:
+        Danger.keep_off)."""
         x, pace = s.where.x, fight.pace_of(self.h, s)
         facing = getattr(getattr(self.h, "actions", None), "facing", None)
-        return any(m.platform == s.platform.id
+        return any(beside(m, s.platform, x, self.danger)
                    and too_close(m, x, self._halves, self.danger, pace, s.platform, (m.x > x) != (facing == RIGHT))
                    for m in monsters)
 
@@ -1257,11 +1271,15 @@ class Hunt:
                                     (lambda dt, p=p: p.still(now, dt)), guards))
         return found, out
 
-    def _about(self, s: Scene, pid: int) -> tuple[list[Monster], list[Monster]]:
-        """The monsters that count as a danger (attack.danger) on platform `pid` as of look `s`, as (those the state has
-        on screen, those about that it didn't find: `_unseen`), none her kills dying there (ledger.dying: the pile's own
-        monster drawn dying; until 2026-10-30 12-28% of the piles' waits live were for it) nor of the feed's tracks
-        taken for dead (Ledger.dead). [] both where nothing counts (the first map)."""
+    def _about(self, s: Scene, pid: int, xs: tuple[float, ...] = ()) -> tuple[list[Monster], list[Monster]]:
+        """The monsters that count as a danger (attack.danger) on platform `pid` as of look `s`, and those on a platform
+        just under or over it whose bodies meet hers standing at one of map xs `xs` there (Danger.beside: a pile's
+        stretch; their walks their own platforms', `_reach_of`), as (those the state has on screen, those about that it
+        didn't find: `_unseen`), none her kills dying there (ledger.dying: the pile's own monster drawn dying; until
+        2026-10-30 12-28% of the piles' waits live were for it) nor of the feed's tracks taken for dead (Ledger.dead).
+        [] both where nothing counts (the first map). Until 2026-10-31 her own platform's alone: in the simulator's
+        grind on Tree Dungeon a pile on 9 was stood on with Horny Mushrooms walking 8 and 10 by it (D:/MapleHelper-
+        scratch/replan/pos: seed 1 at 199.6-203.7 s, four touches at a stand on 9, two from 8 and two from 10)."""
         d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
         if d is None or not d.any:
             return [], []
@@ -1269,9 +1287,12 @@ class Hunt:
         kills = ledger.kills if ledger is not None else []
         die, dead = (getattr(ledger, "die", {}), getattr(ledger, "dead", {})) if ledger is not None else ({}, {})
         seen = [*s.monsters, *[m for m in getattr(s, "swept", ()) if not any(m is o for o in s.monsters)]]
+        p = self.model.platform(pid) if xs and BESIDE_GUARDS else None
 
         def counts(m) -> bool:
-            return m.platform == pid and d.share(m.kind) > 0 and not dying(kills, m, s.t, seen, die, dead)
+            if m.platform != pid and (p is None or not any(d.beside(m, p, x) for x in xs)):
+                return False
+            return d.share(m.kind) > 0 and not dying(kills, m, s.t, seen, die, dead)
         return [m for m in seen if counts(m)], [m for m in self._unseen(s) if counts(m)]
 
     def _reach_of(self, m: Monster) -> tuple:
@@ -1296,10 +1317,10 @@ class Hunt:
         (one about that it didn't find, "unseen", isn't thrown at), its kill time (Attacks.kill_s) and its EXP; else the
         pile is left out ("in general you should kill all the mobs that are in the way, try not to hit by mobs just for
         picking up loots": the user, 2026-10-30). Nothing where nothing counts (the first map)."""
-        seen, unseen_ = self._about(s, p.platform)
+        lo, hi = self._extent(p)
+        seen, unseen_ = self._about(s, p.platform, (lo, hi))
         if not seen and not unseen_:
             return (), None
-        lo, hi = self._extent(p)
         t1 = at + stand + sweep.STAND_PAST_S
         met, rest = [], [*seen, *unseen_]
         while (m := sweep.meets(rest, lo, hi, at, t1, self._reach_of, HER_HALF)) is not None:

@@ -144,7 +144,7 @@ POLICY = Policy(default_mode="skill",     # Magic Claw whenever her MP pays for 
 PET = Pet(hp_warning=0.55, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # hp_warning live (2026-10-29: her pet drank
                                           # at 359 and 335 of 628, 57% and 53%); the rest PLACEHOLDER (the thief's pet): her pet,
                                           # its auto-potion thresholds and potions -- the user's answer; `pet --read` (L0)
-PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=100.0, ground_danger=2.0, hp_exp=250.0,
+PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=250.0, ground_danger=2.0, hp_exp=250.0,
                 seen_share=0.3, threat_s=1.7, keep_danger=0.08, meet_s=8.0)  # PLACEHOLDER (the thief's): re-tuned in
                                           # the simulator with her HP and DEF (S7), then her live kill times (L2)
 # The safety stop's reserve: three of the map's largest touches (behavior.safety: worked out live, at her level and DEF as

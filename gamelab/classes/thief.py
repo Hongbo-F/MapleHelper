@@ -85,7 +85,7 @@ PET = Pet(hp_warning=0.70,                  # sim.world.PET_HP (behavior.safety:
           mp_heal=185.0)                    # sim.world.MP_POTION
 PRIORS = Priors(kill_s_per_exp=0.085,       # behavior.patrol.KILL_S_PER_EXP
                 danger_hp_s=0.0175,         # patrol.DANGER_HP_S
-                hp_price=100.0,             # patrol.HP_PRICE
+                hp_price=250.0,             # patrol.HP_PRICE
                 ground_danger=2.0,          # behavior.hunt.GROUND_DANGER
                 hp_exp=250.0,               # hunt.HP_EXP
                 seen_share=0.3,             # behavior.tour.SEEN_SHARE

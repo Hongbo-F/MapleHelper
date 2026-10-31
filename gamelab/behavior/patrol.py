@@ -202,16 +202,28 @@ DANGER_HP_S = 0.0175
 # model's (attack.danger.DANGER_MIN: on Tree Dungeon a Horny Mushroom takes 16.1% of her 752 HP at level 24, a Green
 # Mushroom 7.2%, a Slime 1.2%; on the first map no kind counts).
 DANGER_MIN = danger_model.DANGER_MIN
-HP_PRICE = 100.0       # guess: what a bar of her HP costs her, in EXP (her pet's potions, and the risk)
-# A stop's place along its platform (stops_of) weighs the EXP it reaches against what touches there cost while she
-# shoots it: KILL_S_PER_EXP s a point of EXP, DANGER_HP_S of her HP a second a unit of danger, HP_PRICE EXP a bar of HP,
-# so 0.149 of its EXP a unit of danger (by the guesses those are). With the default hook, the same all along a platform,
+# What a bar of her HP costs her, in EXP (her pet's potions, and the risk): the hunt loop's (behavior.hunt.HP_EXP: a bar
+# of her 774 HP 3.1 Orange Potions, 500 mesos at a guessed 160 each, 250 EXP at MESO_EXP 0.5), from 2026-10-31; until
+# then 100, a guess of its own, and the loop and her stays priced her touches at the top of Tree Dungeon's tower at
+# 0.07-0.15 bars a round where she lost 3 bars a minute on 10 (D:/MapleHelper-scratch/replan/pos). At 50 mesos a potion a
+# bar would be 78 EXP: the user's to set, by what potions cost.
+HP_PRICE = 250.0
+# A stop's place along its platform (stops_of) weighs the EXP it reaches against its danger there as the hunt loop
+# weighs a ground's (behavior.hunt.GROUND_DANGER: 1 - 2 x the danger, never under 0), from 2026-10-31: on Tree Dungeon
+# 7's stop moves from x -95 (1 unit off its Horny Mushroom's point at -94, danger 0.27) to -31 (0.22), 13's from -35 to
+# 22, 15's from -95 to -55, 19's from 150 (on its point) to 130, 23's from 8 to -172 (0.28 to 0.13), and before she has
+# seen anything the loop is 10, 8 (470 EXP a minute) for 10, 7 (483). Until then KILL_S_PER_EXP x DANGER_HP_S x HP_PRICE
+# (0.149 of its EXP a unit of danger: what touches would cost while she shoots there, by the live hook's guesses), which
+# left the stops on spawn points, a respawn there landing on her. With the default hook, the same all along a platform,
 # it changes no stop.
-STOP_DANGER = KILL_S_PER_EXP * DANGER_HP_S * HP_PRICE
-# ... and blended with the HP she has seen go on each platform (Patrol.learn_hp: the drops of her HP bar between looks
-# there), the hook counting as HP_PRIOR_S s there: in the simulator's crowd on Tree Dungeon she lost 1.3-1.4 bars a
-# minute alive whatever she did (20 bars a run, her 60 potions), live 0.28-0.33.
-HP_PRIOR_S = 60.0      # guess
+STOP_DANGER = 2.0
+# ... and blended with the HP she has seen go on each platform (Patrol.learn_hp: her touches, behavior.grind's
+# HP_BY_TOUCHES, or the drops of her HP bar between looks), the hook counting as HP_PRIOR_S s there: in the simulator's
+# crowd on Tree Dungeon she lost 1.3-1.4 bars a minute alive whatever she did (20 bars a run, her 60 potions), live
+# 0.28-0.33; the hook's 0.0175 a unit of danger is the live hunts' on 23, where in the simulator's grind at the top of
+# the tower she lost 2.4-2.8 bars a minute at 0.3 and more. A guess, 20 s from 2026-10-31 (60 until then): what she sees
+# there counts for as much as the hook after a stop's stay.
+HP_PRIOR_S = 20.0
 # The loop.
 LOOP_MAX = 12          # guess: stops in a round at most ...
 LOOP_MIN = 2           # ... and at least: one is camping (Patrol.camping), which grinding doesn't do

@@ -18,7 +18,10 @@ What changes from the hunt loop (the rules not named here are its own, unchanged
   EXP over their kill time and the walk (`_stay_gain`); with none, the respawns expected in reach within patrol.DUE_S
   (Patrol.wait_gain: 1-2 EXP/s at a point watched empty, so she doesn't wait for respawns). Under it, she leaves
   LEAVE_CONFIRM_S after; STOP_MAX_S at the most with nothing in reach. No better spot (rule 7), no lull loot (rule 8),
-  no waiting out respawns (rule 9 only for those confirmations), no rate rule.
+  no waiting out respawns (rule 9 only for those confirmations), no rate rule. Got to the stop, a knock (or a pile) that
+  leaves her on another platform where it's more dangerous than at the stop's place has her go back to it first (from
+  2026-10-31, `_back_due`: the hunt loop's 'back to spot', by the danger), and rule 1 yields to her way back unless a
+  monster is on her.
 - On the legs: the hunt loop's rule 4, shooting in passing (anything a star reaches, any platform), its finishing (4b)
   and the loot sweep's piles on her way to the stop (behavior.sweep: those worth their time, within its budget): kills
   and pick-ups between moves, without stopping to clear a ground. Every RECHOOSE_S of a trip to a stop, a pile of
@@ -47,12 +50,15 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from ..attack.spots import Spot
+from ..attack.stance import CONTACT_SLACK, beside, half_of
 from ..localization.memory import SURE
 from ..localization.monsters import Monster
 from ..localization.scene import Scene
+from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
-from .hunt import Hunt, Objective, Visit
+from .hunt import PASSING_S, Hunt, Objective, Visit
+from . import patrol as patrol_mod
 from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
@@ -67,6 +73,35 @@ RECHOOSE_S = 1.0       # guess: s between two looks at where she'd go instead (P
 HP_LOG_S = 10.0        # s on a platform at least for the log to say what HP she lost there (the log's choice)
 STATE_EVERY_S = 60.0   # s between two 'grind' records 'state' (what it did so far: a run cut short has them; the
                        # log's choice)
+# Back to the stop (`_back_due`, from 2026-10-31): got to a stop, on another platform where the danger (attack.danger,
+# with the look's monsters) is BACK_MARGIN over the stop's place's, she goes back to it before she shoots from there: a
+# third of a Horny Mushroom's touch on Tree Dungeon (0.156 of her HP). In the simulator's grind there (D:/MapleHelper-
+# scratch/replan/pos) a knock from 10 lifted her onto 9 (between 8 and 10, every place on it 0.32-0.57 where 10's stop
+# is 0.22), and she stayed 36.7 s a run there shooting what was in reach, 16.5 touches, where the hunt loop has its
+# 'back to spot'; the hunt loop's rule 1 yields to her way back unless a monster is on her (`_close_quarters`), and she
+# doesn't shoot in passing on the platform she leaves. BACK_TRIES a visit at the most, BACK_REST_S apart (guesses:
+# unbounded, a prototype sent her back 124 times in a run, each trip cut short by what came into reach). False: she
+# shoots from where she is, as before. With the sweep's guards (behavior.hunt.BESIDE_GUARDS), in the harness's standard
+# grind (12 seeds of 5 minutes, paired against the branch before: pos/impl/out/cmp_E.txt) touches 86.8 -> 81.2 a run
+# (se 4.0), those at piles 16.1 -> 12.2 (se 2.0), EXP a minute 385 -> 373 (se 16).
+BACK = True
+BACK_MARGIN = 0.05
+BACK_TRIES = 3
+BACK_REST_S = 5.0
+# What she learns of the HP a stop costs (Patrol.learn_hp): her HP bar between two looks at most HP_GAP_S apart,
+# charged to the platform she's on (False, until 2026-10-31), where her pet's potions net out touches and her trips
+# aren't looked at (in the simulator's grind on Tree Dungeon it saw 3.27 of the 8.68 bars she lost on seed 1, and none
+# of what she lost on 9 and 8 counted against the loop's stops, 10 and 7); or her touches (True: `_learn_touches`),
+# charged to the stop she's at or going to, her trips' time and touches too.
+HP_BY_TOUCHES = True
+TOUCH_GAP_S = 30.0     # s between two passes at most for the touches between them to be charged (a trip's)
+# Whether what staying at a stop gives (`_stay_gain`) is net of what touches there cost meanwhile (Patrol.hp_rate at
+# HP_PRICE), as the loop's rate is (Patrol.rate), from 2026-10-31; False: its EXP alone, as before. With HP_BY_TOUCHES,
+# her way back and the sweep's guards, in the harness's standard grind (as above: cmp_G.txt) touches 86.8 -> 80.8 (se
+# 3.0), those that hurt 57.3 -> 53.1 (se 2.4), HP potions 24.5 -> 22.8, EXP a minute 385 -> 365 (se 16); with the
+# stops weighing danger and the HP priced as the hunt loop's too (behavior.patrol: STOP_DANGER, HP_PRICE, HP_PRIOR_S,
+# cmp_J.txt) 77.6 touches, 50.0 hurt, 6.6 bars of HP (8.0), 20.3 potions, 359 EXP a minute.
+STAY_NET = True
 
 
 class Grind(Hunt):
@@ -119,12 +154,27 @@ class Grind(Hunt):
     def _learn_hp(self, s: Scene) -> None:
         """Her HP bar between two looks (HP_GAP_S apart at most), what went charged to the platform she was on
         (Patrol.learn_hp): a rise (a potion) counts as none lost; a reading under 2% isn't taken (the bar
-        flashes)."""
+        flashes). With HP_BY_TOUCHES, her touches instead (`_learn_touches`)."""
+        if HP_BY_TOUCHES:
+            return self._learn_touches(s)
         if s.platform is None or s.hp is None or s.hp < 0.02:
             return
         last, self._hp = self._hp, (s.t, s.hp, s.platform.id)
         if last is not None and 0 < s.t - last[0] <= HP_GAP_S:
             self.patrol.learn_hp(last[2], max(0.0, last[1] - s.hp), s.t - last[0])
+
+    def _learn_touches(self, s: Scene) -> None:
+        """HP_BY_TOUCHES: the touches that took HP she was told of since the last pass (the hunter's: Hunter.report, a
+        MISS not), each the share of her HP the map's hardest-hitting kind's touch takes (attack.danger), with the time
+        since (TOUCH_GAP_S at the most: her trips' too), charged to the stop she's at or going to (Patrol.learn_hp)."""
+        rep, d = self.h.report, self.danger
+        told = getattr(rep, "touches", 0) - getattr(rep, "misses", 0)
+        pid = self.visit.ground if self.visit is not None else None
+        last, self._hp = self._hp, (s.t, told, pid)
+        if last is None or last[2] is None or d is None or not 0 < s.t - last[0] <= TOUCH_GAP_S:
+            return
+        share = max((t.share for t in d.threats.values()), default=0.0)
+        self.patrol.learn_hp(last[2], max(0, told - last[1]) * share, s.t - last[0])
 
     def _book(self, s: Scene) -> None:
         """The hunt loop's bookkeeping, and each new kill credited to the platform it died on (`credit`)."""
@@ -155,6 +205,8 @@ class Grind(Hunt):
 
     def _at_ground(self, s: Scene, targets, visible, hidden, now: float) -> None:
         here = s.platform.id
+        if self._back_due(s):  # a knock (or a pile) left her somewhere worse than the stop: back first
+            return self._back(s)
         if any(self._hits(s, m) for m in targets):  # in reach now: shot (beats going on: see the top)
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] != "wait":
@@ -176,6 +228,53 @@ class Grind(Hunt):
             self._idle_since = None
             return None
         return self._wait(wide, targets)
+
+    def _back_due(self, s: Scene) -> bool:
+        """Whether she goes back to the stop she's at (see the top): she got to it, she's on another platform (a
+        touch's knock left her there, or a pile), and the danger where she stands (attack.danger, with the look's
+        monsters) is BACK_MARGIN over the stop's place's; BACK_TRIES times a visit at the most, BACK_REST_S apart, and
+        not within the hunt loop's SPOT_REST of a trip there that failed. Never where nothing counts as a danger."""
+        v, d = self.visit, self.danger
+        if not BACK or d is None or not d.any or v is None or v.arrived is None or s.platform is None \
+                or s.where is None or s.platform.id == v.ground:
+            return False
+        now = time.monotonic()
+        if v.backs >= BACK_TRIES or now < self._no_high_until or now < getattr(self, "_back_rest", 0.0):
+            return False
+        return d.at(s.platform.id, s.where.x, s.monsters) > d.at(v.ground, v.spot.x, s.monsters) + BACK_MARGIN
+
+    def _back(self, s: Scene) -> None:
+        """Back to the stop's place (`_back_due`), 'back to spot': a trip as any (the navigator's: planned and
+        replanned at every state against every monster), with no shooting in passing on the platform she leaves."""
+        v, d = self.visit, self.danger
+        v.backs += 1
+        self._back_rest = time.monotonic() + BACK_REST_S
+        self.log(f"  back to stop {v.ground} at x {v.spot.x:.0f} from platform {s.platform.id} (danger "
+                 f"{d.at(s.platform.id, s.where.x, s.monsters):.2f} here, {d.at(v.ground, v.spot.x, s.monsters):.2f} "
+                 f"there)")
+        self._to_spot_obj(v.spot)
+        self.obj.why = "back to spot"
+        self.obj.passing[s.platform.id] = PASSING_S
+        return self._travel("back to spot")
+
+    def _backing(self, s: Scene) -> bool:
+        """Whether she's on her way back to the stop (`_back`), or due to go (`_back_due`)."""
+        o = self.obj
+        if o is not None:
+            return o.why == "back to spot"
+        return self._back_due(s)
+
+    def _close_quarters(self, s: Scene, monsters) -> bool:
+        """The hunt loop's rule 1, which yields to her way back to the stop (`_backing`: the navigator's trip keeps
+        her body off theirs) unless one of `monsters` is on her (its body on hers, CONTACT_SLACK more: on her platform
+        or beside her, stance's `beside`)."""
+        if not super()._close_quarters(s, monsters):
+            return False
+        if not self._backing(s):
+            return True
+        x, here = s.where.x, s.platform
+        return any(beside(m, here, x, self.danger)
+                   and abs(m.x - x) <= half_of(m.kind, self._halves) + HER_HALF + CONTACT_SLACK for m in monsters)
 
     def _held(self, s: Scene) -> list[Monster]:
         """The wanted monsters her memory has (memory.SURE), seen within HOLD_S, that she can get at from her platform:
@@ -204,7 +303,8 @@ class Grind(Hunt):
 
     def _stay_gain(self, s: Scene, held: list[Monster]) -> float:
         """EXP a second of staying at the stop (see the top): the `held` monsters' EXP over their kill time and the
-        walk to where she gets at the nearest of them; with none, the respawns expected in reach (Patrol.wait_gain)."""
+        walk to where she gets at the nearest of them, less what touches at the stop cost her meanwhile (STAY_NET:
+        Patrol.hp_rate at HP_PRICE); with none, the respawns expected in reach (Patrol.wait_gain)."""
         if not held:
             return self.patrol.wait_gain(self.stop, s.t)
         here, x, avg = s.platform, s.where.x, self._avg_exp()
@@ -214,7 +314,11 @@ class Grind(Hunt):
             near = [abs(m.x - x) for m in held if m.platform == here.id]
             near += [abs(g - x) for g, _ in reaching(here, [m for m in held if m.platform != here.id])]
             walk = min(near, default=0.0) / WALK_SPEED
-        return exp / (exp * self.patrol.kill_s + walk)
+        gain = exp / (exp * self.patrol.kill_s + walk)
+        if STAY_NET and self.stop is not None:  # (less what touches there cost meanwhile, as the loop's rate)
+            st = self.patrol.stops[self.stop]
+            gain -= patrol_mod.HP_PRICE * self.patrol.hp_rate(st.platform, st.x)
+        return gain
 
     def _next_dest(self, s: Scene) -> tuple[int, float] | None:
         """Leaving the stop: the place of the stop she'd go to next (Patrol.choose, peeked: `_instead`), the sweep's way

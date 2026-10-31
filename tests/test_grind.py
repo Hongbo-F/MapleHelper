@@ -575,10 +575,11 @@ def test_far_from_the_loop_a_pile_by_her_pays_only_for_its_detour():
         far, (exp, seen, shoot, _) = 2.0, p.expect(b1, 3.0)
         assert seen == pytest.approx(26 * n, rel=0.05) and exp / (far + shoot + patrol.STOP_S) > 4 * climb
         assert exp < patrol.PULL_GAIN * p.plan.rate * p.detour(b1, nxt, far, 25.0, exp)
-    # Two Horny Mushrooms seen on the shelf, on her way up (12 s, and 13 on: no longer than the climb; 63 EXP expected
-    # by the time she's there): its detour is their kills and a stop, 6.3 s, which they pay for 1.34 times: she goes
-    # up by the shelf.
-    _seen(model, p, [(HORNY, 120, -800), (HORNY, 180, -800)])
+    # Three Horny Mushrooms seen on the shelf, on her way up (12 s, and 13 on: no longer than the climb; 94 EXP expected
+    # by the time she's there): its detour is their kills and a stop, 9.0 s, which they pay for: she goes up by the
+    # shelf. (Two paid for theirs 1.34 times with a bar of her HP at 100 EXP; at the hunt loop's 250, patrol.HP_PRICE
+    # since 2026-10-31, their touches there leave them short of PULL_GAIN.)
+    _seen(model, p, [(HORNY, 100, -800), (HORNY, 150, -800), (HORNY, 200, -800)])
     nxt, info = p.choose(1.0, bottom[0], 150.0, current=here, peek=True)
     assert p.platform_of(nxt) == shelf and info["why"] == "pulled"
     assert info["detour"] == pytest.approx(info["expected"] * p.kill_s + patrol.STOP_S, abs=0.1)
@@ -874,8 +875,8 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
     p.replan(0.0, force=True)
     clock = [100.0]
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
-    # A Horny Mushroom on her platform 100 units off, in reach: its 41 EXP over its kill (11.8 EXP/s) beats the loop's
-    # rate: she stays.
+    # A Horny Mushroom on her platform 100 units off, in reach: its 41 EXP over its kill (11.8 EXP/s, less what touches
+    # there cost her meanwhile: 0.7, grind.STAY_NET) beats the loop's rate: she stays.
     m = _sight(model, HORNY, 250, 0)
     g, s = _at_stop(model, p, ids[0], 150.0, [m], 1.0)
     assert g._held(s) and g._stay_gain(s, g._held(s)) > p.plan.rate
@@ -885,7 +886,7 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
     for dt in (0.0, grind.LEAVE_CONFIRM_S + 0.01):
         clock[0] += dt
         reason = g._leaving(s, g._held(s))
-    assert reason == "11.8 EXP/s here, going on gives 20.0"
+    assert reason == "11.0 EXP/s here, going on gives 20.0"
     # Her kill emptied the point a moment ago: what comes back meanwhile is a few EXP a second at the refill's rate
     # (Patrol.wait_gain), so she doesn't wait for it; nor, watched empty after that, later.
     p.replan(0.0, force=True)
@@ -1268,3 +1269,88 @@ def test_her_time_is_worth_what_staying_gives_on_a_round_trip_from_the_stop_and_
     stay = g._stay_gain(s, g._held(s))
     assert g._time_worth(s, (ids[0], 150.0)) == pytest.approx(stay) and stay > p.plan.rate
     assert g._time_worth(s, (ids[1], 150.0)) == pytest.approx(p.plan.rate)
+
+
+def test_got_to_a_stop_and_left_somewhere_worse_she_goes_back_to_it_before_she_shoots_from_there(monkeypatch):
+    """Back to the stop (grind.BACK, the review of 2026-10-31): got to the stop on A (its place 250 from A's Horny
+    Mushroom point), a knock left her on B between two Horny Mushroom points (100 either side): the danger there is
+    BACK_MARGIN and more over the stop's place's, so she goes back first; not from a platform as safe (C, none about),
+    nor on the stop's platform, nor before she got to it, nor more than BACK_TRIES times a visit, nor within BACK_REST_S
+    of the last. And rule 1 yields to her way back unless a monster's body is on hers (CONTACT_SLACK)."""
+    from gamelab.attack.danger import Danger
+    from gamelab.attack.spots import Spot
+    from gamelab.behavior.hunt import Hunt, Visit
+    from test_danger import HER, build
+    m = build([(0, 500, 400, 500), (500, 520, 900, 520), (1500, 500, 1900, 500)],
+              [("19", 50, 500), ("19", 600, 520), ("19", 800, 520)])
+    a, b, c = (m.platform_under(x, y).id for x, y in ((300, 500), (700, 521), (1700, 500)))
+    g = object.__new__(Grind)
+    g.h, g.model, g.obj, g._no_high_until = SimpleNamespace(danger=Danger(m, HER)), m, None, 0.0
+    g.visit = Visit(a, Spot(a, 300.0, 1.0, False), arrived=time.monotonic())
+
+    def at(pid, x, monsters=()):
+        return SimpleNamespace(platform=m.platform(pid), where=SimpleNamespace(x=x, y=m.platform(pid).y_at(x)),
+                               monsters=list(monsters))
+    on_b = at(b, 700.0)
+    assert g.danger.at(b, 700.0, []) > g.danger.at(a, 300.0, []) + grind.BACK_MARGIN
+    assert g._back_due(on_b) and not g._back_due(at(c, 1700.0)) and not g._back_due(at(a, 100.0))
+    monkeypatch.setattr(grind, "BACK", False)
+    assert not g._back_due(on_b)
+    monkeypatch.setattr(grind, "BACK", True)
+    g.visit.arrived = None
+    assert not g._back_due(on_b)
+    g.visit.arrived, g.visit.backs = time.monotonic(), grind.BACK_TRIES
+    assert not g._back_due(on_b)
+    g.visit.backs, g._back_rest = 0, time.monotonic() + grind.BACK_REST_S
+    assert not g._back_due(on_b)
+    g._back_rest = 0.0
+    # Rule 1 (here every monster too close) yields to it, unless one is on her.
+    monkeypatch.setattr(Hunt, "_close_quarters", lambda self, s, monsters: bool(monsters))
+    g._halves = {HORNY: 28.0}
+    near, on_her = _sight(m, HORNY, 800, 520), _sight(m, HORNY, 740, 520)
+    assert not g._close_quarters(on_b, [near]) and g._close_quarters(on_b, [on_her])
+    g.obj = Objective("spot", a, 300.0, ground=a, why="back to spot")  # (on her way back)
+    assert not g._close_quarters(on_b, [near]) and g._close_quarters(on_b, [on_her])
+    g.obj, g.visit.backs = None, grind.BACK_TRIES  # (not going back: rule 1 as ever)
+    assert g._close_quarters(on_b, [near])
+
+
+def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_of_it():
+    """grind.HP_BY_TOUCHES and STAY_NET (2026-10-31): the touches that took HP she was told of since the last pass (a
+    MISS not), each the share of her HP the map's hardest-hitting kind takes (attack.danger), with the time since (a
+    trip's too, TOUCH_GAP_S at the most), are charged to the stop she's at or going to, not the platform she's on (her HP
+    bar between looks, before, netted her pet's potions out and missed her trips); and what staying at the stop gives is
+    less HP_PRICE times what she loses a second there (Patrol.hp_rate), as the loop's rate is."""
+    from gamelab.attack.danger import Danger
+    from gamelab.attack.spots import Spot
+    from gamelab.behavior.hunt import Visit
+    from test_danger import HER, build
+    model = build([(0, 0, 300, 0), (0, -200, 300, -200)], [("19", 150, 0), ("19", 150, -200)])
+    ids = [_pid(model, 150, 0), _pid(model, 150, -200)]
+    p = _patrol(model, lambda a, b: 2.0)
+    g = _grind(model, {HORNY})
+    g.patrol, g.stop = p, p.stop_on(ids[0])
+    g.h.danger, g.h.report, g._hp = Danger(model, HER), SimpleNamespace(touches=0, misses=0), None
+    g.visit = Visit(ids[0], Spot(ids[0], 150.0, 1.0, False), arrived=time.monotonic())
+    share = max(t.share for t in g.danger.threats.values())
+
+    def on(pid, t):
+        return SimpleNamespace(platform=model.platform(pid), where=SimpleNamespace(x=150.0), hp=0.9, t=t)
+    g._learn_hp(on(ids[1], 10.0))  # (the first pass: nothing yet)
+    g.h.report.touches, g.h.report.misses = 3, 1  # two that took HP, one MISS, on her way back from the stop above
+    g._learn_hp(on(ids[1], 14.0))
+    assert p.hp_time[ids[0]] == pytest.approx(4.0) and p.hp_seen[ids[0]] == pytest.approx(2 * share)
+    assert p.hp_time[ids[1]] == 0.0
+    g._learn_hp(on(ids[0], 14.0 + grind.TOUCH_GAP_S + 1))  # (a gap too long: not charged)
+    assert p.hp_time[ids[0]] == pytest.approx(4.0)
+    # Staying: the held monster's EXP over its kill time, less what touches there cost meanwhile.
+    m = _sight(model, HORNY, 250, 0)
+    s = SimpleNamespace(platform=model.platform(ids[0]), where=SimpleNamespace(x=150.0, y=0.0), monsters=[m], t=20.0)
+    g.tour, g._hits = SimpleNamespace(exp={HORNY: 41.0}), (lambda s, m: True)
+    gain = 41.0 / (41.0 * p.kill_s)
+    assert g._stay_gain(s, [m]) == pytest.approx(gain - patrol.HP_PRICE * p.hp_rate(ids[0], 150.0))
+    grind.STAY_NET = False
+    try:
+        assert g._stay_gain(s, [m]) == pytest.approx(gain)
+    finally:
+        grind.STAY_NET = True

@@ -13,7 +13,8 @@ A monster counts by
   hers (from one over hers by an end: it can't drop through its own), HOP_CHANCE as likely. One walking a platform
   just under or over hers touches her where their bodies overlap (hers the client's box, HER_HALF either side of her
   feet and HER_TALL tall: motion.bodies, which her trips are planned by too; its own half its width and its top: game
-  data), as one on hers does;
+  data), as one on hers does (`level`; her fights and the sweep's guards count such a one as on her platform:
+  `beside`);
 - how soon (`soon`): the walk to where it would touch her, at its speed (game data), weighed exp(-t / THREAT_S): 1 for
   one touching her now, as a respawn on top of her does, about a third for one THREAT_S away.
 A spawn point counts as its monster at the point (`at` with no look: the picture she plans by), or, with the monsters a
@@ -135,6 +136,14 @@ def soon(t: float) -> float:
     return math.exp(-max(0.0, t) / THREAT_S)
 
 
+def level(t: Threat, q: Platform, p: Platform, x: float) -> bool:
+    """Whether a monster of threat `t` walking platform `q` is level enough with her standing at map x on `p` for their
+    bodies to meet where it comes by her: `q` is `p`, or its floor there (at x, or its end nearest x) is less than its
+    top under her feet, or less than HER_TALL over them (hers the client's box, its from its feet to its top: game
+    data). Where it comes within reach along its platform is Danger.walk's."""
+    return q.id == p.id or -HER_TALL < q.y_at(q.clamp(x)) - p.y_at(x) < t.top
+
+
 class Danger:
     """The danger of places on one map, for her (`Her`): `at` a place, `keep_off` a kind on her platform."""
 
@@ -182,7 +191,7 @@ class Danger:
         if t.flies:  # no floor holds it: straight at her
             return _flight(t, mx, q.y_at(q.clamp(mx)), x, p.y_at(x)), 1.0
         lo, hi = walk_edges(q, t.hops)
-        if q.id == p.id or -HER_TALL < q.y_at(q.clamp(x)) - p.y_at(x) < t.top:
+        if level(t, q, p, x):
             a, b = max(lo, x - reach), min(hi, x + reach)
             if a <= b:
                 return (0.0 if a <= mx <= b else min(abs(mx - a), abs(mx - b))), 1.0
@@ -203,6 +212,28 @@ class Danger:
         if q.y_at(eq) - p.y_at(ep) > HOP_UP:
             return None
         return max(0.0, abs(mx - eq) + abs(ep - eq) + abs(x - ep) - reach), HOP_CHANCE
+
+    def beside(self, m: Monster, p: Platform, x: float) -> bool:
+        """Whether monster `m`, on another platform than `p`, touches her standing at map x on `p` as one on `p` does
+        (`walk`'s rule: `level`, its platform's stretch coming within its body and hers of x): a kind that counts and
+        doesn't fly, walking a platform just under or over hers. Her fights count such a one as on her platform (her
+        full box against its: attack.stance's `mine`, the hunt loop's rule 1, the sweep's guards: behavior.hunt), as
+        `at` counts its danger. Live-like in the simulator's grind on Tree Dungeon (2026-10-31: D:/MapleHelper-scratch/
+        replan/pos) the touches from a monster on the platform under or over hers went from 11 to 23 a run of 5 minutes
+        with the loot sweep, on 9 between 8 and 10 above all (40-50 apart: every place on it 0.32-0.57), where her fights
+        went by her own platform's alone. False for one on `p`, one not placed, or a platform not known."""
+        if m.platform is None or m.platform == p.id:
+            return False
+        t = self.threats.get(m.kind)
+        if t is None or t.share <= 0 or t.flies:
+            return False
+        q = p.peer(m.platform)
+        if q is None:
+            try:
+                q = self.model.platform(m.platform)
+            except (KeyError, IndexError):
+                return False
+        return q.left - HER_HALF <= x <= q.right + HER_HALF and level(t, q, p, x)
 
     def of(self, kind: str, q: Platform, mx: float, p: Platform, x: float) -> float:
         """The danger to her at `x` on `p` from one monster of `kind` at `mx` on `q`."""

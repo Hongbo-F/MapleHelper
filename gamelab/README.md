@@ -2129,6 +2129,73 @@ checkout; D:/MapleHelper-scratch/replan/fix, its scripts and out/):
 - *Live*: not run. The player in game predates splices (`lab/player.json` absent): every replan a cut and a resend
   until it's started again with the user's UAC click.
 
+## Where she stands to fight: her full box against theirs, back to the stop, her HP priced (2026-10-31)
+
+The branch after its review earned 24% more EXP a minute than master in the harness's standard grind and was touched
+29% more (above: "Not done"). Where the extra touches were (D:/MapleHelper-scratch/replan/pos, the diagnosis: every touch
+of seeds 1-8 on both sides recorded with the rule in force, her place, the toucher's and the world every 0.1 s): at any
+one place she fought as safely as master (touches a minute on 9 24.3 against 25.8, on 10 22.0 against 24.0), but she
+spent twice as long at the top of Tree Dungeon's tower (platforms 6-13: 129 -> 258 s a run), above all on 9, wedged 40-50
+units between 8 and 10 (every place on it 0.32-0.57 by the danger model, where 10's stop is 0.22). Touches from a
+monster on the platform just under or over hers went from 11 to 23 a run, which neither her fights (rule 1, the stance)
+nor the sweep's guards counted; after a knock onto 9 she stayed 36.7 s a run and took 16.5 touches there (master 10.0 s
+and 3.6), shooting what was in reach, where the hunt loop has its 'back to spot'; and the grind priced her HP at the top
+at 0.07-0.15 bars a round of its loop (10, 7) where she lost 3 bars a minute on 10: her HP bar between looks netted her
+pet's potions out and missed her trips, what she lost on 9 and 8 counted against no stop of the loop, a bar was 100 EXP
+(the hunt loop's 250), her stays weren't net of it, and the stops sat on spawn points (7's 1 unit off its Horny
+Mushroom's, 10's 11). The time at danger 0.3 and over, 33.8 -> 85.5 s a run, at the danger's touch rate there (24-27 a
+minute, against 9-10 under 0.1), is the whole excess.
+
+**What changed** (each by the danger model, attack.danger, nothing by a platform's name):
+- *The sweep's guards count her full box against theirs* (`hunt.BESIDE_GUARDS`, `Hunt._about` with the pile's stretch):
+  a monster walking a platform just under or over a pile's whose body meets hers standing there (`Danger.beside`: its
+  floor less than its top under her feet, or less than her 65 over them, its platform's stretch within reach; the rule
+  `Danger.walk` and her trips' bodies already had, now `danger.level`) guards it as one on the pile's own platform: shot
+  first, or the pile left until a look sees it clear.
+- *Back to the stop* (`grind.BACK`, `Grind._back_due`, `_back`): got to the stop, on another platform where the danger
+  with the look's monsters is `BACK_MARGIN` (0.05, a third of a Horny Mushroom's touch) over the stop's place's, she goes
+  back to it before she shoots from there, no shooting in passing on the platform she leaves, `BACK_TRIES` (3) a visit
+  and `BACK_REST_S` (5 s) apart at the most (unbounded, a prototype sent her back 124 times in a run); the hunt loop's
+  rule 1 yields to the way back (the navigator's trip keeps her body off theirs) unless a monster's body is on hers.
+- *Her HP learned from her touches* (`grind.HP_BY_TOUCHES`, `Grind._learn_touches`): each touch that took HP she was told
+  of (the hunter's: a MISS not) at the share of her HP the map's hardest-hitting kind's touch takes, with the time since
+  the last pass (her trips' too, `TOUCH_GAP_S` at the most), charged to the stop she's at or going to.
+- *Her stays net of it* (`grind.STAY_NET`): what staying at a stop gives is its EXP a second less `HP_PRICE` times the
+  HP a second she loses there (`Patrol.hp_rate`), as the loop's rate already was.
+- *A bar of HP at the hunt loop's price* (`patrol.HP_PRICE` 250, `hunt.HP_EXP`'s: 3.1 Orange Potions at a guessed 160
+  mesos, at `MESO_EXP` 0.5), learned faster (`HP_PRIOR_S` 20 s, from 60). At 50 mesos a potion a bar would be 78 EXP:
+  the user's to set, by what potions cost.
+- *Stops weigh danger as the hunt loop's grounds do* (`patrol.STOP_DANGER` 2, `hunt.GROUND_DANGER`'s: 1 - 2 x the
+  danger): 7's stop moves to x -31 (0.22, off its point), 13's to 22, 15's to -55, 19's to 130, 23's to -172 (0.28 ->
+  0.13); before she has seen anything the loop is 10, 8 (449 EXP a minute) for 10, 7.
+
+**Tried and left off** (12 seeds each, paired against the branch before: `pos/impl/out/cmp_*.txt`):
+- *Her fights by her full box* (`stance.BESIDE`, off; its parts kept: `stance.beside`, `walks_on`, `_star_takes`,
+  `too_close` for one beside her by `Danger.of`): a monster under or over her that can touch her counted as on her
+  platform for rule 1, the stance's close quarters and escape, `_into`, `_throw_side` and `_imminent`, its walk kept to
+  its own platform. With the guards and the way back on both sides, on: 86.3 touches a run and 357 EXP a minute; off:
+  81.2 and 373 (kills 50.7 against 52.8). Her fights kept off what could touch her from under or over her and shot less,
+  and were touched no less: the danger she escapes to (`Danger.at`) has them already. The prototype's copies of them
+  placed on her platform (the diagnosis's `nb`) did no better (-1.6 touches, se 5.6).
+- *Escapes through bodies while invulnerable* (the steps either way she can walk and stop from before her 1.45 s window
+  ends, through the monsters' bodies, by the danger where each ends; taken out): touches +6.5 (se 3.7), standing or
+  fighting +6.7 (se 2.1), EXP -59.
+- Each alone on the guards and the way back (E): HP from touches and stays net of it (G) touches -5.9 (se 3.0) against
+  -5.6 (4.0), EXP -20 against -12; the stops by the danger (H) -7.3 (3.3), EXP -5; both (I) -2.1 (3.2), EXP -9.5; all
+  of it with the HP priced as the hunt loop's (J, as committed) -9.2 (3.7), hurt -7.3 (2.9), HP -1.33 bars (0.49), EXP
+  -27 (11). The seeds' spread is most of those differences (one run's touches swing 20-30 with any change): the
+  harness's own `ab` is the measure (the next commit).
+
+**Cash.** In these worlds a kill costs her about 40 MP (39.5 on master, 40.2 on the branch: Lucky Seven's casts at 14,
+a fifth of them hitting nothing), 0.4 of an MP potion (100 MP, 200 mesos at the harness's guess), against the 25 mesos
+her drops are worth: each more kill is about 55 mesos less cash at the harness's prices, whatever her HP. Her cash flow
+(the mesos she picks up less her potions, HP at 50 or 160, MP at 200) can beat master's only by fewer kills or by MP or
+HP a kill: with the branch's kills the extra MP potions alone (+3.6 a run) cost 143 mesos a minute.
+
+**Not done.** Her touches a minute standing or fighting are still above master's; the rest of the gap is the time at
+the top of the tower, which only a dearer HP (or fewer kills there) buys back. Live: not run (the perception service
+and the player restarted on this code: the user's).
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.
