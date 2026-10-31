@@ -150,6 +150,19 @@ def test_the_look_near_the_forms_places_scores_every_lie_detector_seen_in_game_a
             assert near[form] == pytest.approx(whole[form], abs=1e-4) and near[form] >= 1
 
 
+@pytest.mark.parametrize("png", SEEN_IN_GAME + WITHOUT, ids=lambda p: p.stem)
+def test_its_windows_over_the_play_area_are_seen_at_their_places_and_nothing_else(png):
+    """`over_play` (her place by the scene counted covered under them: localization.locate.Cover): the countdown's
+    window, the mini-game's board and the quiz, at both sizes; the boxes that come before them (the mini-game's notice,
+    the quiz's warning), the Truth Booth's timer and the scenes without them: none; another size: none."""
+    form = None if png.parent.name == "without" else FORMS[png.stem.split("_", 2)[2]]
+    want = form if form in lie_detector.OVER_PLAY else None
+    spotter = LieDetectorSpotter()
+    for frame in (img(png), native(img(png))):
+        assert spotter.over_play(frame) == want
+    assert spotter.over_play(np.asarray(Image.fromarray(img(png)).resize((1600, 900), Image.BOX))) is None
+
+
 CLEAN = "lie_detector/without/2026-10-25_005500_before_the_notice.jpg"  # 1366x768, its capture anchors in place
 
 

@@ -21,7 +21,8 @@ The cues, cheapest first, each tried only when the one before didn't place her:
              where it puts her feet on a platform's line (PRONE_LINE);
   4. carried nothing placed her: the filter's prediction stands (`how` None), its confidence going down; "covered"
              in the counts (`line`) and the scene where what covers her is told (`Cover`: the Lie Detector's alarm
-             up, her stat window open where it opens), nothing placed otherwise.
+             up and one of its windows over the play area, the view not registered under its board or the window seen;
+             her stat window open where it opens, over where the filter has her feet or tag), nothing placed otherwise.
 The filter: her x and its speed (a Kalman filter), y on her platform's line, in a flight under gravity, or on a rope;
 a take-off from a rise off the line, a landing on the first line crossed, a walk off a platform's end, a wall stopping
 her; a rope told from a flight by her last three measured places (constant speed against gravity); her minimap dot a box
@@ -140,7 +141,8 @@ TIMES_KEPT = 600           # frames' times kept for the service's line (20 s at 
 GAP_S = 0.5                # s without a frame (the game not on screen, frames refused) after which she's placed afresh
 # --- what covers her (`Cover`): a frame no cue placed her in counts "covered", not "carried", under it ---
 LIE_DETECTOR, STAT_WINDOW = "the Lie Detector", "her stat window"   # (Located.covered: what covered her)
-COVER_POLL_S = 0.5         # the Lie Detector alarm's file looked at once in this long at the most (s, frames' time)
+COVER_POLL_S = 0.5         # the Lie Detector alarm's file, and its windows, looked at once in this long at the most (s,
+                           # frames' time)
 
 
 def configured(path: Path = CONFIG) -> bool:
@@ -218,20 +220,36 @@ class Located:
 
 class Cover:
     """What covers her on a frame no cue placed her in, for the frame to count as "covered" rather than "carried"
-    (`Locator.line`, the scene's `how`; it places nothing): the Lie Detector's alarm up (its file, paths.ALARM, which
-    the player's watchdog writes at the sighting and the player's resume or `clear-alarm` takes away: the mini-game's
-    window over the play area meanwhile; looked at once in COVER_POLL_S at the most), else her stat window open where
-    it opens (perception.stat_window.shown: a panel exactly where its calibration, lab/stat_window.json, has it; the
-    hunt's read, or the user's S). The user, 2026-10-30 ~20:35, of "Count stats-window and Lie Detector frames as
-    'covered', not 'lost'": "yes please" (on the grind of 16:57-17:59 they were 64% of the carried scenes; on the live
-    clip of 17:54:33 the stat window's read at the level-up was 34 of its 53 carried frames). `alarm`: the alarm's file
-    (None: paths.ALARM's, as it is when looked at); `cal`: the stat window's calibration (None: it isn't looked for)."""
+    (`Locator.line`, the scene's `how`; it places nothing). The user, 2026-10-30 ~20:35, of "Count stats-window and Lie
+    Detector frames as 'covered', not 'lost'": "yes please" (on the grind of 16:57-17:59 they were 64% of the carried
+    scenes; on the live clip of 17:54:33 the stat window's read at the level-up was 34 of its 53 carried frames).
+    - The Lie Detector: its alarm up (its file, paths.ALARM, which the player's watchdog writes at the sighting and the
+      player's resume or `clear-alarm` takes away; looked at once in COVER_POLL_S at the most) and one of its windows
+      over the play area: the view not registered (the mini-game's board hides the map's art: on its clips of 17:37:22
+      and 20:30:25 its 200 and 201 frames were exactly those not registered), or one seen at its place (`window`:
+      perception.lie_detector.LieDetectorSpotter.over_play, the countdown's window, the board, the quiz; on the
+      countdown's clip of 21:17:17 its window was over her 36 s, 541 frames, the view registered about it). The file
+      alone is there from the notice, 10 s before the board, or the quiz's warning, 30 s, till 10 s after it, or till
+      `clear-alarm` after a Truth Booth or with auto-resume off: she's lost then as ever, carried (its review,
+      2026-10-30 ~22:00: on the clip of 17:37:22 another player's tag over her 30 s after the board had gone, 956-957,
+      counted covered by the file).
+    - Else her stat window: a panel exactly where its calibration (lab/stat_window.json) has it open
+      (perception.stat_window.shown; the hunt's read, or the user's S) over her feet or her tag where the filter has
+      them (`her`: Locator.her_box). Left open, a loss of her elsewhere is carried (its review: any carried frame had
+      counted covered while it was open, wherever she was); on the live clip its 34 frames had her feet in its Main
+      panel.
+    `alarm`: the alarm's file (None: paths.ALARM's, as it is when looked at); `cal`: the stat window's calibration
+    (None: it isn't looked for); `spotter`: what sees the Lie Detector's windows (`over_play`; None: a
+    LieDetectorSpotter made when first needed)."""
 
-    def __init__(self, alarm: Path | None = None, cal: stat_window.Calibration | None = None):
-        self.alarm, self.cal = alarm, cal
+    def __init__(self, alarm: Path | None = None, cal: stat_window.Calibration | None = None, spotter=None):
+        self.alarm, self.cal, self.spotter = alarm, cal, spotter
         self.why = ""                 # why the stat window isn't looked for, where it was to be
+        self.why_windows = ""         # why the Lie Detector's windows aren't looked for (its look raised)
         self._polled: float | None = None
         self._up = False
+        self._looked: float | None = None
+        self._window = False
 
     def alarm_up(self, t: float) -> bool:
         """Whether the Lie Detector's alarm is up as of t (s): its file looked at again COVER_POLL_S after the last look
@@ -247,14 +265,35 @@ class Cover:
                 self._up = True
         return self._up
 
-    def __call__(self, frame: np.ndarray, t: float) -> str | None:
-        """What covers her on this 1366x768 RGB frame shown at t (s): LIE_DETECTOR, STAT_WINDOW, or None. Whatever
-        the stat window's look raises (its pictures not to be had) turns it off (`why`), never the frame failing."""
-        if self.alarm_up(t):
-            return LIE_DETECTOR
-        if self.cal is not None:
+    def window(self, frame: np.ndarray, t: float) -> bool:
+        """Whether one of the Lie Detector's windows over the play area is seen on this frame (its spotter's
+        `over_play`: 5.2 ms median, p99 11, on the 15 Lie Detector clips' frames), looked at again COVER_POLL_S after
+        the last look (or when the frames' time went back): with the alarm up, the view registered and nothing placing
+        her alone. Whatever it raises (its pictures not to be had) turns it off (`why_windows`), never the frame
+        failing."""
+        if self.why_windows:
+            return False
+        if self._looked is None or not 0.0 <= t - self._looked < COVER_POLL_S:
+            self._looked = t
             try:
-                if stat_window.shown(frame, self.cal) is not None:
+                if self.spotter is None:
+                    from ..perception.lie_detector import LieDetectorSpotter
+                    self.spotter = LieDetectorSpotter()
+                self._window = self.spotter.over_play(frame) is not None
+            except Exception as e:  # noqa: BLE001 (her place as ever: only its count)
+                self._window, self.why_windows = False, repr(e)
+        return self._window
+
+    def __call__(self, frame: np.ndarray, t: float, sure: bool, her: tuple | None) -> str | None:
+        """What covers her on this 1366x768 RGB frame shown at t (s), `sure` whether its view was registered, `her` the
+        box of her feet and tag on screen where the filter has them (x0, y0, x1, y1; None: not known): LIE_DETECTOR,
+        STAT_WINDOW, or None. Whatever the stat window's look raises (its pictures not to be had) turns it off (`why`),
+        never the frame failing."""
+        if self.alarm_up(t) and (not sure or self.window(frame, t)):
+            return LIE_DETECTOR
+        if self.cal is not None and her is not None:
+            try:
+                if stat_window.shown(frame, self.cal, over=her) is not None:
                     return STAT_WINDOW
             except Exception as e:  # noqa: BLE001 (her place as ever: only its count)
                 self.cal, self.why = None, repr(e)
@@ -345,6 +384,16 @@ class Locator:
             return None
         return (self.kx.p - self.vx, self.y() - self.v)
 
+    def her_box(self) -> tuple[float, float, float, float] | None:
+        """Her feet and her tag on screen where the filter has them (x0, y0, x1, y1: her tag the template's size about
+        its centre, her feet less her plate model's offset), None before she's placed (what `Cover` looks over)."""
+        f = self.feet_screen()
+        if f is None:
+            return None
+        th, tw = self.template().shape[:2]
+        cx, cy = f[0] - self.feet_dx, f[1] - self.feet_dy
+        return (min(f[0], cx - tw / 2), min(f[1], cy - th / 2), max(f[0], cx + tw / 2), max(f[1], cy + th / 2))
+
     def y(self) -> float:
         if self.mode == "ground" and self.plat is not None:
             return self.plat.y_at(self.kx.p)
@@ -429,7 +478,7 @@ class Locator:
         t4 = self._t("update", t3)
         # 6. nothing placed her: what covers her, if it's told (counted "covered"; nothing placed by it)
         if meas is None and self.cover is not None:
-            info["covered"] = self.cover(frame, t)
+            info["covered"] = self.cover(frame, t, self.view_sure, self.her_box())
             self._t("cover", t4)
         self.timer["total"] = (time.perf_counter() - T0) * 1e3
         self.times.append(self.timer["total"])
@@ -927,25 +976,29 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
         log(f"  her place by the scene (localization.locate): the camera on the map's art ({art.rgb.shape[1]}x"
             f"{art.rgb.shape[0]}), her plate's model, " + (f"her pose bank ({len(body.poses)} poses)" if body is not None
                                                             else "no pose bank (no body cue)") + f"; {c}; covered "
-            "under the Lie Detector's alarm" + (" and her stat window" if loc.cover.cal is not None else
-                                                f" (her stat window not looked for: {loc.cover.why})"))
+            "under the Lie Detector's windows (its alarm up)" + (
+                " and her stat window over her" if loc.cover.cal is not None else
+                f" (her stat window not looked for: {loc.cover.why})"))
     return loc
 
 
 def cover() -> Cover:
     """What covers her, for the perception's Locator (`build`): the Lie Detector's alarm, and her stat window where its
     calibration (perception.stat_window.Calibration, lab/stat_window.json: a hunt opens it only with one) has it open
-    at the client's 1366x768. Without one, or its pictures not to be had, the stat window isn't looked for (`why`)."""
-    cal, why = stat_window.Calibration.load(), ""
-    if cal is None:
-        why = "no calibration of it"
-    elif tuple(cal.client) != stat_window.FRAME:
-        cal, why = None, f"calibrated at {cal.client[0]}x{cal.client[1]}"
-    else:
-        try:
-            stat_window.templates(cal)
-        except Exception as e:  # noqa: BLE001 (her place as ever: only what's counted covered)
-            cal, why = None, f"its pictures: {e!r}"
+    at the client's 1366x768. Without one, one not as it's written (a client of one number, a place not two), or its
+    pictures not to be had, the stat window isn't looked for (`why`); never the locator not built for it."""
+    cal, why = None, ""
+    try:
+        cal = stat_window.Calibration.load()
+        if cal is None:
+            why = "no calibration of it"
+        elif tuple(cal.client) != stat_window.FRAME:
+            cal, why = None, f"calibrated at {'x'.join(str(n) for n in cal.client)}"
+        else:
+            for name in stat_window.templates(cal):
+                cal.place(name)
+    except Exception as e:  # noqa: BLE001 (her place as ever: only what's counted covered)
+        cal, why = None, f"its calibration or pictures: {e!r}"
     out = Cover(cal=cal)
     out.why = why
     return out

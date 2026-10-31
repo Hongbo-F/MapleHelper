@@ -116,6 +116,20 @@ def test_shown_exactly_where_its_calibration_has_it_open():
     assert sw.shown(drawn.frame, off) == "detail" and sw.shown(drawn.frame, sw.Calibration(panels={})) is None
 
 
+def test_shown_over_a_box_only_a_panel_over_some_of_it():
+    """`over` (where the scene's filter has her feet and tag: the review of 2026-10-30, a loss of her away from the
+    window had counted covered): only a panel over some of the box is looked at (Main x 300-485, y 120-401; Detail
+    x 485-672, y 120-343)."""
+    cal = sw.Calibration(panels={"main": {"at": [300, 120]}, "detail": {"at": [485, 120]}}, detail_with_main=True)
+    drawn = sw.compose(VALUES, base=_base(), at={"main": (300, 120), "detail": (485, 120)}).frame
+    assert sw.shown(drawn, cal, over=(350, 200, 400, 250)) == "main"
+    assert sw.shown(drawn, cal, over=(500, 200, 550, 250)) == "detail"
+    assert sw.shown(drawn, cal, over=(350, 395, 400, 450)) == "main"                  # (its bottom rows)
+    assert sw.shown(drawn, cal, over=(350, 401, 400, 450)) is None                    # (just under it)
+    assert sw.shown(drawn, cal, over=(700, 200, 750, 250)) is None                    # (beside it)
+    assert sw.shown(_base(), cal, over=(350, 200, 400, 250)) is None                  # (over her, not open)
+
+
 def test_both_panels_read_in_one_ocr_call_each():
     """Each panel's value column read by the OCR in one go, each row taken for the cell it falls in, and parsed: HP
     and MP (cur, max), ATTACK (lo, hi), the rest the first whole number; the DETAIL panel closed: no W.DEF, said."""

@@ -74,6 +74,15 @@ PLACES = {
     "truth booth": ((776, 40),),
 }
 NEAR_MARGIN = 48  # TEMPLATE_FRAME px around each place (24 at half size)
+# The forms whose window lies over the play area, where she is, each at the one of its PLACES where it does: the
+# countdown's window (its yellow title at the first; at the second its box at the right, which comes before it as the
+# mini-game's notice does), the mini-game's board and the quiz. Not the boxes that come before them (the mini-game's
+# notice, the quiz's warning, the countdown's box: she retreats then, the hunt stopped), nor the Truth Booth's timer
+# (another map). For her place by the scene counted "covered" under them (localization.locate.Cover, `over_play`). On
+# every 2nd frame of the 15 Lie Detector clips of 2026-10-26 to 30 (lab/alarm_clips, 1366x768): the board on every
+# frame `near` saw it on (11 clips), the countdown's window from its window on (4: not its box before it), none of the
+# notices; on every 3rd frame of the live clip of 17:54:33, nothing (D:/MapleHelper-scratch/carried/ad/fix/scan_ld.py).
+OVER_PLAY = {"countdown": PLACES["countdown"][0], "mini-game": PLACES["mini-game"][0], "quiz": PLACES["quiz"][0]}
 # The watchdog's every this many looks is of the whole frame (`scores`): a form somewhere else is seen within that many
 # looks (2 s at 4 a second; the notice comes 10 s before the mini-game, the quiz's warning 30 s before the quiz). At 4
 # looks a second on the saved hunt frames, 35 ms of CPU a look against 151 for the whole frame's every time: 0.14 cores
@@ -160,6 +169,27 @@ class LieDetectorSpotter:
                 best = max(best, float(cv2.matchTemplate(gray[rows, cols], template, cv2.TM_CCOEFF_NORMED).max()))
             out[name] = best / threshold
         return out
+
+    def over_play(self, frame: np.ndarray) -> str | None:
+        """The first form whose window over the play area (OVER_PLAY) is seen at its place on this frame of the game's
+        own size (NATIVE_FRAME) or the templates', as `near` matches it there; else None, and None at any other size
+        (its places not known there)."""
+        if (frame.shape[1], frame.shape[0]) not in (NATIVE_FRAME, TEMPLATE_FRAME):
+            return None
+        frame = self._stretched(frame)
+        th, tw = self.template.shape
+        rows, cols = _box(OVER_PLAY["countdown"], (tw, th), TEMPLATE_FRAME, NEAR_MARGIN)
+        if self._yellow_title(frame[rows, cols]) >= THRESHOLD:
+            return "countdown"
+        gray = self._halved(frame)
+        half = (TEMPLATE_FRAME[0] // 2, TEMPLATE_FRAME[1] // 2)
+        for name in ("mini-game", "quiz"):
+            template, threshold = self.half[name]
+            x, y = OVER_PLAY[name]
+            rows, cols = _box((x // 2, y // 2), template.shape[::-1], half, NEAR_MARGIN // 2)
+            if float(cv2.matchTemplate(gray[rows, cols], template, cv2.TM_CCOEFF_NORMED).max()) >= threshold:
+                return name
+        return None
 
     def _stretched(self, frame: np.ndarray) -> np.ndarray:
         """A frame of the game's own size (NATIVE_FRAME) stretched to TEMPLATE_FRAME (into `_kept`'s picture); any

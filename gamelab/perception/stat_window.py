@@ -252,13 +252,16 @@ def is_open(frame: np.ndarray, cal: "Calibration | None" = None, near: dict | No
     return any(at is not None for at, _ in find_all(frame, cal, near).values())
 
 
-def shown(frame: np.ndarray, cal: "Calibration | None", every: int = SHOWN_EVERY) -> str | None:
+def shown(frame: np.ndarray, cal: "Calibration | None", every: int = SHOWN_EVERY,
+          over: tuple[float, float, float, float] | None = None) -> str | None:
     """The first panel of the stat window on `frame` (full size, RGB, the client at its 1366x768) exactly where `cal`
     has it open, or None (None too without a calibration): its masked fit at that place alone, no search (the game
-    draws it where it opens, to the px), every `every`-th px of it each way, FIND_FIT at the most. For a look on many
-    frames (her place by the scene counted "covered" under it: localization.locate.Cover): 0.06-0.08 ms a panel, where
-    `find`'s search within SLACK is 6-13 ms; on the live clip of 2026-10-30 17:54:33 (every 7th of its 4,503 frames)
-    79 at the most under it, 14,000 and more on every other frame."""
+    draws it where it opens, to the px), every `every`-th px of it each way, FIND_FIT at the most. `over`: a box on
+    the frame (x0, y0, x1, y1), only a panel over some of it looked at (where the scene's filter has her feet and tag:
+    localization.locate.Cover; none over it, nothing looked at). For a look on many frames (her place by the scene
+    counted "covered" under it): 0.06-0.08 ms a panel, where `find`'s search within SLACK is 6-13 ms; on the live clip
+    of 2026-10-30 17:54:33 (every 7th of its 4,503 frames) 79 at the most under it, 14,000 and more on every other
+    frame."""
     if cal is None or frame is None:
         return None
     for name, t in templates(cal).items():
@@ -267,6 +270,8 @@ def shown(frame: np.ndarray, cal: "Calibration | None", every: int = SHOWN_EVERY
             continue
         (x, y), (w, h) = at, t.size
         if x < 0 or y < 0 or x + w > frame.shape[1] or y + h > frame.shape[0]:
+            continue
+        if over is not None and not (over[0] < x + w and over[2] > x and over[1] < y + h and over[3] > y):
             continue
         m = t.mask[::every, ::every].astype(bool)
         if not m.any():
