@@ -374,7 +374,8 @@ class FakeTouches:
 # Her place in every look and frame the world's own (TRUE_PLACE: the user, 2026-10-31, "Or simulation can just assume
 # localization is correct"): handed to Senses as live's localizer (localization.locate) hands it, a Located with her
 # feet's map x and y, the platform she stands on, her mode (ground, air, rope) and full confidence, by her tag ("tag"),
-# or carried where a Noise hides her tag. Until then the simulator's eyes have no locator (no name tag to match), and
+# or carried where a Noise hides her tag; by her dot alone while the localizer hasn't found her (Noise.unfound: what
+# recovers from the dot's errors, nav_tree_rope_top_15). Until then the simulator's eyes have no locator (no name tag to match), and
 # every look placed her by her minimap dot (Localizer.where_dot: good to ~11 units, snapped to a platform) refined on
 # screen: on Tree Dungeon her dot on 30 snapped her onto 28, 34 above it, and a drop 28 -> 30 that had landed was judged
 # missed and done again (loop-grind, seeds 6, 9 and 10). The localizer has its own tests, on the game's frames; what
@@ -581,12 +582,13 @@ class FakeEyes(Eyes):
         frame = _BLANK.copy().view(Frame)  # 0.3 ms, against 2.5 to fill a new one with SKY: the same pixels
         frame.screen = self._draw(frame, her, x, y)
         found = self._ropes(her, x, y) if ropes else []
-        seen = not Noise.during(self.noise.tag_hidden, w.t)
+        unfound = Noise.during(self.noise.unfound, w.t)
+        seen = not (unfound or Noise.during(self.noise.tag_hidden, w.t))
         counts["tag hidden"] += not seen
         s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=self._mp(),
                         ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
                         ropes=found)
-        if TRUE_PLACE and not self.noise.by_dot:  # (her tag where her feet put it, hidden or not: Located.tag)
+        if TRUE_PLACE and not unfound:  # (her tag where her feet put it, hidden or not: Located.tag)
             s.tag, s.located = her, self._located(her, seen)
         s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
         s.hp_box, s.lv_box = self._hp_box(), self._lv_box()

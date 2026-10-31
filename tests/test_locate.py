@@ -728,3 +728,33 @@ def test_a_locators_portals_lights_from_its_map_and_their_pictures_not_to_be_had
     loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
     assert loc is not None and loc.cover.lights == [] and "KeyError" in loc.cover.why_lights
     assert said[0].endswith("; no portal's light (its pictures: KeyError('pv'))")
+
+
+# --- at a rope's top (the simulator's nav_tree_rope_top_15: her dot alone puts her on the platform over it) -----------
+
+def hanging(art, m: P.PlateModel, mx: float, my: float, view) -> np.ndarray:
+    """A frame of the art at `view` with her plate drawn where her feet are at map (mx, my)."""
+    frame, _ = art.window(*view)
+    frame = frame.copy()
+    cx, cy = int(round(mx - view[0] - m.feet[0])), int(round(my - view[1] - m.feet[1]))
+    x0, x1, y0, y1 = m.box
+    frame[cy + y0:cy + y1, cx + x0:cx + x1] = m.picture
+    return frame
+
+
+def test_hanging_under_a_platform_on_the_rope_from_it_her_tag_has_her_on_the_rope_not_on_the_platform(art, model,
+                                                                                                       plate):
+    """Her feet 15 and 25 under platform 18 on the rope at x 111 that hangs from it, still (2026-10-26's hang was 19-31
+    under; 15 her dot alone puts on 18, tests/test_rope_top.py): her tag places her there, never on 18, and on the
+    rope from her second frame (the first in the air: a rope is told by her moves)."""
+    p18 = model.platform(18)
+    rope = next(r for r in model.ropes if r.x == 111)
+    for gap in (15.0, 25.0):
+        loc = locator(art, model, plate)
+        my = p18.y_at(rope.x) + gap
+        view = (VIEW[0], int(my) - 400)
+        for k in range(4):
+            got = loc.see(hanging(art, plate, rope.x, my, view), k / 15, dot_of(loc, rope.x, my))
+            assert got.how == "tag" and got.platform is None, (gap, k)
+            assert (got.x, got.y) == pytest.approx((rope.x, my), abs=1.0)
+            assert got.mode == ("air" if k == 0 else "rope"), (gap, k)

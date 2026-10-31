@@ -655,8 +655,9 @@ class Noise:
                                  # five taps of 20-50 ms, three moved her 0 (0.6; research 4.7)
     dot_px: bool = False         # her minimap dot read to whole pixels (11.4 map units each), not exact
     tag_hidden: tuple = ()       # (from, to) s since the start: her name tag can't be seen (behind a box)
-    by_dot: bool = False         # her place by her minimap dot, refined on screen, as live before the localizer has found
-                                 # her (sim.fakes.TRUE_PLACE off for this world: what recovers from the dot's errors)
+    unfound: tuple = ()          # (from, to) s: the localizer hasn't found her (live's first frames, or after a gap in
+                                 # its frames: her tag, plate and body nowhere): her place by her dot alone, as live's
+                                 # then (Senses._by_scene's not found), her tag not seen
     dot_hidden: tuple = ()       # (from, to) s: her minimap dot can't be seen (a tooltip over the minimap)
     exp_hidden: tuple = ()       # (from, to) s: her EXP number can't be read (the cursor or a window over it: its
                                  # pixels change as it comes and as it goes)

@@ -1719,14 +1719,14 @@ def loop_tree_rope_top_15(sim):
     return darts_stop(1)(sim)
 
 
-@tree((18, 111.0), hanging=-880.0, limit=60, noise=Noise(by_dot=True),
+@tree((18, 111.0), hanging=-880.0, limit=60, noise=Noise(unfound=((0.0, 3.0),)),
       expects=(ends("arrived"), logs("her dot never moved"), sends("off_rope"),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_top_15(sim):
-    """From the rope at x 111, her feet 15 under platform 18 (her dot puts her on 18), up to 16 with no monsters about:
-    the jump up from 18 does nothing on the rope and her dot never moves (control.navigator._rope_top), so she's on the
-    rope: up off it onto 18 (Mover.off_rope), and on up. (Her place by her dot, Noise.by_dot, since the simulator's
-    looks have it as the world does, sim.fakes.TRUE_PLACE, 2026-10-31: there nothing put her on 18.)"""
+    """From the rope at x 111, her feet 15 under platform 18, up to 16 with no monsters about, the localizer not
+    finding her for the first 3 s (Noise.unfound: her dot alone places her, on 18): the jump up from 18 does nothing on
+    the rope and her dot never moves (control.navigator._rope_top), so she's on the rope: up off it onto 18
+    (Mover.off_rope), and on up. (Found, the localizer has her on the rope: tests/test_locate.py.)"""
     return _nav(16)(sim)
 
 
