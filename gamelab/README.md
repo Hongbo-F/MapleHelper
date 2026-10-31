@@ -1165,7 +1165,18 @@ To check in game (the report runs on any telemetry): the next hunt loop or tour 
 | in view or out of it | of the free points she left, net back after 7-15 s out of view 0.32, 15-60 s 0.43-0.46, 1-10 minutes 0.43-0.53; in view all along 0.41, 0.46-0.48, 0.49-0.53 (net of her kills there): the same, no spawning only out of sight |
 | other players' kills | 77% of the deaths seen (2,825 hers, 9,391 others'); in her grinds 35-65%, at night others killing 1.5-3 times what she did |
 
-So the game respawns on the map's clock (MeowDB's 7.56 s tick, at 7.115), each free point's monster back with a chance at each tick, whenever it died, as long as the map is under its cap (MeowDB: 75% of its points with one player, 5% more for each other; here, alone, 14 of 31 at the most): with nobody else killing, a point she empties stays empty until something dies somewhere, her own kills too (the alone row counted by look over all ten files, as the review of 2026-10-29 did, `D:/MapleHelper-scratch/respawn/fix/alone_all.py`: first counted by tick it had 0 births in 154 free point-ticks, but its ticks were placed only among births, few when she's alone). Not per point, nothing for 5 s and then n x 12.8 s (the belief's until then), not 8 s after each death (the simulator's). Grinding learns the rate (Grinding: the belief); the simulator has it as `--world tick-respawn` (`Realism.respawn_tick`: the map's tick, a free point's monster back with a chance of 0.27, the map's cap 0.45 of its points and 0.05 more for each other player; the cap's share alone isn't measured) and `--world solo` (nobody else).
+So the game respawns on the map's clock (MeowDB's 7.56 s tick, at 7.115), each free point's monster back with a chance at each tick, whenever it died, as long as the map is under its cap (MeowDB: 75% of its points with one player, 5% more for each other; here, alone, 14 of 31 at the most): with nobody else killing, a point she empties stays empty until something dies somewhere, her own kills too (the alone row counted by look over all ten files, as the review of 2026-10-29 did, `D:/MapleHelper-scratch/respawn/fix/alone_all.py`: first counted by tick it had 0 births in 154 free point-ticks, but its ticks were placed only among births, few when she's alone). Not per point, nothing for 5 s and then n x 12.8 s (the belief's until then), not 8 s after each death (the simulator's). Grinding learns the rate (Grinding: the belief); the simulator has it as `--world tick-respawn` (`Realism.respawn_tick`) and `--world solo` (nobody else).
+
+**... against the server's own rule (2026-10-30: the map fills itself to its cap).** The client has no spawn logic: it shows the monsters the server sends. The nearest thing to the server's code is OrionAlpha (github.com/EricSoftTM/OrionAlpha, KMS-1.23: `LifePool.init`, `tryCreateMob`; a replica of Nexon's early Korean server): a pass at least every 7 s spawns the cap less the monsters alive at spawn points drawn at random (each at most once a pass); the cap is the map's area times its `mobRate` (one monster in 128,000 square px of its footholds' box, 1 to 40, doubled only with more players than half of it); a point with `mobTime` 0 has no cooldown, only no monster within 100 px; one with a `mobTime` holds one monster, back 1.3-2 times it after it dies. MeowDB's model (a global 7.56 s tick, a 5 s cooldown, 75% of the points with one player and 5% more a player) is its own reading of the closed beta. Checked on 40 hours of Tree Dungeon's telemetry (19 files of 2026-10-28 to 30, 85,187 point-passes at 11,187 fitted passes; `D:/MapleHelper-scratch/respawn-orion`, RESULTS.txt and the scripts beside it):
+
+| | measured | OrionAlpha |
+|---|---|---|
+| the pass | 88% of the births within -0.8..+1.0 s of the fitted 7.115 s ticks | 7 s at the least, at the server's update: fits (MeowDB's 7.56 doesn't) |
+| what comes back | with her alone (13 minutes of 40 hours) only what she killed: 10-29 16:37-16:46, 16 of 16 births 1.2-5.8 s after a kill of hers (by accident ~3e-4); 16:39-16:44, no kill, 17-19 free points watched 5 minutes, no birth (a chance for each free point, even 2.5% a tick, expects ~18) | the cap less the alive: fits |
+| the cap | with her alone the parts she saw held 11-15 (0.35-0.5 a point: the 24 points she saw 0-7, the bottom's 7 about 8 at its next look, after others were back); with others 0.39-0.55 a point at every count of players, 1 to 6+: counts of what was in view, the whole map never seen without a kill between | 22 here (0.71 a point): more than was seen, but what wasn't seen isn't known; no rise with players: fits (MeowDB's 75%-100%: neither) |
+| a point with a monster near it | first read as no rule: births beside a monster already there, 0.12-0.21 a pass against 0.20-0.27 farther (seen monsters only), and the clips at 08:26:04 on 10-30 and 20:40:24 on 10-29. Retracted on 2026-10-31 (the user's catch): frame by frame both clips' newcomers faded in at platform 15's other Horny Mushroom point, 115 px from the monster there, outside its box; the detector credited a newborn to the point nearest where it was first tracked, after it had walked, and a spawn tracked once fading in and again solid reads as a new monster beside one there. Nothing seen against the box (`D:/MapleHelper-scratch/respawn-orion/RESULTS.txt`, 6) | no monster within 100 px of the point, across and up or down: kept (the user, 2026-10-31: "I feel the orionalpha's rule actually holds") |
+
+So the respawn is the map's: every ~7.1 s it spawns its cap less what's alive, at points drawn at random among the clear ones (no monster within 100 px across and up or down, nor a point taken before it in that pass), whoever else is there. The cap is the server's formula (`MapModel.mob_cap`: the map's area times its `mobRate`; Tree Dungeon II 22, Thicket Around the Beach II 26, West Rocky Mountain II 23, 10002072 27, 10002074 20): the counts above are of the parts of the map she saw, and the map was never seen whole without a kill between (hers or another's), so how many it held isn't known (the user, 2026-10-30: "Let's use the formula, the issue with your approach is that we don't know how many mobs are on the map at any given time"; it was 0.42 of the spawn points, 13 of 31, from those counts, for a few hours). A point's 0.27 a tick (above) is what died over the map since the pass before, over the free points: with others killing it's about that; alone it's her own kills, back at one of the free points each, mostly those she has just emptied (at the cap 22 of Tree Dungeon's 31 points are held, about 9 free), and where nobody kills stays held. The simulator's `--world tick-respawn` is this from 2026-10-30 (`Realism.respawn_tick`, `respawn_cap` None: the formula's, by the players there, a share of the points still a knob; a point drawn only with no monster within 100 units of it, `world.SPAWN_CLEAR`; until then each free point's monster back with a chance of 0.27 a tick, a cap of 0.45 of the points and 0.05 more for each other player); grinding's belief too (Grinding: the belief). Not settled: whether the game's cap is the formula's (22 here, where the parts she saw held 11-15 with her alone: a count of the whole map with nobody killing would tell); whether a kill with the map at its cap brings a pass at once (OrionAlpha keeps no pass time while the map is full) or waits for the tick, 14 births alone can't tell.
 
 ## Route diversity
 
@@ -2348,16 +2359,23 @@ Dungeon's tower is slow (24 to 6, 21 s by its ropes), down quick (6 to 24, 8 s).
 time ahead (`stock`): those her memory has, each at the nearest point of its kind on its platform; else, for a point her
 kill emptied or a look saw empty (a look that searched a body of its kind standing at the point: `Memory.holds_body` on
 the looks' covers, `Memory.covers`), what's back since the latest look that saw it empty (`back`: the refill's rate a
-second, the same for every point, learned: below); else, never seen, 0.35 (the uncamped 19-21 had a monster 31-39% of
-the time live). A point is emptied once and full again once a monster is seen there after that, so another player's
+second, the same for every free point: below); else, never seen, 0.35 (the uncamped 19-21 had a monster 31-39% of the time live).
+A point is emptied once and full again once a monster is seen there after that, so another player's
 kill of a monster she had seen is never read as a respawn. **The refill** (from 2026-10-29: the respawn as measured,
 below) has no memory: a point watched empty is due its median (ln 2 over the rate, 15.7 s at the prior's) after the
-latest look, however long it has been empty, and nothing is waited out first. Its rate (`Belief.rate`) is learned from
+latest look, however long it has been empty, and nothing is waited out first. From 2026-10-30 (the map filling itself
+to its cap: Tree Dungeon's respawn, against the server's own rule) its rate (`Belief.rate`) is what died over the map
+come back over its weight (`Belief.weight`: its free points at the cap, a pass drawing only among those: the server's
+formula's 22 of its 31 points held on Tree Dungeon, 9 free; a round's own points counted free in its worth, `weight_of`):
+her own kills, known (`own`: her kills a second over the last 60 s, over the weight), and the others', learned
+(`others`). The others' part is learned from
 what the looks saw of the points they saw free: each looked at again within 20 s, free still or with a new monster
 where one born at the point since can be (`Belief.born_reach`: tracking's 60 units of a `spawned` one and what it can
 have walked since the look that saw the point free, as the memory matches a monster seen again; one farther, walking
-in or one the looks had lost, isn't a refill), each the likelihood of a grid of rates by the model, weighed by
-exp(-age / 180 s), the prior a gamma about 0.0442 a second (0.27 a tick) counting as 3 refills. (Until the review of
+in or one the looks had lost, isn't a refill), each the likelihood of a grid of rates by the model, her kills' passes
+in the gap counted in (each kill's within 7.1 s after it), weighed by exp(-age / 180 s), the prior a gamma about 0.0442
+a second (0.27 a tick) counting as 3 refills: where nothing comes back but her kills (her alone), the others' part
+learns near none, where one rate for every free point (until 2026-10-30) took her kills for the map's. (Until the review of
 2026-10-29 within 60 units whatever the gap: a monster born while she was away had mostly walked off its point by the
 time she was back, so that gap went uncounted where every gap that stayed free counted, and the rate came out low;
 replayed, pooled over a run, 27-30% under the perception service's own count on the 15:58 and 16:27 runs of that day,
@@ -2379,7 +2397,10 @@ saw again as left to her).
 she catches at a point what's back a cycle after she found it free (`caught`: `back(cycle)` at the refill's rate
 learned, the same after her kill or a look that saw it free, the refill having no memory: about the cycle times the
 rate when she comes round far more often than it refills, all of it when far less; until 2026-10-29 1 / sum over k of
-not_back(k cycle) by the refill clock); the cycle is the round's route times, 1 s a stop, and her shooting:
+not_back(k cycle) by the refill clock); the refill there the others' part and what the round's own kills bring back
+over the map (its kills a second over the map's weight: a round of a few of its points mostly feeds the rest, and
+with nobody else killing any round of part of the map is worth next to nothing in the long run, the piles she sees
+pulling her against a bar near none; from 2026-10-30); the cycle is the round's route times, 1 s a stop, and her shooting:
 0.085 s a point of EXP (Lucky Seven live on Tree Dungeon: 3.85 throws a Horny Mushroom's kill, 2.95 a Green's, a throw
 every 0.84 s), learned from her throws and the EXP they gave (300 EXP's worth of the prior: with the regular attack it's
 about three times as long). Less what touches cost (`HP_PRICE`, 100 EXP a bar of HP, a guess) by the danger hook. Grown
@@ -2395,7 +2416,8 @@ until the review of that day the run lifted the 20 s until a stop gave EXP, a se
 Dungeon before she has seen anything (`python -m gamelab patrol --map 10002073`): 10, 7 (the top cluster), 486 EXP a
 minute, a round of 24 s (5 of travel, 17 of shooting, 8 points; by the refill clock until 2026-10-29, 463; 14, 10, 8, 12
 461; camping at 23, 228, where her hunt loop camping there made 283 live). Rounds that close are a coin toss: what she
-sees decides, and the refill she learns.
+sees decides, and the refill she learns. With what a round's own kills bring back (from 2026-10-30) the same loop, 515
+EXP a minute (a round of 30 s, 23 of shooting), where without it 477 (the magician's stats of 2026-10-30 both).
 
 **The next stop** (`Patrol.choose`, when she leaves a stop, and every second of a trip to one): along the loop from the
 last loop stop she was at, the first expected to hold a quarter of what it holds full by the time she gets there
@@ -2565,6 +2587,11 @@ added, 9aa2b81; EXP a minute, D:/MapleHelper-scratch/respawn/fix/ab_*.txt):
 | the walkers' (each monster back 17 s after its own death) | 24 | 315.5 | 318.7 | +3.1 (+1.0%) | 7.6 | 67.7 -> 68.2 (+0.8%, se 3.1) |
 | `tick-respawn`: the map's tick, a free point's monster back at it 0.27 of the time, the crowd's five camps, the cap 0.70 of the points | 24 | 306.9 | 309.4 | +2.5 (+0.8%) | 6.9 | 66.7 -> 66.4 (-0.4%, se 2.1) |
 | `tick-respawn`, `solo`: nobody else, the cap 0.45, what she kills alone coming back somewhere | 12 | 113.5 | 231.0 | +117.5 (+103.6%) | 18.4 | 22.8 -> 49.8 (+118%, se 5.3) |
+
+(`tick-respawn` as it was then: a free point's monster back with a chance at each tick under a cap. From 2026-10-30 it
+fills the map to its cap at random points with no monster within 100 units, the server's formula's (22 on Tree
+Dungeon with her alone):
+these runs are of the world before.)
 
 No deaths, falls or stops in any; better on 11 of 24, 12 of 24 and 12 of 12 seeds. In the worlds where something keeps
 killing or each monster comes back on its own, the same within the noise; alone, where the cap has the map make only

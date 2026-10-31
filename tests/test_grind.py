@@ -35,8 +35,14 @@ def _map(plats, spawns):
                      "rx1": x + 40} for k, (x, y, mob) in enumerate(spawns)}
     tree = {"info": {"VRLeft": -500, "VRTop": -3000, "VRRight": 4000, "VRBottom": 1000}, "foothold": {"1": fh},
             "life": life, "miniMap": {"width": 4500, "height": 4000, "centerX": 500, "centerY": 3000, "mag": 4}}
-    return mapdata.parse(1, tree, "Grind test", {}, {"1": "Horny Mushroom", "2": "Green Mushroom"},
-                         {"1": 41, "2": 26})
+    model = mapdata.parse(1, tree, "Grind test", {}, {"1": "Horny Mushroom", "2": "Green Mushroom"},
+                          {"1": 41, "2": 26})
+    # Its mobRate set so the server's cap (MapModel.mob_cap) is half its points (Tree Dungeon's is 22 of 31): by its
+    # area alone a small map of few points would have every point held but hers, and her kills all back on her
+    want = max(1, round(0.5 * len(model.spawns)))
+    model.mob_rate = (want + 0.5) / (model.mob_cap() + 0.5)
+    assert model.mob_cap() == want
+    return model
 
 
 def _pid(model, x, y):
@@ -80,17 +86,21 @@ def test_a_loop_timed_to_respawns_beats_camping():
     model, ids, far, p = _column()
     assert [len(s.cover) for s in p.stops] == [1] * 5  # each platform's own point, nothing across
     camp, loop = p.camping(0.0), p.best(0.0)
-    # Camping at one point gets a kill each time it's back (the refill's rate, 22.6 s free on average), and stands idle
-    # the rest of the time.
-    assert len(camp.stops) == 1 and camp.rate == pytest.approx(41 * patrol.REFILL_RATE, rel=0.1)
-    # The round of the column: each point passed again about when it's back (its cycle past the refill's median), for
-    # a good deal more EXP a minute; the stop 30 s away isn't worth the trip.
-    assert set(loop.stops) == {p.stop_on(i) for i in ids} and p.stop_on(far) not in loop.stops
+    # Camping at one point gets a kill each time it's back (the others' refill, 22.6 s free on average, and what her own
+    # kills bring back over the map, one point of its weight theirs: the camped one free, the rest held up to the
+    # cap), and stands idle the rest of the time.
+    w = p.belief.weight_of(1)
+    assert len(camp.stops) == 1 and camp.rate == pytest.approx(41 * patrol.REFILL_RATE / (1 - 1 / w), rel=0.1)
+    # A round of the column: each point passed again about when it's back (its cycle past the refill's median), for
+    # a good deal more EXP a minute; the stop 30 s away isn't worth the trip. (Three of the column's four from
+    # 2026-10-31: with the map at its cap the points it keeps free are where its kills come back, a fourth adds travel.)
+    assert len(loop.stops) >= 3 and set(loop.stops) <= {p.stop_on(i) for i in ids} and p.stop_on(far) not in loop.stops
     assert loop.cycle >= patrol.refill_median()
     assert loop.rate > 1.5 * camp.rate
-    # A round's worth is what comes back in it: the same round in a world refilling 4 times as slowly is worth less.
-    p.belief._rate = patrol.REFILL_RATE / 4
-    assert p.rate(loop.stops, 0.0).rate < 0.7 * loop.rate
+    # A round's worth is what comes back in it: the same round with the others' kills bringing back 4 times as little is
+    # worth less (not a quarter: its own kills come back on its own points, the map's free ones).
+    p.belief._others = p.belief._rate = patrol.REFILL_RATE / 4
+    assert p.rate(loop.stops, 0.0).rate < 0.8 * loop.rate
 
 
 def test_the_next_stop_goes_round_the_loop_and_skips_what_she_has_just_emptied():
@@ -124,8 +134,10 @@ def _beside(off: float):
     right = _pid(model, 1200, -200)
     p = _patrol(model, lambda a, b: off if right in (a, b) else 2.0 * abs(left.index(a) - left.index(b)))
     p.belief.update(0.0, Memory(model))
-    p.belief._rate = 0.06  # (refilling at 0.06 a second: the loop's points not all back each round, its rate 4.5 EXP/s,
-    # as the refill clock until 2026-10-29 had it for a point alone on its platform; the prior's, 0.044, gives 3.8)
+    # (the others' kills bringing back 0.038 a second at a free point: with what the loop's own kills bring back, two
+    # thirds of them on its own points on this small map, the loop's points not all back each round, its rate 4.5
+    # EXP/s, as the refill clock until 2026-10-29 had it for a point alone on its platform)
+    p.belief._others = p.belief._rate = 0.038
     p._take(p.rate([p.stop_on(i) for i in left], 0.0), 0.0, "test")
     return model, left, right, p
 
@@ -235,7 +247,7 @@ def test_no_flip_flopping_between_loops():
     for k in range(10):
         t += patrol.LOOP_MIN_S + patrol.REPLAN_S
         p.belief.rival_at = {}
-        p.belief._rate = patrol.REFILL_RATE * (1.0 + 0.02 * (k % 2))
+        p.belief._others = p.belief._rate = patrol.REFILL_RATE * (1.0 + 0.02 * (k % 2))
         p.replan(t)
     assert set(p.plan.stops) == second and p.loops == loops
 
@@ -248,12 +260,13 @@ def test_the_belief_of_a_point_her_kill_emptied_refills_and_learns_how_fast():
     m.update(0.0, [seen], None)
     b.update(0.0, m)
     assert b.stock(q.id, 0.0) == pytest.approx(1.0, abs=0.01)
-    # Her kill: the point is empty, coming back at the refill's rate from then (by the learned rate, the prior's so
-    # far), to Q_CEIL in the long run.
+    # Her kill: the point is empty, coming back at the refill's rate from then (the others' part the prior's so far,
+    # and what her kill brings back over the map: one in OWN_S, over its weight), to Q_CEIL in the long run.
     m._killed(m.entries[0], 1.0, 150.0)
     b.update(1.0, m)
+    assert b.kills == [1.0] and b.rate == pytest.approx(patrol.REFILL_RATE + 1 / patrol.OWN_S / b.weight)
     assert b.stock(q.id, 1.0) == 0.0
-    assert b.stock(q.id, 1.0 + 5.0) == pytest.approx(patrol.back(5.0), abs=1e-9)
+    assert b.stock(q.id, 1.0 + 5.0) == pytest.approx(patrol.back(5.0, b.rate), abs=1e-9)
     assert patrol.back(5.0) == pytest.approx(5.0 * patrol.REFILL_RATE, rel=0.25)  # (at first the rate)
     assert b.stock(q.id, 1e4) == pytest.approx(patrol.Q_CEIL)
     assert p.expect(p.stop_on(ids[0]), 1.0)[0] == 0.0
@@ -324,6 +337,71 @@ def test_she_shoots_in_passing_what_a_star_reaches_on_another_platform():
     s.monsters = [there]
     targets, _, _ = g._targets(s, time.monotonic())
     assert there in targets and not g._can_pass_shoot(s, targets)
+
+
+def test_her_kills_come_back_over_the_map_and_the_others_part_is_learned_net_of_them():
+    """The game fills the map to its cap at each pass (patrol's top): what her kills bring back she counts herself (own:
+    her kills a second over OWN_S, over the map's weight, its free points at the cap: a pass draws among those), and
+    the others' part is learned from what her looks saw, her kills' passes in each gap counted in. A world where nothing
+    comes back but her kills (her alone, as on 2026-10-29 16:37-16:46) is learned so: the others' part near none, the
+    rate her kills' (a rate for every free point, until 2026-10-30, took her kills for the others')."""
+    import random
+    model, ids, far, p = _column()
+    n, cap = len(p.points), min(len(p.points), model.mob_cap())
+    learned = []
+    for counted in (True, False):
+        b, rng, t = patrol.Belief(model, p.points), random.Random(2), 0.0
+        assert b.weight == pytest.approx(max(1, n - cap))
+        kills = []
+        for k in range(4000):  # her kill every 10 s, a free point looked at again 0.5-20 s on
+            t = 0.5 * (k + 1)
+            if k % 20 == 0:
+                kills.append(t)
+            gap = rng.uniform(0.5, patrol.WATCH_GAP_S)
+            mine = patrol.passes(kills, t - gap, t) / b.weight
+            b.kills = kills if counted else []
+            b._seen(t, gap, rng.random() < patrol.filled(mine))
+        b.t = t
+        learned.append(b._learned())
+    own = 0.1 / b.weight  # (the prior's REFILL_PRIOR_N refills keep the others' part off none)
+    assert learned[0] < 0.3 * own and learned[1] == pytest.approx(own, rel=0.3) and learned[1] > 3 * learned[0]
+    # Her rate now: her kills over OWN_S, as much back over the map's weight, and the others' part.
+    b = patrol.Belief(model, p.points)
+    b.kills = sorted(t - 5.0 - 10.0 * k for k in range(12))  # (2 minutes of her kills, 6 in the last OWN_S)
+    b.update(t, Memory(model))
+    assert b.own(t) == pytest.approx(6 / patrol.OWN_S) and len(b.kills) == 6  # (the older ones let go)
+    assert b.rate == pytest.approx(b.others + b.own(t) / b.weight) and b.others == pytest.approx(patrol.REFILL_RATE)
+    # Her kill's pass comes within TICK_S of it, the map's phase not known: evenly.
+    assert patrol.passes([10.0], 10.0, 10.0 + patrol.TICK_S / 2) == pytest.approx(0.5)
+    assert patrol.passes([10.0], 0.0, 10.0) == 0.0 and patrol.passes([10.0], 0.0, 100.0) == pytest.approx(1.0)
+    # Tree Dungeon's: 31 points, the server's cap of 22 (MapModel.mob_cap): 9 free at the cap, what a pass draws among.
+    if scenarios.available(10002073):
+        tree = mapdata.load(10002073)
+        assert tree.mob_cap() == 22
+        assert patrol.Belief(tree, patrol.points_of(tree, None, {"x": 1})).weight == pytest.approx(31 - 22)
+
+
+def test_a_rounds_worth_counts_what_its_own_kills_bring_back():
+    """Patrol.rate: a round's own kills come back over the map, its points' share of them on it (the map's passes fill
+    it to its cap at random points): the round of the column, 4 of the map's 4.5 of weight, is worth most of what it
+    was with the others' kills bringing back half as much, its own making up for some; with nobody else killing there,
+    next to nothing in the long run: each round some of what it kills comes back off it, and nothing comes back on it
+    but its kills (alone on the map she lives off what stands there: the piles she sees pull her, the loop's bar near
+    none)."""
+    model, ids, far, p = _column()
+    loop = p.best(0.0)
+    b = p.belief
+    b._others = patrol.REFILL_RATE / 2
+    assert p.rate(loop.stops, 0.0).rate > 0.7 * loop.rate
+    b._others = 1e-5
+    assert p.rate(loop.stops, 0.0).rate < 0.05 * loop.rate
+    assert p.rate((p.stop_on(ids[0]),), 0.0).rate < 0.01 * loop.rate
+    # A point with its monster there: that monster alone (a pass never draws a point with one within 100 units).
+    m = Memory(model)
+    m.update(0.0, [_sight(model, HORNY, 150, 0)], None)
+    b.update(0.0, m)
+    q = next(q for q in p.points if q.platform == ids[0])
+    assert b.stock(q.id, 30.0) == pytest.approx(sum(e.p(30.0) for e in b.at[q.id]))
 
 
 def test_a_world_refilling_as_the_model_says_is_learned_as_the_model():
@@ -655,7 +733,7 @@ def test_her_loop_found_again_in_another_order_keeps_its_order_and_takes_its_rat
     # Refills watched four times as slow as the model's: the same round, its rate now lower; found again in its other
     # order, hers keeps her order (her place in it) and takes the rate (until 2026-10-29 it kept the one it was taken
     # up at: a 2-stop round's two orders are one round, so the pulls' bar and a stop's stayed where they started).
-    p.belief._rate = patrol.REFILL_RATE / 4
+    p.belief._others = p.belief._rate = patrol.REFILL_RATE / 4
     t = patrol.REPLAN_S + 1
     assert set(p.best(t).stops) == set(mine) and p.best(t).stops != mine
     assert p.replan(t) is None and p.plan.stops == mine
@@ -1158,4 +1236,6 @@ def test_the_live_ping_pong_of_2026_10_29_between_two_empty_stops_is_gone():
             at = r["stop"]
     assert len(asked) >= 25 and live_back >= 25
     assert not [a for a in asked if a[2]], [(a[0], a[1], a[3]["why"]) for a in asked if a[2]]
-    assert 1.0 - math.exp(-p.belief.rate * patrol.TICK_S) < 0.05
+    # (the others' part learned low; with what her own kills a minute bring back over the map's 9 free points, a little
+    # more)
+    assert 1.0 - math.exp(-p.belief.others * patrol.TICK_S) < 0.05 and 1.0 - math.exp(-p.belief.rate * patrol.TICK_S) < 0.06

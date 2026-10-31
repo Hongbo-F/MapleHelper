@@ -354,6 +354,7 @@ class Grind(Hunt):
         return {"loops": p.loops, "stops": len(st), "stay_median": round(median(st), 2) if st else None,
                 "stay_longest": round(st[-1], 2) if st else None, "pulls": self.pulls, "skips": self.skips,
                 "refill_scale": round(b.scale, 3), "refill_tick": round(1.0 - math.exp(-b.rate * TICK_S), 3),
+                "refill_others_tick": round(1.0 - math.exp(-b.others * TICK_S), 3), "own": round(b.own(b.t), 3),
                 "refills": b.refills, "watched_s": round(b.watched_s), "kill_s": round(p.kill_s, 4),
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)

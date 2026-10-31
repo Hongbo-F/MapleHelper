@@ -43,6 +43,20 @@ MIN_FALL = 2                 # a platform must be this far below her to be one s
 # is on the long one: a landing on either is arriving, and moves between them are walking. None on the first map.
 TWIN_DY = MIN_FALL
 SPAWN_REACH = 60             # how far above its platform a spawn point may be placed
+# The most monsters the server keeps on a map (MapModel.mob_cap), as OrionAlpha (github.com/EricSoftTM/OrionAlpha,
+# KMS-1.23, a replica of Nexon's early Korean server) has it: LifePool.init, one monster in CAP_AREA square units of the
+# box about the map's footholds as WvsPhysicalSpace2D makes it (each foothold's x CAP_BOX_X inside, its top CAP_BOX_UP
+# over it, its bottom CAP_BOX_DOWN under it; within the VR bounds with VRLimit; CAP_BOX_GROW more each side), its height
+# less CAP_SCREEN_DY and both at least the 800 x 600 screen (CAP_SCREEN), times the map's mobRate, 1 to CAP_MOST;
+# tryCreateMob: with more than half that many users on the map, more, up to twice (OrionAlpha's `1 << cap` read as
+# `cap << 1`: RustMS's "up to twice as many"). Tree Dungeon II 22, Thicket Around the Beach II 26, West Rocky Mountain
+# II 23.
+# The 11-15 counted with her alone on Tree Dungeon (sim.world's top) were of the parts of the map she saw.
+CAP_AREA = 128000.0          # square map units a monster (OrionAlpha's 0.0000078125 a square px)
+CAP_MOST = 40
+CAP_BOX_X, CAP_BOX_UP, CAP_BOX_DOWN, CAP_BOX_GROW = 30, 300, 10, 10
+CAP_SCREEN = (800, 600)
+CAP_SCREEN_DY = 450
 
 
 @dataclass(frozen=True)
@@ -263,6 +277,8 @@ class MapModel:
                                                                   # a Green Mushroom 30, a Horny Mushroom 0) ...
     mob_eva: dict[str, float] = field(default_factory=dict)       # ... its avoid (eva) and level: what a miss is
     mob_level: dict[str, float] = field(default_factory=dict)     # reckoned from (nothing reads these three yet)
+    mob_rate: float = 1.0                                         # info's mobRate, and whether its VR bounds limit
+    vr_limit: bool = False                                        # the server's box of it (VRLimit): mob_cap
 
     # --- one place: twins -----------------------------------------------------------------------
 
@@ -337,6 +353,32 @@ class MapModel:
         return out
 
     # --- monsters -----------------------------------------------------------------------------
+
+    def mob_cap(self, users: int = 1) -> int:
+        """The most monsters the server keeps on the map with `users` players there (see CAP_AREA): its respawn fills
+        it to this (sim.world, behavior.patrol)."""
+        segs = [s for p in self.platforms for s in p.segments] + list(self.walls)
+        if not segs:
+            return 1
+        left = min(min(s.x1, s.x2) + CAP_BOX_X for s in segs)
+        right = max(max(s.x1, s.x2) - CAP_BOX_X for s in segs)
+        top = min(min(s.y1, s.y2) - CAP_BOX_UP for s in segs)
+        bottom = max(max(s.y1, s.y2) + CAP_BOX_DOWN for s in segs)
+        vl, vt, vr, vb = (b or 0 for b in self.bounds)
+        if self.vr_limit:
+            left = vl + 20 if vl > 0 and left < vl + 20 else left
+            right = vr if vr > 0 and right > vr else right
+            top = vt + 65 if vt > 0 and top < vt + 65 else top
+            bottom = vb if vb > 0 and bottom > vb else bottom
+        w = right - left + 2 * CAP_BOX_GROW
+        h = bottom - top + 2 * CAP_BOX_GROW
+        least = min(CAP_MOST, max(1, int(max(h - CAP_SCREEN_DY, CAP_SCREEN[1]) * max(w, CAP_SCREEN[0])
+                                         * self.mob_rate / CAP_AREA)))
+        if users <= least // 2:
+            return least
+        if users >= 2 * least:
+            return 2 * least
+        return least + least * (2 * users - least) // (3 * least)
 
     def safe(self, pid: int, reach: float = MONSTER_REACH) -> bool:
         """No monster can touch her standing on this platform: none spawn on it (monsters never leave
@@ -486,7 +528,8 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
         mob_pdd={mob_names.get(i, i): float(v) for i, v in (mob_pdd or {}).items()},
         mob_mdd={mob_names.get(i, i): float(v) for i, v in (mob_mdd or {}).items()},
         mob_eva={mob_names.get(i, i): float(v) for i, v in (mob_eva or {}).items()},
-        mob_level={mob_names.get(i, i): float(v) for i, v in (mob_level or {}).items()})
+        mob_level={mob_names.get(i, i): float(v) for i, v in (mob_level or {}).items()},
+        mob_rate=float(info.get("mobRate", 1.0)), vr_limit=bool(info.get("VRLimit", 0)))
     floors, peers = tuple(s for p in model.platforms for s in p.segments), tuple(model.platforms)
     for p in model.platforms:
         p.walls, p.floors, p.peers = tuple(model.walls_of(p.group)), floors, peers

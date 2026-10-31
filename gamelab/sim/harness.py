@@ -258,10 +258,11 @@ WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
 # `walkers` had them till 2026-10-31).
 WORLDS["walkers"] = {"chase": True, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
 WORLDS["no-aggro"] = {"chase": False}
-# ... and the game's respawn as measured on Tree Dungeon on 2026-10-29 (`tick-respawn`: world.TICK_S, TICK_P, CAP_SHARE,
-# CAP_OTHER; Realism.respawn_tick): the map's tick, a free point's monster back at it with a chance, under the map's cap
-# (by the other players there), where the other worlds bring each monster back on its own clock (`respawn` s after it
-# died: the walkers' 17); and with nobody else on the map (`solo`: no camps, no rival), as live on 2026-10-29 16:35-16:45.
+# ... and the game's respawn as measured on Tree Dungeon on 2026-10-29 and 30 (`tick-respawn`: world.TICK_S,
+# SPAWN_CLEAR, MapModel.mob_cap; Realism.respawn_tick): the map's pass filling it to its cap (the server's formula) at
+# random spawn points with no monster within 100 units, where the other worlds bring each monster back on its own clock
+# (`respawn` s after it died: the walkers' 17); and with nobody else on the map (`solo`: no camps, no rival), as live on
+# 2026-10-29 16:35-16:45.
 WORLDS["tick-respawn"] = {"respawn_tick": TICK_S}
 WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's

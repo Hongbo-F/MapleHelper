@@ -3076,7 +3076,7 @@ FOLLOW_EXPECTS = (
     check("remembered for her next runs", lambda tr: tr["result"]["remembered"] is not None))
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("jump", "c"),))),
       expects=FOLLOW_EXPECTS + (
           logs("HER JUMPS DIDN'T LIFT HER 6 TIMES IN A ROW"), logs("HER KEYS: THE GAME HAS THEM ON OTHER KEYS"),
@@ -3104,7 +3104,10 @@ def loop_tree_grind_jump_key(sim):
     (2026-10-29: work/evade-int, her evade step and R7's dodge with the pull's detour rule): on 1, and on 4 (the evade
     work's pick without the pull's rule), fewer than 3 of her jumps lifted her after the check; of seeds 1-13, 2, 3, 5-11
     and 13 meet all of this. On 2: the doubt at 138.3 s, put off (a Horny Mushroom and a slime near), the window read at
-    150.0-150.7 s, JUMP followed to C, 42 kills after.)"""
+    150.0-150.7 s, JUMP followed to C, 42 kills after.) (Seed 1 since the respawn as the map's fill to its cap,
+    2026-10-30: work/fill-to-cap, grinding's loop counting what its own kills bring back: on 2 not all of this; of seeds
+    1-13, 1, 3-8 and 10-13 meet all of it. On 1: the doubt at 122.1 s, the window read at 122.6-123.3 s, JUMP followed
+    to C at 124.0 s, 38 kills after.)"""
     return key_check_run(4)(sim)
 
 

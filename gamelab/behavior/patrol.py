@@ -20,18 +20,21 @@ The map, once (Patrol):
 What she believes (Belief, from her memory of the monsters, localization.memory, at every look): how many monsters each
 spawn point has now and at any time ahead (`stock`): the monsters remembered there (each the nearest point of its kind
 on its platform), else, for a point a look has seen empty (one that searched a body of its kind standing at the point:
-Memory.holds_body) or her kill emptied, what's back since the latest look that saw it empty (`back`: the game respawns
-on the map's tick, a free point's monster back at one with a chance, as measured on Tree Dungeon on 2026-10-29; at the
-refill's rate a second, the same for every point, learned from what she sees: `rate`); else, never seen, Q_UNKNOWN. A
-point is emptied once (her kill, or the first look to see it empty after a monster was seen there) and full again once a
-monster is seen there after that. The refill's rate (Belief.rate) is the map's state, not a constant (by the other
-players, the map's cap): from what her looks saw of the points they saw free, each seen again within WATCH_GAP_S free
-still or with a new monster at it, weighed by age, about the prior's REFILL_RATE (until 2026-10-29 a refill clock per
-point, nothing for 5 s and then 12.8 s times the points on its platform, scaled by the refills she watched alone: a
-point that never came back never counted). And what of it is hers (`share`): by a point with another player by it (their
-minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as others leave of its kind, learned from her memory
-(`take`): of the monsters she saw by another player, those looks forgot (not those forgotten by age: she never looked
-again) without her kill, against those she killed or saw there TAKE_KEEP_S after she first saw them.
+Memory.holds_body) or her kill emptied, what's back since the latest look that saw it empty (`back`: the game fills the
+map to its cap at each pass, what died since the pass before back at random spawn points with no monster within 100
+units, as measured on Tree Dungeon on 2026-10-29 and 30 and as the server's code has it; at the refill's rate a second,
+the same for every free point: `rate`); else, never seen, Q_UNKNOWN. A point is emptied once (her kill, or the first
+look to see it empty after a monster was seen there) and full again once a monster is seen there after that. The
+refill's rate (Belief.rate) is the map's state, not a constant: what her own kills bring back over the map (`own`, over
+its `weight`), and what the other players' do (`others`), learned from what her looks saw of the points they saw free,
+each seen again within WATCH_GAP_S free still or with a new monster at it, her kills' passes counted in, weighed by age,
+about the prior's REFILL_RATE (until 2026-10-29 a refill clock per point, nothing for 5 s and then 12.8 s times the
+points on its platform, scaled by the refills she watched alone: a point that never came back never counted; until
+2026-10-30 one rate learned for every free point, whatever died). And what of it is hers (`share`): by a point with
+another player by it (their minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as others leave of its kind,
+learned from her memory (`take`): of the monsters she saw by another player, those looks forgot (not those forgotten by
+age: she never looked again) without her kill, against those she killed or saw there TAKE_KEEP_S after she first saw
+them.
 
 The loop (Patrol.best): a closed round of stops (LOOP_MIN to LOOP_MAX), chosen by its EXP a minute in the long run: each
 spawn point it reaches gives its EXP (times her share) each time she comes round and finds it back (`caught`: what's
@@ -47,7 +50,8 @@ On Tree Dungeon, Forest Up North II, before she has seen anything (Lucky Seven's
 rate): the loop 10, 7, 486 EXP a minute (a round of 24 s: 5 of travel, 17 of shooting; 8 spawn points), where the user
 grinding made 484 on 2026-10-24 (with the refill clock until 2026-10-29: 463; 14, 10, 8, 12 461; camping at 23 228,
 where her hunt loop camping there made 283 live). Rounds this close are a coin toss: what she sees decides (the next
-stop, below), and the refill she learns.
+stop, below), and the refill she learns. With what a round's own kills bring back (from 2026-10-30) the same loop, 515
+(a round of 30 s: 23 of shooting), where without it 477 (the magician's stats of 2026-10-30 both).
 
 The next stop (Patrol.choose): along the loop from the last loop stop she was at, the first expected to hold SKIP_FULL
 of what it holds full when she gets there (an emptied stretch is skipped until it's due; with none due on the loop, of
@@ -102,6 +106,7 @@ The numbers marked "guess" are starting values for the simulator's A/B runs; the
 are a search's resolution.
 """
 
+import bisect
 import math
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -129,36 +134,44 @@ KILL_PRIOR_EXP = 300.0  # guess
 STOP_S = 1.0           # guess: s a stop costs beyond its kills (the looks that judge it, settling where she lands)
 # The refill of a spawn point she has seen empty (`back`, `not_back`), as the game respawns on Tree Dungeon (measured on
 # 2026-10-29 from the perception service's telemetry of 2026-10-28 and 29: 10 files, about 16 hours, 9,957 new monsters
-# at spawn points whose platform was in view before them; D:/MapleHelper-scratch/respawn): on the map's clock, a tick
-# every TICK_S (fitted on each stretch: 7.09-7.13 s; 73-95% of the births within 0.6 s of a tick, the rest the
-# detector's lag), at which a point with no monster gets one with a chance REFILL_P (21,285 free point-ticks in view,
-# 5,775 births) however long it has been free (0.22 within 2 s of its last death, 0.28-0.32 at 2-30 s, 0.23-0.25 past
-# 30 s), however many points its platform has, however near she stands (0.20 within 100 units, 0.25-0.29 farther): one
-# rate for every point, 22.6 s free on average, where until 2026-10-29 each point had its own clock, nothing for 5 s and
-# then n x 12.8 s on a platform of n points. And the chance is the map's state, not a constant: by 5-minute stretch it
-# went from 0.40 to none, with the other players (nobody else for a minute: 0.023, 11 births in 486 free point-ticks,
-# each within two ticks of a kill of hers; one: 0.10-0.17; more: 0.26-0.31) and a little with her kills in the tick
-# before (0.26 with none, 0.31 with 3 or more). The game caps the map's monsters (MeowDB: by the players there; the map
-# held 0.32-0.47 a point when most of it was seen within 30 s) and makes what died: at 16:35-16:45 on 2026-10-29,
-# nobody else there and nothing of hers dying, the top's 12 points and 3 more in view stayed free 4 to 9 minutes, no
-# birth in 38 ticks. So the rate is learned (Belief.rate): what her looks saw of the points they saw free, each looked
-# at again within WATCH_GAP_S, free still or with a new monster where one born at it can be by then (Belief.
-# born_reach), each the likelihood of RATE_GRID's rates by the model, weighed by exp(-age / REFILL_MEMORY_S), the prior
-# a gamma about REFILL_RATE counting as REFILL_PRIOR_N refills. Until 2026-10-29
-# the refills she watched were averaged against the model's mean and a point that never came back never counted: at
-# 16:39-16:44 the top's points, empty for minutes, were each expected back at the model's pace slowed 1.9 times, 45 EXP
-# at stop 7 9 s after she found it empty, and she went between 7 and 14 for 4 minutes for nothing (the user: "the
-# character keeps going up where no mobs are spawning"); learned so, by 16:42 a free point there refills at 2.5% a tick.
-# What's back may be net of others' kills and the cap: a point she left free filling to Q_CEIL in the long run, the
-# refill's rate at first (a chain of two states: in at the rate, out at (1 / Q_CEIL - 1) times it). Measured, out of her
-# view a minute to 10 minutes, the free points she left had a monster on 0.43-0.53 of them when she was back (in view,
-# 0.48-0.53 net of her kills), where the refill alone fills them all; but at 0.5 the loops' long-run rates halve for the
-# long rounds, so the bar a pile must beat (the pull) halves too, and replayed on her 01:11 run the pulls to the bottom
-# come back (10 of 32 choices, 1 at 1.0, 21 live before the pull's rule). Off (1), as the clock had it: other players'
-# share is by their dots (`share`).
+# at spawn points whose platform was in view before them; D:/MapleHelper-scratch/respawn; and on 2026-10-30 against the
+# server's own rule, OrionAlpha's LifePool.tryCreateMob, on 19 files, 40 hours: D:/MapleHelper-scratch/respawn-orion,
+# RESULTS.txt): the map fills itself to its cap. A pass every TICK_S (fitted on each stretch: 7.09-7.13 s; 73-95% of the
+# births within 0.6 s of a tick, the rest the detector's lag) spawns the cap less the monsters alive at points drawn at
+# random among those clear (no monster within 100 units of it, nor a point taken before it that pass: OrionAlpha's box,
+# sim.world.SPAWN_CLEAR; the user, 2026-10-31), the cap the server's formula (MapModel.mob_cap: the map's area times its
+# mobRate; sim.world's top: the measurements; from 2026-10-30 at the user's word, where it was 0.42 of the spawn points
+# by a count of the parts of the map she saw). So what comes back is what died since the pass before, hers and the other
+# players' kills, spread over the map: at a free point, a pass brings one with a chance of what died over the map's
+# weight (Belief.weight: its free points at the cap, a held one never drawn: Tree Dungeon's 31 points, 22 held, 9; until
+# 2026-10-31 a held one half as likely, a second monster beside the first, from evidence that didn't hold up), and with
+# her alone nothing came back but her own kills (16:35-16:45 on 2026-10-29: nobody else there and nothing of hers dying,
+# the top's 12 points and 3 more in view stayed free 4 to 9 minutes, no birth in 38 ticks). Her own kills she knows
+# (Belief.own: her kills a second over OWN_S, each its pass's); the other players' she learns (Belief.others: the refill
+# a second at a free point net of what her kills brought back). With others there a free point refilled at REFILL_P a
+# pass on average (21,285 free point-ticks in view, 5,775 births), by 5-minute stretch from 0.40 to none, with the other
+# players (nobody else for a minute: 0.023, 11 births in 486 free point-ticks, each within two ticks of a kill of hers;
+# one: 0.10-0.17; more: 0.26-0.31), where until 2026-10-29 each point had its own clock, nothing for 5 s and then n x
+# 12.8 s on a platform of n points, and until 2026-10-30 one rate for every free point whatever died. The others' part
+# is learned (Belief.others): what her looks saw of the points they saw free, each looked at again within WATCH_GAP_S,
+# free still or with a new monster where one born at it can be by then (Belief. born_reach), each the likelihood of
+# RATE_GRID's rates by the model, her kills' passes in the gap counted in, weighed by exp(-age / REFILL_MEMORY_S), the
+# prior a gamma about REFILL_RATE counting as REFILL_PRIOR_N refills. A round's worth (Patrol.rate) counts its own
+# kills: what they bring back over the map, its points' share of it. Until 2026-10-29 the refills she watched were
+# averaged against the model's mean and a point that never came back never counted: at 16:39-16:44 the top's points,
+# empty for minutes, were each expected back at the model's pace slowed 1.9 times, 45 EXP at stop 7 9 s after she found
+# it empty, and she went between 7 and 14 for 4 minutes for nothing (the user: "the character keeps going up where no
+# mobs are spawning"); learned so, by 16:42 a free point there refills at 2.5% a tick. What's back may be net of others'
+# kills and the cap: a point she left free filling to Q_CEIL in the long run, the refill's rate at first (a chain of two
+# states: in at the rate, out at (1 / Q_CEIL - 1) times it). Measured, out of her view a minute to 10 minutes, the free
+# points she left had a monster on 0.43-0.53 of them when she was back (in view, 0.48-0.53 net of her kills), where the
+# refill alone fills them all; but at 0.5 the loops' long-run rates halve for the long rounds, so the bar a pile must
+# beat (the pull) halves too, and replayed on her 01:11 run the pulls to the bottom come back (10 of 32 choices, 1 at
+# 1.0, 21 live before the pull's rule). Off (1), as the clock had it: other players' share is by their dots (`share`).
 TICK_S = 7.115
+OWN_S = 60.0           # guess: her kill rate as of now over this long (Belief.own)
 REFILL_P = 0.27
-REFILL_RATE = -math.log(1.0 - REFILL_P) / TICK_S  # 0.0442 a second
+REFILL_RATE = -math.log(1.0 - REFILL_P) / TICK_S  # 0.0442 a second: the others' prior
 REFILL_PRIOR_N = 3.0   # guess: the prior counting as this many refills seen ...
 REFILL_MEMORY_S = 180.0  # guess: ... what she saw weighed by exp(-age / this): the crowd changed within minutes
 WATCH_GAP_S = 20.0     # guess: a point seen free and looked at again within this long: evidence (her looks come in
@@ -379,7 +392,23 @@ def back(dt: float, rate: float = REFILL_RATE) -> float:
     first, Q_CEIL in the long run."""
     if dt <= 0 or rate <= 0:
         return 0.0
-    return Q_CEIL * (1.0 - math.exp(-rate * dt / Q_CEIL))
+    return filled(rate * dt)
+
+
+def filled(mean: float) -> float:
+    """The chance a free point has a monster after `mean` of them were expected to come to it (back's)."""
+    return Q_CEIL * (1.0 - math.exp(-mean / Q_CEIL)) if mean > 0 else 0.0
+
+
+def passes(kills: list[float], t0: float, t1: float) -> float:
+    """How many of her `kills` (times, sorted) had the pass that brought them back between t0 and t1: each a pass
+    within TICK_S after it (the map's phase not known: evenly)."""
+    lo, n = bisect.bisect_left(kills, t0 - TICK_S), 0.0
+    for k in kills[lo:]:
+        if k >= t1:
+            break
+        n += max(0.0, min(t1, k + TICK_S) - max(t0, k)) / TICK_S
+    return n
 
 
 def not_back(dt: float, rate: float = REFILL_RATE) -> float:
@@ -475,9 +504,14 @@ class Belief:
         self.kept_by: Counter = Counter()        # kind -> ... killed by her, or seen there TAKE_KEEP_S on
         self.refills = 0                         # refills watched, in all (the log's)
         self.watched_s = 0.0                     # ... and the s of points watched staying free, in all
+        self.kills: list[float] = []             # her kills' times (own, and the passes that bring them back)
+        self.spawns = sum(1 for s in model.spawns if model.platform_under(s.x, s.y, reach=SPAWN_REACH) is not None)
+        self.cap = model.mob_cap()  # (with her alone: more only with more players than half of it)
+        self.weight = self.weight_of(0.0)  # the map's points as a pass draws them, at its cap
         self._loglik = [0.0] * len(RATE_GRID)    # what she saw, as the log likelihood of each of RATE_GRID ...
         self._weighed_t = 0.0                    # ... weighed by age (REFILL_MEMORY_S) as of this
-        self._rate = REFILL_RATE                 # the rate as of the latest update (rate)
+        self._others = REFILL_RATE               # the others' part as of the latest update (others) ...
+        self._rate = REFILL_RATE                 # ... and the rate (rate)
         self.t = 0.0
         self._events = 0
         self._kept_ids: set[int] = set()
@@ -487,10 +521,26 @@ class Belief:
 
     @property
     def rate(self) -> float:
-        """The refill's rate (a second, a free point; see the top), as of the latest update: the mean over RATE_GRID
-        of what she saw (`_seen`), weighed by age (REFILL_MEMORY_S), and the prior, a gamma about REFILL_RATE counting
-        as REFILL_PRIOR_N refills."""
+        """The refill's rate (a second, a free point; see the top), as of the latest update: what her own kills bring
+        back (`own` over the map's `weight`) and the others' part (`others`)."""
         return self._rate
+
+    @property
+    def others(self) -> float:
+        """The refill's rate (a second, a free point) the other players' kills bring, as of the latest update: the mean
+        over RATE_GRID of what she saw (`_seen`, net of her kills' passes), weighed by age (REFILL_MEMORY_S), and the
+        prior, a gamma about REFILL_RATE counting as REFILL_PRIOR_N refills."""
+        return self._others
+
+    def weight_of(self, free: float) -> float:
+        """The map's points a pass draws among, the free ones (a held one never), with `free` of them kept free (a
+        round's, whose monsters she kills as they come) and the rest held up to the cap."""
+        held = min(max(0.0, self.spawns - free), self.cap)
+        return max(1.0, self.spawns - held)
+
+    def own(self, t: float) -> float:
+        """Her kills a second over the OWN_S before `t`: the monsters the map's passes bring back for them."""
+        return (bisect.bisect_right(self.kills, t) - bisect.bisect_right(self.kills, t - OWN_S)) / OWN_S
 
     def _learned(self) -> float:
         w = math.exp(-max(0.0, self.t - self._weighed_t) / REFILL_MEMORY_S)
@@ -503,15 +553,18 @@ class Belief:
         return REFILL_RATE / self.rate
 
     def _seen(self, t: float, gap: float, born: bool) -> None:
-        """At time `t`, a point seen free `gap` s before seen again: with a new monster (`born`) or free still."""
+        """At time `t`, a point seen free `gap` s before seen again: with a new monster (`born`) or free still. What her
+        kills brought back in the gap (their passes in it, over the map's weight) is counted in: the others' part is
+        learned."""
         if gap <= 0:
             return
         if t > self._weighed_t:
             w = math.exp(-(t - self._weighed_t) / REFILL_MEMORY_S)
             self._loglik = [w * ll for ll in self._loglik]
             self._weighed_t = t
+        mine = passes(self.kills, t - gap, t) / self.weight
         for k, r in enumerate(RATE_GRID):
-            got = back(gap, r)
+            got = filled(r * gap + mine)
             self._loglik[k] += math.log(max(1e-12, got if born else 1.0 - got))
         if born:
             self.refills += 1
@@ -608,7 +661,9 @@ class Belief:
                 self.empty_since.setdefault(q.id, cover.t)
                 self.empty_seen[q.id] = max(cover.t, self.empty_seen.get(q.id, -1e18))
             self._covered_t = cover.t
-        self._rate = self._learned()
+        del self.kills[:bisect.bisect_left(self.kills, t - max(OWN_S, WATCH_GAP_S + TICK_S))]
+        self._others = self._learned()
+        self._rate = self._others + self.own(t) / self.weight
         if players is not None:
             for q in self.points:
                 y = self.model.platform(q.platform).y_at(q.x)
@@ -628,6 +683,7 @@ class Belief:
         new, self._events = min(total - self._events, len(memory.events)), total
         for what, when, e in list(memory.events)[len(memory.events) - new:] if new > 0 else ():
             if what == "killed":
+                bisect.insort(self.kills, when)
                 qs = self._by.get((e.platform, e.kind))
                 if qs:
                     x = e.died_x if e.died_x is not None else e.x
@@ -755,16 +811,23 @@ class Patrol:
             if i not in kept:
                 kept[i] = self.hp_rate(self.stops[i].platform, self.stops[i].x)
         hp_s = {i: kept[i] for i in loop}
-        refill = b.rate
         full = sum(g * q.exp for q, g, _ in pts)  # EXP a round with every point back (hers) ...
+        full_n = sum(g for _, g, _ in pts)  # ... its monsters ...
         full_hp = sum(g * q.exp * self.kill_s * hp_s[i] for q, g, i in pts)  # ... and the HP its shooting costs
         base = travel + STOP_S * len(loop)
         cycle = base + full * self.kill_s  # every point full: the longest a round takes
-        for _ in range(8):  # what's back in a round (the same share at every point: one rate), the round's shooting
-            # for it (cycle only shortens)
+        # The refill: the others' part and what the round's own kills bring back (below: over the map's points as a
+        # pass draws them, the round's free, the rest held up to the cap: what comes back on it is at most what it
+        # kills), from where they meet while few of its points are back each round (its kills full_n x the refill)
+        weight = max(b.weight_of(full_n), full_n)
+        refill = b.others / max(0.05, 1.0 - full_n / weight)
+        for _ in range(12):  # what's back in a round (the same share at every point: one rate), the round's shooting
+            # for it (cycle only shortens), and the refill with what its kills bring back over the map (her kills a
+            # second over the map's weight: a round of a few of its points mostly feeds the rest)
             back_share = caught(cycle, refill)
             shoot = back_share * full * self.kill_s
             cycle = max(base + shoot, 1e-6)
+            refill = b.others + back_share * full_n / cycle / weight
         exp, hp = back_share * full, back_share * full_hp
         return Plan(loop, (exp - HP_PRICE * hp) / cycle, cycle, travel, shoot, exp, len(pts), hp)
 

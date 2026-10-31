@@ -3,6 +3,8 @@ policies on the same seeds (gamelab.sim.harness). Synthetic maps need no game da
 skipped without it."""
 
 import dataclasses
+import random
+from collections import Counter
 
 import pytest
 
@@ -647,34 +649,88 @@ def test_her_stars_and_casts_can_be_her_own_as_measured_on_a_map(model):
     assert w._cast() and w.mp_used == 14.0 and w.mp * 623 == pytest.approx(6 + 100, abs=0.01)  # (the pet drank)
 
 
-def test_the_maps_tick_brings_its_free_points_monsters_back_under_its_cap(model):
+def test_the_maps_pass_fills_it_to_its_cap_at_random_points(model):
     """Realism.respawn_tick (`--world tick-respawn`, the game's respawn as measured on Tree Dungeon): a dead monster
-    isn't back on its own clock but at the map's ticks, each free point's with a chance respawn_p, never past the cap
-    (respawn_cap of the points, respawn_cap_other more for each other player); the map starts at its cap. Off (0), each
-    is back `respawn` s after it died, as before."""
+    isn't back on its own clock: at the map's passes the map is filled to its cap (respawn_cap of its points, whoever
+    else is there), at points drawn at random among the clear ones, once a pass at most; the map starts at its cap.
+    Off (0), each is back `respawn` s after it died, as before. (Six points 125 units apart: none keeps another.)"""
     c = plat(model, 500, 400)
-    snails = [("Snail", c.id, 100.0 + 60 * k) for k in range(10)]
-    w = world(model, c.id, 50.0, monsters=snails,
-              realism=Realism(respawn_tick=7.0, respawn_p=0.5, respawn_cap=0.6, respawn_cap_other=0.0))
+    snails = [("Snail", c.id, 60.0 + 125 * k) for k in range(6)]
+    w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0, respawn_cap=0.5))
     w.invulnerable_ms = 10 ** 9
     still(w)
-    assert sum(m.alive for m in w.monsters) == 6  # at its cap from the start
-    born, free = [], 0
+    assert sum(m.alive for m in w.monsters) == 3  # at its cap from the start
+    born, killed = [], 0
     for k in range(60):  # every 3.5 s: whatever is alive killed by another player
-        for m in [m for m in w.monsters if m.alive]:
+        alive = [m for m in w.monsters if m.alive]
+        for m in alive:
             w._others_kill(m, w._camp_rng, 1.0)
-        free += sum(not m.alive for m in w.monsters)
+        killed += len(alive)
         w.advance(3.5 * (k + 1))
         born += [m.born for m in w.monsters if m.alive]
-        assert sum(m.alive for m in w.monsters) <= 6
-    phases = {round(t % 7.0, 2) for t in born}
-    assert len(phases) == 1  # only at the ticks
-    assert w.respawn_ticks == 30 and w.respawn_births == len(born)
-    assert 0.35 < w.respawn_births / (free / 2) < 0.65  # (a tick's free points: every other look's)
-    # With another player there, a cap of 0.75 (cap_other 0.15): the map starts with more.
-    w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0, respawn_cap=0.6,
-                                                                  respawn_cap_other=0.15, rival_every=1e6))
-    assert sum(m.alive for m in w.monsters) == round(10 * 0.75)
+        assert sum(m.alive for m in w.monsters) <= 3
+    phases = {round(t % 7.0, 1) for t in born}
+    assert len(phases) == 1  # only at the passes
+    alive = sum(m.alive for m in w.monsters)
+    assert w.respawn_ticks == 30 and w.respawn_births == len(born) == killed + alive - 3  # it made what had died ...
+    assert all(n == 3 for n in Counter(born).values())  # ... the map back at its cap every pass
+    # Nothing dies: nothing comes back, however many points are free.
+    w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0, respawn_cap=0.5))
+    still(w)
+    w.advance(70.0)
+    assert w.respawn_ticks == 10 and w.respawn_births == 0 and sum(m.alive for m in w.monsters) == 3
+    # Another player there changes no cap.
+    w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0, respawn_cap=0.5,
+                                                                  rival_every=1e6))
+    assert sum(m.alive for m in w.monsters) == 3
+
+
+def test_the_maps_cap_is_the_servers_formula(model):
+    """MapModel.mob_cap (the server's LifePool, as OrionAlpha has it): one monster in 128,000 square px of the box about
+    the map's footholds (each 30 inside its ends, 300 over its top, 10 under it, 10 more each side; at least the
+    800 x 600 screen, its height less 450) times its mobRate, 1 to 40; more only with more players than half of it, up
+    to twice. The simulator's pass fills the map to it by default (Realism.respawn_cap None), her and the other
+    players counted; a share of the points is a knob."""
+    # The test map: 0..800 x 300..500, a box of 760 x 530: the screen's 800 x 600, 3.75.
+    assert model.mob_cap() == 3 and model.mob_cap(2) == 3 and model.mob_cap(5) == 5 and model.mob_cap(6) == 6
+    c = plat(model, 500, 400)
+    snails = [("Snail", c.id, 100.0 + 60 * k) for k in range(10)]
+    w = world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0))
+    assert sum(m.alive for m in w.monsters) == 3
+    # The maps': Tree Dungeon II 22 (its 31 points), Thicket Around the Beach II 26 (48), West Rocky Mountain II 23
+    # (49), Tree Dungeon III 20 (its mobRate 0.9); Tree Dungeon II with 20 players 28, 44 or more 44.
+    for map_id, cap in ((10002073, 22), (10000012, 26), (10004021, 23), (10002074, 20)):
+        if scenarios.available(map_id):
+            assert mapdata.load(map_id).mob_cap() == cap
+    if scenarios.available(10002073):
+        tree = mapdata.load(10002073)
+        assert [tree.mob_cap(u) for u in (11, 12, 20, 44, 60)] == [22, 22, 28, 44, 44]
+
+
+def test_the_maps_pass_fills_only_points_with_no_monster_within_100_units(model):
+    """The server's rule (OrionAlpha's LifePool.tryCreateMob; the user, 2026-10-31): a pass fills a spawn point only
+    with no live monster within SPAWN_CLEAR (100 units) of it across and up or down, nor a point found clear before it
+    in the pass (the points in the map's order), the cap aside. Six snail points 60 units apart: an empty map's pass
+    fills the first, third and fifth, and the map stays at three under a cap of six; a kill frees its own point (the
+    nearest monster 120 off) and the next pass fills it, its neighbour 60 off kept by it."""
+    c = plat(model, 500, 400)
+    snails = [("Snail", c.id, 100.0 + 60 * k) for k in range(6)]
+    w = still(world(model, c.id, 50.0, monsters=snails, realism=Realism(respawn_tick=7.0, respawn_cap=1.0)))
+    w.invulnerable_ms = 10 ** 9
+    while w.respawn_ticks == 0:  # (the map's phase its own: kill at a pass, the deaths over by the next)
+        w.advance(w.t + 0.1)
+    for m in w.monsters:
+        w._others_kill(m, w._camp_rng, 1.0)
+    w.advance(w.t + 7.05)
+    assert sorted(m.spawn for m in w.monsters if m.alive) == [0, 2, 4] and w.respawn_births == 3
+    w.advance(w.t + 70.0)  # ten passes: every other point within 60 of a monster, nothing more
+    assert sorted(m.spawn for m in w.monsters if m.alive) == [0, 2, 4] and w.respawn_births == 3
+    assert w.respawn_blocked >= 30
+    first = next(m for m in w.monsters if m.alive and m.spawn == 0)
+    w._others_kill(first, w._camp_rng, 1.0)
+    w.advance(w.t + 7.05)
+    assert sorted(m.spawn for m in w.monsters if m.alive) == [0, 2, 4] and w.respawn_births == 4
+    assert first.alive and len(w.monsters) == 6  # (its own monster back, nothing new made)
     # Off: back 8 s after its death, every one.
     w = world(model, c.id, 50.0, monsters=snails[:1])
     w._others_kill(w.monsters[0], w._camp_rng, 1.0)

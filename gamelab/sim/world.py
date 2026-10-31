@@ -83,8 +83,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   (live, no star from 4 ever reached one on 2). Kills give EXP
   (model.mob_exp) and, 2 s later, drops on its platform; a killed monster is seen fading out where it
   died as long as its death animation runs (MobBody.die_s: a pig 0.66 s, a snail 1.26), and respawns 8 s
-  later where it spawned (Realism.respawn), or, with Realism.respawn_tick, at the map's tick with a chance, under the
-  map's cap (TICK_S: the game's as measured);
+  later where it spawned (Realism.respawn), or, with Realism.respawn_tick, at the map's pass, which fills the map to its
+  cap (the server's formula: MapModel.mob_cap) at random spawn points with no monster within 100 units (TICK_S,
+  SPAWN_CLEAR: the server's as OrionAlpha has it);
 - the pick-up key takes the nearest drop within reach (items only while her inventory has room), the
   HP potion key gives 30% HP; her pet (Her.pet), if she has one, drinks a potion for her right after a touch leaves
   her under its warning. (Until 2026-10-26 the chair key sat her down, +3% HP a second, until an arrow stood her up:
@@ -403,18 +404,28 @@ CLOSE_DX = 60.0          # (World.close_ms) a monster this near her, middle to m
 RESPAWN = 8.0
 RESPAWN_LIVE = 17.0  # ... and the live median on Tree Dungeon's 23 after her last kill there (1.7-57 s, telemetry of
                      # 2026-10-24: README, Positioning; harness preset crowd-17): `--world walkers` has it
-# The game's respawn as measured on Tree Dungeon (2026-10-29: behavior.patrol's top, D:/MapleHelper-scratch/respawn):
-# not a monster's own clock but the map's, a tick every TICK_S, at which each spawn point with no monster gets one with a
-# chance TICK_P (5,775 births in 21,285 free point-ticks in view), while the map has fewer than its cap: CAP_SHARE of its
-# spawn points with her alone, CAP_OTHER more for each other player there (MeowDB's 5%; the cap's share alone isn't
-# measured: with nobody else on the map and none of hers dying, the top's 12 points and 3 more stayed free 4 to 9
-# minutes, no birth in 38 ticks, the map then holding 14 monsters at most, 0.45 of its 31 points; when most of the map
-# was seen within 30 s it held 0.32-0.47 a point). Realism.respawn_tick (`--world tick-respawn`): the world's monsters
-# come back so, at random free points' monsters, the map starting at its cap; Realism.respawn's own clock otherwise.
+# The game's respawn as measured on Tree Dungeon (2026-10-29 and 30: behavior.patrol's top, D:/MapleHelper-scratch/
+# respawn and respawn-orion, RESULTS.txt): not a monster's own clock but the map's, filling it to its cap, as the
+# server's LifePool.tryCreateMob does in OrionAlpha (a replica of Nexon's early Korean server): a pass every TICK_S (88%
+# of the births within a second of the fitted ticks; the server's 7 s at the least) spawns the cap less the monsters
+# alive, each at a spawn point drawn at random among the clear ones: no live monster within SPAWN_CLEAR of it across and
+# up or down, nor a point found clear before it in that pass (OrionAlpha's 200 x 200 box; the user, 2026-10-31: "I feel
+# the orionalpha's rule actually holds"). Until then a held point was drawn half as likely and got a second monster
+# beside the first, from births beside a monster already there: the two such clips, looked at frame by frame, were
+# spawns at the platform's other point 115 px away (the newborn credited to the point nearest where it was first
+# tracked, after it had walked), and a spawn tracked once fading in and again solid reads the same; so they showed
+# nothing against the box (D:/MapleHelper-scratch/respawn-orion/RESULTS.txt, 6). The cap is the server's formula
+# (MapModel.mob_cap: the map's area times its mobRate, more only with more players than half of it; Tree Dungeon II 22):
+# with her alone (10-29 16:37-16:46) nothing came back but what she killed, 17-19 free points watched 5 minutes without
+# a kill and without a birth; the parts of the map she saw held 11-15 then, but the map was never seen whole without a
+# kill (hers or another's) between, so its count isn't known; with others 0.39-0.55 a point at every count of players, 1
+# to 6+ (MeowDB's 75% and 5% more a player: not seen). Until the user's call of 2026-10-30 ("Let's use the formula... we
+# don't know how many mobs are on the map at any given time") CAP_SHARE, 0.42 of the points, from that count; the
+# formula's from then on (Realism.respawn_cap None), a share still a knob. Until 2026-10-30 each free point came back
+# with a chance at a tick (0.27), the same whatever died. Realism.respawn_tick (`--world tick-respawn`), the map
+# starting at its cap; Realism.respawn's own clock otherwise.
 TICK_S = 7.115
-TICK_P = 0.27
-CAP_SHARE = 0.45
-CAP_OTHER = 0.05
+SPAWN_CLEAR = 100.0      # map units about a spawn point, across and up or down, that must hold no monster for it to fill
 FADE = 0.8               # s a killed monster is still seen fading out where it died, for a kind whose death
                          # animation the game data doesn't have (else its own: MobBody.die_s, 0.66-1.26 s)
 # A monster her attack killed is drawn alive, walking on with its bar up, until her star lands (Realism.dies_late): its
@@ -702,13 +713,12 @@ class Realism:
     knobs for comparing policies in a world closer to the game's; none of them is measured but lock_arrows (and the
     respawn, which the live telemetry says isn't the game's: RESPAWN)."""
     respawn: float = RESPAWN     # s from a kill until the monster is back at its spawn point
-    respawn_tick: float = 0.0    # s between the map's respawn ticks (TICK_S: the game's, as measured): a dead monster
-                                 # back at a tick with a chance respawn_p, the map under its cap (respawn_cap of its
-                                 # spawn points, respawn_cap_other more for each camp and rival); 0: `respawn` s after
-                                 # its death, each on its own (as until 2026-10-29)
-    respawn_p: float = TICK_P
-    respawn_cap: float = CAP_SHARE
-    respawn_cap_other: float = CAP_OTHER
+    respawn_tick: float = 0.0    # s between the map's respawn passes (TICK_S: the game's, as measured): at each the
+                                 # map filled to its cap (None: the server's formula, MapModel.mob_cap, by the players
+                                 # there, her, the camps and the rival; a number: that share of its spawn points) at
+                                 # random points clear of monsters by SPAWN_CLEAR; 0: `respawn` s after its death, each
+                                 # on its own (as until 2026-10-29)
+    respawn_cap: float | None = None
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
     rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
@@ -1078,6 +1088,12 @@ class SimMonster:
     aggro_until: float | None = None
     chase_dir: int = 0
     chase_rng: random.Random | None = None
+    point: int | None = None   # the spawn point it came from (World._spawn's order; None: its idx), one the map's pass
+                               # made there (Realism.respawn_tick) while the point's own was still fading or walked off
+
+    @property
+    def spawn(self) -> int:
+        return self.idx if self.point is None else self.point
 
     @property
     def lo(self) -> float:
@@ -1431,16 +1447,18 @@ class World:
         self._knock_landed_ms = -10 ** 9  # (her last knock's landing: _log_landing's knock-falls)
         self.monsters: list[SimMonster] = []
         self.by_platform: dict[int, list[SimMonster]] = {}
+        self._kinds: tuple | None = None  # the game data's bodies, speeds and mob ids (_monster)
         self._spawn(monsters)
+        self.points = len(self.monsters)  # the map's spawn points (one monster each at the start)
         self.drops: list[Drop] = [Drop(kind, x, model.platform(pid).y_at(x), pid, 0.0) for kind, pid, x in drops]
         self.rival: Rival | None = None
         if self.realism.rival_every > 0 and self.monsters:
             self.rival = self._rival_start()
             self._push(self._rival_due(), "rival")
             self._push(self._rival_stays(), "rival_moves")
-        if self.realism.respawn_tick > 0 and self.monsters:  # the map's tick, from a phase of its own; the map at its
+        if self.realism.respawn_tick > 0 and self.monsters:  # the map's pass, from a phase of its own; the map at its
             # cap from the start (the monsters over it there from the start, dead long since)
-            self.respawn_ticks = self.respawn_births = 0
+            self.respawn_ticks = self.respawn_births = self.respawn_blocked = 0
             over = len(self.monsters) - self._respawn_cap()
             for m in self._tick_rng.sample(self.monsters, max(0, over)):
                 m.alive, m.died_at, m.died_x = False, -1e6, m.home
@@ -1466,28 +1484,36 @@ class World:
                     wanted.append((s.name or str(s.mob_id), p.id, s.x))
         else:
             wanted = list(monsters)
-        bodies, speeds = monster_data.bodies(self.model), monster_data.speeds(self.model)
-        ids = {kind_of(s.name): s.mob_id for s in self.model.spawns if s.name}  # by kind ...
-        ids.update({s.name: s.mob_id for s in self.model.spawns if s.name})      # ... and by name
         for i, (name, pid, x) in enumerate(wanted):
-            kind = kind_of(name)
-            mob_id = ids.get(name, ids.get(kind))
-            info = None if mob_id is None else mob_info(int(mob_id))
-            half, height = _body_of(kind, bodies.get(kind), info)
-            hits = float(hits_of(kind, info))
-            if self.character.spread and info is not None and info.hp > 0:  # in average stars, not whole ones
-                hits = info.hp * (info.pdd + 100) / 100 / STAR_MEAN
-            m = SimMonster(i, name, kind, self.model.platform(pid), float(x), random.Random(self.rng.random()),
-                           speeds.get(kind, monster_data.DEFAULT_SPEED), half, height, hits, hits)
-            if kind in bodies:
-                m.flinch_top = bodies[kind].flinch_top
-                m.fade = bodies[kind].die_s or FADE
-            m.info = info
-            if self.realism.chase:  # (chasing her once she hits it: Realism.chase)
-                m.chase, m.chase_rng = self._chase_at, random.Random(f"chase:{self.seed}:{i}")
+            m = self._monster(i, name, pid, float(x), random.Random(self.rng.random()))
             m.start(0.0, float(x))
             self.monsters.append(m)
             self.by_platform.setdefault(pid, []).append(m)
+
+    def _monster(self, i: int, name: str, pid: int, x: float, rng: random.Random) -> SimMonster:
+        """A monster of `name` at spawn x `x` on platform `pid`, its body, speed, HP and info the game data's (not
+        started)."""
+        if self._kinds is None:
+            ids = {kind_of(s.name): s.mob_id for s in self.model.spawns if s.name}  # by kind ...
+            ids.update({s.name: s.mob_id for s in self.model.spawns if s.name})      # ... and by name
+            self._kinds = (monster_data.bodies(self.model), monster_data.speeds(self.model), ids)
+        bodies, speeds, ids = self._kinds
+        kind = kind_of(name)
+        mob_id = ids.get(name, ids.get(kind))
+        info = None if mob_id is None else mob_info(int(mob_id))
+        half, height = _body_of(kind, bodies.get(kind), info)
+        hits = float(hits_of(kind, info))
+        if self.character.spread and info is not None and info.hp > 0:  # in average stars, not whole ones
+            hits = info.hp * (info.pdd + 100) / 100 / STAR_MEAN
+        m = SimMonster(i, name, kind, self.model.platform(pid), x, rng, speeds.get(kind, monster_data.DEFAULT_SPEED),
+                       half, height, hits, hits)
+        if kind in bodies:
+            m.flinch_top = bodies[kind].flinch_top
+            m.fade = bodies[kind].die_s or FADE
+        m.info = info
+        if self.realism.chase:  # (chasing her once she hits it: Realism.chase)
+            m.chase, m.chase_rng = self._chase_at, random.Random(f"chase:{self.seed}:{i}")
+        return m
 
     # --- time -----------------------------------------------------------------------------------------
 
@@ -2588,27 +2614,52 @@ class World:
         self._camps_watch(m)
 
     def _respawn_cap(self) -> int:
-        """The most monsters the map has at once (Realism.respawn_cap, respawn_cap_other for each other player)."""
+        """The most monsters the map has at once: the server's formula by the players there (MapModel.mob_cap), or
+        Realism.respawn_cap of its spawn points."""
         r = self.realism
-        others = len(r.camps) + (1 if r.rival_every > 0 else 0)
-        return round(len(self.monsters) * min(1.0, r.respawn_cap + r.respawn_cap_other * others))
+        if r.respawn_cap is None:
+            return self.model.mob_cap(1 + len(r.camps) + (1 if r.rival_every > 0 else 0))
+        return round(self.points * min(1.0, r.respawn_cap))
 
     def _map_tick(self) -> None:
-        """The map's respawn tick (Realism.respawn_tick): each dead monster whose death is over (drawn and faded) back
-        with a chance respawn_p, in a random order, while the map is under its cap."""
+        """The map's respawn pass (Realism.respawn_tick), as the server's (OrionAlpha's LifePool.tryCreateMob): the cap
+        less the monsters alive (or still drawn so) spawned at spawn points drawn at random among the clear ones, a
+        point clear with no live monster within SPAWN_CLEAR of it across and up or down, nor a point found clear before
+        it this pass (the points in the map's order, as the server goes through them); at each a monster of the point's
+        whose death is over (drawn and faded) back, else a new one made (its own still fading out, or alive and walked
+        off past SPAWN_CLEAR)."""
         t, rng = self.t, self._tick_rng
         self.respawn_ticks += 1
         room = self._respawn_cap() - sum(1 for m in self.monsters if m.alive or m.drawn_alive is not None and
                                          t < m.drawn_alive)
-        free = [m for m in self.monsters if not m.alive and m.died_at is not None and t >= m.died_at + m.fade]
-        rng.shuffle(free)
-        for m in free:
-            if room <= 0:
-                break
-            if rng.random() < self.realism.respawn_p:
-                self._respawn(m)
-                self.respawn_births += 1
-                room -= 1
+        if room <= 0:
+            return
+        near = [(x, m.platform.y_at(x)) for m in self.monsters if m.alive for x in (m.at(t),)]
+        clear = []
+        for p in range(self.points):  # (the map's first monsters are its points', in its order: _spawn)
+            home = self.monsters[p]
+            x, y = home.home, home.platform.y_at(home.home)
+            if any(abs(nx - x) < SPAWN_CLEAR and abs(ny - y) < SPAWN_CLEAR for nx, ny in near):
+                self.respawn_blocked += 1
+                continue
+            clear.append(p)
+            near.append((x, y))
+        rng.shuffle(clear)
+        for p in clear[:room]:
+            back = [m for m in self.monsters if m.spawn == p and not m.alive and m.died_at is not None
+                    and t >= m.died_at + m.fade]
+            if back:
+                self._respawn(back[0])
+            else:
+                first = next(m for m in self.monsters if m.spawn == p)
+                m = self._monster(len(self.monsters), first.name, first.platform.id, first.home,
+                                  random.Random(rng.random()))
+                m.point, m.born = p, t
+                m.start(t, first.home)
+                self.monsters.append(m)
+                self.by_platform.setdefault(m.platform.id, []).append(m)
+                self._camps_watch(m)
+            self.respawn_births += 1
 
     def _drop_kinds(self, kind: str, rng: random.Random) -> list[str]:
         """What a kill of a monster of this kind drops: by Realism.drops' chances (drawn from `rng`), else mesos
