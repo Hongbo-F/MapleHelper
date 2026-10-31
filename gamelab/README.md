@@ -1960,6 +1960,33 @@ rule and the chain after its touch planned from where the knock landed her; `nav
 them at all); 21 splices over the 42. Summed over them, the perception commit's traces / these: touches 1,008 / 1,063,
 kills 953 / 950.
 
+**Measured** (D:/MapleHelper-scratch/replan/rp; Idle priority on CPUs 12-23, the game, the live service and the player
+up):
+- *The harness* (`ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world zero-walls --world
+  near-misses --world walkers --minutes 5`, against the perception commit e17af1f, the branch's step before both: out/
+  abB_standard.txt): at 48 seeds EXP a minute 320.7 against 326.8 (-1.9%, se 7.8: within 2 se), touches 76.2 against
+  65.0 (+17.2%, se 2.3: beyond), no deaths, falls or stops either side; with the respawn's tick, capped at 24 seeds
+  (out/abB_tick.txt), 315.0 against 320.0 (-1.6%, se 8.3: within) and touches 75.3 against 68.9 (+9.3%, se 2.6:
+  beyond). The whole state's monsters alone (the commit before, 24 seeds: out/abA_standard.txt) -4.3% and +19.3%. On 24
+  seeds of the standard the touches on her trips went from 10.3 to 15.8 a run and her piles' from 15.0 to 19.1 (where she
+  stands to fight, 28.4 both), her trips' time from 69.2 s to 88.8, `NO_WAIT` 419 to 792, `MEET_S` 0 to 24: her chains
+  stop short of more of what's in her way, and go past it regardless more. Bisected on seeds 1-12 for the commit before
+  (out/var_*.txt), the band's monsters alone in the pass's plan were the base's (69.1 touches against 70.6), the feed's
+  headings (walk-old 79.2), the airborne ones placed (no-place) and the window after every cut (cut-window) not (77.8 as
+  it); on seeds 13-24 with all of it (EXP / touches / on her trips: e17af1f 322.7 / 60.2 / 10.4, this 325.2 / 75.6 /
+  18.8), the band's alone 317.9 / 72.4 / 14.4, `KNOCK_REPLAN` off 311.3 / 74.0 / 13.8, the better switches off 324.0 /
+  77.4 / 16.9, `MEET_WALK` off 305.7 / 78.7 / 19.3, the feed's headings as a reach (forward at speed, `TURN_SLACK` back)
+  301.1 / 66.6 / 15.5, `HEADING_TRUST_S` 0.6 s 305.8 / 81.5 / 20.3. Not settled: what the extra stops for the monsters
+  now seen should be (the meet's order for one far ahead, a star's reach away).
+- *The per-state cost in the tour's process* (bench_state.py: the standard grind, seeds 1 and 2 of 5 minutes, the stack's
+  own computing at each state of a chain's watch from one glance's start to the next's, its glance checks in it, less the
+  simulator's world and feed, by the real clock): 1,768 states, median 0.33 ms, p90 0.54, p99 3.6, the most 51.4; 11 over
+  15 ms, none over a state's 66.7. Its replans (`_switch`, 164 asked): median 0.02 ms (most go no further than where she
+  is), p90 2.9, p99 47.3, the most 51.0: a crowded state's priced chain, past the design's 15 ms budget though within a
+  state.
+- *Live*: not run. The player in game is the one started before this code (no `lab/player.json`): until it's started
+  again (the user's UAC click) every switch is a cut and a send.
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.

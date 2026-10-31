@@ -276,6 +276,14 @@ FALL_LOOKS = 2
 # seeds of 5 minutes; D:/MapleHelper-scratch/hunt-ab/B/ablate-a1-table.txt).
 TRIP_MEMORY_S = 2.0
 UNSEEN_TRIPS = True  # those in view, the feed's hidden tracks and the cut's track (above); off, as before
+# How long a monster's walk as perception has it head (the feed's track: _walking, _track_of) is taken as seen; past that
+# it may have turned or set off either way at its kind's speed (MonsterTrack.trust, reach). None: all along, as the
+# tracker's measured walks were. Predicted from one detection on the user's own play it was 4.0 units off at 0.5 s
+# (median; p90 37.6: localization.monsters.walk_vx), and the simulator's monsters stand 0.5-2.5 s and walk 1-4 s at a
+# time; but 0.6 s made the harness's standard grind worse on seeds 13-24 (EXP a minute 305.8 against 325.2, touches 81.5
+# against 75.6, on her trips 20.3 against 18.8: more chains stopped short and passed regardless; D:/MapleHelper-scratch/
+# replan/rp/out/var_HEADING_TRUST_S=0.6_13.txt).
+HEADING_TRUST_S: float | None = None
 # With a continuous feed (Senses.glanced) her glances while a chain runs carry the monsters it follows, re-found in
 # every frame with which way and how fast they walk (localization.tracking). A monster one of the chain's legs ahead of
 # her now meets (flow.danger over the rest of the plan, REACT_LEAD_S on at the soonest), of the kinds the chain keeps
@@ -1258,7 +1266,7 @@ class Navigator:
             tr = feed.get(getattr(m, "track", None))
             if tr is not None and getattr(tr, "vx", None) is not None:
                 vx = max(-t.speed, min(t.speed, tr.vx)) if abs(tr.vx) > STILL_VX else 0.0
-                t = replace(t, vx=vx, heading=(1 if vx > 0 else -1) if vx else 0, track=tr.id)
+                t = replace(t, vx=vx, heading=(1 if vx > 0 else -1) if vx else 0, track=tr.id, trust=HEADING_TRUST_S)
             out.append(t)
         return out
 
@@ -3003,7 +3011,8 @@ class Navigator:
         vx = max(-speed, min(speed, tr.vx)) if abs(tr.vx) > STILL_VX else 0.0
         heading = (1 if vx > 0 else -1) if vx else 0
         return MonsterTrack(tr.platform, tr.x, speed, heading, half, vx, tr.last_seen - start,
-                            MONSTER_HEIGHT.get(tr.kind, top), tr.facing, tr.kind, top, track=getattr(tr, "id", None))
+                            MONSTER_HEIGHT.get(tr.kind, top), tr.facing, tr.kind, top, track=getattr(tr, "id", None),
+                            trust=HEADING_TRUST_S)
 
     def _placed(self, dot, still: bool, running: _Running,
                 seen_at: float | None = None) -> tuple[Platform | None, int | None, Leg, float | None]:

@@ -297,6 +297,8 @@ class MonsterTrack:
                               # in the way left out within her invulnerability alone (control.navigator.PASS_WINDOW)
     track: int | None = None  # the perception feed's track it is (localization.tracking.Track.id), if it's one of its
                               # (control.navigator: which monster a plan knew, by id)
+    trust: float | None = None  # s from its sighting its walk (vx) is taken as seen; past that it may have turned or
+                                # set off either way at its speed (reach); None: all along
 
     @property
     def tall(self) -> float:
@@ -325,7 +327,8 @@ class MonsterTrack:
         navigator says so of a map where one does (Navigator._threats)."""
         dt = max(0.0, t - self.seen_at)
         if self.vx is not None:  # seen walking: where it's heading, give or take a turn
-            c, spread = self.at(t, p), TURN_SLACK + 20.0 * dt
+            sure = dt if self.trust is None else min(dt, self.trust)
+            c, spread = self.at(self.seen_at + sure, p), TURN_SLACK + 20.0 * sure + self.speed * (dt - sure)
             return max(p.left, c - spread), min(p.right, c + spread)
         go = self.speed * dt
         lo = self.x - (go if self.heading <= 0 else min(go, TURN_SLACK))
