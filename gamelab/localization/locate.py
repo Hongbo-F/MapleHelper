@@ -22,8 +22,8 @@ The cues, cheapest first, each tried only when the one before didn't place her:
   4. carried nothing placed her: the filter's prediction stands (`how` None), its confidence going down; "covered"
              in the counts (`line`) and the scene where what covers her is told (`Cover`: the Lie Detector's alarm
              up and one of its windows over the play area, the view not registered under its board or the window seen;
-             her stat window open where it opens, over where the filter has her feet or tag; a visible portal's light
-             about her body where the filter has her feet), nothing placed otherwise.
+             her stat window open where it opens, over where the filter has her feet or tag; a portal's light about
+             her body where the filter has her feet, her tag where it's searched), nothing placed otherwise.
 The filter: her x and its speed (a Kalman filter), y on her platform's line, in a flight under gravity, or on a rope;
 a take-off from a rise off the line, a landing on the first line crossed, a walk off a platform's end, a wall stopping
 her; a rope told from a flight by her last three measured places (constant speed against gravity); her minimap dot a box
@@ -147,8 +147,9 @@ COVER_POLL_S = 0.5         # the Lie Detector alarm's file, and its windows, loo
                            # frames' time)
 # Her body's box from her feet (map units: left, top, right, bottom), either way she faces (nothing tells it on a frame
 # no cue placed her in): her commonest standing poses' boxes in both characters' pose banks, -28.5..21.5 facing left and
-# -20.5..29.5 facing right, 70-73 rows up (BugBaby's poses 8 and 1, RiceBaby's 8 and 4). In a visible portal's light
-# (`Cover`) with all of it inside the light's box: on Tree Dungeon's out01 (x 237..326) her feet from x 265.5 to 296.5.
+# -20.5..29.5 facing right, 70-73 rows up (BugBaby's poses 8 and 1, RiceBaby's 8 and 4). In a portal's light (`Cover`)
+# with all of it inside its lit box: on Tree Dungeon's out01 (x 240..323, y -1383..-1176; dense from -1293) her feet
+# from x 268.5 to 293.5, from y -1293 to -1176 (her platform 12 there at -1189.7).
 BODY = (-28.5, -73.0, 29.5, 0.0)
 
 
@@ -246,20 +247,24 @@ class Cover:
       them (`her`: Locator.her_box). Left open, a loss of her elsewhere is carried (its review: any carried frame had
       counted covered while it was open, wherever she was); on the live clip its 34 frames had her feet in its Main
       panel.
-    - Else a visible portal's light: her body's box (BODY) with her feet where the filter has them all inside the box
-      of one's light (`lights`: mapdata.portal_lights, from the game data's pictures, any map's). The user, 2026-10-30
-      ~20:47, of the portal's losses: "let's do 2 for the portal" (count them covered and rely on the filter and her
-      dot; not her cues' matching with its light masked out). RiceBaby standing in Tree Dungeon's out01 at platform
-      12's right end (x 280) was lost on about 18 of 24 frames, its pulsing pillar over her body and its bottom over
-      her plate's top rows (her tag's match 0.02-0.88 about its 0.85), the filter holding her at her place; 18 px
-      either side (x 262, 298), her tag placed her every frame; BugBaby's 2-3 s losses of 16:35:21 and 17:29:05 were
-      there too (x 278-284). Of the live telemetry's carried scenes on platform 12 RiceBaby's 241 of 246 and BugBaby's
-      40 of 46 count covered so (the others' bodies out of the light, x 235-263 and 297). Nothing is looked at: it's
-      her place against the map's.
+    - Else a portal's light: her body's box (BODY) with her feet where the filter has them all inside one's light,
+      her feet in its dense part (`lights`: mapdata.portal_lights, a visible portal's or a hidden one's, from the game
+      data's pictures, any map's), and her tag where it's searched (`her` all on the frame, above the HUD: `searched`).
+      The user, 2026-10-30 ~20:47, of the portal's losses: "let's do 2 for the portal" (count them covered and rely on
+      the filter and her dot; not her cues' matching with its light masked out). RiceBaby standing in Tree Dungeon's
+      out01 at platform 12's right end (x 280) was lost on about 18 of 24 frames, its pulsing pillar over her body and
+      its bottom over her plate's top rows (her tag's match 0.02-0.88 about its 0.85), the filter holding her at her
+      place; 18 px either side (x 262, 298), her tag placed her every frame; BugBaby's 2-3 s losses of 16:35:21 and
+      17:29:05 were there too (x 278-284). Of the live telemetry's carried scenes on platform 12 RiceBaby's 241 of 246
+      and BugBaby's 40 of 46 count covered so (the others' bodies out of the light, x 235-263 and 297). Its review,
+      2026-10-31: falling into out00's light or through out01's, her tag behind the HUD, 5 of the telemetry's lost
+      scenes had counted "a portal" (now carried); the light's box had been its pictures' union, 257 px tall, her feet
+      counted in it on a platform 156 over the portal. Nothing is looked at: it's her place against the map's, and her
+      box against the frame's.
     `alarm`: the alarm's file (None: paths.ALARM's, as it is when looked at); `cal`: the stat window's calibration
     (None: it isn't looked for); `spotter`: what sees the Lie Detector's windows (`over_play`; None: a
-    LieDetectorSpotter made when first needed); `lights`: the map's visible portals' lights ((name, (x0, y0, x1, y1))
-    map units, the ends exclusive; None: none)."""
+    LieDetectorSpotter made when first needed); `lights`: the map's portals' lights ((name, lit, dense): its lit px'
+    box and its dense rows', (x0, y0, x1, y1) map units, the ends exclusive: mapdata.portal_lights; None: none)."""
 
     def __init__(self, alarm: Path | None = None, cal: stat_window.Calibration | None = None, spotter=None,
                  lights: list | None = None):
@@ -307,12 +312,12 @@ class Cover:
         return self._window
 
     def light(self, feet: tuple[float, float]) -> str | None:
-        """The visible portal whose light her body's box (BODY) is all inside with her feet at map `feet`, by its name,
-        or None."""
+        """The portal whose light she's in with her feet at map `feet` (her body's box, BODY, all inside its lit box,
+        her feet in its dense one), by its name, or None."""
         x, y = feet
         bx0, by0, bx1, by1 = x + BODY[0], y + BODY[1], x + BODY[2], y + BODY[3]
-        for name, (x0, y0, x1, y1) in self.lights:
-            if x0 <= bx0 and bx1 <= x1 and y0 <= by0 and by1 <= y1:
+        for name, (x0, y0, x1, y1), (dx0, dy0, dx1, dy1) in self.lights:
+            if x0 <= bx0 and bx1 <= x1 and y0 <= by0 and by1 <= y1 and dx0 <= x <= dx1 and dy0 <= y <= dy1:
                 return name
         return None
 
@@ -330,9 +335,17 @@ class Cover:
                     return STAT_WINDOW
             except Exception as e:  # noqa: BLE001 (her place as ever: only its count)
                 self.cal, self.why = None, repr(e)
-        if feet is not None and self.light(feet) is not None:
+        if feet is not None and her is not None and searched(her, frame) and self.light(feet) is not None:
             return PORTAL
         return None
+
+
+def searched(her: tuple, frame: np.ndarray) -> bool:
+    """Whether her box on screen (x0, y0, x1, y1: Locator.her_box, her feet and her tag) is all where her tag is
+    searched: on the frame and above the HUD (ROWS_MAX). Out of it, a loss is that (her tag behind the HUD in a drop),
+    whatever is over her (`Cover`'s portal)."""
+    x0, y0, x1, y1 = her
+    return 0 <= x0 and x1 <= frame.shape[1] and 0 <= y0 and y1 <= ROWS_MAX
 
 
 class Locator:
@@ -1015,8 +1028,8 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
         from .. import native
         c = "in C" if reg.lib is not None and native.locate_lib() is not None else             f"partly in numpy (camreg {camreg.why or 'C'}, locate {native.locate_why or 'C'})"
         cv = loc.cover
-        lights = (f"in a visible portal's light ({', '.join(name for name, _ in cv.lights)})" if cv.lights else
-                  f"no portal's light (its pictures: {cv.why_lights})" if cv.why_lights else "no visible portal")
+        lights = (f"in a portal's light ({', '.join(light[0] for light in cv.lights)})" if cv.lights else
+                  f"no portal's light (its pictures: {cv.why_lights})" if cv.why_lights else "no portal with a light")
         log(f"  her place by the scene (localization.locate): the camera on the map's art ({art.rgb.shape[1]}x"
             f"{art.rgb.shape[0]}), her plate's model, " + (f"her pose bank ({len(body.poses)} poses)" if body is not None
                                                             else "no pose bank (no body cue)") + f"; {c}; covered "
@@ -1029,7 +1042,7 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
 def cover(model: MapModel | None = None) -> Cover:
     """What covers her, for the perception's Locator (`build`): the Lie Detector's alarm, her stat window where its
     calibration (perception.stat_window.Calibration, lab/stat_window.json: a hunt opens it only with one) has it open
-    at the client's 1366x768, and map `model`'s visible portals' lights (mapdata.portal_lights; None: none). Without a
+    at the client's 1366x768, and map `model`'s portals' lights (mapdata.portal_lights; None: none). Without a
     calibration, one not as it's written (a client of one number, a place not two), or its pictures not to be had, the
     stat window isn't looked for (`why`); without the portals' pictures (the game data copy's), no light is (`why_lights`);
     never the locator not built for either."""
@@ -1048,7 +1061,7 @@ def cover(model: MapModel | None = None) -> Cover:
     lights, why_lights = [], ""
     if model is not None:
         try:
-            lights = [(p.name, box) for p, box in mapdata.portal_lights(model)]
+            lights = [(p.name, lit, dense) for p, lit, dense in mapdata.portal_lights(model)]
         except Exception as e:  # noqa: BLE001 (her place as ever: only what's counted covered)
             lights, why_lights = [], repr(e)
     out = Cover(cal=cal, lights=lights)

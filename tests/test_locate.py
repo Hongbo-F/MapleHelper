@@ -599,13 +599,13 @@ def test_a_locators_cover_from_her_stat_windows_calibration(art, model, plate, t
     loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
     assert loc.cover is not None and loc.cover.cal is None and loc.cover.alarm is None   # (paths.ALARM's, when asked)
     assert ("covered under the Lie Detector's windows (its alarm up) (her stat window not looked for: no calibration "
-            "of it); in a visible portal's light (out00, out01)") in said[0]
+            "of it); in a portal's light (out00, out01)") in said[0]
     stat_window_cal().save(paths.STAT_WINDOW)
     said.clear()
     loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
     assert loc.cover.cal is not None and loc.cover.cal.place("main") == (587, 241)
     assert said[0].endswith("covered under the Lie Detector's windows (its alarm up) and her stat window over her; in a "
-                            "visible portal's light (out00, out01)")
+                            "portal's light (out00, out01)")
     for data, why in (({"panels": {"main": {"at": [587, 241]}}, "client": [1366]}, "calibrated at 1366)"),
                       ({"panels": {"main": {"at": [587, 241]}}, "client": [1920, 1080]}, "calibrated at 1920x1080)"),
                       ({"panels": {"main": {"at": [587]}}}, "its calibration or pictures: IndexError")):
@@ -615,33 +615,44 @@ def test_a_locators_cover_from_her_stat_windows_calibration(art, model, plate, t
         assert loc is not None and loc.cover.cal is None and why in said[0], data
 
 
-# --- a visible portal's light (the user, 2026-10-30 ~20:47, of the portal's losses: "let's do 2 for the portal") ------
+# --- a portal's light (the user, 2026-10-30 ~20:47, of the portal's losses: "let's do 2 for the portal") ---------------
 
 V12 = (-658, -1650)   # a view with Tree Dungeon's platform 12 (y -1190) the lowest in the play area, out01 at its right end
-LIGHT = ("out01", (237, -1431, 326, -1174))   # out01's light on the map (281, -1183)
+LIGHT = ("out01", (240, -1383, 323, -1176), (240, -1293, 323, -1176))   # out01's (281, -1183): lit, dense
+ON_SCREEN = (900, 440, 970, 484)      # her box on screen (Locator.her_box) where her tag is searched
 
 
-def test_a_visible_portals_light_from_the_game_data(model):
-    """The client draws an exit with MapHelper.img portal/game/pv/default's 8 frames (84-88 x 182-256 px), each with its
-    origin on the portal's point: its light's box is their union, 89 x 257, wherever it is; the picture a map names
-    (`image`: 2 of the game data's 466 exits) is its own. Tree Dungeon's two exits; its six spawn points none."""
-    assert mapdata.portal_light() == (-44, -248, 45, 9)
-    assert mapdata.portal_light("2") == (-56, -146, 61, 14)
-    lights = {p.name: box for p, box in mapdata.portal_lights(model)}
-    assert lights == {"out00": (238, -297, 327, -40), "out01": LIGHT[1]}
-    assert all((x1 - x0, y1 - y0) == (89, 257) for x0, y0, x1, y1 in lights.values())
+def test_a_portals_light_from_the_game_data(model):
+    """The client draws an exit (a changeable or a script portal too) with MapHelper.img portal/game/pv/default's 8
+    frames (84-88 x 182-256 px) each with its origin on the portal's point, a hidden one ph/default's portalStart and
+    portalContinue (a script one psh's): its light the px lit (alpha over LIGHT_ALPHA) in any of them, its lit box and
+    its dense rows' (lit across half its width or more), not the pictures' union (-44, -248, 45, 9): a fainter glow and a
+    few streaks go up to its top (its review: her feet counted 175 px over the point). The picture a map names (`image`:
+    2 of the game data's 466 exits) is its own. Tree Dungeon's two exits; its six spawn points none."""
+    assert mapdata.portal_light() == ((-41, -200, 42, 7), (-41, -110, 42, 7))
+    assert mapdata.portal_light("2") == ((-53, -127, 51, 8), (-53, -114, 51, 6))
+    assert mapdata.portal_light("", 10) == mapdata.portal_light("", 11) == ((-45, -116, 46, 2), (-45, -105, 46, 1))
+    lights = {p.name: (lit, dense) for p, lit, dense in mapdata.portal_lights(model)}
+    assert lights == {"out00": ((241, -249, 324, -42), (241, -159, 324, -42)), "out01": LIGHT[1:]}
     assert sum(p.kind == 0 for p in model.portals) == 6 and all(p.image == "" for p in model.portals)
-    named = mapdata.parse(1, {"portal": {"0": {"pn": "out00", "pt": 2, "x": 10, "y": 20, "tm": 2, "image": "2"}}}, "", {})
-    assert named.portals[0].image == "2" and mapdata.portal_lights(named)[0][1] == (-46, -126, 71, 34)
+    tree = {"portal": {str(i): {"pn": f"p{kind}", "pt": kind, "x": 10, "y": 20, "tm": 2}
+                       for i, kind in enumerate((0, 1, 2, 3, 4, 6, 7, 8, 10, 11))}}
+    tree["portal"]["10"] = {"pn": "named", "pt": 2, "x": 10, "y": 20, "tm": 2, "image": "2"}
+    m = mapdata.parse(1, tree, "", {})
+    got = {p.name: (lit, dense) for p, lit, dense in mapdata.portal_lights(m)}
+    assert set(got) == {"p2", "p4", "p7", "p10", "p11", "named"}
+    assert got["p2"] == got["p4"] == got["p7"] == ((-31, -180, 52, 27), (-31, -90, 52, 27))
+    assert got["p10"] == got["p11"] == ((-35, -96, 56, 22), (-35, -85, 56, 21))
+    assert m.portals[-1].image == "2" and got["named"] == ((-43, -107, 61, 28), (-43, -94, 61, 26))
 
 
-def test_carried_in_a_visible_portals_light_counts_covered_and_places_nothing_otherwise(art, model, plate, tmp_path):
+def test_carried_in_a_portals_light_counts_covered_and_places_nothing_otherwise(art, model, plate, tmp_path):
     """RiceBaby standing in out01's light at platform 12's right end (x 280) was lost on about 18 of 24 frames (its
     pulsing pillar over her body, its bottom over her plate's top rows), the filter holding her at her place; 18 px
     either side (x 262, 298) her tag placed her every frame. A frame no cue placed her in counts covered with her body's
-    box (BODY) all inside a visible portal's light where the filter has her feet; where she's placed, how sure, what's
-    searched: as without it."""
-    lights = [(p.name, box) for p, box in mapdata.portal_lights(model)]
+    box (BODY) all inside a portal's light where the filter has her feet, her feet in its dense part, her tag where it's
+    searched; where she's placed, how sure, what's searched: as without it."""
+    lights = [(p.name, lit, dense) for p, lit, dense in mapdata.portal_lights(model)]
     bare, _ = art.window(*V12)
     for mx, want in ((280.5, locate.PORTAL), (262.5, None), (297.5, None)):
         plain, loc = locator(art, model, plate), locator(art, model, plate)
@@ -656,6 +667,7 @@ def test_carried_in_a_visible_portals_light_counts_covered_and_places_nothing_ot
             assert b.how == ("tag" if k == 0 else None) and b.covered == (None if k == 0 else want), (mx, k)
             assert a.covered is None
         assert b.x == pytest.approx(mx, abs=0.5) and b.platform is p
+        assert locate.searched(loc.her_box(), bare)
         assert loc.line().startswith("her place by the scene: tag 20.0%, " + (
             "covered 80.0% (a portal); views registered 100.0%, " if want else "carried 80.0%; views registered 100.0%"))
     eyes = saved_eyes(model, plate, art)                  # the scene's how, and its record
@@ -668,35 +680,48 @@ def test_carried_in_a_visible_portals_light_counts_covered_and_places_nothing_ot
     assert s.platform is p and s.where.x == pytest.approx(280.5, abs=0.5)
 
 
-def test_a_portals_light_counts_her_body_all_inside_it_after_the_lie_detector_and_her_stat_window(tmp_path,
-                                                                                                    monkeypatch):
+def test_a_portals_light_counts_her_in_it_with_her_tag_where_its_searched_after_the_lie_detector_and_her_stat_window(
+        tmp_path, monkeypatch):
+    """Her body's box all inside the light's lit box, her feet in its dense rows: standing on platform 12 from x 268.5
+    to 293.5, jumping in it; not over its dense part (its review: Forest Up North IV's platform 8 is 156 over its out01,
+    its pictures' union had had her counted there), nor under its foot. Her box on screen (Locator.her_box) off the
+    frame or under the HUD's top (ROWS_MAX: her tag behind the HUD, falling into out00's light or through out01's, 5 of
+    the telemetry's lost scenes): carried."""
     from gamelab.perception import stat_window as sw
     c = locate.Cover(tmp_path / "ALARM.json", None, None, [LIGHT])
     y = -1189.6                                                       # (platform 12's line there)
-    assert [c.light((x, y)) for x in (265.5, 280.5, 296.5)] == ["out01"] * 3
-    assert [c.light((x, y)) for x in (262.5, 265.0, 297.0, 310.0)] == [None] * 4   # (her body out of it, either side)
-    assert c.light((280.5, y - 150)) == "out01"                       # (jumping in it)
-    assert c.light((280.5, -1431 + 72)) is None and c.light((280.5, -1170.0)) is None   # (over its top, under its foot)
+    assert [c.light((x, y)) for x in (268.5, 280.5, 293.5)] == ["out01"] * 3
+    assert [c.light((x, y)) for x in (262.5, 268.0, 294.0, 310.0)] == [None] * 4   # (her body out of it, either side)
+    assert c.light((280.5, y - 80)) == c.light((280.5, -1293.0)) == "out01"        # (jumping in it)
+    assert c.light((280.5, -1294.0)) is None and c.light((280.5, -1183 - 155.7)) is None   # (over its dense part)
+    assert c.light((280.5, -1175.0)) is None                          # (under its foot)
+    wide = locate.Cover(tmp_path / "ALARM.json", None, None, [("p", (240, -1383, 323, -1176), (200, -1500, 400, -1100))])
+    assert wide.light((280.5, -1300.0)) == "p" and wide.light((280.5, -1310.5)) is None   # (her body in the lit box)
     frame = np.zeros((768, 1366, 3), np.uint8)
-    assert c(frame, 0.0, True, None, (280.5, y)) == locate.PORTAL
-    assert c(frame, 0.0, True, None, (262.5, y)) is None and c(frame, 0.0, True, None, None) is None
-    assert locate.Cover(tmp_path / "ALARM.json")(frame, 0.0, True, None, (280.5, y)) is None   # (no lights: none)
+    assert c(frame, 0.0, True, ON_SCREEN, (280.5, y)) == locate.PORTAL
+    assert c(frame, 0.0, True, ON_SCREEN, (262.5, y)) is None and c(frame, 0.0, True, None, None) is None
+    for her in ((900, 680, 970, 701), (900, 690, 970, 717.9), (-10, 440, 60, 484), (1320, 440, 1390, 484),
+                (900, -5, 970, 39)):                                  # (her tag behind the HUD, off the frame)
+        assert not locate.searched(her, frame) and c(frame, 0.0, True, her, (280.5, y)) is None, her
+    assert locate.searched((900, 676.5, 970, 700), frame) and locate.searched((0, 0, 1366, 700), frame)
+    assert locate.Cover(tmp_path / "ALARM.json")(frame, 0.0, True, ON_SCREEN, (280.5, y)) is None   # (no lights: none)
     monkeypatch.setattr(sw, "shown", lambda frame, cal, over=None: "main")
     c.cal = stat_window_cal()
     assert c(frame, 0.0, True, (680, 540, 720, 564), (280.5, y)) == locate.STAT_WINDOW   # (each as before it)
     (tmp_path / "ALARM.json").write_text("{}")
-    assert c(frame, 1.0, False, None, (280.5, y)) == locate.LIE_DETECTOR
+    assert c(frame, 1.0, False, ON_SCREEN, (280.5, y)) == locate.LIE_DETECTOR
 
 
 def test_a_locators_portals_lights_from_its_map_and_their_pictures_not_to_be_had(art, model, plate, tmp_path,
                                                                                   monkeypatch):
-    """Every visible portal of the locator's map (any map's, from the game data); their pictures not to be had: none
-    counted, said, the locator built as ever."""
+    """Every portal with a light on the locator's map (any map's, from the game data); their pictures not to be had:
+    none counted, said, the locator built as ever."""
     monkeypatch.setattr(locate, "configured", lambda path=None: True)
     monkeypatch.setattr(mapart, "load", lambda map_id: art)
     plate.save(P.model_path(tmp_path))
     loc = locate.build(model, template_of(plate), tmp_path)
-    assert loc.cover.lights == [("out00", (238, -297, 327, -40)), LIGHT] and not loc.cover.why_lights
+    assert loc.cover.lights == [("out00", (241, -249, 324, -42), (241, -159, 324, -42)), LIGHT]
+    assert not loc.cover.why_lights
     assert locate.cover().lights == []                                 # (no map: none)
     monkeypatch.setattr(mapdata, "portal_lights", lambda model: (_ for _ in ()).throw(KeyError("pv")))
     said = []

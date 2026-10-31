@@ -444,7 +444,7 @@ class Senses:
         """Her place as the eyes' Locator gave it (localization.locate.Located): her feet's map place (the view plus her
         place on screen), the platform she stands on, the cue that placed her (`how`: "tag", "plate", "body", or
         "carried" where nothing did and the filter's prediction stands, "covered" where that's under what covers her,
-        the Lie Detector or her stat window: locate.Cover; `tag_seen` False then) and how sure
+        the Lie Detector, her stat window or a portal's light: locate.Cover; `tag_seen` False then) and how sure
         (`confidence`), her mode ("ground", "air", "rope"). Not found yet (the first frames): her dot places her, the
         view puts her on screen (`how` "dot"). A place off the map isn't placed (placecheck). Her dot not read (something
         over the minimap), `where.dot` is where her place puts it (what reads it, her stillness by her dot, the rope's

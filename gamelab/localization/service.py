@@ -1076,7 +1076,8 @@ class Publisher:
     def status(self, now: float, fps: float | None = None) -> str:
         """The console line's part on what it saw: the monsters followed, deaths, her EXP a minute, her touches, her
         place by the scene where it's used (localization.locate.Locator.line: the share of frames each cue placed her
-        in, carried, covered (carried under the Lie Detector or her stat window), the views registered, its time a
+        in, carried, covered (carried under the Lie Detector, her stat window or a portal's light), the views
+        registered, its time a
         frame), the searches a second
         and their time (`_searches`, also published as a 'perf' record; `fps`: the frames a second the line says, for
         it); gamelab's C pieces

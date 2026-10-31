@@ -180,13 +180,30 @@ class Portal:
 # PORTAL_EXIT's kind leads to another map (the spawn points, kind 0, lead nowhere).
 PORTAL_BOX = (25.0, 100.0, 25.0)
 PORTAL_EXIT = 2
-# A visible portal's light (`portal_light`, `portal_lights`): the client draws an exit (PORTAL_SHOWN's kind, "pv") with
-# Map/MapHelper.img portal/game/pv/<its image>'s frames, one after another, each picture with its origin on the portal's
-# point, over her: its pulsing pillar of light (PORTAL_IMAGE's where the map names none: 464 of the game data's 466
-# exits; 2 name "2"). Only the exits' are counted: the others draw nothing of the kind (a hidden portal shows its own
-# pictures only as she comes near, the spawn points and script portals none).
-PORTAL_SHOWN = (PORTAL_EXIT,)
+# A portal's light (`portal_light`, `portal_lights`): the client draws a visible portal (PORTAL_SHOWN's kinds: an exit,
+# a changeable one and a script one, RustMS's MapPortals.cpp, its port of the decompiled v83 client, `visible = type ==
+# Portal::REGULAR || type == Portal::TYPE4 || type == Portal::SCRIPTED`, read 2026-10-31) with Map/MapHelper.img
+# portal/game/pv/<its image>'s frames, one after another, each picture with its origin on the portal's point, over her:
+# its pulsing pillar of light (PORTAL_IMAGE's where the map names none: 464 of the game data's 466 exits; 2 name "2").
+# A hidden portal (PORTAL_HIDDEN's kinds) draws ph/<image>'s (a script one psh/<image>'s) portalStart, then its
+# portalContinue, while her feet are within its reveal box (Portal::reveal_bounds: 100 either side, 50 up and down; of
+# two holding her, the one of the higher id: not told apart here, none of the game data's 9 within another's); her body
+# in its light as locate.Cover has it (her feet then within 16.5 across, 43 up and 1 down of its point) has her in that
+# box. The spawn points and the invisible portals draw nothing.
+# Its light where it's over her (locate.Cover: her body's box all inside its lit px' box, her feet in its dense
+# rows'): a px of a frame lit with its alpha over LIGHT_ALPHA (a quarter opaque), the dense rows those of the frames'
+# union lit across LIGHT_DENSE of its lit width or more. A glow fainter than that (alpha 51 at the most) reaches the
+# pictures' tops, the default's 248 px over its point (lit to 200), and over 116 up only streaks are lit (27% of its
+# width at the most in some frame, 6% in one on average; its dense rows, 110 up to 7 under the point, 52-100% and
+# 15-94%): her feet there, her lower body is under its dense light (at Tree Dungeon's out01, her floor 6.7 over its
+# point, its foot over her plate's top rows too). Its pictures' union had had her feet counted in it up to 175 px over
+# its point, on a platform above (the review of 2026-10-31: Tree Dungeon, Forest Up North IV's platform 8, 156 over
+# its out01; 51 platforms' stretches in 26 maps, most 120-160 over their portal's point; now 29 in 14 maps, 32-97 over
+# it).
+PORTAL_SHOWN = (PORTAL_EXIT, 4, 7)
+PORTAL_HIDDEN = {10: "ph", 11: "psh"}
 PORTAL_IMAGE = "default"
+LIGHT_ALPHA, LIGHT_DENSE = 64, 0.5
 
 
 @dataclass(frozen=True)
@@ -704,38 +721,65 @@ def _mob_die_s(ids: set[str]) -> dict[str, float]:
     return out
 
 
+Box = tuple[int, int, int, int]
+
+
 @lru_cache(maxsize=None)
-def portal_light(image: str = "", copy: Path = COPY) -> tuple[int, int, int, int]:
-    """A visible portal's light from its point (x0, y0, x1, y1 map units, a game px each; the ends exclusive): the union
-    of its animation's frames (MapHelper.img portal/game/pv/<image>, PORTAL_IMAGE's for ""), each picture with its origin
-    on the point. The default's 8 frames (84-88 x 182-256 px, origins (41-44, 173-248)): (-44, -248, 45, 9), 89 x 257.
-    The data image holds 1x1 placeholders with the origins; the pictures (their sizes) are where their `_outlink`s point,
-    in Map/_Canvas. Raises KeyError or OSError if the copy hasn't got them."""
-    from gamedata.canvas import source
+def portal_light(image: str = "", kind: int = PORTAL_EXIT, copy: Path = COPY) -> tuple[Box, Box]:
+    """A portal's light about its point (boxes x0, y0, x1, y1 in map units, a game px each; the ends exclusive): of its
+    animation's frames as the client draws a portal of that `kind` (MapHelper.img portal/game/pv/<image> for a visible
+    one, PORTAL_HIDDEN's ph or psh /<image>'s portalStart and portalContinue for a hidden one; PORTAL_IMAGE's for ""),
+    each picture with its origin on the point, the px lit (alpha over LIGHT_ALPHA) in any of them: (its lit px' box,
+    its dense rows' box: the rows lit across LIGHT_DENSE of its lit width or more, from the first such row to the last).
+    The default visible one's 8 frames (84-88 x 182-256 px, origins (41-44, 173-248); their pictures' union (-44, -248,
+    45, 9)): (-41, -200, 42, 7) and (-41, -110, 42, 7); a hidden one's (ph/default, 11 frames): (-45, -116, 46, 2) and
+    (-45, -105, 46, 1). The data image holds 1x1 placeholders with the origins; the pictures are where their `_outlink`s
+    point, in Map/_Canvas. Raises KeyError or OSError if the copy hasn't got them, ValueError if nothing of them is
+    lit."""
+    from gamedata.canvas import pixels, source
     from gamedata.wz import Canvas
     tree = Package(copy / "Map" / "Map_000.wz").image("MapHelper.img")
-    frames = [c for k, c in tree["portal"]["game"]["pv"][image or PORTAL_IMAGE].items()
-              if k.isdigit() and isinstance(c, Canvas)]
+    name = image or PORTAL_IMAGE
+    if kind in PORTAL_HIDDEN:
+        node = tree["portal"]["game"][PORTAL_HIDDEN[kind]][name]
+        nodes, where = [node["portalStart"], node["portalContinue"]], f"{PORTAL_HIDDEN[kind]}/{name}"
+    else:
+        nodes, where = [tree["portal"]["game"]["pv"][name]], f"pv/{name}"
+    frames = []
+    for node in nodes:
+        for k, c in node.items():
+            if k.isdigit() and isinstance(c, Canvas):
+                o = c.props.get("origin")
+                rgba = pixels(source(c, tree, copy))
+                frames.append(((o.x, o.y) if o is not None else (0, 0), rgba[..., 3] > LIGHT_ALPHA))
     if not frames:
-        raise KeyError(f"MapHelper.img portal/game/pv/{image or PORTAL_IMAGE} has no frames")
-    boxes = []
-    for c in frames:
-        o = c.props.get("origin")
-        ox, oy = (o.x, o.y) if o is not None else (0, 0)
-        picture = source(c, tree, copy)
-        boxes.append((-ox, -oy, picture.width - ox, picture.height - oy))
-    return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+        raise KeyError(f"MapHelper.img portal/game/{where} has no frames")
+    x0, y0 = min(-ox for (ox, _), _m in frames), min(-oy for (_, oy), _m in frames)
+    x1 = max(m.shape[1] - ox for (ox, _), m in frames)
+    y1 = max(m.shape[0] - oy for (_, oy), m in frames)
+    lit = np.zeros((y1 - y0, x1 - x0), bool)          # the frames' union, lit
+    for (ox, oy), m in frames:
+        lit[-oy - y0:-oy - y0 + m.shape[0], -ox - x0:-ox - x0 + m.shape[1]] |= m
+    cols, rows = np.flatnonzero(lit.any(axis=0)), np.flatnonzero(lit.any(axis=1))
+    if not len(cols):
+        raise ValueError(f"MapHelper.img portal/game/{where}: nothing lit")
+    share = lit[:, cols[0]:cols[-1] + 1].mean(axis=1)   # each row's share of the lit width that's lit
+    dense = np.flatnonzero(share >= LIGHT_DENSE)
+    dcols = np.flatnonzero(lit[dense[0]:dense[-1] + 1].any(axis=0))
+    return ((int(x0 + cols[0]), int(y0 + rows[0]), int(x0 + cols[-1] + 1), int(y0 + rows[-1] + 1)),
+            (int(x0 + dcols[0]), int(y0 + dense[0]), int(x0 + dcols[-1] + 1), int(y0 + dense[-1] + 1)))
 
 
-def portal_lights(model: MapModel, copy: Path = COPY) -> list[tuple[Portal, tuple[float, float, float, float]]]:
-    """Every visible portal of the map (PORTAL_SHOWN) and its light's box on the map (x0, y0, x1, y1; `portal_light`
-    placed at its point): Tree Dungeon's out00 (282, -49) x 238..327, y -297..-40, out01 (281, -1183) x 237..326,
-    y -1431..-1174. Raises KeyError or OSError if the game data copy hasn't got its pictures."""
+def portal_lights(model: MapModel, copy: Path = COPY) -> list[tuple[Portal, Box, Box]]:
+    """Every visible or hidden portal of the map (PORTAL_SHOWN, PORTAL_HIDDEN) and its light's boxes on the map (its
+    lit px', its dense rows': `portal_light` placed at its point): Tree Dungeon's out00 (282, -49) x 241..324,
+    y -249..-42 and -159..-42, out01 (281, -1183) x 240..323, y -1383..-1176 and -1293..-1176. Raises KeyError or
+    OSError if the game data copy hasn't got its pictures."""
     out = []
     for p in model.portals:
-        if p.kind in PORTAL_SHOWN:
-            x0, y0, x1, y1 = portal_light(p.image, copy)
-            out.append((p, (p.x + x0, p.y + y0, p.x + x1, p.y + y1)))
+        if p.kind in PORTAL_SHOWN or p.kind in PORTAL_HIDDEN:
+            lit, dense = portal_light(p.image, PORTAL_EXIT if p.kind in PORTAL_SHOWN else p.kind, copy)
+            out.append((p, *(tuple(v + d for v, d in zip(box, (p.x, p.y, p.x, p.y))) for box in (lit, dense))))
     return out
 
 

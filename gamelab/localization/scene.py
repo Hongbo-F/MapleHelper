@@ -45,7 +45,7 @@ class Scene(Observation):
     how: str = "dot"              # how `where.x` was worked out: 'camera', 'rope', 'edge' (on screen) or 'dot'; by the
                                   # scene (localization.locate) the cue that placed her: 'tag', 'plate', 'body', or
                                   # 'carried' (none did: the filter's prediction, `tag_seen` False), 'covered' (so,
-                                  # under the Lie Detector or her stat window: locate.Cover)
+                                  # under the Lie Detector, her stat window or a portal's light: locate.Cover)
     mode: str | None = None       # by the scene: 'ground', 'air' or 'rope' (None: placed as before)
     confidence: float | None = None  # ... and how sure of her place (the cue's score; carried, less each frame)
     tag_seen: bool = True         # `tag` is her name tag as seen (False: where the camera puts her, the tag
