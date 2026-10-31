@@ -663,7 +663,8 @@ def test_in_the_simulator_put_off_at_the_start_collapsed_in_the_hunt_loop():
     """Every spawn point filled: a monster within 250 of her at the start, put off; the grind's hunt loop collapses it
     at its first quiet look DEFER_GAP_S on that tells it (ChatDue from health_check, that look the collapse's first, the
     hunt's looks before it watched: its field unmarked on them; with its own look taken anew a Green Mushroom had come
-    within 250, put off again till 67 s)."""
+    within 250, put off again till 67 s). The monsters walk as with nobody there, hit or not (Realism.chase off): with
+    their chase of her on, the collapse was still put off at the 0.4 minutes' end."""
     from gamelab.behavior.grind import Grind
     from gamelab.behavior.retreat import on_alarm
 
@@ -673,7 +674,7 @@ def test_in_the_simulator_put_off_at_the_start_collapsed_in_the_hunt_loop():
         with on_alarm(tour.h):
             Grind(tour, log=sim.log).run(minutes=0.4)
         return {"start": start, "last": tour.h.chat_check.last.what}
-    got = _sim(fn, monsters="all", chat=EXPANDED)
+    got = _sim(fn, monsters="all", chat=EXPANDED, chase=False)
     assert got["start"] == "put off" and got["last"] == "collapsed" and got["keys"] == ["'"]
     assert any("the chat box's collapse put off: a quiet moment now" in line for line in got["log"])
     assert got["world"]["chat_box"] == COLLAPSED

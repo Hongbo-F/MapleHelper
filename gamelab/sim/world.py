@@ -757,8 +757,9 @@ class Realism:
                                  # DIE_FLIGHT), then dying where it got to, and her frames lose it DIE_LOST_S on, as
                                  # live on 2026-10-26; False: drawn dying where it was at the kill (the server's time),
                                  # its bar gone, from then (as until 2026-10-27)
-    chase: bool = False          # monsters she hits chase her AGGRO_S, each hit anew (aggro, as the game has it; the
-                                 # harness's `--world walkers`); False: they walk as with nobody there
+    chase: bool = True           # monsters she hits chase her AGGRO_S, each hit anew (aggro, as the game has it; the
+                                 # default from 2026-10-31); False: they walk as with nobody there, hit or not (the
+                                 # harness's `--world no-aggro`)
     invulnerable: float = INVULNERABLE  # s a touch leaves her invulnerable (INVULNERABLE_LIVE: as live)
     # The game's own key bindings where they aren't her keys' (behavior.keycheck): (her GameKeys field, the key the game
     # has it on, None: on no key), e.g. (("attack", "a"),): her configured attack key then does nothing (as live on

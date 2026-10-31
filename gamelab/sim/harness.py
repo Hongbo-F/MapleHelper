@@ -252,10 +252,12 @@ WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 # farther; one on another platform 70% (the live hunt of 2026-10-25), where the presets find it 90% of the time wherever
 # it is.
 WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
-# ... and the monsters she hits chasing her (aggro, as the game has it), and her invulnerability after a touch as live
-# (`walkers`: world.AGGRO_S, INVULNERABLE_LIVE; Realism.chase, invulnerable), where the world's monsters walk as with
-# nobody there, hit or not.
+# ... and her invulnerability after a touch as live (`walkers`: INVULNERABLE_LIVE; Realism.invulnerable), with the
+# monsters she hits chasing her (Realism.chase, world.AGGRO_S: every world's since 2026-10-31; till then this world's
+# alone, by chance, CHASE_TREE). `no-aggro`: the monsters walk as with nobody there, hit or not (as every world but
+# `walkers` had them till 2026-10-31).
 WORLDS["walkers"] = {"chase": True, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
+WORLDS["no-aggro"] = {"chase": False}
 # ... and the game's respawn as measured on Tree Dungeon on 2026-10-29 (`tick-respawn`: world.TICK_S, TICK_P, CAP_SHARE,
 # CAP_OTHER; Realism.respawn_tick): the map's tick, a free point's monster back at it with a chance, under the map's cap
 # (by the other players there), where the other worlds bring each monster back on its own clock (`respawn` s after it

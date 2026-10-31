@@ -290,6 +290,8 @@ def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: 
     # (perception.touches.INVULNERABLE_S), the default world's too.
     assert harness.WORLDS["walkers"] == {"chase": True, "invulnerable": world_mod.INVULNERABLE_LIVE,
                                          "respawn": world_mod.RESPAWN_LIVE}
+    # Every world's monsters chase her once she hits them (from 2026-10-31); `no-aggro` the old walk, hit or not.
+    assert world_mod.Realism().chase is True and harness.WORLDS["no-aggro"] == {"chase": False}
     assert (world_mod.INVULNERABLE_LIVE, world_mod.RESPAWN_LIVE) == (1.45, 17.0)
     assert world_mod.INVULNERABLE == world_mod.Realism().invulnerable == 1.45
 

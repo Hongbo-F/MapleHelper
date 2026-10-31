@@ -448,10 +448,15 @@ def test_her_keys_say_her_facing_beyond_doubt_only_well_after_her_arrow_with_no_
 needs_tree = pytest.mark.skipif(not scenarios.available(TREE), reason="needs Tree Dungeon's game data (gamedata/data)")
 
 
+NO_CHASE = Realism(chase=False)
+
+
 def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushrooms=(120.0,), facing=RIGHT, her=None):
     """`hunt kill` of the rightmost Horny Mushroom on 23 (Tree Dungeon; her at `start`, mushrooms at `mushrooms`): her
     attacks counted, and those that went the other way from where the stack threw them (the world's count, by her
-    facing as each started). `read` False: eyes that can't read her picture. What came of it, and the trace."""
+    facing as each started). `read` False: eyes that can't read her picture. What came of it, and the trace. (The
+    mushrooms walk as with nobody there, hit or not, as when these were measured: Realism.chase off, NO_CHASE; what's
+    tested is her heading, not their chase of her.)"""
     out = {}
 
     def fn(sim):
@@ -467,7 +472,8 @@ def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushr
             out["taps"] = h.actions.turns
         return {}
     sc = scenarios.Scenario("heading_kill_23", fn, (23, start), monsters=[("Horny Mushroom", 23, x) for x in mushrooms],
-                            seed=seed, limit=60, noise=noise, realism=realism, map_id=TREE, facing=facing, her=her)
+                            seed=seed, limit=60, noise=noise, realism=realism or NO_CHASE, map_id=TREE, facing=facing,
+                            her=her)
     trace = scenarios.run_scenario(sc)
     out["knocks"] = sum("knocked by" in line for line in trace["world_log"])
     return out, trace
@@ -499,7 +505,7 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
 # (with her touches as the world had them when these were measured: a touch left her a second, and a Horny Mushroom's
 # MISSed EVADE_ACC over its accuracy, 29%; the world's 1.45 s and her avoid since 2026-10-28 knock her less often, and
 # none of seeds 1-32 keeps the single seed's case below: what's tested is her heading after a knock, not the knocks)
-KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0), start=0.0,
+KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False), start=0.0,
                mushrooms=(160.0, -150.0), her=dataclasses.replace(LEVEL_25, avoid=None))
 
 

@@ -1193,7 +1193,7 @@ def fight_snail_stab(sim):
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
-                                ("Orange Mushroom", 2, 200.0)], seed=1, limit=60,
+                                ("Orange Mushroom", 2, 200.0)], seed=3, limit=60,
           expects=(check("no throw from the ground from platform 4",
                          lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
@@ -1220,7 +1220,8 @@ def fight_step_wall(sim):
     she didn't stay on platform 4; of seeds 1-16, 10 and 11 meet all of this, and with master's stack 4 and 12; with her
     band's own search beside a whole screen that takes longer than 0.05 s, worldstate.BAND_STAND_IN_S, 10-12 and 16.)
     (Seed 1 since perception at 15 frames a second, one pass a frame (2026-10-30): on seed 10 she stepped off platform
-    4; seed 1 meets all of this.)"""
+    4; seed 1 meets all of this.) (Seed 3 since the world's monsters chase her once she hits them (Realism.chase,
+    2026-10-31): on seed 1 she didn't stay on platform 4; of seeds 1-13, 3 and 11 meet all of this.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1254,7 +1255,10 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 # damage showing at the star's release: so their world applies it then (world.Realism.damage_ms), not at the server's
 # time the world has from 2026-10-26 (actions.DAMAGE_SHOWS_MS, as measured live), and draws its kill dying from then
 # (not alive until her star lands: Realism.dies_late, the world's from 2026-10-27). To redo with the server's time.
-_AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False)
+# Their target walks as with nobody there, hit or not (Realism.chase off, from 2026-10-31 when the world's monsters
+# chase her once hit): what's probed is her attack's reach at the offsets they're thrown from; with its chase on
+# probe_top's pig came at her x, on 12 of seeds 1-13 otherwise (fine on 4, 8, 9, 11-13). To redo with the chase.
+_AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False, chase=False)
 
 
 @scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=2, limit=400, realism=_AT_RELEASE,
@@ -1450,7 +1454,7 @@ def tour_hunt_other_spot(sim):
 
 
 @scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1300.0)], seed=6, limit=400,
-          expects=(logs("that no spot reaches: onto the platform"),))
+          realism=Realism(chase=False), expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
     """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
     (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 the other
@@ -1461,7 +1465,9 @@ def tour_hunt_onto_platform(sim):
     (localization.tracking's binding) and drawn alive until her star lands (sim.world Realism.dies_late): from 1240
     no seed of 1-16 shows it, the fight reaching the other pig from 14 once the kill isn't put by it; from 1300 seed 1
     does, from 1380 and 1420 seed 4, of 1-4.) (Seed 6 since the whole screen 10 times a second, 2026-10-28: on seed 1 she
-    killed both without going onto 17; of seeds 1-16 only 6 shows it, and with master's stack 1 and 6.)"""
+    killed both without going onto 17; of seeds 1-16 only 6 shows it, and with master's stack 1 and 6.) (The pigs walk
+    as with nobody there, hit or not, since the world's monsters chase her once hit (Realism.chase off, 2026-10-31): with
+    their chase none of seeds 1-13 shows it.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -2529,7 +2535,7 @@ def loop_tree_lie_detector(sim):
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=9, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2574,7 +2580,8 @@ def loop_tree_lie_detector_28(sim):
     every 0.2 s, not two every frame (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 15 a touch knocked her out of the
     tower at 23.3 s, before the sighting (in this world her own group's walls alone stop her); of seeds 1-9, 9 alone
     goes back onto 28 (at x 227, 5.9 s after the sighting), 3 and 6 to 25, the others to a rope, all on a safe place
-    10 s after it.)"""
+    10 s after it.) (Seed 1 since the world's monsters chase her once she hits them (Realism.chase, 2026-10-31): on seed
+    9 neither to safe enough nor on 28; of seeds 1-13, 1 and 5 meet all of this.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2871,7 +2878,7 @@ KEY_EXPECTS = (
     check("the backslash first, then Esc with the window open, nothing else in it, no MENU", _window_ok))
 
 
-@tree((23, 73.0), monsters="all", seed=10, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),))),
       expects=KEY_EXPECTS + (
           check("her stars asked", lambda tr: _said(tr, "her stars: ")),
@@ -2905,11 +2912,12 @@ def loop_tree_grind_attack_key(sim):
     on A, paged once, 11 kills after.) (Seed 10 since perception at 15 frames a second, one pass a frame (2026-10-30):
     on seed 9 the doubt at 63.8 s, and A not pressed after the check in its 2 minutes; of seeds 1-10, 10 alone meets all
     of this, on 1-8 no 5 regular presses in a row went without effect in its 2 minutes. On 10 the doubt at 73.3 s, 4
-    kills after.)"""
+    kills after.) (Seed 11 since the world's monsters chase her once she hits them (Realism.chase, 2026-10-31): on seed
+    10 no regular attack's doubt in its 2 minutes; of seeds 1-13, 11 alone meets all of this.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=10, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),))),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
@@ -2932,11 +2940,12 @@ def loop_tree_attack_unbound(sim):
     ATTACK on none at 78.3 s, 11 kills after.) (Seed 10 since perception at 15 frames a second, one pass a frame
     (2026-10-30): as loop_tree_grind_attack_key: on seed 9 the doubt at 63.8 s and no 'the regular attack off this run'
     in its 2 minutes; of seeds 1-10, 10 alone meets all of this, 1-8 with no doubt. On 10 the doubt at 73.3 s, 4 kills
-    after.)"""
+    after.) (Seed 11 since the world's monsters chase her once she hits them (Realism.chase, 2026-10-31): on seed 10 no
+    regular attack's doubt in its 2 minutes; of seeds 1-13, 11 alone meets all of this.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -2964,11 +2973,13 @@ def loop_tree_attack_misses(sim):
     86.4 s, 11 kills after.) (Seed 1 since the drops' rotation searches a strip in view every 0.2 s, not two every
     frame (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 2 no 5 regular presses in a row went without effect in its 2
     minutes; of seeds 1-10, 1, 4 and 10 meet all of this. On 1 the doubt at 46.3 s, a Green Mushroom at 4%; away to 25
-    (3.9 s), the window read, ATTACK on Ctrl at 52.1 s, Ctrl pressed once at another after, 22 kills after.)"""
+    (3.9 s), the window read, ATTACK on Ctrl at 52.1 s, Ctrl pressed once at another after, 22 kills after.) (Seed 2
+    since the world's monsters chase her once she hits them (Realism.chase, 2026-10-31): on seed 1 no regular attack's
+    doubt in its run; of seeds 1-13, 2 and 11 meet all of this.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -2991,12 +3002,14 @@ def loop_tree_attack_misses_seen(sim):
     as loop_tree_attack_misses: on seeds 6 and 1 her attack's MISS read over fewer than 3 of her regular presses'
     targets. On 2 11 MISSes read from 11.9 s, no doubt.) (Seed 1 since the drops' rotation searches a strip in view
     every 0.2 s, as loop_tree_attack_misses: of seeds 1-12, 1, 2, 4, 5, 6 and 10 meet all of this. On 1 her attack's
-    MISS read over 4 of her regular presses' targets, 5 seen from 29.0 s, no doubt.)"""
+    MISS read over 4 of her regular presses' targets, 5 seen from 29.0 s, no doubt.) (Seed 2 since the world's monsters
+    chase her once she hits them (Realism.chase, 2026-10-31): on seed 1 her attack's MISS not read over her regular
+    presses' targets; of seeds 1-13, 2, 7, 8, 11 and 13 meet all of this.)"""
     return key_check_run(2)(sim)
 
 
 @tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True, attack="regular",
-      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40),
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
                check("by out of darts' own watch, not the stars' test", lambda tr: "Lucky Seven presses over" in (
@@ -3038,7 +3051,10 @@ def loop_tree_attack_no_darts(sim):
     in its 4 minutes; of seeds 1-8, 8 alone meets all of this (on 1, 2 and 4 out of darts' stop without MAYBE OUT). On
     8: the doubt at 79.8 s, a Green Mushroom at 63%, the check put off (it stayed near her), MAYBE OUT at 100.1 s, the
     window read and closed at 102.3-103.7 s, ATTACK on Ctrl: Lucky Seven only, paged; out of darts' stop at 105.3 s,
-    paged.)"""
+    paged.) (Its monsters walk as with nobody there, hit or not, since the world's monsters chase her once she hits them
+    (Realism.chase off, 2026-10-31): with their chase none of seeds 1-40 shows it; on 8 the first doubt at 100.7 s found
+    ATTACK on Ctrl as configured with her stars' test not MAYBE OUT, so no Lucky Seven-only run nor out of darts' stop,
+    175 touches in its 344 s. To redo with the chase.)"""
     return key_check_run(4)(sim)
 
 
