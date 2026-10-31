@@ -136,6 +136,15 @@ class Scene(Observation):
         """Whether loot was looked for at map x on that platform in this look."""
         return any(p == platform and lo <= x <= hi for p, lo, hi in self.looked)
 
+    def searched_x(self, y: float) -> tuple[float, float] | None:
+        """The map x this look searched for monsters at map level `y`: the frame's breadth where its rows (`rows`: the
+        band, the screen) take in `y`; None where they don't, or it searched none (where loot was looked for,
+        `looked`, is a strip of it at a time: worldstate.DROPS_EVERY_S)."""
+        if not self.searched or self.tag is None or self.where is None                 or not any(min(a, b) <= y <= max(a, b) for a, b in self.rows):
+            return None
+        shape = getattr(self.frame, "shape", None)
+        return self.map_x(0), self.map_x(shape[1] if shape is not None else self.geo.frame_size[0])
+
     def record(self) -> dict:
         """This look as telemetry data ('scene'): where she is (and whether she stands: `grounded`), HP and MP, the
         monsters and the drops; and what it searched (from 2026-10-21's evening, for analysis.respawn: an empty list

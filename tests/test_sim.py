@@ -1320,9 +1320,6 @@ AFTER_KILL_PLACE = {"tour_hunt_other_spot", "nav_fight_up_runs_out"}
 # and is touched): she drops when the way is clear, so there's no shot to say there's none of; on master's code seed 2
 # alone of 1-6 meets all of this (1, 3, 4 and 6 neither say it nor stay unhurt). A layout that shows it is to be found.
 NO_LANDING_SHOT = {"nav_tree_landing_no_shot"}
-# With the server's respawn and the chase together (2026-10-31) the hunt loop on Tree Dungeon goes up the tower among
-# its Horny Mushrooms or is knocked out past its walls on every seed of 1-13 (loop_tree_run's docstring): to look into.
-TOWER_TRIPS = {"loop_tree_run"}
 
 
 @pytest.mark.parametrize("name", [pytest.param(name, marks=[pytest.mark.skipif(
@@ -1333,9 +1330,7 @@ TOWER_TRIPS = {"loop_tree_run"}
     + ([pytest.mark.xfail(reason="no seed shows it with her kills on the monsters her attacks took (its docstring)")]
        if name in AFTER_KILL_PLACE else [])
     + ([pytest.mark.xfail(reason="no seed of 1-40 has the walker by her landing at her plan's look (NO_LANDING_SHOT)")]
-       if name in NO_LANDING_SHOT else [])
-    + ([pytest.mark.xfail(reason="up the tower or out of the map on seeds 1-13 with the server's respawn and the chase "
-                                 "(TOWER_TRIPS)")] if name in TOWER_TRIPS else []))
+       if name in NO_LANDING_SHOT else []))
     for name, sc in scenarios.SCENARIOS.items()])
 def test_real_map_scenarios_show_what_they_are_there_for(name):
     trace = scenarios.run(name)

@@ -20,9 +20,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   ignored, and so is one pressed while she's in the air (JUMP_TAKEN_LATE: or one the game takes then);
 - in the air she flies body.fly's arc with the arrow the game sees, flown again from where she is when
   that arrow changes: the opposite one brakes her at 200 units/s², the one she flies with does nothing,
-  and none drags her at 1 (100 once she falls at the cap). Only the walls of her foothold group stop her
-  (body.OWN_GROUP_WALLS: the group of the platform she last stood on; off a rope, none; with Realism.zero_walls
-  group 0's too), and the map's sides (Realism.sides). She lands with the speed she has and slides on, unless an
+  and none drags her at 1 (100 once she falls at the cap). The walls of her foothold group stop her
+  (body.OWN_GROUP_WALLS: the group of the platform she last stood on; off a rope, none) and group 0's (the map's own:
+  Realism.zero_walls, as live), and the map's sides (Realism.sides). She lands with the speed she has and slides on, unless an
   attack is playing: that stops her
   (jump-backs and jump-throws slid 1.4-2.9 units in game). Below the map's lowest floor she has fallen out
   of the map, and the run ends there (SimFellOut);
@@ -479,11 +479,17 @@ PET_FULLNESS = 60.0
 # - The walls of foothold group 0 (a map's own: on Tree Dungeon, Forest Up North II the tower's, its shelves' and its
 #   floor's; its floating platforms are other groups, with no walls). By the client's movement as reconstructed
 #   (body.OWN_GROUP_WALLS), only her own group's walls stop her; RustMS's port has group 0's stop every group's stars
-#   (README, Attack). Whether they stop her body is unknown: walked or knocked off the outer end of a floating platform
-#   there (11's left end, 13 from the tower's wall, 23's 23, 25's right end 34), or off a rope near the wall (the one
-#   at -192, 28 from it: off a rope no wall stops her, body.ROPE_GROUP), she falls past the wall and out of the map, or
-#   slides down it onto the shelf below. (HeavenClient has neither: there a wall stops her if it's chained to the
-#   foothold below her, its prev or the one before, FootholdTree::get_wall, whatever its group.)
+#   (README, Attack). They stop her body too, whatever her group (Realism.zero_walls, the default from 2026-10-31):
+#   live on Tree Dungeon (the perception service's scenes of 2026-10-29 and 30, 387,443 placements; D:/MapleHelper-
+#   scratch/tower) in the air along the tower's walls her place by a cue (her tag or body, not carried) was at the
+#   wall's x, 310 or -220 to a unit, 351 times, and past it 3 (318, 328, -222: the body cue's spread), never on
+#   anything outside, where she stood within 20 of 24's right end (the wall) 7,031 times; falling along it she landed
+#   on 19 at 310, on 13 at -220. With her own group's walls alone (`--world own-walls`), walked or knocked off the
+#   outer end of a floating platform there (11's left end, 13 from the tower's wall, 23's 23, 24's right end at it,
+#   25's right end 34), or off a rope near the wall (the one at -192, 28 from it: off a rope no wall stops her,
+#   body.ROPE_GROUP), she fell past the wall and out of the map: loop_tree_run, 5 of seeds 1-13 on 2026-10-31.
+#   (HeavenClient has neither: there a wall stops her if it's chained to the foothold below her, its prev or the one
+#   before, FootholdTree::get_wall, whatever its group.)
 # - How far above her feet a rope's bottom can be for a jump to grab it: physics.ROPE_REACH, 95 (her jump's 77 and
 #   18 of arms: a guess from the start, never measured; the highest grab tried in game was a rope 69 up, on the first
 #   map); HeavenClient grabs a rope when a point 5 above her feet is on it (Gameplay/MapleMap/MapInfo.cpp,
@@ -744,7 +750,8 @@ class Realism:
     # What isn't known of the game's physics (SIDE_INSET says what each is):
     sides: str = "platforms"     # the map's sides: 'platforms' (its platforms' outer ends, in the air) or 'client'
                                  # (SIDE_INSET in from its footholds' extent, on the ground too)
-    zero_walls: bool = False     # the walls of foothold group 0 stop her whatever her group
+    zero_walls: bool = True      # the walls of foothold group 0 stop her whatever her group (as live: from 2026-10-31,
+                                 # the comment above SIDE_INSET); False: her own group's alone (`--world own-walls`)
     rope_reach: float = ROPE_REACH  # how far above her feet a rope's bottom can be for her to grab it
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
     her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_HALF

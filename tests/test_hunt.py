@@ -202,17 +202,17 @@ def test_the_ground_is_judged_empty_only_from_looks_that_cover_it_for_a_while():
     h = _hunt([])
     h.visit = Visit(17, Spot(16, 636.0, 0.35, True), arrived=time.monotonic() - 30)
     h.kinds, h._skip, h._idle_since = None, {4: time.monotonic() + 60}, None  # another ground to go back to
-    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0))
+    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0, y_at=lambda x: -335.0))
     h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: [])
 
-    def look(pid, strips):
-        return SimpleNamespace(platform=SimpleNamespace(id=pid), looked=strips, monsters=[],
+    def look(pid, span):  # (span: the map x its search for monsters took in at 17's level, Scene.searched_x)
+        return SimpleNamespace(platform=SimpleNamespace(id=pid), searched_x=lambda y: span, monsters=[],
                                where=SimpleNamespace(x=0.0, y=0.0), t=time.monotonic())
-    assert h._leaving(look(36, [(36, 129, 951)])) is None  # down on 36, 17 out of view: no verdict
-    assert h._leaving(look(20, [(17, 855, 886)])) is None and h.visit.empty_since is None  # a sliver of it
-    on_spot = look(16, [(16, 501, 669), (17, 861, 1300)])  # 83% of 17
+    assert h._leaving(look(36, None)) is None  # down on 36, 17's level not searched: no verdict
+    assert h._leaving(look(20, (300, 886))) is None and h.visit.empty_since is None  # a sliver of it
+    on_spot = look(16, (501, 1300))  # 83% of 17
     assert h._leaving(on_spot) is None and h.visit.empty_since is not None  # empty: to be confirmed
-    assert h._leaving(look(16, [(16, 501, 669)])) is None and h.visit.empty_since is not None  # band look: kept
+    assert h._leaving(look(16, None)) is None and h.visit.empty_since is not None  # band look: kept
     h.visit.empty_since -= hunt.EMPTY_CONFIRM_S
     assert h._leaving(on_spot) == "nothing left here, and nothing due back" and 17 in h._skip
 
@@ -226,17 +226,17 @@ def test_she_doesnt_leave_a_ground_for_itself_she_waits_there():
     h.log = lines.append
     h.visit = Visit(23, Spot(24, 231.0, 0.95, False), arrived=time.monotonic() - 30)
     h.kinds, h._skip, h._idle_since, h._stay_said, h._progress = None, {}, None, None, 0.0
-    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=23, left=-197.0, right=186.0))
+    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=23, left=-197.0, right=186.0, y_at=lambda x: -448.0))
     grounds = [23]
     h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: list(grounds))
-    empty = SimpleNamespace(platform=SimpleNamespace(id=24), looked=[(23, -197, 186)], monsters=[], players=[],
-                            where=SimpleNamespace(x=231.0, y=-430.0), t=time.monotonic())
+    empty = SimpleNamespace(platform=SimpleNamespace(id=24), searched_x=lambda y: (-658.0, 708.0), monsters=[],
+                            players=[], where=SimpleNamespace(x=231.0, y=-430.0), t=time.monotonic())
     assert h._leaving(empty) is None and h.visit.empty_since is not None  # empty: to be confirmed
     h.visit.empty_since -= hunt.EMPTY_CONFIRM_S
     assert h._leaving(empty) is None and 23 not in h._skip and h._progress > 0  # stays, not skipped
     assert h._leaving(empty) is None and len(lines) == 1 and "staying at platform 23" in lines[0]  # said once
     # Out of view of the ground (not covered), her patience run out: the same.
-    away = SimpleNamespace(platform=SimpleNamespace(id=24), looked=[], monsters=[], players=[],
+    away = SimpleNamespace(platform=SimpleNamespace(id=24), searched_x=lambda y: None, monsters=[], players=[],
                            where=SimpleNamespace(x=231.0, y=-430.0), t=time.monotonic())
     h._idle_since = time.monotonic() - 10
     assert h._leaving(away) is None
@@ -255,9 +255,9 @@ def test_a_monster_her_memory_has_on_the_ground_keeps_it_from_being_judged_empty
     h = _hunt([])
     h.visit = Visit(17, Spot(16, 636.0, 0.35, True), arrived=time.monotonic() - 30)
     h.kinds, h._skip, h._idle_since = None, {}, None
-    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0))
+    h.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(id=17, left=861.0, right=1389.0, y_at=lambda x: -335.0))
     h.tour = SimpleNamespace(stats={}, ground_values=lambda: {}, hunting_grounds=lambda visit_s=None: [])
-    on_spot = SimpleNamespace(platform=SimpleNamespace(id=16), looked=[(16, 501, 669), (17, 861, 1300)], monsters=[],
+    on_spot = SimpleNamespace(platform=SimpleNamespace(id=16), searched_x=lambda y: (501.0, 1300.0), monsters=[],
                               where=SimpleNamespace(x=0.0, y=0.0), t=time.monotonic())
     h.h.memory.seen = [SimpleNamespace(platform=17, x=1000.0, kind="pig")]
     assert h._leaving(on_spot) is None and h.visit.empty_since is None

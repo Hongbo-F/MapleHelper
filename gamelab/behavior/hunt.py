@@ -1489,11 +1489,18 @@ class Hunt:
         return None
 
     def _covers_ground(self, s: Scene) -> bool:
-        """Whether look `s` searched GROUND_SEEN of the ground at least (a sliver at the screen's edge says
-        nothing about the monsters on the rest of it)."""
+        """Whether look `s` searched GROUND_SEEN of the ground for monsters at least (a sliver at the screen's edge says
+        nothing about the monsters on the rest of it): the screen's stretch of it, its level within the rows searched
+        (Scene.rows: the band, the screen). Until 2026-10-31 by where drops were looked for (Scene.looked), the screen's
+        breadth while every look searched it whole for drops; with the drops' search a strip at a time
+        (worldstate.DROPS_EVERY_S, 2026-10-30) a ground was never covered, so "nothing left here" never came and she
+        left an empty ground on her patience alone, there and back between two every 4-5 s (loop_tree_run's seeds 3, 6
+        and 9 between 19 and 23)."""
         p = self.model.platform(self.visit.ground)
-        seen = sum(max(0.0, min(hi, p.right) - max(lo, p.left)) for pid, lo, hi in s.looked if pid == p.id)
-        return seen >= GROUND_SEEN * (p.right - p.left)
+        span = s.searched_x(p.y_at((p.left + p.right) / 2))
+        if span is None:
+            return False
+        return max(0.0, min(span[1], p.right) - max(span[0], p.left)) >= GROUND_SEEN * (p.right - p.left)
 
     def _patience(self, s: Scene) -> float:
         if not s.monsters:

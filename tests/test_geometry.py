@@ -432,6 +432,25 @@ def test_the_three_standing_tests_go_by_the_looks_geometry():
         assert looting.standing(s) == navigator.standing(s) == s.grounded == stands, (geo.client, width)
 
 
+def test_a_look_searched_for_monsters_the_frames_breadth_at_the_levels_its_rows_take_in():
+    # Scene.searched_x, by which the hunt loop judges a ground empty (hunt._covers_ground): where loot was looked for
+    # (Scene.looked) is a strip at a time since the drops' rotation, and it covered no ground.
+    from types import SimpleNamespace
+
+    from gamelab.localization.pose import Where
+    from gamelab.localization.scene import Scene
+    for geo in (STRETCHED, NATIVE):
+        w, h = geo.frame_size
+        s = Scene(t=0.0, frame=np.zeros((h, w, 3), np.uint8), tag=(w / 2, h / 2), hp=1.0, mp=1.0, geo=geo,
+                  where=Where(231.0, -430.0, SimpleNamespace(id=24), (0, 0)), searched=True, rows=[(-565.0, -350.0)],
+                  looked=[(24, 200.0, 300.0)])
+        half = w / 2 * geo.units_per_px
+        assert s.searched_x(-448.0) == (pytest.approx(231.0 - half), pytest.approx(231.0 + half))
+        assert s.searched_x(-700.0) is None  # (a level its rows don't take in)
+        s.searched = False
+        assert s.searched_x(-448.0) is None
+
+
 def test_a_recordings_analyses_go_by_its_geometry(monkeypatch):
     # combo, lock and track read recordings: at 1366x768 their frames are full size, 1.42 times the px of the
     # 1920x1080 window's half size, where the jump's lift (6 px), a jump straight up (analyze.UP_PX, 12) and the

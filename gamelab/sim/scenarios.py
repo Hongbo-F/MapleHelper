@@ -2187,12 +2187,18 @@ def loop_tree_run(sim):
     review): of seeds 1-13, 1, 4, 6-8 and 11, every seed's touches and what it misses as on work/evade.) (Twenty kills
     and 650 EXP since the server's respawn became every scenario's, 2026-10-31: the map at its cap, 22 of its 31 points,
     a kill back at a clear point at the next pass: 22 kills and 752 EXP in its 5 minutes, where every point filled and
-    each back 8 s after its death gave forty and a thousand.) (Expected to fail since the server's respawn and the chase
-    together (respawn_tick and Realism.chase every world's, 2026-10-31; tests/test_sim.py's TOWER_TRIPS): of seeds 1-13,
-    none meets all of this, as the goldens run them: 8 went up the tower among its Horny Mushrooms, 5 were knocked out
-    past the tower's walls (off 11's left end on 2); with the server's respawn alone 5 of 13 met it (6 up the tower, 2
-    out), with the chase alone and the old respawn 7 of 13 (its forty kills). To look into: grinding's ground choice
-    under the server's respawn, and her knocks near the tower's walls.)"""
+    each back 8 s after its death gave forty and a thousand.) (With the server's respawn and the chase together
+    (respawn_tick and Realism.chase every world's, 2026-10-31) of seeds 1-13 none met all of this, as the goldens run
+    them: 8 went up the tower among its Horny Mushrooms, 5 were knocked out past the tower's walls (off 11's left end on
+    2); with the server's respawn alone 5 of 13 met it (6 up the tower, 2 out), with the chase alone and the old respawn
+    7 of 13 (its forty kills). Marked expected to fail, then looked into.) (Its falls and its back and
+    forth found and fixed the same day: group 0's walls stop her as live (Realism.zero_walls, the default since), and
+    the hunt loop's check that a look covers a ground goes by where monsters were searched (Scene.searched_x), where it
+    had gone by where drops were, a strip at a time since the drops' rotation, so an empty ground was left on her
+    patience alone and the next picked was the one just left, every 4-5 s. Of seeds 1-13 none falls out now, every run
+    23-31 kills and 726-878 EXP; 3 meet all of this (1, 2, 7; on 1 under the goldens' settings and two other hash seeds)
+    and 10 hunt a tower ground a while (7, 10 or 19, a minute or so), by its EXP for its danger, standing on 10 or
+    shooting 19 from 20: on 5 and 6 1-2 hurting touches there, 10-13 on 23.)"""
     return _loop(5)(sim)
 
 

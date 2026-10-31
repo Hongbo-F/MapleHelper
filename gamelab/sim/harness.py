@@ -225,7 +225,7 @@ PRESET_MAPS = {"crowd": (TREE,)}
 # she carries isn't known; world.POTION_HP's 30% otherwise, 226 HP on Tree Dungeon). And how she plays: `lucky-seven`,
 # her attacks as Lucky Seven's live (`tour --loop --skill`: world.LUCKY_SEVEN, a Horny Mushroom's kill in about 4
 # throws, not 12), the stack unchanged (the simulator acts on its key as on the attack's).
-WORLDS = {"zero-walls": {"zero_walls": True}, "client-sides": {"sides": "client"},
+WORLDS = {"zero-walls": {"zero_walls": True}, "own-walls": {"zero_walls": False}, "client-sides": {"sides": "client"},
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}

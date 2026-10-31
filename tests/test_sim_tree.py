@@ -60,10 +60,11 @@ def test_off_a_floating_blocks_outer_end_she_falls_past_the_towers_wall_unless_g
             pass
         return w
 
-    w = walk_off()  # her own group's walls only (body.OWN_GROUP_WALLS): out past x 0, nothing under her
+    w = walk_off(Realism(zero_walls=False))  # her own group's walls only (body.OWN_GROUP_WALLS): out past x 0
     assert w.fell_out_at is not None and w.x < 0
-    w = walk_off(Realism(zero_walls=True))  # group 0's wall stops her, and she comes down by it onto the shelf
-    assert w.fell_out_at is None and w.plat is shelf and 0 <= w.x < 10
+    for realism in (Realism(zero_walls=True), None):  # group 0's wall stops her (the default, as live): down by it
+        w = walk_off(realism)                           # onto the shelf
+        assert w.fell_out_at is None and w.plat is shelf and 0 <= w.x < 10
     assert world_mod._walls_for(m, block.group, zero=True) != world_mod._walls_for(m, block.group)
     assert world_mod._walls_for(m, shelf.group, zero=True) == world_mod._walls_for(m, shelf.group)
 
@@ -397,7 +398,7 @@ def test_knocked_off_the_rope_by_the_towers_left_wall_she_falls_out_unless_group
     # ROPE_GROUP): knocked left off it she went out of the tower (loop_tree_run's seed 10, 328 s); with group 0's walls
     # stopping her (Realism.zero_walls) she comes down by the wall onto 31.
     m = tree_map()
-    for realism, out in ((None, True), (Realism(zero_walls=True), False)):
+    for realism, out in ((Realism(zero_walls=False), True), (Realism(zero_walls=True), False), (None, False)):
         w = world(m, 31, -192.0, hanging=0.0, realism=realism)
         assert w.mode == "rope" and w.group is None
         w._leave_rope()
