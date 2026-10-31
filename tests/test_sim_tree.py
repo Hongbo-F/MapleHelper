@@ -60,13 +60,14 @@ def test_off_a_floating_blocks_outer_end_she_falls_past_the_towers_wall_unless_g
             pass
         return w
 
-    w = walk_off(Realism(zero_walls=False))  # her own group's walls only (body.OWN_GROUP_WALLS): out past x 0
-    assert w.fell_out_at is not None and w.x < 0
+    w = walk_off(Realism(zero_walls=False))  # HeavenClient's rule alone: the wall isn't joined to the shelf under
+    assert w.fell_out_at is not None and w.x < 0  # her (nor the floor's piece of it within reach): out past x 0
     for realism in (Realism(zero_walls=True), None):  # group 0's wall stops her (the default, as live): down by it
         w = walk_off(realism)                           # onto the shelf
         assert w.fell_out_at is None and w.plat is shelf and 0 <= w.x < 10
-    assert world_mod._walls_for(m, block.group, zero=True) != world_mod._walls_for(m, block.group)
-    assert world_mod._walls_for(m, shelf.group, zero=True) == world_mod._walls_for(m, shelf.group)
+    # (without group 0's, the walls' pieces joined to the floor alone, each one way: body.wall_table)
+    assert list(zip(*body.wall_table(m, False))) == [(0, (401, 500), -1), (600, (1, 500), 1)]
+    assert len(body.wall_table(m, True)[0]) == 2 + 3
 
 
 def test_the_maps_sides_are_its_platforms_ends_or_the_clients_25_in_from_its_footholds(monkeypatch):
@@ -101,7 +102,7 @@ def test_a_rope_90_up_is_grabbed_at_the_planners_reach_and_not_at_the_clients():
     w = jump_for_it(Realism(rope_reach=ROPE_REACH_CLIENT))  # a point 5 above her feet never gets to it
     assert w.plat is floor and w.mode == "ground"
     assert not any("grabs the rope" in line for line in w.log)
-    assert body.OWN_GROUP_WALLS  # (the world's default, as fitted on the first map's flights)
+    assert body.JOINED_WALLS and body.ZERO_WALLS  # (the game's rule, as the user chose it on 2026-10-31)
 
 
 # --- the planner on Tree Dungeon, Forest Up North II ---------------------------------------------------------------

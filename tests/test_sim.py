@@ -428,11 +428,11 @@ def test_in_the_air_only_walls_of_her_foothold_group_stop_her(monkeypatch):
 
     w = walk_off()
     assert w.plat is floor and w.x > 300 and w.group == floor.group  # through H's wall, and on
-    monkeypatch.setattr(body, "OWN_GROUP_WALLS", False)
+    monkeypatch.setattr(body, "JOINED_WALLS", False)
     w = walk_off()  # every wall: H's stops her, and she comes down by it (in the basin, or round its foot)
     assert w.x < 220
-    monkeypatch.setattr(body, "OWN_GROUP_WALLS", True)
-    # Her own group's walls still stop her: from C, a running jump into the wall rising at C's right end.
+    monkeypatch.setattr(body, "JOINED_WALLS", True)
+    # A wall joined to the floor under her stops her: from C, a running jump into the wall rising at C's right end.
     c = plat(model_c := mapdata.parse(1, tree(), "Test Map", {}), 500, 400)
     w = world(model_c, c.id, 740.0)
     w.key(0.0, "right", True)

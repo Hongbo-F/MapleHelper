@@ -273,7 +273,7 @@ def test_walls_and_the_maps_sides_stop_her(model):
     f = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, arrow=0)
     assert f.platform is c and 799 < f.land_x < 800 and f.vx_land == 0  # up against the wall at 800
     walls = body.vertical_walls(model.walls)
-    assert walls == ([0, 800], [(399, 501), (399, 501)])
+    assert walls == ([0, 800], [(399, 501), (399, 501)], [0, 0])  # (each either way)
     open_sky = body.fly(model, 790, 380, 149.0, -555.0, shoe=SHOE, walls=([], []), sides=(-100, 850))
     assert open_sky.platform is None and open_sky.land_x == 850  # past the wall's top: the side stops her
 
@@ -292,18 +292,46 @@ def test_a_wall_at_her_start_stops_her_only_going_into_it(model):
     assert body.fly(model, 800, 450, -149.0, 0.0, shoe=SHOE, airborne=True).land_x == 800
 
 
-def test_in_the_air_only_her_own_foothold_groups_walls_stop_her(model, monkeypatch):
-    # C's walls are C's group's: they stop her jumping off C, not someone come from A (another group's).
+def test_in_the_air_a_wall_joined_to_the_floor_under_her_stops_her_whatever_her_group(model, monkeypatch):
+    # C (0..800, y 500) has walls rising 100 from both its ends (group 3, not 0): HeavenClient's rule counts each for
+    # going over C into it, from her feet up to 50 under its bottom, never below C (body.wall_table); her group (C's,
+    # A's, none off a rope) doesn't count. Jumping off C into its right wall, she's stopped whoever she is.
     a, c = by_y(model, 300, 100), by_y(model, 500, 400)
     assert body.walls_for(model, c.group) == model.walls and body.walls_for(model, a.group) == []
     assert body.walls_for(model, body.ROPE_GROUP) == [] and body.walls_for(model, body.EVERY_WALL) == model.walls
-    own = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=c.group)
-    assert own.platform is c and 799 < own.land_x < 800 and own.vx_land == 0
-    other = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=a.group, sides=(-100, 850))
-    assert other.platform is None and other.land_x == 850  # through the wall, out to the map's side
-    monkeypatch.setattr(body, "OWN_GROUP_WALLS", False)  # every wall stops her, as before
-    assert body.walls_for(model, a.group) == model.walls
-    assert body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=a.group).land_x == own.land_x
+    xs, spans, ways = body.wall_table(model)
+    assert sorted(zip(xs, spans, ways)) == [(0, (401, 500), -1), (800, (401, 500), 1)]
+    for group in (c.group, a.group, body.ROPE_GROUP):
+        f = body.fly(model, 790, 499, 149.0, -555.0, shoe=SHOE, group=group, sides=(-100, 850))
+        assert f.platform is c and 799 < f.land_x < 800 and f.vx_land == 0, group
+    # Coming at it from outside C (from the right, over nothing joined to it), it doesn't stop her.
+    out = body.fly(model, 830, 450, -149.0, 0.0, shoe=SHOE, group=a.group, airborne=True)
+    assert out.platform is c and out.land_x < 800
+    monkeypatch.setattr(body, "JOINED_WALLS", False)  # every wall stops her, either way
+    assert body.fly(model, 830, 450, -149.0, 0.0, shoe=SHOE, group=a.group, airborne=True).land_x >= 800
+
+
+def test_group_0s_walls_stop_her_anywhere_along_them():
+    # The map's own frame (a layer's group 0) stops her at any height and either way, whatever is under her: the
+    # tower on Tree Dungeon, Forest Up North II, where live she was placed at its walls in the air 351 times, never
+    # past them (143 over 70 above the floor under her, where HeavenClient's rule alone lets her through).
+    # A tower of group 0 (a floor at y 1000, 0..600, its right wall in 60-unit pieces up to y 0, as the game's are),
+    # and a floating block (group 5) by it, 500 up: jumping off the block's end into the wall, 500 over the tower's
+    # floor, HeavenClient's rule alone counts only the wall's two pieces over the floor and lets her through.
+    t = tree()
+    t["foothold"] = {"1": {
+        "0": dict([seg(1, 0, 1, 0, 1000, 0, 0, 0, 2), seg(1, 0, 2, 0, 1000, 600, 1000, 1, 3),
+                   seg(1, 0, 3, 600, 1000, 600, 940, 2, 5), seg(1, 0, 5, 600, 940, 600, 880, 3, 6),
+                   seg(1, 0, 6, 600, 880, 600, 0, 5, 0)]),
+        "5": dict([seg(1, 5, 4, 400, 500, 590, 500)]),
+    }}
+    t["life"], t["ladderRope"] = {}, {}
+    m = mapdata.parse(1, t, "Test Map", {})
+    block = by_y(m, 500, 500)
+    assert block.group == (1, 5)
+    for zero, stopped in ((True, True), (False, False)):
+        f = body.fly(m, 585, 499, 149.0, -555.0, shoe=SHOE, walls=body.wall_table(m, zero), sides=(-1000, 2000))
+        assert (f.land_x <= 600) is stopped, (zero, f)
 
 
 def _ledge_map():
@@ -341,7 +369,7 @@ def test_walking_off_through_another_groups_wall_lands_beyond_it(monkeypatch):
                 if (mv.kind, mv.src, mv.direction) == ("walk_off", ledge.id, "right")]
 
     assert walk_off() == [(floor.id, round(f.land_x))]  # the planner flies her by the engine
-    monkeypatch.setattr(body, "OWN_GROUP_WALLS", False)
+    monkeypatch.setattr(body, "JOINED_WALLS", False)
     assert walk_off() == [(floor.id, round(round_foot.land_x))]
 
 

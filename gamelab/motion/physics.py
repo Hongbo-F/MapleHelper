@@ -138,8 +138,8 @@ FLY_CACHE_SIZE = 20_000  # landings (about 9 MB when full)
 MODELS_KEPT = 4          # maps fly knows at a time (their walls, and the serial numbers keying their landings)
 _FLY_CACHE: OrderedDict[tuple, tuple] = OrderedDict()
 # The last MODELS_KEPT models fly was used on, by id(model): each kept with its serial number (its landings'
-# key), the walls that stop her by foothold group (body.walls_for), and the same laid out for the flight in C
-# (native: the platforms, and the walls by group; made the first time she flies there with the DLL in use).
+# key), the walls that stop her (body.walls_by: the game's rule, or every wall), and the same laid out for the flight
+# in C (native: the platforms, and the walls; made the first time she flies there with the DLL in use).
 # Keyed by id(model) alone, a freed model's id was reused by the next one, which then got the old one's walls
 # and landings (tests failed depending on their order). A model is kept while it's in here, so its id can't be
 # taken, and a model seen again after it was let go gets a new serial: no landing cached for another model can
@@ -149,18 +149,27 @@ _SERIALS = itertools.count()
 _SHOES: dict[body.Shoe, object] = {}  # each shoe as the C flight takes it (native.shoe_of)
 
 
+def _rule(group):
+    """The key of the walls that stop her flying from foothold `group`: every wall (body.EVERY_WALL, or without
+    body.JOINED_WALLS), or the game's rule (body.wall_table, with or without body.ZERO_WALLS), whatever her group."""
+    if group == body.EVERY_WALL or not body.JOINED_WALLS:
+        return body.EVERY_WALL
+    return "rule", body.ZERO_WALLS
+
+
 def _known(model: MapModel, group) -> tuple[int, body.Walls, dict]:
-    """The model's serial number, the vertical walls that stop her with foothold `group`, sorted by x (their
-    xs, and each one's (top, bottom)), and its layouts for the C flight (_native_flight's)."""
+    """The model's serial number, the walls that stop her flying from foothold `group` (body.walls_by, as body.fly
+    takes them), and its layouts for the C flight (_native_flight's)."""
     known = _MODELS.get(id(model))
     if known is None or known[0] is not model:
         known = _MODELS[id(model)] = (model, next(_SERIALS), {}, {})
     _MODELS.move_to_end(id(model))
     if len(_MODELS) > MODELS_KEPT:
         _MODELS.popitem(last=False)
-    walls = known[2].get(group)
+    rule = _rule(group)
+    walls = known[2].get(rule)
     if walls is None:
-        walls = known[2][group] = body.vertical_walls(body.walls_for(model, group))
+        walls = known[2][rule] = body.walls_by(model, body.EVERY_WALL if rule == body.EVERY_WALL else group)
     return known[1], walls, known[3]
 
 
@@ -168,9 +177,9 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
         dt: float = body.TICK, limit: float = 4.0, group=body.EVERY_WALL,
         arrow: int | None = None) -> tuple[Platform | None, float, float]:
     """Where she lands from (x, y) moving at (vx, vy) (map units/s, y down): the first platform whose
-    surface her feet cross on the way down. Walls stop her sideways: those of foothold `group` (the
-    platform's she leaves, Platform.group; body.ROPE_GROUP off a rope), unless body.OWN_GROUP_WALLS is
-    off; by default every wall. `skip` is a platform she falls through (dropping). Returns (platform,
+    surface her feet cross on the way down. Walls stop her sideways: by the game's rule (body.wall_table, for
+    any `group`: the platform's she leaves, Platform.group, or body.ROPE_GROUP off a rope, as callers say it), or
+    every wall for body.EVERY_WALL, the default. `skip` is a platform she falls through (dropping). Returns (platform,
     landing x, seconds). The start is rounded (x and y to 0.01 units, the speeds to 0.1 units/s) and
     results are cached by it: chains try the same jumps many times over."""
     return flight(model, x, y, vx, vy, skip, dt, limit, group, arrow)[:3]
@@ -185,8 +194,7 @@ def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Plat
     jumps with (it steers toward 8.9 units/s at most); none, and the air drags her a little (a lot at the
     fall cap). Her speed as she lands is 0 after a wall stopped her. On the ground she slides on from it,
     or runs on."""
-    if not body.OWN_GROUP_WALLS:
-        group = body.EVERY_WALL  # (one set of landings, whatever group is asked for)
+    group = _rule(group)  # (one set of landings for every group: the walls are the game's rule's)
     serial, walls, laid_out = _known(model, group)
     x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
     if arrow is None:
@@ -418,14 +426,14 @@ def pose(model: MapModel, platform: Platform, x: float, j: Jump, t: float,
         return lx, land.y_at(lx), False
     nx = x0 + j.vx * tau
     if j.vx:
-        _, (xs, ys), _ = _known(model, platform.group if body.OWN_GROUP_WALLS else body.EVERY_WALL)
+        _, (xs, ys, ways), _ = _known(model, platform.group)
         lo, hi = sorted((x0, nx))
         i = bisect.bisect_left(xs, lo)
         hits = []
         while i < len(xs) and xs[i] <= hi:
             if xs[i] != x0:
                 feet = y0 - rise_after((xs[i] - x0) / j.vx)
-                if ys[i][0] <= feet <= ys[i][1]:
+                if ys[i][0] <= feet <= ys[i][1] and ways[i] * j.vx >= 0:
                     hits.append(xs[i])
             i += 1
         if hits:

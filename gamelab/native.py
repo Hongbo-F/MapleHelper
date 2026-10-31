@@ -94,7 +94,7 @@ _open_lock = threading.Lock()
 _P, _I, _D, _F, _L = ctypes.c_void_p, ctypes.c_int, ctypes.c_double, ctypes.c_float, ctypes.c_longlong
 SIGNATURES = {  # each function's (return type, argument types)
     "silhouette_peaks": (_I, [_P, _I, _I, _P, _I, _I, _D, _D, _F, _P, _P, _P, _I]),
-    "fly": (_I, [_D, _D, _D, _D, _I, _D, _D, _P, _I, _P, _P, _P, _I, _I, _P, _P, _P, _P, _P, _P, _P]),
+    "fly": (_I, [_D, _D, _D, _D, _I, _D, _D, _P, _I, _P, _P, _P, _P, _I, _I, _P, _P, _P, _P, _P, _P, _P]),
     "mm_simd": (_I, [_I]),
     "mm_prepare_size": (_L, [_I, _I, _I]),
     "mm_prepare": (_I, [_P, _L, _P, _L, _I, _I, _I, _I, _P, _L]),
@@ -638,15 +638,17 @@ class Map:
 
 
 class Walls:
-    """Walls laid out for `fly`, as body.vertical_walls gives them: their xs (sorted), and each one's top - 1 and
-    bottom + 1 (motion.physics keeps one per map and foothold group)."""
+    """Walls laid out for `fly`, as body.fly takes them (body.wall_table, vertical_walls): their xs (sorted), each
+    one's lo and hi (the heights of her feet where it stops her), and its way (0 either way, -1 only going left, +1
+    only going right; all 0 when left out). motion.physics keeps one per map and wall rule."""
 
-    def __init__(self, walls: tuple[list[float], list[tuple[float, float]]]):
-        xs, ys = walls
+    def __init__(self, walls: tuple):
+        xs, ys = walls[0], walls[1]
+        ways = walls[2] if len(walls) > 2 else [0] * len(xs)
         self.n = len(xs)
         lo_hi = np.array(ys, np.float64).reshape(-1, 2)
         self.arrays = [np.array(xs, np.float64).reshape(-1), np.ascontiguousarray(lo_hi[:, 0]),
-                       np.ascontiguousarray(lo_hi[:, 1])]
+                       np.ascontiguousarray(lo_hi[:, 1]), np.array(ways, np.int32).reshape(-1)]
         self.pointers = [a.ctypes.data for a in self.arrays]
 
 
@@ -665,9 +667,10 @@ def fly(m: Map, w: Walls, x: float, y: float, vx: float, vy: float, arrow: int, 
     if f is None:
         return None
     left, right, low, seg_at, seg_n, segs = m.pointers
-    wall_xs, wall_lo, wall_hi = w.pointers
+    wall_xs, wall_lo, wall_hi, wall_way = w.pointers
     out = (ctypes.c_double * 4)()
-    q = f.fly(x, y, vx, vy, arrow, dt, limit, ctypes.addressof(shoe), skip, wall_xs, wall_lo, wall_hi, w.n, m.n,
+    q = f.fly(x, y, vx, vy, arrow, dt, limit, ctypes.addressof(shoe), skip, wall_xs, wall_lo, wall_hi, wall_way, w.n,
+              m.n,
               left, right, low, seg_at, seg_n, segs, ctypes.addressof(out))
     if q < -1:
         return None

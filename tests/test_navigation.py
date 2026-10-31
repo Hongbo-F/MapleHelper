@@ -442,13 +442,13 @@ def flights(model, rng, n):
 
 def same_flights(model, cases, monkeypatch):
     """physics.flight (body.fly's flight) with the C flight and without it: the same platform, x, t and speed at
-    landing, to the bit (a zero's sign too) and the type, with each wall rule (body.OWN_GROUP_WALLS)."""
+    landing, to the bit (a zero's sign too) and the type, with each wall rule (body.JOINED_WALLS)."""
     from collections import OrderedDict
 
     from gamelab import native
     from gamelab.motion import body, physics
     for own in (True, False):
-        monkeypatch.setattr(body, "OWN_GROUP_WALLS", own)
+        monkeypatch.setattr(body, "JOINED_WALLS", own)
         got = []
         for use in (True, False):
             monkeypatch.setattr(native, "USE", use)

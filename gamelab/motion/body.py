@@ -403,42 +403,107 @@ def blind_ends_ms(shoe: Shoe, lags: Lags, risk: float = 0.05, longest: int = 400
 
 # --- in the air over a map ----------------------------------------------------------------------------
 
-Walls = tuple[list[float], list[tuple[float, float]]]  # vertical walls by x: their xs, each one's (top, bottom)
+Walls = tuple  # vertical walls by x, as fly takes them: their xs, each one's (lo, hi) (the heights of her feet where it
+               # stops her), and the ways it stops her (0 either way, -1 only going left, +1 only going right; left
+               # out: 0 for all, as vertical_walls has every segment of a list stop her either way)
 
-# Which walls stop her: only those of her own foothold group (mapdata.Segment.group), the group of the
-# foothold she last stood on. A jump or a fall through her platform keeps it, landing sets it, and a rope
-# gives her none (ROPE_GROUP). Floors of every group land her. A reconstruction of the client's code has its
-# airborne collision skip a wall of any other group (ThatMapleDev's "Player Physics" gist), and so did she
-# in the live runs (telemetry, 2026-10-19 and 20; her minimap dot fitted to this engine's arcs): six flights
-# went across another group's wall (15-37 units inside its span; one just under the floor of the block it
-# hangs from, which she'd have landed on above it), and each came down within 13 units of where this puts
-# it, against 54-142 units off (or on another platform) with every wall stopping her. Three walk-offs off
-# platform 3's right end went through platform 1's wall 12 units on, planned for the basin, and landed on 17
-# at 1,005-1,015 (this: 1,004-1,008; stopped by it: the basin, or 869 round its foot); two jumps from 19
-# that came in under 18's floor went through its wall onto 24 at 198 (this: 185-198; stopped: 140-144); one
-# from 22 went through 21's wall onto 34 at -138 (this: -138; stopped: -56). None was seen stopped by one.
-# False: every wall stops her, whatever its group (as before).
-OWN_GROUP_WALLS = True
-EVERY_WALL = "every wall"  # a group that has every wall stop her (whatever OWN_GROUP_WALLS says)
-# Her group off a rope: none, so no wall stops her. (The decompile gives a rope group 0 on the rope's own
-# page, 4 on this map, which no foothold is on; read as the group number alone, it is the basin's (3, 0),
-# whose walls are nowhere near a rope here. Untested in game.)
-ROPE_GROUP = None
+# Which walls stop her in the air: the game's rule, as the user chose it on 2026-10-31 (JOINED_WALLS), HeavenClient's
+# (a rewrite of the v83 client's code: FootholdTree::limit_movement and get_wall, read 2026-10-24) with group 0's on top.
+# HeavenClient's: only the wall pieces joined to the foothold under her, within two links of its end that way (going
+# left its prev and prev's prev, going right its next and next's next), where they overlap the 50 units above her
+# feet: a step or a wall rising from the floor she'd land on, just above it, and nothing over another floor or a gap.
+# On top of it (ZERO_WALLS), every wall of a layer's group 0 (the map's own frame: on Tree Dungeon, Forest Up North II
+# the tower's walls, and every other wall there), either way, wherever her feet are along it. Each half fits what
+# was seen live: on the first map (telemetry, 2026-10-19 and 20; her minimap dot fitted to this engine's arcs) six
+# flights went across the side walls of floating blocks (their own groups, joined to nothing under her: 15-37 units
+# inside their spans) and each came down within 13 units of where this puts it (three walk-offs off platform 3's right
+# end through platform 1's wall onto 17 at 1,005-1,015; two jumps from 19 in under 18's floor through its wall onto 24
+# at 198; one from 22 through 21's wall onto 34 at -138; with every wall stopping her 54-142 units off, or on another
+# platform); on Tree Dungeon (the perception service's scenes of 2026-10-29 and 30) she was placed in the air at the
+# tower's walls 351 times, never past them, 143 of those over 70 units above the floor under her, where HeavenClient's
+# rule alone lets her through. Until 2026-10-31 her own foothold group's walls stopped her and no other's
+# (OWN_GROUP_WALLS, from a reconstruction of the client's code that skips other groups' walls in the air: ThatMapleDev's
+# "Player Physics" gist), and in the simulator her group's and group 0's (Realism.zero_walls). Her group (the platform
+# she last stood on; off a rope, ROPE_GROUP) no longer counts, nor does a rope: the floor under her does.
+# False: every wall stops her, either way (EVERY_WALL).
+JOINED_WALLS = True
+ZERO_WALLS = True   # ... and group 0's walls too, whatever HeavenClient's rule says (the simulator's Realism.zero_walls)
+WINDOW = 50.0       # HeavenClient's: a wall piece counts where it overlaps the units from her feet up this far
+EVERY_WALL = "every wall"  # a group that has every wall stop her (fly's default)
+ROPE_GROUP = None   # her group off a rope (walls_for: none of a group's walls)
+_TABLES: dict = {}  # (id(model), zero) -> (model, its wall table): wall_table's, the model kept so its id isn't reused
 
 
 def vertical_walls(segments) -> Walls:
-    """The vertical ones of a map's wall segments, sorted by x, as fly takes them: their xs, and each
-    one's top and bottom (a unit beyond its ends)."""
+    """The vertical ones of a map's wall segments, sorted by x, as fly takes them: their xs, each one's top and bottom
+    (a unit beyond its ends: where her feet are stopped by it), each stopping her either way."""
     ws = sorted((w for w in segments if w.x1 == w.x2), key=lambda w: w.x1)
-    return [w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws]
+    return [w.x1 for w in ws], [(min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1) for w in ws], [0] * len(ws)
 
 
 def walls_for(model, group) -> list:
-    """The walls of the map that stop her with foothold group `group` (Segment.group; ROPE_GROUP off a
-    rope, EVERY_WALL for all of them): her own group's (OWN_GROUP_WALLS), or else all of them."""
-    if group == EVERY_WALL or not OWN_GROUP_WALLS:
+    """The walls of the map of foothold group `group` (Segment.group; ROPE_GROUP: none), or all of them (EVERY_WALL).
+    (What stops her in the air is wall_table's, whatever her group.)"""
+    if group == EVERY_WALL:
         return model.walls
     return model.walls_of(group)
+
+
+def wall_table(model, zero: bool | None = None) -> Walls:
+    """The walls that stop her in the air by the game's rule (JOINED_WALLS), laid out for fly: HeavenClient's, each
+    floor's wall pieces within two links of its ends that rise above it, stopping her only going over that floor
+    into them (-1 at its left end, +1 at its right) while her feet are within WINDOW under the piece's bottom, over
+    its top and no lower than the floor's end; and with `zero` (default ZERO_WALLS) every piece of a layer's group 0,
+    either way, her feet along it. Without JOINED_WALLS every wall, either way. Worked out once a model."""
+    zero = ZERO_WALLS if zero is None else zero
+    if not JOINED_WALLS:
+        return vertical_walls(model.walls)
+    kept = _TABLES.get((id(model), zero))
+    if kept is not None and kept[0] is model:
+        return kept[1]
+    by_line = {(w.x1, w.y1, w.x2, w.y2): w for w in model.walls}
+    for p in model.platforms:
+        for f in p.segments:
+            by_line.setdefault((f.x1, f.y1, f.x2, f.y2), f)
+    rows = []
+    for p in model.platforms:
+        for f in p.segments:
+            for way, joined, level in ((-1, "prev", f.y1), (1, "next", f.y2)):
+                link = getattr(f, joined)
+                for _ in range(2):  # (its prev, and prev's prev; or its next, and next's next)
+                    g = None if link is None else by_line.get(link)
+                    if g is None:
+                        break
+                    if g.x1 == g.x2:
+                        top, bottom = min(g.y1, g.y2), max(g.y1, g.y2)
+                        hi = min(bottom + WINDOW, level)
+                        if top + 1 <= hi:
+                            rows.append((g.x1, top + 1, hi, way))
+                    link = getattr(g, joined)
+    if zero:
+        rows += [(w.x1, min(w.y1, w.y2) - 1, max(w.y1, w.y2) + 1, 0) for w in model.walls
+                 if w.x1 == w.x2 and w.group is not None and w.group[1] == 0]
+    rows.sort()
+    table = [r[0] for r in rows], [(r[1], r[2]) for r in rows], [r[3] for r in rows]
+    _TABLES[(id(model), zero)] = (model, table)
+    return table
+
+
+def walls_by(model, group) -> Walls:
+    """fly's walls for foothold `group`: every wall for EVERY_WALL, else the game's rule (wall_table)."""
+    return vertical_walls(model.walls) if group == EVERY_WALL else wall_table(model)
+
+
+def stops(walls: Walls, x: float, y: float, way: int) -> bool:
+    """Whether the walls (as fly takes them) within a unit of x stop her going `way` (-1, +1) with her feet at y."""
+    xs, ys = walls[0], walls[1]
+    ways = walls[2] if len(walls) > 2 else None
+    i = bisect.bisect_left(xs, x - 1)
+    while i < len(xs) and xs[i] <= x + 1:
+        if ys[i][0] <= y <= ys[i][1] and (ways is None or ways[i] == 0 or ways[i] == way):
+            return True
+        i += 1
+    return False
 
 
 @dataclass(frozen=True)
@@ -499,14 +564,16 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
         dt: float = TICK, limit: float = 4.0, path: bool = False, airborne: bool = False) -> Flight:
     """Where she lands from (x, y) moving at (vx, vy) with `arrow` held all the way: the first platform
     whose surface her feet cross on the way down (_lands_at), whatever its group. Walls stop her sideways:
-    `walls`, or else those that stop her with foothold `group` (walls_for: the group of the platform she
-    leaves; by default every wall), worked out each call; `sides`, the map's left and right limits, stop
+    `walls`, or else walls_by's for `group` (the game's rule, wall_table, whatever group; by default every
+    wall, EVERY_WALL), each only the way it stops her; `sides`, the map's left and right limits, stop
     her too. A wall at exactly her start, at the end of the platform she stands on (where a wall stops
     her walking), stops her only going into it: she's on her platform's side of it, and a jump away from
     it leaves (counted as in her way both ways, she went straight up against it). `skip` is a platform
     she falls through (dropping). A flight leaving the ground can't land on its first step; one carried on
     from mid-air (`airborne`) can. Not cached."""
-    wall_xs, wall_ys = walls if walls is not None else vertical_walls(walls_for(model, group))
+    walls = walls if walls is not None else walls_by(model, group)
+    wall_xs, wall_ys = walls[0], walls[1]
+    wall_ways = walls[2] if len(walls) > 2 else [0] * len(wall_xs)
     # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
     top = y - (vy * vy / (2 * shoe.gravity) if vy < 0 else 0) - 1
@@ -526,8 +593,8 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
             lo, hi = (x, nx) if nx > x else (nx, x)
             i = bisect.bisect_left(wall_xs, lo)
             while i < len(wall_xs) and wall_xs[i] <= hi:
-                if wall_ys[i][0] <= ny <= wall_ys[i][1] and not (side and wall_xs[i] == x == x0
-                                                                 and (nx - x) * side > 0):
+                if wall_ys[i][0] <= ny <= wall_ys[i][1] and (nx - x) * wall_ways[i] >= 0 and not (
+                        side and wall_xs[i] == x == x0 and (nx - x) * side > 0):
                     nx, nvx = x, 0.0  # bumped into a wall
                     break
                 i += 1

@@ -9,7 +9,7 @@ Moves between platforms (all in map units, using the game's physics and her meas
 - jump: a running jump off one platform's end onto another (up, level or down);
 - walk_off: walk off a platform's end and fall onto the platform below;
 - drop: down + jump to fall through the platform she stands on (not where its foothold forbids it).
-In the air only walls of the foothold group she leaves stop her (body.OWN_GROUP_WALLS). Walking along a
+In the air walls stop her by the game's rule (body.wall_table: those joined to the floor under her, and group 0's). Walking along a
 platform links its moves; routes are found with Dijkstra on time. A twin (a platform lying on another's footholds:
 mapdata.MapModel.twins) is the platform it lies on: no move goes from or to it, and a trip to it is a trip there.
 """
@@ -24,7 +24,7 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import directions
 from ..localization.mapdata import MapModel, Platform, Rope
 from . import body
-from .body import slide, walls_for
+from .body import slide
 from .physics import (CLIMB_SPEED, FALL_SPEED, GRAB_SURE, GRAVITY, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH,
                       SHOE, SLOW_TAKEOFF, WALK_SPEED, fall_time, flight, fly, sure_landing)
 
@@ -151,8 +151,8 @@ MISS_S = 3.0
 ROPE_CLEAR = 30
 DROP_ROOM = 8
 # Nor where she comes down within KNOCK_CARRY of an end of the platform below with nothing under it (void_ends:
-# on this map 36's, the basin's cliffs). In the air from another block she keeps its foothold group, whose walls
-# don't stop her (body.OWN_GROUP_WALLS), and a touch's knock as she comes down carries her up to this far sideways
+# on the first map 36's, the basin's cliffs). In the air from another block her group's walls alone stopped her until
+# 2026-10-31 (body.OWN_GROUP_WALLS; since, body.wall_table), and a touch's knock as she comes down carries her this far sideways
 # before she lands (the simulator's knock, 180 units/s and 220 up, given as high as the tallest body here reaches,
 # an Orange Mushroom's 67: 0.39 s in the air). In the harness, knocks off drops from 31 at 185 (56 from 36's left
 # cliff) and from 33 at 907 (44 from its right one) carried her through the cliff and out of the map.
@@ -317,12 +317,10 @@ def _end_moves(model: MapModel, a: Platform) -> list[Move]:
                     if placed is not None:
                         out.append(placed)
                     break
-        # Walking off this end: from just inside it when a wall of her group rises there (it stops her),
-        # else from just past it. A cliff dropping from the end (34 down to 36) isn't in her way, but
-        # starting inside it read as bumping into the cliff's top.
-        level = a.y_at(edge)
-        rising = any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
-                     for w in walls_for(model, a.group))
+        # Walking off this end: from just inside it when a wall rises there that stops her going that way
+        # (body.wall_table: joined to the end, or group 0's), else from just past it. A cliff dropping from the
+        # end isn't in her way, but starting inside it read as bumping into the cliff's top.
+        rising = body.stops(body.walls_by(model, a.group), edge, a.y_at(edge) - 2, sign)
         land, land_x, t, v_land = flight(model, edge + sign * (-1 if rising else 0.5), a.y_at(edge) - 1,
                                          sign * WALK_SPEED, 0.0, group=a.group)
         # She lands at full speed (unless a wall stopped her), so she must be able to stop on it: her slide
@@ -374,8 +372,8 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
     overlap (LAND_MARGIN in from both ends), if that's where she lands. Taken from the overlap with any
     platform, the first that landed her on one won: 27 -> 36 dropped from the middle of 27's overlap with 2
     (above it), 6 units from the basin's cliff at 36's left end, and 33 -> 36 from its overlap with 1, 6
-    from the cliff at its right end. In the air there, the walls of 36's group don't stop her (body.
-    OWN_GROUP_WALLS), and a touch's knock carried her through them and out of the map (harness, tour seed
+    from the cliff at its right end. In the air there, the walls of 36's group didn't stop her (body.
+    OWN_GROUP_WALLS, until 2026-10-31), and a touch's knock carried her through them and out of the map (harness, tour seed
     25 and loop seed 19). Where something else is under the middle (28 under 27's overlap with 36), there's
     no drop: the stretch between is no wider than her slop (from 27, 12 units at that cliff). Where the game
     won't drop her through a (forbidFallDown), or a knock could take her past a cliff of b (KNOCK_CARRY), she
@@ -415,7 +413,7 @@ def grabbed(model: MapModel, x: float, y: float, vx: float, vy: float, group, re
     of with her feet between its top and `reach` below its bottom (not the one she's `leaving`, nor any within
     REGRAB_S of leaving it). None if she lands first. Not cached (it isn't asked often)."""
     f = body.fly(model, x, y, vx, vy, shoe=SHOE, arrow=(vx > 0) - (vx < 0),
-                 walls=body.vertical_walls(walls_for(model, group)), path=True)
+                 walls=body.walls_by(model, group), path=True)
     after = REGRAB_S if leaving is not None else 0.0
     for i, (px, py) in enumerate(f.path):
         if i * body.TICK < after - 1e-9:

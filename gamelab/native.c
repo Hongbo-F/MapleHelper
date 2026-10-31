@@ -212,7 +212,8 @@ static int bisect_left(const double *xs, int n, double v)
 }
 
 EXPORT int fly(double x, double y, double vx, double vy, int arrow, double dt, double limit, const double *shoe,
-               int skip, const double *wall_xs, const double *wall_lo, const double *wall_hi, int walls, int n,
+               int skip, const double *wall_xs, const double *wall_lo, const double *wall_hi, const int *wall_way,
+               int walls, int n,
                const double *left, const double *right, const double *low, const int *seg_at, const int *seg_n,
                const double *segs, double *out)
 {
@@ -246,7 +247,7 @@ EXPORT int fly(double x, double y, double vx, double vy, int arrow, double dt, d
         if (nx != x) {
             double lo = nx > x ? x : nx, hi = nx > x ? nx : x;
             for (i = bisect_left(wall_xs, walls, lo); i < walls && wall_xs[i] <= hi; i++) {
-                if (wall_lo[i] <= ny && ny <= wall_hi[i]
+                if (wall_lo[i] <= ny && ny <= wall_hi[i] && (nx - x) * wall_way[i] >= 0
                     && !(side && wall_xs[i] == x && x == x0 && (nx - x) * side > 0)) {
                     nx = x;  /* bumped into a wall */
                     nx_same = x_same;

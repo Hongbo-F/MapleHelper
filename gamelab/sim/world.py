@@ -20,9 +20,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   ignored, and so is one pressed while she's in the air (JUMP_TAKEN_LATE: or one the game takes then);
 - in the air she flies body.fly's arc with the arrow the game sees, flown again from where she is when
   that arrow changes: the opposite one brakes her at 200 units/s², the one she flies with does nothing,
-  and none drags her at 1 (100 once she falls at the cap). The walls of her foothold group stop her
-  (body.OWN_GROUP_WALLS: the group of the platform she last stood on; off a rope, none) and group 0's (the map's own:
-  Realism.zero_walls, as live), and the map's sides (Realism.sides). She lands with the speed she has and slides on, unless an
+  and none drags her at 1 (100 once she falls at the cap). Walls stop her by the game's rule (body.wall_table:
+  HeavenClient's, a wall joined to the floor under her just above it, and group 0's, the map's own, anywhere:
+  Realism.zero_walls), and the map's sides (Realism.sides). She lands with the speed she has and slides on, unless an
   attack is playing: that stops her
   (jump-backs and jump-throws slid 1.4-2.9 units in game). Below the map's lowest floor she has fallen out
   of the map, and the run ends there (SimFellOut);
@@ -477,19 +477,21 @@ PET_FULLNESS = 60.0
 #   minutes; none with the client's sides); on Tree Dungeon, Forest Up North II -475 and 565 for -500 and 590, both
 #   outside the tower (-220..310), where nothing is under her either way.
 # - The walls of foothold group 0 (a map's own: on Tree Dungeon, Forest Up North II the tower's, its shelves' and its
-#   floor's; its floating platforms are other groups, with no walls). By the client's movement as reconstructed
-#   (body.OWN_GROUP_WALLS), only her own group's walls stop her; RustMS's port has group 0's stop every group's stars
-#   (README, Attack). They stop her body too, whatever her group (Realism.zero_walls, the default from 2026-10-31):
+#   floor's; its floating platforms are other groups, with no walls). Her own group's walls alone stopped her until
+#   2026-10-31 (body.OWN_GROUP_WALLS, from a reconstruction of the client's movement); RustMS's port has group 0's
+#   stop every group's stars (README, Attack). They stop her body too, whatever is under her (Realism.zero_walls, on
+#   top of HeavenClient's rule, body.wall_table: the default from 2026-10-31):
 #   live on Tree Dungeon (the perception service's scenes of 2026-10-29 and 30, 387,443 placements; D:/MapleHelper-
 #   scratch/tower) in the air along the tower's walls her place by a cue (her tag or body, not carried) was at the
 #   wall's x, 310 or -220 to a unit, 351 times, and past it 3 (318, 328, -222: the body cue's spread), never on
 #   anything outside, where she stood within 20 of 24's right end (the wall) 7,031 times; falling along it she landed
-#   on 19 at 310, on 13 at -220. With her own group's walls alone (`--world own-walls`), walked or knocked off the
+#   on 19 at 310, on 13 at -220. With her own group's walls alone (as until then), walked or knocked off the
 #   outer end of a floating platform there (11's left end, 13 from the tower's wall, 23's 23, 24's right end at it,
 #   25's right end 34), or off a rope near the wall (the one at -192, 28 from it: off a rope no wall stops her,
 #   body.ROPE_GROUP), she fell past the wall and out of the map: loop_tree_run, 5 of seeds 1-13 on 2026-10-31.
-#   (HeavenClient has neither: there a wall stops her if it's chained to the foothold below her, its prev or the one
-#   before, FootholdTree::get_wall, whatever its group.)
+#   HeavenClient's rule alone (`--world joined-walls`: a wall stops her if it's joined to the foothold under her, its
+#   prev or the one before, where it overlaps the 50 units above her feet: FootholdTree::get_wall) lets her through 143
+#   of those 351 live placements, over 70 units above the floor under her.
 # - How far above her feet a rope's bottom can be for a jump to grab it: physics.ROPE_REACH, 95 (her jump's 77 and
 #   18 of arms: a guess from the start, never measured; the highest grab tried in game was a rope 69 up, on the first
 #   map); HeavenClient grabs a rope when a point 5 above her feet is on it (Gameplay/MapleMap/MapInfo.cpp,
@@ -750,8 +752,9 @@ class Realism:
     # What isn't known of the game's physics (SIDE_INSET says what each is):
     sides: str = "platforms"     # the map's sides: 'platforms' (its platforms' outer ends, in the air) or 'client'
                                  # (SIDE_INSET in from its footholds' extent, on the ground too)
-    zero_walls: bool = True      # the walls of foothold group 0 stop her whatever her group (as live: from 2026-10-31,
-                                 # the comment above SIDE_INSET); False: her own group's alone (`--world own-walls`)
+    zero_walls: bool = True      # the walls of foothold group 0 stop her whatever HeavenClient's rule says (body.
+                                 # wall_table; as live: the comment above SIDE_INSET); False: its rule alone
+                                 # (`--world joined-walls`)
     rope_reach: float = ROPE_REACH  # how far above her feet a rope's bottom can be for her to grab it
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
     her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_HALF
@@ -1380,7 +1383,6 @@ class World:
         self.fell_out_at: float | None = None  # when she fell below the map's lowest floor (SimFellOut)
         self.left_map_at: float | None = None  # when she went through a portal (SimLeftMap)
         self.bottom = max(max(q.y_at(q.left), q.y_at(q.right)) for q in model.platforms)  # its lowest floor
-        self._walls: dict = {}          # foothold group -> the walls that stop her with it (body.Walls)
         self.x, self.y = float(start[1]), p.y_at(start[1])
         self.vx = self.vy = 0.0         # her speed (units/s; y down)
         self.glide = 0.0                # on the ground: how far she moves each tick of the game's step (none from a
@@ -1438,7 +1440,8 @@ class World:
         self.arms = self.realism.rope_reach - JUMP_HEIGHT  # she grabs a rope this far above her feet (ARMS)
         self.dead = False
         self.died_at: float | None = None
-        self._blocked = {pid: (_wall_at(model, q, q.left), _wall_at(model, q, q.right))
+        zero = self.realism.zero_walls
+        self._blocked = {pid: (_wall_at(model, q, q.left, -1, zero), _wall_at(model, q, q.right, 1, zero))
                          for pid, q in enumerate(model.platforms)}
         self._near = {q.id: [o.id for o in model.platforms if o.right >= q.left - 60 and o.left <= q.right + 60
                              and -70 <= o.top - q.top <= 70] for q in model.platforms}
@@ -1967,12 +1970,9 @@ class World:
     def _flight(self, x: float, y: float, vx: float, vy: float, arrow: int, skip: Platform | None = None,
                 airborne: bool = False) -> body.Flight:
         """Her arc from (x, y) at (vx, vy) with `arrow` held: body.fly's, step by step on the world's tick,
-        with the map's sides stopping her like walls (the planner never jumps at them), and the walls of
-        her foothold group."""
-        walls = self._walls.get(self.group)
-        if walls is None:
-            walls = self._walls[self.group] = body.vertical_walls(_walls_for(self.model, self.group,
-                                                                              self.realism.zero_walls))
+        with the map's sides stopping her like walls (the planner never jumps at them), and the walls by the
+        game's rule (body.wall_table: those joined to the floor under her, and with Realism.zero_walls group 0's)."""
+        walls = body.wall_table(self.model, self.realism.zero_walls)
         return body.fly(self.model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls,
                         sides=self.sides, dt=TICK_MS / 1000, path=True, airborne=airborne)
 
@@ -2926,20 +2926,10 @@ def _sides(model: MapModel, how: str = "platforms") -> tuple[float, float]:
     return min(xs) + SIDE_INSET, max(xs) - SIDE_INSET
 
 
-def _walls_for(model: MapModel, group, zero: bool = False) -> list:
-    """The walls that stop her with foothold group `group` (body.walls_for), and with `zero` (Realism.zero_walls) those
-    of every layer's group 0 too, whatever her group: off a rope too (body.ROPE_GROUP, where none stops her)."""
-    walls = body.walls_for(model, group)
-    if zero and group != body.EVERY_WALL and body.OWN_GROUP_WALLS:
-        walls = walls + [w for w in model.walls if w.group is not None and w.group[1] == 0 and w.group != group]
-    return walls
-
-
-def _wall_at(model: MapModel, p: Platform, edge: float) -> bool:
-    """Whether a wall of its foothold group rises at this end of platform `p` (it stops her there)."""
-    level = p.y_at(edge)
-    return any(w.x1 == w.x2 and abs(w.x1 - edge) < 1 and min(w.y1, w.y2) < level - 2 <= max(w.y1, w.y2)
-               for w in body.walls_for(model, p.group))
+def _wall_at(model: MapModel, p: Platform, edge: float, way: int, zero: bool = True) -> bool:
+    """Whether a wall rises at this end of platform `p` that stops her going `way` into it (body.wall_table: one joined
+    to its end, or with `zero` a wall of group 0 there): she walks into it, not off the end."""
+    return body.stops(body.wall_table(model, zero), edge, p.y_at(edge) - 2, way)
 
 
 def exp_pixels(exp: int) -> np.ndarray:
