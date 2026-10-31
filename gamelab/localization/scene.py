@@ -73,6 +73,10 @@ class Scene(Observation):
     tracks: list = field(default_factory=list)  # with a continuous feed, the monsters it follows as of this look's frame
                                                 # (tracking.Track: live, hidden on screen up to HIDE_S, or just dead):
                                                 # those it didn't find are about still (localization.unseen); [] without
+    strips: list = field(default_factory=list)  # with a continuous feed, every strip of drops in view as perception last
+                                                # searched it, each at its own time (worldstate.DropStrip: the rotation's
+                                                # and the asked-for; the drop store takes them, behavior.ledger); []
+                                                # without
 
     @classmethod
     def of(cls, obs: Observation) -> "Scene":

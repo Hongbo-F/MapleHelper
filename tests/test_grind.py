@@ -1239,3 +1239,32 @@ def test_the_live_ping_pong_of_2026_10_29_between_two_empty_stops_is_gone():
     # (the others' part learned low; with what her own kills a minute bring back over the map's 9 free points, a little
     # more)
     assert 1.0 - math.exp(-p.belief.others * patrol.TICK_S) < 0.05 and 1.0 - math.exp(-p.belief.rate * patrol.TICK_S) < 0.06
+
+
+def test_leaving_a_stop_the_sweep_has_her_drops_on_her_way_to_the_next_stop_first():
+    """The user, 2026-10-30: "before leaving an area you should try to pick as much as possible without too much impact
+    on travel time". Her reason to leave a stop given, the loot sweep goes first, on her way to the stop Patrol.choose
+    would take her to next (peeked: `_next_dest`); with nothing for it, she goes."""
+    model, ids, far, p = _column()
+    p.replan(0.0, force=True)
+    g, s = _at_stop(model, p, ids[0], 150.0, [], 1.0)
+    asked, acted = [], []
+    g._sweep = lambda s, dest, say=True: asked.append(dest) or "a stop"
+    g._sweep_act = lambda s, stop, visible, hidden, now: acted.append(stop)
+    g._leave(s, "nothing left in reach")
+    j, _ = g._instead(s)
+    assert asked == [(p.stops[j].platform, p.stops[j].x)] and acted == ["a stop"]
+
+
+def test_her_time_is_worth_what_staying_gives_on_a_round_trip_from_the_stop_and_the_loops_rate_on_her_way():
+    """The sweep's price of her time (`_time_worth`): at the stop, a round trip back to its place costs what staying
+    there gives (`_stay_gain`); on her way anywhere else, the loop's rate (Plan.rate: going on)."""
+    from gamelab.attack.spots import Spot
+    model, ids, far, p = _column()
+    p.replan(0.0, force=True)
+    g, s = _at_stop(model, p, ids[0], 150.0, [_sight(model, HORNY, 250, 0)], 1.0)
+    g.visit.spot = Spot(ids[0], 150.0, 1.0, True)
+    g._shoot_rate = lambda s, monsters: (0.0, 0.0)
+    stay = g._stay_gain(s, g._held(s))
+    assert g._time_worth(s, (ids[0], 150.0)) == pytest.approx(stay) and stay > p.plan.rate
+    assert g._time_worth(s, (ids[1], 150.0)) == pytest.approx(p.plan.rate)

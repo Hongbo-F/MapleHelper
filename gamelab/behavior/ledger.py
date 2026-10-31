@@ -20,9 +20,14 @@ throw (Actions.throw_listeners): the kill ledger and the drop store.
 - **The drop store** (`DropStore`): every pile she knows of, with when its kill happened (not when it was
   first seen), when it was last seen, whether a kill of hers explains it, what the last look that saw it saw
   in it and what that's worth (the map's looting.Worth: the game data's prices, mesos by what the map's monsters
-  drop), and its status. A pile is gone as the Looter forgets drops: never before SETTLE after the kill, and only
+  drop; one no look has seen yet, its kind's expected drops: looting.expected_worth), and its status. A drop seen is
+  in one pile only, the nearest within LOOT_REACH (until 2026-10-30 every pile within LOOT_REACH of it took it: 15-24% of
+  the piles' worth listed live was the same drops counted by 2-3 piles). Every look's drops count, and every strip of
+  drops perception searched since the look before (the state's rotation, worldstate.WorldState.drops: Scene.strips), at
+  its own time. A pile is gone as the Looter forgets drops: never before SETTLE after the kill, and only
   after two empty looks EMPTY_LOOKS apart, because monsters are drawn over drops. Gone piles are dropped from the
-  store GONE_KEEP_S later; what the hunt loop counts of them is kept in counters (`gone_tried`).
+  store GONE_KEEP_S later; what the hunt loop counts of them is kept in counters (`gone_tried`). How likely a pile is
+  to lie there still is `survival` (by its age, hers or another's: the live Kaplan-Meier), not a fixed life.
 - **Her wounds** (`Wounds`): the monsters she has hurt and not killed. A monster in the path of a throw of
   hers (as the ledger has it) whose HP bar shows up or changes in a look within STAR_WINDOW s of the throw is
   hers, and followed look to look until a kill of hers is placed on it, it's out of sight for WOUND_LOST_S,
@@ -33,6 +38,7 @@ Step 4 of gamelab/docs/hunt-modes.md: these are observers, kept up whoever looks
 ledger against its world (tests/test_ledger.py), and the hunt loop reads the drop store and the wounds.
 """
 
+import itertools
 from dataclasses import dataclass, field
 
 from maplehelper.engine import RIGHT
@@ -69,6 +75,21 @@ TRACK_GAIN_S = 0.02  # s: a track bound to a gain (tracking.Track.gain) is a kil
 FOLLOW_S = 3.0      # s after a kill that its place follows its track (it walks on until her star lands, and the
                     # tracker may put the gain on another until tracking.REBIND_S + CONFIRM_S)
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
+# How long drops lie (`survival`): the share of them still there at an age (s since her kill, or since another's was
+# first seen), as the perception service saw them on the thief's live run of 2026-10-30 02:03-02:48 (the loot design's
+# Kaplan-Meier, her picks censored: D:/MapleHelper-scratch/replan/loot/survival.py), hers and others'. Live, 12.1% of the
+# drops seen on 3 looks or more (76 of 628, worth 2,012 over 112 minutes) were seen lying past 90 s, which the hunt loop's
+# DROP_LIFE (90 s) had left; the last sightings' p99 138 s. A measured prior with the detector's misses in it (a drop
+# judged gone, then found again as another, shows as lost): to fit again on the 15-a-second telemetry. None past 180 s.
+SURVIVAL = {True: ((0.0, 1.0), (5.0, 0.94), (10.0, 0.90), (20.0, 0.84), (30.0, 0.74), (60.0, 0.55), (90.0, 0.42),
+                   (120.0, 0.26), (150.0, 0.09), (180.0, 0.0)),
+            False: ((0.0, 1.0), (5.0, 0.92), (10.0, 0.83), (20.0, 0.75), (30.0, 0.70), (60.0, 0.57), (90.0, 0.31),
+                    (120.0, 0.22), (150.0, 0.03), (180.0, 0.0))}
+# s a kill's drops are its killer's alone (the game's ownership: nobody else can pick them up meanwhile; looting.
+# cant_pick has seen mesos she stood on twice stay): another's pile is worth a trip once past it. The simulator's
+# (sim.world.Realism.rival_owns), not measured; until 2026-10-30 the hunt loop waited OTHERS_AFTER (30 s, a guess) for
+# drops no kill of hers explains, and live 30% of others' drops were gone within those 30 s.
+OWN_S = 15.0
 # s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
 # forever, every kill added a pile, and every look went through all of them.
@@ -422,12 +443,37 @@ class Pile:
     items: tuple[str, ...] = ()   # what the latest look that saw it saw in it (one kind per drop) ...
     worth: float | None = None    # ... what those are worth together (looting.Worth); None until a look sees it ...
     dearest: float | None = None  # ... and the dearest of them on its own
-    unseen: float = PILE_WORTH    # what it's worth before a look sees it: a bronze coin on its map
+    xs: tuple[float, ...] = ()    # ... and where each lay (map x: the loot sweep's stand covers them)
+    unseen: float = PILE_WORTH    # what it's worth before a look sees it: a bronze coin on its map, or (her kill's) its
+                                  # kind's expected drops (looting.expected_worth)
+    kind: str | None = None       # the kind of the monster whose drops they are (her kill's), if known
+    key: int = field(default_factory=lambda: next(_PILE_KEYS), compare=False)  # its own, never another's (the sweep's)
 
     @property
     def value(self) -> float:
-        """What it's worth, in mesos: what was seen in it last, or a bronze coin (`unseen`) before it's been seen."""
+        """What it's worth, in mesos: what was seen in it last, or `unseen` before it's been seen."""
         return self.unseen if self.worth is None else self.worth
+
+    def still(self, now: float, dt: float = 0.0) -> float:
+        """The chance it still lies there `dt` s after `now`, given it did when a look last saw it (or, not seen yet, at
+        its kill): `survival` at its age then over `survival` at its age when last seen."""
+        ref = 0.0 if self.last_seen is None else max(0.0, self.last_seen - self.since)
+        there = survival(ref, self.hers)
+        return 0.0 if there <= 0.0 else min(1.0, survival(now + dt - self.since, self.hers) / there)
+
+
+_PILE_KEYS = itertools.count(1)
+
+
+def survival(age: float, hers: bool = True) -> float:
+    """The share of drops still lying `age` s on (SURVIVAL: hers or others'), straight between its points."""
+    curve = SURVIVAL[bool(hers)]
+    if age <= 0.0:
+        return 1.0
+    for (t0, s0), (t1, s1) in zip(curve, curve[1:]):
+        if age <= t1:
+            return s0 + (s1 - s0) * (age - t0) / (t1 - t0)
+    return 0.0
 
 
 @dataclass
@@ -436,6 +482,7 @@ class DropStore:
     value: Worth = FIRST  # what drops are worth on her map (looting.worth_for)
     piles: list[Pile] = field(default_factory=list)  # the piles not gone, and those gone in the last GONE_KEEP_S
     gone_tried: int = 0  # piles the hunt loop went for that looks have seen gone, ever (dropped ones too)
+    _strips: dict = field(default_factory=dict, repr=False)  # each strip of drops' last search taken: (platform, x0) -> t
 
     @property
     def known(self) -> list[Pile]:
@@ -450,38 +497,73 @@ class DropStore:
         p.tries += 1
 
     def on_kill(self, kill: Kill) -> "Pile | None":
-        """A kill of hers placed: its pile expected where it died (returned; None: no place)."""
+        """A kill of hers placed: its pile expected where it died (returned; None: no place), worth its kind's expected
+        drops (looting.expected_worth) until a look sees it."""
         if kill.platform is None:
             return None
-        self.piles.append(Pile(kill.x, kill.y, kill.platform, kill.t, hers=True, unseen=self.value.coins["bronze"]))
+        self.piles.append(Pile(kill.x, kill.y, kill.platform, kill.t, hers=True,
+                               unseen=looting.expected_worth(kill.kind, self.value), kind=kill.kind))
         return self.piles[-1]
 
     def on_look(self, s: Scene) -> None:
-        """A look that searched for loot: drops seen confirm a pile (or start one); a pile in view that two
-        looks EMPTY_LOOKS apart see empty, SETTLE after its kill, is gone. With looting.STANDING_ONLY, only looks
-        that show her standing see a pile empty (looting.standing: from mid-jump a look's strips miss the drops on
-        the ground)."""
-        if not s.looked:
-            return
+        """A look: the strips of drops perception searched since the look before (Scene.strips: the state's rotation,
+        each at its own time), then the look's own if it searched for loot (`looked`, `loot`): each a sighting
+        (`_sighting`)."""
         self.piles = [p for p in self.piles if p.gone_at is None or s.t - p.gone_at <= GONE_KEEP_S]
-        seen, ground = list(s.loot), not looting.STANDING_ONLY or standing(s)
-        for p in self.known:
-            if inside := [d for d in seen if _in_pile(p, d)]:
-                p.status, p.last_seen, p.empty_since = "seen", s.t, None
+        ground = not looting.STANDING_ONLY or standing(s)
+        new = [st for st in getattr(s, "strips", None) or () if st.at is not None
+               and st.at > self._strips.get((st.platform, round(st.x0)), -1e18)]
+        for st in sorted(new, key=lambda st: st.at):
+            self._strips[(st.platform, round(st.x0))] = st.at
+            self._sighting(st.at, list(st.loot), lambda pid, x, st=st: pid == st.platform and st.x0 <= x <= st.x1,
+                           ground and not st.mesos_only)
+        if s.looked:
+            self._sighting(s.t, list(s.loot), s.in_view, ground)
+
+    def _sighting(self, t: float, seen: list[Loot], in_view, ground: bool) -> None:
+        """Drops seen at t where `in_view(platform, x)` was searched: each in one pile, the nearest within LOOT_REACH of
+        it, which they confirm (or, none, piles of their own, a LOOT_REACH of them from the left: another's, or one no
+        kill of hers placed); a pile in view that two sightings EMPTY_LOOKS apart see empty, SETTLE after its kill, is
+        gone. `ground`: whether this sighting can see one empty (with looting.STANDING_ONLY only a look showing her
+        standing: looting.standing, from mid-jump a look's strips miss the drops on the ground). A strip searched before
+        a pile was last seen says nothing of it."""
+        known = self.known
+        mine: dict[int, list[Loot]] = {}
+        loose = []
+        for d in seen:
+            near = [p for p in known if _in_pile(p, d)]
+            if near:
+                mine.setdefault(id(min(near, key=lambda p: abs(p.x - d.x))), []).append(d)
+            else:
+                loose.append(d)
+        for p in known:
+            if (inside := mine.get(id(p))) is not None:
+                if p.last_seen is not None and t < p.last_seen:
+                    continue
+                p.status, p.last_seen, p.empty_since = "seen", t, None
                 p.mesos = p.mesos or any(d.mesos for d in inside)
                 p.items, p.worth, p.dearest = _contents(inside, self.value)
-            elif ground and s.t - p.since >= SETTLE and s.in_view(p.platform, p.x):
+                p.xs = tuple(d.x for d in inside)
+            elif ground and t - p.since >= SETTLE and in_view(p.platform, p.x) \
+                    and (p.last_seen is None or t > p.last_seen):
                 if p.empty_since is None:
-                    p.empty_since = s.t
-                elif s.t - p.empty_since >= EMPTY_LOOKS:
-                    p.status, p.gone_at = "gone", s.t
+                    p.empty_since = t
+                elif t - p.empty_since >= EMPTY_LOOKS:
+                    p.status, p.gone_at = "gone", t
                     self.gone_tried += p.tries > 0
-        for d in seen:
-            if not any(_in_pile(p, d) for p in self.known):
-                self.piles.append(Pile(d.x, d.y, d.platform, s.t, hers=False, mesos=d.mesos, last_seen=s.t,
-                                       status="seen", unseen=self.value.coins["bronze"]))
-                new = self.piles[-1]
-                new.items, new.worth, new.dearest = _contents([e for e in seen if _in_pile(new, e)], self.value)
+        taken: set[int] = set()
+        for d in sorted(loose, key=lambda d: (d.platform, d.x)):
+            if id(d) in taken:
+                continue
+            group = [e for e in loose if id(e) not in taken and e.platform == d.platform
+                     and 0.0 <= e.x - d.x <= LOOT_REACH]
+            taken.update(id(e) for e in group)
+            mid = (min(e.x for e in group) + max(e.x for e in group)) / 2
+            self.piles.append(Pile(mid, d.y, d.platform, t, hers=False, mesos=any(e.mesos for e in group),
+                                   last_seen=t, status="seen", unseen=self.value.coins["bronze"]))
+            pile = self.piles[-1]
+            pile.items, pile.worth, pile.dearest = _contents(group, self.value)
+            pile.xs = tuple(e.x for e in group)
 
 
 def _in_pile(p: Pile, d: Loot) -> bool:

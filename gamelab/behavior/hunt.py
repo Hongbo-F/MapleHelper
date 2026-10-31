@@ -16,9 +16,6 @@ in the order listed, 6 before 3):
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving
-   6  urgent pile      drops whose remaining life is under the time to get there plus URGENT_MARGIN, within
-                       URGENT_TRAVEL; above shooting if it goes first (below), or drops lay until they vanished
-                       where respawns never stop
    3  shoot            a target in reach from her spot (or the ground she hunts on): throw, step out from
                        under, close in along her platform
    4  in passing       travelling: a target in reach, thrown at from where she is (or a step of PASS_STEP at
@@ -28,41 +25,51 @@ in the order listed, 6 before 3):
                        and not killed (fight.owed), when a throw from here or a walk of fight.FINISH_WALK at
                        most along her platform gets to them (fight.finish_act), FINISH_S at most per
                        objective; she used to leave monsters half hunted
-   5  pile here        drops on her platform within PILE_NEAR, nothing by them or between her and them (also
-                       piles she passes while travelling)
-  5b  on the way       travelling: a pile a stop at costs DETOUR_S at most more than the trip without it (the
-                       planner's times, motion.route.Planner.arrive), DETOUR_REACH away at most, DETOURS per
-                       objective at most; she used to leave such piles and go back across the map for them when
-                       they were about to vanish
+   S  sweep            the loot sweep (behavior.sweep, from 2026-10-30): travelling, the piles worth their time on
+                       her way to where she's going; at a ground with nothing in reach, those worth a round trip
+                       from her spot; leaving it, before she goes, those worth their time on her way to the next
+                       (`_sweep`, `_sweep_act`: a guard shot first, the trip to a pile, its stand, its drops' landing
+                       waited for)
    7  better spot      wanted monsters seen out of reach, and a spot that reaches clearly more of them
-   8  lull loot        nothing wanted on this ground and a kill of hers due back: piles she can pick up first
    9  wait             monsters about or due back: stand still, for the patience at most, where she is or at the
                        safest place along her platform that still has the ground's spawn points in reach
                        (_wait_place: not between two Horny Mushrooms' spawn points), or on a rope from her
                        platform where nowhere along it is safe enough (_refuge, attack.ropes)
-  10  loot elsewhere   leaving: the piles left when she decided, the most worth per second of travel first
-  11  advance          leaving: one trip to the next ground's spot
+  11  advance          leaving: one trip to the next ground's spot (after the sweep's piles on her way there)
+
+Until 2026-10-30 her drops had five rules of their own (5 pile here, 5b on the way, 6 urgent pile, 8 lull loot, 10 loot
+elsewhere), each with its own bounds (PILE_NEAR, DETOUR_S, URGENT_MARGIN, DROP_LIFE, OTHERS_AFTER), and a pile waited
+while a monster that counts was within PILE_CLEAR of where she'd go for it. Live on 2026-10-30 (the thief's run,
+D:/MapleHelper-scratch/replan/loot) she picked up 199 mesos' worth a minute of the 299 the perception service saw (the
+user's own play 306 of 437), and lost 100 a minute: 47% of that waiting on PILE_CLEAR (12-28% of those waits for the
+pile's own dying monster), 28% known and never gone for, 15% yielded to something in reach; 48% of it lay within 2 s of
+her way while it lasted, and half her departures from a stop came within 3 s of a kill of hers, before its drops landed.
+The sweep takes all of those as one choice, priced in her time (the loop's rate), within a budget of her way's time.
 
 EXP before loot (`_loot_first`; the user, 2026-10-24: "The hunt should be driven by maximizing the exp gain"): no pile
-goes ahead of shooting what's in reach by a fixed priority. One that will still be there when she has killed what's in
-reach waits; one at risk by then (`_at_risk`: its life running out, another player by it once it's no longer hers
-alone) goes first only if what waiting would likely lose of it, at MESO_EXP an meso, is more than the EXP she'd make
-from what's in reach (Attacks.kill_s) over the trip there and back (rules 6a and 6). A trip for a valuable pile is
-called off when that no longer holds (a monster comes into reach), and so is picking one up (Looter.yield_to): the pile
-stays known, and is gone for again once nothing is in reach. (On a trip for an urgent pile she shoots in passing, as
-before: it has URGENT_MARGIN to spare.) In the live hunts of 2026-10-24 (1474 looks with a wanted monster in
-reach on another platform than hers), she didn't throw within 1.5 s on 184: on 78 she was picking up a pile, on 43 the
-valuable pile rule had her off to one (20 of those deciding it or on the way).
+goes ahead of shooting what's in reach by a fixed priority. The sweep comes after the shooting rules, and prices her time
+at the more of the loop's rate and what's in reach would give (`_time_worth`). A valuable one (6a) that will still be
+there when she has killed what's in reach waits; one at risk by then (`_at_risk`: its survival over the wait, another
+player by it once it's no longer hers alone) goes first only if what waiting would likely lose of it, at MESO_EXP an
+meso, is more than the EXP she'd make from what's in reach (Attacks.kill_s) over the trip there and back. A trip for a
+valuable pile is called off when that no longer holds (a monster comes into reach): the pile stays known, and is gone for
+again once nothing is in reach. In the live hunts of 2026-10-24 (1474 looks with a wanted monster in reach on another
+platform than hers), she didn't throw within 1.5 s on 184: on 78 she was picking up a pile, on 43 the valuable pile rule
+had her off to one (20 of those deciding it or on the way).
 
-Her drops are priced by the HP getting them would cost (`_pile_block`, `_pile_price`; from 2026-10-26): no pile is
-gone for, walked to or stood on with a monster that counts as a danger within PILE_CLEAR of where she'd land, walk and
-pick up (seen, or about though the look missed it: localization.unseen; with DUE_BACK, one just due back at its spawn
-point after a kill of hers there too); the pile waits, still known, and a trip for one is called off at the chain that
-sees it so. What's left of the danger there is the pile's price against what it's worth (EXP before loot: HP_EXP a
-bar). Live on 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off 23 came on stays on 23 for drops.
-And what her fights go by takes those about her that the look didn't find (`_unseen`: the feed's hidden tracks, her
-memory's of the last UNSEEN_S): around her for the stance's danger and its moves, and those on her platform that
-count as a danger as targets too (`_with_unseen`).
+No touch for loot (the user, 2026-10-30: "try not to hit by mobs just for picking up loots"; from 2026-10-30, the sweep):
+no pile is stood on where a monster that counts as a danger would meet her standing there (`_guards`: her body's box
+against each one's, walking the way perception says it heads at its kind's speed from the game data, turned back at its
+platform's ends, over the stand and sweep.STAND_PAST_S more; seen, about though the look missed it, localization.unseen;
+never her own kill dying there, ledger.dying, nor the feed's tracks taken for dead, Ledger.dead); one she can shoot from
+where she is is shot first ("in general you should kill all the mobs that are in the way": its kill time in the pile's,
+its EXP in its worth), any other leaves the pile out until a look sees it clear. Her ways to piles are the navigator's
+trips, planned and replanned at every state against every monster, with its shots first at what's in the way. Live on
+2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off 23 came on stays on 23 for drops; until 2026-10-30
+a pile waited while one was within PILE_CLEAR (100 units) of where she'd go for it, whatever its way, and was priced by
+the HP the rest of its danger would cost (HP_EXP a bar). And what her fights go by takes those about her that the look
+didn't find (`_unseen`: the feed's hidden tracks, her memory's of the last UNSEEN_S): around her for the stance's danger
+and its moves, and those on her platform that count as a danger as targets too (`_with_unseen`).
 
 She leaves a ground by the rate rule (`_leaving`): her EXP rate there falls clearly below what the best
 other ground would give, travel included, or nothing is left there and nothing is due back. Not for the ground she'd
@@ -73,12 +80,13 @@ are suspended, not ended, when a higher rule fires: they keep their route weight
 What she knows of the monsters off her band is her memory of them (Hunter.memory, localization.memory: every look's,
 kept across looks, forgotten by looks that cover their place without them or by age), and every look of hers has the
 monsters perception follows on the whole screen (Scene.swept: localization.feed.Feed.look), so the memory is kept up
-while she shoots: the ground's monsters out of reach (rule 7), whether anything is left on it (the fast exit), and what
-guards a pile elsewhere (rule 5b) go by it. Her own platform's, which the fights react to, are the look's as before.
+while she shoots: the ground's monsters out of reach (rule 7) and whether anything is left on it (the fast exit) go by
+it, and what guards a pile goes by the whole state. Her own platform's, which the fights react to, are the look's as
+before.
 
 The numbers marked "guess" are starting values for the simulator's A/B runs (gamelab.sim.harness); none
-is measured in game. Respawns and how long drops last were measured on the live telemetry (analysis.respawn), and
-didn't settle RESPAWN and DROP_LIFE: their comments say what they did show.
+is measured in game. Respawns were measured on the live telemetry (analysis.respawn), and didn't settle RESPAWN: its
+comment says what it did show; how long drops lie is ledger.SURVIVAL, the live service's.
 """
 
 import random
@@ -94,9 +102,10 @@ from ..attack.ropes import Refuge
 from ..attack.spots import GROUND_MARGIN, Spot
 from ..attack.stance import (MIN_MOVE, act_text, close_to, drop_limits, jump_hits, open_above, overhead, stance,
                              too_close)
+from ..control.actions import PILE_EVERY_MS
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
-from ..control.navigator import TRANSIT, Choice, TripState
-from ..localization.monsters import Monster, Tracker, tracks_record
+from ..control.navigator import ARRIVE_TOLERANCE, RUN_SEEN, RUN_UNITS, TRANSIT, Choice, TripState
+from ..localization.monsters import DEFAULT_SPEED, Monster, Tracker, bodies, speeds, touch_box, tracks_record, walk_vx
 from ..localization.players import near_rival
 from ..localization.scene import Scene
 from ..localization.unseen import UNSEEN_S, unseen
@@ -105,13 +114,13 @@ from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
-from . import fight
+from . import fight, sweep
 from .keycheck import Doubt, KeyDoubt
 from .chatcheck import ChatDue
 from .statcheck import StatsDue
 from .fight import THROWS, FightState, Report, kills_text
-from .ledger import DROP_LANDS, Pile
-from .looting import DROPS_LAST, SETTLE, DropSpot
+from .ledger import DROP_LANDS, OWN_S, Pile, dying
+from .looting import LOOT_REACH, MIN_WALK, PILE_GAP, SETTLE, STOOD_ON, _piles
 from .tour import PRIOR
 
 IN_HER_WAY = fight.IN_HER_WAY  # any monster this close on her platform is a target, whatever its kind
@@ -122,18 +131,12 @@ FINISH_S = 8.0         # rule 4b: s of finishing what she has hurt per objective
                        # where the objective was on her own platform, 55)
 PASSING_S = 15.0       # rule 4: s of shooting per platform per objective while passing through ...
 PASS_STEP = fight.FINISH_WALK  # ... and the longest step out from under a target there (_pass_step)
-PILE_NEAR = 150        # rule 5: drops on her platform this close are picked up from where she is
-PILE_GUARD = 110       # ... unless a monster is this close to them (looting.TOO_CLOSE, today's guard)
-PILE_TRIES = 2         # a pile is gone after at most this many times (a suspension counts)
-URGENT_MARGIN = 30.0   # rule 6: s of slack before a pile's expected end (time for a guard to be shot first) ...
-URGENT_TRAVEL = 12.0   # ... for piles at most this far (s of travel): farther ones wait until she leaves a
-                       # ground (rule 10); one 84 s round trip for a pile from the basin took a quarter of a run
-# s a drop is still worth going for (looting.DROPS_LAST, the code's own assumption; the simulator's lie 180 s). The live
-# telemetry of 2026-10-19 to 21 doesn't settle it (analysis.respawn: README, Respawns and drop life): of 337 drops
-# followed, 95% were still lying at 60 s (95% interval 89-97%; 7 followed that long, none past 88 s, as she picks
-# hers up within seconds and the next kill lands by the rest). Longer than a minute, which 90 and 180 both are.
-DROP_LIFE = DROPS_LAST
-OTHERS_AFTER = 30.0    # guess: s before drops no kill of hers explains are worth a trip (not hers before)
+# A pile is left after at most this many stands or trips (a suspension counts): the third time, drops still where she
+# stood twice can't be picked up (looting.cant_pick: someone else's, or her inventory full), the rest stood on once more
+PILE_TRIES = 3
+SURVIVE_MIN = 0.05     # a pile less likely than this to lie there still (Pile.still: ledger.SURVIVAL) isn't gone for
+SPREAD = 30.0          # units either side of where her kill died that its stand walks, its drops not seen yet (live,
+                       # neighbouring drops lay 20-25 apart, and a pile of 3 spans about 40)
 SPOT_MORE, SPOT_TIMES = 2, 1.5  # rule 7: another spot must reach 2 more monsters, or 1.5 times as many ...
 SPOT_TRAVEL = 8.0      # ... within this many s of travel ...
 SPOT_REST = 10.0       # ... not sooner than this after taking a spot ...
@@ -205,46 +208,11 @@ STUCK_S = 120.0        # backstop: s without a kill, a pick-up or a new ground b
 # stands by at once, as before.
 STUCK_CHECKS = True
 STALL_WAIT_S = 30.0    # ... its check put off (no quiet moment), the hunt goes on this long more for one
-PICK_S = 0.6           # s standing on a pile (4 presses)
-# Her drops, priced by the HP getting them would cost (`_pile_block`, `_pile_price`). Live on 2026-10-25 (Tree Dungeon,
-# tour --loop 23:43-23:54, 340 EXP a minute; D:/MapleHelper-scratch/analysis-1025/damage-skeptic on23.py, ctx10.py) all
-# 12 of the Horny Mushrooms' touches (1.90 of the 3.4 bars of HP she lost) and all 3 knocks off 23 down to 29 (43 s back
-# up) came on 6 stays on 23 whose objective was a pile (on 23, 22 or 20: on the way, lull loot, urgent pile, a trip
-# there): she landed or walked beside a Horny seen or remembered there (the service's track 130 alone: 6 touches and a
-# fall), or one just back at its spawn point (2 of them on top of her), and there she killed no faster (9.4 a minute)
-# than from her spot on 24 (11.2). So she doesn't land on a pile's platform for it, walk to it or stand on it with a
-# monster that counts as a danger (attack.danger) within PILE_CLEAR of that stretch: one the look found there, one about
-# that it didn't (localization.unseen: the feed's hidden tracks, her memory's of the last UNSEEN_S), or (DUE_BACK) a
-# spawn point's monster due back. The pile waits, still known, for a look that clears it; a trip for it is called off
-# at the chain that sees it not clear (`_call_off`). 100 units, not the analysis's "~150" (a Horny Mushroom walking at
-# her 100 units a second is on her in about a second at 150): in the simulator (Tree Dungeon, crowd, `--world
-# zero-walls --world near-misses`, `--attack choice`, 8 seeds of 5 minutes, before the review of 2026-10-26) with 150 she lost 0.92 bars of HP a minute alive, drank 13.6
-# potions a run and picked up 115 mesos' worth a minute; with 100 0.87, 12.9 and 130 (EXP a minute 297.7 and 307.4);
-# without it (and HP_EXP) 1.13, 16.9 and 170. Replayed on the live hunt of 2026-10-25 (78 times she went for a pile),
-# 150 has 47 of them wait, 100 44: the stays of both carried 7 of her touches and 1.04 bars of HP, of the 3.4 she lost
-# (D:/MapleHelper-scratch/hunt-ab/B/scripts/b1_replay.py). With the feed's tracks of the dead left out (localization.
-# unseen.hidden) and no due-back block (DUE_BACK), 17 of the 78 wait at 100 (18 at 150): 79 s of stays that carried 5
-# touches and 0.81 bars, 0.61 bars a minute, against 0.24 a minute on the 61 let through, for 20% of the piles' worth
-# (D:/MapleHelper-scratch/hunt-ab/B/fix/b1_replay2.py; with ghosts and due-back 0.34 against 0.31: review of 2026-10-26).
-PILE_CLEAR = 100.0
-# A spawn point's monster is due back from DUE_FROM to DUE_TO s after a kill of hers of its kind on its platform (the
-# point of that kind nearest where it died). A spawn point's cooldown is 5 s by MeowDB (and its 7.56 s tick); live on
-# 2026-10-25 a monster new to her memory was back on Tree Dungeon's 23 (two Horny Mushroom points) a median 7.2 s after
-# her kill there, on 24 11.1 s, 20 15.7 s (exp-time-skeptic refill.py: upper bounds); the user's analysis's "~5-12 s".
-# Only her own kills (others' aren't placed). Before DUE_FROM the point is empty: the time to pick up a kill's drops.
-# Off (DUE_BACK; review of 2026-10-26): replayed on the live hunt of 2026-10-25 (above) the 20 stays it alone would have
-# held carried 1 touch and 0.16 bars in 71 s, 0.14 bars a minute, the safest of all (the 61 let through 0.24, the 17
-# the rest holds 0.61), for 980 mesos' worth; in the simulator (the four worlds of the README's table, 8 seeds of 5
-# minutes) it made no difference to her HP past the seeds' spread (+10%, -7%, +3%, +14% without it, none 1.3
-# standard errors), and grinding she picked up 28% and 10% more without it (D:/MapleHelper-scratch/hunt-ab/B/fix/out/
-# round3.txt).
-DUE_BACK = False
-DUE_FROM = 5.0
-DUE_TO = 12.0
-# What a bar of her HP is worth in EXP, for a pile's price (EXP before loot, `_loot_first`): her pet drinks Orange
-# Potions of 250 HP at its 70% warning (sim.world.HP_POTION, PET_HP: 6 in the 10.95 minutes live on 2026-10-25), about
-# 160 mesos each at a shop (a guess: v83's price), so a bar of her 774 HP is 3.1 of them, 500 mesos, 250 EXP at
-# MESO_EXP; the knocks off a platform a touch can bring aren't counted (attack.stance keeps her off a long drop's end).
+PICK_S = 0.6           # s standing on a pile (4 presses): rule 6a's trips (the sweep's stands are each pile's own)
+# What a bar of her HP is worth in EXP (her pet drinks Orange Potions of 250 HP at its 70% warning, sim.world.HP_POTION,
+# PET_HP: 6 in the 10.95 minutes live on 2026-10-25; about 160 mesos each at a shop, a guess: v83's price; so a bar of her
+# 774 HP is 3.1 of them, 500 mesos, 250 EXP at MESO_EXP). Until 2026-10-30 a pile's price, the HP its danger would cost;
+# since, no pile is gone for where a monster would meet her (the sweep's guards): kept for what reads it (the profile's).
 # The user is short of money for potions.
 HP_EXP = 250.0
 # Whether her fights, her drops' price and guards and her throws' attack go by the monsters about her that a look didn't
@@ -273,17 +241,17 @@ UNSEEN_ATTACK = True
 # 66.8, its ores but Bronze and the Magic Potion; on West Rocky Mountain II 51.8, its Opal, Orihalcon, Silver, Emerald
 # and Adamantium Ores and a gold coin).
 VALUABLE = 30.0
-# EXP before loot (`_loot_first`): what a meso of drops is worth to her in EXP, against what she'd shoot meanwhile. A
-# guess putting EXP first: at it a valuable ore on Tree Dungeon (looting.Worth.valuable 66.8) is worth 33 EXP, under a
-# Horny Mushroom's kill (41), and an at-risk pile 4 s there and back goes first when what's in reach makes her under
-# 8 EXP a second (the regular attack's 3.7 at a Horny Mushroom; Lucky Seven's 12.5 doesn't let it).
+# EXP before loot (`_loot_first`) and the sweep's price of her time: what a meso of drops is worth to her in EXP. A
+# guess putting EXP first, the user's to choose (the loot design: "the user is short on mesos: a reason to consider
+# 1.0"): at it a valuable ore on Tree Dungeon (looting.Worth.valuable 66.8) is worth 33 EXP, under a Horny Mushroom's
+# kill (41), and an at-risk pile 4 s there and back goes first when what's in reach makes her under 8 EXP a second (the
+# regular attack's 3.7 at a Horny Mushroom; Lucky Seven's 12.5 doesn't let it). The sweep's break-even is worth a second
+# of her way at rate / MESO_EXP: at 0.5 and the live thief's 6.9 EXP a second, 13.9 mesos (about 2 s for the drops she
+# lost live, sweep.BUDGET_MIN); at 1.0, 6.9 (about 3 s).
 MESO_EXP = 0.5
-# s a kill's drops are its killer's alone (the game's ownership: nobody else can pick them up meanwhile; looting.
-# cant_pick has seen mesos she stood on twice stay). The simulator's (sim.world.Realism.rival_owns), not measured.
-OWN_S = 15.0
 RIVAL_TAKES = 0.5      # guess: the chance another player by a pile that isn't hers alone takes it before she's there
 EXP_FIRST = True       # EXP before loot on; off, the piles' fixed priorities as before (6a and 6 ahead of shooting)
-VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (URGENT_TRAVEL's 12, and a little),
+VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (the urgent piles' 12 s, and a little),
 VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the others): by one, a monster can stand
                         # (guarded: looting.collect leaves it, not a try), and she can't shoot it from where it lies
 # Whether her look is at the whole screen, with the drops on every platform in view, once a kill's of hers on another
@@ -292,22 +260,10 @@ VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the
 # set off for the Slime Bubble before the mushrooms were dead on 16 seeds with it, on 12 without; the look takes about
 # 120 ms more in game than the band's (README: What a look costs), once a far kill.
 FAR_DROPS_LOOK = True
-# Rule 5b: travelling, a pile a stop at costs this many s at most on top of the trip (her way to it, PICK_S on it
-# and her way on from it, against her way on from here: Planner.arrive), DETOURS piles at most per objective. In
-# the hunt loops of 2026-10-21 (12 runs, 70 minutes) she made 44 trips for piles about to vanish (rule 6), 668 s in
-# all, 27 of them of 10 s or more; 23 of those 44 (280 s) were for piles a trip of hers had passed within 2 s of
-# before, 15 of them within 0.7 s: on the route, only the stop on them. A look at the end of a chain stops it for one
-# within DETOUR_S; the pass that decides allows DETOUR_SLACK more (her real place is a few units off the
-# predicted one), so she doesn't stop again and again for one just over. Only for a pile DETOUR_REACH s away at
-# most: one near the end of a long trip made the whole trip its own while the trip's clock ran (OBJECTIVE_S). In the
-# simulator's hunt loop (preset game, 60 runs of 20 minutes), with no such bound she picked up 89.1% of her drops, for
-# 127.8 EXP a minute, and objectives ran out 111 times; with 6 s 89.4%, 127.4 and 99; with 4 s 89.8%, 128.0 and 99;
-# with 2.5 s 90.1%, 128.3 and 99 (before the stops shared the trip's budgets, `_go_for`; without the rule 88.9%,
-# 128.6 and 61).
-DETOUR_S = 2.0
-DETOUR_SLACK = 0.5
-DETOURS = 3
-DETOUR_REACH = 2.5
+# (Rule 5b, piles on the way, from 2026-10-21 to 30: a stop at a pile DETOUR_S (2 s) at most on top of the trip,
+# DETOUR_REACH (2.5 s) away at most, DETOURS (3) per objective. In the hunt loops of 2026-10-21 she made 44 trips for piles
+# about to vanish, 23 of them for piles a trip of hers had passed within 2 s of before: on the route, only the stop on
+# them. The sweep's budget, sweep.BUDGET_MIN and BUDGET_SHARE, has its place.)
 # Another player on a ground or by it (localization.players: a rival's minimap dot on it, on its spot's platform, or
 # PLAYER_NEAR across and PLAYER_DY up or down of its ends) takes its monsters: choosing the next ground, and in the
 # rate rule's best other ground, its EXP a second counts PLAYER_DISCOUNT of itself (1: as if nobody were there). Off:
@@ -328,8 +284,8 @@ PLAYER_DY = 100.0
 # better, 124.43 -> 122.15 (-1.9%, standard error 1.1%; the worst seed 11% down, and seed 6 fell out of the map at
 # 1168 s, a corner of the simulator's walls), drops 85.3% -> 85.8%. (Before her EXP gains named their kinds: 9 seeds
 # changed, 4 better, 129.93 -> 129.88, drops 83.7% -> 83.9%: it was on.) The other player there takes its drops 22 s
-# after its kill, before OTHERS_AFTER makes them worth a trip anyway, so only piles taken for no kill of hers are
-# left; whether a real player's are worth leaving is for the game to say.
+# after its kill, before they were worth a trip anyway (then OTHERS_AFTER, 30 s), so only piles taken for no kill of
+# hers were left; whether a real player's are worth leaving is for the game to say.
 PLAYER_PILES = False
 
 
@@ -360,7 +316,8 @@ class Objective:
     trip: TripState | None = None
     passing: dict[int, float] = field(default_factory=dict)  # platform -> s shot there while passing (rule 4)
     finishing: float = 0.0     # s spent finishing what she had hurt (rule 4b)
-    why: str = ""              # the rule that set it ("valuable pile", "on the way", ...)
+    why: str = ""              # the rule that set it ("valuable pile", "sweep", ...)
+    after: tuple | None = None  # a sweep's pile: where its itinerary goes on to after it (platform, x)
     detours: int = 0           # piles taken on the way (rule 5b) while it was suspended
 
     def text(self) -> str:
@@ -437,12 +394,19 @@ class Hunt:
         self._hung_at = 0.0                  # ... since when
         self._rope_rest = 0.0                # no rope before this (ROPE_AGAIN_S)
         self._rule = ""
-        # Leaving a ground: the piles to collect first (None: not leaving), the ones left when she decided
-        # to go. Only those: going after the drops of monsters shot on the way to them too, every kill on
-        # a trip made another trip, and she never left. The decision itself is made again at every pass
-        # (kept, a weak reason such as "nothing came into reach" lost respawns that came after it).
-        self._exit_piles: list[Pile] | None = None
-        self._exit_reason: str | None = None  # why, kept while she's off the ground and its spot (see `_at_ground`)
+        # Leaving a ground: why (None: not leaving), kept while she's off the ground and its spot (see `_at_ground`):
+        # the decision itself is made again at every pass at the ground (kept, a weak reason such as "nothing came
+        # into reach" lost respawns that came after it). The piles on her way out are the sweep's, within its budget
+        # (until 2026-10-30 every pile left when she decided, and only those: going after the drops of monsters shot on
+        # the way to them too, every kill on a trip made another trip, and she never left).
+        self._exit_reason: str | None = None
+        self._sweeper = sweep.Sweeper()      # the loot sweep's itinerary she's on (`_sweep`) ...
+        self._swept_for, self._swept = None, None  # ... the look (kept: its id is never another's meanwhile) and the
+        # way it was solved for last, and its first stop
+        self._pile_of: dict[int, Pile] = {}  # ... its spots' piles (sweep.Spot.key: the pile's id)
+        self._stood: dict[int, tuple] = {}  # pile (its id) -> (the pile, where she stood on it: looting.cant_pick)
+        self._sweep_said = None              # the itinerary last said (its order) and recorded ('sweep')
+        self._block_said: dict[int, tuple] = {}  # pile (its id) -> (the pile, whether it was left out unsafe as said)
         self._no_high_until = 0.0            # after a failed trip back up to the spot, not again for a while
         self._tracker = Tracker(self.model)  # the monsters for the mini-map (the navigator sends none with an escort)
         self._s: Scene | None = None         # the last look, for the 'hunt' record
@@ -451,8 +415,6 @@ class Hunt:
         self._end = float("inf")  # when the running hunt ends (run)
         self._loot_said: dict[int, bool] = {}  # pile (its id) -> whether it went first when she last said (_loot_first)
         self._unseen_for, self._unseen_list = None, []  # the look `_unseen` was worked out for, and its answer
-        self._landings: tuple = (None, {})  # the look `_landing` was worked out for, and platform -> where she'd land
-        self._block_said: dict[int, bool] = {}  # pile (its id) -> whether it waited when she last said (_pile_block)
 
     # --- the loop ------------------------------------------------------------------------------------
 
@@ -595,8 +557,8 @@ class Hunt:
             # Seen gone, or the inventory filled up on the way: not worth the rest of the trip.
             self.obj = self.stack.pop() if self.stack else None
             return None
-        if o is not None and o.kind == "pile" and o.pile is not None and (why := self._pile_block(s, o.pile)):
-            return self._call_off(o, why)  # not clear (PILE_CLEAR): it waits, still known
+        if o is not None and o.why == "valuable pile" and o.pile is not None and (why := self._unsafe(s, o.pile)):
+            return self._call_off(o, why)  # a monster would meet her there: it waits, still known
         if o is not None and o.kind == "spot" and o.platform == o.ground == s.platform.id:
             # A ground no standable spot reaches is hunted on itself: anywhere on it she's there (stance
             # closes in). Waiting to reach the spot's x, she was interrupted by close monsters for good.
@@ -633,32 +595,19 @@ class Hunt:
             return self._passing_shot(s, targets, others, visible, hidden, now)
         if (owed := self._owed(s, visible + hidden)) is not None:
             return self._finish(s, owed, visible, hidden, now)
-        if (pile := self._pile_here(s)) is not None and pile is not self.obj.pile:  # one she passes
-            return self._pick_here(s, pile)
-        if (way := self._detour(s, DETOUR_SLACK)) is not None:
-            extra, pile = way
-            self.obj.detours += 1
-            self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f}: on the way ({extra:+.1f} s)")
-            return self._go_for(pile, "on the way", s)
-        if self.obj.kind != "pile" and self._exit_piles is None and (pile := self._urgent_pile(s)) is not None \
-                and self._loot_first(s, pile, targets):
-            return self._go_for(pile, "urgent pile", s)
-        return self._travel(self._rule if self._rule in ("advance", "loot elsewhere", "urgent pile", "on the way",
-                                                         "high ground", "back to spot", "better spot", "lull loot")
+        if o.kind == "pile" and o.why == "sweep":  # on her way to one of the sweep's piles
+            return self._on_sweep(s, visible, hidden, now)
+        if (stop := self._sweep(s, self._dest(o))) is not None:  # the piles worth their time on her way
+            return self._sweep_act(s, stop, visible, hidden, now)
+        return self._travel(self._rule if self._rule in ("advance", "high ground", "back to spot", "better spot")
                             else "travel")
 
     def _at_ground(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
         v, here = self.visit, s.platform.id
-        leaving = self._exit_piles is not None  # the piles left when she decided to go (`_leave`)
+        leaving = self._exit_reason is not None  # she decided to go (`_leave`)
         if not leaving and not self._standable(here) and v.spot.platform != v.ground \
                 and time.monotonic() >= self._no_high_until:
             return self._to_spot(v.spot, "high ground")
-        # About to expire, a pile outranks shooting: where respawns never stop, something is always in
-        # reach, and below shooting the drops lay there until they vanished (a quarter of them). Not while
-        # she's leaving: then only the piles left when she decided; her kills on the trips to them made
-        # new urgent piles, and she never left.
-        if not leaving and (pile := self._urgent_pile(s)) is not None and self._loot_first(s, pile, targets):
-            return self._go_for(pile, "urgent pile", s)
         # Off the ground and its spot (after a pile elsewhere): back, unless she can stand here with the
         # ground in reach, or she's leaving it. Without this she hunted the pile's platform under the old
         # visit. Shooting (rule 3) is only from where she can stand, or on the ground or its spot.
@@ -670,30 +619,27 @@ class Hunt:
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] != "wait":
                 return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
-        if (pile := self._pile_here(s)) is not None:
-            return self._pick_here(s, pile)
         wide = self._wide(s)
         if not leaving and (spot := self._better_spot(wide)) is not None:
             v.changes += 1
             return self._to_spot(spot, "better spot")
-        if self._nothing_here(wide) and (pile := self._lull_pile(wide)) is not None:
-            return self._go_for(pile, "lull loot", wide)
-        # Away from the ground and its spot (an exit pile), the decision stands: from there she can't
+        # Away from the ground and its spot (a pile elsewhere), the decision stands: from there she can't
         # judge the ground (out of view, it looked empty, and was skipped for nothing).
         away = here not in (v.ground, v.spot.platform)
         reason = self._exit_reason if leaving and away else self._leaving(wide)
         if reason is None:
-            self._exit_piles = self._exit_reason = None  # staying after all
+            self._exit_reason = None  # staying after all
+            if (stop := self._sweep(wide, (v.spot.platform, v.spot.x))) is not None:  # piles worth a round trip
+                return self._sweep_act(wide, stop, visible, hidden, now)
             return self._wait(wide, targets)
-        if self._exit_piles is None:  # decided: the piles left now, and only those (see __init__)
-            self._exit_piles = [p for p in self.h.drops.known if self._fresh(p)]
         self._exit_reason = reason
-        return self._leave(wide, reason)
+        return self._leave(wide, reason, visible, hidden, now)
 
-    def _leave(self, s: Scene, reason: str) -> None:
-        """Rules 10 and 11: the piles left when she decided to go, then the next ground."""
-        if (pile := self._best_pile(s, near_only=False, among=self._exit_piles)) is not None:
-            return self._go_for(pile, "loot elsewhere", s)
+    def _leave(self, s: Scene, reason: str, visible=(), hidden=(), now: float | None = None) -> None:
+        """Leaving the ground: the sweep's piles on her way to the next one first (`_next_dest`: its spot), then rule 11,
+        the next ground."""
+        if (stop := self._sweep(s, self._next_dest(s))) is not None:
+            return self._sweep_act(s, stop, list(visible), list(hidden), time.monotonic() if now is None else now)
         self.log(f"  leaving platform {self.visit.ground}: {reason}")
         self._next_ground(s)
         return self._travel("advance")
@@ -1073,20 +1019,23 @@ class Hunt:
             telemetry.emit("event", kind="backstop", text=f"PASSING_S: {PASSING_S:.0f} s shooting on platform {pid}")
         return None
 
-    # --- loot ---------------------------------------------------------------------------------------
+    # --- loot: the sweep (from 2026-10-30) ------------------------------------------------------------------------
 
     def _worthless(self, p: Pile) -> bool:
         """A pile she's going for that isn't worth the rest of the trip: seen gone, or items with her
-        inventory full. Not its age: how long drops last is a guess (DROP_LIFE; the simulator's last
-        twice as long), and dropping trips at that age lost 6% of her drops there. The objective's
-        clock bounds the trip."""
+        inventory full. Not its age: how likely it is to lie there still weighs it in the sweep (Pile.still), and
+        the objective's clock bounds the trip."""
         return p.status == "gone" or (not p.mesos and self.h.looter.inventory_full)
 
-    def _fresh(self, p: Pile) -> bool:
+    def _candidate(self, p: Pile) -> bool:
+        """Whether pile `p` is one to go for: not seen gone, on a platform, stood on or gone for fewer than PILE_TRIES
+        times, hers or past its killer's ownership (OWN_S), mesos or room for items, not another player's (PLAYER_PILES),
+        and likely to lie there still (Pile.still, SURVIVE_MIN: the live service's survival, ledger.SURVIVAL, where until
+        2026-10-30 a pile was left at DROP_LIFE, 90 s, and another's waited OTHERS_AFTER, 30 s)."""
         now = time.monotonic()
-        return (p.status != "gone" and p.platform is not None and now - p.since < DROP_LIFE
-                and p.tries < PILE_TRIES and (p.hers or now - p.since >= OTHERS_AFTER)
-                and (p.mesos or not self.h.looter.inventory_full) and not self._theirs(p))
+        return (p.status != "gone" and p.platform is not None and p.tries < PILE_TRIES
+                and (p.hers or now - p.since >= OWN_S) and (p.mesos or not self.h.looter.inventory_full)
+                and not self._theirs(p) and p.still(now) >= SURVIVE_MIN)
 
     def _theirs(self, p: Pile) -> bool:
         """Whether pile `p` is another player's (PLAYER_PILES): no kill of hers explains it, it holds nothing
@@ -1094,28 +1043,6 @@ class Hunt:
         s = self._seen
         return (PLAYER_PILES and not p.hers and (p.dearest or 0.0) < self.valuable and s is not None
                 and near_rival(s.players, p.x, p.y) is not None)
-
-    def _pile_here(self, s: Scene) -> Pile | None:
-        """Rule 5: drops seen on her platform within PILE_NEAR, nothing by them, nothing in between."""
-        here, x = s.platform.id, s.where.x
-        mine = [m for m in s.monsters if m.platform == here]
-        if mine and not self._standable(here):
-            return None
-        for d in sorted((d for d in s.loot if d.platform == here and abs(d.x - x) <= PILE_NEAR),
-                        key=lambda d: abs(d.x - x)):
-            if any(abs(m.x - d.x) < PILE_GUARD for m in mine):
-                continue
-            pile = next((p for p in self.h.drops.known if p.platform == here and abs(p.x - d.x) <= 60), None)
-            if pile is not None and self._fresh(pile) and not self._pile_block(s, pile):
-                return pile
-        return None
-
-    def _pick_here(self, s: Scene, pile: Pile) -> None:
-        self._note("pile here")
-        self._tried(pile)
-        self.h.looter.walk_piles(s, [DropSpot(pile.x, pile.y, pile.platform, pile.since, pile.mesos, True)], margin=0)
-        self._idle_since = None
-        return None
 
     def _tried(self, pile: Pile) -> None:
         self.h.drops.tried(pile)
@@ -1128,162 +1055,374 @@ class Hunt:
         t = self.nav.planner.travel(here.id, s.where.x, p.platform) if here is not None else None
         return 1e6 if t is None else t + 1.0
 
-    def _urgent_pile(self, s: Scene) -> Pile | None:
-        """Rule 6: a pile whose remaining life is under the time to get there, pick it up, and the margin."""
-        now, best = time.monotonic(), None
-        for p in self.h.drops.known:
-            if not self._fresh(p):
-                continue
-            left = DROP_LIFE - (now - p.since)
-            travel = self._travel_to_pile(s, p)
-            need = travel + PICK_S + URGENT_MARGIN
-            if travel <= URGENT_TRAVEL and need >= left and need - URGENT_MARGIN < left \
-                    and (best is None or left < best[0]) and not self._pile_block(s, p):
-                best = (left, p)
-        return None if best is None else best[1]
+    def _extent(self, p: Pile) -> tuple[float, float]:
+        """The stretch of its platform pile `p`'s drops lie on (map x from, to): where a look saw them, else SPREAD either
+        side of where her kill died, kept on its platform."""
+        if p.xs:
+            lo, hi = min(p.xs), max(p.xs)
+        else:
+            lo, hi = (p.x, p.x) if p.status == "seen" else (p.x - SPREAD, p.x + SPREAD)
+        model = getattr(self, "model", None)
+        q = None if model is None else model.platform(p.platform)
+        return (lo, hi) if q is None else (max(lo, q.left), min(hi, q.right))
 
-    def _lull_pile(self, s: Scene) -> Pile | None:
-        """Rule 8: nothing wanted here; a pile she can get to and pick up before the next respawn of her kills
-        here is due. With none due there's no lull: the ground is empty and she leaves (rules 10 and 11 take
-        the piles). Going after piles on an empty ground, she never left it."""
-        due = min((t + RESPAWN for t in self.visit.kills if t + RESPAWN > time.monotonic()), default=None)
-        if due is None:
+    def _stand_s(self, p: Pile) -> float:
+        """How long standing on pile `p` takes: a press of pick-up for each drop and one more on each bunch of them
+        (PILE_GAP: picked up from one place), PILE_EVERY_MS apart, and the walk over its stretch (`_extent`)."""
+        lo, hi = self._extent(p)
+        n = max(1, len(p.xs) or len(p.items))
+        bunches = len(_piles(list(p.xs))) if p.xs else 1
+        return (n + bunches) * PILE_EVERY_MS / 1000 + (hi - lo) / WALK_SPEED
+
+    def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float, float | None]:
+        """The sweep's terms on her way to `dest` as of look `s`: what her time is worth (`_time_worth`) and its budget
+        (None: sweep.budget_for's). In a lull at the ground she's at (a round trip back to its spot, nothing wanted left
+        on it, `_nothing_here`, and a kill of hers there due back, `_due_back`), her time is worth nothing until the
+        respawn and the budget is that wait (rule 8's, lull loot, until 2026-10-30: in the simulator's loop_lull_loot,
+        with a 2 s budget for her round trips from 13 to 12's drops, she picked up 5 piles in 3 minutes where 20)."""
+        v = self.visit
+        if dest is not None and v is not None and v.arrived is not None and dest == self._home() \
+                and self._nothing_here(s) \
+                and (due := self._due_back()) is not None and due > 0.0 and self._shoot_rate(s, list(s.monsters))[0] <= 0:
+            return 0.0, max(sweep.BUDGET_MIN, due)
+        return self._time_worth(s, dest), None
+
+    def _time_worth(self, s: Scene, dest: tuple[int, float] | None = None) -> float:
+        """What her time is worth now, EXP a second, on her way to `dest` (the sweep's price of it: the marginal value
+        theorem's bar, as at a stop): what she makes at this ground (`_rate_here`), on her way to one what the best gives
+        (`_best_rate`), or, more, what's in reach now (`_shoot_rate`: EXP before loot)."""
+        v, rate = self.visit, 0.0
+        if v is not None and v.arrived is not None:
+            rate = self._rate_here()
+        elif s.platform is not None and (best := self._best_rate(s)) is not None:
+            rate = best[0]
+        return max(rate, self._shoot_rate(s, list(s.monsters))[0])
+
+    def _dest(self, o: "Objective | None") -> tuple[int, float] | None:
+        """Where objective `o` takes her (platform, map x), the sweep's way on; None: none."""
+        if o is None:
             return None
-        return self._best_pile(s, near_only=True, budget=due - time.monotonic())
+        if o.x is not None:
+            return o.platform, o.x
+        q = self.model.platform(o.platform)
+        return o.platform, (q.left + q.right) / 2
 
-    def _best_pile(self, s: Scene, near_only: bool, budget: float = 1e6, among: list[Pile] | None = None) -> Pile | None:
-        """The pile worth the most per second of travel (Pile.value: what was seen in it, by the game data's
-        prices), within `budget` s (of `among`, if given)."""
-        best = None
-        for p in self.h.drops.known if among is None else among:
-            if not self._fresh(p):
+    def _next_dest(self, s: Scene) -> tuple[int, float] | None:
+        """Leaving the ground: the spot of the best other ground she'd go to (`_best_rate`, no draw: the next ground's
+        own choice has one), the sweep's way on; None: none."""
+        best = self._best_rate(s) if s.platform is not None else None
+        if best is None:
+            return None
+        sp = spots.best_spot(self.model, best[1], self.kinds, self.danger)
+        return sp.platform, sp.x
+
+    def _arrive(self, a: int, ax: float, b: int, bx: float) -> float | None:
+        """Her route time from (platform a, x) to standing at x on platform b (Planner.arrive: its searches kept by where
+        from, rounded), from where she is to the nearest 5 units (the sweep asks it from every look)."""
+        return self.nav.planner.arrive(a, 5.0 * round(ax / 5.0), b, bx)
+
+    def _sweep(self, s: Scene, dest: tuple[int, float] | None, say: bool = True) -> "sweep.Stop | None":
+        """The loot sweep's next stop from look `s` on her way to `dest` (platform, x; None: nowhere after it), or None:
+        of the drop store's candidates as pick spots (`_spots`: their worth, stands, landings, survival and guards), by
+        her route times (`_arrive`), her time worth `_time_worth` for that way and its budget (`_sweep_terms`: in a lull,
+        the wait for the respawn; behavior.sweep: the itinerary she's on kept unless another is clearly better,
+        sweep.Sweeper). Solved once a look for each `dest`; the itinerary said
+        and recorded (a 'sweep' record) when it changes (`say`)."""
+        if s.where is None or s.platform is None:
+            return None
+        key = (s, dest)  # (the look itself, not its id: one gone, another may take its id, and a solve for it be
+        # taken for the new look's; a run's choices then went by where in memory its looks were)
+        last = getattr(self, "_swept_for", None)
+        if last is not None and last[0] is s and last[1] == dest:
+            return self._swept
+        if not hasattr(self, "_sweeper"):  # (tests make a hunt without __init__)
+            self._sweeper, self._pile_of, self._stood, self._sweep_said = sweep.Sweeper(), {}, {}, None
+        spots_, out = self._spots(s)
+        if not spots_:  # (nothing to pick up: no itinerary, nor her time's price worked out)
+            self._sweeper.drop()
+            self._swept_for, self._swept = key, None
+            return None
+        rate, budget = self._sweep_terms(s, dest)
+        it = self._sweeper.solve(spots_, (s.platform.id, s.where.x), dest, rate, self._arrive, MESO_EXP, budget)
+        it.out.update(out)
+        self._swept_for, self._swept = key, it.first
+        said = (it.keys(), dest)
+        if say and said != self._sweep_said:
+            self._sweep_said = said
+            if it.stops:
+                self.log("  sweep: " + ", then ".join(
+                    f"{_contents(self._pile_of[st.spot.key])} on {st.spot.platform} at x {st.spot.x:.0f}"
+                    + (f" (a {', '.join(g.monster.kind for g in st.spot.guards)} shot first)" if st.spot.guards else "")
+                    for st in it.stops) + f": {it.extra:+.1f} s on her way for {it.gain:.0f} EXP's worth")
+            if telemetry.recording():
+                telemetry.emit("sweep", dest=None if dest is None else [dest[0], round(dest[1])],
+                               candidates=len(spots_), **it.record())
+        return it.first
+
+    def _sweep_calls(self, s: Scene) -> bool:
+        """Whether the sweep has something else for her than the trip she's on (`_interrupt`): on a trip to a spot, a
+        pile on her way; on a trip to one of its piles, another (or none any more, or a guard to shoot first). Taken at
+        the next pass."""
+        o = self.obj
+        if o is None or o.kind not in ("spot", "pile") or (o.kind == "pile" and o.why != "sweep"):
+            return False
+        first = self._sweep(s, self._dest(o) if o.kind == "spot" else self._after_pile(), say=False)
+        if o.kind == "spot":
+            return first is not None
+        return first is None or self._pile_of.get(first.spot.key) is not o.pile or bool(first.spot.guards)
+
+    def _after_pile(self) -> tuple[int, float] | None:
+        """Where she goes on to after the sweep's pile she's going for: where the itinerary it's of goes on to
+        (Objective.after: leaving a ground, the next one), else the objective under it, else back to the ground's spot
+        (`_home`)."""
+        o = self.obj
+        if o is not None and o.kind == "pile" and o.after is not None:
+            return o.after
+        parent = self.stack[-1] if self.stack else None
+        return self._dest(parent) if parent is not None else self._home()
+
+    def _on_sweep(self, s: Scene, visible, hidden, now: float) -> None:
+        """On her way to the sweep's pile (the objective): the sweep solved again from where she is on her way on
+        (`_after_pile`); the same pile first, on to it (at it, its stand or its landing: `_sweep_act`), else what it has
+        now instead (another pile, a guard to shoot first, or nothing: the objective under it)."""
+        o = self.obj
+        stop = self._sweep(s, self._after_pile())
+        pile = None if stop is None else self._pile_of.get(stop.spot.key)
+        if pile is not o.pile or stop.spot.guards or self._at_pile(s, pile):
+            self.obj = self.stack.pop() if self.stack else None
+            return None if stop is None else self._sweep_act(s, stop, visible, hidden, now)
+        return self._travel("sweep")
+
+    def _home(self) -> tuple[int, float] | None:
+        """Where she comes back to at the ground she's at: its spot (the sweep's round trips)."""
+        v = self.visit
+        return None if v is None else (v.spot.platform, v.spot.x)
+
+    def _spots(self, s: Scene) -> tuple[list["sweep.Spot"], dict]:
+        """The drop store's candidates (`_candidate`) as the sweep's pick spots as of look `s`, and why each pile left
+        out was (by its key): each where its drops lie (`_extent`, its middle), its worth (Pile.value), its stand
+        (`_stand_s`), s until its drops land (an expected pile's: DROP_LANDS after the kill), its survival from now
+        (Pile.still) and what's to be shot first (`_guards`, by when she'd be there going now: `_travel_to_pile`)."""
+        now = time.monotonic()
+        out, found = {}, []
+        self._pile_of = {}
+        for p in self.h.drops.known:
+            if not self._candidate(p):
                 continue
-            t = self._travel_to_pile(s, p) + PICK_S
-            if t <= budget and (not near_only or t < 20) and (best is None or p.value / t > best[0]) \
-                    and not self._pile_block(s, p):
-                best = (p.value / t, p)
-        return None if best is None else best[1]
+            lo, hi = self._extent(p)
+            stand = self._stand_s(p)
+            lands = max(0.0, p.since + DROP_LANDS - now) if p.status == "expected" else 0.0
+            guards, why = self._guards(s, p, max(self._travel_to_pile(s, p), lands), stand)
+            said = getattr(self, "_block_said", None)
+            was = None if said is None else said.get(id(p))
+            if said is not None and (was is None or was[0] is not p or was[1] != (why is not None)):
+                said[id(p)] = (p, why is not None)  # (said as it starts waiting, and when it ends)
+                if why is not None:
+                    self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, {why}")
+            if why is not None:
+                out[p.key] = "unsafe: " + why
+                continue
+            self._pile_of[p.key] = p
+            found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, p.value, stand, lands,
+                                    (lambda dt, p=p: p.still(now, dt)), guards))
+        return found, out
+
+    def _about(self, s: Scene, pid: int) -> tuple[list[Monster], list[Monster]]:
+        """The monsters that count as a danger (attack.danger) on platform `pid` as of look `s`, as (those the state has
+        on screen, those about that it didn't find: `_unseen`), none her kills dying there (ledger.dying: the pile's own
+        monster drawn dying; until 2026-10-30 12-28% of the piles' waits live were for it) nor of the feed's tracks
+        taken for dead (Ledger.dead). [] both where nothing counts (the first map)."""
+        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
+        if d is None or not d.any:
+            return [], []
+        ledger = getattr(self.h, "ledger", None)
+        kills = ledger.kills if ledger is not None else []
+        die, dead = (getattr(ledger, "die", {}), getattr(ledger, "dead", {})) if ledger is not None else ({}, {})
+        seen = [*s.monsters, *[m for m in getattr(s, "swept", ()) if not any(m is o for o in s.monsters)]]
+
+        def counts(m) -> bool:
+            return m.platform == pid and d.share(m.kind) > 0 and not dying(kills, m, s.t, seen, die, dead)
+        return [m for m in seen if counts(m)], [m for m in self._unseen(s) if counts(m)]
+
+    def _reach_of(self, m: Monster) -> tuple:
+        """Monster `m`'s walk for the sweep's checks (sweep.meets): its velocity the way perception says it heads at its
+        kind's speed from the game data (monsters.walk_vx; None, its heading not known: either way), its speed, half its
+        body's width (monsters.touch_box), its platform's ends."""
+        if getattr(self, "_speeds", None) is None:
+            self._speeds, self._bodies = speeds(self.model), bodies(self.model)
+        speed = self._speeds.get(m.kind, DEFAULT_SPEED)
+        vx = walk_vx(m.kind, getattr(m, "facing", 0), getattr(m, "pose", ""), self._speeds)
+        q = self.model.platform(m.platform)
+        return vx, speed, touch_box(m.kind, self._bodies.get(m.kind))[0], q.left, q.right
+
+    def _guards(self, s: Scene, p: Pile, at: float, stand: float) -> tuple[tuple, str | None]:
+        """What would meet her standing on pile `p` from `at` s from now for `stand` s and sweep.STAND_PAST_S more (her
+        body's box against each monster's that counts there, `_about`, walking as `_reach_of` has it: sweep.meets), as
+        (the guards to shoot first, why the pile is left out or None: "a horny-mushroom [unseen ]at x 890 on 23 would meet
+        her there"): every one that would, if a star from where she is hits each (`_hits`) and the state has it on screen
+        (one about that it didn't find, "unseen", isn't thrown at), its kill time (Attacks.kill_s) and its EXP; else the
+        pile is left out ("in general you should kill all the mobs that are in the way, try not to hit by mobs just for
+        picking up loots": the user, 2026-10-30). Nothing where nothing counts (the first map)."""
+        seen, unseen_ = self._about(s, p.platform)
+        if not seen and not unseen_:
+            return (), None
+        lo, hi = self._extent(p)
+        t1 = at + stand + sweep.STAND_PAST_S
+        met, rest = [], [*seen, *unseen_]
+        while (m := sweep.meets(rest, lo, hi, at, t1, self._reach_of, HER_HALF)) is not None:
+            met.append(m)
+            rest = [o for o in rest if o is not m]
+        if not met:
+            return (), None
+        for m in met:
+            on_screen = any(m is o for o in seen)
+            if not on_screen or not self._hits(s, m):
+                return (), f"a {m.kind} {'' if on_screen else 'unseen '}at x {m.x:.0f} on {m.platform} would meet her there"
+        attacks = getattr(self.h, "attacks", None)
+        return tuple(sweep.Guard(m, attacks.kill_s(m) if attacks is not None else 1.0,
+                                 self.tour.exp.get(m.kind, self._avg_exp())) for m in met), None
+
+    def _unsafe(self, s: Scene, p: Pile) -> str | None:
+        """Why standing on pile `p` once she's there from look `s` would have a monster meet her that she can't shoot
+        first from here (`_guards`), or None (rule 6a's pile: it waits)."""
+        return self._guards(s, p, self._travel_to_pile(s, p), self._stand_s(p))[1]
+
+    def _at_pile(self, s: Scene, p: Pile) -> bool:
+        """Whether look `s` has her at pile `p`: on its platform, by its stretch (a trip's arrival, ARRIVE_TOLERANCE)."""
+        if s.platform is None or s.where is None or s.platform.id != p.platform:
+            return False
+        lo, hi = self._extent(p)
+        return lo - ARRIVE_TOLERANCE - STOOD_ON <= s.where.x <= hi + ARRIVE_TOLERANCE + STOOD_ON
+
+    def _sweep_act(self, s: Scene, stop: "sweep.Stop", visible, hidden, now: float) -> None:
+        """The sweep's next stop carried out: its guards shot first ('sweep: clear first'), else at the pile its stand
+        (`_stand`; its drops' landing waited for, 'sweep: landing'), else a trip there ('sweep': the navigator's, planned
+        and replanned at every state as any)."""
+        sp = stop.spot
+        pile = self._pile_of.get(sp.key)
+        if pile is None:
+            return None
+        if sp.guards:
+            guards = [g.monster for g in sp.guards]
+            return self._shoot(s, guards, list(visible), list(hidden), now, "sweep: clear first", approach=False)
+        if self._at_pile(s, pile):
+            if sp.lands > 0.0:
+                self._note("sweep: landing")
+                time.sleep(min(sp.lands, 0.1))
+                return None
+            self._note("sweep")
+            return self._stand(s, pile)
+        return self._go_for(pile, "sweep", s, after=self._sweeper.dest)
+
+    def _stand(self, s: Scene, pile: Pile) -> None:
+        """Pick up pile `p` from where look `s` has her by it: only if nothing would meet her there now (`_guards`, from
+        now: else the next pass's sweep decides again: the guard shot first, or the pile left), each bunch of its drops
+        seen (PILE_GAP) walked to from the nearer end and stood on, a press of pick-up for each drop and one more (its
+        drops not seen yet, the walk over SPREAD either side of where her kill died, pressing all the way); a drop still
+        where she stood twice can't be picked up (looting.cant_pick: someone else's, or her inventory full). One try of
+        the pile's (PILE_TRIES); a telemetry event 'pick'. What's left the next look's drops show (the next pass's sweep:
+        until 2026-10-30 a mop-up of its own, 0.3 s and a look between its rounds)."""
+        here, x = s.platform.id, s.where.x
+        guards, why = self._guards(s, pile, 0.0, self._stand_s(pile))
+        if why is not None or guards:
+            return None
+        looter = self.h.looter
+        seen = [d for d in looter.wanted(s.loot) if d.platform == here and abs(d.x - pile.x) <= LOOT_REACH]
+        kept = self._stood.get(id(pile))
+        if kept is None or kept[0] is not pile:
+            kept = self._stood[id(pile)] = (pile, [])
+        stood = kept[1]
+        stuck = [d for d in seen if sum(abs(sx - d.x) <= STOOD_ON for sx in stood) >= 2]
+        if stuck:
+            looter.cant_pick(stuck)
+            seen = [d for d in seen if not any(d is k for k in stuck)]
+        if seen:
+            xs = sorted(d.x for d in seen)
+            bunches = []
+            for d in xs:  # (as looting._piles bunches them, with how many in each)
+                if bunches and d - bunches[-1][-1] < PILE_GAP:
+                    bunches[-1].append(d)
+                else:
+                    bunches.append([d])
+            goals = [(sum(b) / len(b), len(b) + 1) for b in bunches]
+        elif pile.status == "expected" and not stood:
+            lo, hi = self._extent(pile)
+            goals = [(lo, 1), (hi, 2)]
+        else:  # (seen there before, none seen now from by it: gone, as the store will have it)
+            self._tried(pile)
+            return None
+        if abs(x - goals[-1][0]) < abs(x - goals[0][0]):
+            goals.reverse()
+        actions, x0, first = self.h.actions, x, True
+        for goal, presses in goals:
+            if abs(goal - x) >= MIN_WALK:
+                actions.walk(RIGHT if goal > x else LEFT, abs(goal - x))
+                if first and abs(goal - x) >= RUN_UNITS:
+                    self._ran(x0, goal)
+                x, first = goal, False
+            actions.pick_here(presses)
+            stood.append(goal)
+        self._tried(pile)
+        self.h.report.loot_runs += 1
+        self._idle_since = None
+        if telemetry.recording():
+            telemetry.emit("event", kind="pick", platform=here, x=round(pile.x), drops=len(seen),
+                           stood=[round(g) for g, _ in goals], tries=pile.tries)
+        return None
+
+    def _ran(self, x0: float, goal: float) -> None:
+        """A stand's walk of RUN_UNITS or more from map x0 to `goal`, told to her moves' watch (keycheck.MoveWatch, as the
+        navigator's chains tell it of theirs): whether a glance after it has her dot RUN_SEEN units on. Her arrow keys on
+        other keys in the game, her stands' walks never moved her and, standing by her drops, no chain of hers ran to
+        doubt them (loop_tree_grind_arrow_key: no key check in its 4.5 minutes, where with the old rules one at 61 s)."""
+        moves, senses = getattr(self.h, "moves", None), getattr(self.h, "senses", None)
+        if moves is None or senses is None or not hasattr(senses, "glance"):
+            return
+        dot, _ = senses.glance()
+        if dot is not None:
+            moves.ran(time.monotonic(), abs(senses.localizer.to_map(dot)[0] - x0) >= RUN_SEEN)
 
     def _valuable_pile(self, s: Scene) -> Pile | None:
         """Rule 6a: of the piles seen to hold a drop worth `valuable` mesos or more (looting.Worth: Pile.dearest),
         VALUABLE_TRAVEL s away at most and gone for at once fewer than VALUABLE_TRIES times, the one worth the most
-        per second of travel; None while she's going for one already."""
+        per second of travel; None while she's going for one already. Only one where nothing would meet her standing
+        on it that she can't shoot first (`_unsafe`)."""
         if self.obj is not None and self.obj.why == "valuable pile":
             return None
         best = None
         for p in self.h.drops.known:
-            if p.dearest is None or p.dearest < self.valuable or p.rushed >= VALUABLE_TRIES or not self._fresh(p):
+            if p.dearest is None or p.dearest < self.valuable or p.rushed >= VALUABLE_TRIES or not self._candidate(p):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
-            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]) and not self._pile_block(s, p):
+            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]) and not self._unsafe(s, p):
                 best = (p.worth / t, p)
         return None if best is None else best[1]
 
     def _loot_first(self, s: Scene, p: Pile, monsters, say: bool = True) -> bool:
         """EXP before loot: whether pile `p` goes ahead of shooting what's in reach of `monsters` from where she stands
-        in look `s` (_shoot_rate). With nothing in reach, it does, unless what getting it would cost her in HP
-        (`_pile_price`) is more than it's worth (at MESO_EXP an meso). Else only if what waiting would likely lose of it
-        (its worth x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso), less that price, is more
-        than the EXP she'd make from what's in reach over the trip there and back (and PICK_S on it). Said in her log
-        when the answer for a pile changes (`say`)."""
+        in look `s` (_shoot_rate). With nothing in reach, it does. Else only if what waiting would likely lose of it (its
+        worth x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso) is more than the EXP she'd make
+        from what's in reach over the trip there and back (and PICK_S on it). Said in her log when the answer for a pile
+        changes (`say`)."""
         if not EXP_FIRST:
             return True
-        price = self._pile_price(s, p)
         rate, busy = self._shoot_rate(s, monsters)
         if rate <= 0.0:
-            return price <= p.value * MESO_EXP
+            return True
         risk = self._at_risk(s, p, busy)
         to = self._travel_to_pile(s, p)
         trip = 2 * to + PICK_S
-        first = risk * p.value * MESO_EXP - price > rate * trip
+        first = risk * p.value * MESO_EXP > rate * trip
         if say and self._loot_said.get(id(p)) != first:
             self._loot_said[id(p)] = first
             what = (f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {p.value:.0f}, at risk "
-                    f"{risk:.0%}" + (f", its HP {price:.0f} EXP" if price else "") + f") against {rate:.1f} EXP a "
-                    f"second in reach for {busy:.0f} s, {trip:.1f} s there and back")
+                    f"{risk:.0%}) against {rate:.1f} EXP a second in reach for {busy:.0f} s, {trip:.1f} s there and back")
             self.log(what + (": the pile first" if first else ": shooting first"))
             if telemetry.recording():
                 telemetry.emit("event", kind="loot_first", first=first, worth=round(p.value, 1), risk=round(risk, 2),
                                rate=round(rate, 2), busy=round(busy, 1), trip=round(trip, 1), platform=p.platform,
-                               x=round(p.x), price=round(price, 1))
+                               x=round(p.x))
         return first
-
-    def _landing(self, s: Scene, p: Pile) -> float:
-        """Where on pile `p`'s platform she'd be when she gets there from look `s`: where she stands, on it; else where
-        the quickest route there lands her (its last move's: route.Move.land_x; the trip's own may land elsewhere),
-        the pile itself if there's none. Worked out once a look for each platform."""
-        here = s.platform
-        if here is not None and here.id == p.platform:
-            return s.where.x
-        if self._landings[0] is not s:
-            self._landings = (s, {})
-        got = self._landings[1]
-        if p.platform not in got:
-            path = None if here is None else self.nav.planner.plan(here.id, s.where.x, p.platform)
-            got[p.platform] = path[-1].land_x if path else p.x
-        return got[p.platform]
-
-    def _touchers(self, s: Scene, pid: int, at: float, stay: float) -> list[tuple[str, float, str]]:
-        """The monsters that count as a danger (attack.danger) about platform `pid` as of look `s`, for her there from
-        `at` s on for `stay` s: as (kind, map x, why), those the look found on it ('seen'), those about it that it
-        didn't ('unseen': `_unseen`), and with DUE_BACK its spawn points whose monster is due back then ('due back':
-        DUE_FROM to DUE_TO s after a kill of hers of its kind on it, the point nearest the kill)."""
-        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
-        if d is None or not d.any:
-            return []
-        out = [(m.kind, m.x, "seen") for m in [*s.monsters, *getattr(s, "swept", ())]
-               if m.platform == pid and d.share(m.kind) > 0]
-        out += [(m.kind, m.x, "unseen") for m in self._unseen(s) if m.platform == pid and d.share(m.kind) > 0]
-        now = time.monotonic()
-        for k in reversed(self.h.ledger.kills if DUE_BACK else ()):
-            if k.t < now - DUE_TO:
-                break
-            if not k.placed or k.platform != pid or d.share(k.kind) <= 0:
-                continue
-            if k.t + DUE_FROM <= now + at + stay and now + at <= k.t + DUE_TO:
-                xs = [x for q, x, kind in d.points if q == pid and kind == k.kind]
-                if xs:
-                    out.append((k.kind, min(xs, key=lambda x: abs(x - k.x)), "due back"))
-        return out
-
-    def _pile_block(self, s: Scene, p: Pile) -> str | None:
-        """Why pile `p` isn't to be gone for from look `s` now, or None: a monster that counts as a danger (`_touchers`:
-        seen, about unseen, or with DUE_BACK due back at its spawn point by the time she'd be there) within PILE_CLEAR
-        of the stretch of its platform from where she'd land (`_landing`), or stands on it, to the pile (see
-        PILE_CLEAR). Said in her log when it changes for a pile. Never where nothing counts as a danger (the first
-        map)."""
-        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
-        if d is None or not d.any or p.platform is None or s.where is None or s.platform is None:
-            return None
-        land = self._landing(s, p)
-        on_it = s.platform.id == p.platform
-        lo, hi = sorted((land, p.x))
-        at = 0.0 if on_it else self._travel_to_pile(s, p)
-        why = None
-        for kind, x, how in self._touchers(s, p.platform, at, PICK_S + (hi - lo) / WALK_SPEED):
-            gap = max(lo - x, x - hi, 0.0)
-            if gap < PILE_CLEAR:
-                why = f"a {kind} {how} {gap:.0f} units from {'her way to it' if hi > lo else 'it'}"
-                break
-        if self._block_said.get(id(p)) != (why is not None):  # (said when it starts waiting, not as the gap moves)
-            self._block_said[id(p)] = why is not None
-            if why is not None:
-                self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, {why}")
-        return why
-
-    def _pile_price(self, s: Scene, p: Pile) -> float:
-        """What getting pile `p` would cost her in HP as of look `s`, in EXP (HP_EXP a bar): for each monster that counts
-        about its platform (`_touchers`), its danger (Danger.of: its touch's share of her HP, by how soon it can be on
-        her) where she'd land or at the pile, the worse; 0 where nothing counts as a danger."""
-        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
-        if d is None or not d.any or p.platform is None or s.where is None or s.platform is None:
-            return 0.0
-        q = self.model.platform(p.platform)
-        land = self._landing(s, p)
-        at = 0.0 if s.platform.id == p.platform else self._travel_to_pile(s, p)
-        hp = sum(max(d.of(kind, q, x, q, land), d.of(kind, q, x, q, p.x))
-                 for kind, x, _ in self._touchers(s, p.platform, at, PICK_S))
-        return hp * HP_EXP
 
     def _shoot_rate(self, s: Scene, monsters) -> tuple[float, float]:
         """EXP a second she'd make shooting the wanted ones of `monsters` in reach from where she stands in look `s` (as
@@ -1301,29 +1440,30 @@ class Hunt:
         return (exp / busy if busy > 0 else 0.0), busy
 
     def _at_risk(self, s: Scene, p: Pile, wait: float) -> float:
-        """The chance pile `p` is gone if she first shoots for `wait` s, then goes for it: by its life (DROP_LIFE, a
-        guess), 0 with URGENT_MARGIN or more of it left once she'd be there, 1 with none, in proportion between (0 if
-        it's gone before she could be there going now); RIVAL_TAKES at least if another player is by it (players.
-        near_rival) and it isn't hers alone by then (OWN_S; a pile no kill of hers explains never is)."""
+        """The chance pile `p` is gone if she first shoots for `wait` s, then goes for it, that it wouldn't be going now:
+        by its survival (Pile.still: ledger.SURVIVAL) at her getting there then against now (0 if it's gone before she
+        could be there going now); RIVAL_TAKES at least if another player is by it (players.near_rival) and it isn't
+        hers alone by then (OWN_S; a pile no kill of hers explains never is)."""
         now = time.monotonic()
-        left, to = DROP_LIFE - (now - p.since), self._travel_to_pile(s, p) + PICK_S
-        if left < to:
+        to = self._travel_to_pile(s, p) + PICK_S
+        going = p.still(now, to)
+        if going <= SURVIVE_MIN:
             return 0.0
-        risk = min(1.0, max(0.0, (wait + to + URGENT_MARGIN - left) / URGENT_MARGIN))
+        risk = max(0.0, 1.0 - p.still(now, wait + to) / going)
         players = (self._seen or s).players
         if near_rival(players, p.x, p.y) is not None and (not p.hers or now - p.since + wait + to >= OWN_S):
             risk = max(risk, RIVAL_TAKES)
         return risk
 
     def _call_off(self, o: Objective, why: str | None = None) -> None:
-        """Her trip for a pile ends where she is (something in reach goes first now, or `why`: it isn't clear,
-        `_pile_block`, which said so): the pile stays known, not counted as tried nor rushed, and the objective under
-        it, if any, is hers again."""
+        """Her trip for a pile ends where she is (something in reach goes first now, or `why`: a monster would meet her
+        there, `_unsafe`): the pile stays known, not counted as tried nor rushed, and the objective under it, if any, is
+        hers again."""
         p = o.pile
         if o.why == "valuable pile":
             p.rushed = max(0, p.rushed - 1)
-        if why is None:
-            self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, shooting what's in reach first")
+        self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f}: later, "
+                 + ("shooting what's in reach first" if why is None else why))
         self.obj = self.stack.pop() if self.stack else None
         return None
 
@@ -1332,55 +1472,19 @@ class Hunt:
         any wanted monster in reach, the pile under her waiting)."""
         return self._shoot_rate(s, s.monsters)[0] > 0.0
 
-    def _detour(self, s: Scene, slack: float = 0.0) -> tuple[float, Pile] | None:
-        """Rule 5b: travelling, the pile a stop at costs DETOUR_S at most on top of the trip (and `slack` more):
-        her way to it (and its drops' landing, for one not seen yet), PICK_S on it and her way on from it to the
-        objective's place, less her way there from here (Planner.arrive), the most worth per second of that first;
-        with what it costs. Her ways to the objective's place by the routes its trip takes, keeping off what it
-        keeps off (_keep_off: a spot's ground): weighed by the planner's plain routes, from 36 at x 449 a pile at
-        779 on her way to 17's spot on 16 was 1.3 s more by the right side, past 17, where the trip goes by the
-        left, and 3.8 s more by that. Her way to the pile is the stop's own trip's, which keeps off nothing. Not
-        for a pile more than DETOUR_REACH s away, nor one with a monster by it, nor on a platform she can't stand
-        on with monsters on it, as rule 5 has them; not while the objective is a pile on the way itself, a
-        valuable or an urgent one, nor after DETOURS."""
-        o = self.obj
-        if o is None or o.why in ("on the way", "valuable pile", "urgent pile") or o.detours >= DETOURS:
-            return None
-        plan, here, x, keep = self.nav.planner, s.platform.id, s.where.x, _keep_off(o)
-        direct = plan.arrive(here, x, o.platform, o.x, keep_off=keep)
-        if direct is None:
-            return None
-        now, best = time.monotonic(), None
-        for p in self.h.drops.known:
-            if p is o.pile or not self._fresh(p) or self._guarded(s, p) or self._pile_block(s, p):
-                continue
-            to, on = plan.arrive(here, x, p.platform, p.x), plan.arrive(p.platform, p.x, o.platform, o.x, keep_off=keep)
-            if to is None or on is None or to > DETOUR_REACH:
-                continue
-            lands = max(0.0, p.since + DROP_LANDS - now - to) if p.status == "expected" else 0.0
-            extra = to + lands + PICK_S + on - direct
-            if extra <= DETOUR_S + slack and (best is None or p.value / max(extra, PICK_S) > best[0]):
-                best = (p.value / max(extra, PICK_S), extra, p)
-        return None if best is None else best[1:]
-
-    def _guarded(self, s: Scene, p: Pile) -> bool:
-        """Whether a monster is by pile `p` (PILE_GUARD), or any on its platform where she can't stand: as her memory
-        has them as of look `s` (of any kind: a guard needn't be worth hunting)."""
-        there = self.h.memory.there(s.t, p.platform)
-        return bool(there) and (not self._standable(p.platform) or any(abs(m.x - p.x) < PILE_GUARD for m in there))
-
-    def _go_for(self, pile: Pile, rule: str, s: Scene) -> None:
+    def _go_for(self, pile: Pile, rule: str, s: Scene, after: tuple | None = None) -> None:
         parent = self.obj
         if parent is not None:
             self.stack.append(parent)  # suspended
         if rule == "valuable pile":
             pile.rushed += 1
-        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule)
-        if rule == "on the way" and parent is not None:
+        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule, after=after)
+        if rule == "sweep" and parent is not None:
             # A stop on the way shoots in passing out of the trip's own budget, and leaves finishing to it (once
             # it's done she owes them still): with budgets of their own, its stops shot on and on, and in the
             # simulator's hunt loop the objectives ran out their OBJECTIVE_S 99 times in 60 runs, 87 so (61 without
-            # the rule), for 128.3 EXP a minute against 128.7 and 90.1% of her drops against 90.0%.
+            # the rule), for 128.3 EXP a minute against 128.7 and 90.1% of her drops against 90.0% (rule 5b's piles on
+            # the way, as the sweep's now).
             self.obj.passing, self.obj.finishing = parent.passing, FINISH_S
         return self._travel(rule)
 
@@ -1552,7 +1656,7 @@ class Hunt:
         """The ground to hunt next: the best EXP per second, travel included (varied a little; of those about as good,
         GROUND_TIE, the one she left longest ago), and its spot."""
         self._leave_ground()
-        self._exit_piles = self._exit_reason = None
+        self._exit_reason = None
         now, values, best, scored = time.monotonic(), self.tour.ground_values(), None, []
         here = s.where.platform if s.where is not None else None
         for g in self.tour.hunting_grounds(self._visit_s):
@@ -1634,9 +1738,10 @@ class Hunt:
 
     def _interrupt(self, s: Scene) -> bool:
         """Asked before every chain of a trip: whether a rule calls for her here (close quarters, a valuable pile,
-        one she has hurt to finish, a target in reach she may shoot, a pile on the way, an urgent pile). A
-        valuable or an urgent pile calls for her only where it goes ahead of what's in reach (`_loot_first`, as `_pass`
-        asks it): one that waits stopped the trip "in position" on its first look, no move made, and the next pass
+        one she has hurt to finish, a target in reach she may shoot, a pile the sweep has on her way or another than the
+        one she's going for, `_sweep_calls`). A valuable pile calls for her only where it goes ahead of what's in reach
+        (`_loot_first`, as `_pass` asks it): one that waits stopped the trip "in position" on its first look, no move
+        made, and the next pass
         sent her off on it again, again and again, neither shooting nor moving once her time in passing there was spent
         (review, 2026-10-25: 1-4 such trips a run in loop_tree_ore_waits, one followed by 2.9 s without a throw in the
         harness's crowd). In reach, so too: only what the pass would shoot (fight._wanted, as its targets are: on the
@@ -1650,8 +1755,8 @@ class Hunt:
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
-        if o is not None and o.kind == "pile" and o.pile is not None and self._pile_block(s, o.pile):
-            return True  # not clear any more (`_pass` calls it off)
+        if o is not None and o.why == "valuable pile" and o.pile is not None and self._unsafe(s, o.pile):
+            return True  # a monster would meet her there now (`_pass` calls it off)
         wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
         if o is not None and o.why == "valuable pile":
             # At once: nothing else stops her, but something in reach that goes first now (`_loot_first`)
@@ -1669,10 +1774,7 @@ class Hunt:
         if o is not None and o.kind == "spot" and self._standable(here) \
                 and any(m.platform == o.ground for m in in_reach):
             return True
-        if self._detour(s) is not None:
-            return True
-        return o is not None and o.kind != "pile" and self._exit_piles is None \
-            and (pile := self._urgent_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)
+        return self._sweep_calls(s)
 
     def _arrived(self, o: Objective) -> None:
         if o.kind == "spot":
@@ -1684,11 +1786,11 @@ class Hunt:
                     self._progress = time.monotonic()
                     self.log(f"  at platform {v.ground}'s spot (platform {o.platform})")
         elif o.kind == "pile" and o.pile is not None:
-            p = o.pile
-            # Guarded (a monster by it): not a try. The guard is a target now (it's on her platform), so the
-            # next looks shoot it, and the pile is gone for again while it's still worth it.
-            if self.h.looter.collect(DropSpot(p.x, p.y, p.platform, p.since, p.mesos, p.status == "seen")):
-                self._tried(p)
+            # There: its stand at once, from a look where she got to (`_stand`: only where nothing would meet her
+            # there; not landed yet, or a monster by it, the next pass's sweep decides again).
+            s = self.h.look(mobs=True, loot=True)
+            if s.where is not None and s.platform is not None:
+                self._stand(s, o.pile)
             self.h.looter.pending.clear()
         self.obj = self.stack.pop() if self.stack else None
         self._idle_since = None
@@ -1901,10 +2003,11 @@ class Hunt:
         s = self._s
         if not telemetry.recording() or s is None or s.platform is None:
             return
-        urgent = self._urgent_pile(s)
+        first = getattr(self, "_swept", None)  # (the sweep's next pile: 'urgent', the mini-map's red one)
+        going = None if first is None else self._pile_of.get(first.spot.key)
         piles = [{"x": round(p.x, 1), "y": round(p.y, 1), "platform": p.platform, "status": p.status,
-                  "hers": p.hers, "urgent": p is urgent, "worth": round(p.value)}
-                 for p in self.h.drops.known if self._fresh(p)]
+                  "hers": p.hers, "urgent": p is going, "worth": round(p.value)}
+                 for p in self.h.drops.known if self._candidate(p)]
         v, o = self.visit, self.obj
         key = (self._rule, None if o is None else o.text(), None if v is None else v.ground,
                tuple((d["x"], d["platform"], d["status"], d["urgent"]) for d in piles))

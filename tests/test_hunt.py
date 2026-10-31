@@ -1,6 +1,6 @@
-"""The hunt loop's pile rules (behavior.hunt), on stand-ins: no map, no simulator (but where a hunter and its
-Hunt take their map's worth, on Tree Dungeon's from the game data). The loop itself runs end to end in the
-simulator's loop_* scenarios."""
+"""The hunt loop's rules (behavior.hunt), its loot sweep's among them, on stand-ins: no map, no simulator (but where a
+hunter and its Hunt take their map's worth, on Tree Dungeon's from the game data). The loop itself runs end to end in
+the simulator's loop_* scenarios."""
 
 import random
 import time
@@ -13,7 +13,7 @@ from gamelab.attack.spots import Spot
 from gamelab.behavior import hunt
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.hunt import Hunt, Objective, Visit
-from gamelab.behavior.ledger import Pile
+from gamelab.behavior.ledger import DROP_LANDS, Pile
 from gamelab.localization import mapdata
 
 from test_sim import KEYS, tree
@@ -41,7 +41,7 @@ def _hunt(piles, kills=(), travel=5.0):
     h.nav = SimpleNamespace(planner=SimpleNamespace(travel=lambda src, x, dst: travel,
                                                     arrive=lambda src, x, dst, dst_x=None, keep_off=(): travel))
     h.visit = Visit(1, Spot(1, 0.0, 1.0, True), kills=list(kills))
-    h._exit_piles, h.obj = None, None
+    h._exit_reason, h.obj, h.stack = None, None, []
     h._seen = None  # no look yet (so no other player by any pile)
     return h
 
@@ -54,43 +54,12 @@ def _pile(age, platform=2, hers=True, **kw):
     return Pile(100.0, 0.0, platform, time.monotonic() - age, hers, **kw)
 
 
-def test_a_pile_is_urgent_only_when_its_time_is_nearly_up_and_it_is_close():
-    # 5 s away (+1 s to land, +0.6 s on it) with the 30 s margin: urgent once under 36.6 s of its life is left.
-    old, young = _pile(hunt.DROP_LIFE - 30), _pile(10)
-    assert _hunt([young, old])._urgent_pile(_scene()) is old
-    assert _hunt([young])._urgent_pile(_scene()) is None
-    far = _hunt([old], travel=hunt.URGENT_TRAVEL + 1)  # farther ones wait until she leaves the ground
-    assert far._urgent_pile(_scene()) is None
-    # Too late to make it: 5 s of life left, 6.6 s to get it.
-    assert _hunt([_pile(hunt.DROP_LIFE - 5)])._urgent_pile(_scene()) is None
 
 
-def test_piles_no_kill_of_hers_explains_wait_and_a_pile_is_tried_twice_at_most():
-    h = _hunt([])
-    assert not h._fresh(_pile(10, hers=False)) and h._fresh(_pile(hunt.OTHERS_AFTER + 1, hers=False))
-    assert h._fresh(_pile(10, tries=1)) and not h._fresh(_pile(10, tries=hunt.PILE_TRIES))
-    assert not h._fresh(_pile(hunt.DROP_LIFE + 1)) and not h._fresh(_pile(10, status="gone"))
-    h.h.looter.inventory_full = True  # items can't be picked up any more; mesos still can
-    assert not h._fresh(_pile(10)) and h._fresh(_pile(10, mesos=True))
 
 
-def test_lull_loot_only_while_a_respawn_of_hers_is_due_and_back_in_time():
-    pile = _pile(10)
-    now = time.monotonic()
-    assert _hunt([pile])._lull_pile(_scene()) is None  # nothing due back: the ground is empty, she leaves
-    # Due back in 8 s; the pile takes 6.6 s (5 s there, 1 s to land, 0.6 s on it).
-    assert _hunt([pile], kills=[now - hunt.RESPAWN + 8])._lull_pile(_scene()) is pile
-    assert _hunt([pile], kills=[now - hunt.RESPAWN + 6])._lull_pile(_scene()) is None
 
 
-def test_leaving_takes_only_the_piles_left_when_she_decided():
-    a, b = _pile(10), _pile(10, platform=3)
-    h = _hunt([a])
-    h._exit_piles = [a]
-    h.h.drops.known.append(b)  # a kill on the way to a: its pile isn't gone for before she leaves
-    assert h._best_pile(_scene(), near_only=False, among=h._exit_piles) is a
-    a.tries = hunt.PILE_TRIES
-    assert h._best_pile(_scene(), near_only=False, among=h._exit_piles) is None
 
 
 def test_an_objective_s_clock_runs_while_it_is_suspended():
@@ -356,31 +325,21 @@ def _horny(platform=3):
 
 
 def test_exp_before_loot_a_pile_that_will_still_be_there_waits_for_what_is_in_reach():
-    """The user, 2026-10-24: "The hunt should be driven by maximizing the exp gain". A valuable pile 10 s old (its life
-    DROP_LIFE, 90 s), nobody by it: with a Horny Mushroom in reach she shoots first; with nothing in reach it goes."""
+    """The user, 2026-10-24: "The hunt should be driven by maximizing the exp gain". A valuable pile 10 s old (how long it
+    lies: ledger.SURVIVAL), nobody by it: with a Horny Mushroom in reach she shoots first; with nothing in reach it
+    goes."""
     ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
     h = _shooter([ore])
     s = _scene()
-    assert h._at_risk(s, ore, 4.0) == 0.0
+    assert 0.0 < h._at_risk(s, ore, 4.0) < 0.05  # (by the live survival: ledger.SURVIVAL, 2-3% lost over 4 s)
     assert not h._loot_first(s, ore, [_horny()])
-    assert ("sapphire-ore on platform 2 at x 100 (worth 120, at risk 0%) against 10.0 EXP a second in reach for 4 s, "
+    assert ("sapphire-ore on platform 2 at x 100 (worth 120, at risk 3%) against 10.0 EXP a second in reach for 4 s, "
             "6.6 s there and back: shooting first") in h.said[-1]  # (3 s to it: the planner's 2, and 1 to get off)
     assert h._loot_first(s, ore, [])  # nothing in reach: at once
     h.kinds = {"horny-mushroom"}  # a monster not worth hunting in reach doesn't hold it up
     assert h._loot_first(s, ore, [SimpleNamespace(kind="slime", platform=3, x=0.0, y=0.0)])
 
 
-def test_exp_before_loot_a_pile_at_risk_goes_first_when_it_is_worth_more_than_the_trip_s_exp():
-    # 10 s of its life left: gone if she shoots 11 s first, then goes (3 s there and PICK_S): no URGENT_MARGIN to spare
-    ore = _pile(hunt.DROP_LIFE - 10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
-    s = _scene()
-    slow = _shooter([ore], kill_s=11.0)  # the regular attack at a Horny Mushroom: 3.6 EXP a second
-    assert slow._at_risk(s, ore, 11.0) == 1.0
-    assert slow._at_risk(s, ore, 0.0) == pytest.approx((3.6 + 30 - 10) / 30, abs=0.01)  # going now: some to spare
-    assert slow._at_risk(s, _pile(hunt.DROP_LIFE - 3), 0.0) == 0.0  # gone before she's there anyway
-    assert slow._loot_first(s, ore, [_horny()])  # 120 x 0.5 = 60 against 3.6 x 6.6 = 24
-    fast = _shooter([ore], kill_s=3.3)  # Lucky Seven's: 12.1 EXP a second, 80 over the trip
-    assert not fast._loot_first(s, ore, [_horny()])
 
 
 def test_exp_before_loot_another_player_by_a_pile_puts_it_at_risk_once_it_is_not_hers_alone():
@@ -388,11 +347,17 @@ def test_exp_before_loot_another_player_by_a_pile_puts_it_at_risk_once_it_is_not
     s = _scene()
     young = _pile(2)
     h = _shooter([young], players=[rival])
-    assert h._at_risk(s, young, 4.0) == 0.0  # hers alone until OWN_S: 2 + 4 + 3 + 0.6 s in
+    assert h._at_risk(s, young, 4.0) < 0.05  # hers alone until OWN_S: 2 + 4 + 3 + 0.6 s in (its survival alone)
     assert h._at_risk(s, young, 10.0) == hunt.RIVAL_TAKES
     theirs = _pile(40, hers=False)
     assert h._at_risk(s, theirs, 0.0) == hunt.RIVAL_TAKES
     assert _shooter([theirs])._at_risk(s, theirs, 0.0) == 0.0  # nobody by it
+    # A valuable pile at risk so goes first where it's worth more than what's in reach would give over the trip: 120 x
+    # 0.5 x 0.5 = 30 against the regular attack's 3.6 EXP a second x 6.6 s (24); not against Lucky Seven's 12.1 (80)
+    ore = _pile(20, hers=False, items=("sapphire-ore",), worth=120.0, dearest=120.0)
+    assert _shooter([ore], kill_s=11.0, players=[rival])._loot_first(s, ore, [_horny()])
+    assert not _shooter([ore], kill_s=3.3, players=[rival])._loot_first(s, ore, [_horny()])
+    assert not _shooter([ore], kill_s=11.0)._loot_first(s, ore, [_horny()])  # nobody by it: its survival alone
 
 
 def test_a_trip_for_a_pile_that_went_first_is_called_off_for_what_goes_first_now():
@@ -409,34 +374,6 @@ def test_a_trip_for_a_pile_that_went_first_is_called_off_for_what_goes_first_now
     assert "sapphire-ore on platform 2 at x 100: later, shooting what's in reach first" in h.said[-1]
 
 
-def test_a_trip_stops_for_a_valuable_or_urgent_pile_only_where_it_goes_ahead_of_what_is_in_reach():
-    # Where `_pass` lets a pile wait (EXP before loot), the trip it sends her on doesn't stop for it at its first look:
-    # it did, "in position" with no move made, and the next pass sent her off again, neither shooting nor moving once
-    # her time in passing there was spent (review, 2026-10-25).
-    ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
-    h = _shooter([ore])
-    h.model, h._tops, h._halves = None, {}, {}
-    h._close_quarters = lambda s, monsters: False
-    h._owed = lambda s, monsters: None
-    h._standable = lambda pid: False
-    h._detour = lambda s, slack=0.0: None
-    h.obj = Objective("spot", 19, 36.0)
-    h.obj.passing[1] = hunt.PASSING_S  # her time in passing on this platform spent
-    horny = _horny()
-    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=1), where=SimpleNamespace(x=0.0, y=0.0), monsters=[horny],
-                        players=[])
-    assert h._valuable_pile(s) is ore and not h._loot_first(s, ore, [horny], say=False)
-    assert not h._interrupt(s)  # it waits: on her way
-    s.monsters = []
-    assert h._interrupt(s)  # nothing in reach: it goes at once
-    urgent = _pile(hunt.DROP_LIFE - hunt.URGENT_MARGIN - 2.0, worth=20.0)  # cheap, and about to go
-    h.h.drops.known = [urgent]
-    s.monsters = [horny]
-    h.h.attacks = SimpleNamespace(kill_s=lambda m: 3.3)  # Lucky Seven's: 12.1 EXP a second
-    assert h._urgent_pile(s) is urgent and not h._loot_first(s, urgent, [horny], say=False)
-    assert not h._interrupt(s)
-    s.monsters = []
-    assert h._interrupt(s)
 
 
 def test_a_trip_stops_for_what_is_in_reach_only_where_the_pass_would_shoot_it():
@@ -449,7 +386,7 @@ def test_a_trip_stops_for_what_is_in_reach_only_where_the_pass_would_shoot_it():
     h._close_quarters = lambda s, monsters: False
     h._owed = lambda s, monsters: None
     h._standable = lambda pid: False
-    h._detour = lambda s, slack=0.0: None
+    h._sweep_calls = lambda s: False
     h._pass_step = lambda s, targets: None
     h._star_hits = lambda s, m: False  # a jump's attack reaches it, a star from the ground doesn't
     h.obj = Objective("spot", 19, 36.0)  # her time in passing not spent
@@ -516,72 +453,14 @@ def test_a_hunter_on_a_map_whose_monsters_drops_are_not_known_says_so_once():
     assert len(said) == 1 and said[0].startswith("drops not known for Snail ")
 
 
-def _detour_hunt(piles, times):
-    """A Hunt whose route times are `times`: {(from platform, to platform): s} (Planner.arrive's), or keeping off
-    platforms, {(from, to, keep_off): s}."""
-    h = _hunt(piles)
-    h.nav.planner.arrive = lambda src, x, dst, dst_x=None, keep_off=(): times.get((src, dst, tuple(keep_off)),
-                                                                                  times.get((src, dst)))
-    h._standable = lambda pid: True
-    return h
 
 
-def _at(pid, x=0.0, monsters=()):
-    return SimpleNamespace(platform=SimpleNamespace(id=pid), where=SimpleNamespace(x=x), monsters=list(monsters),
-                           t=time.monotonic())
 
 
-def test_a_pile_a_little_off_her_way_is_picked_up_on_the_way():
-    # From 13 to 17's spot on 16, 5.7 s; by coins on 19 (2.0 s there, 0.6 on them, 4.4 on to 16): 1.3 s more.
-    near, far = _pile(20, platform=19), _pile(20, platform=12)
-    times = {(13, 16): 5.7, (13, 19): 2.0, (19, 16): 4.4, (13, 12): 3.0, (12, 16): 5.0}  # 12: 2.9 s more
-    h = _detour_hunt([far, near], times)
-    h.obj = Objective("spot", 16, 636.0)
-    assert h._detour(_at(13)) == (2.0 + hunt.PICK_S + 4.4 - 5.7, near)
-    h.h.memory.seen = [SimpleNamespace(platform=19, x=120.0, kind="pig")]  # remembered by it (off her band):
-    assert h._detour(_at(13)) is None                                      # guarded
-    h.h.memory.seen = []
-    # Coins on 12, 3 s away, 1.1 s more: past DETOUR_REACH, they'd make the trip their own.
-    times.update({(12, 16): 3.2, (13, 19): 3.0})
-    assert hunt.DETOUR_REACH < 3.0 and h._detour(_at(13)) is None
-    times.update({(13, 19): 2.0})
-    h.obj.detours = hunt.DETOURS                    # bounded: so many on one trip, then on her way
-    assert h._detour(_at(13)) is None
-    for why in ("on the way", "valuable pile", "urgent pile"):  # not from a pile on the way, nor to one that can't wait
-        h.obj = Objective("pile", 16, 600.0, why=why)
-        assert h._detour(_at(13)) is None
 
 
-def test_a_pile_on_the_way_is_weighed_by_the_route_the_trip_takes():
-    # A trip to a spot off its ground keeps off the ground (hunt._keep_off, route.KEEP_OFF_S), and her ways to the
-    # spot, from here and from the pile, are weighed so; her way to the pile is the stop's own trip's, which keeps off
-    # nothing. From 36 at x 0 to 17's spot on 16, a pile on 36 0.5 s away: by the plain routes (up the right side,
-    # past 17) 15.0 s from here and 15.2 from the pile, 1.3 s more; by the trip's (up the left), 18.0 and 21.3: 4.4 s.
-    pile = _pile(20, platform=36)
-    h = _detour_hunt([pile], {})
-    asked = []
-
-    def arrive(src, x, dst, dst_x=None, keep_off=()):
-        asked.append((dst, tuple(keep_off)))
-        if dst == 36:
-            return 0.5
-        return (18.0 if x == 0.0 else 21.3) if tuple(keep_off) == (17,) else (15.0 if x == 0.0 else 15.2)
-    h.nav.planner.arrive = arrive
-    h.obj = Objective("spot", 16, 636.0, ground=17)
-    assert h._detour(_at(36)) is None
-    assert sorted(set(asked)) == [(16, (17,)), (36, ())]
-    h.obj = Objective("spot", 16, 636.0, ground=16)  # a spot on its ground: nothing to keep off
-    assert h._detour(_at(36)) == (0.5 + hunt.PICK_S + 15.2 - 15.0, pile)
 
 
-def test_the_wait_for_drops_to_land_counts_in_what_a_pile_on_the_way_costs():
-    times = {(13, 16): 5.7, (13, 19): 0.5, (19, 16): 5.4}  # she's right by it: 0.5 + 0.6 + 5.4 - 5.7 = 0.8 s
-    h = _detour_hunt([_pile(1.0, platform=19, status="expected")], times)  # lands 1.0 s from now: 0.5 s waited
-    h.obj = Objective("spot", 16, 636.0)
-    extra, _ = h._detour(_at(13))
-    assert abs(extra - (0.8 + 0.5)) < 0.05
-    h.h.drops.known[0].since = time.monotonic()  # killed just now: 1.5 s to wait, 2.3 s in all
-    assert h._detour(_at(13)) is None
 
 
 def test_a_pile_by_another_player_is_left_to_them_unless_it_is_valuable_or_hers(monkeypatch):
@@ -590,19 +469,19 @@ def test_a_pile_by_another_player_is_left_to_them_unless_it_is_valuable_or_hers(
     are."""
     from gamelab.localization.players import Player
     monkeypatch.setattr(hunt, "PLAYER_PILES", True)
-    theirs = _pile(hunt.OTHERS_AFTER + 1, hers=False)
-    dear = _pile(hunt.OTHERS_AFTER + 1, hers=False, dearest=hunt.VALUABLE, worth=hunt.VALUABLE)
+    theirs = _pile(hunt.OWN_S + 1, hers=False)
+    dear = _pile(hunt.OWN_S + 1, hers=False, dearest=hunt.VALUABLE, worth=hunt.VALUABLE)
     mine = _pile(10)
     h = _hunt([theirs, dear, mine])
-    assert h._fresh(theirs) and h._fresh(dear) and h._fresh(mine)
+    assert h._candidate(theirs) and h._candidate(dear) and h._candidate(mine)
     for kind, left in (("stranger", True), ("party", False)):  # her party doesn't hunt against her
         h._seen = SimpleNamespace(players=[Player(1, kind, 300.0, 0.0, 2, (0.0, 0.0), 0.0, 1.0, seen=2)])
-        assert h._fresh(theirs) != left and h._fresh(dear) and h._fresh(mine)
+        assert h._candidate(theirs) != left and h._candidate(dear) and h._candidate(mine)
     h._seen = SimpleNamespace(players=[Player(1, "stranger", 600.0, 0.0, 2, (0.0, 0.0), 0.0, 1.0, seen=2)])
-    assert h._fresh(theirs)  # 500 units off it
+    assert h._candidate(theirs)  # 500 units off it
 
 
-# --- her drops priced by the HP they'd cost (PILE_CLEAR, DUE_FROM, DUE_TO, HP_EXP) --------------------------------------
+# --- the map's danger for her pile tests (test_danger's kinds) ------------------------------------------------------------
 
 def _ground():
     """Tree Dungeon's 23 and 24, made up (test_danger's kinds): the ground (500..900, y 500) with a Horny Mushroom's spawn
@@ -639,109 +518,201 @@ def _remembered(kind, pid, x, age, model):
     return SimpleNamespace(kind=kind, platform=pid, x=x, seen=time.monotonic() - age, monster=m)
 
 
-def test_a_pile_by_a_monster_that_counts_seen_remembered_or_due_back_waits_until_it_is_clear(monkeypatch):
-    """Live on 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off Tree Dungeon's 23 came on stays
-    there for drops (hunt.PILE_CLEAR). A pile on the ground at x 750, from her spot (landing at 880): gone for with
-    nothing about; not with a Horny Mushroom her memory has 15 units from it 1.5 s ago (the looks missed it), nor one
-    between where she'd land and it, nor, with DUE_BACK (off: its numbers there), while the spawn point's monster is
-    due back (her kill there 6 s ago); a kill there 1 s ago leaves her the time to pick it up, one 14 s ago is past
-    DUE_TO. Not where nothing counts (the first map)."""
-    from gamelab.behavior.ledger import Kill
-    m, ground, spot = _ground()
-    pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True)
-    s = _on(spot, 1000.0, m)
-    assert _priced(m, [pile])._pile_block(s, pile) is None
-    h = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.5, m)])
-    assert h._pile_block(s, pile) == "a horny-mushroom unseen 0 units from her way to it"
-    assert h._best_pile(s, near_only=True) is None  # (lull loot, loot elsewhere)
-    assert h.said == [f"  drops on platform {ground} at x 750: later, a horny-mushroom unseen 0 units from her way to it"]
-    seen = _horny(ground)
-    seen.x = 860.0  # where she'd land
-    assert _priced(m, [Pile(560.0, 500.0, ground, time.monotonic(), True)])._pile_block(
-        _on(spot, 1000.0, m, [seen]), Pile(560.0, 500.0, ground, time.monotonic(), True)) is not None
-    now = time.monotonic()
-    assert not hunt.DUE_BACK and _priced(m, [pile], kills=[Kill(now - 6.0, "horny-mushroom", ground, 790.0, 500.0,
-                                                               ground)])._pile_block(s, pile) is None
-    monkeypatch.setattr(hunt, "DUE_BACK", True)
-    for ago, blocked in ((6.0, True), (1.0, False), (14.0, False)):
-        k = Kill(now - ago, "horny-mushroom", ground, 790.0, 500.0, ground)
-        why = _priced(m, [pile], kills=[k])._pile_block(s, pile)
-        assert (why == "a horny-mushroom due back 0 units from her way to it") if blocked else why is None, (ago, why)
-    first = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.5, m)])
-    first.h.danger = None
-    assert first._pile_block(s, pile) is None
+# --- the loot sweep in the hunt loop (from 2026-10-30: behavior.sweep) ----------------------------------------------------
+
+def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
+    """Not a fixed life (DROP_LIFE, 90 s, until 2026-10-30): a pile of hers 100 s old, never seen since her kill, lies
+    there still 37% of the time live (ledger.SURVIVAL) and is gone for; at 175 s under SURVIVE_MIN, not. Another's
+    once past its killer's ownership (OWN_S, where OTHERS_AFTER waited 30 s); one stood on or gone for PILE_TRIES times,
+    not; nor one seen gone."""
+    h = _hunt([])
+    assert h._candidate(_pile(10)) and h._candidate(_pile(100)) and not h._candidate(_pile(175))
+    assert not h._candidate(_pile(10, hers=False)) and h._candidate(_pile(hunt.OWN_S + 1, hers=False))
+    assert not h._candidate(_pile(10, tries=hunt.PILE_TRIES)) and h._candidate(_pile(10, tries=hunt.PILE_TRIES - 1))
+    assert not h._candidate(_pile(10, status="gone"))
+    h.h.looter.inventory_full = True
+    assert not h._candidate(_pile(10)) and h._candidate(_pile(10, mesos=True))
 
 
-def test_on_her_own_platform_a_pile_by_one_the_look_missed_waits_and_a_trip_for_one_is_called_off():
-    m, ground, spot = _ground()
-    pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True)
-    lurking = _remembered("horny-mushroom", ground, 640.0, 1.0, m)
-    h = _priced(m, [pile], memory=[lurking])
-    s = _on(ground, 600.0, m)
-    s.loot = [SimpleNamespace(platform=ground, x=750.0)]
-    h._standable = lambda pid: True
-    assert h._pile_block(s, pile) == "a horny-mushroom unseen 0 units from her way to it"
-    assert h._pile_here(s) is None
-    spot_obj = Objective("spot", spot, 1000.0, ground=ground)
-    h.stack, h.obj = [spot_obj], Objective("pile", ground, 750.0, pile=pile, why="on the way")
-    h._tops, h._halves = {}, {}
-    s.hp = 1.0
-    assert h._interrupt(s)  # not clear any more: the trip stops ...
-    h._call_off(h.obj, h._pile_block(s, pile))  # ... and `_pass` calls it off: the pile still known, not tried
-    assert h.obj is spot_obj and pile in h.h.drops.known and pile.tries == 0
-    h.h.memory = SimpleNamespace(alive=lambda t, min_p=0.0: [], there=lambda *a, **k: [])
-    h._unseen_for = None
-    assert h._pile_here(s) is pile  # clear: picked up
+def _line_hunt(piles, rate=4.0):
+    """_hunt with the sweep's reads: route times on a line of platforms (a walk, and 1.5 s a platform between), her time
+    worth `rate` EXP a second."""
+    h = _hunt(piles)
+
+    def arrive(src, x, dst, dst_x=None, keep_off=()):
+        return abs((dst_x if dst_x is not None else x) - x) / 149.0 + 1.5 * abs(dst - src)
+    h.nav.planner.arrive = arrive
+    h.nav.planner.travel = lambda src, x, dst, keep_off=(): 1.5 * abs(dst - src)
+    h._time_worth = lambda s, dest=None: rate
+    h.log, h.said = (lambda line: h.said.append(line)), []
+    h.model = None
+    return h
 
 
-def test_exp_before_loot_prices_a_pile_by_the_hp_it_would_cost():
-    """hunt.HP_EXP: with nothing in reach a pile goes unless what its HP would cost (the danger where she'd land and
-    pick up, by the monsters about there) is more than it's worth; with something in reach that price comes off what
-    waiting would lose of it."""
-    m, ground, spot = _ground()
-    cheap = Pile(560.0, 500.0, ground, time.monotonic() - 3.0, True)  # a bronze coin's 15 mesos: 7.5 EXP
-    seen = _horny(ground)
-    seen.x = 770.0  # 210 units from the pile, where she'd land too: past PILE_CLEAR
-    h = _priced(m, [cheap], land=560.0)
-    s = _on(spot, 1000.0, m, [seen])
-    assert h._pile_block(s, cheap) is None  # 210 units off: clear
-    price = h._pile_price(s, cheap)
-    assert price == pytest.approx(h.h.danger.of("horny-mushroom", m.platform(ground), 770.0, m.platform(ground), 560.0)
-                                  * hunt.HP_EXP)
-    assert price > cheap.value * hunt.MESO_EXP and not h._loot_first(s, cheap, [])
-    assert _priced(m, [cheap], land=560.0)._loot_first(_on(spot, 1000.0, m), cheap, [])  # nothing about: it goes
+def _on_line(pid, x):
+    return SimpleNamespace(platform=SimpleNamespace(id=pid), where=SimpleNamespace(x=x), monsters=[], swept=[],
+                           t=time.monotonic(), players=[])
 
 
-def test_her_own_kills_ghost_and_a_track_out_of_sight_too_long_keep_no_pile_waiting_and_take_no_throw():
-    """Review of 2026-10-26: the feed keeps a killed monster's track out of sight (HIDDEN) while her EXP gain waits for it
-    (1.8 s), and one someone else killed up to 3.5 s; taken for a monster about (localization.unseen), it kept her own
-    fresh drop waiting and drew throws at nothing. A Horny Mushroom she killed at 752 half a second ago, its track out
-    of sight 0.4 s: the pile it dropped at 750 doesn't wait for it, nor is it a target, with the kill in her ledger
-    (unseen._hers) or the feed's own word that her gain goes on it (Track.owed); one out of sight past unseen.TRACK_S
-    keeps nothing waiting either, nor takes a throw's Lucky Seven (Hunt._unseen_here); one out of sight 0.4 s that no
-    kill is on does (the look missed it)."""
-    from gamelab.behavior.ledger import Kill
-    from gamelab.localization.tracking import HIDDEN, Track
-    from gamelab.localization.unseen import TRACK_S
+def test_the_sweep_takes_a_pile_on_her_way_when_it_pays_for_its_time():
+    """From x 0 on platform 1 to x 600 on 3, coins on 2 at x 300 (on her way: 0.6 s more for its stand) worth a bronze
+    coin's 33.4 at MESO_EXP 0.5 (16.7 EXP): taken at 4 EXP a second, not at 80; and said."""
+    coins = _pile(5, platform=2, items=("mesos",), worth=33.4, xs=(300.0,), status="seen")
+    coins.x, coins.last_seen = 300.0, time.monotonic()
+    h = _line_hunt([coins])
+    stop = h._sweep(_on_line(1, 0.0), (3, 600.0))
+    assert stop is not None and h._pile_of[stop.spot.key] is coins and stop.spot.stand == pytest.approx(0.24)
+    assert h.said[-1].startswith("  sweep: mesos on 2 at x 300: ")
+    assert _line_hunt([coins], rate=80.0)._sweep(_on_line(1, 0.0), (3, 600.0)) is None
+
+
+def test_the_sweep_waits_for_a_kills_drops_to_land_only_where_that_pays():
+    """By her kill of a Horny Mushroom (its pile expected: looting.expected_worth's 23.5 on Tree Dungeon's worth), its
+    drops 1.0 s from landing (DROP_LANDS after the kill), 1.8 s in all with its stand and back: she waits for them at 2
+    EXP a second, not at 10."""
+    kill = _pile(DROP_LANDS - 1.0, platform=1)
+    kill.x, kill.unseen = 20.0, 23.5
+    h = _line_hunt([kill], rate=2.0)
+    stop = h._sweep(_on_line(1, 0.0), (1, 0.0))
+    assert stop is not None and stop.spot.lands == pytest.approx(1.0, abs=0.05)
+    assert _line_hunt([kill], rate=10.0)._sweep(_on_line(1, 0.0), (1, 0.0)) is None
+
+
+def _walker(kind, pid, x, facing, model, pose="move"):
+    from gamelab.localization.monsters import Monster
     from gamelab.perception.mobs import Mob
+    return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, model.platform(pid).y_at(x), pid, facing=facing, pose=pose)
+
+
+def test_a_monster_walking_at_where_she_would_stand_is_shot_first_or_the_pile_left():
+    """The user, 2026-10-30: "in general you should kill all the mobs that are in the way, try not to hit by mobs just
+    for picking up loots". Drops at x 745-755 on the ground (500..900), she on her spot beside it (her trip there 1.1 s:
+    the planner's 0.1 and 1 to get off): a Horny Mushroom at 890 walking left at its 100 units a second is by them as she
+    stands there: shot first where a star from her spot hits it (its kill time and EXP the pile's), else the pile is
+    left; one at 600 walking left, away, guards nothing; one standing at 870 nothing either; one the look didn't find
+    (about: her memory's) leaves it, never thrown at."""
+    m, ground, spot = _ground()
+    pile = Pile(750.0, 500.0, ground, time.monotonic() - 3.0, True, status="seen", xs=(745.0, 755.0),
+                last_seen=time.monotonic())
+    s = _on(spot, 1000.0, m, [_walker("horny-mushroom", ground, 890.0, -1, m)])
+    h = _priced(m, [pile], travel=0.1)
+    guards, why = h._guards(s, pile, h._travel_to_pile(s, pile), h._stand_s(pile))
+    assert why is None and [g.monster.x for g in guards] == [890.0] and guards[0].kill_s == 4.0
+    h._hits = lambda s, m: False
+    assert h._guards(s, pile, 1.1, h._stand_s(pile)) == ((), f"a horny-mushroom at x 890 on {ground} would meet her there")
+    for walker in (_walker("horny-mushroom", ground, 600.0, -1, m), _walker("horny-mushroom", ground, 870.0, 0, m, "stand")):
+        assert _priced(m, [pile], travel=0.1)._guards(_on(spot, 1000.0, m, [walker]), pile, 1.1, 0.5) == ((), None)
+    about = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.0, m)], travel=0.1)
+    assert about._guards(_on(spot, 1000.0, m), pile, 1.1, 0.5)[1].startswith("a horny-mushroom unseen at x 765")
+    first = _priced(m, [pile], travel=0.1)  # where nothing counts as a danger (the first map): nothing guards
+    first.h.danger = None
+    assert first._guards(s, pile, 1.1, 0.5) == ((), None)
+
+
+def test_her_own_kill_dying_by_its_drops_guards_nothing():
+    """Live on 2026-10-30 12-28% of the piles' waits (PILE_CLEAR) were for the pile's own monster, drawn dying where it
+    dropped them: her kill placed on it (ledger.dying) guards nothing, nor a track the feed has taken for dead."""
+    from gamelab.behavior.ledger import Kill
     m, ground, spot = _ground()
     now = time.monotonic()
-    pile = Pile(750.0, 500.0, ground, now - 0.5, True)
+    pile = Pile(750.0, 500.0, ground, now - 0.3, True, xs=(750.0,), status="seen", last_seen=now)
+    corpse = _walker("horny-mushroom", ground, 752.0, 0, m, "stand")
+    from dataclasses import replace
+    s = _on(spot, 1000.0, m, [corpse])
+    s.t = now
+    assert _priced(m, [pile], travel=0.1)._guards(s, pile, 1.1, 0.5)[0]  # (a live one there: a guard)
+    dead = _priced(m, [pile], kills=[Kill(now - 0.3, "horny-mushroom", ground, 750.0, 500.0, ground)], travel=0.1)
+    assert dead._guards(s, pile, 1.1, 0.5) == ((), None)
+    s.monsters = [replace(corpse, track=7)]
+    gone = _priced(m, [pile], travel=0.1)
+    gone.h.ledger.dead = {7: now}
+    assert gone._guards(s, pile, 1.1, 0.5) == ((), None)
 
-    def track(age, owed=False):
-        return Track(7, "horny-mushroom", ground, 752.0, 500.0, Mob("horny-mushroom", 0, 0, 30, 30, 0.9), now - 9.0,
-                     now - age, state=HIDDEN, owed=owed)
 
-    def check(tr, kills=()):
-        h = _priced(m, [pile], kills=kills, land=700.0)
-        s = _on(ground, 700.0, m)
-        s.tracks, s.t = [tr], now
-        targets, _, hidden = h._with_unseen(s, [], [], [])
-        return h._pile_block(s, pile), targets, hidden, h._unseen_here(s)
-    why, targets, hidden, throw = check(track(0.4), [Kill(now - 0.5, "horny-mushroom", ground, 750.0, 500.0, ground)])
-    assert why is None and targets == hidden == throw == []
-    assert check(track(0.4, owed=True))[:2] == (None, []) and check(track(0.4, owed=True))[3] == []
-    assert check(track(TRACK_S + 0.3))[:2] == (None, []) and check(track(TRACK_S + 0.3))[3] == []
-    why, targets, _, throw = check(track(0.4))
-    assert why == "a horny-mushroom unseen 2 units from her way to it" and [t.x for t in targets] == [752.0]
-    assert [t.x for t in throw] == [752.0]  # (her throws' attack goes by it: behavior.attacks, UNSEEN_ATTACK)
+class _Acts:
+    """Her actions' stand-in: the walks and pick-ups, in order."""
+
+    def __init__(self):
+        self.done = []
+
+    def walk(self, side, units):
+        self.done.append(("walk", side, round(units)))
+
+    def pick_here(self, presses):
+        self.done.append(("pick", presses))
+
+
+def test_a_stand_walks_to_each_bunch_presses_once_a_drop_and_leaves_what_she_stood_on_twice():
+    from gamelab.behavior.looting import Looter
+    now = time.monotonic()
+    pile = Pile(130.0, 0.0, 1, now - 5, True, status="seen", xs=(100.0, 105.0, 160.0), last_seen=now)
+    h = _hunt([pile])
+    said = []
+    h.h.looter = Looter(SimpleNamespace(log=said.append))
+    h.h.actions, h.h.report = _Acts(), SimpleNamespace(loot_runs=0)
+    h.h.drops.tried = lambda p: setattr(p, "tries", p.tries + 1)
+    h.report, h.model, h._stood = hunt.HuntReport(), None, {}
+    coins = [SimpleNamespace(platform=1, x=x, mesos=True, item=SimpleNamespace(kind="mesos")) for x in (100.0, 105.0, 160.0)]
+    s = _on_line(1, 90.0)
+    s.loot = list(coins)
+    h._stand(s, pile)
+    assert h.h.actions.done == [("walk", "right", 12), ("pick", 3), ("walk", "right", 58), ("pick", 2)]
+    assert pile.tries == 1 and h._stood[id(pile)][1] == [102.5, 160.0]
+    h.h.actions.done.clear()
+    h._stand(s, pile)                         # still there: stood on again (from the far end: she's at 90)
+    assert [a for a in h.h.actions.done if a[0] == "pick"] == [("pick", 3), ("pick", 2)] and pile.tries == 2
+    h.h.actions.done.clear()
+    h._stand(s, pile)                         # stood on twice and still there: someone else's
+    assert h.h.actions.done == [] and pile.tries == 3 and said[-1].startswith("  can't pick up 3 mesos at x 100, 105, 160")
+
+
+def test_a_stand_is_not_made_where_a_monster_would_meet_her_now():
+    m, ground, spot = _ground()
+    now = time.monotonic()
+    pile = Pile(750.0, 500.0, ground, now - 5, True, status="seen", xs=(750.0,), last_seen=now)
+    h = _priced(m, [pile], travel=0.1)
+    h.h.actions = _Acts()
+    h._hits = lambda s, m: False
+    s = _on(ground, 740.0, m, [_walker("horny-mushroom", ground, 800.0, -1, m)])
+    s.loot = []
+    h._stand(s, pile)
+    assert h.h.actions.done == [] and pile.tries == 0
+
+
+def test_leaving_a_ground_the_sweep_has_her_drops_on_her_way_to_the_next_first():
+    h = _hunt([])
+    asked, acted = [], []
+    h._next_dest = lambda s: (7, -95.0)
+    h._sweep = lambda s, dest, say=True: asked.append(dest) or "a stop"
+    h._sweep_act = lambda s, stop, visible, hidden, now: acted.append(stop)
+    h._leave(_scene(), "nothing left here")
+    assert asked == [(7, -95.0)] and acted == ["a stop"]
+    h._sweep = lambda s, dest, say=True: None
+    h._next_ground = lambda s: acted.append("next ground")
+    h._travel = lambda rule: acted.append(rule)
+    h.log = lambda line: acted.append(line)
+    h._leave(_scene(), "nothing left here")
+    assert acted[1:] == ["  leaving platform 1: nothing left here", "next ground", "advance"]
+
+
+def test_on_her_way_to_a_sweeps_pile_she_goes_on_while_it_is_first_else_takes_what_is():
+    """The objective a pile of the sweep's: solved again from every look on her way on (Objective.after: leaving, the next
+    ground; else the objective under it, else her spot); the same pile first, on her trip there; another, or none, the
+    objective under it and what the sweep has now."""
+    pile, other = _pile(5), _pile(5, platform=3)
+    h = _hunt([pile, other])
+    h.stack, h.obj = [Objective("spot", 9, 50.0)], Objective("pile", 2, 100.0, pile=pile, why="sweep", after=(7, 0.0))
+    first, asked, acted = [pile], [], []
+    h._pile_of = {pile.key: pile, other.key: other}
+
+    def solve(s, dest, say=True):
+        asked.append(dest)
+        return SimpleNamespace(spot=SimpleNamespace(key=first[0].key, guards=()))
+    h._sweep = solve
+    h._at_pile = lambda s, p: False
+    h._travel = lambda rule: rule
+    h._sweep_act = lambda s, stop, visible, hidden, now: acted.append(stop.spot.key)
+    assert h._on_sweep(_scene(), [], [], 0.0) == "sweep" and asked == [(7, 0.0)]
+    first[0] = other
+    h._on_sweep(_scene(), [], [], 0.0)
+    assert acted == [other.key] and h.obj.kind == "spot"

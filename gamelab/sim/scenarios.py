@@ -43,8 +43,8 @@ from ..behavior.tour import Tour
 from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
                     Trace, detector_kinds, patched)
 from . import harness
-from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, Her, Noise,
-                    Realism, SimDied, World)
+from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, TREE_DROP_MIX, Her,
+                    Noise, Realism, SimDied, World)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -815,9 +815,27 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+      realism=Realism(camps=harness.TREE_CAMPS, respawn=30.0, zero_walls=True, drop_mix=TREE_DROP_MIX,
+                      drop_takers=True),
+      expects=(logs("sweep: "), happens("picks up mesos"), logs("next: stop"),
+               check("four drops picked up or more", lambda tr: sum(tr["world"]["picked"].values()) >= 4),
+               check("an item picked up", lambda tr: any(k != "mesos" for k in tr["world"]["picked"]))))
+def loop_tree_grind_drops(sim):
+    """loop_tree_grind with her drops as the perception service saw them live (the loot design of 2026-10-30:
+    world.TREE_DROP_MIX, `--world map-drops`, 0.64 drops a kill, 57% mesos by its kind's amounts, piles of 1-4 drops 20
+    units apart; world.HER_DROPS_LAST, `--world drop-takers`, hers taken by others as long as they lay live): the loot
+    sweep (behavior.sweep) on her legs between stops and before she leaves one, said in her log ("sweep: ..."), each
+    pile's stand made only where no monster would meet her there. On seed 1, 12 kills of hers, 4 drops picked up (2
+    mesos, a Horny and a Green Mushroom's cap), 3 lying on 10 at the end, 11 sweeps said."""
+    return _grind(3)(sim)
+
+
 @tree((24, 231.0), monsters={22, 23}, seed=14, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
-      expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
+      expects=(check("no pile ahead of what's in reach (no ': the pile first')",
+                     lambda tr: not any(": the pile first" in line for line in tr["log"])),
+               happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
                check("hurt five times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 5)))
 def loop_tree_ore_waits(sim):
@@ -868,15 +886,19 @@ def loop_tree_ore_waits(sim):
     chase alone 1, 5, 8 and 12 (the old respawn).) (Seed 1 since a trip's chains are planned by the whole state's
     monsters, each walking as perception has it head at its kind's speed from the game data, with no quick look after a
     touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 5 she was hurt more than five times; of
-    seeds 1-3, 1 and 3 meet all of this.) (Seed 7 since walls stop her in the air by the game's rule (body.wall_table,
-    2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1 the ore never
-    picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the simulator's looks
-    have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 7 the
-    ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.) (Seed 24 since the
-    monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in the time, and hurt
-    more than five times; none of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14 since the stack's
-    monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 24 the
-    ore not picked up in the time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
+    seeds 1-3, 1 and 3 meet all of this.) (Since the loot sweep, 2026-10-30, behavior.sweep: a valuable pile goes at
+    once only where nothing would meet her standing on it, hunt._unsafe, so an ore among 22's Green Mushrooms isn't one
+    EXP before loot weighs against what's in reach, whose word for it, "shooting first", was what this checked; that no
+    pile goes ahead of what's in reach, ": the pile first", is: on seed 1 she picked up every ore, 6 of 6, each when
+    nothing was in reach, and none of her touches hurt.) (Seed 7 since walls stop her in the air by the game's rule
+    (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1
+    the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the
+    simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
+    right): on seed 7 the ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.)
+    (Seed 24 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in
+    the time, and hurt more than five times; none of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14
+    since the stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges),
+    2026-10-31: on seed 24 the ore not picked up in the time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1489,7 +1511,9 @@ def loop_tree_attack_no_darts(sim):
     175 touches in its 344 s. To redo with the chase.) (Seed 3 since a trip's chains are planned by the whole state's
     monsters, each walking as perception has it head at its kind's speed from the game data, with no quick look after a
     touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 8 her stars' test didn't say MAYBE OUT;
-    of seeds 1-16 only 3 meets all of this.) (Seed 6 since the simulator's looks have her place as the world does
+    of seeds 1-16 only 3 meets all of this.) (Seed 6 since the loot sweep (2026-10-30, behavior.sweep: the hunt loop's
+    drops one rule, priced in her time): on seed 3 no 20 Lucky Seven presses in a row came to out of darts' stop; of
+    seeds 1-6, 6 alone meet all of this.) (Seed 6 since the simulator's looks have her place as the world does
     (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT; of
     seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the v83
     client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of
@@ -1732,13 +1756,13 @@ def loop_tree_rope_top(sim):
     return darts_stop(1)(sim)
 
 
-@tree((18, 111.0), hanging=-865.0, monsters="all", seed=2, limit=120, **_LIVE, expects=ROPE_TOP_EXPECTS)
+@tree((18, 111.0), hanging=-865.0, monsters="all", seed=1, limit=120, **_LIVE, expects=ROPE_TOP_EXPECTS)
 def loop_tree_grind_rope_top(sim):
     """`tour --loop --grind --map 10002073` (the feed, the attack choice), as live at 22:58:08, from the rope at x 111,
     her feet 30 under platform 18 (-865): on the rope at the first look (localization.pose.ROPE_TOP_GAP), up off it onto
     18 (Mover.off_rope), and on to grind. Master's stack in this world stopped the hunt for out of darts at 17.7 s (on
     seed 1 at 23.1 s; the -880 twin, 15 under, at 17.4-18.3 s on seeds 1-3; at 18.5 s with after-kill in, 7f6334e), no
-    kill, its presses refused on the rope, as live."""
+    kill, its presses refused on the rope, as live. (Seed 1 since the loot sweep (2026-10-30, behavior.sweep: the hunt loop's drops one rule, priced in her time): on seed 2 the run passed its 120 s limit (her stand-by's fights after the hunt, the tour's drops guarded again and again); of seeds 1-4, 1 and 4 meet all of this.)"""
     return darts_stop(1, grind=True)(sim)
 
 

@@ -20,11 +20,16 @@ What changes from the hunt loop (the rules not named here are its own, unchanged
   LEAVE_CONFIRM_S after; STOP_MAX_S at the most with nothing in reach. No better spot (rule 7), no lull loot (rule 8),
   no waiting out respawns (rule 9 only for those confirmations), no rate rule.
 - On the legs: the hunt loop's rule 4, shooting in passing (anything a star reaches, any platform), its finishing (4b)
-  and the piles on the way (5b) and on her platform (5): kills and pick-ups between moves, without stopping to clear a
-  ground. No trip back for the piles of a stop she leaves (rule 10): those on the way are picked up. Every RECHOOSE_S
-  of a trip to a stop, a pile seen elsewhere (Patrol.choose with the stop she's heading to as the default) takes her
-  there instead, and on a trip to a pile one that no longer pays for its detour back to the loop's next stop
-  (`_interrupt`, `_while_travelling`).
+  and the loot sweep's piles on her way to the stop (behavior.sweep: those worth their time, within its budget): kills
+  and pick-ups between moves, without stopping to clear a ground. Every RECHOOSE_S of a trip to a stop, a pile of
+  monsters seen elsewhere (Patrol.choose with the stop she's heading to as the default) takes her there instead, and on
+  a trip to one that no longer pays for its detour back to the loop's next stop (`_interrupt`, `_while_travelling`).
+- Her drops (from 2026-10-30, the loot sweep): at a stop, with nothing in reach, those worth a round trip from its place
+  at what staying there gives (`_stay_gain`); leaving it, before she goes, those worth their time on her way to the next
+  stop (`_leave`: Patrol.choose's, peeked), the drops of her last kills there waited for where that pays (live on
+  2026-10-30 half her departures from a stop, 24 of 50, came within 3 s of a kill of hers, before its drops landed: 21 of
+  those kills' drops were never seen, 10 picked up, 3 lost). Until then only the hunt loop's piles here (5: on her
+  platform within 150) and urgent ones (6).
 - What she knows: every look updates the belief of each spawn point (patrol.Belief) from her memory of the monsters.
 - What a kill is credited to: the platform it died on (`credit`), not the ground she hunted. The value map
   (lab/grounds.json) isn't written: its EXP a visit credits a ground with its neighbours' kills (live, 48% of 23's on
@@ -53,7 +58,7 @@ from .patrol import TICK_S, Patrol, choice_text, reaching
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
 # s with nothing left in reach before she leaves a stop: one look's miss isn't enough (a hit monster hides under its
 # damage numbers for 1-3 s: fight's hidden targets keep it a target meanwhile, and HOLD_S keeps it held)
-LEAVE_CONFIRM_S = 0.3  # (a guess)
+LEAVE_CONFIRM_S = 0.3  # (a guess; the drops of her last kills there are the sweep's when she leaves: `_leave`)
 HOLD_S = 3.5           # a monster her memory has, seen within this long (tracking.HIDE_S), holds her at a stop
 REACH_STEP = 200.0     # guess: units she walks along her platform at once at most to bring held monsters into reach
 HP_GAP_S = 2.0         # guess: s between two looks at most for the HP gone between them to be charged to a platform
@@ -150,23 +155,21 @@ class Grind(Hunt):
 
     def _at_ground(self, s: Scene, targets, visible, hidden, now: float) -> None:
         here = s.platform.id
-        if (pile := self._urgent_pile(s)) is not None:
-            return self._go_for(pile, "urgent pile", s)
         if any(self._hits(s, m) for m in targets):  # in reach now: shot (beats going on: see the top)
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] != "wait":
                 return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
-        if (pile := self._pile_here(s)) is not None:
-            return self._pick_here(s, pile)
         wide = self._wide(s)
         held = self._held(wide)
         reason = self._leaving(wide, held)
         if reason is not None:
-            return self._leave(wide, reason)
+            return self._leave(wide, reason, visible, hidden, now)
         if any(m.platform == here for m in targets):  # on her platform: stance closes in
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] != "wait":
                 return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
+        if (stop := self._sweep(wide, self._home())) is not None:  # piles worth a round trip from the stop's place
+            return self._sweep_act(wide, stop, visible, hidden, now)
         if held and (step := self._reach_step(wide, held)) is not None:
             self._note("reach")
             self.h.actions.walk(*step)
@@ -213,6 +216,35 @@ class Grind(Hunt):
             walk = min(near, default=0.0) / WALK_SPEED
         return exp / (exp * self.patrol.kill_s + walk)
 
+    def _next_dest(self, s: Scene) -> tuple[int, float] | None:
+        """Leaving the stop: the place of the stop she'd go to next (Patrol.choose, peeked: `_instead`), the sweep's way
+        on; None: none."""
+        if s.platform is None or s.where is None:
+            return None
+        j, _ = self._instead(s)
+        if j is None:
+            return None
+        stop = self.patrol.stops[j]
+        return stop.platform, stop.x
+
+    def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float, float | None]:
+        """The sweep's terms: her time's worth (`_time_worth`), sweep.budget_for's budget (no lulls: she doesn't wait for
+        respawns at a stop)."""
+        return self._time_worth(s, dest), None
+
+    def _time_worth(self, s: Scene, dest: tuple[int, float] | None = None) -> float:
+        """What her time is worth now, EXP a second, on her way to `dest` (the sweep's price of it): at the stop, on a
+        round trip back to it, what staying there gives (`_stay_gain`, by her memory's monsters she gets at from her
+        platform: `_held`); else the loop's rate (Plan.rate: going on); or, more, what's in reach now (EXP before
+        loot)."""
+        v, plan = self.visit, self.patrol.plan
+        if v is not None and v.arrived is not None and dest is not None and dest == self._home() \
+                and s.platform is not None and s.platform.id == v.ground:
+            rate = self._stay_gain(s, self._held(s))
+        else:
+            rate = 0.0 if plan is None else plan.rate
+        return max(rate, self._shoot_rate(s, list(s.monsters))[0])
+
     def _instead(self, s: Scene, heading: int | None = None) -> tuple[int | None, dict]:
         """Where she'd go instead as of look `s` (Patrol.choose, peeked: with the stop she's `heading` to as the
         default on a trip, else from the stop she's at), looked at again every RECHOOSE_S."""
@@ -249,7 +281,11 @@ class Grind(Hunt):
             return "nothing left in reach"
         return f"{stay:.1f} EXP/s here, going on gives {bar:.1f}"
 
-    def _leave(self, s: Scene, reason: str) -> None:
+    def _leave(self, s: Scene, reason: str, visible=(), hidden=(), now: float | None = None) -> None:
+        """Leaving the stop: the sweep's piles on her way to the next one first (`_next_dest`), its drops' landing waited
+        for where that pays; then the next stop."""
+        if (stop := self._sweep(s, self._next_dest(s))) is not None:
+            return self._sweep_act(s, stop, list(visible), list(hidden), time.monotonic() if now is None else now)
         v = self.visit
         there = 0.0 if v.arrived is None else time.monotonic() - v.arrived
         self.log(f"  leaving stop {v.ground}: {reason} ({there:.1f} s there, {v.exp:.0f} EXP)")
@@ -290,7 +326,7 @@ class Grind(Hunt):
         """The next stop (Patrol.choose; on a trip, `heading`: the stop she's on her way to, which only a pile seen
         elsewhere replaces), the loop looked at again first (Patrol.replan), and a trip to it."""
         self._leave_ground()
-        self._exit_piles = self._exit_reason = None
+        self._exit_reason = None
         now, p = time.monotonic(), self.patrol
         p.learn_kills(self.report.throws, self.report.exp)
         why = p.replan(now)

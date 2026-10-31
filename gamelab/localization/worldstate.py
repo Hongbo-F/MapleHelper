@@ -707,7 +707,7 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
               hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None), touch=getattr(st, "touch", None),
               feet=getattr(st, "feet", None), view=getattr(st, "view", None), view_sure=getattr(st, "view_sure", False),
               mode=getattr(st, "mode", None), confidence=getattr(st, "confidence", None),
-              chat=getattr(st, "chat", None))
+              chat=getattr(st, "chat", None), strips=list(getattr(st, "drops", None) or ()))
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

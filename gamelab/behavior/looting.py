@@ -22,6 +22,7 @@ from ..localization.monsters import Monster
 from ..localization.players import near_rival
 from ..localization.scene import Loot, Scene
 from ..perception import drops
+from ..perception.kinds import kind_of
 from ..perception.loot import MESOS, says_full
 
 if TYPE_CHECKING:
@@ -142,6 +143,7 @@ class Worth:
 
 
 FIRST = Worth(COINS)  # the first map's
+_BY_KIND = {kind_of(name): known for name, known in drops.MONSTERS.items()}  # perception.drops' monsters by kind
 
 
 def worth(kind: str, coin: str | None = None) -> float:
@@ -152,6 +154,28 @@ def worth(kind: str, coin: str | None = None) -> float:
 def worth_for(model) -> Worth:
     """What drops are worth on map `model` (a MapModel, or anything with its `id` and `spawns`)."""
     return FIRST if getattr(model, "id", None) == drops.FIRST_MAP else Worth(coins_for(model))
+
+
+# What a kill of hers is expected to drop before a look sees its pile (`expected_worth`: the drop store's Pile.unseen):
+# live on 2026-10-30 (the thief's run as the perception service saw it, the loot design's expcount.py) her kills gave
+# 0.64 drops seen a kill, 57% of them mesos. Each mesos drop is worth the middle of its kind's amounts (perception.drops),
+# each item the price of its kind's items weighed by their reference rates (OSMLib's; the rarest's where it gives none):
+# a Horny Mushroom's pile 23.5 mesos, a Green's 14.1, a slime's 8.3. A kind none of that knows: a bronze coin of the
+# map's, as every pile no look had seen was until then.
+EXPECTED_DROPS = 0.64
+EXPECTED_MESOS = 0.57
+
+
+def expected_worth(kind: str | None, value: "Worth") -> float:
+    """What a pile of a kill of a monster of `kind` is worth before a look sees it, on the map whose drops are worth
+    `value` (see EXPECTED_DROPS)."""
+    known = _BY_KIND.get(kind) if kind is not None else None
+    if known is None or known.mesos is None:
+        return value.coins["bronze"]
+    rates = [(i, known.rates.get(i, min(known.rates.values(), default=0.002))) for i in known.items]
+    total = sum(r for _, r in rates)
+    item = sum(r * value(kind_of(i)) for i, r in rates) / total if total else value.coins["bronze"]
+    return EXPECTED_DROPS * (EXPECTED_MESOS * sum(known.mesos) / 2 + (1 - EXPECTED_MESOS) * item)
 
 
 def coins_for(model) -> dict[str, float]:

@@ -238,11 +238,11 @@ def test_a_kill_is_placed_where_its_monster_was_seen_last_and_its_pile_expected_
 
 
 def test_a_pile_seen_holds_what_was_seen_in_it_and_what_that_is_worth():
-    from gamelab.behavior.ledger import PILE_WORTH
+    from gamelab.behavior.looting import FIRST, expected_worth
     store = DropStore()
     store.on_kill(Kill(0.0, "slime", 3, 500.0, 300.0, 3))
     (p,) = store.known
-    assert p.worth is None and p.value == PILE_WORTH  # not seen yet: a pile's coins
+    assert p.worth is None and p.value == expected_worth("slime", FIRST)  # not seen yet: its kind's expected drops
     seen = [Loot(Item("mesos", 0, 0, 13, 13, 0.9, "bronze"), 510.0, 300.0, 3),
             Loot(Item("slime-bubble", 0, 0, 19, 18, 0.9), 520.0, 300.0, 3)]
     store.on_look(_look(SETTLE, loot=seen, looked=[(3, 300.0, 700.0)]))
@@ -311,13 +311,14 @@ def test_a_gain_soon_after_a_throw_is_its_first_targets_seen_or_not():
 
 
 def test_on_another_map_a_pile_is_worth_its_drops_there():
-    # Tree Dungeon's monsters drop 25-53 mesos: a bronze coin there stands for 33.4 (looting.coins_for), a pile not
-    # seen yet too; its items are worth their shop prices, as on every map.
-    from gamelab.behavior.looting import Worth
+    # Tree Dungeon's monsters drop 25-53 mesos: a bronze coin there stands for 33.4 (looting.coins_for); a pile of a
+    # Horny Mushroom's not seen yet its expected drops there (looting.expected_worth); its items are worth their shop
+    # prices, as on every map.
+    from gamelab.behavior.looting import Worth, expected_worth
     store = DropStore(Worth({"bronze": 33.4, "gold": 51.5}))
     store.on_kill(Kill(0.0, "horny-mushroom", 3, 500.0, 300.0, 3))
     (p,) = store.known
-    assert p.worth is None and p.value == 33.4
+    assert p.worth is None and p.value == expected_worth("horny-mushroom", store.value) == pytest.approx(23.5, abs=0.1)
     seen = [Loot(Item("mesos", 0, 0, 13, 13, 0.9, "gold"), 510.0, 300.0, 3),
             Loot(Item("horny-mushroom-cap", 0, 0, 30, 27, 0.9), 520.0, 300.0, 3)]
     store.on_look(_look(SETTLE, loot=seen, looked=[(3, 300.0, 700.0)]))
@@ -402,3 +403,83 @@ def test_with_the_feed_her_kills_unsure_until_seen_dead_and_another_players_kill
     s2.tracks = [replace(s.tracks[0], died_seen=10.8), replace(s.tracks[1], cause="hers", gain=10.2)]
     ledger.on_look(s2)
     assert set(ledger.dead) == {5, 7} and not ledger.unsure and not ledger.theirs
+
+
+# --- the drop store for the loot sweep (2026-10-30) -------------------------------------------------------------------
+
+def _coin(x, platform=19):
+    return Loot(Item("mesos", 0, 0, 13, 13, 0.9, "bronze"), x, -200.0, platform)
+
+
+def test_a_drop_seen_is_in_one_pile_only_the_nearest():
+    """Live on 2026-10-30 the thief's run listed three piles at x 254, 256 and 260 on platform 19 (two kills of hers
+    there and one seen first), each taking the drops seen within LOOT_REACH of it: 15-24% of the piles' worth listed was
+    the same drops counted by 2-3 piles. Each drop now goes to the nearest pile alone."""
+    store = DropStore()
+    store.on_kill(Kill(0.0, "green-mushroom", 19, 254.0, -200.0, 19))
+    store.on_kill(Kill(0.5, "green-mushroom", 19, 260.0, -200.0, 19))
+    a, b = store.piles
+    store.on_look(_look(SETTLE + 1, loot=[_coin(250.0), _coin(258.0), _coin(262.0)], looked=[(19, 100.0, 400.0)]))
+    assert a.xs == (250.0,) and b.xs == (258.0, 262.0) and len(store.piles) == 2
+    assert a.value + b.value == pytest.approx(3 * store.value.coins["bronze"])  # (each pile had all three: 6 coins)
+
+
+def test_drops_no_pile_has_make_piles_of_their_own_a_loot_reach_apart():
+    store = DropStore()
+    store.on_look(_look(5.0, loot=[_coin(100.0), _coin(120.0), _coin(150.0), _coin(300.0)],
+                        looked=[(19, 0.0, 400.0)]))
+    assert [(round(p.x), p.xs) for p in store.piles] == [(125, (100.0, 120.0, 150.0)), (300, (300.0,))]
+    assert all(not p.hers and p.status == "seen" for p in store.piles)
+
+
+def test_the_states_strips_of_drops_count_each_at_its_own_time():
+    """Every strip of drops perception searched since the look before (the state's rotation: Scene.strips) is a
+    sighting at its own time: a pile seen in one is confirmed; one in a strip searched empty twice EMPTY_LOOKS apart is
+    gone; a strip searched before the look that last saw a pile says nothing of it."""
+    from gamelab.localization.worldstate import DropStrip
+    store = DropStore()
+    store.on_kill(Kill(0.0, "slime", 3, 500.0, 300.0, 3))
+    (p,) = store.piles
+    s = _look(SETTLE + 1.0)
+    s.strips = [DropStrip(3, 400.0, 600.0, SETTLE + 0.5, False, (Loot(Item("mesos", 0, 0, 13, 13, 0.9), 505.0, 300.0,
+                                                                      3),))]
+    store.on_look(s)
+    assert p.status == "seen" and p.last_seen == SETTLE + 0.5 and p.xs == (505.0,)
+    s = _look(SETTLE + 5.0)  # the same strip again (no newer search): nothing new
+    s.strips = list(s.strips) + [DropStrip(3, 400.0, 600.0, SETTLE + 0.5)]
+    store.on_look(s)
+    assert p.empty_since is None
+    for t in (SETTLE + 6.0, SETTLE + 6.0 + EMPTY_LOOKS):
+        s = _look(t + 0.5)
+        s.strips = [DropStrip(3, 400.0, 600.0, t)]
+        store.on_look(s)
+    assert p.status == "gone" and p.gone_at == SETTLE + 6.0 + EMPTY_LOOKS
+
+
+def test_a_pile_lies_by_the_live_survival_not_a_fixed_life():
+    """ledger.SURVIVAL (the live Kaplan-Meier): a pile of hers 100 s old is still there more often than not given it
+    was seen at 60 s (0.36 / 0.55), where DROP_LIFE (90 s) had dropped it; given it was seen a moment ago, about all of
+    it; one never seen, from its kill."""
+    from gamelab.behavior.ledger import Pile, survival
+    assert survival(0.0) == 1.0 and survival(60.0) == pytest.approx(0.55) and survival(200.0) == 0.0
+    assert survival(60.0, hers=False) == pytest.approx(0.57) and survival(150.0, hers=False) == pytest.approx(0.03)
+    p = Pile(0.0, 0.0, 3, 0.0, True, status="seen", last_seen=60.0)
+    assert p.still(100.0) == pytest.approx(survival(100.0) / survival(60.0))
+    p.last_seen = 99.9
+    assert p.still(100.0) == pytest.approx(1.0, abs=0.01) and p.still(100.0, 30.0) < p.still(100.0, 5.0)
+    assert Pile(0.0, 0.0, 3, 0.0, True).still(10.0) == pytest.approx(survival(10.0))
+
+
+def test_an_expected_pile_is_worth_its_kinds_drops():
+    """Before a look sees it a kill's pile is worth what its kind drops (looting.expected_worth: the live 0.64 drops a
+    kill, 57% mesos at the middle of its amounts, the rest its items by their rates), not a bronze coin: on Tree
+    Dungeon a Horny Mushroom's 23.5, a Green's 14.1; a kind none of that knows, a bronze coin."""
+    from gamelab.behavior.looting import Worth, expected_worth
+    tree_worth = Worth({"bronze": 33.4, "gold": 51.5})
+    store = DropStore(value=tree_worth)
+    horny = store.on_kill(Kill(0.0, "horny-mushroom", 3, 500.0, 300.0, 3))
+    green = store.on_kill(Kill(0.0, "green-mushroom", 3, 700.0, 300.0, 3))
+    pig = store.on_kill(Kill(0.0, "pig", 3, 900.0, 300.0, 3))
+    assert horny.value == pytest.approx(23.5, abs=0.1) and green.value == pytest.approx(14.1, abs=0.1)
+    assert pig.value == 33.4 and horny.kind == "horny-mushroom"
+    assert expected_worth("horny-mushroom", tree_worth) == horny.value
