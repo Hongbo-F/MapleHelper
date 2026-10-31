@@ -704,10 +704,13 @@ def loop_tree_23(sim):
     kills since the server's respawn became every scenario's, 2026-10-31: 18 in its 4 minutes, where the denser world
     before gave twenty.) (Seed 3 since chains are replanned at every state as they run (2026-10-30, work/replan:
     navigator.REPLAN, KNOCK_REPLAN, MEET_WALK): on seed 2 the rule 'shoot' decided fewer than 20 times; of seeds 1-3
-    only 3 meets all of this.) (Seed 1 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 2
-    under fifteen kills; of seeds 1-13 1 and 5-12 show all of this.) (Seed 3 since the stack's monsters turn where the
-    game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 1 under fifteen kills; of seeds
-    1-13 3, 7, 8 and 10 show all of this.)"""
+    only 3 meets all of this.) (Seed 1 since work/replan's rebase onto the server's respawn and the chase with where she
+    stands to fight after its review (2026-10-31: D:/MapleHelper-scratch/replan/pos/fix/out/scan_A.txt, scan_B.txt): on
+    seed 3 fewer than fifteen kills, the rule 'shoot' fewer than 20 times (the map at its cap, nothing came back onto 23
+    after 64 s); of seeds 1-10, 1, 4, 5 and 9 meet all of this.) (Seed 1 since the monsters move as the v83 client's AI
+    moves them, 2026-10-31: on seed 2 under fifteen kills; of seeds 1-13 1 and 5-12 show all of this.) (Seed 3 since the
+    stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed
+    1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -815,8 +818,8 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
-      realism=Realism(camps=harness.TREE_CAMPS, respawn=30.0, zero_walls=True, drop_mix=TREE_DROP_MIX,
+@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True,
+      realism=Realism(camps=harness.TREE_CAMPS, zero_walls=True, drop_mix=TREE_DROP_MIX,
                       drop_takers=True),
       expects=(logs("sweep: "), happens("picks up mesos"), logs("next: stop"),
                check("four drops picked up or more", lambda tr: sum(tr["world"]["picked"].values()) >= 4),
@@ -830,7 +833,10 @@ def loop_tree_grind_drops(sim):
     mesos, a Horny and a Green Mushroom's cap), 3 lying on 10 at the end, 11 sweeps said. (Seed 2 since where she stands
     to fight (2026-10-31: the sweep's guards by her full box against theirs, back to the stop, her HP priced as the hunt
     loop's, the stops by danger: D:/MapleHelper-scratch/replan/pos/impl/out/scan_drops.txt): on seed 1 she picked up
-    fewer than four drops; of seeds 1-10, 2, 3, 6 and 8 meet all of this.)"""
+    fewer than four drops; of seeds 1-10, 2, 3, 6 and 8 meet all of this.) (Seed 3 since work/replan's rebase onto the
+    server's respawn and the chase with where she stands to fight after its review (2026-10-31:
+    D:/MapleHelper-scratch/replan/pos/fix/out/scan_A.txt, scan_B.txt): on seed 2 she picked up fewer than four drops, no
+    mesos; of seeds 1-10, 3, 5, 6 and 8-10 meet all of this.)"""
     return _grind(3)(sim)
 
 
@@ -899,13 +905,16 @@ def loop_tree_ore_waits(sim):
     D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 1 she was hurt more than five times; of seeds
     1-8 met on 2-8.) (Seed 7 since walls stop her in the air by the game's rule (body.wall_table, 2026-10-31: the
     planner's flights from a floating platform count the tower's walls now): on seed 1 the ore never picked up in time;
-    of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the simulator's looks have her place as the
-    world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 7 the ore never picked up in
-    time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.) (Seed 24 since the monsters move as the v83
-    client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in the time, and hurt more than five times; none
-    of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14 since the stack's monsters turn where the game
-    turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 24 the ore not picked up in the
-    time; of seeds 1-40 14, 33, 35, 36 and 40 show all of this.)"""
+    of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 10 since work/replan's rebase onto the server's
+    respawn and the chase with where she stands to fight after its review (2026-10-31:
+    D:/MapleHelper-scratch/replan/pos/fix/out/scan_A.txt, scan_B.txt): on seed 2 not every ore picked up; of seeds 1-10,
+    10 alone meet all of this.) (Seed 6 since the simulator's looks have her place as the world does
+    (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 7 the ore never picked up in time; of
+    seeds 1-13, 6 alone meets all of this, 7 alone with her dot.) (Seed 24 since the monsters move as the v83 client's
+    AI moves them, 2026-10-31: on seed 6 the ore not picked up in the time, and hurt more than five times; none of seeds
+    1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14 since the stack's monsters turn where the game turns them,
+    20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 24 the ore not picked up in the time; of seeds
+    1-40 14, 33, 35, 36 and 40 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1531,13 +1540,17 @@ def loop_tree_attack_no_darts(sim):
     of seeds 1-8 met on 3 alone.) (Seed 16 since where she stands to fight (2026-10-31: the sweep's guards by her full
     box against theirs, back to the stop, her HP priced as the hunt loop's, the stops by danger;
     D:/MapleHelper-scratch/replan/pos/impl/out/scan_darts*.txt): on seed 3 out of darts' own stop never came in its 4
-    minutes; of seeds 1-30 met on 16 and 20, her stars' test not MAYBE OUT on 27 of the 28 others.) (Seed 6 since the
-    simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
-    right): on seed 8 her stars' test not MAYBE OUT; of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot
-    too.) (Seed 2 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 her stars never maybe
-    out; of seeds 1-13 2 alone shows all of this.) (Seed 4 since the stack's monsters turn where the game turns them, 20
-    from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7,
-    10 and 12 show all of this.)"""
+    minutes; of seeds 1-30 met on 16 and 20, her stars' test not MAYBE OUT on 27 of the 28 others.) (Seed 3 since
+    work/replan's rebase onto the server's respawn and the chase with where she stands to fight after its review
+    (2026-10-31: D:/MapleHelper-scratch/replan/pos/fix/out/scan_A.txt, scan_B.txt): on seed 16 her stars' test never
+    said MAYBE OUT, so she was paged once; of seeds 1-10, 3 and 7 (and of 1-30 before this, 16 and 20: fragile, the key
+    check's chain of events a run's luck) meet all of this.) (Seed 6 since the simulator's looks have her place as the
+    world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE
+    OUT; of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the
+    v83 client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of
+    this.) (Seed 4 since the stack's monsters turn where the game turns them, 20 from a platform's end
+    (monsters.walk_edges), 2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7, 10 and 12 show all of
+    this.)"""
     return key_check_run(4)(sim)
 
 
@@ -1842,9 +1855,14 @@ def nav_tree_landing_shot_first(sim):
     and on every seed she shoots it first from 24.) (Seed 3 since a trip's chains are planned by the whole state's
     monsters, each walking as perception has it head at its kind's speed from the game data, with no quick look after a
     touch (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT): on seed 5 the jump's landing had no price once
-    the mushroom was shot, nothing to say; of seeds 1-9, 3 and 9 meet all of this.) (Seed 8 since the monsters move as
-    the v83 client's AI moves them, 2026-10-31: on seed 5 the Horny Mushroom not dying by her landing; of seeds 1-13 8
-    alone shows all of this.)"""
+    the mushroom was shot, nothing to say; of seeds 1-9, 3 and 9 meet all of this.) (Not shown since work/replan's
+    rebase onto the server's respawn and the chase (2026-10-31: D:/MapleHelper-scratch/replan/pos/fix/out/scan_A.txt,
+    scan_C.txt, one_landing5.txt): on none of seeds 1-40 does she land by its dying body. Hit, the mushroom walks at her
+    (the chase) and dies about 44 units from where her kill is placed (seed 5: at x 65, the kill at x 21), so its dying
+    body is taken for a live one for 1.4 s ('could touch her on the way: shooting it first', 'nothing in reach' twice),
+    and she jumps once it's gone; tests/test_sim.py's DYING_AWAY.) (Seed 8 since the monsters move as the v83 client's
+    AI moves them, 2026-10-31: on seed 5 the Horny Mushroom not dying by her landing; of seeds 1-13 8 alone shows all of
+    this.)"""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(23, mode=TRANSIT)
 

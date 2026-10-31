@@ -2159,7 +2159,8 @@ minute, against 9-10 under 0.1), is the whole excess.
   rule 1 yields to the way back (the navigator's trip keeps her body off theirs) unless a monster's body is on hers.
 - *Her HP learned from her touches* (`grind.HP_BY_TOUCHES`, `Grind._learn_touches`): each touch that took HP she was told
   of (the hunter's: a MISS not) at the share of her HP the map's hardest-hitting kind's touch takes, with the time since
-  the last pass (her trips' too, `TOUCH_GAP_S` at the most), charged to the stop she's at or going to.
+  the last pass (her trips' too, `TOUCH_GAP_S` at the most), charged to the stop she's at or going to (after its review:
+  at the nearest kind's share, charged to the stop she's at only, below).
 - *Her stays net of it* (`grind.STAY_NET`): what staying at a stop gives is its EXP a second less `HP_PRICE` times the
   HP a second she loses there (`Patrol.hp_rate`), as the loop's rate already was.
 - *A bar of HP at the hunt loop's price* (`patrol.HP_PRICE` 250, `hunt.HP_EXP`'s: 3.1 Orange Potions at a guessed 160
@@ -2249,6 +2250,117 @@ the user's, by what potions cost) or fewer kills there buys back, EXP with it. W
 touches a kill are still 9% over master's and her drops' share fell. The fights' own changes tried here (BESIDE, the
 escapes through bodies) didn't help. Live: not run (the perception service and the player restarted on this code, the
 latter with the user's UAC click: the user's).
+
+## Where she stands to fight, after its review, on the server's respawn and the chase (2026-10-31)
+
+The review of the section above (D:/MapleHelper-scratch/replan/pos/spot), what came of each of its points, and the
+branch rebased onto master 35a1196 (the server's fill-to-cap respawn and the chase in every world: Tree Dungeon's
+respawn, "With the chase") and measured there (this round's scratch D:/MapleHelper-scratch/replan/pos/fix).
+
+**The review's points:**
+1. *The sweep's guards were measured in a world whose body is smaller than the rule's* (the standard world's 15 x 55,
+   the rule's the client's 22 x 65): measured again with `--world client-body` (12 seeds of the standard grind, the
+   guards on against off, `pos/fix/out/diag_cb_*.json`): EXP a minute +28.8 (se 16.0), loot's worth a minute +23.9
+   (11.0), drops' share the same (0.902 against 0.905), touches +5.8 (5.1), at piles +0.6 (1.9), cash a minute at 50 a
+   potion -56 (41). With her body the rule's the guards cost no loot; neither do they cut her touches at piles there.
+   Kept: the client's box is the one the whole stack plans by.
+2. *`danger.level` has no margin*: not changed. The client's rectangles overlap strictly, and her trips are planned by
+   the same box and the same test (motion.bodies.touches): with a margin here the sweep would stand her on a pile her
+   trips keep clear of.
+3. *Every touch charged as the map's hardest-hitting kind's*: each at the share of her HP a touch by the kind nearest
+   her body takes (`Grind._touch_share`: on her platform or one level enough with hers, within `TOUCH_NEAR` 100;
+   `Danger.taken`, under DANGER_MIN too: a Slime's 1.2%), the hardest-hitting kind's only where none is by her.
+4. *The trip back to the stop finished and swept on the platform she was sent back from*: the way back has its
+   FINISH_S spent (no rule 4b) and no sweep on it (`Grind._back`, `Hunt._while_travelling`).
+5. *A trip's touches charged to the stop she was going to*: a stop is charged only while she's at it (got to it, the
+   same visit both looks, wherever a knock took her from it), so staying and the loop's shooting aren't charged for her
+   trips.
+6. *A stop she has been at looked about 10 times dearer than one she hasn't*: the danger hook of a stop she hasn't been
+   at is the hook times what she has lost against it where she has (`Patrol.hook_scale`, `HOOK_PRIOR_HP` 0.2 of HP as
+   the hook said counted in; live, where the hook is the hunts' own, about 1).
+7. *Re-picked scenarios hiding fragile ones*: each scenario re-seeded below says of how many of the seeds tried it holds
+   (`loop_tree_attack_no_darts`: of seeds 1-10, 3 and 7).
+8. *Notes*: patrol's loop before she has seen anything (9, 8 at 492 EXP a minute with the server's respawn; it said 10,
+   8 at 470 where the code gave 449), the grind's HP log by stop (with the hook's scale).
+
+**Measured on the server's respawn and the chase** (the harness's standard `ab`, as above, against master 35a1196's
+baseline, 48 seeds; the branch before this work, 1d28a9d rebased (fa8175f), and this work as built, 0f4dee7 rebased
+(02d7e66), from base.py's fills of 24 seeds; Idle priority on CPUs 12-23 with the game, the live perception service
+and the pet feeder up; `pos/fix/out/ab_tip1.txt`, `paired48_tip.txt`, `paired24_all.txt`, `paired24_vs_before.txt`):
+
+| 48 seeds | master | now | now - master (se) |
+|---|---|---|---|
+| EXP a minute | 321.1 | 303.5 | -17.6 (9.1), -5.5% |
+| touches | 67.9 | 67.9 | +0.0 (2.5) |
+| touches that hurt | 42.0 | 42.5 | +0.6 (1.6) |
+| HP lost (bars) | 5.29 | 5.58 | +0.28 (0.26) |
+| hurt on her trips / at piles / standing or fighting | 11.6 / 16.6 / 30.3 | 10.2 / 7.9 / 32.3 | -1.5 (0.8) / -8.7 (1.3) / +2.0 (1.6) |
+| kills | 45.2 | 42.8 | -2.4 (1.3) |
+| HP / MP potions | 16.1 / 11.8 | 16.9 / 10.6 | +0.8 (0.8) / -1.2 (0.5) |
+| loot's worth a minute | 250.1 | 213.9 | -36.2 (7.2), -14.5% |
+| drops' share | 0.962 | 0.926 | -0.036 (0.011) |
+| cash a minute, HP potions at 160 / 50 | -738 / -383 | -753 / -380 | -15 (31) / +3 (18) |
+
+| 24 seeds | master | before | as built | now | before - master | built - master | now - before (se) |
+|---|---|---|---|---|---|---|---|
+| EXP a minute | 324.5 | 346.4 | 355.8 | 308.6 | +21.9 (10.3) | +31.4 (11.7) | -37.8 (13.1) |
+| touches | 67.9 | 78.8 | 72.7 | 68.6 | +10.9 (3.6) | +4.8 (3.0) | -10.1 (3.1) |
+| touches that hurt | 41.9 | 52.4 | 47.5 | 42.0 | +10.5 (2.9) | +5.6 (2.3) | -10.4 (2.1) |
+| HP lost (bars) | 5.32 | 7.16 | 6.37 | 5.56 | +1.84 (0.46) | +1.05 (0.30) | -1.60 (0.34) |
+| loot's worth a minute | 255.0 | 272.2 | 266.4 | 211.8 | +17.3 (10.1) | +11.4 (8.6) | -60.4 (10.9) |
+| drops' share | 0.976 | 0.955 | 0.954 | 0.921 | -0.021 | -0.022 | -0.033 (0.013) |
+| cash a minute, HP potions at 50 | -392 | -485 | -466 | -389 | -94 (27) | -74 (22) | +97 (25) |
+
+No deaths, falls out of the map or safety stops on any side. On the server's respawn and the chase (22 monsters at most
+on Tree Dungeon's 31 points, those she hits after her) the branch's lead over master shrinks: before this work +22 EXP
+a minute for +11 touches; as built +31 for +5. With the review's points, her touches, those that hurt and her HP are
+master's (within 1 se), her cash too, but her EXP a minute is 5.5% under master's (better on 21 of 48 seeds) and her
+loot 14.5% under (beyond 2 se): the sweep leaves more drops (0.926 of them picked up against master's 0.962), a pile
+waiting for a monster that would meet her there, seen or remembered, that she can't shoot first.
+
+**What each point's change did** (12-24 seeds, in this process, `pos/fix/diag.py`, against master on the same seeds): of
+the review's changes, charging a stop only while she's at it (5) is what moves her most: with 5 and 6 undone (3 and 4
+kept), 24 seeds, EXP +13.0 (se 11.3) and HP +0.80 bars (0.39), loot -12.0 (10.7), cash at 50 -50 (25); with 6 alone
+undone, EXP -2.2 (10.5), HP +0.52 (0.44), loot -22.8 (10.6), cash at 50 -31 (25); all of them (as committed), EXP -15.9
+(13.4), HP +0.24 (0.41), loot -43.1 (8.7), cash at 50 +3 (25). Her stop's HP charged by what she loses there (3, 5) and
+the hook scaled by it (6) make the top of the tower dear at `HP_PRICE` 250 (on seed 1 she learned 3.4 bars a minute at
+10, 14 EXP a second's worth against its 10 of kills), so she shoots less there. The HP price itself (12 seeds): 100, EXP
+-32.4 (7.8), touches -8.3 (4.0), cash at 50 +47 (37); 160, EXP -14.1 (8.0), touches -2.5 (5.0), cash at 50 +4 (27); 250
+(committed) -36.8 (12.3), -1.1 (5.1), +18 (34): within the seeds' spread. Committed: every change on, the one that keeps
+her touches, those that hurt and her HP at master's with her cash no worse.
+
+**Goldens** (Tree Dungeon's 43 recorded again on this code into a scratch folder, `pos/fix/golden-new`, each one's
+expectations checked, then installed in this worktree's lab/golden: `golden check --jobs 2` 43 of 43; the traces before
+in `pos/fix/golden-before`): 40 of 43 show what they're there for: not `loop_tree_run` (up the tower, as on master:
+tests/test_sim.py's TOWER_TRIPS), `nav_tree_landing_no_shot` (as before) and `nav_tree_landing_shot_first`, on no seed
+of 1-40 (its docstring; tests/test_sim.py's DYING_AWAY). Re-seeded, each saying why (of seeds 1-10, which meet all of
+it): `loop_tree_grind_drops` 2 -> 3, `loop_tree_23` 3 -> 1, `loop_tree_ore_waits` 2 -> 10 (10 alone),
+`loop_tree_lie_detector_28` 6 -> 1, `loop_tree_23_near_misses` 4 -> 5, `loop_tree_wait` 2 -> 6,
+`loop_tree_attack_misses` 4 -> 1, `loop_tree_attack_misses_seen` 3 -> 1, `loop_tree_attack_no_darts` 16 -> 3 (3 and 7);
+`loop_tree_grind_drops`'s clock respawn (30 s) dropped, as master did `loop_tree_grind`'s. `loop_tree_run` ends at 304 s
+(482 on the old simulator, 180 of them fighting on the floor on her way to stand by: gone). Summed over the 42 master
+has (35a1196's traces by its commit: 700 touches, 640 kills, 21,411 EXP): 640, 580, 19,896. Off Tree Dungeon (the first
+map's, gone from master since e8564f2) re-seeded too, each saying why: `nav_fight_up` 1 -> 2, `probe_air` 1 -> 3,
+`loop_lull_loot` 2 -> 9 (9 alone of 1-10); and tests: the rope test 1 -> 4 (tests/test_ropes.py), the walk's evades 1 ->
+3 (tests/test_evade.py), the jump after a kill falling 7 of 8 times where it was 8 (tests/test_sim.py), the replan's
+touch layout with the mushroom chasing her as `nav_tree_evade`'s (tests/test_replan.py). The other maps' goldens weren't
+recorded again.
+
+**Cash.** As above: a kill costs her about 40 MP (0.4 of an MP potion at the harness's 200 mesos) against the 25 mesos
+her drops are worth, so at the harness's prices every version loses money a minute; at 50 mesos an HP potion she now
+loses about what master does (-380 against -383 a minute), where before this work she lost 94 more and as built 74
+more. Leaving the MP potions out (mesos less HP potions at 50) she keeps 45 a minute against master's 89: her potions'
+saving is spent by the drops she leaves.
+
+**Not done.** The bar is half met: her touches, those that hurt and her HP lost are at master's, her cash too, but
+neither her EXP gain nor her loot gain survives the server's respawn and the chase (EXP -5.5%, loot -14.5%). The loot
+she leaves is the sweep's guards waiting on monsters she can't shoot first (in 12 runs with the hook's scale off, 1,587
+of the "later" waits were for one remembered and not on screen, 628 for one on screen); the EXP she gives up is the top
+of the tower, priced at `HP_PRICE` (the user's, by what potions really cost). The magician's grind takes the same
+pricing and isn't checked in the simulator. Live: not run (the perception service and the player restarted on this code,
+the latter with the user's UAC click). Master has moved on since (0fd374a, 2026-10-31 14:10: walls in the air and the
+tower's walls by the game's rule, the old maps' scenarios gone, Tree's scenarios reworked): another rebase, `ab` and the
+goldens again before this goes onto master.
 
 ## Localization
 

@@ -98,8 +98,8 @@ def _run(sc, fn):
 def _evade_layout(**kw):
     return scenarios.Scenario("replan touch", None, (21, 60.0), monsters=[("Green Mushroom", 21, 130.0)], seed=2, limit=60,
                               map_id=scenarios.TREE, attack="choice", her=scenarios.SCENARIOS["nav_tree_evade"].her,
-                              realism=Realism(zero_walls=True, chase=harness.CHASE_TREE,
-                                              invulnerable=harness.INVULNERABLE_LIVE), **kw)
+                              realism=Realism(zero_walls=True, chase=True, invulnerable=harness.INVULNERABLE_LIVE),
+                              **kw)  # (the mushroom hit before the trip and chasing her, as nav_tree_evade's: go's aggro)
 
 
 @REAL
@@ -111,6 +111,7 @@ def test_a_touch_mid_chain_is_replanned_at_once_from_where_the_knock_lands_her(m
     calls = []
 
     def go(sim):
+        sim.world.monsters[0].aggro(sim.world.t)
         nav = sim.navigator(sim.hunter())
         real = nav.recover
         nav.recover = lambda *a, **k: calls.append(sim.clock.now) or real(*a, **k)

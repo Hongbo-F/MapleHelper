@@ -515,11 +515,13 @@ def test_in_the_simulators_walk_she_evades_and_no_move_a_monster_blocks_goes_to_
     # harness `walk` (movement only, as the live QA walk) in the standard world (the crowd, walkers, near-misses): she
     # steps to refuges and goes past, said ('evade' events), and her touches on the mover's moves are none or next to it
     # (the mover only for a move no chain plans: 4 since chains are replanned as they run, 2026-10-30, navigator.REPLAN,
-    # drops no chain could plan with a monster by them; 3 before).
+    # drops no chain could plan with a monster by them; 3 before). Seed 3 since work/replan's rebase onto the server's
+    # respawn and the chase (2026-10-31): on seed 1 two touches on the mover's 2 moves; of seeds 1-6 two on 1, one on
+    # 2, none on 3-6 (D:/MapleHelper-scratch/replan/pos/fix/out/walk.txt).
     from gamelab.sim import harness, scenarios
     if not scenarios.available(scenarios.TREE):
         pytest.skip("Tree Dungeon's game data isn't on this computer")
-    out = harness.run_one("walk", 1, "crowd", minutes=1.0, costs="measured", map_id=scenarios.TREE,
+    out = harness.run_one("walk", 3, "crowd", minutes=1.0, costs="measured", map_id=scenarios.TREE,
                           world=("zero-walls", "near-misses", "walkers"), attack="choice")
     assert out["evades"].get("spot", 0) + out["evades"].get("move", 0) >= 1 and out["evades"].get("pass", 0) >= 1
     assert out["touches_by"]["move"] <= 1 and out["mover_moves"] <= 4

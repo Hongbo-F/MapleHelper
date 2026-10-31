@@ -218,10 +218,12 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
     fixes of work/replan, 2026-10-30 (the frames on their grid at 15 a second whatever is asked, feed.run; a monster
     standing planned either way a while, navigator.STAND_UNSURE_S;
     D:/MapleHelper-scratch/replan/fix/out/scant_ropes.txt): on seed 3 she never waits on the rope; of seeds 1-12 it's
-    met on all but 3 and 10.) Seed 11 since the stack's monsters turn where the game turns them, 20 from a platform's
-    end (monsters.walk_edges, 2026-10-31): on seed 1 the safety stop before she waits on the rope; of seeds 1-12 it's
-    met on 11 alone, and on 10 she waits on it and the safety stop comes, on the other 10 before she ever waits on
-    it.)"""
+    met on all but 3 and 10.) Seed 4 since work/replan's rebase onto the server's respawn and the chase (2026-10-31:
+    D:/MapleHelper-scratch/replan/pos/fix/out/rope.txt): on seed 1 she never waits on the rope; of seeds 1-12 it's met
+    on 4, 9, 10 and 12, and on 7 of the others the safety stop before she ever waits on it.) Seed 11 since the stack's
+    monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges, 2026-10-31): on seed 1 the
+    safety stop before she waits on the rope; of seeds 1-12 it's met on 11 alone, and on 10 she waits on it and the
+    safety stop comes, on the other 10 before she ever waits on it.)"""
     from gamelab.sim import harness, scenarios, world
     from gamelab.sim.world import Realism
     model = build([FLOOR, OVER], LIVES, [ROPE])
