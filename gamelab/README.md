@@ -2184,7 +2184,57 @@ minute, against 9-10 under 0.1), is the whole excess.
   -5.6 (4.0), EXP -20 against -12; the stops by the danger (H) -7.3 (3.3), EXP -5; both (I) -2.1 (3.2), EXP -9.5; all
   of it with the HP priced as the hunt loop's (J, as committed) -9.2 (3.7), hurt -7.3 (2.9), HP -1.33 bars (0.49), EXP
   -27 (11). The seeds' spread is most of those differences (one run's touches swing 20-30 with any change): the
-  harness's own `ab` is the measure (the next commit).
+  harness's own `ab` below is the measure.
+
+**Measured** (the harness's `ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world
+zero-walls --world near-misses --world walkers --minutes 5`, against master's cached baseline at 52d6195, 48 seeds; the
+branch before these changes, 1d28a9d, from its saved runs on the same seeds; Idle priority on CPUs 12-23 with the
+game, the live perception service and the pet feeder up; `pos/impl/out/ab_std.txt`, `ab_tick.txt`, `paired48.txt`):
+
+| standard world | master | before | now | now - master (se) | now - before (se) |
+|---|---|---|---|---|---|
+| EXP a minute | 308.9 | 382.7 | 366.2 | +57.3 (6.9), +18.6% | -16.5 (6.6) |
+| touches | 67.6 | 87.4 | 76.7 | +9.1 (2.5), +13.5% | -10.7 (2.3) |
+| touches that hurt | 42.0 | 57.4 | 49.8 | +7.8 (1.9) | -7.6 (1.8) |
+| HP lost (bars) | 5.25 | 7.99 | 6.74 | +1.48 (0.33), +28% | -1.25 (0.28) |
+| hurt on her trips / at piles / standing or fighting | 10.9 / 16.9 / 31.1 | 8.5 / 16.1 / 48.9 | 8.8 / 11.6 / 41.0 | -2.1 / -5.3 / +9.9 | +0.3 / -4.5 / -7.9 |
+| kills | 44.8 | 53.6 | 52.3 | +7.5 (0.9) | -1.3 (0.8) |
+| touches a kill / those that hurt | 1.52 / 0.94 | 1.65 / 1.08 | 1.48 / 0.96 | -0.04 (0.05) / +0.02 (0.04) | -0.17 / -0.12 |
+| HP a thousand EXP (bars) | 3.37 | 4.21 | 3.70 | +0.33 (0.20) | -0.50 (0.17) |
+| loot's worth a minute | 231.9 | 258.0 | 263.7 | +31.9 (5.8), +13.7% | +5.7 (7.0) |
+| drops' share | 0.941 | 0.914 | 0.934 | | +0.019 (0.008) |
+| HP / MP potions | 16.0 / 11.2 | 24.6 / 15.2 | 20.7 / 14.7 | +4.7 / +3.4 | -3.9 / -0.5 |
+| cash a minute, HP potions at 160 / 50 | -730 / -378 | -1137 / -596 | -985 / -530 | -255 (39) / -152 (20) | +152 (33) / +66 (17) |
+
+| `--world tick-respawn` | master | before | now | now - master (se) | now - before (se) |
+|---|---|---|---|---|---|
+| EXP a minute | 318.3 | 367.4 | 354.6 | +36.3 (5.9), +11.4% | -12.8 (6.9) |
+| touches | 67.8 | 84.4 | 81.0 | +13.2 (2.4), +19.5% | -3.4 (2.0) |
+| touches that hurt | 41.7 | 56.5 | 53.0 | +11.3 (1.8) | -3.5 (1.7) |
+| HP lost (bars) | 5.22 | 7.73 | 7.12 | +1.90 (0.30), +36% | -0.61 (0.26) |
+| hurt on her trips / at piles / standing or fighting | 10.9 / 17.3 / 30.8 | 9.3 / 17.2 / 47.2 | 10.1 / 12.7 / 42.9 | -0.8 / -4.6 / +12.1 | +0.8 / -4.5 / -4.3 |
+| touches a kill | 1.49 | 1.67 | 1.62 | +0.13 (0.05) | -0.05 (0.06) |
+| loot's worth a minute | 236.3 | 262.5 | 252.4 | +16.1 (5.4) | -10.0 (6.5) |
+| drops' share | 0.953 | 0.940 | 0.923 | -0.030 (0.012) | -0.018 (0.008) |
+| cash a minute, HP potions at 160 / 50 | -730 / -381 | -1093 / -571 | -1009 / -529 | -279 (36) / -148 (18) | +84 (30) / +42 (16) |
+
+No deaths, falls out of the map or safety stops on either side. EXP a minute better than master's on 43 of 48 seeds
+(the worst -11%; tick-respawn 40, the worst -23%). In the standard world she's now as safe a kill as master (1.48
+touches a kill against 1.52; 0.96 that hurt against 0.94): what's left over master's touches is her 17% more kills, at
+the top of the tower. With the respawns on the map's tick less of it came back (touches -3.4 against the branch before,
+1.7 se), and its drops' share fell (0.940 -> 0.923). Neither world meets the bar: touches, those that hurt and HP lost
+are all still over master's, beyond 2 se.
+
+**Goldens** (Tree Dungeon's 43, recorded again into a scratch folder, each one's expectations checked, the
+safety-relevant ones read, then installed in this worktree's lab/golden and `golden check --jobs 2` 43 of 43;
+`pos/impl/out/golden_summary.txt`, the traces before in `pos/impl/golden-before`): 42 of 43 meet what they're there for
+(`nav_tree_landing_no_shot` expected to fail, as before). 20 of the 43 the same to the byte (every trip's,
+`tour_tree_run`, the hunt loop's three Lie Detector scenarios, `loop_tree_safety_stop`); of the 23 that differ, the
+grind's Lie Detector (`loop_tree_lie_detector_grind`) retreats to 25 at x 199 (danger 0, arrived), as before at 119;
+summed over the 43 touches 1,142 -> 1,258, kills 1,049 -> 1,103, picked 789 -> 775 (two of them on new seeds, below:
+`loop_tree_attack_no_darts` alone 16 -> 84 touches on its new seed; single seeds, the harness's 48 are the measure). Re-picked, each
+saying why: `loop_tree_grind_drops` 1 -> 2 (of seeds 1-10, 2, 3, 6 and 8 pick up four drops and an item),
+`loop_tree_attack_no_darts` 3 -> 16 (of seeds 1-30, 16 and 20 meet all of it).
 
 **Cash.** In these worlds a kill costs her about 40 MP (39.5 on master, 40.2 on the branch: Lucky Seven's casts at 14,
 a fifth of them hitting nothing), 0.4 of an MP potion (100 MP, 200 mesos at the harness's guess), against the 25 mesos
@@ -2192,9 +2242,13 @@ her drops are worth: each more kill is about 55 mesos less cash at the harness's
 (the mesos she picks up less her potions, HP at 50 or 160, MP at 200) can beat master's only by fewer kills or by MP or
 HP a kill: with the branch's kills the extra MP potions alone (+3.6 a run) cost 143 mesos a minute.
 
-**Not done.** Her touches a minute standing or fighting are still above master's; the rest of the gap is the time at
-the top of the tower, which only a dearer HP (or fewer kills there) buys back. Live: not run (the perception service
-and the player restarted on this code: the user's).
+**Not done.** The bar: her touches, those that hurt and her HP lost are still over master's in both worlds (standard
++13.5%, +18.5%, +28%; tick-respawn +19.5%, +27%, +36%), standing or fighting above all (+32%, +39%); in the standard
+world as safe a kill as master's, so what's left is her extra kills at the top of the tower, which a dearer HP (`HP_PRICE`:
+the user's, by what potions cost) or fewer kills there buys back, EXP with it. With the respawns on the map's tick her
+touches a kill are still 9% over master's and her drops' share fell. The fights' own changes tried here (BESIDE, the
+escapes through bodies) didn't help. Live: not run (the perception service and the player restarted on this code, the
+latter with the user's UAC click: the user's).
 
 ## Localization
 

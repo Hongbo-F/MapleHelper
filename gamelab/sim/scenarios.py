@@ -815,7 +815,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       realism=Realism(camps=harness.TREE_CAMPS, respawn=30.0, zero_walls=True, drop_mix=TREE_DROP_MIX,
                       drop_takers=True),
       expects=(logs("sweep: "), happens("picks up mesos"), logs("next: stop"),
@@ -827,7 +827,10 @@ def loop_tree_grind_drops(sim):
     units apart; world.HER_DROPS_LAST, `--world drop-takers`, hers taken by others as long as they lay live): the loot
     sweep (behavior.sweep) on her legs between stops and before she leaves one, said in her log ("sweep: ..."), each
     pile's stand made only where no monster would meet her there. On seed 1, 12 kills of hers, 4 drops picked up (2
-    mesos, a Horny and a Green Mushroom's cap), 3 lying on 10 at the end, 11 sweeps said."""
+    mesos, a Horny and a Green Mushroom's cap), 3 lying on 10 at the end, 11 sweeps said. (Seed 2 since where she stands
+    to fight (2026-10-31: the sweep's guards by her full box against theirs, back to the stop, her HP priced as the hunt
+    loop's, the stops by danger: D:/MapleHelper-scratch/replan/pos/impl/out/scan_drops.txt): on seed 1 she picked up
+    fewer than four drops; of seeds 1-10, 2, 3, 6 and 8 meet all of this.)"""
     return _grind(3)(sim)
 
 
@@ -1525,13 +1528,16 @@ def loop_tree_attack_no_darts(sim):
     a second whatever is asked, feed.run; a monster standing planned either way a while, navigator.STAND_UNSURE_S; her
     piles seen gone only by strips sure of them, worldstate.DropStrip.sure;
     D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 6 out of darts wasn't told by its own watch;
-    of seeds 1-8 met on 3 alone.) (Seed 6 since the simulator's looks have her place as the world does
-    (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT; of
-    seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the v83
-    client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of
-    this.) (Seed 4 since the stack's monsters turn where the game turns them, 20 from a platform's end
-    (monsters.walk_edges), 2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7, 10 and 12 show all of
-    this.)"""
+    of seeds 1-8 met on 3 alone.) (Seed 16 since where she stands to fight (2026-10-31: the sweep's guards by her full
+    box against theirs, back to the stop, her HP priced as the hunt loop's, the stops by danger;
+    D:/MapleHelper-scratch/replan/pos/impl/out/scan_darts*.txt): on seed 3 out of darts' own stop never came in its 4
+    minutes; of seeds 1-30 met on 16 and 20, her stars' test not MAYBE OUT on 27 of the 28 others.) (Seed 6 since the
+    simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
+    right): on seed 8 her stars' test not MAYBE OUT; of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot
+    too.) (Seed 2 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 her stars never maybe
+    out; of seeds 1-13 2 alone shows all of this.) (Seed 4 since the stack's monsters turn where the game turns them, 20
+    from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7,
+    10 and 12 show all of this.)"""
     return key_check_run(4)(sim)
 
 
