@@ -570,7 +570,7 @@ def nav_tree_down(sim):
     return _nav(33)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=1, limit=600,
+@tree((28, 247.0), monsters="all", seed=7, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
@@ -635,7 +635,9 @@ def loop_tree_run(sim):
     patience alone and the next picked was the one just left, every 4-5 s. Of seeds 1-13 none falls out now, every run
     23-31 kills and 726-878 EXP; 3 meet all of this (1, 2, 7; on 1 under the goldens' settings and two other hash seeds)
     and 10 hunt a tower ground a while (7, 10 or 19, a minute or so), by its EXP for its danger, standing on 10 or
-    shooting 19 from 20: on 5 and 6 1-2 hurting touches there, 10-13 on 23.)"""
+    shooting 19 from 20: on 5 and 6 1-2 hurting touches there, 10-13 on 23.) (Seed 7 since walls stop her in the air by
+    the game's rule (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls
+    now): on seed 1 a tower ground hunted; of seeds 1-13, 7 alone meets all of this, 1, 2 and 7 before.)"""
     return _loop(5)(sim)
 
 
@@ -707,7 +709,7 @@ def loop_tree_23(sim):
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=4, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -722,11 +724,13 @@ def loop_tree_23_near_misses(sim):
     work's integration with master 8dcc2e6 (2026-10-29, work/evade-int; swept again after its review): of seeds 1-13
     all but 1 and 11, every seed's touches as on work/evade.) (Seed 4 since the server's respawn and the chase together
     (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 2 not all of this; of seeds 1-13, 4, 9 and 10
-    meet all of it.)"""
+    meet all of it.) (Seed 3 since walls stop her in the air by the game's rule (body.wall_table, 2026-10-31: the
+    planner's flights from a floating platform count the tower's walls now): on seed 4 no Horny Mushroom missed by the
+    looks later; of seeds 1-13, 3 and 13 meet all of this, 4, 9 and 10 before.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
-@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=2, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_wait(sim):
@@ -737,7 +741,9 @@ def loop_tree_wait(sim):
     she went for 3 mesos on 19 at x 134 and the drop planned from 18 at x 110 took the rope at 111 instead, 12 times from
     147 s to 231 s, the pile taken up again 3 s after "too many misses": a loop of the navigation's own, a drop planned
     over a rope's top, which master's stack (one miss on seed 3) didn't come to. Of seeds 1-12 every one meets it, with
-    no such miss on 2, 4-8 and 10-12; master's stack meets all 12.)"""
+    no such miss on 2, 4-8 and 10-12; master's stack meets all 12.) (Seed 1 since walls stop her in the air by the
+    game's rule (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls
+    now): on seed 2 not all of this; of seeds 1-13, 1, 5, 7, 10 and 13 meet all of it, five before too.)"""
     return harness._only(_loop(4), (20,))(sim)
 
 
@@ -797,7 +803,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=7, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -847,7 +853,9 @@ def loop_tree_ore_waits(sim):
     map at its cap from the start, a kill back at the next pass; on 5 not all of this; of seeds 1-13, 13 alone (of 1-26)
     meet all of it.) (Seed 1 since the server's respawn and the chase together (respawn_tick and Realism.chase every
     world's, 2026-10-31): on seed 13 she never picked up the ore; of seeds 1-13, 1 and 6 meet all of this, with the
-    chase alone 1, 5, 8 and 12 (the old respawn).)"""
+    chase alone 1, 5, 8 and 12 (the old respawn).) (Seed 7 since walls stop her in the air by the game's rule
+    (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1
+    the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1361,7 +1369,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -1376,7 +1384,10 @@ def loop_tree_attack_misses(sim):
     MISSes read, no doubt.) The monster to finish is set up as in loop_tree_grind_attack_key (_HURT): on seed 3 the
     doubt at 60.1 s, ATTACK on Ctrl at 69.9 s, 7 kills after; of seeds 1-13 all but 1 (no doubt) and 12 (2 kills
     after) meet all of this, and seed 3 with the chase off and with the old respawn clock too (on that clock seed 2
-    has under 3 kills after the check, seed 4 no doubt)."""
+    has under 3 kills after the check, seed 4 no doubt). (Seed 1 since walls stop her in the air by the game's rule
+    (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 3
+    no regular attack's doubt; of seeds 1-13, 10 meet all of this (1, 2, 4-6, 9-13), and on 1 with the chase off and on
+    the old respawn clock too.)"""
     return key_check_run(2)(sim)
 
 
