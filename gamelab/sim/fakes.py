@@ -44,6 +44,7 @@ from maplehelper.ocr.exp_table import EXP_TO_NEXT
 from ..attack.choice import MP_STEPS
 from ..behavior.pet import PetCare
 from ..control import client
+from ..localization.locate import Located
 from ..localization.mapdata import MapModel
 from ..localization.monsters import FLINCH_S
 from ..localization.pose import GRASS_OVERHANG
@@ -370,6 +371,17 @@ class FakeTouches:
         return out
 
 
+# Her place in every look and frame the world's own (TRUE_PLACE: the user, 2026-10-31, "Or simulation can just assume
+# localization is correct"): handed to Senses as live's localizer (localization.locate) hands it, a Located with her
+# feet's map x and y, the platform she stands on, her mode (ground, air, rope) and full confidence, by her tag ("tag"),
+# or carried where a Noise hides her tag. Until then the simulator's eyes have no locator (no name tag to match), and
+# every look placed her by her minimap dot (Localizer.where_dot: good to ~11 units, snapped to a platform) refined on
+# screen: on Tree Dungeon her dot on 30 snapped her onto 28, 34 above it, and a drop 28 -> 30 that had landed was judged
+# missed and done again (loop-grind, seeds 6, 9 and 10). The localizer has its own tests, on the game's frames; what
+# runs here is what comes after it. False: by her dot, as before.
+TRUE_PLACE = True
+
+
 class FakeEyes(Eyes):
     def __init__(self, world: World, clock: Clock, model: MapModel, guard: Callable[[], None] | None = None):
         """`guard`: called before every look; it raises when the fakes aren't in place (sim.scenarios.Sim)."""
@@ -574,6 +586,8 @@ class FakeEyes(Eyes):
         s = Observation(t=t, frame=frame, tag=her if seen else None, hp=self._hp(), mp=self._mp(),
                         ground=self._ground(her) if seen else None, dot=self._dot(counts), others=self._others(),
                         ropes=found)
+        if TRUE_PLACE and not self.noise.by_dot:  # (her tag where her feet put it, hidden or not: Located.tag)
+            s.tag, s.located = her, self._located(her, seen)
         s.exp, s.exp_box = exp_pixels(w.exp), self._exp_box()
         s.hp_box, s.lv_box = self._hp_box(), self._lv_box()
         if w.chat_box is not None:  # her chat box as the game shows it (Realism.chat; None: not read, as before)
@@ -582,6 +596,16 @@ class FakeEyes(Eyes):
             s.exp = s.exp.copy()                       # and goes, as in game (and a kill under it the rest)
             s.exp[:, 20:50] = True
         return s
+
+    def _located(self, her: tuple[int, int], seen: bool) -> Located:
+        """Her place as the world has it, as localization.locate's Located (TRUE_PLACE): her feet's map place, the
+        platform she stands on (none in the air or on a rope), her mode, placed by her tag (carried where it's hidden:
+        her tag on screen where her feet put it all the same, as the localizer's)."""
+        w = self.world
+        mode = w.mode if w.mode in ("ground", "air", "rope") else "air"
+        return Located(view=(0, 0), view_sure=False, feet=(float(her[0]), float(her[1])), tag=her,
+                       x=w.x, y=w.y, platform=w.plat if mode == "ground" else None, mode=mode,
+                       how="tag" if seen else None, confidence=1.0)
 
     def glance(self) -> tuple[tuple[float, float] | None, float]:
         self._now()

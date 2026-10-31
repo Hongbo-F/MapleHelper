@@ -1193,7 +1193,9 @@ def test_the_stack_runs_only_with_the_fakes_in_place(model):
 
 # --- seeing ------------------------------------------------------------------------------------------
 
-def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(model):
+def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(model, monkeypatch):
+    # (her place by her dot, refined on screen, as live before the localizer has found her: fakes.TRUE_PLACE off)
+    monkeypatch.setattr(fakes, "TRUE_PLACE", False)
     b = plat(model, 360, 300)  # monsters are placed on platforms their kind spawns on (monsters.monster_platform)
     clock = Clock()
     w = World(model, KEYS, (b.id, 240.0), monsters=[("Snail", b.id, 380.0)], origin=clock.now,
@@ -1218,7 +1220,8 @@ def test_a_look_places_her_the_monsters_and_the_drops_where_the_world_has_them(m
     assert s.how == "edge" and s.where.x == pytest.approx(240, abs=1)  # ... or from her platform's end
 
 
-def test_noise_rounds_the_dot_hides_her_tag_and_dot_and_makes_stars_miss(model):
+def test_noise_rounds_the_dot_hides_her_tag_and_dot_and_makes_stars_miss(model, monkeypatch):
+    monkeypatch.setattr(fakes, "TRUE_PLACE", False)  # (her place by her dot: the noises it's there for)
     b = plat(model, 360, 300)
     clock = Clock()
     noise = Noise(dot_px=True, tag_hidden=((0.0, 1.0),), dot_hidden=((2.0, 3.0),))

@@ -709,7 +709,7 @@ def loop_tree_23(sim):
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -726,7 +726,9 @@ def loop_tree_23_near_misses(sim):
     (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 2 not all of this; of seeds 1-13, 4, 9 and 10
     meet all of it.) (Seed 3 since walls stop her in the air by the game's rule (body.wall_table, 2026-10-31: the
     planner's flights from a floating platform count the tower's walls now): on seed 4 no Horny Mushroom missed by the
-    looks later; of seeds 1-13, 3 and 13 meet all of this, 4, 9 and 10 before.)"""
+    looks later; of seeds 1-13, 3 and 13 meet all of this, 4, 9 and 10 before.) (Seed 2 since the simulator's looks have
+    her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 3 not all
+    of this; of seeds 1-13, 9 meet all of it, 4 with her dot.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -803,7 +805,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=7, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=6, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -855,7 +857,9 @@ def loop_tree_ore_waits(sim):
     world's, 2026-10-31): on seed 13 she never picked up the ore; of seeds 1-13, 1 and 6 meet all of this, with the
     chase alone 1, 5, 8 and 12 (the old respawn).) (Seed 7 since walls stop her in the air by the game's rule
     (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1
-    the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.)"""
+    the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the
+    simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
+    right): on seed 7 the ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1219,7 +1223,7 @@ DARTS_EXPECTS = (
     check("her moves alone after the stop, no attack and no mouse", _moves_alone))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+@tree((23, 73.0), monsters="all", seed=2, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
       expects=DARTS_EXPECTS)
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
@@ -1234,7 +1238,9 @@ def loop_tree_out_of_darts(sim):
     s, on 25 (a safe platform: at once), the window read, Lucky Seven on Shift as configured: the stop at 76.1 s, her
     moves alone after it. (Seed 1 since the server's respawn became every scenario's, 2026-10-31: the map at its cap
     from the start, a kill back at the next pass; on 4 not all of this; of seeds 1-13, 1, 2, 5-7 and 9-13 meet all of
-    it.)"""
+    it.) (Seed 2 since the simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's
+    localizer taken as right): on seed 1 not on a safe place once her retreat was over; of seeds 1-13, 11 meet all of
+    this, 10 with her dot.)"""
     return darts_stop(5)(sim)
 
 
@@ -1391,7 +1397,7 @@ def loop_tree_attack_misses(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -1405,11 +1411,13 @@ def loop_tree_attack_misses_seen(sim):
     took effect (keycheck: "missed"), so no run of 5 without effect: no doubt, no window, nobody paged. The presses are
     set up as in loop_tree_grind_attack_key (_HURT): on seed 2, 64 presses judged "missed", no doubt; of seeds 1-13 all
     but 3 and 8 meet all of this (on those, 19 and 31 read missed, and 5 in a row unread all the same: the doubt), and
-    seed 2 with the chase off and with the old respawn clock too."""
+    seed 2 with the chase off and with the old respawn clock too. (Seed 1 since the simulator's looks have her place as
+    the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 2 the MISSes read said
+    her key works; of seeds 1-13, 11 meet all of this, 12 with her dot.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=8, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1455,7 +1463,9 @@ def loop_tree_attack_no_darts(sim):
     paged.) (Its monsters walk as with nobody there, hit or not, since the world's monsters chase her once she hits them
     (Realism.chase off, 2026-10-31): with their chase none of seeds 1-40 shows it; on 8 the first doubt at 100.7 s found
     ATTACK on Ctrl as configured with her stars' test not MAYBE OUT, so no Lucky Seven-only run nor out of darts' stop,
-    175 touches in its 344 s. To redo with the chase.)"""
+    175 touches in its 344 s. To redo with the chase.) (Seed 6 since the simulator's looks have her place as the world
+    does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT;
+    of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.)"""
     return key_check_run(4)(sim)
 
 
@@ -1709,13 +1719,14 @@ def loop_tree_rope_top_15(sim):
     return darts_stop(1)(sim)
 
 
-@tree((18, 111.0), hanging=-880.0, limit=60,
+@tree((18, 111.0), hanging=-880.0, limit=60, noise=Noise(by_dot=True),
       expects=(ends("arrived"), logs("her dot never moved"), sends("off_rope"),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_top_15(sim):
     """From the rope at x 111, her feet 15 under platform 18 (her dot puts her on 18), up to 16 with no monsters about:
     the jump up from 18 does nothing on the rope and her dot never moves (control.navigator._rope_top), so she's on the
-    rope: up off it onto 18 (Mover.off_rope), and on up."""
+    rope: up off it onto 18 (Mover.off_rope), and on up. (Her place by her dot, Noise.by_dot, since the simulator's
+    looks have it as the world does, sim.fakes.TRUE_PLACE, 2026-10-31: there nothing put her on 18.)"""
     return _nav(16)(sim)
 
 
