@@ -211,11 +211,12 @@ HP_PRICE = 250.0
 # A stop's place along its platform (stops_of) weighs the EXP it reaches against its danger there as the hunt loop
 # weighs a ground's (behavior.hunt.GROUND_DANGER: 1 - 2 x the danger, never under 0), from 2026-10-31: on Tree Dungeon
 # 7's stop moves from x -95 (1 unit off its Horny Mushroom's point at -94, danger 0.27) to -31 (0.22), 13's from -35 to
-# 22, 15's from -95 to -55, 19's from 150 (on its point) to 130, 23's from 8 to -172 (0.28 to 0.13), and before she has
-# seen anything the loop is 10, 8 (470 EXP a minute) for 10, 7 (483). Until then KILL_S_PER_EXP x DANGER_HP_S x HP_PRICE
-# (0.149 of its EXP a unit of danger: what touches would cost while she shoots there, by the live hook's guesses), which
-# left the stops on spawn points, a respawn there landing on her. With the default hook, the same all along a platform,
-# it changes no stop.
+# 22, 15's from -95 to -55, 19's from 150 (on its point) to 130, 23's from 8 to -172 (0.28 to 0.13); before she has seen
+# anything the loop is 9, 8 (492 EXP a minute with the server's respawn, 2026-10-31; the thief's stats of the harness),
+# as with the old weight (before the server's respawn: 10, 8 at 449, for 10, 7). Until then KILL_S_PER_EXP x DANGER_HP_S
+# x HP_PRICE (0.149 of its EXP a unit of danger: what touches would cost while she shoots there, by the live hook's
+# guesses), which left the stops on spawn points, a respawn there landing on her. With the default hook, the same all
+# along a platform, it changes no stop.
 STOP_DANGER = 2.0
 # ... and blended with the HP she has seen go on each platform (Patrol.learn_hp: her touches, behavior.grind's
 # HP_BY_TOUCHES, or the drops of her HP bar between looks), the hook counting as HP_PRIOR_S s there: in the simulator's
@@ -224,6 +225,13 @@ STOP_DANGER = 2.0
 # the tower she lost 2.4-2.8 bars a minute at 0.3 and more. A guess, 20 s from 2026-10-31 (60 until then): what she sees
 # there counts for as much as the hook after a stop's stay.
 HP_PRIOR_S = 20.0
+# ... and the hook of a place she hasn't been at scaled by what she has lost against it where she has (Patrol.
+# hook_scale), the hook's own word counting as HOOK_PRIOR_HP of HP lost as it said (a guess: about 40 s of shooting at
+# a stop of danger 0.3), from the review of 2026-10-31: in the simulator's crowd she learned 2.4-2.8 bars a minute at
+# the top of Tree Dungeon's tower against the hook's 0.3, so a stop she had been at soon looked 10 times dearer than
+# one she hadn't, and the loop's replans went for the stops she hadn't been at; live the hook is the hunts' own (the
+# scale near 1).
+HOOK_PRIOR_HP = 0.2
 # The loop.
 LOOP_MAX = 12          # guess: stops in a round at most ...
 LOOP_MIN = 2           # ... and at least: one is camping (Patrol.camping), which grinding doesn't do
@@ -750,6 +758,7 @@ class Patrol:
         self.loops = 0                 # rounds taken up (the first, and every change)
         self.hp_seen: Counter = Counter()  # platform -> the share of her HP she has seen go there (learn_hp) ...
         self.hp_time: Counter = Counter()  # ... over this many s there
+        self.hp_hook = 0.0                 # ... and what the danger hook said she'd lose meanwhile (hook_scale)
         self._legs: dict[tuple[int, int], float | None] = {}
 
     def platform_of(self, i: int) -> int:
@@ -780,15 +789,30 @@ class Patrol:
             self._gets[key] = any(True for _ in reaching(self.model.platform(st.platform), [e.monster]))
         return self._gets[key]
 
-    def learn_hp(self, pid: int, lost: float, dt: float) -> None:
-        """`dt` s on platform `pid`, with `lost` of her HP gone meanwhile (hp_rate)."""
+    def learn_hp(self, pid: int, lost: float, dt: float, x: float | None = None) -> None:
+        """`dt` s on platform `pid` (at map x `x`: her stop's place there; None, its stop's, or its middle), with `lost`
+        of her HP gone meanwhile (hp_rate), and what the danger hook said she'd lose meanwhile (`hook_scale`)."""
         self.hp_seen[pid] += lost
         self.hp_time[pid] += dt
+        if x is None:
+            st = self.stop_on(pid)
+            q = self.model.platform(pid)
+            x = self.stops[st].x if st is not None else (q.left + q.right) / 2
+        self.hp_hook += DANGER_HP_S * self.danger(pid, x) * dt
+
+    def hook_scale(self) -> float:
+        """How many times the danger hook's HP (DANGER_HP_S a unit of danger) she has lost where she's been, over every
+        place she learned it at (learn_hp), HOOK_PRIOR_HP of HP lost as the hook said counted in: the hook of a place she
+        hasn't been at is the hook times this (hp_rate)."""
+        seen = sum(self.hp_seen.values())
+        return (HOOK_PRIOR_HP + seen) / (HOOK_PRIOR_HP + self.hp_hook)
 
     def hp_rate(self, pid: int, x: float) -> float:
         """The share of her HP a second she loses fighting on platform `pid` at x: the danger hook's (DANGER_HP_S a
-        unit of it), as HP_PRIOR_S s there, blended with what she has seen go there."""
-        return (DANGER_HP_S * self.danger(pid, x) * HP_PRIOR_S + self.hp_seen[pid]) / (HP_PRIOR_S + self.hp_time[pid])
+        unit of it) as scaled by what she has lost against it everywhere (`hook_scale`), as HP_PRIOR_S s there, blended
+        with what she has seen go there."""
+        hook = DANGER_HP_S * self.danger(pid, x) * self.hook_scale()
+        return (hook * HP_PRIOR_S + self.hp_seen[pid]) / (HP_PRIOR_S + self.hp_time[pid])
 
     def learn_kills(self, throws: int, exp: float) -> None:
         """Her kill time a point of EXP from the throws she made and the EXP her kills gave (KILL_PRIOR_EXP)."""

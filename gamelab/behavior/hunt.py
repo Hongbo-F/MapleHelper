@@ -611,7 +611,8 @@ class Hunt:
             return self._finish(s, owed, visible, hidden, now)
         if o.kind == "pile" and o.why == "sweep":  # on her way to one of the sweep's piles
             return self._on_sweep(s, visible, hidden, now)
-        if (stop := self._sweep(s, self._dest(o))) is not None:  # the piles worth their time on her way
+        if o.why != "back to spot" and (stop := self._sweep(s, self._dest(o))) is not None:  # the piles worth their
+            # time on her way (not on the grind's way back to its stop: behavior.grind's `_back`)
             return self._sweep_act(s, stop, visible, hidden, now)
         return self._travel(self._rule if self._rule in ("advance", "high ground", "back to spot", "better spot")
                             else "travel")

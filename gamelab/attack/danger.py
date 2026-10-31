@@ -151,9 +151,11 @@ class Danger:
         self.model, self.her = model, her
         body, speed = bodies(model), speeds(model)
         self.threats: dict[str, Threat] = {}
+        self.takes: dict[str, float] = {}  # kind -> the share of her HP its touch takes, under DANGER_MIN too (`taken`)
         for name, pad in model.mob_damage.items():
             kind = kind_of(name)
             share = touch_taken(pad, self.her.defence, self.her.level) / self.her.hp if pad > 0 else 0.0
+            self.takes[kind] = share
             b = body.get(kind)
             top = b.top if b else 46.0
             self.threats[kind] = Threat(kind, share if share >= DANGER_MIN else 0.0, speed.get(kind, DEFAULT_SPEED),
@@ -173,6 +175,11 @@ class Danger:
         """The share of her HP a touch by `kind` takes, 0 if it doesn't count (or isn't known)."""
         t = self.threats.get(kind)
         return t.share if t is not None else 0.0
+
+    def taken(self, kind: str) -> float:
+        """The share of her HP a touch by `kind` takes, whether it counts as a danger or not (a Slime's 1.2% on Tree
+        Dungeon, under DANGER_MIN), 0 if it isn't known: what she loses, for the HP her stops cost (behavior.grind)."""
+        return self.takes.get(kind, 0.0)
 
     def keep_off(self, kind: str) -> float:
         """How near a monster of `kind` on her platform she lets it come (middle to middle) before she moves away: where
