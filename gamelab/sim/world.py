@@ -729,6 +729,10 @@ class Realism:
                                  # on its own (the default until 2026-10-31; harness `--world clock-respawn`)
     respawn_cap: float | None = None
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
+    hurt: tuple = ()             # ((kind, share), ...): the map's monsters of that kind there at the start have that
+                                 # share of their HP left, their bars up (hurt by someone before her: as by the crowd
+                                 # live); back whole once killed. A scenario's set-up: a monster to finish certain from
+                                 # the start (the regular attack's doubt: loop_tree_grind_attack_key)
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
     rival_owns: float = 15.0     # s a rival's drops can't be picked up by her
     rival_takes: float = 20.0    # s after landing that a rival picks up its own drops
@@ -1461,6 +1465,10 @@ class World:
         self._kinds: tuple | None = None  # the game data's bodies, speeds and mob ids (_monster)
         self._spawn(monsters)
         self.points = len(self.monsters)  # the map's spawn points (one monster each at the start)
+        hurt = dict(self.realism.hurt)
+        for m in self.monsters:  # (Realism.hurt: a share of its HP left, its bar drawn as any hurt one's: drawn_bar)
+            if m.kind in hurt:
+                m.hp = m.hp_max * hurt[m.kind]
         self.drops: list[Drop] = [Drop(kind, x, model.platform(pid).y_at(x), pid, 0.0) for kind, pid, x in drops]
         self.rival: Rival | None = None
         if self.realism.rival_every > 0 and self.monsters:

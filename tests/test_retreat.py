@@ -293,11 +293,16 @@ def test_hanging_on_a_rope_within_a_monsters_reach_she_gets_off_it_for_a_safe_pl
 # (loop_tree_lie_detector, _28 and _23 are checked with every scenario: test_sim's
 # test_real_map_scenarios_show_what_they_are_there_for.)
 
+# The sweep's hunt loop from 28 at x 247 on its monsters' own clock, as loop_tree_lie_detector had it until 2026-10-31
+# (since, it starts on the floor and the sighting comes 2 s in: its docstring)
+SWEEP_FROM = {"loop_tree_lie_detector": dict(start=(28, 247.0), realism=scenarios._CLOCK)}
+
+
 def _sweep(name: str, seeds, times, only=None) -> list[dict]:
     """The scenario `name` over `seeds` and sighting `times` (her looks perception's, as `tour --loop` takes them); each
     run's result (the runs that fell out of the map before the sighting, a simulator effect on Tree Dungeon without
     group 0's walls, left out)."""
-    base, out = scenarios.SCENARIOS[name], []
+    base, out = dataclasses.replace(scenarios.SCENARIOS[name], **SWEEP_FROM.get(name, {})), []
     for seed in seeds:
         for after in times:
             def fn(sim, a=after):

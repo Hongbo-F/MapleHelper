@@ -166,6 +166,24 @@ def test_another_player_hunts_one_place_at_a_time_its_dot_on_the_minimap(model):
     assert math.isclose(sum(steps), abs(walked[-1][0] - start[0]), abs_tol=1.0)
 
 
+def test_monsters_can_start_hurt_their_bars_up_and_come_back_whole(model):
+    """Realism.hurt (a scenario's set-up: a monster to finish from the start, loop_tree_grind_attack_key): the monsters
+    of a kind there at the start have that share of their HP left, their bars drawn so (the stack reads them); the
+    others whole; one killed comes back whole."""
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, monsters=[("Pig", c.id, 400.0), ("Snail", c.id, 450.0)], facing="right",
+                    realism=Realism(hurt=(("pig", 0.25),), respawn_tick=0.0, respawn=2.0)))
+    pig, snail = w.monsters
+    assert pig.hp == pytest.approx(0.25 * pig.hp_max) and w.drawn_bar(pig) == pytest.approx(0.25)
+    assert snail.hp == snail.hp_max and w.drawn_bar(snail) is None
+    tap(w, 0.0, "f", 0.04)  # one star (a whole pig takes three: HITS)
+    w.advance(1.5)
+    assert not pig.alive and w.kills == {"pig": 1}
+    w.advance(5.0)  # back 2 s after its death
+    assert pig.alive and pig.hp == pig.hp_max and w.drawn_bar(pig) is None
+    assert Realism().hurt == ()
+
+
 def test_potions_run_out_and_arrows_can_be_swallowed_after_an_attack(model):
     c = plat(model, 500, 400)
     w = world(model, c.id, 100.0, hp=0.2, realism=Realism(potions=1))
