@@ -150,6 +150,11 @@ MISS_S = 3.0
 # the units within which a plan takes her as standing where it wants her; the mover's walks).
 ROPE_CLEAR = 30
 DROP_ROOM = 8
+# And, where the stretch has a spot that is, not within LAND_ROPE_CLEAR of a rope hanging from the platform she lands on:
+# down still held as she lands there (a key's lag; or down pressed again by a pass that took her for still up) climbs
+# her onto it (Tree Dungeon's drop 28 -> 30, 6.5 units from 30's rope at 146, 2026-10-31: no spot there is clear, its
+# stretch 130-149). GRAB_X, and a stop's slop (flow.STEP_ACCEPT).
+LAND_ROPE_CLEAR = GRAB_X + 8
 # Nor where she comes down within KNOCK_CARRY of an end of the platform below with nothing under it (void_ends:
 # on the first map 36's, the basin's cliffs). In the air from another block her group's walls alone stopped her until
 # 2026-10-31 (body.OWN_GROUP_WALLS; since, body.wall_table), and a touch's knock as she comes down carries her this far sideways
@@ -393,6 +398,11 @@ def _drop_moves(model: MapModel, a: Platform) -> list[Move]:
             if not ok:
                 continue
             x = float(min(ok, key=lambda s: abs(s - x)))  # the nearest spot where it will
+        tops = rope_tops(model, b)
+        if any(abs(x - rx) <= LAND_ROPE_CLEAR for rx in tops):  # (by a rope hanging from b: LAND_ROPE_CLEAR)
+            away = [s for s in drop_spots(model, a, b) if all(abs(s - rx) > LAND_ROPE_CLEAR for rx in tops)]
+            if away:
+                x = float(min(away, key=lambda s: abs(s - x)))
         land, land_x, t = fly(model, x, a.y_at(x) + 1, 0.0, 0.0, skip=a, group=a.group)
         if land is b:
             out.append(Move("drop", a.id, b.id, x, land_x, seconds=DROP_EXTRA_S + t))
@@ -589,12 +599,14 @@ def drop_clear(model: MapModel, a: Platform, x: float, below: Platform | None = 
 def drop_spots(model: MapModel, a: Platform, below: Platform) -> list[int]:
     """Where on a she can drop through it onto `below`: every DROP_STEP units where they overlap (LAND_MARGIN
     in from the ends), not within ROPE_CLEAR of a rope's top, nor within DROP_ROOM of a foothold that
-    forbids dropping, nor within KNOCK_CARRY of a cliff of `below` (void_ends)."""
+    forbids dropping, nor within KNOCK_CARRY of a cliff of `below` (void_ends); of those, the ones not within
+    LAND_ROPE_CLEAR of a rope hanging from `below`, if there are any."""
     lo, hi = max(a.left, below.left) + LAND_MARGIN, min(a.right, below.right) - LAND_MARGIN
-    ropes, cliffs = rope_tops(model, a), void_ends(model, below)
-    return [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
-            if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and droppable(model, a, x, DROP_ROOM)
-            and _clear_of(cliffs, x)]
+    ropes, cliffs, landing = rope_tops(model, a), void_ends(model, below), rope_tops(model, below)
+    spots = [x for x in range(int(lo), int(hi) + 1, DROP_STEP)
+             if all(abs(x - rx) > ROPE_CLEAR for rx in ropes) and droppable(model, a, x, DROP_ROOM)
+             and _clear_of(cliffs, x)]
+    return [x for x in spots if all(abs(x - rx) > LAND_ROPE_CLEAR for rx in landing)] or spots
 
 
 def droppable(model: MapModel, a: Platform, x: float, room: float = 0.0) -> bool:

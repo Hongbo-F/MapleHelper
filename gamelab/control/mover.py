@@ -64,6 +64,7 @@ STILL = 0.6               # minimap px: her dot within this of where a move bega
 # 19 at x 128, 17 off the rope at 111: from x 104-110 she grabbed the rope 11 times in a minute, the hunt loop's seed 18,
 # 20 touches and 71 s without a kill.) False: as before.
 DROP_AT_SPOT = True
+DROP_DOWN_UP_MS = 200  # a drop's down let go this long after it (its jump at 120)
 
 
 class MoveCut(Exception):
@@ -294,7 +295,9 @@ class Mover:
         if abs(dx) > tolerance and (why := self._clear(here, here + dx)):
             raise MoveRefused(why)
         events, t = self.walk_events(dx, tolerance)
-        self._send(events + [[t, down, "down"], *tap(t + 120, jump), [t + 320, down, "up"]], "drop")
+        # Down let go DROP_DOWN_UP_MS after it, 80 ms after the jump (as flow.DROP_DOWN_HOLD's chains do): held to 320
+        # ms, a key's lag had her land still holding it, by a rope's top climbing onto it (2026-10-31).
+        self._send(events + [[t, down, "down"], *tap(t + 120, jump), [t + DROP_DOWN_UP_MS, down, "up"]], "drop")
         time.sleep(0.3)  # then settle looks for her standing still
 
     def _run_and_jump(self, m: Move, s: Scene) -> None:

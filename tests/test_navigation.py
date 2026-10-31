@@ -239,6 +239,41 @@ def test_localizer_round_trip(model):
     assert loc.to_map(dot) == pytest.approx((410, 500))
 
 
+def test_her_dot_snaps_onto_the_nearer_of_two_platforms_one_over_the_other():
+    # Localizer.where_dot: of the platforms her dot could be on, the one whose surface is nearest its height. Taking the
+    # closest at or below a point DOT_SNAP_LIFT over it, a dot 2 units over the lower of two 34 apart went onto the
+    # upper (Tree Dungeon's 28 over 30 at x 157: a drop 28 -> 30 that had landed judged missed and done again, 2026-10-31).
+    t = tree()
+    t["foothold"]["1"]["20"] = dict([seg(1, 20, 40, 1000, 700, 1200, 700)])
+    t["foothold"]["1"]["21"] = dict([seg(1, 21, 41, 1000, 666, 1200, 666)])
+    m = mapdata.parse(1, t, "Test Map", {})
+    loc = Localizer(m, origin=(10.0, 20.0))
+    for y, on in ((698, 700), (702, 700), (690, 700), (664, 666), (668, 666), (676, 666)):
+        assert loc.where_dot(loc.to_dot(1100, y)).platform.y_at(1100) == on, y
+
+
+def test_a_drop_lands_out_of_reach_of_a_rope_hanging_from_the_platform_below_where_it_can():
+    # route.drop_spots and _drop_moves: down still held as she lands within LAND_ROPE_CLEAR of a rope hanging from the
+    # platform below climbs her onto it, so of the spots she can drop from, those clear of it, if any (Tree Dungeon's
+    # drop 28 -> 30 by 30's rope at 146, 2026-10-31: none clear there, its stretch 130-149).
+    from gamelab.motion.route import LAND_ROPE_CLEAR, drop_spots
+    t = tree()
+    t["foothold"]["1"]["22"] = dict([seg(1, 22, 42, 1400, 300, 1700, 300)])
+    t["foothold"]["1"]["23"] = dict([seg(1, 23, 43, 1400, 400, 1700, 400)])
+    t["ladderRope"]["1"] = {"l": 0, "uf": 1, "x": 1550, "y1": 400, "y2": 480}
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, b = by_y(m, 300, 1550), by_y(m, 400, 1550)
+    spots = drop_spots(m, a, b)
+    assert spots and all(abs(x - 1550) > LAND_ROPE_CLEAR for x in spots) and min(spots) < 1550 < max(spots)
+    [drop] = [x for x in Planner(m).moves if x.kind == "drop" and (x.src, x.dst) == (a.id, b.id)]
+    assert abs(drop.x - 1550) > LAND_ROPE_CLEAR and abs(drop.x - 1550) <= LAND_ROPE_CLEAR + 2  # (the nearest clear)
+    # A stretch all within it: every spot, as before.
+    t["foothold"]["1"]["22"] = dict([seg(1, 22, 42, 1520, 300, 1580, 300)])
+    m = mapdata.parse(1, t, "Test Map", {})
+    a, b = by_y(m, 300, 1550), by_y(m, 400, 1550)
+    assert drop_spots(m, a, b) and all(abs(x - 1550) <= LAND_ROPE_CLEAR for x in drop_spots(m, a, b))
+
+
 def test_camera_follows_her_but_stops_at_the_map_edges():
     from gamelab.localization.pose import Camera, VIEW
     cam = Camera((0, 0, 3000, 2000), offset=(680, 490))

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..screen import STRETCHED, Geometry
-from .mapdata import MapModel, Platform
+from .mapdata import FEET_BELOW, MapModel, Platform
 
 if TYPE_CHECKING:
     from .scene import Scene
@@ -108,8 +108,14 @@ class Localizer:
 
     def where_dot(self, dot: tuple[float, float]) -> Where:
         x, y = self.to_map(dot)
-        # The dot is only good to ~1 px (11 map units); snap to the platform she's most likely on.
-        platform = self.model.platform_under(x, y - DOT_SNAP_LIFT, reach=DOT_SNAP_REACH)
+        # The dot is only good to ~1 px (11 map units); snap to the platform she's most likely on: of those it could be
+        # on (at or below a point DOT_SNAP_LIFT above it, within DOT_SNAP_REACH), the one whose surface is nearest the
+        # dot's own height. The closest at or below the lifted point, as until 2026-10-31, took the one above where two
+        # overlap 30-35 apart: on Tree Dungeon's 30 under 28 (34 above it at x 157) her dot 2 units high snapped her onto
+        # 28, and a drop 28 -> 30 that had landed was judged missed and done again from 30 (loop-grind, seeds 6, 9, 10).
+        low = y - DOT_SNAP_LIFT
+        near = [p for p in self.model.places if p.covers(x, 15) and -FEET_BELOW <= p.y_at(x) - low <= DOT_SNAP_REACH]
+        platform = min(near, key=lambda p: abs(p.y_at(x) - y)) if near else None
         if platform is not None and self.on_rope_under(platform, x, y):
             return Where(x, y, None, dot)  # (on the rope: as anywhere off the platforms, the dot's own place)
         if platform is not None:

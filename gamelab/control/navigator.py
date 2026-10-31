@@ -200,6 +200,15 @@ ROPE_CUT = True
 # at 146: 12 times in 57 s, "ended on air/rope instead of platform 30", and seed 18's mover drop from 18 by the rope at
 # 111, 11 times). It costs CANNOT_S for the rest of the trip, as a move the mover can't do does. False: as before.
 ROPE_DROP = True
+# A chain that ends in a drop, judged from a look of before the fall (DROP_RELOOK, 2026-10-31): `recover` takes the frame
+# its glances saw her standing still in, and before a drop she lies still, down held, on the platform she drops through,
+# so its look could be of that frame, her on it. "Ended on platform 28 instead of platform 30", and the next pass planned
+# the same drop from 28 with her on 30 already: down + jump took her through 30 too, onto 32, or (at 146) down 30's rope
+# by its top (loop-grind, Tree Dungeon's crowd: seeds 6, 9 and 10, 7 of the 9 misses of seeds 1-12 once the wall-slide
+# walk-offs took her to 28). When the look has her on the platform she dropped through, it looks again DROP_RELOOK_S on,
+# the fall over, and she's judged by that. False: as before.
+DROP_RELOOK = True
+DROP_RELOOK_S = 0.35
 # What her dot shows of a chain's jumps and runs, told to the hunter's watch of her moves' keys (`moves`:
 # behavior.keycheck.MoveWatch; the user, 2026-10-28: her keys moved in the game are followed): a planned jump's lift-off
 # lifted her if a glance from it to LIFT_BY_S after has her dot LIFT_UNITS over the highest it had LIFT_BEFORE_S before
@@ -1952,6 +1961,10 @@ class Navigator:
         st.moved_at = time.monotonic()
         self.actions.facing = None
         after = self._after_chain(cut, st.moved_at, st)
+        last = legs[-1].move
+        if DROP_RELOOK and not cut and last.kind == "drop" and after.where.platform is not None \
+                and after.where.platform.id == last.src:
+            after = self._after_drop(st)
         # Cut short, she replans from a quick look, without monsters: with an escort that skips the fights
         # (and `until`) for one chain, so she moves on from where a hit knocked her first. Fighting from
         # there instead (a look with monsters) kept her fighting wherever she was knocked to: in the
@@ -2218,6 +2231,17 @@ class Navigator:
         after = self.recover(longest=AFTER_STILL_S, mobs=True, wide=not self.fight)
         if after.where.platform is None:
             return self.mover.settle(1.5)
+        st.fresh = after
+        return after
+
+    def _after_drop(self, st: TripState) -> Scene:
+        """A look again DROP_RELOOK_S after a chain's drop, once the look after it had her on the platform she dropped
+        through (from a frame of before the fall: DROP_RELOOK): once she's stopped moving, of a frame after the first."""
+        time.sleep(DROP_RELOOK_S)
+        after = self.recover(longest=AFTER_STILL_S, mobs=True, wide=not self.fight)
+        if after.where.platform is None:
+            return self.mover.settle(1.5)
+        self.log(f"    looked again after the drop's fall: on {platform_text(after.where.platform)}")
         st.fresh = after
         return after
 

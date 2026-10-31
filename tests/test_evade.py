@@ -753,6 +753,8 @@ def test_a_drop_with_no_spot_clear_of_a_ropes_top_goes_from_the_moves_own_spot(m
     at = SimpleNamespace(where=Where(110.0, -901, m.platform(18), (0, 0)))
     mover._drop(drop, at)
     assert sent[-1][0][1:] == ["right", "down"]  # (a walk right first)
+    downs = [e for e in sent[-1] if e[1] == "down"]  # down let go 80 ms after the jump (as a chain's drop does)
+    assert [e[2] for e in downs] == ["down", "up"] and downs[1][0] - downs[0][0] == mv.DROP_DOWN_UP_MS == 200
     monkeypatch.setattr(mv, "DROP_AT_SPOT", False)
     mover._drop(drop, at)
     assert sent[-1][0][1:] == ["down", "down"]  # (as before: down at once)
