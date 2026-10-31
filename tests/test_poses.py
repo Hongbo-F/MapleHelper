@@ -24,13 +24,14 @@ def anchor_picture(seed: int = 5) -> tuple[np.ndarray, np.ndarray]:
     return np.ascontiguousarray(pic), np.ones((8, 14), bool)
 
 
-def bank(seed: int = 0, n: int = 3) -> PoseBank:
-    """n poses of hers: an ellipse of her colours each, her anchor (her glasses) pasted at a place of its own."""
+def bank(seed: int = 0, n: int = 3, tall: tuple[int, int] = (70, 90)) -> PoseBank:
+    """n poses of hers: an ellipse of her colours each (`tall` rows from its top to her feet: from, to), her anchor (her
+    glasses) pasted at a place of its own."""
     rng = np.random.default_rng(seed)
     apic, amask = anchor_picture()
     poses = []
     for i in range(n):
-        h, w = int(rng.integers(70, 90)), int(rng.integers(36, 52))
+        h, w = int(rng.integers(*tall)), int(rng.integers(36, 52))
         yy, xx = np.mgrid[0:h, 0:w]
         mask = ((yy - h / 2) / (h / 2)) ** 2 + ((xx - w / 2) / (w / 2)) ** 2 <= 1.0
         pic = HER[rng.integers(len(HER), size=(h, w))]

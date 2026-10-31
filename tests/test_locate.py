@@ -367,3 +367,130 @@ def test_carried_far_from_her_dot_she_is_put_there_within_dot_to_n_frames(art, m
         got = loc.see(bare, k / 15, dot_of(loc, *far))
         assert got.info.get("to_dot", False) == (k == locate.DOT_TO_N)
     assert got.x == pytest.approx(far[0], abs=1)
+
+
+# --- after the carried frames' investigation (2026-10-30; D:/MapleHelper-scratch/carried/verdict.txt, ad/) ---------
+
+@pytest.mark.parametrize("tall,up,kept", [((44, 46), 0, True),     # lying down on her platform's line: kept
+                                          ((44, 46), 25, False),   # ... 25 px over it (her head behind the HUD)
+                                          ((70, 90), 25, True)])   # a pose of her full height there: as before
+def test_her_lying_down_pose_places_her_only_on_a_platforms_line(art, model, plate, tall, up, kept):
+    """Behind the HUD in a drop her lying-down pose (BugBaby's pose 31, 45 rows) matched her head over its top: her feet
+    put 13-34 px off, the frames carried after drifting to 43 (the live clip of 17:54:33, 769-771, 3566, 3569)."""
+    b = pose_bank(0, 3, tall=tall)
+    assert all((-q.dy0 < locate.PRONE_H) == (tall[1] <= locate.PRONE_H) for q in b.poses)
+    loc = locator(art, model, plate, b)
+    frame, (fx, fy), _, p = scene(art, model, plate, 43.5, body=b.poses[0])
+    loc.see(frame, 0.0, dot_of(loc, fx + VIEW[0], fy + VIEW[1]))
+    frame, (fx, fy), _, p = scene(art, model, plate, 45.5, plate_drawn="none")
+    draw_pose(frame, b.poses[0], fx, fy - up)
+    assert (loc.platform_near(fx + VIEW[0], fy - up + VIEW[1], up=locate.PRONE_LINE, down=locate.PRONE_LINE)
+            is None) == (up > 0)
+    got = loc.see(frame, 1 / 15, dot_of(loc, fx + VIEW[0], fy + VIEW[1]))
+    assert got.info["body"] >= locate.SPRITE_OK   # (found either way)
+    if kept:
+        assert got.how == "body" and got.info["meas"] == pytest.approx([fx, fy - up], abs=1.0)
+        assert "body_prone_off_line" not in got.info
+    else:
+        assert got.how is None and got.info["body_prone_off_line"][2] == b.poses[0].id
+        assert got.feet == pytest.approx((fx, fy), abs=3.0) and got.platform is p   # carried on her platform
+
+
+def stat_window_cal():
+    """Her stat window's calibration as the live capture of 2026-10-28 left it (the game data's pictures)."""
+    from gamelab.perception import stat_window as sw
+    return sw.Calibration(panels={"main": {"at": [587, 241], "size": [185, 281]},
+                                  "detail": {"at": [768, 299], "size": [187, 223]}}, detail_with_main=True)
+
+
+def test_carried_under_the_lie_detector_or_her_stat_window_counts_covered_and_places_nothing_otherwise(
+        art, model, plate, tmp_path):
+    """The user, 2026-10-30 ~20:35, of counting the stat window's and the Lie Detector's frames as covered, not lost:
+    "yes please". The Lie Detector's alarm file looked at once in COVER_POLL_S; her stat window where its calibration
+    has it open; neither changes where she's placed, how sure, or what's searched."""
+    from gamelab.perception import stat_window as sw
+    alarm = tmp_path / "ALARM.json"
+    plain, loc = locator(art, model, plate), locator(art, model, plate)
+    loc.cover = locate.Cover(alarm, stat_window_cal())
+    frame, (fx, fy), _, _ = scene(art, model, plate, 43.5)
+    bare, _ = art.window(*VIEW)
+    window = sw.compose(base=bare, at={"main": (587, 241), "detail": (768, 299)}).frame
+    moved = sw.compose(base=bare, at={"main": (687, 341), "detail": (868, 399)}).frame   # (dragged off its place)
+    seen = sw.compose(base=frame, at={"main": (587, 241), "detail": (768, 299)}).frame   # (her tag shows under it)
+    dot = dot_of(plain, fx + VIEW[0], fy + VIEW[1])
+    # (each frame, whether the alarm's file is there as it's shown, what it counts as)
+    frames = ([(frame, False, "tag")] + [(bare, False, "carried")] * 3
+              + [(bare, True, "carried")] * 5          # the alarm's file written: looked at again 0.5 s on (k = 9)
+              + [(bare, True, "covered")] * 3 + [(frame, True, "tag")]
+              + [(bare, False, "covered")] * 4         # ... and taken away: still up till the next look (k = 17)
+              + [(bare, False, "carried")] * 2
+              + [(window, False, "covered"), (seen, False, "tag"), (window, False, "covered"),
+                 (moved, False, "carried"), (window, False, "covered")])
+    for k, (f, up, want) in enumerate(frames):
+        if up:
+            alarm.write_text("{}")
+        else:
+            alarm.unlink(missing_ok=True)
+        a, b = plain.see(f, k / 15, dot), loc.see(f, k / 15, dot)
+        assert (b.how or ("covered" if b.covered else "carried")) == want, k
+        assert b.covered == (None if want != "covered" else locate.LIE_DETECTOR if k < 19 else locate.STAT_WINDOW), k
+        assert (a.how, a.feet, a.x, a.y, a.mode, a.confidence, a.unseen) == (b.how, b.feet, b.x, b.y, b.mode,
+                                                                             b.confidence, b.unseen), k
+        assert a.covered is None
+    assert (loc.counts["tag"], loc.counts["carried"], loc.counts["covered"]) == (3, 11, 10)
+    assert (plain.counts["carried"], plain.counts["covered"]) == (21, 0)
+    assert loc.line().startswith("her place by the scene: tag 12.5%, carried 45.8%, covered 41.7% (the Lie Detector, "
+                                 "her stat window); views registered 100.0%, ")
+    assert plain.line().startswith("her place by the scene: tag 12.5%, carried 87.5%; views registered")
+    loc.see(bare, len(frames) / 15, dot)
+    assert loc.line().startswith("her place by the scene: carried 100.0%; ")   # (what covered her since alone)
+
+
+def test_covered_in_the_scene_and_its_record(art, model, plate, tmp_path):
+    from gamelab.perception import stat_window as sw
+    eyes = saved_eyes(model, plate, art)
+    eyes.locator.cover = locate.Cover(tmp_path / "ALARM.json", stat_window_cal())
+    senses = Senses(eyes, model, (300, 100))
+    frame, (fx, fy), centre, p = scene(art, model, plate, 43.5)
+    senses.place(eyes.look_at(frame, 0.0))
+    bare, _ = art.window(*VIEW)
+    s = senses.place(eyes.look_at(sw.compose(base=bare, at={"main": (587, 241), "detail": (768, 299)}).frame, 1 / 15))
+    assert s.how == "covered" and not s.tag_seen and s.located.covered == locate.STAT_WINDOW
+    assert (s.where.x, s.where.y) == pytest.approx((43.5, p.y_at(43.5)), abs=0.5) and s.mode == "ground"
+    assert s.record()["her"]["how"] == "covered"
+    s = senses.place(eyes.look_at(bare, 2 / 15))
+    assert s.how == "carried" and s.record()["her"]["how"] == "carried"
+
+
+def test_the_alarms_file_unreadable_is_up_and_the_stat_windows_look_failing_is_turned_off(tmp_path, monkeypatch):
+    c = locate.Cover(tmp_path / "ALARM.json", stat_window_cal())
+    assert not c.alarm_up(0.0)
+    (tmp_path / "ALARM.json").write_text("{}")
+    assert not c.alarm_up(0.1) and c.alarm_up(locate.COVER_POLL_S)   # (looked at again COVER_POLL_S on)
+    assert c.alarm_up(0.2) and not locate.Cover(tmp_path / "none.json").alarm_up(5.0)   # (the time back: again)
+
+    def denied(path, *a, **k):
+        raise PermissionError(path)
+    with monkeypatch.context() as m:
+        m.setattr(locate.os, "stat", denied)
+        assert locate.Cover(tmp_path / "none.json").alarm_up(0.0)          # (control.player.alarm_up's: up)
+    from gamelab.perception import stat_window as sw
+    monkeypatch.setattr(sw, "shown", lambda frame, cal: (_ for _ in ()).throw(OSError("no UI_000.wz")))
+    c = locate.Cover(tmp_path / "none.json", stat_window_cal())
+    assert c(np.zeros((768, 1366, 3), np.uint8), 0.0) is None and c.cal is None and "UI_000" in c.why
+
+
+def test_a_locators_cover_from_her_stat_windows_calibration(art, model, plate, tmp_path, monkeypatch):
+    from gamelab import paths
+    monkeypatch.setattr(locate, "configured", lambda path=None: True)
+    monkeypatch.setattr(mapart, "load", lambda map_id: art)
+    plate.save(P.model_path(tmp_path))
+    said = []
+    loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
+    assert loc.cover is not None and loc.cover.cal is None and loc.cover.alarm is None   # (paths.ALARM's, when asked)
+    assert "covered under the Lie Detector's alarm (her stat window not looked for: no calibration of it)" in said[0]
+    stat_window_cal().save(paths.STAT_WINDOW)
+    said.clear()
+    loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
+    assert loc.cover.cal is not None and loc.cover.cal.place("main") == (587, 241)
+    assert said[0].endswith("covered under the Lie Detector's alarm and her stat window")

@@ -443,7 +443,8 @@ class Senses:
     def _by_scene(self, s: Scene, loc) -> None:
         """Her place as the eyes' Locator gave it (localization.locate.Located): her feet's map place (the view plus her
         place on screen), the platform she stands on, the cue that placed her (`how`: "tag", "plate", "body", or
-        "carried" where nothing did and the filter's prediction stands: `tag_seen` False then) and how sure
+        "carried" where nothing did and the filter's prediction stands, "covered" where that's under what covers her,
+        the Lie Detector or her stat window: locate.Cover; `tag_seen` False then) and how sure
         (`confidence`), her mode ("ground", "air", "rope"). Not found yet (the first frames): her dot places her, the
         view puts her on screen (`how` "dot"). A place off the map isn't placed (placecheck). Her dot not read (something
         over the minimap), `where.dot` is where her place puts it (what reads it, her stillness by her dot, the rope's
@@ -470,7 +471,8 @@ class Senses:
         if (off := off_map(self.model, where)) is not None:
             s.bad = Problem("place", off)
             return
-        s.where, s.how, s.mode, s.confidence = where, loc.how or "carried", loc.mode, loc.confidence
+        s.where, s.mode, s.confidence = where, loc.mode, loc.confidence
+        s.how = loc.how or ("covered" if getattr(loc, "covered", None) else "carried")
         s.tag_seen = loc.how is not None
         if s.tag_seen:
             self._learn(s)

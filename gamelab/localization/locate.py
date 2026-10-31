@@ -17,8 +17,11 @@ The cues, cheapest first, each tried only when the one before didn't place her:
   3. body    her body against her pose bank (BodyFinder.find: her glasses first, then her colours against the map's art
              behind her) in the box the filter's uncertainty gives (poses.tracked_box: tight across, a cast's twin origin
              25 px away left out); lost, across where her dot is at its height (at most every WIDE_EVERY-th frame, not
-             after a tracked search that took WIDE_BUDGET_MS already);
-  4. carried nothing placed her: the filter's prediction stands (`how` None), its confidence going down.
+             after a tracked search that took WIDE_BUDGET_MS already); her lying-down pose (under PRONE_H rows) only
+             where it puts her feet on a platform's line (PRONE_LINE);
+  4. carried nothing placed her: the filter's prediction stands (`how` None), its confidence going down; "covered"
+             in the counts (`line`) and the scene where what covers her is told (`Cover`: the Lie Detector's alarm
+             up, her stat window open where it opens), nothing placed otherwise.
 The filter: her x and its speed (a Kalman filter), y on her platform's line, in a flight under gravity, or on a rope;
 a take-off from a rise off the line, a landing on the first line crossed, a walk off a platform's end, a wall stopping
 her; a rope told from a flight by her last three measured places (constant speed against gravity); her minimap dot a box
@@ -37,13 +40,14 @@ is the same.
 Where it's used (Senses: the eyes' `locator`): at the game's own 1366x768 on a map whose art can be drawn (the game data
 copy here), for a character whose plate model is in her lab folder (calibration's: localization.her_cues), with ON
 (config.toml's [perception] scene, true by default): Eyes.look_at places her by it, the Scene says which cue placed her
-(`how`: "tag", "plate", "body", "carried") and how sure (`confidence`), and its screen <-> map conversions go by the
-view (Scene.view). A frame whose view was never registered (the first frames of a map that isn't on screen) is placed as
-before (NameTag, her dot, pose.Camera). Elsewhere (1920x1080, the simulator, another map's missing data) nothing
-changes.
+(`how`: "tag", "plate", "body", "carried", "covered") and how sure (`confidence`), and its screen <-> map conversions
+go by the view (Scene.view). A frame whose view was never registered (the first frames of a map that isn't on screen) is
+placed as before (NameTag, her dot, pose.Camera). Elsewhere (1920x1080, the simulator, another map's missing data)
+nothing changes.
 """
 
 import math
+import os
 import time
 import tomllib
 from collections import deque
@@ -52,9 +56,11 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import paths
 from ..paths import CONFIG
 from ..perception import plate as plates
 from ..perception import poses
+from ..perception import stat_window
 from ..screen import NATIVE, Geometry
 from .mapdata import MapModel, Platform
 from .pose import Camera, Localizer
@@ -76,6 +82,15 @@ SPRITE_WIDE_AFTER = 2      # frames placed by nothing before her dot's column is
 WIDE_EVERY = 8             # ... at most this often
 WIDE_DOT_Y = 60            # ... its rows her dot's height +- this
 WIDE_BUDGET_MS = 12.0      # ... not in a frame whose tracked body search took this long already
+# Her body in a pose under PRONE_H rows from its top to her feet (her lying-down one: BugBaby's pose 31, 45 rows; the
+# others 60-100, RiceBaby's 61-100) places her only with her feet within PRONE_LINE px of a platform's line (the user,
+# 2026-10-30 ~20:35, of "Lying-down pose only on a platform line": "Do it"). Behind the HUD in a drop, her head and
+# hat over its top alone, it matched her head: her feet put 30-35 px off and 20 across, and the frames after it drifted
+# to 43 (the live clip of 17:54:33, its frames checked by hand: within 3 px 29 -> 32 of 42, over 10 px 10 -> 4, the worst
+# 43.1 -> 24.6; 769 and 3566 carried now, 6.8 px off). Her held-out frames and RiceBaby's quick-2min and part2: the same
+# answers on every frame; on 754 of RiceBaby's (her outfit the same) it was never within 10 px of her
+# (D:/MapleHelper-scratch/carried/verdict.txt; the replays: carried/ad).
+PRONE_H, PRONE_LINE = 55, 8.0
 SD = {"tag": 0.5, "plate": 0.5, "body": 1.0, "body-weak": 2.0}   # a cue's measurement sd (px)
 # --- the filter (the prototype's, tuned on part1 outside the held-out clips) ---
 DOT_OFF = (-0.88, 5.52)    # her dot's map place less her feet's
@@ -123,6 +138,9 @@ FEET_MARGIN = 13           # her feet across: the map's platforms' ends (in its 
 PROTO_DT = 1 / 15          # the prototype's frames' gap (its counts are of these)
 TIMES_KEPT = 600           # frames' times kept for the service's line (20 s at 30 a second)
 GAP_S = 0.5                # s without a frame (the game not on screen, frames refused) after which she's placed afresh
+# --- what covers her (`Cover`): a frame no cue placed her in counts "covered", not "carried", under it ---
+LIE_DETECTOR, STAT_WINDOW = "the Lie Detector", "her stat window"   # (Located.covered: what covered her)
+COVER_POLL_S = 0.5         # the Lie Detector alarm's file looked at once in this long at the most (s, frames' time)
 
 
 def configured(path: Path = CONFIG) -> bool:
@@ -187,6 +205,7 @@ class Located:
     facing: str | None = None         # ... and which way it faces
     ms: dict = field(default_factory=dict)   # what each part took (ms)
     info: dict = field(default_factory=dict)
+    covered: str | None = None        # carried (`how` None) under what covers her (`Cover`: LIE_DETECTOR, STAT_WINDOW)
 
     @property
     def grounded(self) -> bool:
@@ -197,14 +216,61 @@ class Located:
         return self.mode == "rope"
 
 
+class Cover:
+    """What covers her on a frame no cue placed her in, for the frame to count as "covered" rather than "carried"
+    (`Locator.line`, the scene's `how`; it places nothing): the Lie Detector's alarm up (its file, paths.ALARM, which
+    the player's watchdog writes at the sighting and the player's resume or `clear-alarm` takes away: the mini-game's
+    window over the play area meanwhile; looked at once in COVER_POLL_S at the most), else her stat window open where
+    it opens (perception.stat_window.shown: a panel exactly where its calibration, lab/stat_window.json, has it; the
+    hunt's read, or the user's S). The user, 2026-10-30 ~20:35, of "Count stats-window and Lie Detector frames as
+    'covered', not 'lost'": "yes please" (on the grind of 16:57-17:59 they were 64% of the carried scenes; on the live
+    clip of 17:54:33 the stat window's read at the level-up was 34 of its 53 carried frames). `alarm`: the alarm's file
+    (None: paths.ALARM's, as it is when looked at); `cal`: the stat window's calibration (None: it isn't looked for)."""
+
+    def __init__(self, alarm: Path | None = None, cal: stat_window.Calibration | None = None):
+        self.alarm, self.cal = alarm, cal
+        self.why = ""                 # why the stat window isn't looked for, where it was to be
+        self._polled: float | None = None
+        self._up = False
+
+    def alarm_up(self, t: float) -> bool:
+        """Whether the Lie Detector's alarm is up as of t (s): its file looked at again COVER_POLL_S after the last look
+        (or when the frames' time went back). One that can't be looked at is up (control.player.alarm_up's)."""
+        if self._polled is None or not 0.0 <= t - self._polled < COVER_POLL_S:
+            self._polled = t
+            try:
+                os.stat(paths.ALARM if self.alarm is None else self.alarm)
+                self._up = True
+            except FileNotFoundError:
+                self._up = False
+            except OSError:
+                self._up = True
+        return self._up
+
+    def __call__(self, frame: np.ndarray, t: float) -> str | None:
+        """What covers her on this 1366x768 RGB frame shown at t (s): LIE_DETECTOR, STAT_WINDOW, or None. Whatever
+        the stat window's look raises (its pictures not to be had) turns it off (`why`), never the frame failing."""
+        if self.alarm_up(t):
+            return LIE_DETECTOR
+        if self.cal is not None:
+            try:
+                if stat_window.shown(frame, self.cal) is not None:
+                    return STAT_WINDOW
+            except Exception as e:  # noqa: BLE001 (her place as ever: only its count)
+                self.cal, self.why = None, repr(e)
+        return None
+
+
 class Locator:
     """Her place, frame after frame, on one map (the top). `reg`: the map's camera registration (camreg.Registration);
     `template`: her tag's full gray template, or what gives it (NameTag's, cut on the first look); `plate`: her plate's
-    matcher (perception.plate.Plate); `body`: her body's search (perception.poses.BodyFinder; None: no body cue)."""
+    matcher (perception.plate.Plate); `body`: her body's search (perception.poses.BodyFinder; None: no body cue);
+    `cover`: what covers her where nothing placed her (`Cover`, `build`'s; None: nothing looked for, "carried")."""
 
     def __init__(self, model: MapModel, reg, template, plate: plates.Plate, body: poses.BodyFinder | None = None,
-                 geo: Geometry = NATIVE):
+                 geo: Geometry = NATIVE, cover: Cover | None = None):
         self.model, self.reg, self.plate, self.body, self.geo = model, reg, plate, body, geo
+        self.cover = cover
         self._template = template
         self.feet_dx, self.feet_dy = plate.feet           # her feet from her tag's centre (the plate model's)
         # her tag's match sure at SURE, or lower where her plate's model says her template scores less on her (its
@@ -220,8 +286,10 @@ class Locator:
         inside = [p for p in model.places if p.right >= left and p.left <= right
                   and top <= p.y_at(p.clamp((left + right) / 2)) <= bottom] or list(model.places)
         self.feet_map_x = (min(p.left for p in inside) - FEET_MARGIN, max(p.right for p in inside) + FEET_MARGIN)
-        self.counts = {"frames": 0, "tag": 0, "plate": 0, "body": 0, "carried": 0, "none": 0, "view carried": 0}
+        self.counts = {"frames": 0, "tag": 0, "plate": 0, "body": 0, "carried": 0, "covered": 0, "none": 0,
+                       "view carried": 0}
         self._said = dict(self.counts)               # (`line`'s: the counts at the last line)
+        self._covers: list[str] = []                 # ... and what covered her since, as first told
         self.times: deque[float] = deque(maxlen=TIMES_KEPT)   # each frame's time (ms), the newest
         self.reset()
 
@@ -358,21 +426,29 @@ class Locator:
         self.update(meas, dmap, info)
         if self.mode == "ground" and self.plat is not None and self.kx is not None:
             self.ground = (t, self.plat.y_at(self.kx.p))
-        self._t("update", t3)
+        t4 = self._t("update", t3)
+        # 6. nothing placed her: what covers her, if it's told (counted "covered"; nothing placed by it)
+        if meas is None and self.cover is not None:
+            info["covered"] = self.cover(frame, t)
+            self._t("cover", t4)
         self.timer["total"] = (time.perf_counter() - T0) * 1e3
         self.times.append(self.timer["total"])
         return self.output(info, meas, v)
 
     def line(self) -> str:
         """Since the last line (the perception service's console line, every 10 s): the share of frames each cue placed
-        her in, carried, and with the view registered, and the frames' time (median, the most)."""
+        her in, carried, covered (carried under what covers her: `Cover`, said after it), and with the view
+        registered, and the frames' time (median, the most): "her place by the scene: tag 91.0%, plate 6.0%, body
+        2.0%, carried 0.5%, covered 0.5% (her stat window); views registered 100.0%, 1.1 ms a frame (the most 9.0)"."""
         now, before = dict(self.counts), self._said
         self._said = now
+        covers, self._covers = self._covers, []
         d = {k: now[k] - before.get(k, 0) for k in now}
         n = d["frames"]
         if n <= 0:
             return ""
-        cues = ", ".join(f"{k} {100 * d[k] / n:.1f}%" for k in ("tag", "plate", "body", "carried") if d[k])
+        cues = ", ".join(f"{k} {100 * d[k] / n:.1f}%" + (f" ({', '.join(covers)})" if k == "covered" and covers else "")
+                         for k in ("tag", "plate", "body", "carried", "covered") if d[k])
         sure = 100 * (1 - (d["view carried"] + d["none"]) / n)
         times = sorted(self.times)
         ms = f", {times[len(times) // 2]:.1f} ms a frame (the most {times[-1]:.1f})" if times else ""
@@ -542,6 +618,11 @@ class Locator:
             if r2 is not None and (res is None or r2.agree > res.agree + 0.05):
                 res = r2
         self._t("body", t0)
+        if (res is not None and res.agree >= SPRITE_OK and -res.pose.dy0 < PRONE_H
+                and self.platform_near(res.fx + self.vx, res.fy + self.v, up=PRONE_LINE, down=PRONE_LINE) is None):
+            # her lying-down pose off every platform's line: her head matched (behind the HUD in a drop), not her
+            info["body_prone_off_line"] = [round(res.fx, 1), round(res.fy, 1), res.pose.id]
+            return None
         if res is not None and res.agree >= SPRITE_OK:
             return ("body", res.fx, res.fy, SD["body"] if res.agree >= SPRITE_SURE else SD["body-weak"],
                     {"score": round(res.agree, 3), "pose": res.pose.id, "facing": res.pose.facing, "box": res.box,
@@ -791,7 +872,10 @@ class Locator:
     def output(self, info: dict, meas: tuple | None, view) -> Located:
         f = self.feet_screen()
         how = info.get("how")
-        self.counts[how or "carried"] += 1
+        covered = None if how else info.get("covered")
+        self.counts[how or ("covered" if covered else "carried")] += 1
+        if covered and covered not in self._covers:
+            self._covers.append(covered)
         conf = 0.0
         tag = None
         extra = meas[4] if meas is not None else {}
@@ -808,7 +892,7 @@ class Locator:
             x=None if f is None else float(self.kx.p), y=None if f is None else float(self.y()),
             platform=self.plat if (self.mode == "ground" and f is not None) else None, mode=self.mode, how=how,
             confidence=round(float(conf), 3), unseen=self.unseen, box=extra.get("box"), facing=extra.get("facing"),
-            ms={k: round(v, 3) for k, v in self.timer.items()}, info=info)
+            ms={k: round(v, 3) for k, v in self.timer.items()}, info=info, covered=covered)
 
 
 def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None) -> Locator | None:
@@ -831,7 +915,7 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
         bank = poses.bank_path(lab, geo)
         if Path(bank).exists():
             body = poses.BodyFinder(poses.PoseBank.load(bank), poses.Background(art.rgb, (art.x0, art.y0), art.static))
-        loc = Locator(model, reg, template, plates.Plate(plates.PlateModel.load(path)), body, geo)
+        loc = Locator(model, reg, template, plates.Plate(plates.PlateModel.load(path)), body, geo, cover())
     except Exception as e:  # noqa: BLE001 (her place as before, whatever it was)
         mapart.forget()
         if log is not None:
@@ -842,5 +926,26 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
         c = "in C" if reg.lib is not None and native.locate_lib() is not None else             f"partly in numpy (camreg {camreg.why or 'C'}, locate {native.locate_why or 'C'})"
         log(f"  her place by the scene (localization.locate): the camera on the map's art ({art.rgb.shape[1]}x"
             f"{art.rgb.shape[0]}), her plate's model, " + (f"her pose bank ({len(body.poses)} poses)" if body is not None
-                                                            else "no pose bank (no body cue)") + f"; {c}")
+                                                            else "no pose bank (no body cue)") + f"; {c}; covered "
+            "under the Lie Detector's alarm" + (" and her stat window" if loc.cover.cal is not None else
+                                                f" (her stat window not looked for: {loc.cover.why})"))
     return loc
+
+
+def cover() -> Cover:
+    """What covers her, for the perception's Locator (`build`): the Lie Detector's alarm, and her stat window where its
+    calibration (perception.stat_window.Calibration, lab/stat_window.json: a hunt opens it only with one) has it open
+    at the client's 1366x768. Without one, or its pictures not to be had, the stat window isn't looked for (`why`)."""
+    cal, why = stat_window.Calibration.load(), ""
+    if cal is None:
+        why = "no calibration of it"
+    elif tuple(cal.client) != stat_window.FRAME:
+        cal, why = None, f"calibrated at {cal.client[0]}x{cal.client[1]}"
+    else:
+        try:
+            stat_window.templates(cal)
+        except Exception as e:  # noqa: BLE001 (her place as ever: only what's counted covered)
+            cal, why = None, f"its pictures: {e!r}"
+    out = Cover(cal=cal)
+    out.why = why
+    return out

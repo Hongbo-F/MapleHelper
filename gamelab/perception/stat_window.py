@@ -48,6 +48,7 @@ FUNCTION = "ABILITY"  # its function in the KEY BINDINGS window (perception.keyb
 FRAME = (1366, 768)  # the client's size it's read at (w, h): the game draws its pictures as they are there
 FIND_FIT = 400.0     # levels^2 a channel over the picture's px at the most, for it to be there
 SLACK = 4            # px around the place it was last seen that it's looked for first
+SHOWN_EVERY = 4      # `shown`'s px: every this many of a panel's, each way
 PART = {"main": ("Main", "backgrnd"), "detail": ("Detail", "backgrnd")}
 LIGHT = (225, 223, 213)  # a value cell's colour in the pictures
 # The value cells (x0, y0, x1, y1: panel px), measured off the pictures (`cells_of`: the light cell around each vector),
@@ -249,6 +250,32 @@ def find_all(frame: np.ndarray, cal: "Calibration | None" = None,
 def is_open(frame: np.ndarray, cal: "Calibration | None" = None, near: dict | None = None) -> bool:
     """Whether any panel of the stat window is on `frame`."""
     return any(at is not None for at, _ in find_all(frame, cal, near).values())
+
+
+def shown(frame: np.ndarray, cal: "Calibration | None", every: int = SHOWN_EVERY) -> str | None:
+    """The first panel of the stat window on `frame` (full size, RGB, the client at its 1366x768) exactly where `cal`
+    has it open, or None (None too without a calibration): its masked fit at that place alone, no search (the game
+    draws it where it opens, to the px), every `every`-th px of it each way, FIND_FIT at the most. For a look on many
+    frames (her place by the scene counted "covered" under it: localization.locate.Cover): 0.06-0.08 ms a panel, where
+    `find`'s search within SLACK is 6-13 ms; on the live clip of 2026-10-30 17:54:33 (every 7th of its 4,503 frames)
+    79 at the most under it, 14,000 and more on every other frame."""
+    if cal is None or frame is None:
+        return None
+    for name, t in templates(cal).items():
+        at = cal.place(name)
+        if at is None:
+            continue
+        (x, y), (w, h) = at, t.size
+        if x < 0 or y < 0 or x + w > frame.shape[1] or y + h > frame.shape[0]:
+            continue
+        m = t.mask[::every, ::every].astype(bool)
+        if not m.any():
+            continue
+        want = t.rgb[::every, ::every][m].astype(np.int32)
+        got = frame[y:y + h:every, x:x + w:every, :3][m].astype(np.int32)
+        if float(((got - want) ** 2).sum()) / want.size <= FIND_FIT:
+            return name
+    return None
 
 
 # --- reading it ------------------------------------------------------------------------------------------------------

@@ -100,6 +100,22 @@ def test_it_is_found_where_it_is_and_not_where_it_isnt():
     assert sw.find_all(alone.frame)["detail"][0] is None and sw.find_all(alone.frame)["main"][0] == sw.DRAW_AT["main"]
 
 
+def test_shown_exactly_where_its_calibration_has_it_open():
+    """`shown` (her place by the scene counted covered under it: localization.locate.Cover): the first panel found at
+    its calibrated place alone, no search, whatever its values say, as a JPEG too; moved off it (the user dragged it),
+    or with no calibration, nothing; a place off the frame skipped."""
+    base = _base()
+    cal = sw.Calibration(panels={"main": {"at": [300, 120]}, "detail": {"at": [485, 120]}}, detail_with_main=True)
+    drawn = sw.compose(VALUES, base=base, at={"main": (300, 120), "detail": (485, 120)})
+    assert sw.shown(drawn.frame, cal) == "main" and sw.shown(_jpeg(drawn.frame), cal) == "main"
+    alone = sw.compose(VALUES, base=base, at={"main": (600, 120), "detail": (485, 120)})   # (its Main panel elsewhere)
+    assert sw.shown(alone.frame, cal) == "detail"
+    moved = sw.compose(VALUES, base=base, at={"main": (500, 300), "detail": (685, 300)})
+    assert sw.shown(moved.frame, cal) is None and sw.shown(base, cal) is None and sw.shown(drawn.frame, None) is None
+    off = sw.Calibration(panels={"main": {"at": [1300, 700]}, "detail": {"at": [485, 120]}})
+    assert sw.shown(drawn.frame, off) == "detail" and sw.shown(drawn.frame, sw.Calibration(panels={})) is None
+
+
 def test_both_panels_read_in_one_ocr_call_each():
     """Each panel's value column read by the OCR in one go, each row taken for the cell it falls in, and parsed: HP
     and MP (cur, max), ATTACK (lo, hi), the rest the first whole number; the DETAIL panel closed: no W.DEF, said."""
