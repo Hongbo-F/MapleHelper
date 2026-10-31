@@ -265,7 +265,8 @@ def test_a_scenario_that_takes_a_portal_or_falls_out_of_the_map_is_unmet_as_a_de
 def _camp_world(m, **kw):
     from gamelab.sim.world import Camp
     camps = (Camp(28, 250.0, (29, 30), ("green-mushroom",)),)
-    return world(m, 23, 0.0, monsters={29, 30, 23}, realism=Realism(camps=camps, respawn=8.8, **kw))
+    return world(m, 23, 0.0, monsters={29, 30, 23}, realism=Realism(camps=camps, respawn=8.8, respawn_tick=0.0,
+                                                                     **kw))
 
 
 def test_a_camp_kills_the_greens_it_hunts_2_to_6_s_after_they_show_and_leaves_the_rest():
@@ -419,11 +420,11 @@ def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_
     from gamelab.sim.world import LEVEL_25
     sc = harness.scenario("loop", 1, "crowd", map_id=TREE, world=("zero-walls", "touch-share"))
     assert sc.start == harness.TREE_START_AT[1] and sc.name == "loop:crowd:1:10002073:zero-walls:touch-share"
-    assert sc.realism.camps == harness.TREE_CAMPS and sc.realism.respawn == 8.8 and sc.realism.zero_walls
+    assert sc.realism.camps == harness.TREE_CAMPS and sc.realism.respawn_tick == world_mod.TICK_S  # (the server's
+    assert sc.realism.respawn_cap is None and sc.realism.zero_walls  # respawn, its cap the formula's)
     assert sc.noise.dot_under == 56.0 and sc.realism.spawn_share == 1.0 and sc.realism.rival_every == 0
-    for preset, respawn in (("crowd-17", 17.0), ("crowd-slow", 30.0)):  # the live median on 23, the first map's refill
-        other = harness.scenario("loop", 1, preset, map_id=TREE)
-        assert other.realism.respawn == respawn and other.realism.camps == harness.TREE_CAMPS
+    assert "crowd-17" not in harness.PRESETS and "crowd-slow" not in harness.PRESETS  # (one with the server's respawn)
+    assert harness.scenario("loop", 1, "crowd", map_id=TREE, world=("clock-respawn",)).realism.respawn_tick == 0.0
     assert sc.her == dataclasses.replace(LEVEL_25, defence=None)
     assert harness.scenario("loop", 1, "game", map_id=TREE).her is None  # as she is there (scenarios.HER)
     assert harness.scenario("tour", 2, map_id=TREE, world=("client-reach",)).realism.rope_reach == ROPE_REACH_CLIENT

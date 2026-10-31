@@ -11,7 +11,7 @@ from gamelab.analysis import respawn
 from gamelab.attack.reach import LOOK_DOWN, LOOK_UP
 from gamelab.localization.pose import Camera
 from gamelab.sim import scenarios
-from gamelab.sim.world import RESPAWN
+from gamelab.sim.world import RESPAWN, Realism
 
 REAL = pytest.mark.skipif(not scenarios.available(), reason="needs the map's game data (gamedata/data)")
 BAND = (LOOK_UP, LOOK_DOWN)
@@ -231,7 +231,8 @@ def test_on_the_simulator_it_measures_the_simulator_s_respawn():
             h.look()
         return {}
 
-    sc = scenarios.Scenario("respawn", fn, (36, 450.0), monsters=[("Pig", 36, 650.0)], seed=2)
+    sc = scenarios.Scenario("respawn", fn, (36, 450.0), monsters=[("Pig", 36, 650.0)], seed=2,
+                            realism=Realism(respawn_tick=0.0))  # (its own clock, the default until 2026-10-31)
     with telemetry.captured() as records:
         _, sim = scenarios.run_sim(sc)
     model = sim.model

@@ -707,17 +707,18 @@ class Noise:
 
 @dataclass(frozen=True)
 class Realism:
-    """How busy and how hard the map is. The defaults are the simulator's own world (every spawn point
-    filled, an 8 s respawn, nobody else hunting, endless potions), which is denser and easier than the
-    game: tour_run makes about 143 EXP a minute where a sweep in game made about 76. The other values are
-    knobs for comparing policies in a world closer to the game's; none of them is measured but lock_arrows (and the
-    respawn, which the live telemetry says isn't the game's: RESPAWN)."""
-    respawn: float = RESPAWN     # s from a kill until the monster is back at its spawn point
-    respawn_tick: float = 0.0    # s between the map's respawn passes (TICK_S: the game's, as measured): at each the
+    """How busy and how hard the map is. The defaults are the simulator's own world (the map at its cap from the start,
+    filled again at the map's respawn passes as the server fills it: respawn_tick; nobody else hunting, endless
+    potions). Until 2026-10-31 (the user: "Use the tick default everywhere") every spawn point was filled and each
+    monster came back 8 s after its own death (RESPAWN, now `respawn_tick` 0), denser and easier than the game: tour_run
+    made about 143 EXP a minute where a sweep in game made about 76. The other values are knobs for comparing policies
+    in a world closer to the game's; none of them is measured but lock_arrows and the respawn."""
+    respawn: float = RESPAWN     # with respawn_tick 0: s from a kill until the monster is back at its spawn point
+    respawn_tick: float = TICK_S  # s between the map's respawn passes (TICK_S: the game's, as measured): at each the
                                  # map filled to its cap (None: the server's formula, MapModel.mob_cap, by the players
                                  # there, her, the camps and the rival; a number: that share of its spawn points) at
                                  # random points clear of monsters by SPAWN_CLEAR; 0: `respawn` s after its death, each
-                                 # on its own (as until 2026-10-29)
+                                 # on its own (the default until 2026-10-31; harness `--world clock-respawn`)
     respawn_cap: float | None = None
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     rival_every: float = 0.0     # s between another player's kills, on average (0: nobody else)
@@ -2634,7 +2635,9 @@ class World:
                                          t < m.drawn_alive)
         if room <= 0:
             return
-        near = [(x, m.platform.y_at(x)) for m in self.monsters if m.alive for x in (m.at(t),)]
+        # (where each is, from a copy: its own walk is drawn as it's looked at, aimed at where she is then with
+        # Realism.chase, so a look of the pass's own would move it)
+        near = [(x, m.platform.y_at(x)) for m in self.monsters if m.alive for x in (m.ghost().at(t),)]
         clear = []
         for p in range(self.points):  # (the map's first monsters are its points', in its order: _spawn)
             home = self.monsters[p]

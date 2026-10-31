@@ -28,8 +28,8 @@ A run hunts for a fixed time (the horizon) from one of its map's START_AT, on a 
 random choices fixed (POLICY_SEED), so two policies meet the same monsters until their kills differ. On the first
 map by default; `--map 10004021` on West Rocky Mountain II, `--map 10002073` on Tree Dungeon, Forest Up North II, with
 her as she plays each (sim.scenarios.HER: level 23 and 24, her pet drinking her potions), saved as
-POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd`, `crowd-17` and `crowd-slow`, Tree
-Dungeon's other players (TREE_CAMPS), which are that map's alone. `--world` switches on what isn't known of the game
+POLICY-PRESET-MAP; the presets are the same worlds on every map, but `crowd`, Tree Dungeon's other players
+(TREE_CAMPS), which is that map's alone. `--world` switches on what isn't known of the game
 there (WORLDS: group 0's walls, the client's sides, the client's rope reach, a touch as a share of PADamage, no
 evasion, the monsters' HP bars read empty), each saved as a suffix of the name. `--attack` has the stack choose her
 attack a throw as live (behavior.attacks: Lucky Seven but the regular attack to finish a monster and while her MP is
@@ -156,7 +156,7 @@ from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
 from .world import (DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
-                    OFF_SEEN, RESPAWN_LIVE, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, Camp, Noise, Realism)
+                    OFF_SEEN, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, Camp, Noise, Realism)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -206,19 +206,18 @@ GREEN, SLIME = "green-mushroom", "slime"
 TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GREEN,)), Camp(23, 0.0, (22,), (GREEN,)),
               Camp(19, 200.0, (19,), (GREEN,)), Camp(33, 120.0, (32, 33), (GREEN, SLIME)))
 # Tree Dungeon's crowd: "game"'s errors, other players' dots under hers unseen (Noise.dot_under: 56 units, the study's
-# frames), every spawn point filled (MeowDB lifts its cap from 6 players on), the camps above instead of "game"'s one
-# roaming rival, and respawns at MeowDB's mean, 8.8 s ("crowd"), at 17 s ("crowd-17": the live median on 23 after her
-# last kill there, 1.7-57 s, telemetry of 2026-10-24: README, Positioning), or 30 s ("crowd-slow": the first map's slow
-# refill, README: Respawns and drop life). Only on that map (PRESET_MAPS).
+# frames), the camps above instead of "game"'s one roaming rival, the map's respawn the server's (Realism.respawn_tick:
+# its cap by the formula, the players there counted). Only on that map (PRESET_MAPS). Until 2026-10-31 every spawn
+# point was filled and each monster came back on its own clock, 8.8 s after its death ("crowd": MeowDB's mean), 17 s
+# ("crowd-17": the live median on 23 after her last kill there) or 30 s ("crowd-slow": the first map's slow refill):
+# with the server's respawn those three are one, "crowd".
 # From 2026-10-27, with the air pick's noise as fitted to the live jump throws there (world.TREE_AIR: each monster's top
 # uniform over its height for it, a point-blank target taking the star up to 30% of the time the nearer the first band,
 # one under its window 30%, an air turn lost 26%), the world picking from a jump by the star's search (world.AIR_PICK
 # 'search'), so that its jump throws hit and miss where live ones did, by distance and by the slope.
 _CROWD_NOISE = dataclasses.replace(_GAME_NOISE, dot_under=56.0, **TREE_AIR)
-PRESETS["crowd"] = (_CROWD_NOISE, Realism(respawn=8.8, camps=TREE_CAMPS, potions=60, lock_arrows=True))
-PRESETS["crowd-17"] = (_CROWD_NOISE, Realism(respawn=17.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
-PRESETS["crowd-slow"] = (_CROWD_NOISE, Realism(respawn=30.0, camps=TREE_CAMPS, potions=60, lock_arrows=True))
-PRESET_MAPS = {"crowd": (TREE,), "crowd-17": (TREE,), "crowd-slow": (TREE,)}
+PRESETS["crowd"] = (_CROWD_NOISE, Realism(camps=TREE_CAMPS, potions=60, lock_arrows=True))
+PRESET_MAPS = {"crowd": (TREE,)}
 # What isn't known of the game, switched on with `--world` (each a world.Realism field, or her own: world.Her):
 # group 0's walls stopping her whatever her group, the map's sides as HeavenClient has them, a rope grabbed as it does
 # (82 up at most), a touch's HP as a share of PADamage (as fitted on the first map) rather than meowdb's formula, and
@@ -254,16 +253,17 @@ WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
 # ... and her invulnerability after a touch as live (`walkers`: INVULNERABLE_LIVE; Realism.invulnerable), with the
 # monsters she hits chasing her (Realism.chase, world.AGGRO_S: every world's since 2026-10-31; till then this world's
-# alone, by chance, CHASE_TREE). `no-aggro`: the monsters walk as with nobody there, hit or not (as every world but
+# alone, by chance, CHASE_TREE; and each monster back 17 s after its own death, RESPAWN_LIVE, until the server's respawn
+# became the default the same day). `no-aggro`: the monsters walk as with nobody there, hit or not (as every world but
 # `walkers` had them till 2026-10-31).
-WORLDS["walkers"] = {"chase": True, "invulnerable": INVULNERABLE_LIVE, "respawn": RESPAWN_LIVE}
+WORLDS["walkers"] = {"chase": True, "invulnerable": INVULNERABLE_LIVE}
 WORLDS["no-aggro"] = {"chase": False}
-# ... and the game's respawn as measured on Tree Dungeon on 2026-10-29 and 30 (`tick-respawn`: world.TICK_S,
-# SPAWN_CLEAR, MapModel.mob_cap; Realism.respawn_tick): the map's pass filling it to its cap (the server's formula) at
-# random spawn points with no monster within 100 units, where the other worlds bring each monster back on its own clock
-# (`respawn` s after it died: the walkers' 17); and with nobody else on the map (`solo`: no camps, no rival), as live on
-# 2026-10-29 16:35-16:45.
+# The game's respawn is every world's from 2026-10-31 (Realism.respawn_tick: world.TICK_S, SPAWN_CLEAR,
+# MapModel.mob_cap): `tick-respawn` is that, kept for the runs saved under its name; `clock-respawn` each monster back
+# on its own clock, `respawn` s after it died, as every world had it until then; and with nobody else on the map
+# (`solo`: no camps, no rival), as live on 2026-10-29 16:35-16:45.
 WORLDS["tick-respawn"] = {"respawn_tick": TICK_S}
+WORLDS["clock-respawn"] = {"respawn_tick": 0.0}
 WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown

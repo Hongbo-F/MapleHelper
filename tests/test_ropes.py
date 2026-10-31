@@ -222,7 +222,7 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
         pytest.skip("needs the Horny Mushroom's game data (gamedata/data)")
     g = on(model, 100, 500)
     sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=1,
-                            limit=400, realism=Realism(respawn=17.0), may_die=True)
+                            limit=400, realism=Realism(respawn=17.0, respawn_tick=0.0), may_die=True)
     trace = scenarios.run_scenario(sc, model)
     log = "\n".join(trace["log"])
     assert "waiting on the rope at x 250" in log and "off the rope at x 250" in log, trace["result"]

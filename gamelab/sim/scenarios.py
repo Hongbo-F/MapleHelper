@@ -1042,7 +1042,7 @@ def hunt_clear_basin(sim):
             "inventory_full": h.looter.inventory_full}
 
 
-@scenario((36, 300.0), monsters={36}, seed=7,
+@scenario((36, 300.0), monsters={36}, seed=1,
           expects=(ends("killed", key="ended"), happens("claw swipe hits", "close up, the claw swipes")))
 def hunt_kill(sim):
     """`hunt kill`: the slime nearest her on the basin floor, 55 units off. Too close for a star from the
@@ -1057,9 +1057,11 @@ def hunt_kill(sim):
     her EXP gains name their kinds. Over 16 seeds 10 meet all of this.) (Seed 7 since the whole screen 10 times a
     second with her band's own search beside it where a whole screen takes longer than 0.05 s (worldstate.WIDE_EVERY_S,
     BAND_STAND_IN_S, 2026-10-28; at the simulator's costs each about 5 times a second): on seed 6 the run went otherwise
-    from 4.6 s (a look a millisecond sooner), her claw's swipes going to the basin's pigs and its other slime, and
-    she hadn't killed it after 30 s; of seeds 1-16, 1, 4, 7, 10 and 15 meet all of this, with master's stack and the
-    branch as first built 1, 4, 6, 7, 10 and 15.)"""
+    from 4.6 s (a look a millisecond sooner), her claw's swipes going to the basin's pigs and its other slime, and she
+    hadn't killed it after 30 s; of seeds 1-16, 1, 4, 7, 10 and 15 meet all of this, with master's stack and the branch
+    as first built 1, 4, 6, 7, 10 and 15.) (Seed 1 since the server's respawn became every scenario's, 2026-10-31: the
+    map at its cap from the start, a kill back at the next pass; on 7 not all of this; of seeds 1-13, 1, 4, 6 and 11
+    meet all of it.)"""
     h = sim.hunter()
     s = h.look()
     target = min(s.monsters, key=lambda t: abs(t.x - s.where.x))
@@ -1261,7 +1263,14 @@ def _lone(trace: dict, lo: float, hi: float) -> bool:
 _AT_RELEASE = Realism(damage_ms=STAR_DELAY_MS, dies_late=False, chase=False)
 
 
-@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=2, limit=400, realism=_AT_RELEASE,
+# Set-pieces on the monsters they start with and when each is back: on their own clock (respawn_tick 0, the default
+# until 2026-10-31), where the server's respawn, every scenario's since, starts the map at its cap with random points
+# empty and has a kill back at the next pass: of seeds 1-13 none met theirs with it.
+_CLOCK = Realism(respawn_tick=0.0)
+
+
+@scenario((13, -14.0), monsters=[("Pig", 12, -170.0)], seed=2, limit=400,
+          realism=dataclasses.replace(_AT_RELEASE, respawn_tick=0.0),
           expects=(check("30 throws logged", lambda tr: len(_probe_rows(tr)) == 30),
                    check("each at the lone pig in front, 110-200 off", lambda tr: _lone(tr, 110, 200)),
                    check("each with the pick and every monster's evidence",
@@ -1282,12 +1291,13 @@ def probe_top(sim):
     test of that had none to check.) (Seed 1 still with the whole screen 10 times a second, 2026-10-28: of seeds 1-16,
     1, 7, 11 and 15 meet all of this, and with master's stack 1-4 and 11. With the whole screen standing in for her
     band's own search there, as first built (worldstate.BAND_STAND_IN_S), on seed 1 all 30 hit, one with the pig read
-    106.7 off at the pick, under the 111 the world's search reaches from.)"""
+    106.7 off at the pick, under the 111 the world's search reaches from.) (On its monsters' own clock since the
+    server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
     h = sim.hunter()
     return str(probe.run(h, sim.navigator(h), probe.PROBES["top-60"], seconds=300))
 
 
-@scenario((4, 260.0), monsters=[("Orange Mushroom", 2, -50.0)], seed=1, limit=400, realism=_AT_RELEASE,
+@scenario((4, 260.0), monsters=[("Orange Mushroom", 2, -50.0)], seed=4, limit=400, realism=_AT_RELEASE,
           expects=(check("from the ground, no star gets past the step",
                          lambda tr: len(_shown(tr, "throw")) == 6 and all(s is False for _, s in _shown(tr, "throw"))),
                    check("jumping back, every star does",
@@ -1299,9 +1309,10 @@ def probe_step_up(sim):
     60 above her behind the step wall of her own foothold group (the wall rule off for the run, so she throws
     at it). The world stops a star at that wall where it crosses the line 28 above her feet, higher in a jump:
     from the ground every star hits nothing; jumping back the attack starts 44 up, its line over the step's
-    top, and every star hits. Jumping back she throws at one only up to 375 off at the look (probe.JUMP_BACK_OUT:
-    the jump back has carried her 25 units out by the pick); thrown at 387-394, on 3 of seeds 1-16 a star missed
-    one that was out of reach by then."""
+    top, and every star hits. Jumping back she throws at one only up to 375 off at the look (probe.JUMP_BACK_OUT: the
+    jump back has carried her 25 units out by the pick); thrown at 387-394, on 3 of seeds 1-16 a star missed one that
+    was out of reach by then. (Seed 4 since the server's respawn became every scenario's, 2026-10-31: the map at its cap
+    from the start, a kill back at the next pass; on 1 not all of this; of seeds 1-13, 4 and 10 meet all of it.)"""
     h = sim.hunter()
     nav = sim.navigator(h)
     p = probe.adjust(probe.PROBES["step-up"], x=260.0, throws=6)
@@ -1454,7 +1465,7 @@ def tour_hunt_other_spot(sim):
 
 
 @scenario((14, 760.0), monsters=[("Pig", 17, 1000.0), ("Pig", 17, 1300.0)], seed=6, limit=400,
-          realism=Realism(chase=False), expects=(logs("that no spot reaches: onto the platform"),))
+          realism=dataclasses.replace(_CLOCK, chase=False), expects=(logs("that no spot reaches: onto the platform"),))
 def tour_hunt_onto_platform(sim):
     """The same two pigs: no spot off the platform reaches the one left, so onto platform 17 itself.
     (Seed 6 since monsters walk as fast as the game data says (a pig 125 units/s, not 70): on seed 4 the other
@@ -1467,7 +1478,7 @@ def tour_hunt_onto_platform(sim):
     does, from 1380 and 1420 seed 4, of 1-4.) (Seed 6 since the whole screen 10 times a second, 2026-10-28: on seed 1 she
     killed both without going onto 17; of seeds 1-16 only 6 shows it, and with master's stack 1 and 6.) (The pigs walk
     as with nobody there, hit or not, since the world's monsters chase her once hit (Realism.chase off, 2026-10-31): with
-    their chase none of seeds 1-13 shows it.)"""
+    their chase none of seeds 1-13 shows it.) (On its monsters' own clock since the server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1562,14 +1573,15 @@ def _died(cause: str, at_least: int = 1):
                  lambda tr: tr["feed"]["tracker"][f"died {cause}"] >= at_least)
 
 
-@scenario((36, 300.0), monsters="all", seed=22, limit=400,
+@scenario((36, 300.0), monsters="all", seed=1, limit=400,
           noise=Noise(miss=0.28, walk_jitter=6.0, lag_sd=1.0, tap_lost=0.6, dot_px=True, tag_hidden=((20.0, 23.0),)),
           realism=Realism(lock_arrows=True),
           expects=(check("kills", lambda tr: _kills(tr) >= 1), happens("star misses")))
 def tour_hunt_noisy(sim):
-    """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, the
-    lags spread as measured, short taps lost (60%), her dot read to whole pixels, and her name tag hidden
-    for 3 s mid-fight."""
+    """tour_hunt_basin with the real game's errors: stars missing (28%), walks off by a few units, the lags spread as
+    measured, short taps lost (60%), her dot read to whole pixels, and her name tag hidden for 3 s mid-fight. (Seed 1
+    since the server's respawn became every scenario's, 2026-10-31: the map at its cap from the start, a kill back at
+    the next pass; on 22 not all of this; of seeds 1-13, 1-13 all meet all of it.)"""
     return _tour_hunt(36, 5)(sim)
 
 
@@ -1776,7 +1788,7 @@ def _loop_bubble(sim):
 
 
 @scenario((16, 636.0), monsters=[("Slime", 17, 940.0), ("Orange Mushroom", 17, 1300.0), ("Orange Mushroom", 17, 1350.0)],
-          seed=2, limit=200, realism=Realism(respawn=120.0, drops=(("slime", "slime-bubble", 1.0),)),
+          seed=2, limit=200, realism=Realism(drops=(("slime", "slime-bubble", 1.0),)),
           expects=(_rule("valuable pile"), happens("picks up slime-bubble"),
                    check("she sets off for the Slime Bubble while an Orange Mushroom is still about",
                          lambda tr: _first(tr["log"], "picking it up now") < _nth(tr["world_log"], "kills", 3))))
@@ -2116,10 +2128,10 @@ def nav_tree_down(sim):
 
 @tree((28, 247.0), monsters="all", seed=1, limit=600,
       expects=(_rule("close quarters"), _rule("in passing"),
-               check("forty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 40),
+               check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
                check("every kill counted", _every_kill), ends("time up", key="hunt_stop"),
                ends("standing by on a safe platform", key="stop"),
-               check("a thousand EXP or more", lambda tr: tr["world"]["exp"] >= 1000),
+               check("650 EXP or more", lambda tr: tr["world"]["exp"] >= 650),
                check("not up the tower among the Horny Mushrooms (19, 7, 10)",
                      lambda tr: not set(tr["result"]["grounds"]) & {7, 10, 19})))
 def loop_tree_run(sim):
@@ -2165,23 +2177,28 @@ def loop_tree_run(sim):
     review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 5 under
     forty kills; of seeds 1-13, 1, 4, 6-8 and 11 meet all of this.) (The same at the evade work's integration with
     master 8dcc2e6, the pull's detour rule and the magician's casts (2026-10-29, work/evade-int; swept again after its
-    review): of seeds 1-13, 1, 4, 6-8 and 11, every seed's touches and what it misses as on work/evade.)"""
+    review): of seeds 1-13, 1, 4, 6-8 and 11, every seed's touches and what it misses as on work/evade.) (Twenty kills
+    and 650 EXP since the server's respawn became every scenario's, 2026-10-31: the map at its cap, 22 of its 31 points,
+    a kill back at a clear point at the next pass: 22 kills and 752 EXP in its 5 minutes, where every point filled and
+    each back 8 s after its death gave forty and a thousand.)"""
     return _loop(5)(sim)
 
 
 @tree((28, 247.0), monsters="all", seed=10, limit=600, realism=Realism(zero_walls=True),
-      expects=(check("thirty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 30),
+      expects=(check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
                ends("time up", key="hunt_stop"), check("still in the tower", lambda tr: tr["world"].get("fell_out_at")
                                                        is None)))
 def loop_tree_walls(sim):
     """loop_tree_run's twin in a world where the walls of foothold group 0 (the tower's) stop her whatever her group,
-    off a rope too (world.Realism.zero_walls). Seed 10: with her own group's walls alone she was knocked off the rope
-    at -192 (28 from the wall) and out of the map at 328 s; here she stays in the tower all 5 minutes."""
+    off a rope too (world.Realism.zero_walls). Seed 10: with her own group's walls alone she was knocked off the rope at
+    -192 (28 from the wall) and out of the map at 328 s; here she stays in the tower all 5 minutes. (Fifteen kills since
+    the server's respawn became every scenario's, 2026-10-31: 19 in its 5 minutes, where the denser world before gave
+    thirty.)"""
     return _loop(5)(sim)
 
 
 @tree((28, 247.0), monsters="all", seed=3, limit=400, may_die=True,
-      realism=Realism(camps=harness.TREE_CAMPS, respawn=8.8, zero_walls=True),
+      realism=Realism(camps=harness.TREE_CAMPS, zero_walls=True),
       expects=(happens("another player kills green-mushroom"), check("only her kills in the ledger", _every_kill),
                check("nobody else kills a Horny Mushroom", lambda tr: not any(
                    "another player kills horny-mushroom" in line for line in tr["world_log"]))))
@@ -2192,14 +2209,14 @@ def loop_tree_crowd(sim):
     return _loop(3)(sim)
 
 
-_CROWD, _SLOW = harness.PRESETS["crowd"], harness.PRESETS["crowd-slow"]
+_CROWD = harness.PRESETS["crowd"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
 @tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
-               _rule("shoot", 20), check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
+               _rule("shoot", 20), check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
                check("every kill counted", _every_kill), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_23(sim):
     """The hunt loop as live on 2026-10-24: Tree Dungeon's 23 its only ground (harness `--grounds 23`), Lucky Seven
@@ -2226,7 +2243,9 @@ def loop_tree_23(sim):
     Green Mushroom's spawn point (attack.spots.SPAWN_CLEAR): of seeds 1-16 all but 14 meet all of this. (Seed 2 since
     2026-10-27, an attack from a jump picking by the star's search alone, her stance going by where each monster will be
     when her attack starts, and the world's air pick fitted to the live throws (Clearance and slopes): on seed 1 she
-    shot 23 from the spot fewer than 20 times, for 42 kills; of seeds 1-16 all but 1 and 4 meet all of this.)"""
+    shot 23 from the spot fewer than 20 times, for 42 kills; of seeds 1-16 all but 1 and 4 meet all of this.) (Fifteen
+    kills since the server's respawn became every scenario's, 2026-10-31: 18 in its 4 minutes, where the denser world
+    before gave twenty.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2250,8 +2269,8 @@ def loop_tree_23_near_misses(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
-@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=2, limit=500, may_die=True, noise=_SLOW[0], her=_LUCKY,
-      realism=dataclasses.replace(_SLOW[1], zero_walls=True),
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=2, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+      realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_wait(sim):
     """20 its only ground, hunted standing on it (no spot off it is better: attack.spots), its one Horny Mushroom's
@@ -2296,7 +2315,7 @@ def _grind(minutes: float):
 
 
 @tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
-      realism=Realism(camps=harness.TREE_CAMPS, respawn=30.0, zero_walls=True),
+      realism=Realism(camps=harness.TREE_CAMPS, zero_walls=True),
       expects=(logs("loop: ["), logs("next: stop"), logs("grinding:"),
                check("three stops or more", lambda tr: len(tr["result"]["grounds"]) >= 3),
                check("kills credited to two platforms or more", lambda tr: len(tr["result"]["credit"]) >= 2),
@@ -2321,8 +2340,8 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=5, limit=240, may_die=True, noise=_CROWD[0],
-      realism=Realism(respawn=17.0, zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
+@tree((24, 231.0), monsters={22, 23}, seed=13, limit=240, may_die=True, noise=_CROWD[0],
+      realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
                check("hurt five times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 5)))
@@ -2365,9 +2384,11 @@ def loop_tree_ore_waits(sim):
     2026-10-28; at the simulator's costs the same timeline as at 10, WIDE_SHARE holding a 100 ms whole screen to 5 a
     second): on seed 1 she was hurt more than five times; of seeds 1-16, 4-6, 11-13, 15 and 16 meet all of this, with
     master's stack 2, 6, 8, 9, 11, 12 and 14-16 (on 5 hurt more than five times). Her regular attack was doubted with
-    her keys right on 7 of the 16, the key check finding ATTACK on Ctrl after (master's stack: 6), on 5 never.)
-    (Seed 5 kept at the rebase of the whole screen 15 times a second onto her touches (master 73394ba, 2026-10-28):
-    on 5 hurt none of its touches, 6 ores picked up.)"""
+    her keys right on 7 of the 16, the key check finding ATTACK on Ctrl after (master's stack: 6), on 5 never.) (Seed 5
+    kept at the rebase of the whole screen 15 times a second onto her touches (master 73394ba, 2026-10-28): on 5 hurt
+    none of its touches, 6 ores picked up.) (Seed 13 since the server's respawn became every scenario's, 2026-10-31: the
+    map at its cap from the start, a kill back at the next pass; on 5 not all of this; of seeds 1-13, 13 alone (of 1-26)
+    meet all of it.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2381,7 +2402,7 @@ def _lucky_seven_again(tr: dict) -> bool:
 
 @tree((24, 231.0), monsters={22, 23}, seed=1, limit=300, may_die=True, noise=_CROWD[0], attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER, pet_mp=None),
-      realism=Realism(respawn=17.0, zero_walls=True),
+      realism=Realism(zero_walls=True),
       expects=(logs("Lucky Seven: horny-mushroom"), logs("< a cast's 14"),
                check("Lucky Seven again once her MP came back", _lucky_seven_again),
                check("never Lucky Seven with too little MP", lambda tr: not any(
@@ -2499,7 +2520,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((28, 247.0), monsters="all", seed=4, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=4, limit=400, realism=_CLOCK, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -2531,11 +2552,12 @@ def loop_tree_lie_detector(sim):
     and the world's damage at the server's time: on seed 2 she went up the rope at 146 from 32, no safe platform near;
     of seeds 1-16, 4, 5, 7, 10, 11, 13, 14 and 15 meet all of this.) (Seed 4 kept with parts A and B together,
     work/hunt-ab, 2026-10-26, where part B alone had it on 1: of seeds 1-16, 2, 4-7, 10, 11 and 14-16 meet all of this;
-    on 1 she went to a safe platform, not the rope.)"""
+    on 1 she went to a safe platform, not the rope.) (On its monsters' own clock since the server's respawn became every
+    scenario's, 2026-10-31: _CLOCK's note.)"""
     return lie_detector(110.0)(sim)
 
 
-@tree((28, 247.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((28, 247.0), monsters="all", seed=1, limit=400, realism=_CLOCK, expects=LIE_DETECTOR_EXPECTS + (
     _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
 def loop_tree_lie_detector_28(sim):
     """As loop_tree_lie_detector, seen 40 s in, on her way down from 28: back onto 28, which no monster reaches (its
@@ -2581,7 +2603,7 @@ def loop_tree_lie_detector_28(sim):
     tower at 23.3 s, before the sighting (in this world her own group's walls alone stop her); of seeds 1-9, 9 alone
     goes back onto 28 (at x 227, 5.9 s after the sighting), 3 and 6 to 25, the others to a rope, all on a safe place
     10 s after it.) (Seed 1 since the world's monsters chase her once she hits them (Realism.chase, 2026-10-31): on seed
-    9 neither to safe enough nor on 28; of seeds 1-13, 1 and 5 meet all of this.)"""
+    9 neither to safe enough nor on 28; of seeds 1-13, 1 and 5 meet all of this.) (On its monsters' own clock since the server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -2784,7 +2806,7 @@ DARTS_EXPECTS = (
     check("her moves alone after the stop, no attack and no mouse", _moves_alone))
 
 
-@tree((23, 73.0), monsters="all", seed=4, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
       expects=DARTS_EXPECTS)
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
@@ -2795,9 +2817,11 @@ def loop_tree_out_of_darts(sim):
     reviews of her kill's monster, 2026-10-27: on seed 1 her first kill's monster, bound and by her, kept her from the
     jump onto 22 at 1.6 s, and the stop came at 82 s on 28, where her retreat to the rope at x 146 was knocked back off
     32 twice and ended on 33. Of seeds 1-12, all but 1 meet it, and master's stack all but 3 and 12.) Since the afternoon of 2026-10-28 out of darts'
-    stop due in the hunt loop has the key bindings read first (her Lucky Seven's key moved does the same): due at 72.4 s,
-    on 25 (a safe platform: at once), the window read, Lucky Seven on Shift as configured: the stop at 76.1 s, her moves
-    alone after it."""
+    stop due in the hunt loop has the key bindings read first (her Lucky Seven's key moved does the same): due at 72.4
+    s, on 25 (a safe platform: at once), the window read, Lucky Seven on Shift as configured: the stop at 76.1 s, her
+    moves alone after it. (Seed 1 since the server's respawn became every scenario's, 2026-10-31: the map at its cap
+    from the start, a kill back at the next pass; on 4 not all of this; of seeds 1-13, 1, 2, 5-7 and 9-13 meet all of
+    it.)"""
     return darts_stop(5)(sim)
 
 
@@ -3111,7 +3135,7 @@ def loop_tree_grind_jump_key(sim):
     return key_check_run(4)(sim)
 
 
-@tree((23, -150.0), monsters="all", seed=9, limit=400, may_die=True,
+@tree((23, -150.0), monsters="all", seed=1, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("right", "e"),))),
       expects=FOLLOW_EXPECTS + (
           logs("HER RUNS DIDN'T MOVE HER 4 TIMES IN A ROW"), logs("RIGHT RIGHT -> E"),
@@ -3129,9 +3153,11 @@ def loop_tree_grind_arrow_key(sim):
     window (master d9774e5, 2026-10-28): on seed 1 her runs' doubt came at 320 s, after the hunt; of seeds 1-12, 9,
     10 and 12 meet all of this, master's stack on 9 doubts at 236 s with too few runs after. On 9: the doubt at 42.7
     s, the window read at 43.8-44.5 s, MOVE RIGHT followed to E, 51 kills after; 55 since the pull's detour rule
-    (2026-10-29: behavior.patrol, a pile against the loop's rate), 54 since a pile's touches count against it, 50 at
-    the evade work's integration, 40 with the refill learned from what she sees (2026-10-29: work/respawn), the doubt
-    and the window as before.)"""
+    (2026-10-29: behavior.patrol, a pile against the loop's rate), 54 since a pile's touches count against it, 50 at the
+    evade work's integration, 40 with the refill learned from what she sees (2026-10-29: work/respawn), the doubt and
+    the window as before.) (Seed 1 since the server's respawn became every scenario's, 2026-10-31: on 9 the check was
+    put off three times, a Horny Mushroom near, and the hunt stopped; of seeds 1-13 run as the goldens run them, 1, 4,
+    7, 10 and 12 meet all of this.)"""
     return key_check_run(4)(sim)
 
 
@@ -3354,7 +3380,8 @@ def _spread_from_spot() -> bool:
     return flow.SPREAD_FROM_SPOT
 
 
-@tree((21, 42.0), monsters=[("Horny Mushroom", 23, 24.0), ("Horny Mushroom", 23, -132.0)], seed=2, limit=60, **_LIVE,
+@tree((21, 42.0), monsters=[("Horny Mushroom", 23, 24.0), ("Horny Mushroom", 23, -132.0)], seed=2, limit=60,
+      **dict(_LIVE, realism=dataclasses.replace(_LIVE["realism"], respawn_tick=0.0)),
       expects=(ends("arrived"), no_log("by her landing on 23: shooting it first"), no_log("none thrown"),
                check("says why there's no shot first (or, the take-offs from their own spots, drops clear)",
                      lambda tr: _spread_from_spot() or any("no shot first, no throw from the ground takes it from "
@@ -3370,7 +3397,8 @@ def nav_tree_landing_no_shot(sim):
     there's no shot and why (FightOnTheWay.shot_place: "no shot first, no throw from the ground takes it from anywhere on
     platform 21 (it's 125 under her), nor one from a jump where she stands") and nothing is sent, and she goes. With
     flow.SPREAD_FROM_SPOT (off from the review of 2026-10-28) the drop's other takeoffs are tried from their own spots,
-    it drops from another, clear of both, and there's nothing to say; not hurt either way."""
+    it drops from another, clear of both, and there's nothing to say; not hurt either way. (On its monsters' own clock
+    since the server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
     from ..control.navigator import HUNT
     return sim.navigator(sim.hunter(), fight=True).go(23, x=8.0, mode=HUNT)
 

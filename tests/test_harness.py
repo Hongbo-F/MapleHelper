@@ -86,7 +86,7 @@ def test_a_monsters_pose_can_read_wrong_in_spells_as_the_templates_do_in_game(mo
     def poses(wrong: float, looks: int = 40) -> list[str]:
         clock = Clock()
         w = World(model, KEYS, (b.id, 240.0), monsters=[("Pig", b.id, 380.0)], origin=clock.now,
-                  noise=Noise(pose_wrong=wrong))
+                  noise=Noise(pose_wrong=wrong), realism=Realism(respawn_tick=0.0))  # (its own clock: no passes)
         w.invulnerable_ms = 10 ** 9  # it walks into her: no touches
         h = Hunter(FakeEyes(w, clock, model), KEYS, model, log=lambda m: None)
         out = []
@@ -328,7 +328,8 @@ def test_her_mp_bar_shows_a_cast_and_her_pets_drink_the_servers_time_after_its_k
 
 def test_a_touch_by_a_monster_just_back_at_its_spawn_point_is_a_fresh_one(model):
     c = plat(model, 500, 400)
-    w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0)], facing="right"))
+    w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 300.0)], facing="right",
+                    realism=Realism(respawn_tick=0.0)))  # (back on its own clock, RESPAWN after its death)
     tap(w, 0.0, "f", 0.04)  # one star kills a snail
     w.advance(2.0)
     assert not w.monsters[0].alive and not w.touch_log
@@ -731,8 +732,8 @@ def test_the_maps_pass_fills_only_points_with_no_monster_within_100_units(model)
     w.advance(w.t + 7.05)
     assert sorted(m.spawn for m in w.monsters if m.alive) == [0, 2, 4] and w.respawn_births == 4
     assert first.alive and len(w.monsters) == 6  # (its own monster back, nothing new made)
-    # Off: back 8 s after its death, every one.
-    w = world(model, c.id, 50.0, monsters=snails[:1])
+    # Off (respawn_tick 0, the default until 2026-10-31): back 8 s after its death, every one.
+    w = world(model, c.id, 50.0, monsters=snails[:1], realism=Realism(respawn_tick=0.0))
     w._others_kill(w.monsters[0], w._camp_rng, 1.0)
     w.advance(7.9)
     assert not w.monsters[0].alive
