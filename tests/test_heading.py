@@ -504,8 +504,10 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
 
 # (with her touches as the world had them when these were measured: a touch left her a second, and a Horny Mushroom's
 # MISSed EVADE_ACC over its accuracy, 29%; the world's 1.45 s and her avoid since 2026-10-28 knock her less often, and
-# none of seeds 1-32 keeps the single seed's case below: what's tested is her heading after a knock, not the knocks)
-KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False), start=0.0,
+# none of seeds 1-32 keeps the single seed's case below: what's tested is her heading after a knock, not the knocks;
+# the monsters walk as with nobody there and come back on their own clock, as then: Realism.chase off, respawn_tick 0)
+KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False, respawn_tick=0.0),
+               start=0.0,
                mushrooms=(160.0, -150.0), her=dataclasses.replace(LEVEL_25, avoid=None))
 
 

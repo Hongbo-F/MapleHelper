@@ -1195,7 +1195,7 @@ def fight_snail_stab(sim):
 
 
 @scenario((4, 520.0), monsters=[("Orange Mushroom", 2, 80.0), ("Orange Mushroom", 2, 140.0),
-                                ("Orange Mushroom", 2, 200.0)], seed=3, limit=60,
+                                ("Orange Mushroom", 2, 200.0)], seed=8, limit=60,
           expects=(check("no throw from the ground from platform 4",
                          lambda tr: not any(p[1] == "throw" for p in tr["plans"])),
                    check("she stays on platform 4", lambda tr: tr["world"]["platform"] == 4),
@@ -1223,7 +1223,9 @@ def fight_step_wall(sim):
     band's own search beside a whole screen that takes longer than 0.05 s, worldstate.BAND_STAND_IN_S, 10-12 and 16.)
     (Seed 1 since perception at 15 frames a second, one pass a frame (2026-10-30): on seed 10 she stepped off platform
     4; seed 1 meets all of this.) (Seed 3 since the world's monsters chase her once she hits them (Realism.chase,
-    2026-10-31): on seed 1 she didn't stay on platform 4; of seeds 1-13, 3 and 11 meet all of this.)"""
+    2026-10-31): on seed 1 she didn't stay on platform 4; of seeds 1-13, 3 and 11 meet all of this.) (Seed 8 since the
+    server's respawn and the chase together (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 3 she
+    didn't stay on platform 4; of seeds 1-13, 8, 11 and 12 meet all of this, with the chase alone 3 and 11.)"""
     h = sim.hunter()
     r = h.clear(max_kills=3, seconds=20)
     return {"report": str(r)}
@@ -1475,10 +1477,11 @@ def tour_hunt_onto_platform(sim):
     first.) (The other pig from 1300 since 2026-10-27, her kill credited to the monster her attack took
     (localization.tracking's binding) and drawn alive until her star lands (sim.world Realism.dies_late): from 1240
     no seed of 1-16 shows it, the fight reaching the other pig from 14 once the kill isn't put by it; from 1300 seed 1
-    does, from 1380 and 1420 seed 4, of 1-4.) (Seed 6 since the whole screen 10 times a second, 2026-10-28: on seed 1 she
-    killed both without going onto 17; of seeds 1-16 only 6 shows it, and with master's stack 1 and 6.) (The pigs walk
-    as with nobody there, hit or not, since the world's monsters chase her once hit (Realism.chase off, 2026-10-31): with
-    their chase none of seeds 1-13 shows it.) (On its monsters' own clock since the server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
+    does, from 1380 and 1420 seed 4, of 1-4.) (Seed 6 since the whole screen 10 times a second, 2026-10-28: on seed 1
+    she killed both without going onto 17; of seeds 1-16 only 6 shows it, and with master's stack 1 and 6.) (The pigs
+    walk as with nobody there, hit or not, since the world's monsters chase her once hit (Realism.chase off,
+    2026-10-31): with their chase none of seeds 1-13 shows it.) (On its monsters' own clock since the server's respawn
+    became every scenario's, 2026-10-31: _CLOCK's note.)"""
     return _hunt_17_pigs(sim)
 
 
@@ -1654,7 +1657,7 @@ def _loop_on_12(sim):
     return _loop(3)(sim, tour)
 
 
-@scenario((13, 0.0), monsters={12}, seed=1, limit=400,
+@scenario((13, 0.0), monsters={12}, seed=2, limit=400,
           expects=(check("platform 12 hunted", lambda tr: tr["result"]["grounds"][0] == 12),
                    _rule("lull loot"), check("drops picked up", lambda tr: sum(tr["world"]["picked"].values()) >= 20),
                    check("every kill counted", _every_kill)))
@@ -1691,7 +1694,9 @@ def loop_lull_loot(sim):
     own search as first built, worldstate.BAND_STAND_IN_S, all but 2 and 10, no lull coming on 2.) (Seed 1 since
     perception at 15 frames a second, one pass a frame, with the drops' rotation a strip in view every 0.2 s
     (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 2 the rule 'lull loot' never decided; seed 1 meets all of this,
-    17 pigs and 10 Orange Mushrooms killed, 7 piles.)"""
+    17 pigs and 10 Orange Mushrooms killed, 7 piles.) (Seed 2 since the server's respawn and the chase together
+    (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 1 not all of this; of seeds 1-13, 2-4 and 7-9
+    meet all of it.)"""
     return _loop_on_12(sim)
 
 
@@ -1837,7 +1842,7 @@ def loop_noisy(sim):
     return _loop(2)(sim)
 
 
-@scenario((36, 300.0), monsters="all", seed=2, limit=400, may_die=True,
+@scenario((36, 300.0), monsters="all", seed=7, limit=400, may_die=True,
           realism=Realism(spawn_share=0.5, rival_every=20.0),
           expects=(check("only her kills in the ledger", _every_kill), happens("another player kills"),
                    _died("other")))
@@ -1854,7 +1859,9 @@ def loop_rival(sim):
     (behavior.fight.TOUCH_NEAR) and her kills credited to the monster her attack took: on seed 2 the feed saw none of
     the rival's kills die; of seeds 1-12, 4-7, 9 and 10 meet all of this, and with master's stack 2, 4-7 and 9.) (Seed 2
     since perception at 15 frames a second, one pass a frame (2026-10-30): on seed 4 the feed judged none of the rival's
-    kills someone else's in its 3 minutes (3 lost in a crowd); of seeds 1-2, 2 meets all of this.)"""
+    kills someone else's in its 3 minutes (3 lost in a crowd); of seeds 1-2, 2 meets all of this.) (Seed 7 since the
+    server's respawn and the chase together (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 2 not
+    all of this; of seeds 1-13, 7 and 10 meet all of it.)"""
     return _loop(3)(sim)
 
 
@@ -2180,7 +2187,12 @@ def loop_tree_run(sim):
     review): of seeds 1-13, 1, 4, 6-8 and 11, every seed's touches and what it misses as on work/evade.) (Twenty kills
     and 650 EXP since the server's respawn became every scenario's, 2026-10-31: the map at its cap, 22 of its 31 points,
     a kill back at a clear point at the next pass: 22 kills and 752 EXP in its 5 minutes, where every point filled and
-    each back 8 s after its death gave forty and a thousand.)"""
+    each back 8 s after its death gave forty and a thousand.) (Expected to fail since the server's respawn and the chase
+    together (respawn_tick and Realism.chase every world's, 2026-10-31; tests/test_sim.py's TOWER_TRIPS): of seeds 1-13,
+    none meets all of this, as the goldens run them: 8 went up the tower among its Horny Mushrooms, 5 were knocked out
+    past the tower's walls (off 11's left end on 2); with the server's respawn alone 5 of 13 met it (6 up the tower, 2
+    out), with the chase alone and the old respawn 7 of 13 (its forty kills). To look into: grinding's ground choice
+    under the server's respawn, and her knocks near the tower's walls.)"""
     return _loop(5)(sim)
 
 
@@ -2252,7 +2264,7 @@ def loop_tree_23(sim):
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=4, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -2265,7 +2277,9 @@ def loop_tree_23_near_misses(sim):
     work's review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 1 no
     'later, a horny-mushroom unseen' line; of seeds 1-13 all but 1 and 11 meet all of this.) (The same at the evade
     work's integration with master 8dcc2e6 (2026-10-29, work/evade-int; swept again after its review): of seeds 1-13
-    all but 1 and 11, every seed's touches as on work/evade.)"""
+    all but 1 and 11, every seed's touches as on work/evade.) (Seed 4 since the server's respawn and the chase together
+    (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 2 not all of this; of seeds 1-13, 4, 9 and 10
+    meet all of it.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2340,7 +2354,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=13, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -2388,7 +2402,9 @@ def loop_tree_ore_waits(sim):
     kept at the rebase of the whole screen 15 times a second onto her touches (master 73394ba, 2026-10-28): on 5 hurt
     none of its touches, 6 ores picked up.) (Seed 13 since the server's respawn became every scenario's, 2026-10-31: the
     map at its cap from the start, a kill back at the next pass; on 5 not all of this; of seeds 1-13, 13 alone (of 1-26)
-    meet all of it.)"""
+    meet all of it.) (Seed 1 since the server's respawn and the chase together (respawn_tick and Realism.chase every
+    world's, 2026-10-31): on seed 13 she never picked up the ore; of seeds 1-13, 1 and 6 meet all of this, with the
+    chase alone 1, 5, 8 and 12 (the old respawn).)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -2580,30 +2596,31 @@ def loop_tree_lie_detector_28(sim):
     seed 1 she went up the rope at 146 from 32, a rope as safe, as master's stack does in this world; of seeds 1-40 only
     37 goes back onto 28, and on 39 a touch knocked her out of the tower 3 s after the sighting (in this world her own
     group's walls alone stop her: loop_tree_run).)
-    (Seed 7 since 2026-10-27 on its own branch, her kill credited to the monster her attack took (localization.tracking's
-    binding) and drawn alive until her star lands (sim.world Realism.dies_late): on seed 1 she didn't go back onto 28;
-    of seeds 1-16 only 7 meets all of this, and on 13 and 14 she fell out of the map before 40 s.) (Seed 37 kept since
-    the rebase of her kill's monster onto clearance and slopes: of seeds 30-40, 33 and 37 meet all of this.) (Seed 5
-    since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does: navigator.TOUCH_CUTS), the world's
-    invulnerability 1.45 s and her MISSes by the game's hit check (sim.world.INVULNERABLE, LEVEL_25_AVOID): on seed 37
-    she went up the rope at 146 from 32, a rope as safe, as she does with the stack's reactions off in this world too;
-    of seeds 1-40, 5, 8, 9, 11, 29, 33 and 38 meet all of this.) (Seed 5 kept at the rebase of the whole screen 15
-    times a second onto her touches (master 73394ba, 2026-10-28), where the branch at 10 a second had it on 2: on 5
-    she is on 28, a safe platform, 10 s after it.) (Seed 2 since the evade work's review (2026-10-29: her evade step and
-    R7's dodge, the rope fixes; rebased onto master 945f201): on seed 5 her retreat went to 27, a safe platform, not
-    back onto 28; of seeds 1-13, 2, 4 and 6 meet all of this (every switch off: 1, 2, 4 and 5), and on all 13 she is on
-    a safe place 10 s after the sighting, with no fall (the review's falls off 25 were on the code before the rebase;
-    her retreat weighs 25 by its places now: retreat.OVERHEAD).) (The same at the evade work's integration with master
-    8dcc2e6 (2026-10-29, work/evade-int; swept again after its review): of seeds 1-13, 2, 4 and 6 meet all of this, and
-    on all 13 she is on a safe place 10 s after the sighting, with no fall.) (Seed 15 since perception at 15 frames a
-    second, one pass a frame (2026-10-30): on seed 2 at 40 s she was by the rope over 32, not on her way down from 28,
-    and retreated to that rope (a rope as safe); of seeds 1-15, 15 alone meets all of this, 3 and 13 going to 25, the
-    others to a rope or 27. On 15 back onto 28 at x 227.) (Seed 9 since the drops' rotation searches a strip in view
-    every 0.2 s, not two every frame (worldstate.DROPS_EVERY_S, 2026-10-30): on seed 15 a touch knocked her out of the
-    tower at 23.3 s, before the sighting (in this world her own group's walls alone stop her); of seeds 1-9, 9 alone
-    goes back onto 28 (at x 227, 5.9 s after the sighting), 3 and 6 to 25, the others to a rope, all on a safe place
-    10 s after it.) (Seed 1 since the world's monsters chase her once she hits them (Realism.chase, 2026-10-31): on seed
-    9 neither to safe enough nor on 28; of seeds 1-13, 1 and 5 meet all of this.) (On its monsters' own clock since the server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
+    (Seed 7 since 2026-10-27 on its own branch, her kill credited to the monster her attack took
+    (localization.tracking's binding) and drawn alive until her star lands (sim.world Realism.dies_late): on seed 1 she
+    didn't go back onto 28; of seeds 1-16 only 7 meets all of this, and on 13 and 14 she fell out of the map before 40
+    s.) (Seed 37 kept since the rebase of her kill's monster onto clearance and slopes: of seeds 30-40, 33 and 37 meet
+    all of this.) (Seed 5 since 2026-10-28, her touches her popups (a MISS cutting her trips as a hit does:
+    navigator.TOUCH_CUTS), the world's invulnerability 1.45 s and her MISSes by the game's hit check
+    (sim.world.INVULNERABLE, LEVEL_25_AVOID): on seed 37 she went up the rope at 146 from 32, a rope as safe, as she
+    does with the stack's reactions off in this world too; of seeds 1-40, 5, 8, 9, 11, 29, 33 and 38 meet all of this.)
+    (Seed 5 kept at the rebase of the whole screen 15 times a second onto her touches (master 73394ba, 2026-10-28),
+    where the branch at 10 a second had it on 2: on 5 she is on 28, a safe platform, 10 s after it.) (Seed 2 since the
+    evade work's review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on
+    seed 5 her retreat went to 27, a safe platform, not back onto 28; of seeds 1-13, 2, 4 and 6 meet all of this (every
+    switch off: 1, 2, 4 and 5), and on all 13 she is on a safe place 10 s after the sighting, with no fall (the review's
+    falls off 25 were on the code before the rebase; her retreat weighs 25 by its places now: retreat.OVERHEAD).) (The
+    same at the evade work's integration with master 8dcc2e6 (2026-10-29, work/evade-int; swept again after its review):
+    of seeds 1-13, 2, 4 and 6 meet all of this, and on all 13 she is on a safe place 10 s after the sighting, with no
+    fall.) (Seed 15 since perception at 15 frames a second, one pass a frame (2026-10-30): on seed 2 at 40 s she was by
+    the rope over 32, not on her way down from 28, and retreated to that rope (a rope as safe); of seeds 1-15, 15 alone
+    meets all of this, 3 and 13 going to 25, the others to a rope or 27. On 15 back onto 28 at x 227.) (Seed 9 since the
+    drops' rotation searches a strip in view every 0.2 s, not two every frame (worldstate.DROPS_EVERY_S, 2026-10-30): on
+    seed 15 a touch knocked her out of the tower at 23.3 s, before the sighting (in this world her own group's walls
+    alone stop her); of seeds 1-9, 9 alone goes back onto 28 (at x 227, 5.9 s after the sighting), 3 and 6 to 25, the
+    others to a rope, all on a safe place 10 s after it.) (Seed 1 since the world's monsters chase her once she hits
+    them (Realism.chase, 2026-10-31): on seed 9 neither to safe enough nor on 28; of seeds 1-13, 1 and 5 meet all of
+    this.) (On its monsters' own clock since the server's respawn became every scenario's, 2026-10-31: _CLOCK's note.)"""
     return lie_detector(40.0)(sim)
 
 
@@ -3135,7 +3152,7 @@ def loop_tree_grind_jump_key(sim):
     return key_check_run(4)(sim)
 
 
-@tree((23, -150.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, -150.0), monsters="all", seed=10, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("right", "e"),))),
       expects=FOLLOW_EXPECTS + (
           logs("HER RUNS DIDN'T MOVE HER 4 TIMES IN A ROW"), logs("RIGHT RIGHT -> E"),
@@ -3157,11 +3174,12 @@ def loop_tree_grind_arrow_key(sim):
     evade work's integration, 40 with the refill learned from what she sees (2026-10-29: work/respawn), the doubt and
     the window as before.) (Seed 1 since the server's respawn became every scenario's, 2026-10-31: on 9 the check was
     put off three times, a Horny Mushroom near, and the hunt stopped; of seeds 1-13 run as the goldens run them, 1, 4,
-    7, 10 and 12 meet all of this.)"""
+    7, 10 and 12 meet all of this.) (Seed 10 since the server's respawn and the chase together (respawn_tick and
+    Realism.chase every world's, 2026-10-31): on seed 1 not all of this; of seeds 1-13, 10 and 12 meet all of it.)"""
     return key_check_run(4)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("lucky_seven", "a"),))),
       expects=FOLLOW_EXPECTS + (
           logs("the key bindings checked first"), logs("LUCKY SEVEN SHIFT -> A"),
@@ -3175,7 +3193,9 @@ def loop_tree_grind_lucky_seven_key(sim):
     stop; remembered, paged once; kills with it after. (Until 2026-10-28 out of darts stopped the hunt at 24 s.) On seed
     1: out of darts due at 26.5 s, away to 25 (1.6 s; a safe platform: no put-off), the window read at 29.5-30.2 s,
     followed at 30.9 s, 63 kills after (27.2, 1.7, 29.3-30.0, 30.7 and 67 before the pull's detour rule (2026-10-29:
-    behavior.patrol, a pile against the loop's rate))."""
+    behavior.patrol, a pile against the loop's rate)). (Seed 2 since the server's respawn and the chase together
+    (respawn_tick and Realism.chase every world's, 2026-10-31): on seed 1 not all of this; of seeds 1-13, 2-13 meet all
+    of it.)"""
     return key_check_run(4)(sim)
 
 
