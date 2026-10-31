@@ -74,10 +74,15 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    mover_moves, her moves the mover made alone ('move' records); evades, the navigator's evade steps
                    by kind ('evade' events: control.navigator's evade step, its passes, its contact rule). The `walk`
                    policy's (movement only, as the live QA walk) above all
-  drops_share      of her drops whose fate is known by the end (picked up, or lain their whole life),
-                   the share she picked up; value_share, the same weighed by what each is worth on the world's
-                   map (behavior.looting.worth_for: the game data's prices, mesos by what its monsters drop), and
-                   value_per_min, the mesos' worth she picked up a minute
+  drops_share      of her drops whose fate is known by the end (picked up, taken by others: `--world drop-takers`,
+                   or lain their whole life), the share she picked up; value_share, the same weighed by what each is
+                   worth on the world's map (behavior.looting.worth_for: the game data's prices, mesos by what its
+                   monsters drop, or by their amount where the world drew one: `--world map-drops`), and
+                   value_per_min, the mesos' worth she picked up a minute: mesos_per_min of it her mesos',
+                   items_per_min her items' (items_picked of them); drops_left_per_min, the worth of her drops she
+                   left (taken by others, or lain their whole life); cash_per_min, value_per_min less her potions at
+                   HP_POTION_PRICE and MP_POTION_PRICE (guesses); pick_age, the median age of her drops as she picked
+                   them up (s from their landing)
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   safety_stops     the safety stop (behavior.safety: her HP under her reserve, her profile's hits of the map's largest
@@ -156,7 +161,7 @@ from ..analysis import coverage
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
 from .world import (DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
-                    OFF_SEEN, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, Camp, Noise, Realism)
+                    OFF_SEEN, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -265,6 +270,14 @@ WORLDS["no-aggro"] = {"chase": False}
 WORLDS["tick-respawn"] = {"respawn_tick": TICK_S}
 WORLDS["clock-respawn"] = {"respawn_tick": 0.0}
 WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
+# ... and her drops as the perception service saw them live (the loot design, 2026-10-30: D:/MapleHelper-scratch/replan/
+# loot): what a kill drops fitted to its sightings (`map-drops`: world.TREE_DROP_MIX, Realism.drop_mix: 0.64 drops a
+# kill, 57% mesos, by its kind's amounts, piles of 1-4, 20 units apart on alternating sides), where the default world drops
+# one coin a kill; and her drops taken by others as long as they lay live (`drop-takers`: world.HER_DROPS_LAST,
+# Realism.drop_takers: 55% still there at 60 s, 26% at 120), where the default world leaves them 180 s. With the default
+# world the simulator credited her with 94% of her drops (master's crowd baseline) where live she picked 67-71%.
+WORLDS["map-drops"] = {"drop_mix": TREE_DROP_MIX}
+WORLDS["drop-takers"] = {"drop_takers": True}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -578,10 +591,15 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         end = min(end, world.t)
     mine = [k for k in world.kill_log if k[3] == "her"]
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
-    known = [d for d in drops if d.taken_by == "her" or d.since + DROP_LIFE <= horizon]
+    known = [d for d in drops if d.taken_by in ("her", "other") or d.since + DROP_LIFE <= horizon]
     picked = [d for d in known if d.taken_by == "her"]
-    worth = worth_for(world.model)  # what drops are worth on the world's map (looting.Worth)
-    worth_known, worth_picked = sum(worth(d.kind) for d in known), sum(worth(d.kind) for d in picked)
+    coin = worth_for(world.model)  # what drops are worth on the world's map (looting.Worth) ...
+
+    def worth(d) -> float:  # ... mesos by their amount where the world drew one (Realism.drop_mix)
+        return float(d.amount) if d.mesos and d.amount else coin(d.kind)
+    worth_known, worth_picked = sum(worth(d) for d in known), sum(worth(d) for d in picked)
+    left = [d for d in known if d.taken_by != "her"]  # (taken by others, or lain their whole life)
+    ages = sorted(d.taken_at - d.since for d in picked)
     times = sorted([0.0] + [k[0] for k in mine] + [d.taken_at for d in world.drops if d.taken_by == "her"] + [end])
     gaps = [b - a for a, b in zip(times, times[1:])]
     waits = _waits(records)
@@ -622,7 +640,14 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "drops": len(drops),
         "drops_share": round(len(picked) / len(known), 3) if known else None,
         "value_share": round(worth_picked / worth_known, 3) if worth_known else None,
-        "value_per_min": round(sum(worth(d.kind) for d in drops if d.taken_by == "her") / (horizon / 60), 2),
+        "value_per_min": round(sum(worth(d) for d in drops if d.taken_by == "her") / (horizon / 60), 2),
+        "mesos_per_min": round(sum(worth(d) for d in drops if d.taken_by == "her" and d.mesos) / (horizon / 60), 2),
+        "items_per_min": round(sum(worth(d) for d in drops if d.taken_by == "her" and not d.mesos) / (horizon / 60), 2),
+        "items_picked": sum(1 for d in drops if d.taken_by == "her" and not d.mesos),
+        "drops_left_per_min": round(sum(worth(d) for d in left) / (horizon / 60), 2),
+        "cash_per_min": round((sum(worth(d) for d in drops if d.taken_by == "her") - world.potions_used * HP_POTION_PRICE
+                               - world.mp_potions * MP_POTION_PRICE) / (horizon / 60), 2),
+        "pick_age": round(ages[len(ages) // 2], 2) if ages else None,
         "longest_idle": round(max(gaps, default=0.0), 1),
         "stuck_s": round(sum(max(0.0, g - IDLE_GRACE) for g in gaps), 1),
         "safety_stops": len(stops),
@@ -846,7 +871,12 @@ def _trips(world, records: list[dict], end: float) -> dict:
 
 # The hunt loop's rules for her drops (behavior.hunt: 6a, 6, 5, 5b, 8, 10), for pile_s: while one of them decides, or
 # her objective is a pile (a trip for one: its 'hunt' record's objective "pile on ..."), she's on her drops.
-PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull loot", "loot elsewhere")
+PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull loot", "loot elsewhere",
+              "sweep", "sweep: landing", "sweep: clear first")  # (the loot sweep's, behavior.sweep, from 2026-10-30)
+# What her potions cost at a shop, for cash_per_min (guesses: v83's prices, not this game's, not read): an Orange Potion
+# (her pet drinks those on Tree Dungeon: hunt.HP_EXP) 160 mesos, a Blue Potion 200.
+HP_POTION_PRICE = 160.0
+MP_POTION_PRICE = 200.0
 
 
 def _on_piles(world, records: list[dict], end: float) -> dict:

@@ -568,6 +568,51 @@ MESOS_SHARE = 0.72
 NO_RATE = 0.002
 
 
+@dataclass(frozen=True)
+class DropMix:
+    """What a kill drops in a world fitted to what the perception service saw where her kills died live (Realism.
+    drop_mix; the harness's `--world map-drops`): her thief's run on Tree Dungeon of 2026-10-30 02:03-02:48 (the loot
+    design's measurements, D:/MapleHelper-scratch/replan/loot: drops_fate.py, spread.py, dupes.py, expcount.py) gave 0.64
+    drops seen a kill of hers, 57% of them mesos, its piles of 1, 2, 3 and 4 or more drops 61, 23, 8 and 6% of them (of
+    the scenes' clusters 6,609, 2,538, 884 and 625), neighbouring drops 20-25 units apart (3,649 of the 6,739 gaps under
+    70), where the default world drops one coin a kill at +-10 of where it died. Each kill's pile is empty, or has
+    `sizes`' drops (drawn by their shares), `per_kill` a kill on average; each drop mesos with `mesos` of a chance, its
+    amount drawn from its kind's range (perception.drops' reports: a Horny Mushroom 40-53, a Green 25-30, a slime 10-20),
+    else one of its kind's items (perception.drops: by OSMLib's reference rates, an item with none at the rarest's);
+    the first where the monster died, each next `gap` farther out on alternating sides (+20, -20, +40, ...: how the
+    game pops them out). What is seen counts what the detector missed as not dropped, so this is a floor."""
+    per_kill: float = 0.64
+    sizes: tuple = ((1, 0.61), (2, 0.23), (3, 0.08), (4, 0.08))  # (drops, share of the piles with any)
+    mesos: float = 0.57
+    gap: float = 20.0
+
+    def any_share(self) -> float:
+        """The share of kills whose pile has any drop: per_kill over the drops a pile has on average."""
+        mean = sum(n * p for n, p in self.sizes) / sum(p for _, p in self.sizes)
+        return min(1.0, self.per_kill / mean)
+
+
+TREE_DROP_MIX = DropMix()
+# Her drops taken by others or gone (Realism.drop_takers; the harness's `--world drop-takers`), fitted to how long the
+# perception service saw her drops lie on the live thief run of 2026-10-30 (the loot design's Kaplan-Meier, her picks
+# censored: D:/MapleHelper-scratch/replan/loot/survival.py): still there at 5, 10, 20, 30, 60, 90, 120, 150 s 94, 90,
+# 84, 74, 55, 42, 26 and 9% of them, none by DROP_LIFE. Each of her drops gets a life drawn from that curve, never under
+# Realism.rival_owns (nobody else can pick hers up before), and is taken ('other') then if she hasn't picked it up: the
+# default world leaves every drop of hers lying DROP_LIFE (180 s), and the simulator credited her with 94% of them
+# (master's crowd baseline) where live she picked up 67-71%.
+HER_DROPS_LAST = ((0.0, 1.0), (5.0, 0.94), (10.0, 0.90), (20.0, 0.84), (30.0, 0.74), (60.0, 0.55), (90.0, 0.42),
+                  (120.0, 0.26), (150.0, 0.09), (180.0, 0.0))
+
+
+def drop_life(u: float, curve: tuple = HER_DROPS_LAST) -> float:
+    """The age at which a drop's still-there share on `curve` ((s, share) from (0, 1) down) falls to `u` (0-1): its life
+    drawn by inverting the curve, straight between its points."""
+    for (t0, s0), (t1, s1) in zip(curve, curve[1:]):
+        if s1 <= u <= s0:
+            return t0 if s0 == s1 else t0 + (s0 - u) / (s0 - s1) * (t1 - t0)
+    return curve[-1][0]
+
+
 def game_drops(model) -> tuple:
     """What a kill drops on map `model` in a world closer to the game's: (monster kind, drop kind, chance), as
     GAME_DROPS. The first map's are GAME_DROPS, as seen in game; another's are its monsters': a monster seen in game
@@ -781,6 +826,11 @@ class Realism:
     drops: tuple | str = ()      # what a kill drops: (monster kind, drop kind, chance) (GAME_DROPS), drawn per
                                  # kill from a generator of their own, or MAP_DROPS: the world's map's (game_drops);
                                  # (): mesos, and a pig's leather (ITEM_OF)
+    drop_mix: DropMix | None = None  # what a kill drops, fitted to the live service's sightings (TREE_DROP_MIX: the
+                                     # harness's `--world map-drops`), from a generator of its own; None: `drops`
+    drop_takers: bool = False    # her drops taken by others at a life drawn from the live curve (HER_DROPS_LAST: the
+                                 # harness's `--world drop-takers`), from a generator of its own; False: they lie
+                                 # DROP_LIFE
     camps: tuple = ()            # other players camping (Camp, CAMP_KILL): each kills the monsters of its kinds on
                                  # its platforms soon after they show
     shared_exp: bool = False     # another player's kill of a monster she hurt gives her its EXP times the share of its
@@ -1647,7 +1697,8 @@ class Drop:
     gone: bool = False
     owner: str = "her"  # "her", or "rival": another player's kill (Realism.rival_every)
     taken_at: float | None = None  # when it was picked up ...
-    taken_by: str = ""             # ... and by whom ("her" or "rival")
+    taken_by: str = ""             # ... and by whom ("her", "rival", or "other": Realism.drop_takers)
+    amount: int = 0     # mesos: how many (Realism.drop_mix); 0: not drawn (the coin's worth: behavior.looting.Worth)
 
     @property
     def mesos(self) -> bool:
@@ -1706,6 +1757,8 @@ class World:
         self._drop_rng = random.Random(f"drops:{seed}")  # Realism.drops' draws (the others' unchanged by them)
         self._camp_rng = random.Random(f"camps:{seed}")  # Realism.camps' draws
         self._tick_rng = random.Random(f"ticks:{seed}")  # Realism.respawn_tick's draws
+        self._mix_rng = random.Random(f"mix:{seed}")      # Realism.drop_mix's draws
+        self._taker_rng = random.Random(f"takers:{seed}")  # Realism.drop_takers' draws
         # What a kill drops (Realism.drops; with MAP_DROPS, the map's)
         self._drop_table = game_drops(model) if self.realism.drops == MAP_DROPS else tuple(self.realism.drops)
         self.potions_left = self.realism.potions
@@ -2141,6 +2194,10 @@ class World:
             for d in e.data:
                 if not d.gone:
                     d.gone, d.taken_at, d.taken_by = True, self.t, "rival"
+        elif e.kind == "others_take":  # (Realism.drop_takers: her drop's life ends, taken by someone else)
+            for d in e.data:
+                if not d.gone:
+                    d.gone, d.taken_at, d.taken_by = True, self.t, "other"
 
     def _key_window(self, action: str) -> None:
         """The backslash (`set_key`) or Esc pressed: the KEY BINDINGS window opened or closed (Esc with it closed: the
@@ -3059,11 +3116,19 @@ class World:
         self.note(f"{what} kills {m.kind} #{m.idx} at x {mx:.0f} (platform {m.platform.id})")
         p = m.platform
         drops = []
-        rng = self._drop_rng if self._drop_table else self.rng
-        for kind in self._drop_kinds(m.kind, rng):
-            x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
-            drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
+        if self.realism.drop_mix is not None:
+            drops = self._mixed_drops(m, mx, t + DROP_DELAY)
+        else:
+            rng = self._drop_rng if self._drop_table else self.rng
+            for kind in self._drop_kinds(m.kind, rng):
+                x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
+                drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
+        if self.realism.drop_takers:  # (taken by others at a life drawn from the live curve, never before she owns it)
+            for d in drops:
+                life = max(drop_life(self._taker_rng.random()), self.realism.rival_owns)
+                if life < DROP_LIFE:
+                    self._push(self.ms + int((DROP_DELAY + life) * 1000), "others_take", [d])
         if self.realism.respawn_tick <= 0:
             self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
 
@@ -3126,6 +3191,30 @@ class World:
                 self._keep(m)
                 self._camps_watch(m)
             self.respawn_births += 1
+
+    def _mixed_drops(self, m: "SimMonster", mx: float, lands: float) -> list[Drop]:
+        """What a kill of monster `m` at map x `mx` drops by Realism.drop_mix (DropMix), landing at `lands`: none, or a
+        pile of its sizes' drops, each mesos (an amount from its kind's range) or one of its kind's items, out from
+        where it died on alternating sides `gap` apart, kept on its platform."""
+        mix, rng, p = self.realism.drop_mix, self._mix_rng, m.platform
+        if rng.random() >= mix.any_share():
+            return []
+        n = rng.choices([k for k, _ in mix.sizes], weights=[w for _, w in mix.sizes])[0]
+        known = drop_data.MONSTERS.get(m.name) if m.name else None
+        lo, hi = known.mesos if known is not None and known.mesos is not None else (10, 20)
+        items = [] if known is None else [(kind_of(i), known.rates.get(i, min(known.rates.values(), default=NO_RATE)))
+                                          for i in known.items]
+        side = 1 if rng.random() < 0.5 else -1
+        out = []
+        for i in range(n):
+            off = 0.0 if i == 0 else side * mix.gap * ((i + 1) // 2) * (1 if i % 2 else -1)
+            x = min(max(mx + off + rng.uniform(-3.0, 3.0), p.left + 3), p.right - 3)
+            if not items or rng.random() < mix.mesos:
+                out.append(Drop("mesos", x, p.y_at(x), p.id, lands, amount=rng.randint(lo, hi)))
+            else:
+                out.append(Drop(rng.choices([k for k, _ in items], weights=[w for _, w in items])[0], x, p.y_at(x),
+                                p.id, lands))
+        return out
 
     def _drop_kinds(self, kind: str, rng: random.Random) -> list[str]:
         """What a kill of a monster of this kind drops: by Realism.drops' chances (drawn from `rng`), else mesos
@@ -3251,7 +3340,7 @@ class World:
             if d.mesos or not self.inventory_full:
                 d.gone, d.taken_at, d.taken_by = True, t, "her"
                 self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
-                self.messages.append((t, "You have gained mesos (+15)" if d.mesos else
+                self.messages.append((t, f"You have gained mesos (+{d.amount or 15})" if d.mesos else
                                       f"{d.kind.replace('-', ' ').title()} x1 earned. "
                                       + ("(Use)" if d.kind.endswith("-potion") else "(Etc)")))
                 self.note(f"picks up {d.kind} at x {d.x:.0f}")
