@@ -599,12 +599,13 @@ def test_a_locators_cover_from_her_stat_windows_calibration(art, model, plate, t
     loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
     assert loc.cover is not None and loc.cover.cal is None and loc.cover.alarm is None   # (paths.ALARM's, when asked)
     assert ("covered under the Lie Detector's windows (its alarm up) (her stat window not looked for: no calibration "
-            "of it)") in said[0]
+            "of it); in a visible portal's light (out00, out01)") in said[0]
     stat_window_cal().save(paths.STAT_WINDOW)
     said.clear()
     loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
     assert loc.cover.cal is not None and loc.cover.cal.place("main") == (587, 241)
-    assert said[0].endswith("covered under the Lie Detector's windows (its alarm up) and her stat window over her")
+    assert said[0].endswith("covered under the Lie Detector's windows (its alarm up) and her stat window over her; in a "
+                            "visible portal's light (out00, out01)")
     for data, why in (({"panels": {"main": {"at": [587, 241]}}, "client": [1366]}, "calibrated at 1366)"),
                       ({"panels": {"main": {"at": [587, 241]}}, "client": [1920, 1080]}, "calibrated at 1920x1080)"),
                       ({"panels": {"main": {"at": [587]}}}, "its calibration or pictures: IndexError")):
@@ -612,3 +613,93 @@ def test_a_locators_cover_from_her_stat_windows_calibration(art, model, plate, t
         said.clear()
         loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
         assert loc is not None and loc.cover.cal is None and why in said[0], data
+
+
+# --- a visible portal's light (the user, 2026-10-30 ~20:47, of the portal's losses: "let's do 2 for the portal") ------
+
+V12 = (-658, -1650)   # a view with Tree Dungeon's platform 12 (y -1190) the lowest in the play area, out01 at its right end
+LIGHT = ("out01", (237, -1431, 326, -1174))   # out01's light on the map (281, -1183)
+
+
+def test_a_visible_portals_light_from_the_game_data(model):
+    """The client draws an exit with MapHelper.img portal/game/pv/default's 8 frames (84-88 x 182-256 px), each with its
+    origin on the portal's point: its light's box is their union, 89 x 257, wherever it is; the picture a map names
+    (`image`: 2 of the game data's 466 exits) is its own. Tree Dungeon's two exits; its six spawn points none."""
+    assert mapdata.portal_light() == (-44, -248, 45, 9)
+    assert mapdata.portal_light("2") == (-56, -146, 61, 14)
+    lights = {p.name: box for p, box in mapdata.portal_lights(model)}
+    assert lights == {"out00": (238, -297, 327, -40), "out01": LIGHT[1]}
+    assert all((x1 - x0, y1 - y0) == (89, 257) for x0, y0, x1, y1 in lights.values())
+    assert sum(p.kind == 0 for p in model.portals) == 6 and all(p.image == "" for p in model.portals)
+    named = mapdata.parse(1, {"portal": {"0": {"pn": "out00", "pt": 2, "x": 10, "y": 20, "tm": 2, "image": "2"}}}, "", {})
+    assert named.portals[0].image == "2" and mapdata.portal_lights(named)[0][1] == (-46, -126, 71, 34)
+
+
+def test_carried_in_a_visible_portals_light_counts_covered_and_places_nothing_otherwise(art, model, plate, tmp_path):
+    """RiceBaby standing in out01's light at platform 12's right end (x 280) was lost on about 18 of 24 frames (its
+    pulsing pillar over her body, its bottom over her plate's top rows), the filter holding her at her place; 18 px
+    either side (x 262, 298) her tag placed her every frame. A frame no cue placed her in counts covered with her body's
+    box (BODY) all inside a visible portal's light where the filter has her feet; where she's placed, how sure, what's
+    searched: as without it."""
+    lights = [(p.name, box) for p, box in mapdata.portal_lights(model)]
+    bare, _ = art.window(*V12)
+    for mx, want in ((280.5, locate.PORTAL), (262.5, None), (297.5, None)):
+        plain, loc = locator(art, model, plate), locator(art, model, plate)
+        loc.cover = locate.Cover(tmp_path / "ALARM.json", None, None, lights)
+        frame, (fx, fy), _, p = scene(art, model, plate, mx, view=V12)
+        assert p.id == 12
+        dot = dot_of(plain, mx, p.y_at(mx))
+        for k, f in enumerate([frame] + [bare] * 4):
+            a, b = plain.see(f, k / 15, dot), loc.see(f, k / 15, dot)
+            assert (a.how, a.feet, a.x, a.y, a.mode, a.platform, a.confidence, a.unseen) == (
+                b.how, b.feet, b.x, b.y, b.mode, b.platform, b.confidence, b.unseen), (mx, k)
+            assert b.how == ("tag" if k == 0 else None) and b.covered == (None if k == 0 else want), (mx, k)
+            assert a.covered is None
+        assert b.x == pytest.approx(mx, abs=0.5) and b.platform is p
+        assert loc.line().startswith("her place by the scene: tag 20.0%, " + (
+            "covered 80.0% (a portal); views registered 100.0%, " if want else "carried 80.0%; views registered 100.0%"))
+    eyes = saved_eyes(model, plate, art)                  # the scene's how, and its record
+    eyes.locator.cover = locate.Cover(tmp_path / "ALARM.json", None, None, lights)
+    senses = Senses(eyes, model, (300, 100))
+    frame, _, _, p = scene(art, model, plate, 280.5, view=V12)
+    assert senses.place(eyes.look_at(frame, 0.0)).how == "tag"
+    s = senses.place(eyes.look_at(bare, 1 / 15))
+    assert s.how == "covered" and s.located.covered == locate.PORTAL and s.record()["her"]["how"] == "covered"
+    assert s.platform is p and s.where.x == pytest.approx(280.5, abs=0.5)
+
+
+def test_a_portals_light_counts_her_body_all_inside_it_after_the_lie_detector_and_her_stat_window(tmp_path,
+                                                                                                    monkeypatch):
+    from gamelab.perception import stat_window as sw
+    c = locate.Cover(tmp_path / "ALARM.json", None, None, [LIGHT])
+    y = -1189.6                                                       # (platform 12's line there)
+    assert [c.light((x, y)) for x in (265.5, 280.5, 296.5)] == ["out01"] * 3
+    assert [c.light((x, y)) for x in (262.5, 265.0, 297.0, 310.0)] == [None] * 4   # (her body out of it, either side)
+    assert c.light((280.5, y - 150)) == "out01"                       # (jumping in it)
+    assert c.light((280.5, -1431 + 72)) is None and c.light((280.5, -1170.0)) is None   # (over its top, under its foot)
+    frame = np.zeros((768, 1366, 3), np.uint8)
+    assert c(frame, 0.0, True, None, (280.5, y)) == locate.PORTAL
+    assert c(frame, 0.0, True, None, (262.5, y)) is None and c(frame, 0.0, True, None, None) is None
+    assert locate.Cover(tmp_path / "ALARM.json")(frame, 0.0, True, None, (280.5, y)) is None   # (no lights: none)
+    monkeypatch.setattr(sw, "shown", lambda frame, cal, over=None: "main")
+    c.cal = stat_window_cal()
+    assert c(frame, 0.0, True, (680, 540, 720, 564), (280.5, y)) == locate.STAT_WINDOW   # (each as before it)
+    (tmp_path / "ALARM.json").write_text("{}")
+    assert c(frame, 1.0, False, None, (280.5, y)) == locate.LIE_DETECTOR
+
+
+def test_a_locators_portals_lights_from_its_map_and_their_pictures_not_to_be_had(art, model, plate, tmp_path,
+                                                                                  monkeypatch):
+    """Every visible portal of the locator's map (any map's, from the game data); their pictures not to be had: none
+    counted, said, the locator built as ever."""
+    monkeypatch.setattr(locate, "configured", lambda path=None: True)
+    monkeypatch.setattr(mapart, "load", lambda map_id: art)
+    plate.save(P.model_path(tmp_path))
+    loc = locate.build(model, template_of(plate), tmp_path)
+    assert loc.cover.lights == [("out00", (238, -297, 327, -40)), LIGHT] and not loc.cover.why_lights
+    assert locate.cover().lights == []                                 # (no map: none)
+    monkeypatch.setattr(mapdata, "portal_lights", lambda model: (_ for _ in ()).throw(KeyError("pv")))
+    said = []
+    loc = locate.build(model, template_of(plate), tmp_path, log=said.append)
+    assert loc is not None and loc.cover.lights == [] and "KeyError" in loc.cover.why_lights
+    assert said[0].endswith("; no portal's light (its pictures: KeyError('pv'))")

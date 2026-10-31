@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -170,6 +170,7 @@ class Portal:
     x: float
     y: float
     to_map: int | None
+    image: str = ""   # the map's `image`: which of MapHelper.img's portal pictures it's drawn with ("": PORTAL_IMAGE)
 
 
 # Where a portal takes her (HeavenClient, Gameplay/MapleMap/Portal.cpp and Stage.cpp, read 2026-10-24): while up is held
@@ -179,6 +180,13 @@ class Portal:
 # PORTAL_EXIT's kind leads to another map (the spawn points, kind 0, lead nowhere).
 PORTAL_BOX = (25.0, 100.0, 25.0)
 PORTAL_EXIT = 2
+# A visible portal's light (`portal_light`, `portal_lights`): the client draws an exit (PORTAL_SHOWN's kind, "pv") with
+# Map/MapHelper.img portal/game/pv/<its image>'s frames, one after another, each picture with its origin on the portal's
+# point, over her: its pulsing pillar of light (PORTAL_IMAGE's where the map names none: 464 of the game data's 466
+# exits; 2 name "2"). Only the exits' are counted: the others draw nothing of the kind (a hidden portal shows its own
+# pictures only as she comes near, the spawn points and script portals none).
+PORTAL_SHOWN = (PORTAL_EXIT,)
+PORTAL_IMAGE = "default"
 
 
 @dataclass(frozen=True)
@@ -436,7 +444,8 @@ def parse(map_id: int, tree: dict, name: str, physics: dict, mob_names: dict | N
     ropes = [Rope(r["x"], r["y1"], r["y2"], bool(r.get("l")), bool(r.get("uf")))
              for r in (tree.get("ladderRope") or {}).values()]
     portals = [Portal(p.get("pn", ""), p.get("pt", 0), p["x"], p["y"],
-                      None if p.get("tm") in (None, 999999999) else p["tm"])  # 999999999: leads nowhere
+                      None if p.get("tm") in (None, 999999999) else p["tm"],  # 999999999: leads nowhere
+                      str(p.get("image") or ""))
                for p in (tree.get("portal") or {}).values()]
     mob_names = mob_names or {}
     spawns = [Spawn(int(s["id"]), s["x"], s.get("cy", s["y"]), s.get("rx0", s["x"]), s.get("rx1", s["x"]),
@@ -692,6 +701,41 @@ def _mob_die_s(ids: set[str]) -> dict[str, float]:
                   if isinstance(f, Canvas)]
         if delays:
             out[i] = sum(delays) / 1000
+    return out
+
+
+@lru_cache(maxsize=None)
+def portal_light(image: str = "", copy: Path = COPY) -> tuple[int, int, int, int]:
+    """A visible portal's light from its point (x0, y0, x1, y1 map units, a game px each; the ends exclusive): the union
+    of its animation's frames (MapHelper.img portal/game/pv/<image>, PORTAL_IMAGE's for ""), each picture with its origin
+    on the point. The default's 8 frames (84-88 x 182-256 px, origins (41-44, 173-248)): (-44, -248, 45, 9), 89 x 257.
+    The data image holds 1x1 placeholders with the origins; the pictures (their sizes) are where their `_outlink`s point,
+    in Map/_Canvas. Raises KeyError or OSError if the copy hasn't got them."""
+    from gamedata.canvas import source
+    from gamedata.wz import Canvas
+    tree = Package(copy / "Map" / "Map_000.wz").image("MapHelper.img")
+    frames = [c for k, c in tree["portal"]["game"]["pv"][image or PORTAL_IMAGE].items()
+              if k.isdigit() and isinstance(c, Canvas)]
+    if not frames:
+        raise KeyError(f"MapHelper.img portal/game/pv/{image or PORTAL_IMAGE} has no frames")
+    boxes = []
+    for c in frames:
+        o = c.props.get("origin")
+        ox, oy = (o.x, o.y) if o is not None else (0, 0)
+        picture = source(c, tree, copy)
+        boxes.append((-ox, -oy, picture.width - ox, picture.height - oy))
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+def portal_lights(model: MapModel, copy: Path = COPY) -> list[tuple[Portal, tuple[float, float, float, float]]]:
+    """Every visible portal of the map (PORTAL_SHOWN) and its light's box on the map (x0, y0, x1, y1; `portal_light`
+    placed at its point): Tree Dungeon's out00 (282, -49) x 238..327, y -297..-40, out01 (281, -1183) x 237..326,
+    y -1431..-1174. Raises KeyError or OSError if the game data copy hasn't got its pictures."""
+    out = []
+    for p in model.portals:
+        if p.kind in PORTAL_SHOWN:
+            x0, y0, x1, y1 = portal_light(p.image, copy)
+            out.append((p, (p.x + x0, p.y + y0, p.x + x1, p.y + y1)))
     return out
 
 

@@ -22,7 +22,8 @@ The cues, cheapest first, each tried only when the one before didn't place her:
   4. carried nothing placed her: the filter's prediction stands (`how` None), its confidence going down; "covered"
              in the counts (`line`) and the scene where what covers her is told (`Cover`: the Lie Detector's alarm
              up and one of its windows over the play area, the view not registered under its board or the window seen;
-             her stat window open where it opens, over where the filter has her feet or tag), nothing placed otherwise.
+             her stat window open where it opens, over where the filter has her feet or tag; a visible portal's light
+             about her body where the filter has her feet), nothing placed otherwise.
 The filter: her x and its speed (a Kalman filter), y on her platform's line, in a flight under gravity, or on a rope;
 a take-off from a rise off the line, a landing on the first line crossed, a walk off a platform's end, a wall stopping
 her; a rope told from a flight by her last three measured places (constant speed against gravity); her minimap dot a box
@@ -63,6 +64,7 @@ from ..perception import plate as plates
 from ..perception import poses
 from ..perception import stat_window
 from ..screen import NATIVE, Geometry
+from . import mapdata
 from .mapdata import MapModel, Platform
 from .pose import Camera, Localizer
 
@@ -140,9 +142,14 @@ PROTO_DT = 1 / 15          # the prototype's frames' gap (its counts are of thes
 TIMES_KEPT = 600           # frames' times kept for the service's line (20 s at 30 a second)
 GAP_S = 0.5                # s without a frame (the game not on screen, frames refused) after which she's placed afresh
 # --- what covers her (`Cover`): a frame no cue placed her in counts "covered", not "carried", under it ---
-LIE_DETECTOR, STAT_WINDOW = "the Lie Detector", "her stat window"   # (Located.covered: what covered her)
+LIE_DETECTOR, STAT_WINDOW, PORTAL = "the Lie Detector", "her stat window", "a portal"   # (Located.covered: what)
 COVER_POLL_S = 0.5         # the Lie Detector alarm's file, and its windows, looked at once in this long at the most (s,
                            # frames' time)
+# Her body's box from her feet (map units: left, top, right, bottom), either way she faces (nothing tells it on a frame
+# no cue placed her in): her commonest standing poses' boxes in both characters' pose banks, -28.5..21.5 facing left and
+# -20.5..29.5 facing right, 70-73 rows up (BugBaby's poses 8 and 1, RiceBaby's 8 and 4). In a visible portal's light
+# (`Cover`) with all of it inside the light's box: on Tree Dungeon's out01 (x 237..326) her feet from x 265.5 to 296.5.
+BODY = (-28.5, -73.0, 29.5, 0.0)
 
 
 def configured(path: Path = CONFIG) -> bool:
@@ -207,7 +214,8 @@ class Located:
     facing: str | None = None         # ... and which way it faces
     ms: dict = field(default_factory=dict)   # what each part took (ms)
     info: dict = field(default_factory=dict)
-    covered: str | None = None        # carried (`how` None) under what covers her (`Cover`: LIE_DETECTOR, STAT_WINDOW)
+    covered: str | None = None        # carried (`how` None) under what covers her (`Cover`: LIE_DETECTOR, STAT_WINDOW,
+                                      # PORTAL)
 
     @property
     def grounded(self) -> bool:
@@ -238,14 +246,28 @@ class Cover:
       them (`her`: Locator.her_box). Left open, a loss of her elsewhere is carried (its review: any carried frame had
       counted covered while it was open, wherever she was); on the live clip its 34 frames had her feet in its Main
       panel.
+    - Else a visible portal's light: her body's box (BODY) with her feet where the filter has them all inside the box
+      of one's light (`lights`: mapdata.portal_lights, from the game data's pictures, any map's). The user, 2026-10-30
+      ~20:47, of the portal's losses: "let's do 2 for the portal" (count them covered and rely on the filter and her
+      dot; not her cues' matching with its light masked out). RiceBaby standing in Tree Dungeon's out01 at platform
+      12's right end (x 280) was lost on about 18 of 24 frames, its pulsing pillar over her body and its bottom over
+      her plate's top rows (her tag's match 0.02-0.88 about its 0.85), the filter holding her at her place; 18 px
+      either side (x 262, 298), her tag placed her every frame; BugBaby's 2-3 s losses of 16:35:21 and 17:29:05 were
+      there too (x 278-284). Of the live telemetry's carried scenes on platform 12 RiceBaby's 241 of 246 and BugBaby's
+      40 of 46 count covered so (the others' bodies out of the light, x 235-263 and 297). Nothing is looked at: it's
+      her place against the map's.
     `alarm`: the alarm's file (None: paths.ALARM's, as it is when looked at); `cal`: the stat window's calibration
     (None: it isn't looked for); `spotter`: what sees the Lie Detector's windows (`over_play`; None: a
-    LieDetectorSpotter made when first needed)."""
+    LieDetectorSpotter made when first needed); `lights`: the map's visible portals' lights ((name, (x0, y0, x1, y1))
+    map units, the ends exclusive; None: none)."""
 
-    def __init__(self, alarm: Path | None = None, cal: stat_window.Calibration | None = None, spotter=None):
+    def __init__(self, alarm: Path | None = None, cal: stat_window.Calibration | None = None, spotter=None,
+                 lights: list | None = None):
         self.alarm, self.cal, self.spotter = alarm, cal, spotter
+        self.lights = list(lights or [])
         self.why = ""                 # why the stat window isn't looked for, where it was to be
         self.why_windows = ""         # why the Lie Detector's windows aren't looked for (its look raised)
+        self.why_lights = ""          # why the portals' lights aren't known (their pictures not to be had)
         self._polled: float | None = None
         self._up = False
         self._looked: float | None = None
@@ -284,11 +306,22 @@ class Cover:
                 self._window, self.why_windows = False, repr(e)
         return self._window
 
-    def __call__(self, frame: np.ndarray, t: float, sure: bool, her: tuple | None) -> str | None:
+    def light(self, feet: tuple[float, float]) -> str | None:
+        """The visible portal whose light her body's box (BODY) is all inside with her feet at map `feet`, by its name,
+        or None."""
+        x, y = feet
+        bx0, by0, bx1, by1 = x + BODY[0], y + BODY[1], x + BODY[2], y + BODY[3]
+        for name, (x0, y0, x1, y1) in self.lights:
+            if x0 <= bx0 and bx1 <= x1 and y0 <= by0 and by1 <= y1:
+                return name
+        return None
+
+    def __call__(self, frame: np.ndarray, t: float, sure: bool, her: tuple | None,
+                 feet: tuple[float, float] | None = None) -> str | None:
         """What covers her on this 1366x768 RGB frame shown at t (s), `sure` whether its view was registered, `her` the
-        box of her feet and tag on screen where the filter has them (x0, y0, x1, y1; None: not known): LIE_DETECTOR,
-        STAT_WINDOW, or None. Whatever the stat window's look raises (its pictures not to be had) turns it off (`why`),
-        never the frame failing."""
+        box of her feet and tag on screen where the filter has them (x0, y0, x1, y1; None: not known), `feet` her feet
+        on the map where it has them (None: not known): LIE_DETECTOR, STAT_WINDOW, PORTAL, or None. Whatever the stat
+        window's look raises (its pictures not to be had) turns it off (`why`), never the frame failing."""
         if self.alarm_up(t) and (not sure or self.window(frame, t)):
             return LIE_DETECTOR
         if self.cal is not None and her is not None:
@@ -297,6 +330,8 @@ class Cover:
                     return STAT_WINDOW
             except Exception as e:  # noqa: BLE001 (her place as ever: only its count)
                 self.cal, self.why = None, repr(e)
+        if feet is not None and self.light(feet) is not None:
+            return PORTAL
         return None
 
 
@@ -394,6 +429,12 @@ class Locator:
         cx, cy = f[0] - self.feet_dx, f[1] - self.feet_dy
         return (min(f[0], cx - tw / 2), min(f[1], cy - th / 2), max(f[0], cx + tw / 2), max(f[1], cy + th / 2))
 
+    def her_feet(self) -> tuple[float, float] | None:
+        """Her feet on the map where the filter has them, None before she's placed (what `Cover` puts her body on)."""
+        if self.kx is None:
+            return None
+        return (float(self.kx.p), float(self.y()))
+
     def y(self) -> float:
         if self.mode == "ground" and self.plat is not None:
             return self.plat.y_at(self.kx.p)
@@ -478,7 +519,7 @@ class Locator:
         t4 = self._t("update", t3)
         # 6. nothing placed her: what covers her, if it's told (counted "covered"; nothing placed by it)
         if meas is None and self.cover is not None:
-            info["covered"] = self.cover(frame, t, self.view_sure, self.her_box())
+            info["covered"] = self.cover(frame, t, self.view_sure, self.her_box(), self.her_feet())
             self._t("cover", t4)
         self.timer["total"] = (time.perf_counter() - T0) * 1e3
         self.times.append(self.timer["total"])
@@ -964,7 +1005,7 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
         bank = poses.bank_path(lab, geo)
         if Path(bank).exists():
             body = poses.BodyFinder(poses.PoseBank.load(bank), poses.Background(art.rgb, (art.x0, art.y0), art.static))
-        loc = Locator(model, reg, template, plates.Plate(plates.PlateModel.load(path)), body, geo, cover())
+        loc = Locator(model, reg, template, plates.Plate(plates.PlateModel.load(path)), body, geo, cover(model))
     except Exception as e:  # noqa: BLE001 (her place as before, whatever it was)
         mapart.forget()
         if log is not None:
@@ -973,20 +1014,25 @@ def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None
     if log is not None:
         from .. import native
         c = "in C" if reg.lib is not None and native.locate_lib() is not None else             f"partly in numpy (camreg {camreg.why or 'C'}, locate {native.locate_why or 'C'})"
+        cv = loc.cover
+        lights = (f"in a visible portal's light ({', '.join(name for name, _ in cv.lights)})" if cv.lights else
+                  f"no portal's light (its pictures: {cv.why_lights})" if cv.why_lights else "no visible portal")
         log(f"  her place by the scene (localization.locate): the camera on the map's art ({art.rgb.shape[1]}x"
             f"{art.rgb.shape[0]}), her plate's model, " + (f"her pose bank ({len(body.poses)} poses)" if body is not None
                                                             else "no pose bank (no body cue)") + f"; {c}; covered "
             "under the Lie Detector's windows (its alarm up)" + (
-                " and her stat window over her" if loc.cover.cal is not None else
-                f" (her stat window not looked for: {loc.cover.why})"))
+                " and her stat window over her" if cv.cal is not None else
+                f" (her stat window not looked for: {cv.why})") + f"; {lights}")
     return loc
 
 
-def cover() -> Cover:
-    """What covers her, for the perception's Locator (`build`): the Lie Detector's alarm, and her stat window where its
+def cover(model: MapModel | None = None) -> Cover:
+    """What covers her, for the perception's Locator (`build`): the Lie Detector's alarm, her stat window where its
     calibration (perception.stat_window.Calibration, lab/stat_window.json: a hunt opens it only with one) has it open
-    at the client's 1366x768. Without one, one not as it's written (a client of one number, a place not two), or its
-    pictures not to be had, the stat window isn't looked for (`why`); never the locator not built for it."""
+    at the client's 1366x768, and map `model`'s visible portals' lights (mapdata.portal_lights; None: none). Without a
+    calibration, one not as it's written (a client of one number, a place not two), or its pictures not to be had, the
+    stat window isn't looked for (`why`); without the portals' pictures (the game data copy's), no light is (`why_lights`);
+    never the locator not built for either."""
     cal, why = None, ""
     try:
         cal = stat_window.Calibration.load()
@@ -999,6 +1045,12 @@ def cover() -> Cover:
                 cal.place(name)
     except Exception as e:  # noqa: BLE001 (her place as ever: only what's counted covered)
         cal, why = None, f"its calibration or pictures: {e!r}"
-    out = Cover(cal=cal)
-    out.why = why
+    lights, why_lights = [], ""
+    if model is not None:
+        try:
+            lights = [(p.name, box) for p, box in mapdata.portal_lights(model)]
+        except Exception as e:  # noqa: BLE001 (her place as ever: only what's counted covered)
+            lights, why_lights = [], repr(e)
+    out = Cover(cal=cal, lights=lights)
+    out.why, out.why_lights = why, why_lights
     return out
