@@ -123,7 +123,10 @@ REVIVE_S = 30.0
 # where one of the older's lay when it was last seen (within HELD_DX: drops don't move once down, and a look places
 # them to a few units), from the review of 2026-10-31: until then any pile of hers within LOOT_REACH that took drops in
 # that sighting, so a newer kill's pile by an older one she had picked up herself took its age, and its drops were
-# judged expired up to the gap between the two kills too soon.
+# judged expired up to the gap between the two kills too soon. And only while a look still sees a drop where the older's
+# lay (Pile.aged, aged_xs), its own kill's age after (the pile's `since` kept: Pile.born), from the independent check of
+# 2026-11-01: until then the whole pile took the older's age for good, so a pile whose own drops lay until 330 s in the
+# simulator was given up at 241 s, once the older drop had gone.
 HELD_AGE = True
 HELD_DX = 10.0
 # What a pile no look has seen yet is worth (Pile.value), in mesos: a kill's pile is coins most often (63-80% of
@@ -480,6 +483,8 @@ class Pile:
     unseen: float = PILE_WORTH    # what it's worth before a look sees it: a bronze coin on its map, or (her kill's) its
                                   # kind's expected drops (looting.expected_worth)
     kind: str | None = None       # the kind of the monster whose drops they are (her kill's), if known
+    aged: float | None = None     # an older pile of hers' `born`, whose drops it holds (HELD_AGE) while a look sees one
+    aged_xs: tuple[float, ...] = ()  # ... where they lie
     key: int = field(default_factory=lambda: next(_PILE_KEYS), compare=False)  # its own, never another's (the sweep's)
 
     @property
@@ -487,12 +492,18 @@ class Pile:
         """What it's worth, in mesos: what was seen in it last, or `unseen` before it's been seen."""
         return self.unseen if self.worth is None else self.worth
 
+    @property
+    def born(self) -> float:
+        """When its oldest drop fell: its kill (or its first sighting), or an older pile's whose drops it holds (`aged`)."""
+        return self.since if self.aged is None else min(self.since, self.aged)
+
     def still(self, now: float, dt: float = 0.0) -> float:
         """The chance it still lies there `dt` s after `now`, given it did when a look last saw it (or, not seen yet, at
-        its kill): `survival` at its age then over `survival` at its age when last seen."""
-        ref = 0.0 if self.last_seen is None else max(0.0, self.last_seen - self.since)
+        its kill): `survival` at its age (from `born`) then over `survival` at its age when last seen."""
+        born = self.born
+        ref = 0.0 if self.last_seen is None else max(0.0, self.last_seen - born)
         there = survival(ref, self.hers)
-        return 0.0 if there <= 0.0 else min(1.0, survival(now + dt - self.since, self.hers) / there)
+        return 0.0 if there <= 0.0 else min(1.0, survival(now + dt - born, self.hers) / there)
 
 
 _PILE_KEYS = itertools.count(1)
@@ -590,6 +601,10 @@ class DropStore:
                 p.mesos = p.mesos or any(d.mesos for d in inside)
                 p.items, p.worth, p.dearest, p.each = _contents(inside, self.value)
                 p.xs = tuple(d.x for d in inside)
+                if p.aged is not None:  # (HELD_AGE: the older pile's age while a drop of it is still seen there)
+                    p.aged_xs = tuple(x for x in p.aged_xs if any(abs(d.x - x) <= HELD_DX for d in inside))
+                    if not p.aged_xs:
+                        p.aged = None
             elif ground and t - p.since >= SETTLE and in_view(p.platform, p.x) \
                     and (p.last_seen is None or t > p.last_seen):
                 if p.empty_since is None:
@@ -603,7 +618,9 @@ class DropStore:
                                 and any(abs(d.x - x) <= HELD_DX for d in mine[id(q)] for x in p.xs)]
                         if held:
                             q = min(held, key=lambda q: abs(q.x - p.x))
-                            q.since = min(q.since, p.since)
+                            old = tuple(d.x for d in mine[id(q)] if any(abs(d.x - x) <= HELD_DX for x in p.xs))
+                            q.aged = p.born if q.aged is None else min(q.aged, p.born)
+                            q.aged_xs = q.aged_xs + old
         taken: set[int] = set()
         for d in sorted(loose, key=lambda d: (d.platform, d.x)):
             if id(d) in taken:

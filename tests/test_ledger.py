@@ -535,15 +535,37 @@ def test_a_pile_of_hers_holding_an_older_one_s_drops_keeps_that_one_s_age():
     store._sighting(100.0, seen, lambda pid, x: True, True)
     assert new.status == far.status == "seen" and old.empty_since == 100.0 and new.since == 90.0
     store._sighting(100.0 + EMPTY_LOOKS, seen, lambda pid, x: True, True)
-    assert old.status == "gone" and new.since == 10.0 and far.since == 95.0
-    assert theirs.status == "gone" and new.since == 10.0  # (another's turning gone gives nobody its age)
+    assert old.status == "gone" and new.born == 10.0 and far.born == 95.0
+    assert theirs.status == "gone" and new.born == 10.0  # (another's turning gone gives nobody its age)
     store = DropStore()  # (she picked the older pile at 100 up herself: the newer kill's drops lie at 140 and 150)
     old = Pile(100.0, -200.0, 19, 10.0, True, status="seen", last_seen=40.0, xs=(100.0, 105.0))
     new = Pile(130.0, -200.0, 19, 90.0, True)
     store.piles = [old, new]
     for t in (100.0, 100.0 + EMPTY_LOOKS):
         store._sighting(t, [_coin(140.0), _coin(150.0)], lambda pid, x: True, True)
-    assert old.status == "gone" and new.status == "seen" and new.since == 90.0
+    assert old.status == "gone" and new.status == "seen" and new.born == new.since == 90.0
+
+
+def test_a_pile_holds_an_older_ones_age_only_while_a_drop_of_it_is_seen():
+    """HELD_AGE, from the independent check of 2026-11-01: the newer pile kept the older one's age for good, its own
+    fresh drops too, so once the older drop had gone (expired at 180 s in the simulator) a pile whose own drops lay
+    until 330 s was given up at 241 s. The pile's own kill is kept (Pile.since) and the older's age held (Pile.aged,
+    `born`) only while a look still sees a drop where the older's lay."""
+    from gamelab.behavior.ledger import Pile, survival
+    store = DropStore()
+    old = Pile(100.0, -200.0, 19, 0.0, True, status="seen", last_seen=140.0, xs=(125.0,))  # (a kill at 0, a drop at 125)
+    new = Pile(140.0, -200.0, 19, 150.0, True)  # (a kill at 150 by it)
+    store.piles = [old, new]
+    both = [_coin(125.0), _coin(145.0), _coin(150.0)]  # (125 nearer the new pile: it takes the old drop)
+    for t in (154.0, 154.0 + EMPTY_LOOKS):
+        store._sighting(t, both, lambda pid, x: True, True)
+    assert old.status == "gone" and new.since == 150.0 and new.born == 0.0 and new.aged_xs == (125.0,)
+    assert new.still(200.0) == pytest.approx(survival(200.0) / survival(155.5))
+    store._sighting(185.0, both[1:], lambda pid, x: True, True)  # (the old drop gone: her own kill's two left)
+    assert new.aged is None and new.born == 150.0
+    for t in (230.0, 241.0, 260.0):
+        store._sighting(t, both[1:], lambda pid, x: True, True)
+        assert new.status == "seen" and new.still(t) == 1.0 and new.still(t, 3.0) > 0.95
 
 
 def test_an_expected_pile_is_worth_its_kinds_drops():
