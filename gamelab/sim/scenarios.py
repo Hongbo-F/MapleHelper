@@ -1431,7 +1431,7 @@ _HURT = (("green-mushroom", 0.1),)
 _HURT_LIVE = dict(_LIVE, realism=Realism(zero_walls=True, hurt=_HURT))
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),), hurt=_HURT)),
       expects=KEY_EXPECTS + (
           check("her stars asked", lambda tr: _said(tr, "her stars: ")),
@@ -1456,11 +1456,14 @@ def loop_tree_grind_attack_key(sim):
     respawn clock too. (Seed 2 since work/replan's loot work on master 072e1ec (2026-10-31: her HP at the user's prices,
     the positioning switches as first built, her drops' life by the live evidence: eval/seeds/keys.txt): on seed 1 the
     doubt came at 131.2 s, too late for the check in its 2 minutes; of seeds 1-13 all but 1, 5 and 10 (no doubt in the
-    time) meet all of this; on 2 the doubt at 24.2 s, ATTACK followed to A at 28.9 s, 20 kills after.)"""
+    time) meet all of this; on 2 the doubt at 24.2 s, ATTACK followed to A at 28.9 s, 20 kills after.) (Seed 3 since
+    her two jump attacks, jittered (2026-11-01: reach.TOP_KEY_MS, fight.jittered): on 2 no doubt in its 2 minutes; of
+    seeds 1-13 all but 1, 2 and 5 meet all of this; on 3 the doubt at 9.8 s, the window read from 11.5 s,
+    ATTACK followed to A, 24 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),), hurt=_HURT)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
@@ -1478,7 +1481,9 @@ def loop_tree_attack_unbound(sim):
     seed 1 with the chase off and with the old respawn clock too. (Seed 2 since work/replan's loot work on master
     072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as first built, her drops' life by the
     live evidence), as there: on seed 1 the doubt at 131.2 s, too late; of seeds 1-13 the same ten meet all of this; on
-    2 the doubt at 24.2 s, ATTACK on none at 28.9 s.)"""
+    2 the doubt at 24.2 s, ATTACK on none at 28.9 s.) (Seed 3 since her two jump attacks, jittered (2026-11-01), as
+    there: on 2 no doubt in its 2 minutes; of seeds 1-13 the same ten meet all of this; on 3 the doubt at 9.8 s, the window
+    read from 11.5 s, ATTACK on none, 23 kills after.)"""
     return key_check_run(2)(sim)
 
 
