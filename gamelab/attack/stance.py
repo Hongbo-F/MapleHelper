@@ -1199,32 +1199,50 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     else:
         tries = ((jump, physics.AIR_TURN_ATTACK_MS, 0.0),
                  (tap, physics.JUMP_ATTACK_MS, physics.JUMP_THROW_TURN_MS / 1000))
+
+    def clear(k: int, t: float) -> bool:  # (the line from her feet to it as an attack keyed k starts, `t`: _jittered_up)
+        return platform is None or all(
+            reach.wall_in_way(platform, x, y, x + d * gap(t), physics.jump_rise(k + physics.JUMP_LAG * 1000 + lag), own,
+                              y + drop(t), (top, half)) is None for lag in (0, physics.ATTACK_DECIDE_LAG_MS))
+
     for act, key, wait in tries:
         t = pace.lead + wait + jump_pick_s(key)
         if reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, key):
-            return Here(_jittered_up(act, m, key, wait, gap, drop, top, half, pace), True, gap(t))
+            return Here(_jittered_up(act, m, key, wait, gap, drop, top, half, pace, clear), True, gap(t))
     if g0 < CLAW_ONLY:
         return Here(ground, False, g0)
     act, key, wait = tries[-1]
     return Here(act, False, gap(pace.lead + wait + jump_pick_s(key)))
 
 
+# A jump throw up close's later keys (the jitter's room) have their lines to it checked too (_jittered_up), as reach.shots'
+# picks are and the world's attacks: until the review of 2026-11-01 its pick alone (reach.air_sure), and on a slope her
+# own floor or one just over her stopped the star of a later key where the key's hit (on Tree Dungeon's 33 at x 127, a
+# Horny Mushroom 107 off, keyed 40 the world's star hit, 41-55 stopped: 22 of 290 of the world's close throws with a
+# room, 185 of 4,150 of their keys), a pattern of the jitter's own making for the later analysis. Checked at both ends of
+# the decide lag (physics.ATTACK_DECIDE_LAG_MS), as air_sure checks the pick: at its start alone, 2 of 290, 10 of 3,940
+# keys; at both, none of 3,490 (D:/MapleHelper-scratch/replan/speed/fix/world_rooms.py). False: as before.
+ROOM_LINE = True
+
+
 def _jittered_up(act: tuple, m: Monster, key: int, wait: float, gap: Callable[[float], float],
-                 drop: Callable[[float], float], top: float, half: float, pace: Pace) -> tuple:
+                 drop: Callable[[float], float], top: float, half: float, pace: Pace,
+                 clear: Callable[[int, float], bool] = lambda k, t: True) -> tuple:
     """A jump throw up close at `m` (_from_here's `act`, its attack keyed `key` ms after the jump key, the jump `wait` s
     after the plan's start: a tap first) with the keys its jitter may key it at (JumpPlan.room: behavior.fight.jittered,
     the user's "a bit jitter" of 2026-11-01, as her jump shots': reach.JITTER_FIRST_MS later at most, never sooner), those
     after it whose attack surely picks the monster too as `pace` has it walk (reach.air_sure, CLEAR_MARGIN farther, at
-    every reach.KEY_CHECK_MS), up to the first that doesn't. Its plan says 'close' (or its own why: 'tap first'), and
-    that it's for `m`."""
+    every reach.KEY_CHECK_MS) and whose line to it is clear then (ROOM_LINE: `clear`, the key and when its attack picks;
+    reach.wall_in_way from her feet at both ends of the decide lag), up to the first that doesn't. Its plan says 'close'
+    (or its own why: 'tap first'), and that it's for `m`."""
+    plan = plan_of(act)
     hi = key
     while hi + reach.KEY_CHECK_MS <= key + reach.JITTER_FIRST_MS:
         k = hi + reach.KEY_CHECK_MS
         t = pace.lead + wait + jump_pick_s(k)
-        if not reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, k):
+        if not reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, k) or (ROOM_LINE and not clear(k, t)):
             break
         hi = k
-    plan = plan_of(act)
     return (act[0], act[1], JumpPlan(key, 0, plan.air_turn if plan is not None else True,
                                      plan.why if plan is not None else "close", room=(key, hi), target=m))
 

@@ -385,6 +385,42 @@ def test_a_jump_throw_up_close_is_jittered_over_the_keys_the_stance_finds_as_sur
         plan_of(stance(400, 500, floor, [pig(475, 500, floor.id)], facing=RIGHT)).room is None  # (not sure)
 
 
+def test_a_jump_throw_up_close_keeps_its_jitter_to_keys_whose_line_is_clear(monkeypatch):
+    """attack.stance._jittered_up (ROOM_LINE, the review of 2026-11-01): on Tree Dungeon's slopes a close jump throw's
+    later keys had their star stopped by her floor or one just over her where the key's hit (on 33 at x 126.9 facing
+    left at a Horny Mushroom 107 off, keyed 40 the world's star hits, 41-55 stopped; on 13 at -139 facing right at one
+    108 off, 40-45 hit, 46-55 stopped): the room now ends before the first key whose line, at either end of the decide
+    lag, is stopped, and every key of it hits in the world; without the check, the old rooms."""
+    from maplehelper.engine import LEFT, RIGHT
+    from gamelab.attack import stance as st
+    from gamelab.behavior.fight import bodies
+    model = mapdata.load(10002073)
+    tops = {k: b.top for k, b in bodies(model).items()}
+
+    def room(pid, x, mx, facing):
+        p = model.platform(pid)
+        m = Monster(Mob("horny-mushroom", 0, 0, 30, 30, 0.9), mx, p.y_at(mx), pid)
+        plan = st.plan_of(st.stance(x, p.y_at(x), p, [m], facing=facing, tops=tops, around=[m]))
+        assert plan.why == "close" and plan.key_ms == 40 and plan.target is m
+        return plan.room
+
+    def hits(pid, x, mx, facing, key):
+        w = still(World(model, KEYS, (pid, x), monsters=[("Horny Mushroom", pid, mx)], facing=facing))
+        w.invulnerable_ms = 10_000
+        tap(w, 0.0, "alt", 0.04)
+        tap(w, key / 1000, "f", 0.04)
+        w.advance(1.5)
+        return w.attack_log[-1][5]
+    cases = ((33, 126.9, 126.9 - 107.2, LEFT, (40, 40), (40, 55)), (13, -139.0, -31.0, RIGHT, (40, 40), (40, 55)))
+    for pid, x, mx, facing, now, old in cases:
+        got = room(pid, x, mx, facing)
+        assert got == now, (pid, got)
+        assert all(hits(pid, x, mx, facing, k) == "hit" for k in range(got[0], got[1] + 1)), pid
+        assert hits(pid, x, mx, facing, old[1]) == "stopped"  # (a key the old room had)
+    monkeypatch.setattr(st, "ROOM_LINE", False)
+    assert [room(pid, x, mx, facing) for pid, x, mx, facing, _, _ in cases] == [old for *_, old in cases]
+
+
 def test_a_simulated_runs_jitter_is_drawn_from_its_seed():
     """sim.scenarios.Sim.hunter: her jitter's generator seeded by the scenario's seed, so a run is the same when run
     again (its draws the same), another seed's others."""
