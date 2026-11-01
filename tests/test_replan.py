@@ -340,7 +340,8 @@ def test_a_replan_done_too_late_for_its_splice_point_is_dropped():
     assert late, trace["log"][:60]
     assert not trace["splices"]
     monster = [line for line in late if nv.COMING in line]
-    assert monster and all(line.endswith(("dropped, she stops for it", "dropped, the next state asks again"))
+    again = f"dropped, asked about again {nv.LATE_AGAIN_S:.1f} s on (dropped late {nv.LATE_RETRIES + 1} times in a row)"
+    assert monster and all(line.endswith(("dropped, she stops for it", "dropped, the next state asks again", again))
                            for line in monster), monster
     better = f"dropped, the next look for a better way asks again ({nv.BETTER_EVERY_S:.2f} s on)"
     assert all(" a better way" in line and line.endswith(better) for line in late if line not in monster), late
@@ -393,6 +394,50 @@ def test_a_monster_whose_replan_was_dropped_late_with_no_room_to_stop_is_asked_a
     said = [line for line in trace["log"] if "replanned too late" in line]
     assert len(said) == 1 and nv.COMING in said[0] and said[0].endswith("dropped, the next state asks again"), said
     assert any(sp[0] >= asks[i + 1][0] - 1e-6 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
+    assert not any("plan cut short" in line and nv.COMING in line for line in trace["log"])
+
+
+def _late_always(asks: list):
+    """A navigator wrap (_spawn_run's) whose every "monster" replan takes 0.15 s of the clock (too late:
+    SPLICE_LATE_S) with no room to stop after it; every such ask (its sim time) in `asks`."""
+    def wrap(sim, nav):
+        real_switch, real_chain = nav._switch, nav.flow.chain
+        on = {"inside": False}
+
+        def chain(*a, **k):
+            if on["inside"]:
+                sim.clock.sleep(0.15)
+            return real_chain(*a, **k)
+
+        def switch(st, running, dst, why, k):
+            if k != "monster":
+                return real_switch(st, running, dst, why, k)
+            on["inside"] = True
+            asks.append(sim.clock.now - sim.clock.start)
+            try:
+                return real_switch(st, running, dst, why, k)
+            finally:
+                on["inside"] = False
+        nav.flow.chain, nav._switch, nav._room_to_stop = chain, switch, lambda running, t: False
+    return wrap
+
+
+@REAL
+def test_a_monster_whose_replans_keep_coming_late_is_asked_about_again_only_after_a_while():
+    """The review of 2026-11-01, its finding 3: a monster whose replan is dropped as too late with no room to stop is
+    asked about again at the next state LATE_RETRIES times in a row; dropped late again, it's marked for LATE_AGAIN_S
+    (said so), and not asked about again before then: under the load that makes a replan late, every state paid a whole
+    replan while the monster came."""
+    asks: list = []
+    trace, sim, state = _spawn_run(_late_always(asks))
+    said = [line for line in trace["log"] if "replanned too late" in line and nv.COMING in line]
+    assert said and said[0].endswith("dropped, the next state asks again"), said
+    again = f"dropped, asked about again {nv.LATE_AGAIN_S:.1f} s on (dropped late {nv.LATE_RETRIES + 1} times in a row)"
+    k = next(k for k, line in enumerate(said) if line.endswith(again))
+    assert k == nv.LATE_RETRIES, said
+    assert len(asks) > k + 1, asks
+    assert asks[k] - asks[k - 1] <= 0.15 + 2 * nv.STATE_S + 1e-6  # (the retry: the next state's)
+    assert asks[k + 1] - asks[k] >= nv.LATE_AGAIN_S - 1e-6, asks  # (then a while)
     assert not any("plan cut short" in line and nv.COMING in line for line in trace["log"])
 
 

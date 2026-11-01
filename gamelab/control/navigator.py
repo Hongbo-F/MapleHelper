@@ -307,6 +307,13 @@ STAND_UNSURE_S: float | None = 1.0
 REACT = True
 REACT_LEAD_S = 0.25  # s: a stop from a run slides her about 0.26 s (AFTER_STILL_S), so a touch sooner comes anyway
 REACT_AGAIN_S = 3.0  # s
+# A monster whose replan was dropped as too late with no room to stop (SPLICE_LATE_S) is asked about again at the next
+# state LATE_RETRIES times in a row; dropped late again, it's marked for LATE_AGAIN_S, then asked about again (the review
+# of 2026-11-01, its finding 3: the load that makes a replan late makes the next one late too, and every state, 67 ms
+# apart, paid a whole replan while the monster came, its touch's and off-path checks waiting). None of the harness's
+# runs has dropped one at 1x or 3x of its computing charged to the clock (--think-clock): only its tests do.
+LATE_RETRIES = 1
+LATE_AGAIN_S = REACT_AGAIN_S / 2  # s
 STILL_VX = 15.0      # units/s: a followed monster slower than this stands (tracking's velocities, filtered frame to frame)
 REACT_ROOM = 50.0    # units of platform ahead of her run she needs to stop on (her 149 units/s for AFTER_STILL_S's
                      # slide: 39, and a little)
@@ -817,6 +824,7 @@ class Navigator:
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
         self._replanned = False  # whether the last _switch replanned with nothing to take (REPLAN: _watching marks so)
         self._late = None  # the last _switch's replan dropped as too late: (why, its ms, s late), said by _dropped
+        self._late_in_row: dict[int, int] = {}  # the feed's track id -> its replans dropped late in a row, no room
         self._came = None  # the feed's track of the monster the last cut was for (REACT: _coming), for TripState.came
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
@@ -2603,7 +2611,9 @@ class Navigator:
                 if switched is None and (not replan or self._room_to_stop(current, time.monotonic() - current.start)):
                     cut = why
                 if self._late is not None:  # (replanned too late: she stops for it where there's room, else asked)
-                    self._dropped("monster", "she stops for it" if cut else "the next state asks again")
+                    self._dropped("monster", "she stops for it" if cut else self._late_again(tid))
+                if self._late is None or cut:  # (taken, or cut for: its late replans no longer in a row)
+                    self._late_in_row.pop(tid, None)
                 if switched is not None or cut or self._replanned:
                     # (acted on, or replanned with nothing to take: not again for REACT_AGAIN_S; else, in a flight or
                     # past a takeoff's key, not where the plan has her, or its replan dropped as too late with no room
@@ -2758,6 +2768,18 @@ class Navigator:
                 return None
         return self._take_over(st, running, at, path, legs, keys, why_c, why, kind, near if near is not None else monsters,
                                think_ms, spliced)
+
+    def _late_again(self, tid: int) -> str:
+        """What comes of the feed's track `tid`'s replan dropped as too late with no room to stop: the next state asks
+        about it again, LATE_RETRIES times in a row; then it's marked for LATE_AGAIN_S (REACT_AGAIN_S's mark set back),
+        asked about again after that."""
+        n = self._late_in_row.get(tid, 0) + 1
+        if n <= LATE_RETRIES:
+            self._late_in_row[tid] = n
+            return "the next state asks again"
+        self._late_in_row.pop(tid, None)
+        self._reacted[tid] = time.monotonic() - (REACT_AGAIN_S - LATE_AGAIN_S)
+        return f"asked about again {LATE_AGAIN_S:.1f} s on (dropped late {n} times in a row)"
 
     def _dropped(self, kind: str, then: str) -> None:
         """The last _switch's replan of `kind`, dropped as too late (`_late`: SPLICE_LATE_S), said with what comes of it
