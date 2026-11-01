@@ -340,8 +340,8 @@ class Hunter:
         # Her facing off the frames: looks, told or not (and why), what her keys made of each (Actions.saw), and those
         # that told the other way from her last arrow ('against')
         self.heading_counts: Counter[str] = Counter()
-        # The jump throws her stances chose for what their attack reaches, by why and the jump's kind (fight.log_jump),
-        # and how many were logged (their records' `n`)
+        # The jump throws her stances chose for what their attack reaches (and from 2026-11-01 those up close: 'close',
+        # 'tap first'), by why and the jump's kind (fight.log_jump), and how many were logged (their records' `n`)
         self.jump_counts: Counter[str] = Counter()
         self.jumps_logged = 0
         # What her jump attacks' keys are jittered by (fight.jittered: the user's "a bit jitter", 2026-11-01): the

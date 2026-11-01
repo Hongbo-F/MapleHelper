@@ -59,7 +59,7 @@ def test_who_is_too_close_goes_by_where_it_will_be_when_her_attack_starts(monkey
     monkeypatch.setattr(st, "WALK_AT", False)
     # So the stance: from the ground it would be a claw swipe, but a jump in place keyed 40 ms after the jump key
     # surely takes it (83 off at that attack's start): the jump, not the throw it was decided as live.
-    assert stance(500, [green], pace=st.Pace(0.6, lambda m: -95.0)) == ("jump_throw", RIGHT)
+    assert stance(500, [green], pace=st.Pace(0.6, lambda m: -95.0))[:2] == ("jump_throw", RIGHT)
     assert stance(500, [green], pace=st.Pace(0.6, lambda m: 0.0)) == ("throw", RIGHT)
 
 
@@ -68,18 +68,19 @@ def test_up_close_the_throw_is_one_whose_attack_surely_takes_it():
     # whose attack 40 ms into the jump picks it from 44 (54 with CLEAR_MARGIN); nearer still, a step to where the next
     # one will (to 55 off: from 20 off, 35 back).
     assert stance(500, [mon(615)]) == ("throw", RIGHT)
-    assert stance(500, [mon(560)]) == ("jump_throw", RIGHT)
-    assert stance(500, [mon(554)]) == ("jump_throw", RIGHT) and stance(500, [mon(553)])[:2] == ("back", LEFT)
+    assert stance(500, [mon(560)])[:2] == ("jump_throw", RIGHT)
+    assert stance(500, [mon(554)])[:2] == ("jump_throw", RIGHT) and stance(500, [mon(553)])[:2] == ("back", LEFT)
     assert stance(500, [mon(520)])[:3] == ("back", LEFT, 35)
     # Facing away: an air turn's attack (120 ms into the jump, her feet 52-56 up) picks one on her level only from 144,
     # so she taps the arrow on the ground first and jumps keyed 40 ms after the jump key (JumpPlan air_turn False).
     tap_first = ("jump_throw", RIGHT, st.JumpPlan(physics.JUMP_ATTACK_MS, 0, False, "tap first"))
-    assert stance(500, [mon(580)], facing=LEFT) == tap_first
+    from test_attack import no_room
+    assert no_room(stance(500, [mon(580)], facing=LEFT)) == tap_first
     # Cornered (at her platform's end, 50 kept with monsters about): no step; within CLAW_ONLY (15: on her) the claw from
     # the ground (a swipe, no MP), beyond it the jump in place all the same (live 16% of such casts killed one 20-30
     # ahead, 37% 30-40).
     assert stance(60, [mon(70)]) == ("throw", RIGHT)
-    assert stance(60, [mon(80)]) == ("jump_throw", RIGHT)
+    assert stance(60, [mon(80)])[:2] == ("jump_throw", RIGHT)
 
 
 def test_a_monster_walking_at_her_stops_where_it_meets_her_on_its_side(monkeypatch):
@@ -119,9 +120,9 @@ def test_on_a_slope_a_jump_throw_at_one_lower_down_is_keyed_so_its_attack_picks_
     act = stance(260, [mon(190, y_it, 5)], p=SLOPE, facing=LEFT)
     assert act[:2] == ("back", RIGHT)
     # The same 70 off on level ground: the jump.
-    assert stance(260, [mon(190)], facing=LEFT) == ("jump_throw", LEFT)
+    assert stance(260, [mon(190)], facing=LEFT)[:2] == ("jump_throw", LEFT)
     # Uphill (she's the lower one), the jump in place picks it all the more.
-    assert stance(190, [mon(260, y_her, 5)], p=SLOPE, facing=RIGHT) == ("jump_throw", RIGHT)
+    assert stance(190, [mon(260, y_her, 5)], p=SLOPE, facing=RIGHT)[:2] == ("jump_throw", RIGHT)
 
 
 def test_pace_of_reads_a_monsters_walk_off_its_track():

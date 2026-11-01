@@ -642,15 +642,17 @@ def jittered(h: "Hunter", act: tuple) -> tuple:
     soonest's up to reach.JITTER_FIRST_MS later, the top's JITTER_TOP_MS either side, every key in it sure), so her keys
     vary and what the jitter does can be looked for later (the user, 2026-11-01: "add a bit jitter to it so we still
     have some variation and can later on analyze if the jitter can show any pattern": analysis.jumps' jitter table,
-    `python -m gamelab jitter`). Drawn from `h.jitter` (a random.Random: the system's live, seeded by the run's seed in
+    `python -m gamelab jitter`); a jump throw up close (no shot: attack.stance._from_here, keyed 40 ms after the jump
+    key, or 120 turning in the air) over its plan's own room (JumpPlan.room: up to JITTER_FIRST_MS later, each key as
+    sure by the stance's own check). Drawn from `h.jitter` (a random.Random: the system's live, seeded by the run's seed in
     the simulator, sim.scenarios.Sim.hunter, so a run is the same when run again), here as the attack is carried out,
     not in the search, which stays deterministic; as it was without one (`h.jitter` None: tests' hunters) or a shot.
     Its path (FightState.aimed) was worked out at the shot's own key: the jitter moves her feet at most 7 units then."""
     plan = plan_of(act)
     rng = getattr(h, "jitter", None)
-    if plan is None or plan.shot is None or rng is None:
+    if plan is None or plan.keys is None or rng is None:
         return act
-    lo, hi = plan.shot.window
+    lo, hi = plan.keys
     return (*act[:2], replace(plan, key_ms=rng.randint(lo, hi)), *act[3:])
 
 
@@ -662,10 +664,15 @@ def log_jump(h: "Hunter", s: Scene, act: tuple) -> int | None:
     (`jitter_ms`), the keys the jitter could go at (`window`), how high she is when the attack starts as keyed (`rise`),
     the target, how far off and above, where she lands; `n`, its number, for the 'jump_keys' record after its keys:
     throw_act), so a live run shows how often each fires (sim.harness counts them: attack_kinds' `chosen`) and what came
-    of it (its kills: the ledger's; analysis.jumps). Returns `n` (None: no shot)."""
+    of it (its kills: the ledger's; analysis.jumps). A jump throw up close (its plan's room, no shot: the stance's
+    _from_here) too, from 2026-11-01: its why 'close' (or 'tap first'), a jump in place at the nearest monster on her
+    platform the way it throws (as the stance's), its turn in the air as her actions will make it, her rise as keyed;
+    nothing in her log but that line. Returns `n` (None: no shot, no room)."""
     plan = plan_of(act)
-    if plan is None or plan.shot is None:
+    if plan is None or plan.keys is None:
         return None
+    if plan.shot is None:
+        return _log_close(h, s, act, plan)
     sh, x, y = plan.shot, s.where.x, s.where.y
     t = sh.target
     if hasattr(h, "jump_counts"):
@@ -684,6 +691,33 @@ def log_jump(h: "Hunter", s: Scene, act: tuple) -> int | None:
     return n
 
 
+def _log_close(h: "Hunter", s: Scene, act: tuple, plan) -> int | None:
+    """log_jump's for a jump throw up close (no shot: its plan's room, attack.stance._from_here)."""
+    if s.where is None or s.platform is None:
+        return None
+    x, y, here = s.where.x, s.where.y, s.platform.id
+    way = [m for m in s.monsters if m.platform == here and (m.x > x) == (act[1] == RIGHT)]
+    t = min(way, key=lambda m: abs(m.x - x)) if way else None
+    if hasattr(h, "jump_counts"):
+        h.jump_counts[f"{plan.why}: up"] += 1
+    n = getattr(h, "jumps_logged", 0) + 1
+    h.jumps_logged = n
+    base, (lo, hi) = plan.keys[0], plan.keys
+    faces = getattr(h.actions, "faces", None)
+    turn = bool(plan.air_turn and faces is not None and not faces(act[1]))
+    side = 1 if act[1] == RIGHT else -1
+    h.log(f"    jump ({plan.why}): a jump in place throwing {act[1]}, the attack {base} ms in ({lo}-{hi}), keyed at "
+          f"{plan.key_ms} ({plan.key_ms - base:+d})" + ("" if t is None else f": {t.kind} {t.x - x:+.0f}"))
+    if telemetry.recording():
+        telemetry.emit("jump", kind=plan.why, jump="up", side=side, turn=turn, key_ms=plan.key_ms, base_ms=base,
+                       jitter_ms=plan.key_ms - base, window=[lo, hi],
+                       rise=round(physics.rise_after(plan.key_ms / 1000), 1),
+                       target=None if t is None else t.kind, dx=None if t is None else round(t.x - x, 1),
+                       up=None if t is None else round(y - t.y, 1), platform=None if t is None else t.platform,
+                       x=round(x, 1), land_x=round(x, 1), way=0, n=n)
+    return n
+
+
 def throw_act(h: "Hunter", s: Scene, act: tuple) -> bool:
     """Carry out a throwing stance `act` (THROWS) decided from look `s` with her actions (control.actions.Actions): a
     throw from the ground, a jump throw (in place or forward, its attack timed as its JumpPlan says:
@@ -697,11 +731,9 @@ def throw_act(h: "Hunter", s: Scene, act: tuple) -> bool:
     act = jittered(h, act)
     plan = plan_of(act)
     attacks = getattr(h, "attacks", None)
-    n = None
-    if plan is not None and plan.shot is not None:
-        n = log_jump(h, s, act)
-        if attacks is not None:
-            attacks.aimed = plan.shot.target
+    n = log_jump(h, s, act)
+    if plan is not None and plan.shot is not None and attacks is not None:
+        attacks.aimed = plan.shot.target
     try:
         thrown = _throw(h.actions, act, plan, _turn_key(h, s, act)) is not False
     finally:

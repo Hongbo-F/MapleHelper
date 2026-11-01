@@ -239,30 +239,42 @@ def _bin(row: dict) -> int:
     return BIN_MS * round(row["jitter_ms"] / BIN_MS)
 
 
+CLOSE = ("close", "tap first")  # the 'jump' records' kinds of a jump throw up close (attack.stance._from_here's): no shot
+
+
 def _group(row: dict) -> tuple:
-    """A jump attack's base key, the jump's kind and whether it turns her in the air."""
-    return row.get("base_ms"), row.get("jump"), bool(row.get("turn"))
+    """A jump attack's base key, the jump's kind, whether it turns her in the air, and whether it's a jump throw up close
+    ('close': CLOSE) or a shot at what's out of a throw's reach ('shot': the stance's _jump_shot)."""
+    return (row.get("base_ms") or 0, row.get("jump") or "-", bool(row.get("turn")),
+            "close" if row.get("kind") in CLOSE else "shot")
+
+
+def _label(g: tuple) -> str:
+    base, jump, turn, of = g[:4]
+    return f"{base:4d} {jump:8s} {'yes' if turn else 'no':4s} {of:5s}"
+
+
+_HEAD = f"{'base':>4s} {'jump':8s} {'turn':4s} {'of':5s}"
 
 
 def jitter_table(rows: list[dict]) -> str:
-    """The jump attacks with jitter thrown (jitter_rows), by base key, jump kind (and a turn in the air) and jitter bin
-    (_bin): how many, kills, hits (a bar lower, the simulator's 'hit'), misses (the simulator's noise), wasted
+    """The jump attacks with jitter thrown (jitter_rows), by base key, jump kind, a turn in the air, close or shot
+    (_group) and jitter bin (_bin): how many, kills, hits (a bar lower, the simulator's 'hit'), misses (the simulator's noise), wasted
     (WASTED), unmatched, the share that hit (HITS), and the target's median distance and height."""
     thrown = [r for r in rows if r["thrown"]]
     by: dict[tuple, list[dict]] = defaultdict(list)
     for r in thrown:
         by[(*_group(r), _bin(r))].append(r)
-    lines = [f"{'base':>4s} {'jump':8s} {'turn':4s} {'jitter':>9s} {'n':>4s} {'kill':>4s} {'hit':>4s} {'miss':>4s} "
-             f"{'none':>4s} {'?':>3s} {'hit%':>5s}  {'dx':>4s} {'up':>4s}"]
-    for (base, jump, turn, b), rs in sorted(by.items(), key=lambda kv: (kv[0][0] or 0, kv[0][1] or "", kv[0][2],
-                                                                     kv[0][3])):
+    lines = [f"{_HEAD} {'jitter':>6s} {'n':>4s} {'kill':>4s} {'hit':>4s} {'miss':>4s} {'none':>4s} {'?':>3s} "
+             f"{'hit%':>5s}  {'dx':>4s} {'up':>4s}"]
+    for g, rs in sorted(by.items(), key=lambda kv: kv[0]):
         c = Counter(r["outcome"] for r in rs)
         hit = sum(c[o] for o in HITS)
-        lines.append(f"{base or 0:4d} {jump or '-':8s} {'yes' if turn else 'no':4s} {f'{b:+d}':>9s} "
+        lines.append(f"{_label(g)} {f'{g[4]:+d}':>6s} "
                      f"{len(rs):4d} {c['kill']:4d} {c['hit']:4d} {c['miss']:4d} {sum(c[o] for o in WASTED):4d} "
                      f"{c['unmatched']:3d} {100 * hit / len(rs):5.0f}  "
-                     f"{statistics.median(abs(r.get('dx', 0.0)) for r in rs):4.0f} "
-                     f"{statistics.median(r.get('up', 0.0) for r in rs):+4.0f}")
+                     f"{statistics.median(abs(r.get('dx') or 0.0) for r in rs):4.0f} "
+                     f"{statistics.median(r.get('up') or 0.0 for r in rs):+4.0f}")
     return "\n".join(lines)
 
 
@@ -286,8 +298,8 @@ def _perm_p(groups: list[list[tuple[float, bool]]], shuffles: int, rng: random.R
 
 
 def jitter_test(rows: list[dict], shuffles: int = SHUFFLES, seed: int = 0) -> str:
-    """Whether the jitter predicts a hit (HITS against the rest thrown, unmatched left out), within each base key and
-    jump kind with at least 2 hits and 2 not, and over all of them (stratified by those): how many, the hits' mean
+    """Whether the jitter predicts a hit (HITS against the rest thrown, unmatched left out), within each base key, jump
+    kind, turn and close or shot (_group) with at least 2 hits and 2 not, and over all of them (stratified by those): how many, the hits' mean
     jitter against the others', and a permutation test's two-sided p (SHUFFLES, seeded by `seed`). A small p (under
     0.05) says the outcome goes with the jitter there; a large one, that this many attacks show no such pattern."""
     rng = random.Random(seed)
@@ -295,20 +307,18 @@ def jitter_test(rows: list[dict], shuffles: int = SHUFFLES, seed: int = 0) -> st
     for r in rows:
         if r["thrown"] and r["outcome"] != "unmatched":
             by[_group(r)].append((float(r["jitter_ms"]), r["outcome"] in HITS))
-    lines = [f"{'base':>4s} {'jump':8s} {'turn':4s} {'n':>4s} {'hits':>4s} {'jitter, hits':>12s} {'others':>7s} "
-             f"{'p':>6s}"]
+    lines = [f"{_HEAD} {'n':>4s} {'hits':>4s} {'jitter, hits':>12s} {'others':>7s} {'p':>6s}"]
     tested = []
-    for (base, jump, turn), g in sorted(by.items(), key=lambda kv: (kv[0][0] or 0, kv[0][1] or "", kv[0][2])):
+    for key, g in sorted(by.items(), key=lambda kv: kv[0]):
         hits = [j for j, h in g if h]
         rest = [j for j, h in g if not h]
         if len(hits) < 2 or len(rest) < 2:
-            lines.append(f"{base or 0:4d} {jump or '-':8s} {'yes' if turn else 'no':4s} {len(g):4d} {len(hits):4d} "
-                         f"{'':>12s} {'':>7s}      - (too few of one outcome)")
+            lines.append(f"{_label(key)} {len(g):4d} {len(hits):4d} {'':>12s} {'':>7s}      - (too few of one outcome)")
             continue
         tested.append(g)
         _, pv = _perm_p([g], shuffles, rng)
-        lines.append(f"{base or 0:4d} {jump or '-':8s} {'yes' if turn else 'no':4s} {len(g):4d} {len(hits):4d} "
-                     f"{statistics.fmean(hits):+12.1f} {statistics.fmean(rest):+7.1f} {pv:6.3f}")
+        lines.append(f"{_label(key)} {len(g):4d} {len(hits):4d} {statistics.fmean(hits):+12.1f} "
+                     f"{statistics.fmean(rest):+7.1f} {pv:6.3f}")
     if tested:
         per, pv = _perm_p(tested, shuffles, rng)
         lines.append(f"all of those, within each: the hits' jitter {per:+.1f} ms from their group's mean, p {pv:.3f} "
@@ -345,7 +355,8 @@ def jitter_report(paths: list[Path]) -> list[str]:
     if sent:
         off = [r["pressed_ms"] - r["key_ms"] for r in sent]
         lines += ["", f"the player's presses against the keys sent ({len(sent)}): median {statistics.median(off):+.1f} "
-                      f"ms, at most {max(off, key=abs):+.1f}"]
+                      f"ms, at most {max(off, key=abs):+.1f}; {sum(abs(o) > 2 for o in off)} more than 2 ms off (her "
+                      f"actions keying it otherwise: a turn in the air's key where the stance had her facing it)"]
     return lines
 
 

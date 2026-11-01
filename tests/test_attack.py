@@ -17,6 +17,13 @@ from gamelab.localization.monsters import Monster, monster_platform
 from gamelab.motion import physics
 from gamelab.perception.mobs import Mob
 
+
+def no_room(act: tuple) -> tuple:
+    """A stance's act with its jump throw's jitter room left out (attack.stance.JumpPlan.room, from 2026-11-01: a jump
+    throw up close's own), for comparing its plan as before."""
+    plan = stance_mod.plan_of(act)
+    return act if plan is None else (*act[:2], stance_mod.replace(plan, room=None), *act[3:])
+
 PLAT = Platform(0, [Segment(0, 500, 1000, 500)])      # her platform
 BELOW = Platform(1, [Segment(1100, 560, 1600, 560)])  # 60 below, to the right
 
@@ -109,9 +116,10 @@ def test_one_too_close_she_steps_to_where_her_next_throw_takes_it():
     # first if she must turn (its attack 40 ms into the jump: an air turn's, 120 ms, starts 30 units higher), as by her
     # keys she faces it at once; under CLAW_ONLY (15: on her) the claw from the ground. No crossing either way.
     tap = ("jump_throw", RIGHT, stance_mod.JumpPlan(40, 0, False, "tap first"))
-    assert stance(60, 500, PLAT, [target(110)]) == tap
-    assert stance(60, 500, PLAT, [target(110)], facing=RIGHT) == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(560), target(400)]) == tap
+    assert no_room(stance(60, 500, PLAT, [target(110)])) == tap
+    assert stance_mod.plan_of(stance(60, 500, PLAT, [target(110)])).room is None  # (not sure: no jitter)
+    assert stance(60, 500, PLAT, [target(110)], facing=RIGHT)[:2] == ("jump_throw", RIGHT)
+    assert no_room(stance(500, 500, PLAT, [target(560), target(400)])) == tap
     assert stance(60, 500, PLAT, [target(70)], facing=RIGHT) == ("throw", RIGHT)
 
 
@@ -160,9 +168,11 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
     # first as she doesn't surely face it; one target (decide) she steps away from. From 115 it's a star.
     pig = target(605)
     tap = ("jump_throw", RIGHT, stance_mod.JumpPlan(40, 0, False, "tap first"))
-    assert stance(500, 500, PLAT, [pig]) == tap
-    assert stance(500, 500, PLAT, [pig, target(350)]) == tap
-    assert stance(500, 500, PLAT, [pig], facing=RIGHT) == ("jump_throw", RIGHT)
+    assert no_room(stance(500, 500, PLAT, [pig])) == tap
+    room = stance_mod.plan_of(stance(500, 500, PLAT, [pig])).room  # (sure: its jitter's, 40 ms and later, each sure)
+    assert room[0] == 40 and 40 <= room[1] <= 40 + reach.JITTER_FIRST_MS
+    assert no_room(stance(500, 500, PLAT, [pig, target(350)])) == tap
+    assert stance(500, 500, PLAT, [pig], facing=RIGHT)[:2] == ("jump_throw", RIGHT)
     assert decide(500, 500, PLAT, pig, []) == ("walk", LEFT, 120)
     assert stance(500, 500, PLAT, [target(615)]) == ("throw", RIGHT)
     assert decide(500, 500, PLAT, target(615), []) == ("throw", RIGHT)
@@ -173,7 +183,7 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
     assert stance(500, 500, PLAT, [target(600, kind="snail")]) == ("throw", RIGHT)
     assert stance(500, 500, PLAT, [target(595.8, kind="snail")])[:2] == ("back", LEFT)
     assert stance(500, 500, PLAT, [target(595.8, kind="snail")], halves={"snail": 18.5}) == ("throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(600, kind="slime")]) == tap
+    assert no_room(stance(500, 500, PLAT, [target(600, kind="slime")])) == tap
     assert stance(500, 500, PLAT, [target(610, kind="orange-mushroom")]) == ("throw", RIGHT)
 
 
@@ -408,7 +418,7 @@ def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stab
     # JUMP_THROW_SNAILS brings back the jump throw at one, cornered or not.
     monkeypatch.setattr(stance_mod, "JUMP_THROW_SNAILS", True)
     assert stance(60, 500, PLAT, [target(110, kind="snail")])[:2] == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(560, kind="snail")], facing=RIGHT) == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(560, kind="snail")], facing=RIGHT)[:2] == ("jump_throw", RIGHT)
     # The kinds' sizes can come from the map's game data instead of the tables.
     assert stance(60, 500, PLAT, [target(110, kind="snail")], tops={"snail": 5.0}) == ("throw", RIGHT)
 

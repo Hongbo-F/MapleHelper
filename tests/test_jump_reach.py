@@ -328,6 +328,62 @@ def test_a_jump_attack_is_keyed_as_jittered_and_its_records_say_so(monkeypatch):
     assert a.key_gap() is None
 
 
+def test_a_jump_throw_up_close_is_jittered_over_the_keys_the_stance_finds_as_sure(monkeypatch):
+    """attack.stance._from_here (from 2026-11-01): a jump throw at a pig too close to throw at from the ground (95 or 105
+    off on her floor) is keyed 40 ms after the jump (facing it; tapping first if not), its plan's room (JumpPlan.room)
+    the keys after it, up to reach.JITTER_FIRST_MS, whose attack surely picks it too (reach.air_sure, CLEAR_MARGIN
+    farther, as the key itself), 40-45 here (her feet rise past its top); fight.jittered draws over it, and its 'jump'
+    record says 'close' (or 'tap first'), base 40, the jitter, the room, the pig 105 off; not sure, no room."""
+    import random
+    from types import SimpleNamespace
+    from collections import Counter
+    from maplehelper.engine import LEFT, RIGHT
+    from gamelab import telemetry
+    from gamelab.attack.stance import CLEAR_MARGIN, plan_of, stance
+    from gamelab.behavior import fight
+    from gamelab.control import actions as actions_mod
+    from gamelab.localization.monsters import MONSTER_HALF, MONSTER_TOP
+    floor = plat(LEDGE, 500, 400)
+    for dx in (95, 105):
+        m = pig(400 + dx, 500, floor.id)
+        for facing, why in ((RIGHT, "close"), (LEFT, "tap first")):
+            act = stance(400, 500, floor, [m], facing=facing)
+            plan = plan_of(act)
+            assert act[:2] == ("jump_throw", RIGHT) and plan.why == why and plan.key_ms == 40 and plan.shot is None
+            lo, hi = plan.room
+            assert lo == 40 and hi == 45 and plan.keys == plan.room
+            for k in range(lo, hi + 1, reach.KEY_CHECK_MS):  # (every key of it as sure as the key: a pig standing)
+                assert reach.air_sure(dx - CLEAR_MARGIN, 0.0, MONSTER_TOP["pig"], MONSTER_HALF["pig"], k), (dx, k)
+            drawn = SimpleNamespace(jitter=random.Random(dx))
+            draws = {plan_of(fight.jittered(drawn, act)).key_ms for _ in range(200)}
+            assert draws == set(range(lo, hi + 1))
+    m = pig(505, 500, floor.id)
+    plans = []
+    monkeypatch.setattr(actions_mod.client, "submit",
+                        lambda events, **kw: plans.append(events) or {"sent": [list(e) for e in events]})
+    key = lambda name: SimpleNamespace(name=name)
+    a = actions_mod.Actions(SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), attack=key("f"),
+                                            lucky_seven=None, pick_up=key("z"), hp_potion=None, chair=None))
+    a.facing = RIGHT
+    h = SimpleNamespace(actions=a, jitter=random.Random(2), log=lambda line: None, jump_counts=Counter(), danger=None,
+                        model=LEDGE)
+    s = SimpleNamespace(where=SimpleNamespace(x=400.0, y=500.0), platform=floor, monsters=[m])
+    act = stance(400, 500, floor, [m], facing=RIGHT)
+    want = random.Random(2).randint(40, 45)
+    with telemetry.captured() as records:
+        assert fight.throw_act(h, s, act)
+    (events,) = plans
+    at = lambda k: next(e[0] for e in events if e[1] == k and e[2] == "down")
+    assert at("f") - at("alt") == want
+    jump = next(r for r in records if r["topic"] == "jump")
+    assert (jump["kind"], jump["jump"], jump["base_ms"], jump["key_ms"], jump["jitter_ms"], jump["window"],
+            jump["turn"], jump["target"], jump["dx"]) == ("close", "up", 40, want, want - 40, [40, 45], False, "pig",
+                                                         105.0)
+    assert next(r for r in records if r["topic"] == "jump_keys")["pressed_ms"] == want
+    assert plan_of(stance(400, 500, floor, [pig(475, 500, floor.id)], facing=RIGHT)) is None or \
+        plan_of(stance(400, 500, floor, [pig(475, 500, floor.id)], facing=RIGHT)).room is None  # (not sure)
+
+
 def test_a_simulated_runs_jitter_is_drawn_from_its_seed():
     """sim.scenarios.Sim.hunter: her jitter's generator seeded by the scenario's seed, so a run is the same when run
     again (its draws the same), another seed's others."""
@@ -570,7 +626,7 @@ def test_the_jitter_report_tabulates_jump_attacks_by_jitter_and_asks_whether_it_
                and r["source"] == "sim" for r in got)
     assert all(r["pressed_jitter"] == r["jitter_ms"] for r in got if r["thrown"])
     table = jumps.jitter_table(got)
-    bins = [line.split()[3] for line in table.splitlines()[1:] if line.split()[:3] == ["278", "up", "no"]]
+    bins = [line.split()[4] for line in table.splitlines()[1:] if line.split()[:4] == ["278", "up", "no", "shot"]]
     assert bins == ["-20", "-15", "-10", "-5", "+0", "+5", "+10", "+15", "+20"], table
     test = jumps.jitter_test(got)
     p = float(test.splitlines()[1].split()[-1])

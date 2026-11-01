@@ -569,12 +569,23 @@ class JumpPlan:
     """How a jump throw or a jump back goes (control.actions.Actions.jump_throw, jump_back): the attack key `key_ms`
     after the jump key; `way` +1/-1 a jump forward that way (0: in place); `air_turn` False: turning, the tap goes
     before the jump (an attack too soon in the jump to turn first: a short monster); why it was chosen (`why`: the
-    telemetry 'jump' record's kind) and the shot it makes (attack.reach.Shot), if worked out."""
+    telemetry 'jump' record's kind) and the shot it makes (attack.reach.Shot), if worked out; `room`, the keys about
+    `key_ms` a jitter may key it at where it has no shot (a jump throw up close: _from_here), each as sure as it.
+    `keys`: those, or its shot's window."""
     key_ms: int = physics.JUMP_ATTACK_MS
     way: int = 0
     air_turn: bool = True
     why: str = ""
     shot: reach.Shot | None = None
+    room: tuple[int, int] | None = None
+
+    @property
+    def keys(self) -> tuple[int, int] | None:
+        """The attack keys (ms after the jump key) its jitter may key it at (behavior.fight.jittered): `room`, else its
+        shot's window (reach.Shot.window), else None (no jitter: the stance's own timing)."""
+        if self.room is not None:
+            return self.room
+        return None if self.shot is None else self.shot.window
 
 
 def plan_of(act: tuple) -> JumpPlan | None:
@@ -1190,11 +1201,30 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     for act, key, wait in tries:
         t = pace.lead + wait + jump_pick_s(key)
         if reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, key):
-            return Here(act, True, gap(t))
+            return Here(_jittered_up(act, key, wait, gap, drop, top, half, pace), True, gap(t))
     if g0 < CLAW_ONLY:
         return Here(ground, False, g0)
     act, key, wait = tries[-1]
     return Here(act, False, gap(pace.lead + wait + jump_pick_s(key)))
+
+
+def _jittered_up(act: tuple, key: int, wait: float, gap: Callable[[float], float], drop: Callable[[float], float],
+                 top: float, half: float, pace: Pace) -> tuple:
+    """A jump throw up close (_from_here's `act`, its attack keyed `key` ms after the jump key, the jump `wait` s after
+    the plan's start: a tap first) with the keys its jitter may key it at (JumpPlan.room: behavior.fight.jittered, the
+    user's "a bit jitter" of 2026-11-01, as her jump shots': reach.JITTER_FIRST_MS later at most, never sooner), those
+    after it whose attack surely picks the monster too as `pace` has it walk (reach.air_sure, CLEAR_MARGIN farther, at
+    every reach.KEY_CHECK_MS), up to the first that doesn't. Its plan says 'close' (or its own why: 'tap first')."""
+    hi = key
+    while hi + reach.KEY_CHECK_MS <= key + reach.JITTER_FIRST_MS:
+        k = hi + reach.KEY_CHECK_MS
+        t = pace.lead + wait + jump_pick_s(k)
+        if not reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, k):
+            break
+        hi = k
+    plan = plan_of(act)
+    return (act[0], act[1], JumpPlan(key, 0, plan.air_turn if plan is not None else True,
+                                     plan.why if plan is not None else "close", room=(key, hi)))
 
 
 def _star_takes(platform: Platform | None, x: float, y: float, m: Monster, mx: float) -> bool:

@@ -550,7 +550,8 @@ def attack_kinds(world, records: list[dict]) -> dict:
     that pressed it (control.actions: "throw", "jump_throw", "jump_back"; a chain's, "flow"), how many and what came of
     each ("kill", "hit", "swipe", "miss", "stopped", "nothing": `hit_nothing` the last two), those started in the air,
     and of those the ones that picked a monster whose feet were LEVEL or more above hers then (`up`); and the jump
-    throws the stack chose, by why (its telemetry 'jump' records' `kind`: attack.stance), with what came of each
+    throws the stack chose, by why (its telemetry 'jump' records' `kind`: attack.stance; from 2026-11-01 its jump throws
+    up close too, 'close' and 'tap first', jittered as its shots are), with what came of each
     (`chosen_by`: why and the jump's kind -> outcomes, the record matched to the first jump's attack keyed within
     CHOSEN_KEY_S after it; 'unmatched' if none was)."""
     out: dict = {}
