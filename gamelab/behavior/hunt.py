@@ -105,7 +105,8 @@ from ..attack.stance import (MIN_MOVE, act_text, beside, close_to, drop_limits, 
 from ..control.actions import PILE_EVERY_MS
 from ..control.mover import HANG_TOLERANCE, ON_ROPE_X
 from ..control.navigator import ARRIVE_TOLERANCE, RUN_SEEN, RUN_UNITS, TRANSIT, Choice, TripState
-from ..localization.monsters import DEFAULT_SPEED, Monster, Tracker, bodies, speeds, touch_box, tracks_record, walk_vx
+from ..localization.monsters import (DEFAULT_SPEED, Monster, Tracker, bodies, speeds, touch_box, tracks_record,
+                                     walk_edges, walk_vx)
 from ..localization.players import near_rival
 from ..localization.scene import Scene
 from ..localization.unseen import UNSEEN_S, unseen
@@ -1310,16 +1311,22 @@ class Hunt:
     def _reach_of(self, m: Monster) -> tuple:
         """Monster `m`'s walk for the sweep's checks (sweep.meets): its velocity the way perception says it heads at its
         kind's speed from the game data (monsters.walk_vx; None, its heading not known: either way), its speed, half its
-        body's width (monsters.touch_box), its platform's ends. One standing or flinching (walk_vx 0) may set off either
-        way any time, as one whose heading isn't known (sweep.UNSURE_S of it at most): taken as staying put, a stand
-        passed its check at 58 units from a standing one where PILE_CLEAR had kept her 100 off, and on the user's own
-        play a standing monster set off at about 0.61 a second (the review of 2026-10-30)."""
+        body's width (monsters.touch_box), where its middle turns on its platform (monsters.walk_edges: the game's walk
+        edge, 20 from each end, or the ends themselves for a kind that hops, as the stack's danger has it since master
+        072e1ec; until then the platform's ends, 20 units more than the game lets a walker go). One standing or
+        flinching (walk_vx 0) may set off either way any time, as one whose heading isn't known (sweep.UNSURE_S of it at
+        most): taken as staying put, a stand passed its check at 58 units from a standing one where PILE_CLEAR had kept
+        her 100 off, and on the user's own play a standing monster set off at about 0.61 a second (the review of
+        2026-10-30)."""
         if getattr(self, "_speeds", None) is None:
             self._speeds, self._bodies = speeds(self.model), bodies(self.model)
         speed = self._speeds.get(m.kind, DEFAULT_SPEED)
         vx = walk_vx(m.kind, getattr(m, "facing", 0), getattr(m, "pose", ""), self._speeds) or None
         q = self.model.platform(m.platform)
-        return vx, speed, touch_box(m.kind, self._bodies.get(m.kind))[0], q.left, q.right
+        d = getattr(self.h, "danger", None)
+        t = None if d is None else d.threats.get(m.kind)
+        return (vx, speed, touch_box(m.kind, self._bodies.get(m.kind))[0],
+                *walk_edges(q, t is not None and t.hops))
 
     def _guards(self, s: Scene, p: Pile, at: float, stand: float) -> tuple[tuple, str | None]:
         """What would meet her standing on pile `p` from `at` s from now for `stand` s and sweep.STAND_PAST_S more (her

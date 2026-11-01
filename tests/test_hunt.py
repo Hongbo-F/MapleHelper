@@ -606,6 +606,10 @@ def test_a_monster_walking_at_where_she_would_stand_is_shot_first_or_the_pile_le
     stands = _walker("horny-mushroom", ground, 870.0, 0, m, "stand")
     standing = _priced(m, [pile], travel=0.1)
     assert standing._reach_of(stands)[0] is None  # (either way, as one whose heading isn't known)
+    # Its middle turns where the game turns a walker, 20 along its end footholds from the ground's ends (500..900:
+    # monsters.walk_edges, since master 072e1ec the stack's danger's too), where until then the ends themselves.
+    from gamelab.localization.monsters import WALK_EDGE
+    assert standing._reach_of(stands)[3:] == (500.0 + WALK_EDGE, 900.0 - WALK_EDGE)
     assert [g.monster.x for g in standing._guards(_on(spot, 1000.0, m, [stands]), pile, 1.1, 0.5)[0]] == [870.0]
     about = _priced(m, [pile], memory=[_remembered("horny-mushroom", ground, 765.0, 1.0, m)], travel=0.1)
     assert about._guards(_on(spot, 1000.0, m), pile, 1.1, 0.5)[1].startswith("a horny-mushroom unseen at x 765")
