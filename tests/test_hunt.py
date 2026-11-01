@@ -520,6 +520,25 @@ def _remembered(kind, pid, x, age, model):
 
 # --- the loot sweep in the hunt loop (from 2026-10-30: behavior.sweep) ----------------------------------------------------
 
+def test_with_her_etc_tab_full_a_pile_of_etc_items_alone_is_no_candidate_and_one_with_coins_is_worth_the_coins():
+    """Her inventory by tab (looting.Looter.full, from 2026-10-31): her Etc tab full, a pile seen holding a Horny
+    Mushroom's cap alone holds nothing she can take: not a candidate, and one she's going for is worthless; one with
+    coins and a cap is, worth its coins (`_worth`); one not seen yet, while her Use tab has room, still is."""
+    from gamelab.behavior.looting import FIRST, Looter
+    h = _hunt([])
+    looter = Looter(SimpleNamespace(log=lambda m: None))
+    looter.full = {"Etc": (time.monotonic(), "test")}
+    h.h.looter, h.h.drops.value = looter, FIRST
+    cap = _pile(10, items=("horny-mushroom-cap",), worth=FIRST("horny-mushroom-cap"), status="seen")
+    both = _pile(10, mesos=True, items=("mesos", "horny-mushroom-cap"), status="seen",
+                 worth=FIRST("mesos", "bronze") + FIRST("horny-mushroom-cap"))
+    assert not h._candidate(cap) and h._worthless(cap)
+    assert h._candidate(both) and h._worth(both) == pytest.approx(FIRST("mesos", "bronze"))
+    assert h._candidate(_pile(10))  # (not seen yet: it may hold a Use item, or mesos)
+    looter.full["Use"] = (time.monotonic(), "test")
+    assert not h._candidate(_pile(10)) and looter.items_full
+
+
 def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
     """Not a fixed life (DROP_LIFE, 90 s, until 2026-10-30): a pile of hers 100 s old, never seen since her kill, lies
     there still 93% of the time (ledger.SURVIVAL, by the live evidence since 2026-10-31: hers alone for OWN_S, others'

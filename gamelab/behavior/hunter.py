@@ -351,11 +351,12 @@ class Hunter:
         self._feed_throw = self.senses.feed.throw  # (the feed she was made with, as the listener was before)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
-        """A look (Senses.look); drops are looked for as her inventory allows (only mesos when it's full). Not with
+        """A look (Senses.look); drops are looked for as her inventory allows (only mesos when every item tab of hers
+        is full: Looter.items_full). Not with
         the Lie Detector alarm up (client.LieDetectorAlarm): a hunt that only looks for a while (waiting, standing by)
         stops there too, as at its next key plan, and retreats (behavior.retreat)."""
         client.check_alarm()
-        return self.senses.look(mobs, wide, loot, mesos_only=self.looter.inventory_full)
+        return self.senses.look(mobs, wide, loot, mesos_only=self.looter.items_full)
 
     def clear(self, kinds=None, **kw) -> Report:
         """Fight the monsters in reach (behavior.fight.clear)."""
@@ -1495,7 +1496,8 @@ class Hunter:
                 record["her"].update(facing=a.heading, facing_by=a.facing_by, facing_keys=a.facing,
                                      facing_seen=self.facing_seen.side, facing_strong=self.facing_seen.strong)
             telemetry.emit("scene", **record)
-            telemetry.emit("drops", inventory_full=self.looter.inventory_full, pending=[
+            telemetry.emit("drops", inventory_full=self.looter.inventory_full, full_tabs=sorted(self.looter.full),
+                           pending=[
                 {"x": round(d.x, 1), "y": round(d.y, 1), "platform": d.platform, "mesos": d.mesos}
                 for d in self.looter.pending])
             for e in s.events or ():

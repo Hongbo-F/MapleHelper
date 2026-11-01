@@ -1522,7 +1522,7 @@ def cmd_hunt(args) -> int:
     _annotate(final, _shot("hunt_end.png"))
     left = ", ".join(f"{d.item.kind} at {d.x - final.where.x:+.0f}" for d in final.loot) or "none"
     print(f"done: {hunter.report}; now HP {final.hp:.0%}, MP {final.mp:.0%}; drops left on her platform: {left}"
-          + ("; her inventory is full" if hunter.looter.inventory_full else ""))
+          + (f"; her {' and '.join(sorted(hunter.looter.full))} tab full" if hunter.looter.full else ""))
     return 0
 
 

@@ -114,6 +114,7 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
+from ..perception.loot import MESOS
 from ..perception.mobs import Mob
 from . import fight, sweep
 from .keycheck import Doubt, KeyDoubt
@@ -1058,19 +1059,42 @@ class Hunt:
     # --- loot: the sweep (from 2026-10-30) ------------------------------------------------------------------------
 
     def _worthless(self, p: Pile) -> bool:
-        """A pile she's going for that isn't worth the rest of the trip: seen gone, or items with her
-        inventory full. Not its age: how likely it is to lie there still weighs it in the sweep (Pile.still), and
-        the objective's clock bounds the trip."""
-        return p.status == "gone" or (not p.mesos and self.h.looter.inventory_full)
+        """A pile she's going for that isn't worth the rest of the trip: seen gone, or nothing in it she can take (its
+        items' tabs full: `_takes`). Not its age: how likely it is to lie there still weighs it in the sweep
+        (Pile.still), and the objective's clock bounds the trip."""
+        return p.status == "gone" or not self._takes(p)
+
+    def _takes(self, p: Pile) -> bool:
+        """Whether pile `p` holds something she can take: mesos, an item whose tab has room (looting.Looter.can_take;
+        her inventory by tab, from 2026-10-31), or, none seen in it yet, while an item tab of hers has room."""
+        looter = self.h.looter
+        if p.mesos:
+            return True
+        can = getattr(looter, "can_take", None)
+        if can is None:  # (a looter of tests': the one flag)
+            return not looter.inventory_full
+        if p.items:
+            return any(can(k) for k in p.items)
+        return not looter.items_full
+
+    def _worth(self, p: Pile) -> float:
+        """What pile `p` is worth to her (Pile.value) but for the items she can't take (their tabs full)."""
+        looter = self.h.looter
+        can = getattr(looter, "can_take", None)
+        if can is None or not looter.inventory_full or not p.items:
+            return p.value
+        value = self.h.drops.value
+        return max(0.0, p.value - sum(value(k) for k in p.items if k != MESOS and not can(k)))
 
     def _candidate(self, p: Pile) -> bool:
         """Whether pile `p` is one to go for: not seen gone, on a platform, stood on or gone for fewer than PILE_TRIES
-        times, hers or past its killer's ownership (OWN_S), mesos or room for items, not another player's (PLAYER_PILES),
-        and likely to lie there still (Pile.still, SURVIVE_MIN: the live service's survival, ledger.SURVIVAL, where until
-        2026-10-30 a pile was left at DROP_LIFE, 90 s, and another's waited OTHERS_AFTER, 30 s)."""
+        times, hers or past its killer's ownership (OWN_S), something in it she can take (`_takes`: her inventory by
+        tab), not another player's (PLAYER_PILES), and likely to lie there still (Pile.still, SURVIVE_MIN:
+        ledger.SURVIVAL, where until 2026-10-30 a pile was left at DROP_LIFE, 90 s, and another's waited OTHERS_AFTER,
+        30 s)."""
         now = time.monotonic()
         return (p.status != "gone" and p.platform is not None and p.tries < PILE_TRIES
-                and (p.hers or now - p.since >= OWN_S) and (p.mesos or not self.h.looter.inventory_full)
+                and (p.hers or now - p.since >= OWN_S) and self._takes(p)
                 and not self._theirs(p) and p.still(now) >= SURVIVE_MIN)
 
     def _theirs(self, p: Pile) -> bool:
@@ -1281,7 +1305,7 @@ class Hunt:
                 out[p.key] = "unsafe: " + why
                 continue
             self._pile_of[p.key] = p
-            found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, p.value, stand, lands,
+            found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, self._worth(p), stand, lands,
                                     (lambda dt, p=p: p.still(now, dt)), guards))
         return found, out
 

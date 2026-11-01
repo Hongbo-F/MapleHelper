@@ -8,13 +8,14 @@ pressing pick-up, that's still there is someone else's (drops belong to the kill
 inventory is full: the game says so in the pickup log, and then she only takes mesos.
 """
 
+import re
 import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .. import directions
+from .. import directions, telemetry
 from ..attack.reach import EDGE_MARGIN
 from ..attack.stance import TOO_CLOSE
 from ..control.navigator import MIN_GROUND_PX
@@ -37,7 +38,22 @@ SETTLE = 3.0       # s a kill's drops take to land and show: recorded at 2 fps, 
 EMPTY_LOOKS = 1.5  # s between two looks that must both see a remembered drop spot empty before it's
                    # forgotten: monsters are drawn over drops, and a pig walking over coins hid them
 UNPICKABLE_FOR = 90  # s drops she failed to pick up are left alone (they vanish after a while anyway)
-FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up: her inventory is full
+FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up: their tabs are full
+# Her inventory's tabs (from 2026-10-31, the user: "we also need to watch for backpack full scenario"): the one a drop's
+# kind goes into (`tab_of`: its item id's in the game data, perception.loot.item_ids, 2xxxxxx Use, 4xxxxxx Etc; mesos
+# none; a kind the game data doesn't name, Use for a potion and Etc for the rest, as the simulator's pickup log has
+# them), and which are full (Looter.full), learned where items stay under her after two stands (`cant_pick`): the pickup
+# log's full message ("You can't get anymore items.", which names no tab) marks the tabs of the items stuck there,
+# FAILED_PICKS failures in a row without it too; an "earned. (Tab)" line in the same read (hers or her pets') says that
+# tab has room. A full tab's items are left and not gone for, mesos and the other tab's still taken (Looter.can_take:
+# behavior.hunt's piles priced by what she can take), perception looking for mesos alone only once every item tab is
+# full (`items_full`); a full tab is taken as having room again TAB_RETRY_S on (she may have sold or dropped things),
+# learned again at the next failure. Until then one flag for the whole run (`inventory_full`, now: any tab full): every
+# item left once it was set, nothing ever clearing it. Live a full inventory came once (2026-10-19, the first map's Etc
+# tab, a Snail Shell), never on Tree Dungeon.
+ITEM_TABS = ("Use", "Etc")
+TAB_RETRY_S = 600.0  # guess
+EARNED = re.compile(r"earned\W*\(\s*(equip|use|set-?up|etc|cash)\s*\)", re.I)
 DROPS_LAST = 90    # s remembered drops are worth going back for (they vanish, and others may take them)
 MIN_WALK = 10      # a sweep's stops nearer to her than this aren't walked to: she's there
 # Whether only a look that shows her standing can see a drop spot empty (`standing`). From mid-jump a look's loot
@@ -220,7 +236,7 @@ class Looter:
     def __init__(self, hunter: "Hunter"):
         self.h = hunter
         self.pending: list[DropSpot] = []  # drops off her platform, left for later (the tour collects them)
-        self.inventory_full = False  # pick-up failed for want of room: items are left, mesos still taken
+        self.full: dict[str, tuple[float, str]] = {}  # tab -> (when she learned it's full, why): its items left
         self.unpickable: list[tuple[float, int, float]] = []  # (x, platform, when) of drops she couldn't take
         self._failed_picks = 0  # items in a row that stayed under her (see FAILED_PICKS)
         # Whether a look's monsters call her off picking up (collect, mop_up), leaving the drops for later: the hunt
@@ -232,11 +248,52 @@ class Looter:
         # missed (localization.unseen).
         self.unseen: Callable[[Scene], list[Monster]] | None = None
 
+    @property
+    def inventory_full(self) -> bool:
+        """Whether a tab of hers is full (the 'drops' record's, analysis.respawn's)."""
+        return bool(self.full)
+
+    @inventory_full.setter
+    def inventory_full(self, full: bool) -> None:
+        """Every item tab full (True, as the one flag before the tabs had it), or none."""
+        now = time.monotonic()
+        self.full = {tab: (now, "set") for tab in ITEM_TABS} if full else {}
+
+    @property
+    def items_full(self) -> bool:
+        """Whether every item tab is full: drops are looked for as mesos alone (Hunter.look)."""
+        self._retry()
+        return all(tab in self.full for tab in ITEM_TABS)
+
+    def can_take(self, kind: str) -> bool:
+        """Whether a drop of `kind` fits: mesos always, an item while its tab isn't known to be full."""
+        if kind == MESOS:
+            return True
+        self._retry()
+        return tab_of(kind) not in self.full
+
+    def _retry(self) -> None:
+        """A tab full for TAB_RETRY_S taken as having room again (learned again at the next failure)."""
+        now = time.monotonic()
+        for tab in [tab for tab, (since, _) in self.full.items() if now - since >= TAB_RETRY_S]:
+            del self.full[tab]
+            self._tell(tab, False, f"{TAB_RETRY_S / 60:.0f} minutes since it was: trying its items again")
+
+    def _tell(self, tab: str, full: bool, why: str, kinds: tuple[str, ...] = ()) -> None:
+        """A tab's state changed: her log, and a telemetry event 'inventory'."""
+        if full:
+            others = [t for t in ITEM_TABS if t != tab and t not in self.full]
+            self.h.log(f"  her {tab} tab is full ({why}): leaving {tab} items, still taking mesos"
+                       + "".join(f" and {t} items" for t in others))
+        else:
+            self.h.log(f"  her {tab} tab has room ({why})")
+        telemetry.emit("event", kind="inventory", tab=tab, full=full, why=why, kinds=list(kinds))
+
     def wanted(self, loot: list[Loot]) -> list[Loot]:
-        """The drops worth going for: not ones she failed to pick up, and only mesos with her inventory full."""
+        """The drops worth going for: not ones she failed to pick up, and no items of a full tab."""
         now = time.monotonic()
         self.unpickable = [u for u in self.unpickable if now - u[2] < UNPICKABLE_FOR]
-        return [d for d in loot if (d.mesos or not self.inventory_full)
+        return [d for d in loot if (d.mesos or self.can_take(d.item.kind))
                 and not any(p == d.platform and abs(x - d.x) <= STOOD_ON for x, p, _ in self.unpickable)]
 
     def remember(self, s: Scene) -> None:
@@ -407,22 +464,47 @@ class Looter:
         """Drops she stood on twice, pressing pick-up, that are still there: left alone for a while. Mesos
         always fit, so those are someone else's (drops belong to the killer for a while). Items may be
         too, unless the pickup log says her inventory is full, or items keep staying under her
-        (FAILED_PICKS times in a row, with none picked up in between): then items are left, mesos taken."""
+        (FAILED_PICKS times in a row, with none picked up in between): then their tabs are full (see the top), but a
+        tab the same read has an item earned into, and their items are left, mesos and the rest taken."""
         now = time.monotonic()
         self.unpickable += [(d.x, d.platform, now) for d in stuck]
         self.h.log(f"  can't pick up {_summary(stuck)} at x {', '.join(f'{d.x:.0f}' for d in stuck)}: left")
-        if self.inventory_full or all(d.mesos for d in stuck):
+        kinds = tuple(sorted({d.item.kind for d in stuck if not d.mesos}))
+        tabs = {tab_of(k) for k in kinds} - set(self.full)
+        if not tabs:
             return
         self._failed_picks += 1
         text = self.h.senses.eyes.messages()
+        room = {m.group(1).replace("-", "").capitalize() for m in EARNED.finditer(text)}
+        for tab in sorted(room & set(self.full)):  # (an item earned into one: it has room)
+            del self.full[tab]
+            self._tell(tab, False, "an item earned into it")
         if says_full(text):
             why = f"the game says so: {' / '.join(line for line in text.splitlines() if says_full(line))}"
         elif self._failed_picks >= FAILED_PICKS:
             why = f"items stayed under her {self._failed_picks} times in a row"
         else:
             return
-        self.inventory_full = True
-        self.h.log(f"  her inventory is full ({why}): leaving items, picking up mesos only")
+        for tab in sorted(tabs - room):
+            self.full[tab] = (now, why)
+            self._tell(tab, True, why, tuple(k for k in kinds if tab_of(k) == tab))
+
+
+_TABS: dict[str, str] | None = None
+
+
+def tab_of(kind: str) -> str | None:
+    """The inventory tab a drop of `kind` goes into (see ITEM_TABS): None for mesos."""
+    global _TABS
+    if kind == MESOS:
+        return None
+    if _TABS is None:
+        try:
+            from ..perception.loot import item_ids
+            _TABS = {kind_of(name): "Use" if ids[0] // 1_000_000 == 2 else "Etc" for name, ids in item_ids().items()}
+        except (OSError, ImportError, KeyError, ValueError):  # (no game data here: by the rule alone)
+            _TABS = {}
+    return _TABS.get(kind) or ("Use" if kind.endswith("-potion") else "Etc")
 
 
 def standing(s: Scene) -> bool:

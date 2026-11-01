@@ -348,7 +348,7 @@ class Tour:
                 telemetry.emit("event", kind="backstop", text=f"LOOT_SECONDS: {LOOT_SECONDS} s collecting drops")
                 break
             fresh = [d for d in looter.pending if time.monotonic() - d.since < DROPS_LAST and d.platform is not None
-                     and (d.mesos or not looter.inventory_full)]
+                     and (d.mesos or not looter.items_full)]
             looter.pending = []
             if not fresh:
                 break

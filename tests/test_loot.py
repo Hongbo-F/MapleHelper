@@ -387,6 +387,28 @@ def test_without_the_message_items_stuck_three_times_running_mean_a_full_invento
         assert h.looter.inventory_full == (n == 2)
 
 
+def test_her_inventory_is_full_by_tab_and_an_item_earned_into_one_says_it_has_room(monkeypatch):
+    """Her inventory by tab (looting.ITEM_TABS, from 2026-10-31): Etc items stuck under her with the game's full message
+    (which names no tab) mark her Etc tab full, not her Use tab: Etc items are left, a Use item and mesos still wanted,
+    and drops still looked for as all kinds (items_full only once every item tab is). Later a Use item stuck with the
+    message and an "earned. (Etc)" line in the same read (her pets' pick-up, say): Use full, Etc with room again. And a
+    tab full TAB_RETRY_S ago is taken as having room again."""
+    from gamelab.behavior import looting
+    full = "You can't get anymore items."
+    h, _ = _mopper(monkeypatch, [[_loot("leather", 1100), _loot("mesos", 900)]] * 2 + [[_loot("leather", 1100)]],
+                   text=full)
+    h.looter.mop_up()
+    assert set(h.looter.full) == {"Etc"} and h.looter.inventory_full and not h.looter.items_full
+    left = h.looter.wanted([_loot("leather", 700), _loot("red-potion", 720), _loot("mesos", 760)])
+    assert [d.item.kind for d in left] == ["red-potion", "mesos"]
+    h.senses.eyes.text = "Leather x1 earned. (Etc)\n" + full
+    h.looter.cant_pick([_loot("red-potion", 720)])
+    assert set(h.looter.full) == {"Use"} and h.looter.can_take("leather") and not h.looter.can_take("red-potion")
+    when, why = h.looter.full["Use"]
+    h.looter.full["Use"] = (when - looting.TAB_RETRY_S, why)
+    assert h.looter.can_take("red-potion") and not h.looter.full
+
+
 def test_an_item_picked_up_resets_the_count_of_failed_picks(monkeypatch):
     h, _ = _mopper(monkeypatch, [[_loot("leather", 1100)], []])
     h.looter._failed_picks = 2
