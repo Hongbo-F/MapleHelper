@@ -440,6 +440,54 @@ def test_a_full_tab_still_takes_a_kind_she_holds_a_stack_of(monkeypatch):
     assert h.looter.can_take("horny-mushroom-cap") and set(h.looter.full) == {"Etc", "Use"}
 
 
+def test_the_pickup_logs_cut_names_are_read_as_their_items():
+    """The independent check of 2026-11-01: the game cuts long names off ("Horny Mushroo... x1 earned. (Etc)", live on
+    2026-10-26), which the regex of the name before "x1" read as a kind of its own ('horny-mushroo...'). Read by
+    maplehelper's loot-line parser against the game's item names (looting._earned: parse_loot, ITEM_NAMES), the live
+    fixture's lines come out as their items, a cut name the item names leave open ("Orange Mushro...") the one priced
+    drop it starts, a misread tab ("(Ete)") the kind's; a line with no name read tells the tab alone. The simulator's log
+    cuts them as the game does (world.log_name)."""
+    import json
+    from gamelab.behavior.looting import _earned
+    from gamelab.sim.world import log_name
+    lines = json.loads((ROOT / "tests/fixtures/pickup_log_lines_2026-10-26.json").read_text(encoding="utf-8"))["lines"]
+    got = {line: _earned(line) for line in lines if "earned" in line.lower()}
+    assert got["Horny Mushroo... x1 earned. (Etc)"] == got["HornyMushroo...x1 earned. (Etc)"] \
+        == got["Horny Mushroo...x1 earned. (Ete)"] == ("Etc", "horny-mushroom-cap")
+    assert got["Green Mushroo... x1 earned. (Etc)"] == ("Etc", "green-mushroom-cap")
+    assert got["Silver Ore x1 earned. (Etc)"] == ("Etc", "silver-ore") and got["earned.(Etc)"] == ("Etc", None)
+    assert got["Red Potion x1 earned. (Use)"] == ("Use", "red-potion")
+    assert sum(kind is not None and kind.endswith("...") for _, kind in filter(None, got.values())) == 0
+    assert _earned("Orange Mushro... x1 earned. (Etc)") == ("Etc", "orange-mushroom-cap")
+    assert _earned("You have gained mesos (+15)") is None and _earned("You can't get anymore items.") is None
+    assert log_name("horny-mushroom-cap") == "Horny Mushroo..." and log_name("silver-ore") == "Silver Ore"
+    assert _earned(f"{log_name('fragment-of-magic')} x1 earned. (Etc)") == ("Etc", "fragment-of-magic")
+
+
+def test_a_stacks_top_up_in_the_log_says_nothing_of_a_full_tabs_room(monkeypatch):
+    """The independent check of 2026-11-01: an "earned" line after the last refusal says its tab has room only for a
+    kind that didn't fit (stuck under her now, or refused): a top-up of a stack she holds (hers or her pets') needs no
+    slot. With her Etc tab known full and her cap stack topped up ("Horny Mushroo...", the game's cut name), a potion
+    of someone else's stuck under her twice leaves Etc full (it was cleared: the cut name was never one she held); a
+    refusal and then her cap top-up while Etc is learned marks it full (the top-up kept it from being marked); a refused
+    kind earned after the refusal clears it."""
+    full = "You can't get anymore items."
+    h, _ = _mopper(monkeypatch, [], text=full)
+    h.looter.stood_on(["horny-mushroom-cap"])
+    h.looter.cant_pick([_loot("silver-ore", 1100)])
+    assert set(h.looter.full) == {"Etc"} and h.looter.can_take("horny-mushroom-cap")
+    h.senses.eyes.text = "Horny Mushroo... x1 earned. (Etc)"  # (no refusal since)
+    h.looter.cant_pick([_loot("red-potion", 1200)])
+    assert "Etc" in h.looter.full and not h.looter.can_take("silver-ore")
+    h, _ = _mopper(monkeypatch, [], text=full + "\nHorny Mushroo... x1 earned. (Etc)")
+    h.looter.stood_on(["horny-mushroom-cap"])
+    h.looter.cant_pick([_loot("topaz-ore", 1100)])
+    assert set(h.looter.full) == {"Etc"} and h.looter.can_take("horny-mushroom-cap")
+    h.senses.eyes.text = full + "\nTopaz Ore x1 earned. (Etc)"  # (a refused kind taken after all: a slot for it)
+    h.looter.cant_pick([_loot("red-potion", 1200)])
+    assert "Etc" not in h.looter.full and h.looter.can_take("silver-ore")
+
+
 def test_a_kind_is_hers_once_the_looks_show_it_gone_from_the_pile_she_stood_on(monkeypatch):
     """Looter.stood_on with the pile (the hunt's stands): a kind counts as one she holds a stack of (`held`) only once
     the looks after show it gone from that pile (Looter.on_look, after the drop store's: the pile seen without it, or

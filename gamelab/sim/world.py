@@ -542,6 +542,21 @@ def tab_of(kind: str) -> str:
     """The inventory tab an item of `kind` goes into in the simulator: Use for a potion, Etc for the rest (as its
     pickup log says them; behavior.looting.tab_of reads the game data's, which agrees for Tree Dungeon's drops)."""
     return "Use" if kind.endswith("-potion") else "Etc"
+
+
+# The game's pickup log cuts a long item name off with "..." (live on 2026-10-26, tests/fixtures/
+# pickup_log_lines_2026-10-26.json: "Horny Mushroo... x1 earned. (Etc)", "Green Mushroo...", "Arrows for Cros...";
+# "Arrows for Bows", "Orange Potion" and "Emerald Ore" whole): by the px of its font, here by letters, a name of more
+# than LOG_NAME_MAX cut to its first LOG_NAME_CUT (Tree Dungeon's caps as the game cuts them; until the review of
+# 2026-11-01 every name whole, so the looter's reading of the log was never tried on a cut one in the simulator).
+LOG_NAME_MAX = 15
+LOG_NAME_CUT = 13
+
+
+def log_name(kind: str) -> str:
+    """An item of `kind` as the pickup log names it (LOG_NAME_MAX)."""
+    name = kind.replace("-", " ").title()
+    return name if len(name) <= LOG_NAME_MAX else name[:LOG_NAME_CUT].rstrip() + "..."
 # The message bar's line when the game refuses an attack on a rope (live on 2026-10-26: perception.messages); it stays
 # up until another line replaces it (none does in the simulator)
 ROPE_REFUSAL = "That cannot be used while you're on a rope or ladder."
@@ -3386,7 +3401,7 @@ class World:
                 d.gone, d.taken_at, d.taken_by = True, t, "her"
                 self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
                 self.messages.append((t, f"You have gained mesos (+{d.amount or 15})" if d.mesos else
-                                      f"{d.kind.replace('-', ' ').title()} x1 earned. ({tab})"))
+                                      f"{log_name(d.kind)} x1 earned. ({tab})"))
                 self.note(f"picks up {d.kind} at x {d.x:.0f}")
                 if tab is not None:
                     self.tab_kinds.setdefault(tab, {}).setdefault(d.kind, t)

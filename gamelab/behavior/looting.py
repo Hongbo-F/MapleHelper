@@ -15,6 +15,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from maplehelper.ocr.item_names import ITEM_NAMES
+from maplehelper.ocr.parse import match_prefix, parse_loot
+
 from .. import directions, telemetry
 from ..attack.reach import EDGE_MARGIN
 from ..attack.stance import TOO_CLOSE
@@ -59,13 +62,21 @@ FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up
 # earned by the log's word, her pets' too) are still taken from a full tab until one stays under her (`refused`: its
 # stack full too), a kind she doesn't hold needs a slot and isn't. (Taken as hers on the stand alone, as first built, a
 # tab full from the start had every kind she stood on before she learned it taken for hers: 3.0 of her 5.2 stands a run
-# for nothing came after she had, in `--world etc-full`.) Until then any "earned" line of a tab in the read kept it from being marked full, and one refused kind marked
-# every kind of its tab full for TAB_RETRY_S.
+# for nothing came after she had, in `--world etc-full`.) Until then any "earned" line of a tab in the read kept it
+# from being marked full, and one refused kind marked every kind of its tab full for TAB_RETRY_S.
+# From the independent check of 2026-11-01: the "earned" lines' items named by maplehelper's own loot-line parser
+# against the game's item names (`_earned`: maplehelper.ocr.parse.parse_loot, ITEM_NAMES; a cut name the parser leaves
+# open, "Orange Mushro...", the one priced drop it starts, PRICES), where a regex of the name before "x1" read the
+# game's cut names ("Horny Mushroo... x1 earned. (Etc)", live on 2026-10-26: tests/fixtures/
+# pickup_log_lines_2026-10-26.json) as kinds of their own ('horny-mushroo...'), never one she held: her cap top-up into
+# a full Etc tab cleared it. And an "earned" line after the last refusal says its tab has room only for a kind that
+# didn't fit (stuck under her now, or `refused`): one more of a kind she holds a stack of, or may hold from before the
+# run, needs no slot (until then any such line in the read of a tab being learned kept it from being marked full, so
+# her stacks' top-ups, hers or her pets', stalled the learning).
 ITEM_TABS = ("Use", "Etc")
 TAB_RETRY_S = 600.0  # guess
 PICK_SEEN_S = 10.0   # s after a stand the looks have to show a kind gone from the pile she stood on (`on_look`)
-EARNED = re.compile(r"earned\W*\(\s*(equip|use|set-?up|etc|cash)\s*\)", re.I)
-EARNED_KIND = re.compile(r"([A-Za-z][A-Za-z' .-]*?)\s*x\s*\d+\s*earned", re.I)  # ... and the item's name before it
+EARNED = re.compile(r"earned\W*\(\s*(equip|use|set-?up|etc|cash)\s*\)", re.I)  # an "earned" line's tab
 DROPS_LAST = 90    # s remembered drops are worth going back for (they vanish, and others may take them)
 MIN_WALK = 10      # a sweep's stops nearer to her than this aren't walked to: she's there
 # Whether only a look that shows her standing can see a drop spot empty (`standing`). From mid-jump a look's loot
@@ -510,10 +521,12 @@ class Looter:
         always fit, so those are someone else's (drops belong to the killer for a while). Items may be
         too, unless the pickup log says her inventory is full, or items keep staying under her
         (FAILED_PICKS times in a row, with none picked up in between): then their tabs are full (see the top), but a
-        tab the same read has an item earned into, and their items are left, mesos and the rest taken."""
+        tab the same read has an item that didn't fit earned into after the refusal, and their items are left, mesos
+        and the rest taken."""
         now = time.monotonic()
         self.unpickable += [(d.x, d.platform, now) for d in stuck]
         self.h.log(f"  can't pick up {_summary(stuck)} at x {', '.join(f'{d.x:.0f}' for d in stuck)}: left")
+        didnt = {d.item.kind for d in stuck if not d.mesos} | set(self.refused)  # (the kinds that didn't fit)
         kinds = tuple(sorted({d.item.kind for d in stuck if not d.mesos} - set(self.refused)))
         stacked = [k for k in kinds if tab_of(k) in self.full]  # (a kind she holds, of a tab full: its stack full too)
         for k in stacked:
@@ -529,17 +542,15 @@ class Looter:
         refusal = max((i for i, line in enumerate(lines) if says_full(line)), default=-1)
         room = set()
         for i, line in enumerate(lines):
-            if (m := EARNED.search(line)) is None:
+            if (got := _earned(line)) is None:
                 continue
-            tab = m.group(1).replace("-", "").capitalize()
-            name = EARNED_KIND.search(line)
-            kind = kind_of(name.group(1).strip()) if name else None
-            if i > refusal and (kind is None or tab not in self.full or kind not in self.held):
-                room.add(tab)  # (earned after the last refusal: room then, a new kind's slot where it's full)
+            tab, kind = got
+            if i > refusal and kind in didnt:
+                room.add(tab)  # (one that didn't fit earned after the last refusal: a slot for it then)
             if kind is not None:
                 self.held.add(kind)  # (a stack of it with room, hers or her pets')
                 self.refused.pop(kind, None)
-        for tab in sorted(room & set(self.full)):  # (a new kind earned into one: it has room)
+        for tab in sorted(room & set(self.full)):  # (one that didn't fit earned into it: it has room)
             del self.full[tab]
             for k in [k for k in self.refused if tab_of(k) == tab]:
                 del self.refused[k]
@@ -558,6 +569,23 @@ class Looter:
             self._tell(tab, True, why, tuple(k for k in kinds if tab_of(k) == tab))
 
 
+def _earned(line: str) -> tuple[str, str | None] | None:
+    """A pickup log line that says an item was earned: (its tab, the item's kind, None where the line doesn't tell it),
+    None for any other line. The name by maplehelper's loot-line parser against the game's item names (parse_loot,
+    ITEM_NAMES), a cut one it leaves open the one priced drop it starts (PRICES: see ITEM_TABS); the tab as the line says
+    it, else the kind's (`tab_of`: OCR's "(Ete)")."""
+    tab = EARNED.search(line)
+    got = parse_loot(line, ITEM_NAMES)
+    name = got.item if got is not None and got.kind == "item" else None
+    if name and got.cut:
+        name = match_prefix(name, _PRICED)
+    kind = kind_of(name) if name else None
+    if tab is not None:
+        return tab.group(1).replace("-", "").capitalize(), kind
+    return (tab_of(kind), kind) if kind is not None else None
+
+
+_PRICED = tuple(k.replace("-", " ") for k in PRICES)  # (the priced drops' names: `_earned`'s cut names)
 _TABS: dict[str, str] | None = None
 
 
