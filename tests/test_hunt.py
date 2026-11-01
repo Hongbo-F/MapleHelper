@@ -428,6 +428,28 @@ def test_on_another_map_a_drop_is_valuable_at_twice_its_bronze_coin():
     assert h._valuable_pile(_scene()) is topaz
 
 
+def test_a_pile_is_rushed_and_put_first_only_for_what_she_can_take():
+    """The independent check of 2026-11-01: rule 6a went by the pile's dearest drop and its whole worth, and EXP before
+    loot by its whole worth, a full tab's items too: with her Etc tab full she rushed a pile of a coin and an ore for
+    the coin. Now by the dearest drop she can take (Hunt._dearest: looting.Looter.can_take) and her worth of it
+    (Hunt._worth): on Tree Dungeon (a bronze coin 33.4, valuable from 66.8) a coin and a Silver Ore (80) with Etc full
+    is neither rushed nor put ahead of a Horny Mushroom in reach; with room, both; a Magic Potion (Use) still is."""
+    from gamelab.behavior.looting import Worth, tab_of
+    tree_worth = Worth({"bronze": 33.4, "gold": 51.5})
+    ore = _pile(20, hers=False, items=("mesos", "silver-ore"), worth=113.4, dearest=80.0, each=(33.4, 80.0), mesos=True)
+    rival = SimpleNamespace(rival=True, near=lambda x, y, dx, dy: True, x=120.0)
+    for full, rushed in ((set(), True), ({"Etc"}, False)):
+        h = _shooter([ore], kill_s=11.0, players=[rival])
+        h.valuable, h.h.drops.value = tree_worth.valuable, tree_worth
+        h.h.looter = SimpleNamespace(inventory_full=bool(full), items_full=False,
+                                     can_take=lambda k, full=full: k == "mesos" or tab_of(k) not in full)
+        assert (h._valuable_pile(_scene()) is ore) == rushed and h._dearest(ore) == (80.0 if rushed else 33.4)
+        assert h._loot_first(_scene(), ore, [_horny()]) == rushed
+    potion = _pile(5, items=("mesos", "magic-potion"), worth=283.4, dearest=250.0, each=(33.4, 250.0), mesos=True)
+    h.h.drops.known = [potion]
+    assert h._valuable_pile(_scene()) is potion and h._dearest(potion) == 250.0
+
+
 @pytest.mark.skipif(not (mapdata.CACHE / "10002073.json").exists() and not (COPY / "Map").is_dir(),
                     reason="needs Tree Dungeon's map data")
 def test_a_hunter_on_tree_dungeon_and_its_hunt_go_by_the_maps_worth():

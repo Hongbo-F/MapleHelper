@@ -475,6 +475,7 @@ class Pile:
     items: tuple[str, ...] = ()   # what the latest look that saw it saw in it (one kind per drop) ...
     worth: float | None = None    # ... what those are worth together (looting.Worth); None until a look sees it ...
     dearest: float | None = None  # ... and the dearest of them on its own
+    each: tuple[float, ...] = ()  # ... and what each is worth, one to an item (behavior.hunt: the dearest she can take)
     xs: tuple[float, ...] = ()    # ... and where each lay (map x: the loot sweep's stand covers them)
     unseen: float = PILE_WORTH    # what it's worth before a look sees it: a bronze coin on its map, or (her kill's) its
                                   # kind's expected drops (looting.expected_worth)
@@ -587,7 +588,7 @@ class DropStore:
                     continue
                 p.status, p.last_seen, p.empty_since = "seen", t, None
                 p.mesos = p.mesos or any(d.mesos for d in inside)
-                p.items, p.worth, p.dearest = _contents(inside, self.value)
+                p.items, p.worth, p.dearest, p.each = _contents(inside, self.value)
                 p.xs = tuple(d.x for d in inside)
             elif ground and t - p.since >= SETTLE and in_view(p.platform, p.x) \
                     and (p.last_seen is None or t > p.last_seen):
@@ -614,7 +615,7 @@ class DropStore:
             self.piles.append(Pile(mid, d.y, d.platform, t, hers=False, mesos=any(e.mesos for e in group),
                                    last_seen=t, status="seen", unseen=self.value.coins["bronze"]))
             pile = self.piles[-1]
-            pile.items, pile.worth, pile.dearest = _contents(group, self.value)
+            pile.items, pile.worth, pile.dearest, pile.each = _contents(group, self.value)
             pile.xs = tuple(e.x for e in group)
 
 
@@ -622,9 +623,9 @@ def _in_pile(p: Pile, d: Loot) -> bool:
     return p.platform == d.platform and abs(p.x - d.x) <= LOOT_REACH
 
 
-def _contents(seen: list[Loot], value: Worth = FIRST) -> tuple[tuple[str, ...], float, float]:
-    """The drops seen in a pile: their kinds, what they're worth together (`value`: the map's looting.Worth), and the
-    dearest's worth."""
-    each = [value(d.item.kind, d.item.coin) for d in seen]
-    return tuple(d.item.kind for d in seen), float(sum(each)), float(max(each, default=0.0))
+def _contents(seen: list[Loot], value: Worth = FIRST) -> tuple[tuple[str, ...], float, float, tuple[float, ...]]:
+    """The drops seen in a pile: their kinds, what they're worth together (`value`: the map's looting.Worth), the
+    dearest's worth, and each one's."""
+    each = tuple(float(value(d.item.kind, d.item.coin)) for d in seen)
+    return tuple(d.item.kind for d in seen), float(sum(each)), float(max(each, default=0.0)), each
 

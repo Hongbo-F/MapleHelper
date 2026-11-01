@@ -1496,27 +1496,41 @@ class Hunt:
             moves.ran(time.monotonic(), abs(senses.localizer.to_map(dot)[0] - x0) >= RUN_SEEN)
 
     def _valuable_pile(self, s: Scene) -> Pile | None:
-        """Rule 6a: of the piles seen to hold a drop worth `valuable` mesos or more (looting.Worth: Pile.dearest),
-        VALUABLE_TRAVEL s away at most and gone for at once fewer than VALUABLE_TRIES times, the one worth the most
-        per second of travel; None while she's going for one already. Only one where nothing would meet her standing
-        on it that she can't shoot first (`_unsafe`)."""
+        """Rule 6a: of the piles seen to hold a drop she can take worth `valuable` mesos or more (looting.Worth:
+        `_dearest`), VALUABLE_TRAVEL s away at most and gone for at once fewer than VALUABLE_TRIES times, the one worth
+        the most to her (`_worth`) per second of travel; None while she's going for one already. Only one where nothing
+        would meet her standing on it that she can't shoot first (`_unsafe`). (Until the independent check of
+        2026-11-01 by the dearest drop and the worth of all it held, a full tab's items too: with Etc full she rushed a
+        pile of a coin and an ore for the coin.)"""
         if self.obj is not None and self.obj.why == "valuable pile":
             return None
         best = None
         for p in self.h.drops.known:
-            if p.dearest is None or p.dearest < self.valuable or p.rushed >= VALUABLE_TRIES or not self._candidate(p):
+            dear = self._dearest(p)
+            if dear is None or dear < self.valuable or p.rushed >= VALUABLE_TRIES or not self._candidate(p):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
-            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or p.worth / t > best[0]) and not self._unsafe(s, p):
-                best = (p.worth / t, p)
+            worth = self._worth(p)
+            if t <= VALUABLE_TRAVEL + PICK_S and (best is None or worth / t > best[0]) and not self._unsafe(s, p):
+                best = (worth / t, p)
         return None if best is None else best[1]
+
+    def _dearest(self, p: Pile) -> float | None:
+        """The worth of the dearest drop seen in pile `p` that she can take (Pile.dearest but for the items of a full
+        tab: looting.Looter.can_take), None with none (or none seen)."""
+        looter = self.h.looter
+        can = getattr(looter, "can_take", None)
+        if can is None or not looter.inventory_full or p.dearest is None:
+            return p.dearest
+        each = p.each if len(p.each) == len(p.items) else tuple(self.h.drops.value(k) for k in p.items)
+        return max((w for k, w in zip(p.items, each) if k == MESOS or can(k)), default=None)
 
     def _loot_first(self, s: Scene, p: Pile, monsters, say: bool = True) -> bool:
         """EXP before loot: whether pile `p` goes ahead of shooting what's in reach of `monsters` from where she stands
         in look `s` (_shoot_rate). With nothing in reach, it does. Else only if what waiting would likely lose of it (its
-        worth x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso) is more than the EXP she'd make
-        from what's in reach over the trip there and back (and PICK_S on it). Said in her log when the answer for a pile
-        changes (`say`)."""
+        worth to her x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso: `_worth`, a full tab's
+        items worth nothing) is more than the EXP she'd make from what's in reach over the trip there and back (and
+        PICK_S on it). Said in her log when the answer for a pile changes (`say`)."""
         if not EXP_FIRST:
             return True
         rate, busy = self._shoot_rate(s, monsters)
@@ -1525,14 +1539,15 @@ class Hunt:
         risk = self._at_risk(s, p, busy)
         to = self._travel_to_pile(s, p)
         trip = 2 * to + PICK_S
-        first = risk * p.value * MESO_EXP > rate * trip
+        worth = self._worth(p)  # (but for a full tab's items: the independent check of 2026-11-01)
+        first = risk * worth * MESO_EXP > rate * trip
         if say and self._loot_said.get(id(p)) != first:
             self._loot_said[id(p)] = first
-            what = (f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {p.value:.0f}, at risk "
+            what = (f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {worth:.0f}, at risk "
                     f"{risk:.0%}) against {rate:.1f} EXP a second in reach for {busy:.0f} s, {trip:.1f} s there and back")
             self.log(what + (": the pile first" if first else ": shooting first"))
             if telemetry.recording():
-                telemetry.emit("event", kind="loot_first", first=first, worth=round(p.value, 1), risk=round(risk, 2),
+                telemetry.emit("event", kind="loot_first", first=first, worth=round(worth, 1), risk=round(risk, 2),
                                rate=round(rate, 2), busy=round(busy, 1), trip=round(trip, 1), platform=p.platform,
                                x=round(p.x))
         return first
