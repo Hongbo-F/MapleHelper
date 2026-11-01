@@ -124,6 +124,41 @@ def test_the_next_stop_goes_round_the_loop_and_skips_what_she_has_just_emptied()
     assert info["skipped"][0]["due"] == pytest.approx(1.5 + patrol.refill_median() - 2.0, abs=0.1)
 
 
+def test_her_drops_by_a_stop_count_in_what_it_gives_next():
+    """grind.DROPS_IN_CHOICE (2026-10-31: "we shouldn't let loot expire"): the stop she'd skip as just emptied isn't,
+    with her drops by it worth more than SKIP_FULL of what it holds full (Patrol.choose's `bonus`, said in the choice:
+    info["drops"]); the grind's bonus is the loot sweep's round trip from the stop's place over the latest solve's spots
+    (60 mesos lying there: 30 EXP at MESO_EXP less her stand at the loop's rate), nothing for one over its budget (and
+    no bonus at all without spots)."""
+    model, ids, far, p = _column()
+    p.belief.update(0.0, Memory(model))
+    p.replan(0.0)
+    order = list(p.plan.stops)
+    first, _ = p.choose(0.0, ids[0], 150.0, current=p.stop_on(ids[0]))
+    nxt, _ = p.choose(1.0, p.platform_of(first), 150.0, current=first)
+    after = order[(order.index(nxt) + 1) % len(order)]
+    q = next(i for i, _ in p.stops[after].cover)
+    p.belief.empty_since[q] = 1.5
+    assert p.choose(2.0, p.platform_of(nxt), 150.0, current=nxt, peek=True)[0] != after
+    j, info = p.choose(2.0, p.platform_of(nxt), 150.0, current=nxt, peek=True,
+                       bonus=lambda k: 25.0 if k == after else 0.0)
+    assert j == after and info["drops"] == 25.0 and "25 of it her drops" in grind.choice_text(info)
+    # The grind's bonus: the sweep's round trip from each stop's place over the latest solve's spots.
+    from gamelab.behavior import sweep
+    from gamelab.behavior.hunt import MESO_EXP
+    g = object.__new__(Grind)
+    g.patrol = p
+    st = p.stops[after]
+    g._arrive = lambda a, ax, b, bx: abs(bx - ax) / 149.0 if a == b else 30.0
+    g._spots_at = (2.0, [sweep.Spot("coins", st.platform, st.x + 10.0, 60.0, 0.4)])
+    s = SimpleNamespace(t=2.5)
+    bonus = g._drops_bonus(s)
+    gain = 60.0 * MESO_EXP - p.plan.rate * (0.4 + 2 * 10.0 / 149.0)
+    assert bonus(after) == pytest.approx(gain) and bonus(p.stop_on(far)) == 0.0
+    g._spots_at = (2.0, [])
+    assert g._drops_bonus(s) is None
+
+
 def _beside(off: float):
     """Two areas side by side: the loop's on the left (three platforms of one Horny Mushroom each, 2 s apart), a fourth
     platform `off` s to the right with two Horny Mushroom points and a Green's; the loop taken up, her at its first

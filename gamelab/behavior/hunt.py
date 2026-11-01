@@ -1179,6 +1179,7 @@ class Hunt:
         if not hasattr(self, "_sweeper"):  # (tests make a hunt without __init__)
             self._sweeper, self._pile_of, self._stood, self._sweep_said = sweep.Sweeper(), {}, {}, None
         spots_, out = self._spots(s)
+        self._spots_at = (getattr(s, "t", None), spots_)  # (the grind's choice of its next stop counts their worth)
         if not spots_:  # (nothing to pick up: no itinerary, nor her time's price worked out)
             self._sweeper.drop()
             self._swept_for, self._swept = key, None

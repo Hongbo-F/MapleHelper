@@ -57,8 +57,8 @@ from ..localization.monsters import Monster
 from ..localization.scene import Scene
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
-from . import fight
-from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
+from . import fight, sweep
+from .hunt import MESO_EXP, PASSING_S, Hunt, Objective, Visit, bar_exp
 from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
@@ -115,6 +115,13 @@ TOUCH_NEAR = 100.0     # units between her body and a monster's at most for its 
 # stops weighing danger and the HP priced as the hunt loop's too (behavior.patrol: STOP_DANGER, HP_PRICE, HP_PRIOR_S,
 # cmp_J.txt) 77.6 touches, 50.0 hurt, 6.6 bars of HP (8.0), 20.3 potions, 359 EXP a minute.
 STAY_NET = True
+# Whether the next stop's choice (Patrol.choose, `_instead`) counts what a visit to each stop would pick up of her drops
+# (`_drops_bonus`: the loot sweep's round trip from its place, sweep.plan at the loop's rate, MESO_EXP, its budget),
+# from 2026-10-31: the user's "we shouldn't let loot expire and we shouldn't wait too long and take a long detour to
+# pick them up". In 15-minute runs of the harness's standard grind 11% of her drops' worth expired lying in her store,
+# every one more than the sweep's CAND_S off her way or over its budget for most of its life, on platforms her loop
+# didn't pass: a stop by them, otherwise as good, is the cheap way to them. False: the stops' monsters alone, as before.
+DROPS_IN_CHOICE = True
 
 
 class Grind(Hunt):
@@ -411,9 +418,28 @@ class Grind(Hunt):
         if a is None or a[1] != heading or not 0 <= s.t - a[0] < RECHOOSE_S:
             skip = [g for g, until in self._skip.items() if until > time.monotonic()]
             j, info = self.patrol.choose(s.t, s.platform.id, s.where.x, current=self.stop if heading is None else None,
-                                         skip=skip, heading=heading, peek=True)
+                                         skip=skip, heading=heading, peek=True, bonus=self._drops_bonus(s))
             self._alt = a = (s.t, heading, j, info)
         return a[2], a[3]
+
+    def _drops_bonus(self, s: Scene):
+        """DROPS_IN_CHOICE: what a visit to stop j would pick up of her drops, in EXP (Patrol.choose's `bonus`): the
+        loot sweep's round trip from the stop's place (sweep.plan from it back to it, its budget, at the loop's rate
+        and MESO_EXP), over the pick spots of the hunt loop's latest solve (`_spots`, its guards and survival as of
+        then: within RECHOOSE_S of look `s`); None where there are none."""
+        got = getattr(self, "_spots_at", None)
+        if not DROPS_IN_CHOICE or got is None or not got[1] or got[0] is None or not 0 <= s.t - got[0] <= RECHOOSE_S:
+            return None
+        spots_, plan, memo = got[1], self.patrol.plan, {}
+        rate = 0.0 if plan is None else max(0.0, plan.rate)
+
+        def bonus(j: int) -> float:
+            if j not in memo:
+                st = self.patrol.stops[j]
+                it = sweep.plan(spots_, (st.platform, st.x), (st.platform, st.x), rate, self._arrive, MESO_EXP)
+                memo[j] = max(0.0, it.value)
+            return memo[j]
+        return bonus
 
     def _leaving(self, s: Scene, held: list[Monster]) -> str | None:
         """Why she leaves the stop now, or None to stay (see the top)."""

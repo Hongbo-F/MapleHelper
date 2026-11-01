@@ -994,11 +994,14 @@ class Patrol:
         return exp * (1.0 - self.hp_price * self.kill_s * self.hp_rate(s.platform, s.x))
 
     def choose(self, t: float, here: int | None, x: float | None, current: int | None = None,
-               skip: Iterable[int] = (), heading: int | None = None, peek: bool = False) -> tuple[int | None, dict]:
+               skip: Iterable[int] = (), heading: int | None = None, peek: bool = False,
+               bonus: Callable[[int], float] | None = None) -> tuple[int | None, dict]:
         """The next stop from (platform `here`, map x `x`), having been at stop `current`, never one on a platform in
         `skip` (see the top): (its index, what decided it, for the log and the telemetry). `heading`: the stop she's
         on her way to, which stands in for the loop's next (only a pull takes her elsewhere); `peek`: what she'd do,
-        her place in the loop left as it is (a check on the way, a replay)."""
+        her place in the loop left as it is (a check on the way, a replay); `bonus(j)`: EXP a visit to stop j gives
+        beside its monsters (behavior.grind: her drops a sweep from its place would pick up), counted in what it's
+        expected to give and in what she has seen there."""
         skip = set(skip)
         if self.plan is None:
             self.replan(t, force=True)
@@ -1010,7 +1013,7 @@ class Patrol:
         if current in loop:  # from the loop's stop she was at; from a pile there, on from the stop its detour went to
             at_loop = (loop.index(pulled[1]) - 1) % len(loop) if pulled is not None and pulled[0] == current \
                 else loop.index(current)
-        options = {}
+        options, drops = {}, {}
         for j in range(len(self.stops)):
             s = self.stops[j]
             if j == current or s.platform in skip:
@@ -1024,6 +1027,10 @@ class Patrol:
             if far is None:
                 continue
             exp, seen, shoot, full = self.expect(j, t + far)
+            extra = bonus(j) if bonus is not None else 0.0
+            if extra > 0.0:
+                drops[j] = extra
+                exp, seen = exp + extra, seen + extra
             options[j] = (far, exp, seen, exp / (far + shoot + STOP_S), full)
         order = [loop[(at_loop + k) % len(loop)] for k in range(1, len(loop) + 1)]
         order = [j for j in order if j in options] or [j for j in sorted(options, key=lambda j: options[j][0])]
@@ -1091,6 +1098,8 @@ class Patrol:
                 "expected": round(exp, 1), "seen": round(seen, 1), "gain": round(gain, 2),
                 "skipped": [{"stop": self.stops[j].platform, "expected": round(options[j][1], 1),
                              "due": None if (d := self.due(j, t)) is None else round(d, 1)} for j in skipped]}
+        if nxt in drops:
+            info["drops"] = round(drops[nxt], 1)
         if pulled_from is not None:
             info["instead_of"] = {"stop": self.stops[pulled_from].platform, "gain": round(options[pulled_from][3], 2)}
             info["detour"], info["loop_rate"] = round(best[2], 1), round(rate, 2)
@@ -1103,8 +1112,9 @@ class Patrol:
 
 def choice_text(info: dict) -> str:
     """A next stop's choice (Patrol.choose's info) for the log."""
+    drops = f", {info['drops']:.0f} of it her drops" if info.get("drops") else ""
     out = (f"stop {info['stop']} at x {info['x']:.0f}, {info['travel']:.1f} s away: {info['expected']:.0f} EXP "
-           f"expected ({info['seen']:.0f} seen), {info['gain']:.1f} EXP/s with its kills; {info['why']}")
+           f"expected ({info['seen']:.0f} seen{drops}), {info['gain']:.1f} EXP/s with its kills; {info['why']}")
     if "instead_of" in info:
         o = info["instead_of"]
         out += (f" (not stop {o['stop']}: a {info['detour']:.1f} s detour on the way to stop {info['ahead']}, the loop's "
