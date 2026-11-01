@@ -940,3 +940,52 @@ def test_a_pile_may_add_to_her_way_by_its_age_and_less_where_it_is_more_dangerou
     allow = {h._pile_of[sp.key] is by_point: sp.allow for sp in found}
     assert allow == {True: hunt.ALLOW_OLD, False: hunt.ALLOW_FRESH} and not out
     assert hunt.bar_exp(774.0) == 774.0 / hunt.HP_PER_MESO * hunt.MESO_EXP == 193.5
+
+
+def test_in_a_lull_every_pile_may_take_the_wait_but_one_more_dangerous_than_where_she_stands():
+    """The hunt loop's lull (`_sweep_terms`' floor: the wait for the respawn, her time worth nothing until then): every
+    pile may take the wait, but one where the danger is SAFER_MARGIN over where she stands keeps ALLOW_OLD (the review
+    of 2026-11-01: the wait lifted that cap too), and the itinerary has the wait for its budget, without sweep.MOST_S;
+    out of a lull, the piles' own allowances and MOST_S."""
+    m, ground, spot = _ground()
+    now = time.monotonic()
+    by_point = Pile(790.0, 500.0, ground, now - 3.0, True, status="seen", xs=(785.0, 795.0), last_seen=now)
+    by_her = Pile(960.0, 480.0, spot, now - 3.0, True, status="seen", xs=(955.0, 965.0), last_seen=now)
+    h = _priced(m, [by_point, by_her], travel=0.1)
+    h._sweeper, h._pile_of, h._stood, h._sweep_said = sweep.Sweeper(), {}, {}, None
+    got = {}
+
+    def solve(spots, here, dest, arrive, budget=None, most=sweep.MOST_S):
+        got.update(allow={h._pile_of[sp.key] is by_point: sp.allow for sp in spots}, budget=budget, most=most)
+        return sweep.Itinerary()
+    h._sweeper.solve = solve
+    for terms, want in (((8.0, 8.0), {"allow": {True: hunt.ALLOW_OLD, False: 8.0}, "budget": 8.0, "most": None}),
+                        ((None, 0.0), {"allow": {True: hunt.ALLOW_OLD, False: hunt.ALLOW_FRESH}, "budget": None,
+                                       "most": sweep.MOST_S})):
+        h._sweep_terms = lambda s, dest, terms=terms: terms
+        h._sweep(_on(spot, 1060.0, m), (spot, 1060.0), say=False)
+        assert got == want
+
+
+def test_with_a_tab_full_a_pile_may_add_the_share_of_its_allowance_she_can_take_of_its_worth():
+    """The review of 2026-11-01: with her Etc tab full (her drops as live, Meat and her pets) the allowances alone had
+    her hurt at piles 10.5 times a run against 4.8 before, for no more loot. A pile's allowance now goes by the share of
+    its worth she can take (`_share`: `_worth` against Pile.value): a coin and a cap with Etc full the coin's share of
+    it, a Horny Mushroom's pile not seen yet its drops' but the Etc items' (looting.expected_worth); with room for all
+    of it, the whole allowance."""
+    from gamelab.behavior.looting import Looter, Worth, expected_worth, tab_of
+    tree = Worth({"bronze": 33.4, "gold": 51.5})
+    now = time.monotonic()
+    both = Pile(100.0, 0.0, 2, now - 3.0, True, mesos=True, items=("mesos", "horny-mushroom-cap"), status="seen",
+                worth=33.4 + 22.0, xs=(95.0, 105.0), last_seen=now)
+    unseen = _pile(3, kind="horny-mushroom", unseen=expected_worth("horny-mushroom", tree))
+    h = _line_hunt([both, unseen])
+    looter = Looter(SimpleNamespace(log=lambda m: None))
+    h.h.looter, h.h.drops.value = looter, tree
+    s = _on_line(1, 0.0)
+    assert {sp.key: sp.allow for sp in h._spots(s)[0]} == {both.key: hunt.ALLOW_FRESH, unseen.key: hunt.ALLOW_FRESH}
+    looter.full = {"Etc": (now, "test")}
+    no_etc = expected_worth("horny-mushroom", tree, lambda k: tab_of(k) != "Etc")
+    allow = {sp.key: sp.allow for sp in h._spots(s)[0]}
+    assert allow[both.key] == pytest.approx(hunt.ALLOW_FRESH * 33.4 / 55.4)
+    assert allow[unseen.key] == pytest.approx(hunt.ALLOW_FRESH * no_etc / unseen.value) and no_etc < unseen.value

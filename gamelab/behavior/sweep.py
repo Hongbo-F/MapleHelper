@@ -17,17 +17,18 @@ pick up the most of
 spot's own `allow` (s it may add to her way on its own: the hunt's, by the pile's age and the danger there,
 Hunt._allow), and the whole itinerary's `extra` (the time the route through them and on to where she's going takes over
 going there straight, the landings waited for in it, not its guards' kill times: those are EXP) within the sum of its
-spots' allowances, and within `budget` where one is given (the hunt loop's lull and its way out). Of those that pick up
-as much (to GAIN_TIE), the quickest. Until 2026-11-01 the most of worth x MESO_EXP and the guards' EXP less her time's
-worth (the loop's rate x extra) within a budget of max(BUDGET_MIN, BUDGET_SHARE x the straight way), each spot CAND_S (5
-s) at most: the user wasn't sure of that exchange ("My idea is just picking up mesos and items as we kill mobs"), and at
-a stop its 2 s budget never fetched a fresh coin 160 units off (the independent check of 2026-11-01, finding 2). Every
-spot's stand is checked against the monsters that count where she'd stand, each walking the way perception says it heads
-at its kind's speed from the game data, turned back at its platform's ends (`meets`: her body's box against theirs over
-the stand and STAND_PAST_S more); one that meets a monster she can shoot first from where she is has the shot in its
-time (a Guard: "kill all the mobs that are in the way"), one that meets another is left out for this solve ("try not to
-hit by mobs just for picking up loots"). Her legs between spots are the navigator's trips, planned and replanned at
-every state against every monster as any trip (control.navigator: REPLAN, its shots first at what's in its way).
+spots' allowances and MOST_S, and within `budget` where one is given (the hunt loop's lull, without MOST_S, and its way
+out). Of those that pick up as much (to GAIN_TIE), the quickest. Until 2026-11-01 the most of worth x MESO_EXP and the
+guards' EXP less her time's worth (the loop's rate x extra) within a budget of max(BUDGET_MIN, BUDGET_SHARE x the
+straight way), each spot CAND_S (5 s) at most: the user wasn't sure of that exchange ("My idea is just picking up mesos
+and items as we kill mobs"), and at a stop its 2 s budget never fetched a fresh coin 160 units off (the independent
+check of 2026-11-01, finding 2). Every spot's stand is checked against the monsters that count where she'd stand, each
+walking the way perception says it heads at its kind's speed from the game data, turned back at its platform's ends
+(`meets`: her body's box against theirs over the stand and STAND_PAST_S more); one that meets a monster she can shoot
+first from where she is has the shot in its time (a Guard: "kill all the mobs that are in the way"), one that meets
+another is left out for this solve ("try not to hit by mobs just for picking up loots"). Her legs between spots are the
+navigator's trips, planned and replanned at every state against every monster as any trip (control.navigator: REPLAN,
+its shots first at what's in its way).
 
 Solved exactly in its travel: of at most MAX_CAND candidates (the most worth for their insertion's time first, each
 alone within its allowance), a dynamic program over subsets with the last spot visited (the least time to have picked up
@@ -52,6 +53,12 @@ from dataclasses import dataclass, field
 BUDGET_MIN = 2.0
 BUDGET_SHARE = 0.5
 ALLOW = BUDGET_MIN   # s a spot may add to her way where its maker gives none (Spot.allow)
+# s an itinerary may add to her way at most, its guards' kills not counted, whatever its spots' allowances come to
+# (`plan`'s `most`; None: their sum alone, the hunt loop's lull): two fresh piles' (hunt.ALLOW_FRESH), from the review
+# of 2026-11-01 ("we shouldn't wait too long and take a long detour to pick them up"): their sum alone (up to MAX_CAND x
+# 3 s) had her plan +11.6 and then +18.2 s on a 2.6 s way to her next stop for 260 mesos (the harness's seed 17 at 136
+# s), over 10 s in 1 of 8 of its runs of 5 minutes and in 3 of 8 with her pets. A guess, measured in the README.
+MOST_S = 6.0
 MAX_CAND = 8         # candidates at most (the dynamic program's 2^8 sets x 8 ends)
 KEEP_SHARE = 0.2     # the itinerary she's on is kept unless another picks up this much more ...
 KEEP_S = 0.5         # ... while it costs her way no more than this over its allowances
@@ -157,12 +164,12 @@ def budget_for(direct: float) -> float:
 
 
 def plan(spots: list[Spot], here: tuple[int, float], dest: tuple[int, float] | None, arrive: Arrive,
-         budget: float | None = None) -> Itinerary:
+         budget: float | None = None, most: float | None = MOST_S) -> Itinerary:
     """The best itinerary through `spots` from `here` (platform, x) to `dest` (platform, x; None: nowhere after, the
     route ends at its last spot), by her route times `arrive(platform, x, platform, x)` (s, or None: no way): the most
     mesos likely picked up, each spot within its `allow` of her way on its own and all of them within the sum of
-    theirs (their guards' kill times not counted), and within `budget` s more than the straight way where one is given;
-    of those as good (GAIN_TIE), the quickest. The empty itinerary if none fits."""
+    theirs and `most` (None: the sum alone; their guards' kill times not counted), and within `budget` s more than the
+    straight way where one is given; of those as good (GAIN_TIE), the quickest. The empty itinerary if none fits."""
     direct = 0.0 if dest is None else (arrive(*here, *dest) or 0.0) if (here[0], here[1]) != dest else 0.0
     out = Itinerary(direct=direct, budget=budget)
     memo: dict = {}
@@ -225,7 +232,7 @@ def plan(spots: list[Spot], here: tuple[int, float], dest: tuple[int, float] | N
     chosen, value, extra, key = None, 0.0, 0.0, None
     for mask in range(1, 1 << n):
         each = [cands[k] for k in range(n) if mask & (1 << k)]
-        allowed, clear = sum(sp.allow for sp in each), sum(sp.clear_s for sp in each)
+        allowed, clear = _cap(sum(sp.allow for sp in each), most), sum(sp.clear_s for sp in each)
         for j, (leave, order, gain) in best[mask].items():
             after = on(places[j])
             if after is None:
@@ -252,11 +259,15 @@ def plan(spots: list[Spot], here: tuple[int, float], dest: tuple[int, float] | N
     return out
 
 
+def _cap(allowed: float, most: float | None) -> float:
+    return allowed if most is None else min(allowed, most)
+
+
 def again(it: Itinerary, spots: list[Spot], here: tuple[int, float], dest: tuple[int, float] | None,
-          arrive: Arrive) -> Itinerary | None:
+          arrive: Arrive, most: float | None = MOST_S) -> Itinerary | None:
     """Itinerary `it`'s order of spots as they are now (`spots`, by key; None if one of them is gone from it or no longer
-    has a way, or it now costs her way more than its allowances and KEEP_S), from `here` on to `dest`: its times, extra
-    and value again."""
+    has a way, or it now costs her way more than its allowances, `most` at most, and KEEP_S), from `here` on to `dest`:
+    its times, extra and value again."""
     by = {sp.key: sp for sp in spots}
     if any(k not in by for k in it.keys()):
         return None
@@ -276,7 +287,7 @@ def again(it: Itinerary, spots: list[Spot], here: tuple[int, float], dest: tuple
     if after is None:
         return None
     kept = Itinerary(stops, clock + after - direct, gain, direct, it.budget)
-    return None if kept.extra - kept.clear > kept.allowed + KEEP_S else kept
+    return None if kept.extra - kept.clear > _cap(kept.allowed, most) + KEEP_S else kept
 
 
 class Sweeper:
@@ -287,11 +298,11 @@ class Sweeper:
         self.dest: tuple[int, float] | None = None
 
     def solve(self, spots: list[Spot], here: tuple[int, float], dest: tuple[int, float] | None, arrive: Arrive,
-              budget: float | None = None) -> Itinerary:
-        new = plan(spots, here, dest, arrive, budget)
+              budget: float | None = None, most: float | None = MOST_S) -> Itinerary:
+        new = plan(spots, here, dest, arrive, budget, most)
         cur = self.current
         if cur is not None and cur.stops and self.dest == dest and new.keys() != cur.keys():
-            kept = again(cur, spots, here, dest, arrive)
+            kept = again(cur, spots, here, dest, arrive, most)
             if kept is not None:
                 kept.budget = budget
             if kept is not None and kept.value > 0.0 and (budget is None or kept.extra <= budget + KEEP_S) \

@@ -1294,9 +1294,11 @@ class Hunt:
             self._swept_for, self._swept = key, None
             return None
         budget, floor = self._sweep_terms(s, dest)
-        if floor > 0.0:  # (a lull's: every pile may take its wait)
-            spots_ = [replace(sp, allow=max(sp.allow, floor)) for sp in spots_]
-        it = self._sweeper.solve(spots_, (s.platform.id, s.where.x), dest, self._arrive, budget)
+        if floor > 0.0:  # (a lull's: every pile may take its wait, but one more dangerous than where she is: until the
+            # review of 2026-11-01 that one too, SAFER_MARGIN's cap lifted)
+            spots_ = [sp if sp.key in self._riskier else replace(sp, allow=max(sp.allow, floor)) for sp in spots_]
+        it = self._sweeper.solve(spots_, (s.platform.id, s.where.x), dest, self._arrive, budget,
+                                 None if floor > 0.0 else sweep.MOST_S)  # (a lull's wait its budget alone)
         it.out.update(out)
         self._swept_for, self._swept = key, it.first
         said = (it.keys(), dest)
@@ -1376,7 +1378,7 @@ class Hunt:
         stands: attack.danger with the look's monsters)."""
         now = time.monotonic()
         out, found = {}, []
-        self._pile_of = {}
+        self._pile_of, self._riskier = {}, set()  # (the piles capped for their danger: a lull's wait doesn't lift it)
         d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
         here = None
         if d is not None and d.any and s.platform is not None and s.where is not None:
@@ -1398,12 +1400,26 @@ class Hunt:
                 out[p.key] = "unsafe: " + why
                 continue
             self._pile_of[p.key] = p
-            allow = self._allow(p, now)
+            worth = self._worth(p)
+            allow = self._allow(p, now) * self._share(p, worth)
             if here is not None and d.at(p.platform, (lo + hi) / 2, s.monsters) > here + SAFER_MARGIN:
                 allow = min(allow, ALLOW_OLD)  # (more dangerous there than where she is: on her way only)
-            found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, self._worth(p), stand, lands,
+                self._riskier.add(p.key)
+            found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, worth, stand, lands,
                                     (lambda dt, p=p: p.still(now, dt)), guards, allow))
         return found, out
+
+    def _share(self, p: Pile, worth: float) -> float:
+        """The share of pile `p`'s worth (Pile.value) that she can take (`worth`: `_worth`'s, a full tab's items
+        nothing): 1 with room for all of it (her inventory by tab, looting.Looter.can_take). Her allowance of a pile
+        goes by it (`_spots`: what she'd go out of her way for is what she can take of it), from the review of
+        2026-11-01: with her Etc tab full (her drops as live, Meat and her pets, 12 seeds of 5 minutes) the allowances
+        alone had her hurt at piles 10.5 times a run against 4.8 with the exchange of mesos for EXP before, for no more
+        loot."""
+        looter = self.h.looter
+        if not looter.inventory_full or p.value <= 0.0:
+            return 1.0
+        return min(1.0, max(0.0, worth / p.value))
 
     def _about(self, s: Scene, pid: int, xs: tuple[float, ...] = ()) -> tuple[list[Monster], list[Monster]]:
         """The monsters that count as a danger (attack.danger) on platform `pid` as of look `s`, and those on a platform

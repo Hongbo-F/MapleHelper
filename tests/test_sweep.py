@@ -27,9 +27,10 @@ def _spot(key, x, worth=30.0, platform=1, stand=0.3, lands=0.0, still=None, guar
     return Spot(key, platform, x, worth, stand, lands, still or (lambda dt: 1.0), tuple(guards), allow)
 
 
-def _brute(spots, here, dest, arrive, budget=None):
+def _brute(spots, here, dest, arrive, budget=None, most=sweep.MOST_S):
     """The best itinerary's (value, extra) by trying every order of every subset of the spots each within its allowance
-    on its own (the objective of sweep.plan: the most mesos to GAIN_TIE, then the least time)."""
+    on its own (the objective of sweep.plan: the most mesos to GAIN_TIE, then the least time; their allowances' sum
+    `most` at most)."""
     direct = 0.0 if dest is None else arrive(*here, *dest)
 
     def on(p):
@@ -45,7 +46,8 @@ def _brute(spots, here, dest, arrive, budget=None):
                 gain += sp.worth * sp.still(start)
                 at, clock = (sp.platform, sp.x), start + sp.stand
             extra = clock + on(at) - direct
-            if extra - sum(sp.clear_s for sp in order) > sum(sp.allow for sp in order) + 1e-9:
+            allowed = sum(sp.allow for sp in order)
+            if extra - sum(sp.clear_s for sp in order) > (allowed if most is None else min(allowed, most)) + 1e-9:
                 continue
             if budget is not None and extra > budget + 1e-9:
                 continue
@@ -71,8 +73,9 @@ def test_the_exact_solve_is_brute_forces_on_random_instances():
                        rng.choice([0.0, 0.0, rng.uniform(0, 2)]), allow=rng.uniform(0.5, 6.0)) for i in range(n)]
         here, dest = (rng.randint(1, 3), rng.uniform(-400, 400)), rng.choice([None, (rng.randint(1, 3), 300.0)])
         budget = rng.choice([None, None, rng.uniform(1.0, 8.0)])
-        it = sweep.plan(spots, here, dest, line, budget)
-        value, extra = _brute(spots, here, dest, line, budget)
+        most = rng.choice([sweep.MOST_S, None, rng.uniform(1.0, 8.0)])
+        it = sweep.plan(spots, here, dest, line, budget, most)
+        value, extra = _brute(spots, here, dest, line, budget, most)
         assert it.value == pytest.approx(value, abs=1e-6), trial
         assert it.extra == pytest.approx(extra, abs=1e-6), trial
 
@@ -86,8 +89,8 @@ def test_with_survival_the_solve_is_within_a_hair_of_brute_force():
         spots = [_spot(i, rng.uniform(-400, 400), rng.uniform(5, 120), rng.randint(1, 3), 0.4, allow=8.0,
                        still=(lambda dt, a=rng.uniform(0, 0.006): max(0.0, 1.0 - a * dt))) for i in range(n)]
         here, dest = (2, 0.0), (rng.randint(1, 3), 250.0)
-        it = sweep.plan(spots, here, dest, line)
-        best, _ = _brute(spots, here, dest, line)
+        it = sweep.plan(spots, here, dest, line, most=None)
+        best, _ = _brute(spots, here, dest, line, most=None)
         assert best * 0.98 <= it.value <= best + 1e-9, trial
 
 
@@ -113,6 +116,25 @@ def test_an_itinerary_is_within_the_sum_of_its_piles_allowances():
     assert set(it.keys()) == {"a", "b"} and 3.0 < it.extra <= it.allowed == 6.0
     # ... and within the budget, where one is given (the hunt loop's way out, its lull)
     assert len(sweep.plan([a, b], (1, 0.0), (1, 0.0), line, budget=3.0).keys()) == 1
+
+
+def test_an_itinerary_adds_most_s_to_her_way_at_most_whatever_its_piles_allowances_come_to():
+    """The review of 2026-11-01: an itinerary's sum of allowances alone (up to MAX_CAND x 3 s) had her plan +18.2 s on a
+    2.6 s way. Three fresh piles about her stop, at -195, -200 and 200 (each within its 3 s alone, 9 s together): the
+    two on one side (3.3 s) within MOST_S (6 s), the three of them (6.3 s) with the sum alone (`most` None: the hunt
+    loop's lull, its wait the budget); its guards' kills aren't counted (EXP). Kept against a new solve, an itinerary
+    goes once it's over `most` and KEEP_S."""
+    three = [_spot("a", -195.0), _spot("c", -200.0), _spot("b", 200.0)]
+    it = sweep.plan(three, (1, 0.0), (1, 0.0), line)
+    assert sweep.MOST_S == 6.0 and set(it.keys()) == {"a", "c"} and it.extra <= sweep.MOST_S
+    every = sweep.plan(three, (1, 0.0), (1, 0.0), line, most=None)
+    assert len(every.keys()) == 3 and sweep.MOST_S < every.extra <= every.allowed
+    guarded = [_spot("a", -150.0, guards=(Guard(None, 5.0, 40.0),)), _spot("c", -160.0)]
+    it = sweep.plan(guarded, (1, 0.0), (1, 0.0), line)
+    assert len(it.keys()) == 2 and it.extra - it.clear <= sweep.MOST_S < it.extra
+    kept = sweep.plan(three[:2], (1, 0.0), (1, 0.0), line)
+    assert sweep.again(kept, three[:2], (1, 0.0), (1, 0.0), line) is not None
+    assert sweep.again(kept, three[:2], (1, 0.0), (1, 0.0), line, most=1.0) is None
 
 
 def test_the_most_mesos_then_the_least_time():
