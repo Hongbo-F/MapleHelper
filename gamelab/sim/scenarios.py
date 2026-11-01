@@ -830,7 +830,8 @@ def loop_tree_grind(sim):
 def loop_tree_grind_drops(sim):
     """loop_tree_grind with her drops as the perception service saw them live (the loot design of 2026-10-30:
     world.TREE_DROP_MIX, `--world map-drops`, 0.64 drops a kill, 57% mesos by its kind's amounts, piles of 1-4 drops 20
-    units apart; world.HER_DROPS_LAST, `--world drop-takers`, hers taken by others as long as they lay live): the loot
+    units apart; world.HER_DROPS_LAST, `--world drop-takers`, hers taken by others as long as they lay live, until
+    2026-10-31, the live evidence's and the server's expiry passes since: world.others_life, expiry_life): the loot
     sweep (behavior.sweep) on her legs between stops and before she leaves one, said in her log ("sweep: ..."), each
     pile's stand made only where no monster would meet her there. On seed 1, 12 kills of hers, 4 drops picked up (2
     mesos, a Horny and a Green Mushroom's cap), 3 lying on 10 at the end, 11 sweeps said. (Seed 2 since where she stands
@@ -1100,7 +1101,10 @@ def loop_tree_lie_detector_23(sim):
     1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.) (Seed 1
     since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the dying and a throw's last look before its
     key, with her drops waiting while a monster that counts is by them and her decisions going by the monsters the looks
-    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.) (Seed 2 since chains are replanned at every state as they run (2026-10-30, work/replan: navigator.REPLAN, KNOCK_REPLAN, MEET_WALK): on seed 1 she went to the rope at x 146 from 32, a rope as safe, not onto 25; of seeds 1-3, 2 and 3 meet all of this.)
+    missed): on seed 4 she was still on her way 10 s on, not onto 25; of seeds 1-16 all but 4 meet all of this.)
+    (Seed 2 since chains are replanned at every state as they run (2026-10-30, work/replan: navigator.REPLAN,
+    KNOCK_REPLAN, MEET_WALK): on seed 1 she went to the rope at x 146 from 32, a rope as safe, not onto 25; of seeds
+    1-3, 2 and 3 meet all of this.)
     (Seed 1 since the review's fixes of 2026-10-30 (the frames on their grid at 15 a second whatever is asked,
     feed.run; a monster standing planned either way a while, navigator.STAND_UNSURE_S; her piles seen gone only by
     strips sure of them, worldstate.DropStrip.sure; D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt):
@@ -1813,7 +1817,9 @@ def loop_tree_grind_rope_top(sim):
     her feet 30 under platform 18 (-865): on the rope at the first look (localization.pose.ROPE_TOP_GAP), up off it onto
     18 (Mover.off_rope), and on to grind. Master's stack in this world stopped the hunt for out of darts at 17.7 s (on
     seed 1 at 23.1 s; the -880 twin, 15 under, at 17.4-18.3 s on seeds 1-3; at 18.5 s with after-kill in, 7f6334e), no
-    kill, its presses refused on the rope, as live. (Seed 1 since the loot sweep (2026-10-30, behavior.sweep: the hunt loop's drops one rule, priced in her time): on seed 2 the run passed its 120 s limit (her stand-by's fights after the hunt, the tour's drops guarded again and again); of seeds 1-4, 1 and 4 meet all of this.)"""
+    kill, its presses refused on the rope, as live. (Seed 1 since the loot sweep (2026-10-30, behavior.sweep: the hunt
+    loop's drops one rule, priced in her time): on seed 2 the run passed its 120 s limit (her stand-by's fights after
+    the hunt, the tour's drops guarded again and again); of seeds 1-4, 1 and 4 meet all of this.)"""
     return darts_stop(1, grind=True)(sim)
 
 
