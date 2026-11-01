@@ -619,6 +619,63 @@ def _near_line(footholds, x0: float, y0: float, x1: float, y1: float) -> list[Se
             and min(f.y1, f.y2) <= hi_y and max(f.y1, f.y2) >= lo_y]
 
 
+# A line of sight's footholds found by a grid (from 2026-11-01, the latency analysis's option d): _near_line tried every
+# one of a platform's floors and walls for every line (Tree Dungeon's 182 floors, and the 214 walls of its tower's
+# group: 396 for each of its 19 platforms in it), 40% of the time of the 40 slowest jump-shot searches of the harness
+# standard's 12 runs and the hunt loop's 4 (59 us a line there, the grid's 4: D:/MapleHelper-scratch/replan/speed/d).
+# The tower's floors share one x range, so the cells go across and down.
+SIGHT_CELL = 64.0   # map units: a cell's side
+
+
+class _Sight:
+    """A platform's floors and walls (sight_stop's footholds, in that order) by the SIGHT_CELL cells their bounds
+    touch, for _near_line's answer from the few in the cells a box touches: the same footholds in the same order (a
+    box touching a foothold's bounds shares a point with them, so a cell; sorted by their place in the order)."""
+
+    def __init__(self, floors: tuple[Segment, ...], walls: tuple[Segment, ...]):
+        self.floors, self.walls = floors, walls
+        self.footholds = (*floors, *walls)
+        self.bounds = [(min(f.x1, f.x2), max(f.x1, f.x2), min(f.y1, f.y2), max(f.y1, f.y2)) for f in self.footholds]
+        self.cells: dict[tuple[int, int], list[int]] = {}
+        for i, (lo_x, hi_x, lo_y, hi_y) in enumerate(self.bounds):
+            for cx in range(math.floor(lo_x / SIGHT_CELL), math.floor(hi_x / SIGHT_CELL) + 1):
+                for cy in range(math.floor(lo_y / SIGHT_CELL), math.floor(hi_y / SIGHT_CELL) + 1):
+                    self.cells.setdefault((cx, cy), []).append(i)
+
+    def near(self, x0: float, y0: float, x1: float, y1: float) -> list[Segment]:
+        """_near_line's footholds of the box from (x0, y0) to (x1, y1), in the same order (a box over more cells
+        than there are footholds: _near_line itself)."""
+        lo_x, hi_x, lo_y, hi_y = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+        cx0, cx1 = math.floor(lo_x / SIGHT_CELL), math.floor(hi_x / SIGHT_CELL)
+        cy0, cy1 = math.floor(lo_y / SIGHT_CELL), math.floor(hi_y / SIGHT_CELL)
+        if (cx1 - cx0 + 1) * (cy1 - cy0 + 1) > len(self.footholds):
+            return _near_line(self.footholds, x0, y0, x1, y1)
+        got: set[int] = set()
+        cells = self.cells
+        for cx in range(cx0, cx1 + 1):
+            for cy in range(cy0, cy1 + 1):
+                ids = cells.get((cx, cy))
+                if ids:
+                    got.update(ids)
+        bounds, footholds = self.bounds, self.footholds
+        out = []
+        for i in sorted(got):
+            b = bounds[i]
+            if b[0] <= hi_x and b[1] >= lo_x and b[2] <= hi_y and b[3] >= lo_y:
+                out.append(footholds[i])
+        return out
+
+
+def _sight(platform: Platform) -> _Sight:
+    """`platform`'s footholds by cell (_Sight), made once a platform and kept on it (anew where its floors or walls
+    aren't the ones it was made from)."""
+    s = getattr(platform, "_sight", None)
+    if s is None or s.floors is not platform.floors or s.walls is not platform.walls:
+        s = _Sight(platform.floors, platform.walls)
+        platform._sight = s
+    return s
+
+
 def sight_stop(platform: Platform, sx: float, sy: float, ex: float, ey: float,
                footholds: list[Segment] | None = None) -> Segment | None:
     """The foothold that stops the v83 client's line of sight from map (sx, sy) to (ex, ey) first, or None
@@ -626,12 +683,13 @@ def sight_stop(platform: Platform, sx: float, sy: float, ex: float, ey: float,
     the foothold group of `platform`, the one she last stood on (platform.walls); each only where the line goes
     from its open side (above a floor, outside a wall) to its closed side. Through a foothold's end, only if the
     line also ends behind the corner it makes with the one joined there (_behind_corner); at a free end it
-    passes. The nearest such crossing stops it. `footholds`: those to try, if already narrowed (_near_line)."""
+    passes. The nearest such crossing stops it. `footholds`: those to try, if already narrowed (_near_line; else the
+    platform's grid's, _sight: the same ones)."""
     if sx == ex and sy == ey:
         return None
     shot = (sx, sy, ex, ey)
     if footholds is None:
-        footholds = _near_line((*platform.floors, *platform.walls), sx, sy, ex, ey)
+        footholds = _sight(platform).near(sx, sy, ex, ey)
     best = None  # (how far along, foothold)
     for f in footholds:
         line = (f.x1, f.y1, f.x2, f.y2)
@@ -755,8 +813,8 @@ def clear_length(platform: Platform, x: float, y: float, target: Platform, lo: f
     width = (hi - lo) / n
     xs = np.minimum(np.maximum(lo + (np.arange(n) + 0.5) * width, target.left + 1), target.right - 1)  # _inside
     feet = _ys_at(target, xs)
-    near = _near_line((*platform.floors, *platform.walls), min(a, lo - half), min(row, float(feet.min()) - top),
-                      max(a, hi + half), max(row, float(feet.max())))  # what any of those lines can meet
+    near = _sight(platform).near(min(a, lo - half), min(row, float(feet.min()) - top),
+                                 max(a, hi + half), max(row, float(feet.max())))  # what any of those lines can meet
     hx, hy = _hits_on(a, row, xs, feet, top, half, target)
     return width * int(np.count_nonzero(_sight_clear(near, a, row, hx, hy)))
 

@@ -785,6 +785,44 @@ def test_clear_length_answers_as_its_lines_one_at_a_time():
         assert reach.clear_length(here, x, y, there, lo, hi, body) == one_at_a_time(here, x, y, there, lo, hi, body)
 
 
+def test_a_lines_footholds_come_from_its_platforms_grid_the_same_ones_in_the_same_order():
+    # reach._Sight (from 2026-11-01): the footholds a line of sight is tried against (sight_stop's, clear_length's)
+    # from the SIGHT_CELL cells its box touches, not all of a platform's floors and walls: the same ones in the same
+    # order as _near_line over all of them (the nearest crossing's tie goes to the first), on Tree Dungeon's tower (396
+    # for each of its 19 platforms of the walls' group) for a star's lines from her place on every platform, level,
+    # plumb and up to 450 across and 250 up or down, and a box over more cells than there are footholds; so every
+    # sight_stop answers the same, the simulator's world's own (World.sight_stop: wall_between's) with them.
+    import random
+
+    from gamelab.sim import scenarios
+    if not scenarios.available(10002073):
+        pytest.skip("no Tree Dungeon game data")
+    model = mapdata.load(10002073)
+    rng, stops = random.Random(11), 0
+    for p in model.platforms:
+        every = (*p.floors, *p.walls)
+        for _ in range(250):
+            x = rng.uniform(p.left, p.right)
+            sx, sy = x, p.y_at(x) - rng.choice((reach.SHOT_H, 0, 77 + reach.SHOT_H))
+            ex = sx + rng.choice((0.0, rng.uniform(-450, 450)))
+            ey = sy + rng.choice((0.0, rng.uniform(-250, 250)))
+            near = reach._near_line(every, sx, sy, ex, ey)
+            got = reach._sight(p).near(sx, sy, ex, ey)
+            assert len(got) == len(near) and all(a is b for a, b in zip(got, near))
+            stop = reach.sight_stop(p, sx, sy, ex, ey, near)
+            assert reach.sight_stop(p, sx, sy, ex, ey) is stop
+            stops += stop is not None
+        whole = reach._sight(p).near(-2000, -3000, 2000, 1000)
+        assert len(whole) == len(every) and all(a is b for a, b in zip(whole, every))
+    assert stops > 500  # (lines that something stops, not only open air)
+    # made once a platform, anew where its floors or walls are others
+    _, h, low, _ = ledge_map()
+    grid = reach._sight(h)
+    assert reach._sight(h) is grid and grid.near(-5, 495, 60, 520) == [h.segments[0], h.walls[0]]  # (4 cells of 7)
+    h.walls = ()  # (her block's walls gone)
+    assert reach._sight(h) is not grid and reach._sight(h).near(-5, 495, 60, 520) == [h.segments[0]]
+
+
 def shield_map():
     """step_map's A, step wall and B (group (1, 1)), and a ledge L (group (1, 2): 60..300 at y 560), 60 below
     A. Returns the model and A, B, L."""
