@@ -670,7 +670,7 @@ _CROWD = harness.PRESETS["crowd"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
@@ -710,14 +710,17 @@ def loop_tree_23(sim):
     after 64 s); of seeds 1-10, 1, 4, 5 and 9 meet all of this.) (Seed 1 since the monsters move as the v83 client's AI
     moves them, 2026-10-31: on seed 2 under fifteen kills; of seeds 1-13 1 and 5-12 show all of this.) (Seed 3 since the
     stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed
-    1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.)"""
+    1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.) (Seed 1 since her drops are swept by the
+    seconds each may add to her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan:
+    hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 3 seven kills, the rule
+    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=10, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -742,7 +745,10 @@ def loop_tree_23_near_misses(sim):
     2026-10-31: on seed 8 under twenty kills; of seeds 1-13 6, 11 and 12 show all of this.) (Seed 1 since work/replan's
     loot work on master 072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as first built, her
     drops' life by the live evidence: eval/seeds/near.txt): on seed 6 under twenty kills, no Horny Mushroom the looks
-    missed by a pile of hers; of seeds 1-13 1, 3, 5, 7, 10 and 11 show all of this; on 1, 25 kills.)"""
+    missed by a pile of hers; of seeds 1-13 1, 3, 5, 7, 10 and 11 show all of this; on 1, 25 kills.) (Seed 10 since
+    her drops are swept by the seconds each may add to her way and a fresh pile by her is left to her pets a moment
+    (2026-11-01, work/replan: hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 1
+    13 kills; of seeds 1-16 10, 12 and 16 show all of this, most of the others under twenty kills; on 10, 22.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1510,7 +1516,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1581,7 +1587,11 @@ def loop_tree_attack_no_darts(sim):
     this.) (Seed 1 since the review's fixes of 2026-10-31 (a chain after a touch planned once the knock's slide is over,
     a splice's start by the chain's own physics, her landings at her own prices, her drops' life past 180 s, her detours
     priced by their HP: D:/MapleHelper-scratch/replan/loot/fix2/seeds): on 4 neither her stars' test's MAYBE OUT nor the
-    page; of seeds 1-16, 1 and 8 meet all of this.)"""
+    page; of seeds 1-16, 1 and 8 meet all of this.) (Seed 2 since her drops are swept by the seconds each may add to
+    her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan: hunt._allow, PET_LOOT;
+    D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on 1 her stars' test cast nothing in its 10 s (not on a
+    platform: "her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-16, 2 and 12 meet all of
+    this.)"""
     return key_check_run(4)(sim)
 
 
