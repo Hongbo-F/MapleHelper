@@ -82,8 +82,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    items_per_min her items' (items_picked of them); drops_left_per_min, the worth of her drops she
                    left (taken by others, or lain their whole life); cash_per_min, value_per_min less her potions at
                    the user's reference prices (behavior.hunt: HP_PER_MESO HP and MP_PER_MESO MP a meso, by what each
-                   of hers gives: the simulator's Orange Potion 125 mesos, its Blue 100); pick_age, the median age of
-                   her drops as she picked them up (s from their landing)
+                   of hers gives: the simulator's Orange Potion 125 mesos, Meat 80 with `--world meat`, its Blue
+                   100); pick_age, the median age of her drops as she picked them up (s from their landing)
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   safety_stops     the safety stop (behavior.safety: her HP under her reserve, her profile's hits of the map's largest
@@ -162,8 +162,8 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, OFF_SEEN,
-                    ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
+from .world import (HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, OFF_SEEN,
+                    POTIONS, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -295,6 +295,10 @@ WORLDS["room-later"] = {"room_at": 180.0}
 # elevated player is restarted on this code (control.client.can_splice: lab/player.json); the review of 2026-10-30
 # found the path exercised by nothing.
 WORLDS["no-splices"] = {"splices": False}
+# ... and her pet's potions as she carries them on a grind (`meat`: the user, 2026-11-01): Meat (world.MEAT_HP, 160 HP,
+# 80 mesos at their prices) from a stock of world.POTIONS (250) a run, where the crowd preset has 60 Orange Potions
+# (250 HP), which ran out within 15 minutes.
+WORLDS["meat"] = {"potion": MEAT_HP, "potions": POTIONS}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's

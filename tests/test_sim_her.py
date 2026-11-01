@@ -118,6 +118,17 @@ def test_her_pet_drinks_from_her_stock_and_with_none_left_nothing(model, monkeyp
     assert any("her pet has no potion left to drink" in line for line in w.log)
 
 
+def test_with_meat_her_pet_heals_her_meats_hp_from_a_runs_stock(model, monkeypatch):
+    """The harness's `--world meat` (the user, 2026-11-01: "200 or 300 pieces of meat"): her pet's potion heals
+    world.MEAT_HP (the game data's 160) from a stock of world.POTIONS; with none left it drinks nothing."""
+    fields = harness.WORLDS["meat"]
+    her = dataclasses.replace(Her(max_hp=774.0, pet=0.45), potion=fields["potion"])
+    w = _touched(model, monkeypatch, 0.48, her, Realism(potions=fields["potions"]))
+    assert w.hp == pytest.approx(0.43 + world_mod.MEAT_HP / 774.0) and w.potions_left == world_mod.POTIONS - 1
+    w = _touched(model, monkeypatch, 0.48, her, Realism(potions=0))
+    assert w.hp == pytest.approx(0.43) and w.pet_potions == 0
+
+
 def test_the_pet_food_key_feeds_her_pet(model):
     c = plat(model, 500, 400)
     w = World(model, KEYS, (c.id, 400.0), monsters=None, character=LEVEL_23)

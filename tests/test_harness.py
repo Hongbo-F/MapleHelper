@@ -258,6 +258,13 @@ def test_outcomes_are_read_from_the_world(model):
     hp_potion = w._potion() * w.character.max_hp / hunt.HP_PER_MESO
     cash = harness.outcomes(w, [], 60.0)["cash_per_min"]
     assert cash == pytest.approx(out["value_per_min"] - 2 * hp_potion - 3 * w.character.mp_potion / hunt.MP_PER_MESO)
+    # ... a Meat (`--world meat`: the user's, 2026-11-01) at what it heals, world.MEAT_HP / 2: 80 mesos.
+    assert harness.WORLDS["meat"] == {"potion": world_mod.MEAT_HP, "potions": world_mod.POTIONS}
+    assert "potion" in harness.HER_FIELDS and "potions" in {f.name for f in dataclasses.fields(Realism)}
+    w.character = dataclasses.replace(w.character, potion=world_mod.MEAT_HP)
+    meat = harness.outcomes(w, [], 60.0)["cash_per_min"]
+    assert meat == pytest.approx(out["value_per_min"] - 2 * world_mod.MEAT_HP / hunt.HP_PER_MESO
+                                 - 3 * w.character.mp_potion / hunt.MP_PER_MESO) and world_mod.MEAT_HP / 2 == 80
     w.drops[0].taken_by, w.drops[0].since = "", 0.0  # a drop left lying its whole life counts as missed
     assert harness.outcomes(w, [], DROP_LIFE + 1)["drops_share"] == 0.0
 

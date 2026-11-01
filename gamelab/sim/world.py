@@ -1008,7 +1008,16 @@ LEVEL_23 = Her(max_hp=730.0, level=23, exp=31_736, defence=DEFENCE, pet=0.45)
 # empty bar: the MP item's, not modelled.) The harness's `--world red-potion` has her drink Red Potions (100 HP).
 PET_HP = 0.70
 HP_POTION = 250.0
-LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=601.0, pet_mp=PET_MP, potion=HP_POTION)
+# Her pet's HP potion as she grinds from 2026-11-01 (the user: "Usually 200 or 300 pieces of meat (150HP)"): Meat (item
+# 2010003), which heals 160 HP by the game data (Item/Consume 0201.img: spec hp 160, the Red Potion's 100, the
+# Orange's 250), as live (63 rises of exactly 160 HP on 2026-10-30 at 22:14, the magician's pet: lab/telemetry/
+# 20261030-221417-perceive-part2.jsonl; D:/MapleHelper-scratch/replan/loot2/design), where the user remembered 150;
+# POTIONS of them a run, the middle of their 200-300. The harness's `--world meat` (Her.potion, Realism.potions), her
+# pet's warning still PET_HP (measured with Orange Potions on the thief: with Meat it isn't known). The crowd preset's
+# 60 Orange Potions ran out within 15 minutes, the safety stop ending 7 of 12 of the standard grind's runs.
+MEAT_HP = 160.0
+POTIONS = 250
+LEVEL_24 =Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=601.0, pet_mp=PET_MP, potion=HP_POTION)
 # ... and from 2026-10-25 at level 25: HP 774 and MP 623 (her bars' numbers), her stars as read off the monsters' bars
 # then (attack.choice.STAR and SKILL_STAR: the regular star 20-140, Lucky Seven's two of 96-192), drawn so with `spread`
 # (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP), her pet's MP potions Blue Potions (100) and its HP
