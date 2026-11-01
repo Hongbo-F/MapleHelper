@@ -2524,12 +2524,21 @@ nothing +1.3 (0.6): neither kept. What the tabs add is past these runs: Use item
 cleared by an item earned into it or tried again after TAB_RETRY_S (the flag was never cleared), and the log line saying
 so.
 
+**All of it, on 48 seeds against master 072e1ec** (the standard grind, 5 minutes; `fix/final/ab48.txt`): EXP a minute
+308.6 -> 322.7 (+14.0, se 8.3, +4.5%; better on 28), loot 236.6 -> 244.8 (+8.2, se 7.6), drops' share 0.953 -> 0.952,
+touches 71.6 -> 84.2 (+12.6, se 2.6), those that hurt 45.9 -> 54.5, hurt at piles 19.0 -> 12.7, HP lost 5.97 -> 7.28 bars
+(+1.31, se 0.31), HP potions 18.3 -> 22.3, knock falls 9.6 -> 10.8, cash at the user's prices -443 -> -549 a minute; no
+deaths, falls out of the map or stops. Against the switches alone (the commit that set them, 48 seeds): EXP -1.1 (6.4),
+loot +0.8 (6.6), HP -0.28 bars (0.22): what came after them is the same in the 5-minute standard grind, its gain in the
+15-minute live drops' worlds (her drops' life).
+
 **Not done.** The seeds of the scenarios and tests the new monsters and these changes moved aren't re-picked, nor the
-goldens recorded (the targeted tests' failures: test_heading's three knock and turn cases, `loop_tree_ore_waits`,
-`nav_tree_rope_hit` and test_touches' MISS on a trip, `loop_tree_lie_detector_grind`, `loop_tree_attack_unbound`,
-`loop_tree_grind_attack_key`, `loop_tree_attack_no_darts`, test_harness's glances in a minute's run). The magician's
-grind isn't measured. Her pets' looting (the diagnosis: 71% of her drops that vanished did so 15 units or more from her)
-is the user's to confirm before the sweep counts on it. Live: not run.
+goldens recorded (the fast suite's failures, 11 of 2,814: test_heading's three knock and turn cases,
+`loop_tree_ore_waits`, `nav_tree_rope_hit` and test_touches' MISS on a trip, `loop_tree_attack_unbound`,
+`loop_tree_grind_attack_key`, test_harness's glances in a minute's run; test_perception's look at a capture, this
+worktree's lab, and test_lie_yolo's 4-frames-a-second shadow under the suite's load, as before). The magician's grind
+isn't measured. Her pets' looting (the diagnosis: 71% of her drops that vanished did so 15 units or more from her) is the
+user's to confirm before the sweep counts on it. Live: not run.
 
 ## Localization
 
