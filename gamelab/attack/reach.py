@@ -1117,7 +1117,9 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
     are when the attack starts (physics.pose; _air_pick, AIR_MARGIN into it, at both ends of ATTACK_DECIDE_LAG_MS), of
     all of `others`, and its line not stopped (wall_in_way, from her feet then: stopped, the
     attack hits nothing); the monsters where `where` says they'll be (default: where they are). `sizes`: the kinds'
-    bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). Map units, y down."""
+    bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). Map units, y down.
+    Where `where` has the monsters at a time is worked out once a search (both sides of a kind of jump ask the same
+    times: from 2026-11-01, 39% of the slowest searches' time was it asked again)."""
     others = monsters if others is None else others
     out: list[Shot] = []
     for m in monsters:
@@ -1131,13 +1133,17 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
     places = {m.platform: platform if m.platform == platform.id else platform.peer(m.platform) for m in near}
     body = {id(m): body_of(m.kind, sizes) for m in near}
 
+    at: dict[float, Placed] = {}  # (each side of a kind of jump asks the same times)
+
     def placed(t: float) -> Placed:
-        rows = []
-        for m in near:
-            mx = m.x if where is None else where(m, t)
-            q = places.get(m.platform)
-            my = m.y if q is None or where is None else q.y_at(min(max(mx, q.left), q.right))
-            rows.append((m, mx, my, *body[id(m)]))
+        rows = at.get(t)
+        if rows is None:
+            rows = at[t] = []
+            for m in near:
+                mx = m.x if where is None else where(m, t)
+                q = places.get(m.platform)
+                my = m.y if q is None or where is None else q.y_at(min(max(mx, q.left), q.right))
+                rows.append((m, mx, my, *body[id(m)]))
         return rows
 
     still = placed(0.0) if where is None else None

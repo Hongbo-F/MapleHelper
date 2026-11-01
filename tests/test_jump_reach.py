@@ -226,6 +226,25 @@ def test_a_monster_walking_is_placed_where_it_will_be_when_the_attack_picks():
     assert walking.hits(m, ("up",)) and not walking.ground(m)
 
 
+def test_a_search_asks_where_each_monster_will_be_once_a_time():
+    # reach.shots (from 2026-11-01): the monsters' places at a time (`where`: behavior.fight.walk_on's, walking each
+    # along its platform) worked out once a search, where both sides of a kind of jump asked them again, the times of
+    # its attack keys the same either way.
+    from collections import Counter
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 500)
+    ms = [pig(560, 400, up.id, facing=1, pose="move"), pig(250, 400, up.id), pig(700, 500, floor.id)]
+    asked = Counter()
+
+    def walking(m, t):
+        asked[(id(m), t)] += 1
+        return m.x - 40 * t
+
+    got = cover(LEDGE, floor, 400, ms, where=walking)
+    assert any(s.jump is not None for s in got.shots) and asked and max(asked.values()) == 1
+    assert len({t for _, t in asked}) * len(ms) == len(asked)  # (every monster placed at every time asked)
+
+
+
 # --- the world goes by the same model -------------------------------------------------------------------------------
 
 def world(model, pid, x, **kw):
