@@ -393,6 +393,61 @@ def test_a_trip_stops_for_what_is_in_reach_only_where_the_pass_would_shoot_it():
     assert h._interrupt(s)
 
 
+def test_a_trip_s_question_asks_what_is_in_reach_only_where_it_decides():
+    """From 2026-11-01 (the latency analysis's option d): in passing, a monster a star from where she stands hits
+    decides it, the others' jump-shot searches not made (most of the question's time, at the made-up place the "better
+    way" check asks about); with neither her time in passing there left nor a spot's ground to shoot at from there,
+    nothing in reach is asked. Its answer the old question's in every case: every objective, her time in passing,
+    the spot's platform, monsters on the ground, on hers and elsewhere, each one's star and jump hits, the step from
+    under one."""
+    import random
+
+    def old(h, s):  # (the question as it was asked until then, its rules from what's in reach on)
+        o, here = h.obj, s.platform.id
+        wanted = [m for m in s.monsters if h.kinds is None or m.kind in h.kinds]
+        ground = None if h.visit is None else h.visit.ground
+        in_reach = [m for m in wanted if h._hits(s, m)
+                    and (ground is None or m.platform in (ground, here) or h._star_hits(s, m))]
+        if (in_reach or h._pass_step(s, wanted) is not None) and o is not None \
+                and o.passing.get(here, 0.0) < hunt.PASSING_S:
+            return True
+        if o is not None and o.kind == "spot" and h._standable(here) and any(m.platform == o.ground for m in in_reach):
+            return True
+        return h._sweep_calls(s)
+
+    rng, asked, answers = random.Random(5), [], set()
+    h = _shooter([])
+    h._close_quarters = lambda s, monsters: False
+    h._owed = lambda s, monsters: None
+    for case in range(600):
+        star, jump = rng.random(), rng.random()
+        hits = {}
+        s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=5), where=SimpleNamespace(x=0.0, y=0.0), players=[],
+                            monsters=[_horny(rng.choice((1, 3, 5, 9))) for _ in range(rng.randint(0, 4))])
+        for m in s.monsters:
+            hits[id(m)] = (rng.random() < star, rng.random() < jump)
+        h._star_hits = lambda s, m: asked.append(("star", id(m))) or hits[id(m)][0]
+        h._hits = lambda s, m: asked.append(("any", id(m))) or hits[id(m)][0] or hits[id(m)][1]
+        h._pass_step = (lambda s, t: None) if rng.random() < 0.5 else (lambda s, t: ("back", "right", 10.0))
+        h._standable = (lambda pid: True) if rng.random() < 0.5 else (lambda pid: False)
+        h._sweep_calls = (lambda s: True) if rng.random() < 0.3 else (lambda s: False)
+        h.obj = rng.choice((None, Objective("spot", 19, 36.0, ground=rng.choice((1, 9))), Objective("pile", 9, 10.0)))
+        if h.obj is not None and rng.random() < 0.4:
+            h.obj.passing[5] = hunt.PASSING_S  # (her time in passing here spent)
+        want = old(h, s)
+        asked.clear()
+        assert h._interrupt(s) == want, case
+        answers.add(want)
+        passing = h.obj is not None and h.obj.passing.get(5, 0.0) < hunt.PASSING_S
+        if passing and any(hits[id(m)][0] for m in s.monsters):  # a star's hit: no jump search after it
+            assert not any(kind == "any" for kind, _ in asked)
+            first = next(m for m in s.monsters if hits[id(m)][0])
+            assert asked[-1] == ("star", id(first))
+        if not passing and not (h.obj is not None and h.obj.kind == "spot" and h._standable(5)):
+            assert not asked  # (nothing in reach asked)
+    assert answers == {True, False}
+
+
 def test_picking_up_yields_to_what_is_in_reach_while_she_hunts():
     from gamelab.behavior.looting import DropSpot, Looter
     said = []

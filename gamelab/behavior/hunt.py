@@ -1979,15 +1979,22 @@ class Hunt:
             return True
         if self._owed(s, s.monsters) is not None:
             return True
-        ground = None if self.visit is None else self.visit.ground
-        in_reach = [m for m in wanted if self._hits(s, m)
-                    and (ground is None or m.platform in (ground, here) or self._star_hits(s, m))]
-        if (in_reach or self._pass_step(s, wanted) is not None) and o is not None \
-                and o.passing.get(here, 0.0) < PASSING_S:
+        # What's in reach, asked only where it decides (the latency analysis of 2026-11-01, its option d: the jump-shot
+        # search for each monster no star from the ground hits was most of this question's time): in passing one a star
+        # hits decides it, the rest not searched; with neither her time in passing here left nor a spot's ground to
+        # shoot at from here, nothing in reach does.
+        passing = o is not None and o.passing.get(here, 0.0) < PASSING_S
+        if passing and any(self._star_hits(s, m) for m in wanted):
             return True
-        if o is not None and o.kind == "spot" and self._standable(here) \
-                and any(m.platform == o.ground for m in in_reach):
-            return True
+        spot = o is not None and o.kind == "spot" and self._standable(here)
+        if passing or spot:
+            ground = None if self.visit is None else self.visit.ground
+            in_reach = [m for m in wanted if self._hits(s, m)
+                        and (ground is None or m.platform in (ground, here) or self._star_hits(s, m))]
+            if passing and (in_reach or self._pass_step(s, wanted) is not None):
+                return True
+            if spot and any(m.platform == o.ground for m in in_reach):
+                return True
         return self._sweep_calls(s)
 
     def _arrived(self, o: Objective) -> None:
