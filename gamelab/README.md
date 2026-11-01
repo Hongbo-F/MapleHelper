@@ -2746,6 +2746,61 @@ tag_template_full.npy, as before).
 Whether to fetch piles about to expire beyond what they're worth (the drops' share at 15 minutes). Her pets' looting,
 MESO_EXP 0.5, TAKE_RATE and EXPIRE_PASS_S as guesses. The magician's grind can't be measured in the harness (its
 scenarios are the thief's).
+
+## The independent check's findings fixed (2026-11-01, the night)
+
+The independent check of 1ff93e6 (D:/MapleHelper-scratch/replan/verify/verdict.txt: not to merge as it was) confirmed
+eight findings. This round (D:/MapleHelper-scratch/replan/loot2/fix) fixed five of them and three of its nits, each
+with a test, on master 072e1ec. Finding 2 (the stop's 2 s sweep budget, piles about to expire) and 3 (the docs' 15-minute
+numbers) are left to the next stages: the user's answers of ~02:00 change them ("piles should be picked up soon after
+killing"; Meat, 150 HP, 200-300 a run; her pets take what they walk over). Finding 7 (cut and resend unmeasured since
+b9933ef) is a measurement for before the live grind.
+
+- **A monster of no known kind priced at nothing** (finding 1, a regression against master). `Danger.taken` of a kind
+  the map's game data doesn't have ('', which the landings' judge takes for a 'pig') is now the map's hardest-touching
+  kind's, as `Navigator._toucher`'s stand-in is; 0 only with no kind known. With her own prices (a6a2c28) a meeting with
+  one had cost nothing: no shot first, no wait at a trip's last landing. Master's flat `MEET_PRICE_S` priced it.
+- **The pickup log's cut names** (finding 4). `looting._earned` reads an "earned" line with maplehelper's loot-line
+  parser against the game's item names (`maplehelper.ocr.parse.parse_loot`, `ITEM_NAMES`). A cut name it leaves open
+  ("Orange Mushro...") is the one priced drop it starts; a misread tab ("(Ete)") is the kind's. Every "earned" line of
+  the live fixture (tests/fixtures/pickup_log_lines_2026-10-26.json) now comes out as its item, where the regex read
+  "Horny Mushroo... x1 earned. (Etc)" as a kind of its own, never one she held: her cap top-up into a known-full Etc tab
+  cleared it. An "earned" line after the last refusal says its tab has room only for a kind that didn't fit (stuck under
+  her now, or refused). A top-up of a stack she holds needs no slot; until now such a line kept a tab from being learned.
+  The simulator's log cuts names over 15 letters to 13 and "..." (`world.log_name`: Tree Dungeon's caps as the game cuts
+  them).
+- **FAILED_PICKS never reset in the grind** (finding 5). The row of items stuck under her is broken by an item of a
+  stand of hers that the looks show gone from its pile (`Looter.on_look`). It starts afresh once it marks a tab full or a
+  tab is tried again. Only a mop-up reset it before, and the grind's stands have none: three stuck items in a run, however
+  far apart, marked every later one's tab full.
+- **Rule 6a and EXP before loot priced items she can't take** (finding 6). They now go by the dearest drop she can take
+  (`Hunt._dearest`, by `Pile.each`: what each drop seen is worth) and the pile's worth to her (`Hunt._worth`). With Etc
+  full she had rushed a pile of a coin and an ore for the coin.
+- **HELD_AGE for good** (finding 8). A pile holds an older pile's age (`Pile.aged`, `aged_xs`; `Pile.born` is what
+  `Pile.still` goes by) only while a look still sees a drop where the older's lay; its own `since` is kept. Before, a
+  pile whose own drops lay until 330 s in the simulator was given up at 241 s.
+- **Nits.** `SPLICE_PHYSICS` checks the arrow as of the press's whole ms (`flow.ms`; at 0.4006 s it missed the 401 ms
+  press). Her landings' EXP a second is kept within `fight.RATE_BAND` (4) of `RATE_PRIOR` either way, and is
+  `RATE_PRIOR` where the hunt has none or one not over 0: before, a price went by 1 / rate without bound. The claim
+  that Tree Dungeon's numbers price her landings "only until her max HP is read" is corrected (above and in fight's
+  note): her EXP a second stays the live thief's wherever no grind loop sets one.
+
+**Measured.** The standard grind (the harness standard, 12 seeds of 5 minutes against 1ff93e6, fix/ab.txt) is the same
+to the digit: EXP a minute 338.8, touches 85.7, loot's worth 242.2 a minute, drops' share 0.948, hurt 56.0, at piles
+12.7, potions 23.0; no deaths, falls or stops. None of the fixes changes a decision there: the map's three kinds are
+all priced, no tab fills (the standard world drops no items), the loops' rates are inside the band, and no pile's older
+drop goes while its own lie on. With her drops as live (`--world map-drops`) and `etc-full` or `fills-up` added
+(fix/ab_etc.txt, ab_fills.txt) the same to the digit too: in `etc-full` she holds no stack, so no "earned" item line
+comes, and the tab is learned once from the game's message (fix/probe, seed 1: one `cant_pick` a run); in `fills-up` no
+item stays under her twice in 5 minutes (none). So the backpack fixes are checked by the tests alone. The 43 Tree
+Dungeon goldens match (`golden check --jobs 4`, fix/golden.txt).
+
+**Tests:** test_landing (an unknown kind's meeting priced; the rate's band), test_loot (the live fixture's and the
+simulator's cut names; a top-up leaving a full tab full and not stalling its learning; the failed-pick row afresh),
+test_hunt (rule 6a and EXP before loot by what she can take), test_ledger (an older age only while its drop is seen),
+test_replan (splices from 0.4000-0.4009 s). Each fails on 1ff93e6. The fast suite (2 workers): 2,827 passed, 72
+skipped, 2 xfailed, 1 failed: test_perception's look at a capture (this worktree's lab lacks tag_template_full.npy, as
+before).
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.
