@@ -802,9 +802,10 @@ class FakeEyes(Eyes):
         her = w.plat or w.last_plat
         if her is None:
             return None
+        mx = m.at(w.t)  # (first: a jumper's platform is the one it's on then)
         if m.platform.id != her.id:
             return self.noise.off_seen
-        dx = abs(m.at(w.t) - w.x)
+        dx = abs(mx - w.x)
         return next((seen for upto, seen in self.noise.near_seen if dx < upto), None)
 
     def _ropes(self, her: tuple[int, int], x: float, y: float) -> list[ScreenRope]:

@@ -33,9 +33,11 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
   does nothing, as on the bottom floor;
 - monsters walk their platform as fast as the game data says (monster_data.speeds: 125 units/s for a pig,
-  43.75 for a snail), turning and stopping now and then (seeded); a hit that doesn't kill pushes one
-  KNOCK_MOB units back from her and stands it while it flinches (MOB_KNOCKBACK), never off its platform, if its
-  damage reaches the monster's `pushed` in the game data (push_chance: any damage for the first map's kinds).
+  43.75 for a snail), deciding as the v83 client's AI does (AI_STEP: stand, left or right for 1-3 s, seeded),
+  turning WALK_EDGE from its ends; those that jump (SimJumper: Tree Dungeon's Slimes) jump as it has them, off
+  their platform too; a hit that doesn't kill pushes one KNOCK_MOB units back from her and stands it while it
+  flinches (MOB_KNOCKBACK), never off its platform, if its damage reaches the monster's `pushed` in the game data
+  (push_chance: any damage for the first map's kinds).
   A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
   the box of the frame it shows then in the game data, walking, standing or flinching after a hit, turned
   the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of its walk.
@@ -257,9 +259,9 @@ POPUP_S = 1.0
 # that player's client "with chase" (OrionAlpha, a replica of Nexon's early Korean server: Mob.onMobHit,
 # LifePool.changeMobController, MobCtrl.Active_Req; once its controller hasn't hurt it for 5 s, to whoever else did in
 # those 5 s: Mob.onMobMove), and that client chases its player (HeavenClient, a reimplementation of the v83 client from
-# its code: Mob::chase, FUN_007f73d8) AGGRO_S from then, 3 to 4 minutes: every AGGRO_THINK it decides which way to walk,
-# at her, or on the way it's going while she's within AGGRO_PASS across (so it walks past her that far and more before
-# turning back: Mob::think), never standing, at its walk speed (info/chaseSpeed is for a kind with a chase animation:
+# its code: Mob::chase, FUN_007f73d8) AGGRO_S from then, 3 to 4 minutes: every CHASE_THINK_MS decision it decides
+# which way to walk, at her, or on the way it chose while she's within AGGRO_PASS across (so it walks past her that far
+# and more before turning back, and where its platform's end turned it, back to that end: Mob::think), never standing, at its walk speed (info/chaseSpeed is for a kind with a chase animation:
 # none of Tree Dungeon's or the first map's kinds has one, nor info/firstAttack, a kind's chase on sight: gamedata),
 # along its own platform wherever she is (turning at its ends as its walks do). Each hit of hers starts it anew, after
 # the hit's flinch (knock). Unhurt it walks as ever. The user, 2026-10-31: "Mobs move on their own until you hit them,
@@ -269,8 +271,22 @@ POPUP_S = 1.0
 # of 2026-10-27: within 100 of her, monsters walked at her 50% of the time unhurt, 63% hurt): the unhurt ones' 50% is
 # their own walk's (the world's walks with nobody there had 46%).
 AGGRO_S = (180.0, 240.0)
-AGGRO_THINK = (0.8, 1.2)
 AGGRO_PASS = 100.0
+# The monsters' AI as the v83 client runs it (RustMS's copy of HeavenClient, annotated with the client's functions, read
+# 2026-10-31: Mob::step_body, think, walk, chase; the user, 2026-10-31: "Yes, align them"): it steps every AI_STEP s
+# (FUN_007f72d9), and a decision holds a whole number of its steps: unhurt (r + 1000) // 90 of them, r uniform in
+# 0-1999 (1.0-3.0 s), standing, walking left or walking right, a third each (FUN_007f8025, FUN_007f81c8); chasing
+# (r + 800) // 90, r in 0-399 (0.72-1.17 s). A hit (Realism.chase) is a chase anew (Mob::chase: its timer and its way
+# reset): at her from the hit's flinch's end. Until then the simulator's own: standing 35% of its stretches (0.5-2.5 s)
+# and walking 65% (1-4 s), its chase every 0.8-1.2 s to its aggro's end, after an end's turn on the way it was going, and
+# a hit while it chased kept its way.
+AI_STEP = 0.09
+IDLE_THINK_MS = (1000, 2000)   # (least, span): (r + least) // 90 steps, r uniform in 0 to span - 1
+CHASE_THINK_MS = (800, 400)
+# A walking monster (move ability 1: no jump, no flight) turns WALK_EDGE along the foothold at its platform's end from
+# the end (FootholdTree::get_walk_edge, FUN_007f8d64), where the simulator had its body's half width (28 for Tree
+# Dungeon's kinds).
+WALK_EDGE = 20.0
 # Her landings as the live diagnosis counted them (World.land_log): an attack played in the flight if keyed from
 # ATTACK_BEFORE_TAKEOFF_MS before she left the ground (a jump throw's key comes 40-120 ms after the jump key, and
 # her feet leave the ground about JUMP_LAG after it), and a fall within KNOCK_FALL_MS of a knock's landing the knock's
@@ -298,19 +314,58 @@ HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
 # 115 HP and DEF 10, would take 3).
 STAR_DAMAGE = (30, 70)
 HITS_UNKNOWN = 2         # ... and a kind without game data
-# A hit that doesn't kill (a star or a swipe) pushes the monster KNOCK_MOB units away from her over
-# KNOCK_MOB_S, and it stands in its hit1 frame until monster_data.FLINCH_S after the hit (0.6 s, that
-# frame's delay); then it walks or stands as its own draws say. In the game data `pushed` is 1 for all four
-# kinds: any damage pushes them. Measured once: a slime walking at her, swiped on the basin floor
-# (lab/recordings/do_attack2, static camera, 30 fps), went 13 half-px (18 units) back over about 0.25 s
-# and stood about 0.6 s before it walked at her again; a pig hit in `fight1` lost about 80 units of its
-# walk (moving camera, so no distance). One sample, so False puts the monsters back to walking through
-# hits. Pushed from where it turns (its body at the platform's end), a monster stays on its platform:
-# none is pushed off an end (pigs have been seen on platforms where none spawn; how they get there isn't
-# known).
+# A hit that doesn't kill (a star or a swipe) pushes the monster away from her at KNOCK_MOB_V, slowing at
+# KNOCK_MOB_DECEL on the ground (v83's push, 130 px/s, slowed by 40000 / its mass of 100: Mob::flinch_body,
+# step_body): KNOCK_MOB units in all over KNOCK_MOB_S (21 units, 0.33 s), stopping at its walk's end. It faces
+# her and stands in its hit1 frame until monster_data.FLINCH_S after the hit (0.6 s, that frame's delay), its AI
+# waiting the hit out; then the rest of its decision standing, or hit with Realism.chase at her at once. In the game
+# data `pushed` is 1 for all four kinds: any damage pushes them. Measured once: a slime walking at her, swiped on
+# the basin floor (lab/recordings/do_attack2, static camera, 30 fps), went 13 half-px (18 units) back over about
+# 0.25 s and stood about 0.6 s before it walked at her again (until 2026-10-31 the push: KNOCK_MOB 18, KNOCK_MOB_S
+# 0.25, evenly, facing as before it, its next decision drawn after the flinch); a pig hit in `fight1` lost about 80
+# units of its walk (moving camera, so no distance). False puts the monsters back to walking through hits. A
+# walker stays on its platform: none is pushed off an end (pigs, which jump, have been seen on platforms where none
+# spawn: SimJumper).
 MOB_KNOCKBACK = True
-KNOCK_MOB = 18.0
-KNOCK_MOB_S = 0.25
+KNOCK_MOB_V = 130.0
+KNOCK_MOB_DECEL = 400.0
+KNOCK_MOB = KNOCK_MOB_V ** 2 / (2 * KNOCK_MOB_DECEL)
+KNOCK_MOB_S = KNOCK_MOB_V / KNOCK_MOB_DECEL
+
+
+def think_steps(rng: random.Random, ms: tuple[int, int]) -> int:
+    """A decision's AI steps (AI_STEP each): (r + least) // 90, r uniform in 0 to span - 1 (IDLE_THINK_MS,
+    CHASE_THINK_MS)."""
+    return (rng.randrange(ms[1]) + ms[0]) // 90
+
+
+_EDGES: dict[int, tuple] = {}
+
+
+def walk_edges(p: Platform) -> tuple[float, float]:
+    """Where a walking monster turns on platform p (x from, to): WALK_EDGE along its end footholds from its ends (the
+    middle of a platform too short for both)."""
+    kept = _EDGES.get(id(p))
+    if kept is not None and kept[0] is p:
+        return kept[1]
+
+    def margin(s) -> float:
+        dx = abs(s.x2 - s.x1)
+        length = math.hypot(dx, s.y2 - s.y1)
+        return 0.0 if length == 0 else min(WALK_EDGE, length) * dx / length
+
+    first = min(p.segments, key=lambda s: min(s.x1, s.x2))
+    last = max(p.segments, key=lambda s: max(s.x1, s.x2))
+    lo, hi = p.left + margin(first), p.right - margin(last)
+    edges = (lo, hi) if lo <= hi else ((p.left + p.right) / 2,) * 2
+    _EDGES[id(p)] = (p, edges)
+    return edges
+
+
+def pushed_x(start: float, to: float, tau: float) -> float:
+    """Where a push from `start` toward `to` (as far as it goes) has a monster `tau` s after the hit."""
+    went = KNOCK_MOB_V * tau - KNOCK_MOB_DECEL * tau * tau / 2 if tau < KNOCK_MOB_S else KNOCK_MOB
+    return start + math.copysign(min(went, abs(to - start)), to - start)
 CLAW = 0.2               # a claw swipe's damage, in stars (9-11 against a star's 30-70)
 CLAW_DAMAGE = (9, 11)
 STAR_MEAN = sum(STAR_DAMAGE) / 2  # a star's damage on average: the unit of a monster's HP with Her.spread
@@ -1115,11 +1170,11 @@ class SimMonster:
 
     @property
     def lo(self) -> float:
-        return self.platform.left + self.half
+        return walk_edges(self.platform)[0]
 
     @property
     def hi(self) -> float:
-        return max(self.lo, self.platform.right - self.half)
+        return walk_edges(self.platform)[1]
 
     def start(self, t: float, x: float) -> None:
         self.t0, self.x0, self.anim0, self.pushed = t, min(max(x, self.lo), self.hi), t, None
@@ -1128,35 +1183,33 @@ class SimMonster:
     def _draw(self) -> None:
         if self.aggro_until is not None and self.t0 < self.aggro_until and self._chase_her():
             return
-        r = self.rng.random()
-        self.d = 0 if r < 0.35 else (-1 if r < 0.675 else 1)
-        self.t1 = self.t0 + (self.rng.uniform(0.5, 2.5) if self.d == 0 else self.rng.uniform(1.0, 4.0))
+        self.t1 = self.t0 + think_steps(self.rng, IDLE_THINK_MS) * AI_STEP
+        self.d = self.rng.randrange(3) - 1
 
     def _chase_her(self) -> bool:
-        """Realism.chase (AGGRO_S): this stretch, AGGRO_THINK long (to its aggro's end at the most), walks at her, or on
-        the way it's going while she's within AGGRO_PASS across; False with no her to chase (its own walk then)."""
+        """Realism.chase (AGGRO_S): this decision, CHASE_THINK_MS long, walks at her, or on the way it chose while she's
+        within AGGRO_PASS across (back to its platform's end if that turned it); False with no her to chase (its own
+        walk then)."""
         hx = self.chase(self, self.t0)
         if hx is None:
             return False
-        if self.chase_dir == 0 or abs(hx - self.x0) > AGGRO_PASS:
+        if self.chase_dir == 0 or abs(hx - self.x0) >= AGGRO_PASS:
             self.chase_dir = 1 if hx >= self.x0 else -1
-        else:
-            self.chase_dir = self.facing  # (the way it's going: back, if its platform's end turned it)
         self.d = self.chase_dir
-        self.t1 = min(self.t0 + self.chase_rng.uniform(*AGGRO_THINK), self.aggro_until)
+        self.t1 = self.t0 + think_steps(self.chase_rng, CHASE_THINK_MS) * AI_STEP
         return True
 
     def aggro(self, t: float) -> None:
-        """Hit by her at t (Realism.chase): it chases her AGGRO_S from now, which way decided afresh if it wasn't
-        chasing her; it decides at once, or once a hit's flinch is over (knock)."""
+        """Hit by her at t (Realism.chase): it chases her AGGRO_S from now, its way decided afresh, at once, or once a
+        hit's flinch is over (knock)."""
         if self.chase is None:
             return
         self.at(t)
-        if self.aggro_until is None or t >= self.aggro_until:
-            self.chase_dir = 0
+        self.chase_dir = 0
         self.aggro_until = t + self.chase_rng.uniform(*AGGRO_S)
         if self.pushed is not None and self.pushed[0] == self.t0:
-            return  # (flinching: it chases from the flinch's end)
+            self.t1 = min(self.t1, self.t0 + monster_data.FLINCH_S)  # (flinching: it chases from the flinch's end)
+            return
         (x, d), walked = self._fold(t), self.d
         self.t0, self.x0, self.facing = t, x, d or self.facing
         self._draw()
@@ -1167,7 +1220,7 @@ class SimMonster:
         """Where it is at t within the current segment, and which way it's then going (bouncing at the ends)."""
         if not self.d:
             if self.pushed is not None and self.pushed[0] == self.t0 and t < self.t0 + KNOCK_MOB_S:
-                return self.pushed[1] + (self.x0 - self.pushed[1]) * (t - self.t0) / KNOCK_MOB_S, 0
+                return pushed_x(self.pushed[1], self.x0, t - self.t0), 0
             return self.x0, 0
         span = self.hi - self.lo
         if span <= 0:
@@ -1210,13 +1263,14 @@ class SimMonster:
 
     def knock(self, t: float, away: int) -> None:
         """Hit at t, from her side: pushed KNOCK_MOB units `away` (+1/-1) over KNOCK_MOB_S, as far as its
-        walk goes, standing until FLINCH_S after the hit (it faces the way it did). Its walk after is drawn
-        then, as at the end of any of its segments."""
+        walk goes, facing her, standing until FLINCH_S after the hit and then the rest of its decision (its AI waits
+        the hit out). Its walk after is drawn then, as at the end of any of its segments."""
         self.at(t)
-        x, d = self._fold(t)
-        self.pushed, self.anim0, self.facing = (t, x), t, d or self.facing
+        x, _ = self._fold(t)
+        left = max(0.0, self.t1 - t)
+        self.pushed, self.anim0, self.facing = (t, x), t, -away
         self.t0, self.x0, self.d = t, min(max(x + away * KNOCK_MOB, self.lo), self.hi), 0
-        self.t1 = t + monster_data.FLINCH_S
+        self.t1 = t + monster_data.FLINCH_S + left
 
     def body(self, t: float, flinching: bool = False) -> tuple[float, float, float, float]:
         """Its body at t: from `lo` to `hi` sideways of its feet and from `bottom` to `top` above them. With
@@ -1232,6 +1286,377 @@ class SimMonster:
         else:
             f = MobInfo.frame_at(self.info.move if self.d else self.info.stand, (t - self.anim0) * 1000)
         return (f.lo, f.hi, f.bottom, f.top) if (d or self.facing) < 0 else (-f.hi, -f.lo, f.bottom, f.top)
+
+
+# Monsters that jump (a jump action in their game data, MapModel.mob_hops: Tree Dungeon's Slimes): v83's move ability
+# 2 (RustMS's HeavenClient: Mob::step_body, think, think_jump, jump; FootholdTree::limit_jumper, get_wall_ahead;
+# Physics::jump), where the simulator walked them as any other (the user, 2026-10-31: "Yes, align them"). Its AI as a
+# walker's (AI_STEP, IDLE_THINK_MS, CHASE_THINK_MS), and: one idle decision in JUMP_IDLE a jump (the way it walks, or
+# straight up standing), after which it decides again; a rising wall within JUMP_AHEAD ahead (at its platform's end)
+# jumped at while its decision lasts, and pressed against one, back the other way; a jump of those that lands as high
+# as it left turns it round; chasing her, one AI step in JUMP_CHASE a jump while she's over a floor of another group,
+# higher, that reaches across over it. Walking: within its reach (its platform's group's and its home group's across,
+# less JUMPER_MARGIN a side where wider than twice that), turning round at its limits; at its platform's end, on down a
+# step joined to it (unless chasing her over another group), else it stops and jumps off it the client's tick later
+# (EDGE_JUMP_S; chasing her lower, at a free end or a step half the time, and the other half off it walking). Its jump:
+# up at the jump speed (555: 77 units high), the way it holds at its walk speed (from standing at 0.8 of it: the kick),
+# through the air as her flight (body.fly: its shoe, the walls that stop her and the map's sides, World._flight's),
+# landing on the way it jumped; in the air its AI only counts its decision down. Hit in the air, it's stood where it
+# lands (Mob::flinch_body); its push as a walker's, as far as its platform and its reach go. False: they walk as the
+# others.
+JUMPERS = True
+JUMP_IDLE = 5
+JUMP_CHASE = 3
+JUMP_AHEAD = 40.0
+JUMPER_MARGIN = 20.0
+EDGE_JUMP_S = 0.008
+JUMPER_KEEP_S = 10.0  # the stretches kept behind it, for a look a little back in time
+
+
+@dataclass
+class JumpSpace:
+    """What a jumping monster needs of its world: the map, the walls and sides that stop it in the air (World._flight's),
+    each foothold group's reach across (x from, to) and a shoe for each walk speed."""
+    model: MapModel
+    walls: tuple
+    sides: tuple[float, float] | None
+    reach: dict
+    shoes: dict
+
+    @classmethod
+    def of(cls, model: MapModel, walls, sides) -> "JumpSpace":
+        reach: dict = {}
+        for g, xs in ([(p.group, (p.left, p.right)) for p in model.platforms]
+                      + [(w.group, (w.x1, w.x2)) for w in model.walls if w.group is not None]):
+            lo, hi = reach.get(g, (min(xs), max(xs)))
+            reach[g] = (min(lo, *xs), max(hi, *xs))
+        return cls(model, walls, sides, reach, {})
+
+    def shoe(self, speed: float) -> body.Shoe:
+        """A monster's shoe: walking at `speed`, jumping at the jump speed (100%)."""
+        if speed not in self.shoes:
+            self.shoes[speed] = body.Shoe.from_physics(body.PHYSICS_IMG, 100 * speed / body.PHYSICS_IMG["walkSpeed"],
+                                                       100.0)
+        return self.shoes[speed]
+
+    def group_below(self, x: float, y: float):
+        """The foothold group of the floor at or under (x, y) (None: none)."""
+        under = [q for q in self.model.platforms if q.covers(x) and q.y_at(x) >= y - 1]
+        return min(under, key=lambda q: q.y_at(x)).group if under else None
+
+
+def end_link(p: Platform, way: int) -> str:
+    """What joins platform p's end that way (+1 right, -1 left): "free" (nothing), "rising" (a wall up from it),
+    "step" (a wall down from it), "on" (a foothold on across)."""
+    if way > 0:
+        link = max(p.segments, key=lambda s: max(s.x1, s.x2)).next
+    else:
+        link = min(p.segments, key=lambda s: min(s.x1, s.x2)).prev
+    if link is None:
+        return "free"
+    x1, y1, x2, y2 = link
+    if x2 > x1:
+        return "on"
+    return "rising" if (y2 < y1 if way > 0 else y2 > y1) else "step"
+
+
+@dataclass
+class SimJumper(SimMonster):
+    """A monster that jumps (JUMPERS): moved step by step of its AI (AI_STEP) and event by event between them (its
+    walk reaching its platform's end or its reach, a jump asked for there, its landing, its hit's end), as the
+    stretches it goes through (`segs`: ("stand", t0, x, platform), ("walk", t0, x, way, platform), ("press", t0, x,
+    way, platform): walking into its platform's end, ("hit", t0, from x, to x, platform), ("air", t0, flight, way)),
+    kept JUMPER_KEEP_S behind the latest. `platform` is the one it stands on, or jumped from in the air."""
+    space: JumpSpace | None = None
+    target: Callable[["SimJumper", float], tuple[float, float] | None] | None = None
+    home_platform: Platform | None = None
+    segs: list | None = None
+    ai_t: float = 0.0          # its AI's next step
+    thinktimer: int = 0
+    movedir: int = 0
+    jumpdir: int = 0
+    checkjump: bool = False
+    jumpy: float = 0.0
+    jump_at: float | None = None  # a jump asked for at its platform's end
+    hit_until: float | None = None
+    last: tuple[float, float, float] = (0.0, 0.0, 0.0)  # (t, x, y) of its last place worked out
+
+    def start(self, t: float, x: float) -> None:
+        if self.home_platform is None:
+            self.home_platform = self.platform
+        self.platform = p = self.home_platform
+        x = p.clamp(x)
+        self.segs, self.ai_t = [("stand", t, x, p)], t + AI_STEP
+        self.thinktimer = self.movedir = self.jumpdir = 0
+        self.checkjump, self.jump_at, self.hit_until, self.pushed = False, None, None, None
+        self.t0, self.x0, self.d, self.anim0 = t, x, 0, t
+        self.last = (t, x, p.y_at(x))
+
+    def ghost(self) -> "SimJumper":
+        g = super().ghost()
+        g.segs = list(self.segs)
+        return g
+
+    # --- where it is ---------------------------------------------------------------------------------------------
+
+    def at(self, t: float) -> float:
+        self._run(t)
+        x, y, _, _ = self._place(t)
+        self.last = (t, x, y)
+        return x
+
+    def y(self, x: float) -> float:
+        _, lx, ly = self.last
+        return ly if abs(x - lx) < 1e-6 else self.platform.y_at(self.platform.clamp(x))
+
+    def in_air(self, t: float) -> bool:
+        self.at(t)
+        return self._seg(t)[0] == "air"
+
+    def faces(self, t: float) -> tuple[int, bool]:
+        self.at(t)
+        s = self._seg(t)
+        if s[0] in ("walk", "press"):
+            return s[3] or self.facing, bool(s[3])
+        if s[0] == "air":
+            return s[3] or self.facing, True
+        return self.facing, False
+
+    def body(self, t: float, flinching: bool = False) -> tuple[float, float, float, float]:
+        way, walking = self.faces(t)
+        if self.info is None or not self.info.move:
+            return -self.half, self.half, 0.0, max(self.height, self.flinch_top) if flinching else self.height
+        if flinching and self.info.hit is not None:
+            f = self.info.hit
+        else:
+            f = MobInfo.frame_at(self.info.move if walking else self.info.stand, (t - self.anim0) * 1000)
+        return (f.lo, f.hi, f.bottom, f.top) if way < 0 else (-f.hi, -f.lo, f.bottom, f.top)
+
+    def _seg(self, t: float):
+        for s in reversed(self.segs):
+            if s[1] <= t:
+                return s
+        return self.segs[0]
+
+    def _place(self, t: float) -> tuple[float, float, int, Platform | None]:
+        """(x, y, the way it holds: its AI's input, the platform under it: None in the air) at t."""
+        s = self._seg(t)
+        kind, t0 = s[0], s[1]
+        if kind == "stand":
+            return s[2], s[3].y_at(s[2]), 0, s[3]
+        if kind in ("walk", "press"):
+            x = s[2] + s[3] * self.speed * max(0.0, t - t0) if kind == "walk" else s[2]
+            return x, s[4].y_at(s[4].clamp(x)), s[3], s[4]
+        if kind == "hit":
+            x = pushed_x(s[2], s[3], max(0.0, t - t0))
+            return x, s[4].y_at(s[4].clamp(x)), 0, s[4]
+        path = s[2].path
+        u = max(0.0, t - t0) / body.TICK
+        i = int(u)
+        if i >= len(path) - 1:
+            x, y = path[-1]
+        else:
+            k = u - i
+            x = path[i][0] + (path[i + 1][0] - path[i][0]) * k
+            y = path[i][1] + (path[i + 1][1] - path[i][1]) * k
+        return x, y, s[3], None
+
+    # --- its events ----------------------------------------------------------------------------------------------
+
+    def _run(self, t: float) -> None:
+        while True:
+            s = self.segs[-1]
+            if self.hit_until is not None:
+                due = [(self.hit_until, "hit end")]
+            else:
+                due = [(self.ai_t, "ai")]
+                if s[0] == "walk":
+                    due.append(self._walk_end(s))
+                elif s[0] == "air":
+                    due.append((s[1] + s[2].seconds, "land"))
+                if self.jump_at is not None:
+                    due.append((self.jump_at, "jump"))
+            te, what = min(due)
+            if te > t:
+                break
+            if what == "ai":
+                self.ai_t = te + AI_STEP
+                if s[0] == "air":
+                    self.thinktimer -= 1
+                else:
+                    self._think(te)
+            elif what == "hit end":
+                self.hit_until = None
+                x, _, _, p = self._place(te)
+                self._add(("stand", te, x, p))
+            elif what == "land":
+                self._land(te)
+            elif what == "jump":
+                self._jump(te, self._place(te)[2], check=False)
+            else:
+                self._at_end(te, what)
+        if len(self.segs) > 1 and self.segs[1][1] < t - JUMPER_KEEP_S:
+            keep = [s for s in self.segs if s[1] >= t - JUMPER_KEEP_S]
+            self.segs = [self._seg(t - JUMPER_KEEP_S), *keep] if keep else self.segs[-1:]
+
+    def _add(self, s) -> None:
+        moving = s[0] in ("walk", "press", "air") and s[3] != 0 or s[0] == "air"
+        before = self.segs[-1]
+        if s[0] == "hit" or moving != (before[0] in ("walk", "press", "air") and before[3] != 0 or before[0] == "air"):
+            self.anim0 = s[1]
+        self.segs.append(s)
+        if s[0] != "air":
+            self.platform = s[-1]
+        self.d = s[3] if s[0] in ("walk", "press", "air") else 0
+        if self.d:
+            self.facing = self.d
+
+    def _limits(self) -> tuple[float, float]:
+        """Its reach across: its platform's group's and its home group's, less JUMPER_MARGIN a side where wider than
+        twice that (FootholdTree::limit_jumper)."""
+        here = self.space.reach.get(self.platform.group, (self.platform.left, self.platform.right))
+        home = self.space.reach.get(self.home_platform.group, here)
+        lo, hi = min(here[0], home[0]), max(here[1], home[1])
+        return (lo + JUMPER_MARGIN, hi - JUMPER_MARGIN) if hi - lo > 2 * JUMPER_MARGIN else (lo, hi)
+
+    def _walk_end(self, s) -> tuple[float, str]:
+        """When a walk reaches its platform's end ("end") or its reach ("turn")."""
+        _, t0, x0, way, p = s
+        lo, hi = self._limits()
+        if way > 0:
+            stop, what = (p.right, "end") if p.right <= hi else (hi, "turn")
+        else:
+            stop, what = (p.left, "end") if p.left >= lo else (lo, "turn")
+        return t0 + max(0.0, (stop - x0) * way) / self.speed, what
+
+    def _chasing(self, t: float) -> tuple[float, float] | None:
+        """Her place (x, her feet's y) while it chases her (Realism.chase), else None."""
+        if self.target is None or self.aggro_until is None or t >= self.aggro_until or self.hit_until is not None:
+            return None
+        return self.target(self, t)
+
+    def _walk(self, t: float, way: int) -> None:
+        """Mob::walk: stand (0) or walk that way; pressed to its platform's end, it holds that way (the jump asked
+        for there goes that way)."""
+        x, _, now, p = self._place(t)
+        s = self.segs[-1]
+        if s[0] == "press":
+            if way != now:
+                self._add(("press", t, x, way, p) if way else ("stand", t, x, p))
+            return
+        if way != now or s[0] not in ("walk", "stand"):
+            self._add(("walk", t, x, way, p) if way else ("stand", t, x, p))
+
+    def _jump(self, t: float, way: int, check: bool) -> None:
+        x, y, _, _ = self._place(t)
+        s = self.segs[-1]
+        shoe = self.space.shoe(self.speed)
+        v = s[3] * self.speed if s[0] == "walk" else 0.0
+        self.jumpdir, self.checkjump, self.jumpy, self.jump_at = way, check, y, None
+        self._fly(t, x, y, body.takeoff(v, way, shoe) if way else v, -shoe.vjump, way)
+
+    def _fly(self, t: float, x: float, y: float, vx: float, vy: float, way: int) -> None:
+        f = body.fly(self.space.model, x, y, vx, vy, shoe=self.space.shoe(self.speed), arrow=way, walls=self.space.walls,
+                     sides=self.space.sides, path=True)
+        self._add(("air", t, f, way))
+
+    def _land(self, t: float) -> None:
+        f = self.segs[-1][2]
+        if f.platform is None:  # (nothing to land on within the flight's time: back where it came from)
+            self.start(t, self.home)
+            return
+        way = self.jumpdir
+        self._add(("walk", t, f.land_x, way, f.platform) if way else ("stand", t, f.land_x, f.platform))
+
+    def _at_end(self, t: float, what: str) -> None:
+        """Its walk at its reach (round) or its platform's end (on, down a step, off walking, or a jump asked for)."""
+        _, _, _, way, p = self.segs[-1]
+        x, y, _, _ = self._place(t)
+        if what == "turn":
+            self._add(("walk", t, x, -way, p))
+            return
+        link = end_link(p, way)
+        her = self._chasing(t)
+        lo, hi = self._limits()
+        inreach = lo < p.left if way < 0 else p.right < hi
+        stepdown = her is None or self.space.group_below(*her) == p.group
+        edgejump = her is None or her[1] <= y or self.chase_rng.random() < 0.5
+        if link == "on" or link == "step" and inreach and stepdown or link in ("free", "step") and not edgejump:
+            self.jumpdir, self.checkjump = way, False
+            self._fly(t, x, y, way * self.speed, 0.0, way)  # (on, or off it walking)
+            return
+        self._add(("press", t, x, way, p))
+        self.jump_at = t + EDGE_JUMP_S
+
+    def _think(self, t: float) -> None:
+        """One AI step on the ground: think_jump, then think (Mob::think)."""
+        x, y, way, p = self._place(t)
+        her = self._chasing(t)
+        if self.checkjump:
+            self.checkjump = False
+            if way and abs(y - self.jumpy) < 0.5:
+                way = -way
+                self._walk(t, way)
+        end = p.right if way > 0 else p.left
+        if way and end_link(p, way) == "rising" and (end - x) * way <= JUMP_AHEAD:
+            if (end - x) * way < 1:
+                way = -way
+                self._walk(t, way)
+            elif self.thinktimer > 0:
+                self._jump(t, way, check=True)
+                self.thinktimer -= 1
+                return
+        if her is not None and self.thinktimer > 0:
+            g = self.space.group_below(*her)
+            reach = self.space.reach.get(g)
+            if (g is not None and g != p.group and her[1] < y and reach is not None and reach[0] < x < reach[1]
+                    and self.chase_rng.randrange(JUMP_CHASE) == 0):
+                self.movedir, self.thinktimer = 0, -1
+                self._jump(t, way, check=True)
+                return
+        if self.thinktimer > 0:
+            self.thinktimer -= 1
+            return
+        if her is not None:
+            self.thinktimer = think_steps(self.chase_rng, CHASE_THINK_MS)
+            if self.movedir == 0 or abs(her[0] - x) >= AGGRO_PASS:
+                self.movedir = 1 if her[0] >= x else -1
+            self._walk(t, self.movedir)
+        elif self.rng.randrange(JUMP_IDLE) == 0:
+            self._jump(t, way, check=False)
+            return
+        else:
+            self.thinktimer = think_steps(self.rng, IDLE_THINK_MS)
+            self.movedir = self.rng.randrange(3) - 1
+            self._walk(t, self.movedir)
+        self.thinktimer -= 1
+
+    # --- hit ---------------------------------------------------------------------------------------------------
+
+    def knock(self, t: float, away: int) -> None:
+        self.at(t)
+        x, _, _, p = self._place(t)
+        if p is None:  # (in the air: stood where it lands)
+            f = self.segs[-1][2]
+            if f.platform is None:
+                self.start(t, self.home)
+                x, p = self.home, self.platform
+            else:
+                x, p = f.land_x, f.platform
+        lo, hi = self._limits()
+        to = min(max(x + away * KNOCK_MOB, p.left, lo), p.right, hi)
+        self.jump_at, self.checkjump = None, False
+        self.ai_t = t + monster_data.FLINCH_S + max(0.0, self.ai_t - t)  # (its AI waits the hit out)
+        self.hit_until = t + monster_data.FLINCH_S
+        self._add(("hit", t, x, to, p))
+        self.pushed, self.facing = (t, x), -away
+
+    def aggro(self, t: float) -> None:
+        if self.chase is None:
+            return
+        self.at(t)
+        self.aggro_until = t + self.chase_rng.uniform(*AGGRO_S)
+        self.thinktimer, self.movedir = 0, 0  # (Mob::chase: it decides at its AI's next step)
 
 
 @dataclass
@@ -1464,7 +1889,9 @@ class World:
         self._took_off: tuple[int | None, float, int] | None = None
         self._knock_landed_ms = -10 ** 9  # (her last knock's landing: _log_landing's knock-falls)
         self.monsters: list[SimMonster] = []
-        self.by_platform: dict[int, list[SimMonster]] = {}
+        self.by_platform: dict[int, list[SimMonster]] = {}  # (the walkers by their platform; the jumpers apart: _on)
+        self.jumpers: list[SimJumper] = []
+        self._jump_space: JumpSpace | None = None
         self._kinds: tuple | None = None  # the game data's bodies, speeds and mob ids (_monster)
         self._spawn(monsters)
         self.points = len(self.monsters)  # the map's spawn points (one monster each at the start)
@@ -1510,7 +1937,7 @@ class World:
             m = self._monster(i, name, pid, float(x), random.Random(self.rng.random()))
             m.start(0.0, float(x))
             self.monsters.append(m)
-            self.by_platform.setdefault(pid, []).append(m)
+            self._keep(m)
 
     def _monster(self, i: int, name: str, pid: int, x: float, rng: random.Random) -> SimMonster:
         """A monster of `name` at spawn x `x` on platform `pid`, its body, speed, HP and info the game data's (not
@@ -1527,8 +1954,15 @@ class World:
         hits = float(hits_of(kind, info))
         if self.character.spread and info is not None and info.hp > 0:  # in average stars, not whole ones
             hits = info.hp * (info.pdd + 100) / 100 / STAR_MEAN
-        m = SimMonster(i, name, kind, self.model.platform(pid), x, rng, speeds.get(kind, monster_data.DEFAULT_SPEED),
-                       half, height, hits, hits)
+        hops = self.model.mob_hops
+        jumps = JUMPERS and bool(hops[name] if name in hops else any(v for k, v in hops.items() if kind_of(k) == kind))
+        m = (SimJumper if jumps else SimMonster)(i, name, kind, self.model.platform(pid), x, rng,
+                                                 speeds.get(kind, monster_data.DEFAULT_SPEED), half, height, hits, hits)
+        if jumps:
+            if self._jump_space is None:
+                self._jump_space = JumpSpace.of(self.model, body.wall_table(self.model, self.realism.zero_walls),
+                                                self.sides)
+            m.space, m.target = self._jump_space, self._target_at
         if kind in bodies:
             m.flinch_top = bodies[kind].flinch_top
             m.fade = bodies[kind].die_s or FADE
@@ -2085,7 +2519,7 @@ class World:
         if cause == "knock":
             self._knock_landed_ms = self.ms
         t, near = self.t, None
-        for m in self.by_platform.get(q.id, ()):
+        for m in self._on(q.id):
             if m.alive:
                 mx = m.at(t)
                 if near is None or abs(mx - x) < near[0]:
@@ -2094,6 +2528,30 @@ class World:
         self.land_log.append((round(t, 3), None if took is None else took[0], None if took is None else round(took[1], 1),
                               q.id, round(x, 1), cause, *((None, None, None) if near is None else
                                                          (round(near[0], 1), near[1], near[2]))))
+
+    def _keep(self, m: SimMonster) -> None:
+        """A new monster among the walkers on its platform (by_platform), or the jumpers."""
+        if isinstance(m, SimJumper):
+            self.jumpers.append(m)
+        else:
+            self.by_platform.setdefault(m.platform.id, []).append(m)
+
+    def _on(self, pid: int) -> list[SimMonster]:
+        """The monsters on platform `pid` now: its walkers, and the jumpers standing on it or in the air from it."""
+        here = self.by_platform.get(pid, [])
+        if not self.jumpers:
+            return here
+        t, here = self.t, list(here)
+        for j in self.jumpers:
+            if j.alive:
+                j.at(t)
+            if j.platform.id == pid:
+                here.append(j)
+        return here
+
+    def _target_at(self, m: SimMonster, t: float) -> tuple[float, float] | None:
+        """Realism.chase: her place (x, her feet's y) for a jumper's chase, None once she's dead."""
+        return None if self.dead else (self.x, self.y)
 
     def _chase_at(self, m: SimMonster, t: float) -> float | None:
         """Realism.chase: her x for monster m's chase stretch starting at t, wherever she is (it walks along its own
@@ -2161,7 +2619,7 @@ class World:
         if self.mode == "rope" or self.dead:
             return
         t, x, claw, close = self.t, self.x, False, False
-        for m in self.by_platform.get(self.last_plat.id, ()):
+        for m in self._on(self.last_plat.id):
             if m.alive:
                 dx = abs(m.at(t) - x)
                 claw = claw or dx < reach.CLAW_FAR + m.half
@@ -2178,18 +2636,19 @@ class World:
             pids = self._near[self.plat.id]
         else:
             pids = [q.id for q in self.model.platforms if q.covers(self.x, 60) and -70 <= q.y_at(self.x) - self.y <= 70]
-        for pid in pids:
-            for m in self.by_platform.get(pid, ()):
-                if not m.alive:
-                    continue
-                mx = m.at(t)
-                lo, hi, bottom, top = self.body(m)
-                if self.x + half <= mx + lo or self.x - half >= mx + hi:
-                    continue
-                my = m.y(mx)
-                if self.y > my - top and self.y - tall < my - bottom:
-                    self._hit_by(m, mx)
-                    return
+        near = [m for pid in pids for m in self._on(pid)]
+        near += [j for j in self.jumpers if j.alive and j not in near and j.in_air(t)]  # (in the air from elsewhere)
+        for m in near:
+            if not m.alive:
+                continue
+            mx = m.at(t)
+            lo, hi, bottom, top = self.body(m)
+            if self.x + half <= mx + lo or self.x - half >= mx + hi:
+                continue
+            my = m.y(mx)
+            if self.y > my - top and self.y - tall < my - bottom:
+                self._hit_by(m, mx)
+                return
 
     def _hit_by(self, m: SimMonster, mx: float) -> None:
         self.touches += 1
@@ -2326,9 +2785,11 @@ class World:
         limit = math.inf if pick is None else (pick.at(t) - self.x) * d
         near = []
         for m in self.monsters:
-            if not m.alive or m is pick or m.platform.id != self.last_plat.id:
+            if not m.alive or m is pick:
                 continue
             mx = m.at(t)
+            if m.platform.id != self.last_plat.id:
+                continue
             ahead = (mx - self.x) * d
             lo, hi, bottom, top = reach.body_box(ahead, m.y(mx) - self.y, top_of(m), m.half)
             if hi <= 0 or ahead >= limit or reach.search_band(lo, hi, bottom, top) is not None:
@@ -2546,7 +3007,7 @@ class World:
         ahead, how much lower its feet are than the floor under her (+ lower), and it; None with none (pick_log)."""
         t, d, p, best = self.t, directions.sign(facing), self.last_plat, None
         floor = p.y_at(p.clamp(self.x))
-        for m in self.by_platform.get(p.id, ()):
+        for m in self._on(p.id):
             if m.alive:
                 mx = m.at(t)
                 ahead = (mx - self.x) * d
@@ -2655,7 +3116,7 @@ class World:
             return
         # (where each is, from a copy: its own walk is drawn as it's looked at, aimed at where she is then with
         # Realism.chase, so a look of the pass's own would move it)
-        near = [(x, m.platform.y_at(x)) for m in self.monsters if m.alive for x in (m.ghost().at(t),)]
+        near = [(x, g.y(x)) for m in self.monsters if m.alive for g in (m.ghost(),) for x in (g.at(t),)]
         clear = []
         for p in range(self.points):  # (the map's first monsters are its points', in its order: _spawn)
             home = self.monsters[p]
@@ -2678,7 +3139,7 @@ class World:
                 m.point, m.born = p, t
                 m.start(t, first.home)
                 self.monsters.append(m)
-                self.by_platform.setdefault(m.platform.id, []).append(m)
+                self._keep(m)
                 self._camps_watch(m)
             self.respawn_births += 1
 

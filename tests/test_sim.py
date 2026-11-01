@@ -978,8 +978,9 @@ def test_a_hit_pushes_a_monster_back_and_stands_it_while_it_flinches(model, monk
     at_hit = 600.0 - m.speed * hit
     # a star (of 3) lands 520 ms after the key: its push then, its damage the server's at 290 (actions.DAMAGE_SHOWS_MS)
     assert m.hp == 2 and hit == pytest.approx(0.52)
-    assert m.at(hit + 0.125) == pytest.approx(at_hit + 9)  # pushed away from her ...
-    assert m.at(hit + 0.3) == m.at(hit + 0.59) == pytest.approx(at_hit + 18)  # ... 18 units, then it stands
+    # pushed away from her at 130 units/s slowing at 400/s² (v83's) ...
+    assert m.at(hit + 0.125) == pytest.approx(at_hit + 130 * 0.125 - 200 * 0.125 ** 2)
+    assert m.at(hit + 0.33) == m.at(hit + 0.59) == pytest.approx(at_hit + 21.125)  # ... 21 units, then it stands
     assert m.d == 0
     m = shot(False)  # without: it walks on through the hit
     assert m.at(hit + 0.3) == pytest.approx(600.0 - m.speed * (hit + 0.3))
@@ -992,14 +993,12 @@ def test_a_hit_pushes_a_monster_back_and_stands_it_while_it_flinches(model, monk
 def test_simulated_monsters_walk_the_maps_speeds_and_stand_through_a_hits_push():
     """The game data's walking speeds (MapModel.mob_speeds, localization.monsters.speeds) and the push of a
     hit: a pig on a map whose data says 120 units/s (walkSpeed 100, speed stat +20; the table says 125)
-    walks at 120, the tracker expects as much, a hit pushes it 18 units away from her over 0.25 s and stands
-    it until FLINCH_S after the hit, and then it walks at 120 again."""
-    class Walks:  # its draws after the stand: walk right, for 4 s
-        def random(self):
-            return 0.9
-
-        def uniform(self, lo, hi):
-            return hi
+    walks at 120, the tracker expects as much, a hit pushes it 21 units away from her over 0.33 s (slowing) and
+    stands it facing her until FLINCH_S after the hit, and the rest of its decision (its AI waits the hit out), and
+    then it walks at 120 again."""
+    class Walks:  # its draws after the stand: walk right, for 33 AI steps
+        def randrange(self, n):
+            return n - 1
 
     fast = mapdata.parse(1, tree(), "Test Map", {"walkSpeed": 100.0}, {"2": "Snail", "8": "Pig"}, {"2": 2},
                          mob_speeds={"8": 20})
@@ -1008,13 +1007,14 @@ def test_simulated_monsters_walk_the_maps_speeds_and_stand_through_a_hits_push()
     w = world(fast, c.id, 300.0, monsters=[("Pig", c.id, 600.0)])
     m = w.monsters[0]
     assert m.speed == 120.0
-    m.t0, m.x0, m.d, m.t1, m.rng = 0.0, 600.0, -1, 1e9, Walks()  # walking at her
+    m.t0, m.x0, m.d, m.t1, m.rng = 0.0, 600.0, -1, 1.3, Walks()  # walking at her, 0.3 s of its decision left at 1
     assert m.at(1.0) == pytest.approx(480.0)
     m.knock(1.0, 1)
-    assert m.at(1.125) == pytest.approx(489.0) and m.at(1.25) == m.at(1.0 + monsters.FLINCH_S - 0.01) == 498.0
-    assert m.faces(1.3) == (-1, False)  # standing, still facing her
-    t = 1.0 + monsters.FLINCH_S
-    assert m.at(t + 0.2) == pytest.approx(498.0 + 120.0 * 0.2) and m.faces(t + 0.2) == (1, True)
+    pushed = 480.0 + world_mod.KNOCK_MOB
+    assert m.at(1.125) == pytest.approx(493.125) and m.at(1.33) == m.at(1.0 + monsters.FLINCH_S + 0.29) == pushed
+    assert m.faces(1.3) == (-1, False)  # standing, facing her
+    t = 1.0 + monsters.FLINCH_S + 0.3
+    assert m.at(t + 0.2) == pytest.approx(pushed + 120.0 * 0.2) and m.faces(t + 0.2) == (1, True)
 
 
 def test_she_evades_some_touches_and_dies_at_no_hp(model, monkeypatch):
@@ -1383,7 +1383,8 @@ def test_a_simulated_monster_faces_the_way_it_last_walked():
         t = i * 0.01
         x = m.at(t)
         way, walking = m.faces(t)
-        if last is not None and walking and abs(x - last) > 0.5 and m.lo + 2 < x < m.hi - 2:  # not mid-bounce
+        if (last is not None and walking and abs(x - last) > 0.5 and m.lo + 2 < x < m.hi - 2  # not mid-bounce
+                and m.t0 <= t - 0.01):  # (nor its decision's turn since the step before: AI_STEP's, on its grid)
             assert (x > last) == (way > 0)
             walked += 1
         if not walking:

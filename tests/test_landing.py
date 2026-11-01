@@ -243,7 +243,7 @@ def test_grind_stops_stand_clear_of_their_platforms_spawn_points(tree_map, monke
 
 def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: F811
     # Realism.chase (aggro, as the game has it: world.AGGRO_S): unhurt, a monster walks as with nobody there, the knob on
-    # or off (its chase draws from its own rng); hit by her, it walks at her every stretch (AGGRO_THINK s each, never
+    # or off (its chase draws from its own rng); hit by her, it walks at her every stretch (CHASE_THINK_MS each, never
     # standing), on past her AGGRO_PASS and a stretch's walk at the most before turning back, until its aggro's end, a
     # hit again starting it anew; then its own walk again.
     c = plat(model, 500, 400)
@@ -259,15 +259,16 @@ def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: 
     x0 = m.at(t)
     m.aggro(t)
     assert t + world_mod.AGGRO_S[0] <= m.aggro_until <= t + world_mod.AGGRO_S[1]
+    longest = (sum(world_mod.CHASE_THINK_MS) - 1) // 90 * world_mod.AI_STEP  # (a chase decision's most: 1.17 s)
     xs, stretches = [], set()
     for i in range(1, 1201):  # (two minutes of it)
         xs.append(m.at(t + i * 0.1))
         stretches.add((m.t0, m.t1, m.d))
-    assert all(d != 0 and t1 - t0 <= world_mod.AGGRO_THINK[1] + 1e-9 for t0, t1, d in stretches)
+    assert all(d != 0 and t1 - t0 <= longest + 1e-9 for t0, t1, d in stretches)
     met = next(i for i, x in enumerate(xs) if abs(x - 400.0) <= m.speed * 0.1)
     assert (met + 1) * 0.1 <= abs(x0 - 400.0) / m.speed + 0.2  # (straight at her)
     after = [x - 400.0 for x in xs[met:]]
-    past = world_mod.AGGRO_PASS + m.speed * world_mod.AGGRO_THINK[1]
+    past = world_mod.AGGRO_PASS + m.speed * longest
     assert max(abs(dx) for dx in after) <= past + 1e-6
     assert min(after) < -world_mod.AGGRO_PASS + 5 and max(after) > world_mod.AGGRO_PASS - 5  # (on past her, both ways)
     # A hit again starts it anew; once it's over, its own walk (standing too).
@@ -278,7 +279,7 @@ def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: 
     for i in range(1, int((until - t - 100.0 + 60.0) * 10)):
         m.at(t + 100.0 + i * 0.1)
         (own if m.t0 >= until else ends).add((m.t0, m.t1, m.d))
-    assert max(t1 for _, t1, _ in ends) == pytest.approx(until)
+    assert until <= max(t1 for _, t1, _ in ends) <= until + longest + 1e-9  # (its last chase decision run out)
     assert any(d == 0 for _, _, d in own) and all(d != 0 for _, _, d in ends)
     # Her x wherever she is (it walks along its own platform at it); none once she's dead.
     w.x = 123.0

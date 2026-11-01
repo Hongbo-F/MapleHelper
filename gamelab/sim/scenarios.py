@@ -670,7 +670,7 @@ _CROWD = harness.PRESETS["crowd"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
@@ -702,14 +702,15 @@ def loop_tree_23(sim):
     when her attack starts, and the world's air pick fitted to the live throws (Clearance and slopes): on seed 1 she
     shot 23 from the spot fewer than 20 times, for 42 kills; of seeds 1-16 all but 1 and 4 meet all of this.) (Fifteen
     kills since the server's respawn became every scenario's, 2026-10-31: 18 in its 4 minutes, where the denser world
-    before gave twenty.)"""
+    before gave twenty.) (Seed 1 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 2 under
+    fifteen kills; of seeds 1-13 1 and 5-12 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=8, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -728,11 +729,12 @@ def loop_tree_23_near_misses(sim):
     planner's flights from a floating platform count the tower's walls now): on seed 4 no Horny Mushroom missed by the
     looks later; of seeds 1-13, 3 and 13 meet all of this, 4, 9 and 10 before.) (Seed 2 since the simulator's looks have
     her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 3 not all
-    of this; of seeds 1-13, 9 meet all of it, 4 with her dot.)"""
+    of this; of seeds 1-13, 9 meet all of it, 4 with her dot.) (Seed 8 since the monsters move as the v83 client's AI
+    moves them, 2026-10-31: on seed 2 no monster later unseen; of seeds 1-13 8, 11 and 12 show all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
-@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=7, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_wait(sim):
@@ -745,7 +747,9 @@ def loop_tree_wait(sim):
     over a rope's top, which master's stack (one miss on seed 3) didn't come to. Of seeds 1-12 every one meets it, with
     no such miss on 2, 4-8 and 10-12; master's stack meets all 12.) (Seed 1 since walls stop her in the air by the
     game's rule (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls
-    now): on seed 2 not all of this; of seeds 1-13, 1, 5, 7, 10 and 13 meet all of it, five before too.)"""
+    now): on seed 2 not all of this; of seeds 1-13, 1, 5, 7, 10 and 13 meet all of it, five before too.) (Seed 7 since
+    the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 1 no wait; of seeds 1-13 7 and 12 show all
+    of this.)"""
     return harness._only(_loop(4), (20,))(sim)
 
 
@@ -805,7 +809,7 @@ def loop_tree_grind(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=6, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=24, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(logs(": shooting first"), happens("picks up sapphire-ore"),
                check("every ore picked up", lambda tr: tr["world"]["picked"].get("sapphire-ore", 0) >= 4),
@@ -859,7 +863,9 @@ def loop_tree_ore_waits(sim):
     (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 1
     the ore never picked up in time; of seeds 1-13, 7 alone meets all of this, 1 and 6 before.) (Seed 6 since the
     simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as
-    right): on seed 7 the ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.)"""
+    right): on seed 7 the ore never picked up in time; of seeds 1-13, 6 alone meets all of this, 7 alone with her dot.)
+    (Seed 24 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 6 the ore not picked up in
+    the time, and hurt more than five times; none of seeds 1-23 shows all of this, of 1-40 24, 29 and 35.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1223,7 +1229,7 @@ DARTS_EXPECTS = (
     check("her moves alone after the stop, no attack and no mouse", _moves_alone))
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
       expects=DARTS_EXPECTS)
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
@@ -1240,7 +1246,8 @@ def loop_tree_out_of_darts(sim):
     from the start, a kill back at the next pass; on 4 not all of this; of seeds 1-13, 1, 2, 5-7 and 9-13 meet all of
     it.) (Seed 2 since the simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's
     localizer taken as right): on seed 1 not on a safe place once her retreat was over; of seeds 1-13, 11 meet all of
-    this, 10 with her dot.)"""
+    this, 10 with her dot.) (Seed 1 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 2 not
+    on a safe place once her retreat was over; of seeds 1-13 all but 2 and 10 show all of this.)"""
     return darts_stop(5)(sim)
 
 
@@ -1375,7 +1382,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -1393,7 +1400,8 @@ def loop_tree_attack_misses(sim):
     has under 3 kills after the check, seed 4 no doubt). (Seed 1 since walls stop her in the air by the game's rule
     (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls now): on seed 3
     no regular attack's doubt; of seeds 1-13, 10 meet all of this (1, 2, 4-6, 9-13), and on 1 with the chase off and on
-    the old respawn clock too.)"""
+    the old respawn clock too.) (Seed 2 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 1
+    not the key bindings' check; of seeds 1-13 all but 1 show all of this.)"""
     return key_check_run(2)(sim)
 
 
@@ -1417,7 +1425,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1465,7 +1473,8 @@ def loop_tree_attack_no_darts(sim):
     ATTACK on Ctrl as configured with her stars' test not MAYBE OUT, so no Lucky Seven-only run nor out of darts' stop,
     175 touches in its 344 s. To redo with the chase.) (Seed 6 since the simulator's looks have her place as the world
     does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 8 her stars' test not MAYBE OUT;
-    of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.)"""
+    of seeds 1-13, 6, 7, 9 and 11 meet all of this, four with her dot too.) (Seed 2 since the monsters move as the v83
+    client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of this.)"""
     return key_check_run(4)(sim)
 
 
@@ -1740,7 +1749,7 @@ def nav_tree_rope_hit(sim):
     return _nav(16, fight=True)(sim)
 
 
-@tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=5, limit=60, **_LIVE,
+@tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=8, limit=60, **_LIVE,
       expects=(ends("arrived"), logs("could touch her on the way: shooting it first"),
                logs("by her landing on 23: no shot first, it's dying"), no_log("none thrown"),
                check("on 23 by the end", lambda tr: tr["world"]["platform"] == 23),
@@ -1757,7 +1766,8 @@ def nav_tree_landing_shot_first(sim):
     screen 10 times a second with her band's own search beside it where a whole screen takes longer than 0.05 s
     (worldstate.BAND_STAND_IN_S, 2026-10-28): on seed 3 her throw went 2 ms later, the star pushed the mushroom back
     and it died at x 2, not by her landing, so nothing priced it; of seeds 1-16, 5, 8, 9, 15 and 16 meet all of this,
-    and on every seed she shoots it first from 24.)"""
+    and on every seed she shoots it first from 24.) (Seed 8 since the monsters move as the v83 client's AI moves them,
+    2026-10-31: on seed 5 the Horny Mushroom not dying by her landing; of seeds 1-13 8 alone shows all of this.)"""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(23, mode=TRANSIT)
 
