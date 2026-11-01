@@ -1534,7 +1534,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1609,7 +1609,12 @@ def loop_tree_attack_no_darts(sim):
     her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan: hunt._allow, PET_LOOT;
     D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on 1 her stars' test cast nothing in its 10 s (not on a
     platform: "her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-16, 2 and 12 meet all of
-    this.)"""
+    this.) (Seed 6 since the loot review's fixes (2026-11-01: PET_LOOT off, the sweep's allowances bounded; failing on
+    666c54b) and her two jump attacks, jittered (reach.TOP_KEY_MS, fight.jittered;
+    D:/MapleHelper-scratch/replan/speed/rec/seeds/no_darts.txt): on 2 her stars' test had no monster in reach to cast
+    at ("her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-24, 6 and 13 meet all of this.
+    On 6: the doubt at 67.2 s, a Horny Mushroom at 26%; MAYBE OUT at 74.9 s, ATTACK on Ctrl as configured at 76.8 s:
+    Lucky Seven only, paged; out of darts' stop at 93.7 s, paged.)"""
     return key_check_run(4)(sim)
 
 
