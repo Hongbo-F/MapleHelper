@@ -39,8 +39,9 @@ the two; the simulator's world has either, sim.world.AIR_PICK). Since 2026-10-25
 window's top over her feet (44), and past it the search's own windows from where her feet are then pick too
 (`air_takes`, AIR_SEARCH): they widen with the distance, so a monster on a platform above is hit from high in the
 jump up close and from lower, or from the ground, farther off, as the user's play has it. `shots` and `Coverage` say,
-for where she stands, every jump and attack key that surely hits each monster: one query for the stance, the hunt
-loop, grinding and her trips, the throw from the ground its case with no jump. From 2026-10-27 the area is gone
+for where she stands, every jump and attack key that surely hits each monster (from 2026-11-01 two keys a jump, the
+user's: at once and at its top): one query for the stance, the hunt loop, grinding and her trips, the throw from the
+ground its case with no jump. From 2026-10-27 the area is gone
 (AIR_MODEL 'search'; 'widening' puts it back): from a jump the star's search alone picks, from her feet when the
 attack starts, as RustMS has it. The live hunts of 2026-10-25 and 26 on Tree Dungeon say so: jump throws in place
 at a monster on her platform hurt one under 40 ahead half as often as farther off, and from an air turn's later key,
@@ -1007,13 +1008,33 @@ def air_hits(top: float, gap_ms: float) -> bool:
 # AIR_MARGIN), at the very top; farther off the windows reach higher, so lower in the jump (and from the ground with
 # UP_BY_SEARCH, on by the user's choice: a pig 100 above her from 271 off, 110 from 311; capped at SHOT_UP, 60,
 # without), up to 124 over her feet at the last band (385-400 ahead), from a jump 201 above where she stood.
+# Two attack keys a jump, the user's (2026-11-01: "You only need two jump attacks: one with jump and immediately attack,
+# another with jump and attack at mid air peak"): the soonest (KEY_FIRST_MS; turning in the air, the turn's soonest) and
+# the top's (TOP_KEY_MS), each keyed with a little jitter (the user: "add a bit jitter to it so we still have some
+# variation and can later on analyze if the jitter can show any pattern"), drawn as the attack is carried out
+# (behavior.fight.jittered), not here: the search stays deterministic, and checks that the pick holds over the whole of
+# the jitter's room, the slack about it too (Shot.window). From 2026-10-25 (the user then: the timing "needs to be
+# dynamic but preferably attack immediately after jump or at jump 2") to 2026-11-01 every key from the soonest to 480
+# ms, 5 ms apart, was tried, the soonest sure one taken: about 89 a start, most of the "a better way" check's time
+# (the latency analysis of 2026-11-01).
 KEY_FIRST_MS = physics.JUMP_ATTACK_MS  # the soonest an attack key goes after its jump key (40: in game, keyed so, a
                      # star from the jump killed a snail; keyed at the jump key the game may take the attack first,
                      # on the ground, which nothing has measured)
-KEY_LAST_MS = 480    # the latest tried: it starts 545 ms after the jump key, as she comes down to where she left
-KEY_STEP_MS = 10     # the attack keys tried, this far apart
+TOP_KEY_MS = round(physics.APEX_S * 1000)  # 278: the top's. An attack starts JUMP_LAG after its key as the jump lifts
+                     # off JUMP_LAG after its own, so keyed this long after the jump key it starts at her arc's top,
+                     # physics.APEX_S after lift-off, her feet JUMP_HEIGHT (77) up: within 0.4 units of it 20 ms either
+                     # side, 1.2 with the slack too, 2.1 with the decide lag
 KEY_SLACK_MS = 15    # a key counts as sure only if keyed this much sooner or later the attack picks the same monster:
                      # the game sees a key 7.7 ms either side of when it's due on average (body.Lags, one sd), twice
+KEY_CHECK_MS = 5     # the keys about an attack key whose picks are checked (its slack, its jitter's room), this far
+                     # apart (the old scan's step)
+JITTER_FIRST_MS = 15  # the soonest key keyed up to this much later (uniform to the ms), never sooner: sooner than
+                     # KEY_FIRST_MS the game may take the attack on the ground (unmeasured), and sooner than the turn's
+                     # soonest a turn in the air went the wrong way more often live (physics.AIR_TURN_LEAD_MS). The
+                     # game's own spread of a key (KEY_SLACK_MS: body.Lags' 7.7 ms sd, twice), as she still rises
+                     # fast: 7 units in it (her feet 21 up keyed at 40, 28 at 55)
+JITTER_TOP_MS = 20   # the top's key keyed up to this much sooner or later (uniform to the ms): her arc is flat there
+                     # (TOP_KEY_MS), so a wider spread than the game's own costs no reach and gives the analysis more
 TURN_KEY_MS = physics.AIR_TURN_ATTACK_MS  # a jump that turns her in the air (physics.AIR_TURN_MS: the arrow 60 ms
                      # after the jump key) has its attack key this long after the jump key at the soonest, as the jump
                      # backs do (120: physics.AIR_TURN_LEAD_MS after the arrow; 85 until 2026-10-26, 36% of those went
@@ -1024,10 +1045,13 @@ JUMP_KINDS = ("up", "forward", "back")  # the jumps tried (physics.jump_of): in 
 @dataclass(frozen=True)
 class Shot:
     """An attack she can make from where she stands, at `target`: from the ground (`jump` None), or from a jump
-    (physics.Jump) with the attack key `key_ms` after the jump key (keyed anywhere in `window`, ms after it, the attack
-    still picks `target` surely), throwing `side` (+1 right, -1 left); `turn`: an 'up' that turns her in the air first
-    (physics.AIR_TURN_MS; a jump back always does). Where she is when it picks (`x`, her feet `rise` over where she
-    stood), and where the jump lands her (`land`, `land_x`, `land_s` s after lift-off); `alts`, a jump forward's or
+    (physics.Jump) with the attack key `key_ms` after the jump key (the soonest, KEY_FIRST_MS or a turn's, or the top's,
+    TOP_KEY_MS: shots), throwing `side` (+1 right, -1 left); `window` (ms after the jump key) the keys about it its
+    jitter may key it at (behavior.fight.jittered), every one sure to pick `target` (KEY_SLACK_MS either side, checked
+    every KEY_CHECK_MS): the jitter's room (up to JITTER_FIRST_MS later for the soonest, JITTER_TOP_MS either side for
+    the top's), narrower where the pick isn't sure all over it (until 2026-11-01, every later key that still picked
+    it, to 480); `turn`: an 'up' that turns her in the air first (physics.AIR_TURN_MS; a jump back always does). Where
+    she is when it picks at its key (`x`, her feet `rise` over where she stood), and where the jump lands her (`land`, `land_x`, `land_s` s after lift-off); `alts`, a jump forward's or
     back's other ways of going (physics.jump_variants: lifting off early or late, slower, the kick short) and where
     each lands, as a route jump's are checked (physics.sure_landing): `lands_sure`, `land_span`."""
     side: int
@@ -1066,8 +1090,8 @@ class Shot:
         return jump_lands_back(platform, (self.land, self.land_x, self.land_s), self.alts, lo, hi)
 
     def text(self) -> str:
-        """The shot for a log line: "a jump forward throwing right, the attack 40 ms in (40-120), 26 up: horny-mushroom
-        +180"."""
+        """The shot for a log line: "a jump forward throwing right, the attack 40 ms in (40-55), 26 up: horny-mushroom
+        +180" (its key, its window)."""
         way = "right" if self.side > 0 else "left"
         if self.jump is None:
             return f"from the ground {way}: {self.target.kind} {self.target.x - self.x:+.0f}"
@@ -1125,22 +1149,26 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
     """Every attack from map (x, y) on `platform` that surely hits one of `monsters`, from the ground and from her
     jumps: one Shot per target and way of attacking, from the ground and for each of `kinds` of jump
     (physics.jump_of) each way she can throw from it ('up' either way, with and without a turn in the air; 'forward'
-    toward the throw; 'back' away from it, turning in the air), with the soonest attack key from KEY_FIRST_MS (with a
-    turn, turn_key_ms of the target's kind: TURN_KEY_MS, sooner for one too short to pick then, a pig 105 ms) that picks
-    the target surely keyed KEY_SLACK_MS sooner or later too, and how much later it still would (Shot.window). (From
-    2026-10-26 to the review of that day every kind's turning shots started at TURN_KEY_MS, 120: a pig or a slime on her
-    platform, picked only to 105 and 110 ms, had none.) From the ground: can_hit (in reach, nothing stopping its star
-    or that of one the attack takes first; of `others`, every monster around her, `monsters` by default). From a
-    jump: the attack's pick (the area about her feet, or the search's widening windows: air_takes) from where her feet
-    are when the attack starts (physics.pose; _air_pick, AIR_MARGIN into it, at both ends of ATTACK_DECIDE_LAG_MS), of
-    all of `others`, and its line not stopped (wall_in_way, from her feet then: stopped, the
-    attack hits nothing); the monsters where `where` says they'll be (default: where they are). `sizes`: the kinds'
-    bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). `lands` (lo, hi): only the
-    jumps landing her back on `platform` between those map x however they go (jump_lands_back, worked out before their
-    keys are) have their shots tried, for an asker who takes no other (behavior.fight.jump_cover: the stance's); by
-    default every jump's. Map units, y down. Where `where` has the monsters at a time is worked out once a search
-    (both sides of a kind of jump ask the same times: from 2026-11-01, 39% of the slowest searches' time was it asked
-    again)."""
+    toward the throw; 'back' away from it, turning in the air), at the sooner of its two attack keys that picks the
+    target surely (the user's two jump attacks, 2026-11-01): the soonest (KEY_FIRST_MS; with a turn, turn_key_ms of the
+    target's kind: TURN_KEY_MS, sooner for one too short to pick then, a pig 105 ms) or the top's (TOP_KEY_MS), sure
+    keyed KEY_SLACK_MS sooner or later too (every KEY_CHECK_MS), with the keys about it its jitter may key it at
+    (Shot.window: each sure so too, the soonest's up to JITTER_FIRST_MS later, the top's JITTER_TOP_MS either side,
+    narrowed where the pick isn't sure all over that: a shot sure at its key alone is kept, with no jitter). (From
+    2026-10-25 to 2026-11-01 every key from the soonest to 480, 5 ms apart: the soonest sure one, its window how much
+    later it still picked the target. From 2026-10-26 to the review of that day every kind's turning shots started at
+    TURN_KEY_MS, 120: a pig or a slime on her platform, picked only to 105 and 110 ms, had none.) From the ground:
+    can_hit (in reach, nothing stopping its star or that of one the attack takes first; of `others`, every monster
+    around her, `monsters` by default). From a jump: the attack's pick (the area about her feet, or the search's
+    widening windows: air_takes) from where her feet are when the attack starts (physics.pose; _air_pick, AIR_MARGIN
+    into it, at both ends of ATTACK_DECIDE_LAG_MS), of all of `others`, and its line not stopped (wall_in_way, from her
+    feet then: stopped, the attack hits nothing); the monsters where `where` says they'll be (default: where they are).
+    `sizes`: the kinds' bodies (localization.monsters.bodies: the map's game data; body_of's tables by default).
+    `lands` (lo, hi): only the jumps landing her back on `platform` between those map x however they go
+    (jump_lands_back, worked out before their keys are) have their shots tried, for an asker who takes no other
+    (behavior.fight.jump_cover: the stance's); by default every jump's. Map units, y down. Where `where` has the
+    monsters at a time is worked out once a search (both sides of a kind of jump ask the same times: from 2026-11-01,
+    39% of the slowest searches' time was it asked again)."""
     others = monsters if others is None else others
     out: list[Shot] = []
     for m in monsters:
@@ -1169,10 +1197,13 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
 
     still = placed(0.0) if where is None else None
     lag, decide = physics.JUMP_LAG, physics.ATTACK_DECIDE_LAG_MS / 1000
-    step = KEY_STEP_MS // 2
     turns = {m.kind: turn_key_ms(sizes[m.kind].top if sizes and m.kind in sizes else MONSTER_TOP.get(m.kind, PIG[0]))
              for m in near if id(m) in wanted}  # each kind's soonest attack key turning in the air
-    turn0 = min(turns.values(), default=TURN_KEY_MS)
+    slack = [d for d in range(-KEY_SLACK_MS, KEY_SLACK_MS + 1, KEY_CHECK_MS) if d]
+    peak = (TOP_KEY_MS, JITTER_TOP_MS, JITTER_TOP_MS)
+    # a start's keys, the soonest first: (the key, how much sooner and how much later its jitter may key it)
+    keys_of = {False: ((KEY_FIRST_MS, 0, JITTER_FIRST_MS), peak),
+               True: (*((k, 0, JITTER_FIRST_MS) for k in sorted(set(turns.values()) or {TURN_KEY_MS})), peak)}
     for side in (-1, 1):
         if not any(id(m) in wanted and (m.x - x) * side >= -60 for m in near):
             continue  # (a jump forward can carry her past one 60 behind at most before its attack starts)
@@ -1205,26 +1236,22 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
                     picks[k] = (m, p0)
                 return picks[k]
 
-            starts = (((KEY_FIRST_MS, False), (turn0, True)) if kind == "up"
-                      else ((turn0, True),) if kind == "back" else ((KEY_FIRST_MS, False),))
-            for start, turning in starts:
+            for turning in ((False, True) if kind == "up" else (True,) if kind == "back" else (False,)):
                 seen: set[int] = set()
-                k = start
-                while k <= KEY_LAST_MS:
+                for k, sooner, later in keys_of[turning]:
                     m, p0 = pick(k)
-                    if not p0[2]:
-                        break  # landed by then: the attack would start on the ground
-                    if (m is not None and id(m) in wanted and id(m) not in seen
-                            and (not turning or k >= turns.get(m.kind, TURN_KEY_MS))
-                            and all(pick(k + d)[0] is m for d in (-KEY_SLACK_MS, KEY_SLACK_MS))):
-                        hi = k
-                        while (hi + step <= KEY_LAST_MS and pick(hi + step)[0] is m
-                               and pick(hi + step + KEY_SLACK_MS)[0] is m):
-                            hi += step
-                        seen.add(id(m))
-                        out.append(Shot(side, m, j, k, (k, hi), p0[0], y - p0[1], landing[0], landing[1], landing[2],
-                                        turn=turning, alts=alts))
-                    k += step
+                    if (not p0[2] or m is None or id(m) not in wanted or id(m) in seen
+                            or (turning and k < turns.get(m.kind, TURN_KEY_MS))
+                            or not all(pick(k + d)[0] is m for d in slack)):
+                        continue  # (not in the air then, none picked, not one asked for, or not surely it)
+                    lo = hi = k  # the jitter's room: the keys about it, each sure too
+                    while lo - KEY_CHECK_MS >= k - sooner and pick(lo - KEY_CHECK_MS - KEY_SLACK_MS)[0] is m:
+                        lo -= KEY_CHECK_MS
+                    while hi + KEY_CHECK_MS <= k + later and pick(hi + KEY_CHECK_MS + KEY_SLACK_MS)[0] is m:
+                        hi += KEY_CHECK_MS
+                    seen.add(id(m))
+                    out.append(Shot(side, m, j, k, (lo, hi), p0[0], y - p0[1], landing[0], landing[1], landing[2],
+                                    turn=turning, alts=alts))
     return out
 
 

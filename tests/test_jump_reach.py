@@ -113,15 +113,19 @@ def test_the_same_height_farther_off_is_hit_lower_in_the_jump_or_from_the_ground
     # horizontal scale out": the windows reach 5 higher every 20 ahead, so 100 up is in reach lower in the jump
     # farther off: 290 off with the attack keyed at once, and from the ground there too, the search's windows reaching
     # it from 271 (a pig: UP_BY_SEARCH, on by the user's choice, 2026-10-25). With the switch off, her decisions keep
-    # to SHOT_UP (60) above her from the ground, and 290 off is a jump's only.
+    # to SHOT_UP (60) above her from the ground, and 290 off is a jump's only. Of the two keys (from 2026-11-01, the
+    # user's: at once, at the top) the top's nearer (until then 175 ms at 80 off, 95 at 160, 60 at 220: the soonest
+    # sure key from 40 on); turning in the air, its soonest (120: 52 up) from 160 off.
     floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 600)
-    keys = {}
+    keys, turning = {}, {}
     for dx in (80, 160, 220, 290):
         m = pig(400 + dx, 400, up.id)
         c = cover(LEDGE, floor, 400, [m])
         assert c.ground(m) == (dx == 290), dx
-        keys[dx] = c.best(m, ("up",)).key_ms
-    assert keys[80] > keys[160] > keys[220] >= keys[290] == reach.KEY_FIRST_MS, keys
+        keys[dx] = min(s.key_ms for s in c.of(m) if s.kind == "up" and not s.turn)
+        turning[dx] = min(s.key_ms for s in c.of(m) if s.kind == "up" and s.turn)
+    assert keys == {80: reach.TOP_KEY_MS, 160: reach.TOP_KEY_MS, 220: reach.TOP_KEY_MS, 290: reach.KEY_FIRST_MS}
+    assert turning == {80: reach.TOP_KEY_MS, 160: reach.TURN_KEY_MS, 220: reach.TURN_KEY_MS, 290: reach.TURN_KEY_MS}
     assert reach.can_shoot(290, -100) and not reach.can_shoot(250, -100)
     far = pig(400 + 290, 400, up.id)
     monkeypatch.setattr(reach, "UP_BY_SEARCH", False)
@@ -164,16 +168,16 @@ def test_too_high_for_the_widest_window_and_the_jump_is_out_of_reach():
 def test_a_turning_jumps_attack_at_one_on_her_platform_starts_at_its_kinds_turn_key(monkeypatch):
     """reach.shots' jumps that turn her in the air ('up' turning, 'back') start at reach.turn_key_ms of the target's
     kind. By the star's search from her feet in the air (reach.AIR_MODEL 'search', from 2026-10-27) every kind's is
-    120 ms, and a pig on her level 40 or 100 off is picked by no turning jump in place until her way down (450 ms in
-    and later: her feet 55 up at 120 ms, the pig's top 17 under them); a jump back at one 150 off picks it at 120. By the
-    area ('widening'): a pig (38 tall at least) at 105 ms, the latest that still picks it, its arrow 45 ms before; never
-    sooner than that for any kind. With 120 for every kind (from 2026-10-26 to the review of that day, TURN_KEY_MS), a
-    pig on her platform had no turning shot until her way down, 430 ms in."""
+    120 ms, and a pig on her level 40 or 100 off is picked by no turning jump in place (her feet 55 up at 120 ms, the
+    pig's top 17 under them; at the top, 77: until 2026-11-01, when every key to 480 was tried, from 450 ms in on her
+    way down); a jump back at one 150 off picks it at 120. By the area ('widening'): a pig (38 tall at least) at 105
+    ms, the latest that still picks it, its arrow 45 ms before; never sooner than that for any kind. With 120 for every
+    kind (from 2026-10-26 to the review of that day, TURN_KEY_MS), a pig on her platform had no turning shot (until
+    2026-11-01: none until her way down, 430 ms in)."""
     from gamelab.localization.monsters import MONSTER_TOP
     p = plat(LEDGE, 500, 200)
     for dx in (40, 100):
-        turning = [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [pig(200.0 + dx, 500.0, p.id)]) if s.turn]
-        assert all(s.key_ms >= 435 for s in turning), dx
+        assert not [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [pig(200.0 + dx, 500.0, p.id)]) if s.turn], dx
     assert any(s.kind == "back" and s.key_ms == 120 for s in reach.shots(LEDGE, p, 200.0, 500.0,
                                                                          [pig(350.0, 500.0, p.id)]))
     monkeypatch.setattr(reach, "AIR_MODEL", "widening")
@@ -181,10 +185,70 @@ def test_a_turning_jumps_attack_at_one_on_her_platform_starts_at_its_kinds_turn_
         target = pig(200.0 + dx, 500.0, p.id)
         turning = [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn]
         assert turning and min(s.key_ms for s in turning) == reach.turn_key_ms(MONSTER_TOP["pig"]) == 105, dx
-        assert all(s.key_ms >= 105 for s in turning)
+        assert all(s.key_ms == 105 and s.window[0] == 105 for s in turning)  # (never sooner: its jitter later only)
         with monkeypatch.context() as mp:
             mp.setattr(reach, "turn_key_ms", lambda top: 120)
-            assert min(s.key_ms for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn) > 400, dx
+            assert not [s for s in reach.shots(LEDGE, p, 200.0, 500.0, [target]) if s.turn], dx
+
+
+def test_each_jump_tries_two_attack_keys_at_once_and_at_its_top(monkeypatch):
+    """The user (2026-11-01): "You only need two jump attacks: one with jump and immediately attack, another with jump
+    and attack at mid air peak." reach.shots tries each jump and side at its soonest key (KEY_FIRST_MS; turning in the
+    air, TURN_KEY_MS) and the top's (TOP_KEY_MS: 278, the attack starting physics.APEX_S after lift-off, her feet
+    JUMP_HEIGHT up) and nowhere else but the slack and the jitter's room about them (until then every key from the
+    soonest to 480, 5 ms apart); every shot at one of them, its window within that key's jitter."""
+    assert reach.TOP_KEY_MS == round(physics.APEX_S * 1000) == 278
+    assert physics.jump_rise(reach.TOP_KEY_MS + physics.JUMP_LAG * 1000) == pytest.approx(physics.JUMP_HEIGHT,
+                                                                                         abs=0.01)
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 600)
+    ms = [pig(560, 400, up.id), pig(480, 500, floor.id), pig(250, 400, up.id), pig(700, 400, up.id)]
+    asked = set()
+    real = physics.pose
+
+    def pose(model, platform, x, j, t, landing=None):
+        asked.add(round((t - physics.JUMP_LAG) * 1000))  # (the key, or 11 ms later: ATTACK_DECIDE_LAG_MS)
+        return real(model, platform, x, j, t, landing)
+    monkeypatch.setattr(physics, "pose", pose)
+    got = reach.shots(LEDGE, floor, 400.0, 500.0, ms)
+    monkeypatch.undo()
+    reach_of = {reach.KEY_FIRST_MS: (0, reach.JITTER_FIRST_MS), reach.TURN_KEY_MS: (0, reach.JITTER_FIRST_MS),
+                reach.TOP_KEY_MS: (reach.JITTER_TOP_MS, reach.JITTER_TOP_MS)}
+    slack, decide = reach.KEY_SLACK_MS, physics.ATTACK_DECIDE_LAG_MS
+    near = lambda k: any(base - lo - slack <= k <= base + hi + slack + decide for base, (lo, hi) in reach_of.items())
+    assert asked and all(near(k) for k in asked), sorted(asked)
+    assert {reach.KEY_FIRST_MS, reach.TURN_KEY_MS, reach.TOP_KEY_MS} <= asked
+    jumps = [sh for sh in got if sh.jump is not None]
+    assert {sh.key_ms for sh in jumps} == {reach.KEY_FIRST_MS, reach.TURN_KEY_MS, reach.TOP_KEY_MS}, jumps
+    for sh in jumps:
+        lo, hi = reach_of[sh.key_ms]
+        assert sh.key_ms - lo <= sh.window[0] <= sh.key_ms <= sh.window[1] <= sh.key_ms + hi, sh.text()
+        assert (sh.key_ms == reach.TURN_KEY_MS) <= sh.turn  # (the turn's soonest only turning)
+
+
+def test_a_jump_shots_window_is_its_jitters_room_every_key_in_it_sure():
+    """Shot.window (from 2026-11-01): the keys its jitter may key it at (behavior.fight.jittered), each picking the
+    target surely: the top's JITTER_TOP_MS either side of it at a pig 100 above her (the world's attack hits it keyed
+    anywhere in it), the soonest's up to JITTER_FIRST_MS later, never sooner; narrowed where the pick isn't sure all
+    over that, to the key alone for a pig on her level 60 off (sure at 40 ms, not keyed 5 ms later: its window then,
+    as the old scan's, 40-40): kept, with no jitter, rather than dropped."""
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 480)
+    m = pig(480, 400, up.id)
+    top = min((s for s in cover(LEDGE, floor, 400, [m]).of(m) if s.kind == "up" and not s.turn),
+              key=lambda s: s.key_ms)
+    assert top.window == (reach.TOP_KEY_MS - reach.JITTER_TOP_MS, reach.TOP_KEY_MS + reach.JITTER_TOP_MS)
+    for key in range(top.window[0], top.window[1] + 1, 4):
+        w = still(world(LEDGE, floor.id, 400.0, monsters=[("Pig", up.id, 480.0)], facing="right"))
+        w.invulnerable_ms = 10_000
+        tap(w, 0.0, "alt", 0.04)
+        tap(w, key / 1000, "f", 0.04)
+        w.advance(1.5)
+        assert w.monsters[0].hp < w.monsters[0].hp_max, (key, w.log[-5:])
+    level = pig(460, 500, floor.id)
+    first = [s for s in cover(LEDGE, floor, 400, [level]).of(level) if s.kind == "up" and not s.turn]
+    assert [(s.key_ms, s.window) for s in first] == [(reach.KEY_FIRST_MS, (reach.KEY_FIRST_MS, reach.KEY_FIRST_MS))]
+    far = pig(550, 480, floor.id)  # (20 up, 150 off: sure all over the soonest's room)
+    first = [s for s in cover(LEDGE, floor, 400, [far]).of(far) if s.kind == "up" and not s.turn]
+    assert [s.window for s in first] == [(reach.KEY_FIRST_MS, reach.KEY_FIRST_MS + reach.JITTER_FIRST_MS)]
 
 
 def test_a_jump_forward_reaches_one_past_a_gap():
@@ -213,10 +277,11 @@ def test_a_wall_of_her_group_blocks_from_the_ground_and_from_the_jump():
 
 
 def test_a_monster_walking_is_placed_where_it_will_be_when_the_attack_picks():
-    # A pig on her floor 452 off (its near side past a star's 400) walking at her at 100 units/s: by the attack's
-    # pick from a jump (0.1-0.5 s on) it has come 10-50 nearer, into reach; standing there, it's out of reach.
+    # A pig on her floor 430 off (its near side past a star's 400) walking at her at 100 units/s: by the attack's
+    # pick from a jump keyed at once (0.1 s on) it has come 10 nearer, into reach; standing there, it's out of reach.
+    # (Until 2026-11-01, with every key to 480 tried, 452 off: 50 nearer on her way down.)
     floor = plat(LEDGE, 500, 400)
-    m = pig(400 + 452, 500, floor.id)
+    m = pig(400 + 430, 500, floor.id)
 
     def toward(mo, t):
         return mo.x - 100 * t
@@ -301,13 +366,15 @@ def world(model, pid, x, **kw):
 
 @pytest.mark.parametrize("dx", [80, 160])
 def test_the_world_s_attack_from_a_jump_hits_where_the_query_says(dx):
+    # A pig 100 above her: the top's key (from 2026-11-01) and every key its jitter may go at hit it in the world (her
+    # facing it, no turn), the soonest key doesn't (her feet 21 up then).
     floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 400 + dx)
     m = pig(400 + dx, 400, up.id)
-    s = cover(LEDGE, floor, 400, [m]).best(m, ("up",))
+    s = min((s for s in cover(LEDGE, floor, 400, [m]).of(m) if s.kind == "up" and not s.turn), key=lambda s: s.key_ms)
     lo, hi = s.window
-    for key, hits in ((lo, True), (hi, True), (max(physics.JUMP_ATTACK_MS, lo - 60), False)):
-        if key == lo - 60 and lo - 60 < physics.JUMP_ATTACK_MS:
-            continue
+    assert s.key_ms == reach.TOP_KEY_MS and (lo, hi) == (reach.TOP_KEY_MS - reach.JITTER_TOP_MS,
+                                                         reach.TOP_KEY_MS + reach.JITTER_TOP_MS)
+    for key, hits in ((lo, True), (s.key_ms, True), (hi, True), (reach.KEY_FIRST_MS, False)):
         w = still(world(LEDGE, floor.id, 400.0, monsters=[("Pig", up.id, 400.0 + dx)], facing="right"))
         w.invulnerable_ms = 10_000
         tap(w, 0.0, "alt", 0.04)
@@ -391,8 +458,10 @@ def test_the_jumps_of_the_hunt_of_2026_10_25_2343_as_the_perception_services_rec
 # --- the stance takes them -------------------------------------------------------------------------------------------
 
 def test_the_stance_jump_throws_at_a_monster_above_with_the_attack_when_it_surely_picks_it():
-    # A pig 100 above her 150 off: out of reach from the ground (SHOT_UP), in reach from a jump in place 95 ms on (her
-    # feet 34 up), her body clear of it however it walks meanwhile (125 units/s either way: _arc_meets).
+    # A pig 100 above her 150 off: out of reach from the ground (SHOT_UP), in reach from a jump in place at its top (the
+    # top's key, from 2026-11-01: her feet 77 up), or turning in the air at the turn's soonest (120 ms, 52 up; until
+    # then the soonest sure key either way, 95 ms on, her feet 34 up), her body clear of it however it walks meanwhile
+    # (125 units/s either way: _arc_meets).
     from maplehelper.engine import LEFT, RIGHT
     from gamelab.attack.stance import plan_of, stance
     floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 550)
@@ -401,7 +470,13 @@ def test_the_stance_jump_throws_at_a_monster_above_with_the_attack_when_it_surel
         act = stance(400, 500, floor, [m], facing=facing, jumps=lambda: cover(LEDGE, floor, 400, [m]))
         plan = plan_of(act)
         assert act[:2] == ("jump_throw", RIGHT) and plan.way == 0 and plan.why == "above", act
-        assert plan.shot.window[0] <= plan.key_ms <= plan.shot.window[1] and 20 <= plan.shot.rise <= 60
+        if facing == RIGHT:  # facing it: at the top (the soonest key, 40, from 21 up, doesn't pick it)
+            assert plan.key_ms == reach.TOP_KEY_MS and plan.shot.window == (reach.TOP_KEY_MS - reach.JITTER_TOP_MS,
+                                                                            reach.TOP_KEY_MS + reach.JITTER_TOP_MS)
+        else:  # turning in the air: its soonest key, 52 up, picks it
+            assert plan.key_ms == reach.TURN_KEY_MS and plan.shot.window == (reach.TURN_KEY_MS,
+                                                                             reach.TURN_KEY_MS + reach.JITTER_FIRST_MS)
+        assert plan.shot.rise == pytest.approx(physics.rise_after(plan.key_ms / 1000), abs=0.1)
         assert plan.shot.turn == (facing == LEFT)
     # without what her jumps reach: as before, nothing she can do from here
     assert stance(400, 500, floor, [m], facing=RIGHT)[0] in ("wait", "approach", "back")

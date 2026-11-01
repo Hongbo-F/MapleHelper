@@ -581,7 +581,8 @@ def attack_kinds(world, records: list[dict]) -> dict:
 
 
 CHOSEN_KEY_S = 1.5  # (attack_kinds) a chosen jump's attack key comes this soon after its record at the latest: its key
-                    # at most 0.48 s into the jump (attack.reach.KEY_LAST_MS), after a wait for her lock
+                    # at most 0.3 s into the jump (attack.reach.TOP_KEY_MS and JITTER_TOP_MS; 0.48 until 2026-11-01),
+                    # after a wait for her lock
 
 
 _LEVEL = 15.0  # (attack.reach.LEVEL) a pick this far above her feet or more is off her level, above her
