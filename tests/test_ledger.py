@@ -498,13 +498,19 @@ def test_only_a_strip_sure_of_it_sees_a_pile_empty_and_a_missed_pile_is_hers_aga
 
 def test_a_pile_lies_by_the_live_survival_not_a_fixed_life():
     """ledger.SURVIVAL by the live evidence (2026-10-31): hers lie whole for OWN_S (her ownership), then are taken by
-    others at TAKE_RATE a minute (0.89 still there at 150 s), and none past EXPIRE_S; a pile of hers seen at 100 s is
+    others at TAKE_RATE a minute (0.89 still there at 150 s), and go at the server's expiry pass past EXPIRE_S, any time
+    in EXPIRE_PASS_S (the review of 2026-10-31: one seen lying past EXPIRE_S still there, likelier the sooner it was
+    seen; until then none past it), none after; a pile of hers seen at 100 s is
     still there 20 s on more than 95 times in 100, where the raw curve (0.26 / 0.42 at 120 and 100 s) gave it 60;
     given it was seen a moment ago, about all of it; one never seen, from its kill. Others' are the raw curve still."""
-    from gamelab.behavior.ledger import EXPIRE_S, OWN_S, TAKE_RATE, Pile, survival
+    from gamelab.behavior.ledger import EXPIRE_PASS_S, EXPIRE_S, OWN_S, TAKE_RATE, Pile, survival
     assert survival(0.0) == survival(OWN_S) == 1.0 and survival(150.0) == pytest.approx(0.89, abs=0.01)
     assert survival(150.0) == pytest.approx(math.exp(-TAKE_RATE / 60.0 * (150.0 - OWN_S)))
-    assert survival(EXPIRE_S) == 0.0 and survival(200.0) == 0.0 and survival(EXPIRE_S - 1.0) > 0.85
+    last = EXPIRE_S + EXPIRE_PASS_S
+    assert survival(EXPIRE_S - 1.0) > 0.85 and survival(EXPIRE_S + EXPIRE_PASS_S / 2) == pytest.approx(
+        survival(EXPIRE_S) / 2) and survival(last) == 0.0 and survival(last + 1.0) == 0.0
+    late = Pile(0.0, 0.0, 3, 0.0, True, status="seen", last_seen=EXPIRE_S + 20.0)  # (seen lying past EXPIRE_S)
+    assert late.still(EXPIRE_S + 20.0) == pytest.approx(1.0) and late.still(EXPIRE_S + 30.0) == pytest.approx(0.75)
     assert survival(60.0, hers=False) == pytest.approx(0.57) and survival(150.0, hers=False) == pytest.approx(0.03)
     p = Pile(0.0, 0.0, 3, 0.0, True, status="seen", last_seen=100.0)
     assert p.still(120.0) == pytest.approx(survival(120.0) / survival(100.0)) and p.still(120.0) > 0.95
@@ -516,10 +522,11 @@ def test_a_pile_lies_by_the_live_survival_not_a_fixed_life():
 def test_a_pile_of_hers_holding_an_older_one_s_drops_keeps_that_one_s_age():
     """HELD_AGE: every drop seen goes to its nearest pile, so a newer kill's pile by her older drops takes them and the
     older pile, seen empty twice, turns gone: the one holding its drops takes its age (the drops'), not the newer
-    kill's; one of another's or too far off doesn't."""
+    kill's; one of another's or too far off doesn't. Only one holding a drop where one of the older's lay (HELD_DX,
+    the review of 2026-10-31): one by an older pile she picked up herself keeps its own age."""
     from gamelab.behavior.ledger import Pile
     store = DropStore()
-    old = Pile(100.0, -200.0, 19, 10.0, True, status="seen", last_seen=40.0, xs=(100.0,))
+    old = Pile(100.0, -200.0, 19, 10.0, True, status="seen", last_seen=40.0, xs=(125.0,))
     new = Pile(130.0, -200.0, 19, 90.0, True)
     far = Pile(400.0, -200.0, 19, 95.0, True)
     theirs = Pile(70.0, -200.0, 19, 5.0, False, status="seen", last_seen=40.0, xs=(70.0,))
@@ -530,6 +537,13 @@ def test_a_pile_of_hers_holding_an_older_one_s_drops_keeps_that_one_s_age():
     store._sighting(100.0 + EMPTY_LOOKS, seen, lambda pid, x: True, True)
     assert old.status == "gone" and new.since == 10.0 and far.since == 95.0
     assert theirs.status == "gone" and new.since == 10.0  # (another's turning gone gives nobody its age)
+    store = DropStore()  # (she picked the older pile at 100 up herself: the newer kill's drops lie at 140 and 150)
+    old = Pile(100.0, -200.0, 19, 10.0, True, status="seen", last_seen=40.0, xs=(100.0, 105.0))
+    new = Pile(130.0, -200.0, 19, 90.0, True)
+    store.piles = [old, new]
+    for t in (100.0, 100.0 + EMPTY_LOOKS):
+        store._sighting(t, [_coin(140.0), _coin(150.0)], lambda pid, x: True, True)
+    assert old.status == "gone" and new.status == "seen" and new.since == 90.0
 
 
 def test_an_expected_pile_is_worth_its_kinds_drops():

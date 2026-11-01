@@ -85,8 +85,11 @@ DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded a
 OWN_S = 15.0
 # How long drops lie (`survival`): the share of them still there at an age (s since her kill, or since another's was
 # first seen). Hers by the live evidence (from 2026-10-31, the loot designs: D:/MapleHelper-scratch/replan/loot/diag,
-# live_km.txt, and design): hers alone for OWN_S, then taken by someone else at TAKE_RATE a minute, gone at EXPIRE_S, as
-# the simulator's drop-takers world has them (sim.world.others_life). The perception service's own, her pets' pick-ups
+# live_km.txt, and design): hers alone for OWN_S, then taken by someone else at TAKE_RATE a minute, gone at the expiry
+# pass past EXPIRE_S, as the simulator's drop-takers world has them (sim.world.others_life, EXPIRE_PASS_S): the same
+# guesses on both sides, so within the branch that world agrees with the planner by construction (the review of
+# 2026-10-31); the harness's standard world (one coin a kill, gone at 180 s, nobody taking hers) doesn't, and is where
+# the belief is checked against a world it isn't fitted to. The perception service's own, her pets' pick-ups
 # (71% of her drops that vanished did so 15 units or more from her) and the detector's misses taken out, 95%, 88% and
 # 86% of her drops were still lying at 15, 60 and 90 s: at most about 0.1 a minute left to others. Until then hers were
 # the service's raw curve (the thief's live run of 2026-10-30, her picks censored: 55% at 60 s, 26% at 120, 9% at 150),
@@ -94,12 +97,15 @@ OWN_S = 15.0
 # of the harness's standard grind 11% of her drops' worth expired lying in her store. Others' as before: that raw curve
 # (live, 12.1% of the drops seen on 3 looks or more were seen lying past 90 s; the last sightings' p99 138 s).
 TAKE_RATE = 0.05   # a minute: others taking her drops once past OWN_S (a guess inside the live bound)
-EXPIRE_S = 180.0   # s her drops lie at most (HeavenMS's 180 s, checked every 10 s; one live expiry pass took four drops
-                   # 198-228 s old)
+EXPIRE_S = 180.0   # s her drops lie at least (HeavenMS's 180 s) ...
+EXPIRE_PASS_S = 60.0  # ... then gone at the server's next expiry pass, a time no look tells: as likely any time in
+                      # this long past EXPIRE_S (the one live pass took four drops 198-228 s old, so its passes come 48 s
+                      # apart at least; 60 a guess, sim.world.EXPIRE_PASS_S). Until the review of 2026-10-31 none past
+                      # EXPIRE_S, so a pile seen lying past it was given up at once.
 SURVIVAL = {True: ((0.0, 1.0), (OWN_S, 1.0))
                   + tuple((t, math.exp(-TAKE_RATE / 60.0 * (t - OWN_S)))
-                          for t in (30.0, 60.0, 90.0, 120.0, 150.0, EXPIRE_S - 10.0, EXPIRE_S - 0.01))
-                  + ((EXPIRE_S, 0.0),),
+                          for t in (30.0, 60.0, 90.0, 120.0, 150.0, EXPIRE_S))
+                  + ((EXPIRE_S + EXPIRE_PASS_S, 0.0),),
             False: ((0.0, 1.0), (5.0, 0.92), (10.0, 0.83), (20.0, 0.75), (30.0, 0.70), (60.0, 0.57), (90.0, 0.31),
                     (120.0, 0.22), (150.0, 0.03), (180.0, 0.0))}
 # s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
@@ -113,8 +119,13 @@ REVIVE_S = 30.0
 # Whether a pile of hers holding drops another of hers held before keeps that one's age (`_sighting`), from 2026-10-31:
 # every drop seen goes to its nearest pile within LOOT_REACH, so a newer kill's pile by her older drops takes them, the
 # older pile turns gone, and the drops were priced by the newer's age (on the harness's seed 5, a pile from a kill at
-# 118.7 s held drops from kills at 22-57 s). False: each pile its own kill's age, as before.
+# 118.7 s held drops from kills at 22-57 s). False: each pile its own kill's age, as before. Only a pile holding a drop
+# where one of the older's lay when it was last seen (within HELD_DX: drops don't move once down, and a look places
+# them to a few units), from the review of 2026-10-31: until then any pile of hers within LOOT_REACH that took drops in
+# that sighting, so a newer kill's pile by an older one she had picked up herself took its age, and its drops were
+# judged expired up to the gap between the two kills too soon.
 HELD_AGE = True
+HELD_DX = 10.0
 # What a pile no look has seen yet is worth (Pile.value), in mesos: a kill's pile is coins most often (63-80% of
 # each kind's piles seen where her kills died on 2026-10-21; looting.COINS), and its item is worth less than they are
 # but for the Slime Bubble (looting.PRICES). That's the first map's; on another a bronze coin of its own (Pile.unseen,
@@ -587,7 +598,8 @@ class DropStore:
                     self.gone_tried += p.tries > 0
                     if HELD_AGE and p.hers:  # (its drops another pile of hers by it holds now: theirs, its age)
                         held = [q for q in known if q.hers and id(q) in mine and q.platform == p.platform
-                                and abs(q.x - p.x) <= LOOT_REACH]
+                                and abs(q.x - p.x) <= LOOT_REACH
+                                and any(abs(d.x - x) <= HELD_DX for d in mine[id(q)] for x in p.xs)]
                         if held:
                             q = min(held, key=lambda q: abs(q.x - p.x))
                             q.since = min(q.since, p.since)

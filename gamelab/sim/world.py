@@ -611,6 +611,17 @@ TREE_DROP_MIX = DropMix()
 # s, 26% at 120, none at 180), which counted her pets' pick-ups and the detector's misses as takings: about 4 times her
 # real loss.
 TAKE_RATE = 0.05
+# ... and (from the review of 2026-10-31) the rest gone at the server's first expiry pass past DROP_LIFE, the passes
+# EXPIRE_PASS_S apart from a time of the run's own (Drop.life): the one live pass took four drops 198-228 s old, so its
+# passes come 48 s apart at least, and 60 is a guess. Until then they went at DROP_LIFE.
+EXPIRE_PASS_S = 60.0
+
+
+def expiry_life(since: float, phase: float, every: float | None = None) -> float:
+    """How long a drop down at `since` lies untaken: to the first of the server's expiry passes (at `phase` and every
+    EXPIRE_PASS_S) past DROP_LIFE."""
+    every = EXPIRE_PASS_S if every is None else every
+    return phase + math.ceil((since + DROP_LIFE - phase) / every) * every - since
 
 
 def others_life(u: float, owns: float, rate: float = TAKE_RATE) -> float:
@@ -842,7 +853,8 @@ class Realism:
     drop_mix: DropMix | None = None  # what a kill drops, fitted to the live service's sightings (TREE_DROP_MIX: the
                                      # harness's `--world map-drops`), from a generator of its own; None: `drops`
     drop_takers: bool = False    # her drops taken by others once past rival_owns, at TAKE_RATE a minute (others_life:
-                                 # the harness's `--world drop-takers`), from a generator of its own; False: they lie
+                                 # the harness's `--world drop-takers`), from a generator of its own, the rest gone at
+                                 # the server's first expiry pass past DROP_LIFE (EXPIRE_PASS_S); False: they lie
                                  # DROP_LIFE
     splices: bool = True         # the player takes splices (sim.fakes.FakePlayer.splices, control.client.can_splice);
                                  # False: a player started before them, every replanned chain a cut and a resend (the
@@ -1715,6 +1727,7 @@ class Drop:
     taken_at: float | None = None  # when it was picked up ...
     taken_by: str = ""             # ... and by whom ("her", "rival", or "other": Realism.drop_takers)
     amount: int = 0     # mesos: how many (Realism.drop_mix); 0: not drawn (the coin's worth: behavior.looting.Worth)
+    life: float = DROP_LIFE  # s it lies unless taken: DROP_LIFE, or to the expiry pass past it (Realism.drop_takers)
 
     @property
     def mesos(self) -> bool:
@@ -1775,6 +1788,7 @@ class World:
         self._tick_rng = random.Random(f"ticks:{seed}")  # Realism.respawn_tick's draws
         self._mix_rng = random.Random(f"mix:{seed}")      # Realism.drop_mix's draws
         self._taker_rng = random.Random(f"takers:{seed}")  # Realism.drop_takers' draws
+        self._expiry_at = random.Random(f"expiry:{seed}").uniform(0.0, EXPIRE_PASS_S)  # ... and its expiry passes'
         # What a kill drops (Realism.drops; with MAP_DROPS, the map's)
         self._drop_table = game_drops(model) if self.realism.drops == MAP_DROPS else tuple(self.realism.drops)
         self.potions_left = self.realism.potions
@@ -3153,7 +3167,8 @@ class World:
         if self.realism.drop_takers:  # (taken by others once she owns them no more, at TAKE_RATE a minute)
             for d in drops:
                 life = others_life(1.0 - self._taker_rng.random(), self.realism.rival_owns)
-                if life < DROP_LIFE:
+                d.life = expiry_life(d.since, self._expiry_at)
+                if life < d.life:
                     self._push(self.ms + int((DROP_DELAY + life) * 1000), "others_take", [d])
         if self.realism.respawn_tick <= 0:
             self._push(self.ms + int(self.realism.respawn * 1000), "respawn", m)
@@ -3358,7 +3373,7 @@ class World:
 
     def _pick(self) -> None:
         t = self.t
-        near = sorted((d for d in self.drops if not d.gone and d.since <= t < d.since + DROP_LIFE
+        near = sorted((d for d in self.drops if not d.gone and d.since <= t < d.since + d.life
                        and d.platform == self.plat.id and abs(d.x - self.x) <= PICK_REACH
                        and (d.owner == "her" or t >= d.since + self.realism.rival_owns)),
                       key=lambda d: (abs(d.x - self.x), d.x))
@@ -3404,7 +3419,7 @@ class World:
     def live_drops(self) -> list[Drop]:
         """The drops lying on the ground now (landed, not taken, not vanished yet)."""
         t = self.t
-        return [d for d in self.drops if not d.gone and d.since <= t < d.since + DROP_LIFE]
+        return [d for d in self.drops if not d.gone and d.since <= t < d.since + d.life]
 
     def visible_monsters(self) -> list[tuple[SimMonster, float, float, bool]]:
         """Every monster that shows: (monster, x, y, alive as drawn); killed ones fade out where they died, those her

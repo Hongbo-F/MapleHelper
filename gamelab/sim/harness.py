@@ -162,8 +162,8 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
-                    OFF_SEEN, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
+from .world import (HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN, OFF_SEEN,
+                    ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -608,7 +608,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         end = min(end, world.t)
     mine = [k for k in world.kill_log if k[3] == "her"]
     drops = [d for d in world.drops if d.owner == "her" and d.since <= horizon]
-    known = [d for d in drops if d.taken_by in ("her", "other") or d.since + DROP_LIFE <= horizon]
+    known = [d for d in drops if d.taken_by in ("her", "other") or d.since + d.life <= horizon]
     picked = [d for d in known if d.taken_by == "her"]
     coin = worth_for(world.model)  # what drops are worth on the world's map (looting.Worth) ...
 
@@ -914,7 +914,7 @@ def _full_stands(world, records: list[dict], end: float) -> dict:
                 continue
             t = r["t"] - start
             here = [d for d in world.drops if d.platform == r.get("platform")
-                    and abs(d.x - r.get("x", 0.0)) <= LOOT_REACH and d.since <= t < d.since + DROP_LIFE
+                    and abs(d.x - r.get("x", 0.0)) <= LOOT_REACH and d.since <= t < d.since + d.life
                     and (d.taken_at is None or d.taken_at >= t)]
             if here and not any(d.mesos or world.takes(d.kind, t) for d in here):
                 nothing += 1

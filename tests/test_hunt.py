@@ -13,7 +13,7 @@ from gamelab.attack.spots import Spot
 from gamelab.behavior import hunt, sweep
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.hunt import Hunt, Objective, Visit
-from gamelab.behavior.ledger import DROP_LANDS, EXPIRE_S, Pile
+from gamelab.behavior.ledger import DROP_LANDS, EXPIRE_PASS_S, EXPIRE_S, Pile
 from gamelab.localization import mapdata
 
 from test_sim import KEYS, tree
@@ -561,12 +561,13 @@ def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
     """Not a fixed life (DROP_LIFE, 90 s, until 2026-10-30): a pile of hers 100 s old, never seen since her kill, lies
     there still 93% of the time (ledger.SURVIVAL, by the live evidence since 2026-10-31: hers alone for OWN_S, others'
     0.05 a minute after) and is gone for, one 170 s old too (the raw curve until then, 3%, under SURVIVE_MIN from about
-    163 s), and one 150 s old seen 10 s ago; past EXPIRE_S, not. Another's once past its killer's ownership (OWN_S,
+    163 s), and one 150 s old seen 10 s ago; just past EXPIRE_S too (its expiry pass may not have come yet), past
+    EXPIRE_S and EXPIRE_PASS_S not. Another's once past its killer's ownership (OWN_S,
     where OTHERS_AFTER waited 30 s); one stood on or gone for PILE_TRIES times, not; nor one seen gone."""
     h = _hunt([])
     seen = _pile(150, status="seen", last_seen=time.monotonic() - 10.0)
     assert h._candidate(_pile(10)) and h._candidate(_pile(100)) and h._candidate(_pile(170)) and h._candidate(seen)
-    assert not h._candidate(_pile(EXPIRE_S + 1))
+    assert h._candidate(_pile(EXPIRE_S + 1)) and not h._candidate(_pile(EXPIRE_S + EXPIRE_PASS_S + 1))
     assert not h._candidate(_pile(10, hers=False)) and h._candidate(_pile(hunt.OWN_S + 1, hers=False))
     assert not h._candidate(_pile(10, tries=hunt.PILE_TRIES)) and h._candidate(_pile(10, tries=hunt.PILE_TRIES - 1))
     assert not h._candidate(_pile(10, status="gone"))

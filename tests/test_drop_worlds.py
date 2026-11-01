@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from gamelab.sim import harness
-from gamelab.sim.world import DROP_LIFE, TAKE_RATE, TREE_DROP_MIX, DropMix, World, others_life
+from gamelab.sim.world import (DROP_LIFE, EXPIRE_PASS_S, TAKE_RATE, TREE_DROP_MIX, DropMix, World, expiry_life,
+                                others_life)
 
 
 def _platform():
@@ -71,6 +72,19 @@ def test_drop_takers_take_hers_only_past_her_ownership_at_their_rate():
     gone = sum(life < DROP_LIFE for life in lives) / len(lives)
     assert gone == pytest.approx(1.0 - math.exp(-TAKE_RATE / 60.0 * (DROP_LIFE - 15.0)), abs=0.01)
     assert 0.12 < gone < 0.14 and others_life(0.5, 15.0, rate=0.0) == math.inf
+
+
+def test_drop_takers_drops_left_alone_go_at_the_first_expiry_pass_past_their_life():
+    """The review of 2026-10-31: the one live expiry pass took four drops 198-228 s old, so the drop-takers world's go at
+    the server's first pass past DROP_LIFE (EXPIRE_PASS_S apart, from a time of the run's own), 180-240 s, as the
+    planner's ledger.SURVIVAL has it; until then at DROP_LIFE."""
+    from gamelab.behavior import ledger
+    assert EXPIRE_PASS_S == ledger.EXPIRE_PASS_S and DROP_LIFE == ledger.EXPIRE_S
+    assert expiry_life(0.0, 10.0) == pytest.approx(190.0) and expiry_life(25.0, 10.0) == pytest.approx(225.0)
+    assert expiry_life(31.0, 10.0) == pytest.approx(219.0) and expiry_life(70.0, 10.0) == pytest.approx(DROP_LIFE)
+    lives = [expiry_life(t / 7.0, 13.0) for t in range(5000)]
+    assert min(lives) >= DROP_LIFE and max(lives) < DROP_LIFE + EXPIRE_PASS_S
+    assert sum(lives) / len(lives) == pytest.approx(DROP_LIFE + EXPIRE_PASS_S / 2, abs=1.0)
 
 
 def test_the_harness_worlds_switch_them_on():
