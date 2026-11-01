@@ -355,10 +355,12 @@ SPLICE_DRIFT = 20.0          # map units: a replan goes from where the state has
 # master's 8 in all. False: the span's, as before.
 SPLICE_PHYSICS = True
 SPLICE_LATE_S = 0.05         # s: a replan done so late that the player would take it this much past its plan time 0, or
-                             # past a takeoff's key of the running plan's (KEY_COMMIT_S), is dropped (_switch: the next
-                             # state asks again): its start would be behind her (7.5 units at her run), or the takeoff's
-                             # key let go by the splice while its plan has her running on (the review of 2026-10-30: a
-                             # replan slower than about 108 ms; measured p99 36 ms, the most 51 at Idle priority)
+                             # past a takeoff's key of the running plan's (KEY_COMMIT_S), is dropped (_switch, _dropped:
+                             # for a monster coming she stops for it where there's room, else the next state asks again,
+                             # the monster not taken as handled; a better way's next look asks again): its start would
+                             # be behind her (7.5 units at her run), or the takeoff's key let go by the splice while its
+                             # plan has her running on (the review of 2026-10-30: a replan slower than about 108 ms;
+                             # measured p99 36 ms, the most 51 at Idle priority)
 KNOCK_REPLAN = True
 KNOCK_AIR_S = 2 * KNOCK_VY / GRAVITY - STATE_S  # s after a touch's popup her knock's flight lasts on flat ground (0.22 s)
                                                 # less a state: no state sooner has her landed
@@ -813,7 +815,8 @@ class Navigator:
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
         self._siblings: dict[tuple[int, int], list[Move]] | None = None  # (src, dst) -> the route's moves (_pricing)
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
-        self._replanned = False  # whether the last _switch got as far as replanning (REPLAN: _watching marks so)
+        self._replanned = False  # whether the last _switch replanned with nothing to take (REPLAN: _watching marks so)
+        self._late = None  # the last _switch's replan dropped as too late: (why, its ms, s late), said by _dropped
         self._came = None  # the feed's track of the monster the last cut was for (REACT: _coming), for TripState.came
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
@@ -2595,18 +2598,25 @@ class Navigator:
             if not cut and REACT and (coming := self._coming(current, room=not replan)) is not None:
                 mo, t, tid = coming
                 why = f"{COMING} ({mo.kind} on {mo.platform}, {t - (time.monotonic() - current.start):.2f} s ahead)"
-                self._replanned = False
+                self._replanned, self._late = False, None
                 switched = self._switch(st, current, dst, why, "monster") if replan else None
                 if switched is None and (not replan or self._room_to_stop(current, time.monotonic() - current.start)):
                     cut = why
+                if self._late is not None:  # (replanned too late: she stops for it where there's room, else asked)
+                    self._dropped("monster", "she stops for it" if cut else "the next state asks again")
                 if switched is not None or cut or self._replanned:
                     # (acted on, or replanned with nothing to take: not again for REACT_AGAIN_S; else, in a flight or
-                    # past a takeoff's key, not where the plan has her, the next state asks again, as _switch says:
-                    # marked first, it went unheeded for 3 s, 1-3 times a 5-minute run: the review of 2026-10-30)
+                    # past a takeoff's key, not where the plan has her, or its replan dropped as too late with no room
+                    # to stop, the next state asks again, as _switch says: marked first, it went unheeded for 3 s, 1-3
+                    # times a 5-minute run, the review of 2026-10-30; a replan dropped late was marked so until the
+                    # latency analysis of 2026-11-01, and she ran on into it)
                     self._reacted[tid] = time.monotonic()
             elif not cut and replan and time.monotonic() >= better_at:
                 better_at = time.monotonic() + BETTER_EVERY_S
+                self._late = None
                 switched = self._switch(st, current, dst, "a better way", "better")
+                if self._late is not None:  # (the next look is BETTER_EVERY_S on, as after any other)
+                    self._dropped("better", f"the next look for a better way asks again ({BETTER_EVERY_S:.2f} s on)")
             if switched is not None:  # (handed over: the running plan's rest is the new chain's)
                 if not top:
                     self._keys_seen(current, glanced, until=switched.start)
@@ -2670,7 +2680,10 @@ class Navigator:
         the same way on past where it stops; or the new one's route isn't the running one's and costs SWITCH_GAIN_S
         less by the route planner's own costs (Planner.quickest against the running way, Planner.through its next
         move: the same estimates both); SWITCH_MIN_S after the last switch at the soonest either way. None: nothing taken
-        (no state, she's in the air or not where the plan has her, no route, nothing chains, or not worth it)."""
+        (no state, she's in the air or not where the plan has her, no route, nothing chains, or not worth it; or done
+        too late, SPLICE_LATE_S: `_late` says so, and the caller says what comes of it, _dropped). `_replanned` once it
+        replans, for 'monster': a monster replanned for with nothing to take is handled (_watching marks it), one whose
+        replan was dropped as too late isn't."""
         state = getattr(self.senses, "glanced", None)
         if st is None or state is None or not getattr(state, "placed", False):
             return None
@@ -2693,7 +2706,8 @@ class Navigator:
         s = self._state_scene(state, body)
         if s is None:
             return None
-        self._replanned = True  # (from here on it's replanned: a monster it was for isn't asked about again at once)
+        self._replanned = True  # (from here on it's replanned: a monster it was for isn't asked about again at once,
+                                # unless the replan is dropped as too late, below)
         t0 = time.perf_counter()
         start = running.start + at  # when the new plan's keys take over (its plan time 0)
         kept = [leg.move for leg in running.legs if leg.end.t <= at + 1e-6]
@@ -2737,14 +2751,23 @@ class Navigator:
         if late > 0.0:
             gone = self._splice_point(running, at + late)
             if late > SPLICE_LATE_S or gone is None or gone[0] > at + late + 1e-6:
-                self.log(f"    {why}: replanned too late ({think_ms:.0f} ms, {late * 1000:.0f} ms past its start): "
-                         "dropped, the next state asks again")
-                if telemetry.recording():
-                    telemetry.emit("event", kind="replan", text="dropped: too late", think_ms=round(think_ms, 2),
-                                   late_ms=round(late * 1000, 1))
+                # (nothing taken, and for a monster nothing handled: _watching cuts where there's room, else the next
+                # state asks again; until the latency analysis of 2026-11-01 its monster stayed marked replanned for
+                # REACT_AGAIN_S, while the log said the next state asks again)
+                self._replanned, self._late = False, (why, think_ms, late)
                 return None
         return self._take_over(st, running, at, path, legs, keys, why_c, why, kind, near if near is not None else monsters,
                                think_ms, spliced)
+
+    def _dropped(self, kind: str, then: str) -> None:
+        """The last _switch's replan of `kind`, dropped as too late (`_late`: SPLICE_LATE_S), said with what comes of it
+        (`then`: her stop for the monster, or when it's asked again): the log and a 'replan' event."""
+        why, think_ms, late = self._late
+        self.log(f"    {why}: replanned too late ({think_ms:.0f} ms, {late * 1000:.0f} ms past its start): "
+                 f"dropped, {then}")
+        if telemetry.recording():
+            telemetry.emit("event", kind="replan", text="dropped: too late", of=kind, then=then,
+                           think_ms=round(think_ms, 2), late_ms=round(late * 1000, 1))
 
     def _take_over(self, st: TripState, running: _Running, at: float, path: list[Move], legs: list[Leg], keys,
                    why_c: str, why: str, kind: str, known, think_ms: float, spliced: bool | None = None) -> _Running:

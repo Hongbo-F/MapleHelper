@@ -316,7 +316,8 @@ def test_a_monster_coming_she_cant_act_on_yet_is_asked_about_again_at_the_next_s
 def test_a_replan_done_too_late_for_its_splice_point_is_dropped():
     """The review of 2026-10-30: nothing checked a replan's deadline once it was computed, so one slower than about 108
     ms would have been spliced in past the running plan's next takeoff key (let go by the switch while the new plan has
-    her running on). A replan the player would take more than SPLICE_LATE_S past its plan time 0 is dropped: said,
+    her running on). A replan the player would take more than SPLICE_LATE_S past its plan time 0 is dropped: said with
+    what comes of it (for a monster coming her stop for it or the next state's ask, for a better way the next look's),
     nothing spliced for it (here every replan's chain made to take 0.15 s of the clock)."""
     def wrap(sim, nav):
         real_switch, real_chain = nav._switch, nav.flow.chain
@@ -335,8 +336,78 @@ def test_a_replan_done_too_late_for_its_splice_point_is_dropped():
                 inside["on"] = False
         nav.flow.chain, nav._switch = chain, switch
     trace, sim, state = _spawn_run(wrap)
-    assert any("replanned too late" in line for line in trace["log"]), trace["log"][:60]
+    late = [line for line in trace["log"] if "replanned too late" in line]
+    assert late, trace["log"][:60]
     assert not trace["splices"]
+    monster = [line for line in late if nv.COMING in line]
+    assert monster and all(line.endswith(("dropped, she stops for it", "dropped, the next state asks again"))
+                           for line in monster), monster
+    better = f"dropped, the next look for a better way asks again ({nv.BETTER_EVERY_S:.2f} s on)"
+    assert all(" a better way" in line and line.endswith(better) for line in late if line not in monster), late
+
+
+def _late_once(asks: list, room: bool | None = None, kind: str = "monster"):
+    """A navigator wrap (_spawn_run's) whose first replan of `kind` to plan a chain takes 0.15 s of the clock there (too
+    late: SPLICE_LATE_S), with room to stop or none right after it as `room` says (None: as it is); every ask of `kind`
+    (its sim time, and whether it was the late one) in `asks`."""
+    def wrap(sim, nav):
+        real_switch, real_chain, real_room = nav._switch, nav.flow.chain, nav._room_to_stop
+        on = {"inside": False, "slowed": False, "this": False, "room": None}
+
+        def chain(*a, **k):
+            if on["inside"] and not on["slowed"]:
+                on["slowed"] = on["this"] = True
+                sim.clock.sleep(0.15)
+            return real_chain(*a, **k)
+
+        def switch(st, running, dst, why, k):
+            if k != kind:
+                return real_switch(st, running, dst, why, k)
+            on["inside"], on["this"] = True, False
+            t = sim.clock.now - sim.clock.start
+            try:
+                return real_switch(st, running, dst, why, k)
+            finally:
+                on["inside"] = False
+                asks.append((t, on["this"]))
+                if on["this"]:
+                    on["room"] = room
+
+        def room_to_stop(running, t):
+            forced, on["room"] = on["room"], None
+            return real_room(running, t) if forced is None else forced
+        nav.flow.chain, nav._switch, nav._room_to_stop = chain, switch, room_to_stop
+    return wrap
+
+
+@REAL
+def test_a_monster_whose_replan_was_dropped_late_with_no_room_to_stop_is_asked_about_again_at_the_next_state():
+    """The latency analysis of 2026-11-01: a "monster" replan dropped as too late left its monster marked replanned
+    (`_replanned` set before the deadline's check) for REACT_AGAIN_S, so with no room to stop she ran on into it while
+    the log said the next state asks again. Now a late one isn't taken as handled: said so, the next state asks about it
+    again (here in time: spliced), and nothing cut."""
+    asks: list = []
+    trace, sim, state = _spawn_run(_late_once(asks, room=False))
+    i = next(i for i, (_, late) in enumerate(asks) if late)
+    assert len(asks) > i + 1 and asks[i + 1][0] - asks[i][0] <= 0.15 + 2 * nv.STATE_S + 1e-6, asks
+    said = [line for line in trace["log"] if "replanned too late" in line]
+    assert len(said) == 1 and nv.COMING in said[0] and said[0].endswith("dropped, the next state asks again"), said
+    assert any(sp[0] >= asks[i + 1][0] - 1e-6 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
+    assert not any("plan cut short" in line and nv.COMING in line for line in trace["log"])
+
+
+@REAL
+def test_a_monster_whose_replan_was_dropped_late_with_room_to_stop_has_her_stop_for_it():
+    """... and with room to stop, the dropped replan's monster cuts the plan (REACT's cut, as without REPLAN): said as
+    her stop for it, the cut for it next, and it's handled (not asked about again at the next state)."""
+    asks: list = []
+    trace, sim, state = _spawn_run(_late_once(asks, room=True))
+    i = next(i for i, (_, late) in enumerate(asks) if late)
+    log = trace["log"]
+    j = next(j for j, line in enumerate(log) if "replanned too late" in line)
+    assert nv.COMING in log[j] and log[j].endswith("dropped, she stops for it"), log[j]
+    assert "plan cut short" in log[j + 1] and nv.COMING in log[j + 1], log[j:j + 2]
+    assert not [t for t, _ in asks[i + 1:] if t - asks[i][0] <= 0.15 + 2 * nv.STATE_S + 1e-6], asks
 
 
 @REAL
@@ -408,6 +479,37 @@ def test_better_ways_are_switched_to_with_hysteresis_never_dithering(monkeypatch
     assert at, "no switch at all"
     gaps = [b - a for a, b in zip(at, at[1:])]
     assert all(g >= nv.SWITCH_MIN_S - 1e-6 for g in gaps), gaps
+    # A better way's replan dropped as too late (its chain made to take 0.15 s of the clock): as before, nothing taken,
+    # no monster marked; its next look BETTER_EVERY_S on, as the log says.
+    marks, looks = [], []
+
+    def go_late(sim):
+        nav = sim.navigator(sim.hunter())
+        real_switch, real_chain = nav._switch, nav.flow.chain
+        inside = {"on": False}
+
+        def chain(*a, **k):
+            if inside["on"]:
+                sim.clock.sleep(0.15)
+            return real_chain(*a, **k)
+
+        def switch(st, running, dst, why, kind):
+            inside["on"] = kind == "better"
+            looks.append(sim.clock.now - sim.clock.start)
+            try:
+                return real_switch(st, running, dst, why, kind)
+            finally:
+                inside["on"] = False
+                marks.append(dict(nav._reacted))
+        nav.flow.chain, nav._switch = chain, switch
+        return nav.go(33, seconds=90)
+    trace, sim = _run(sc, go_late)
+    late = [line for line in trace["log"] if "replanned too late" in line]
+    assert late and all(" a better way (" in line for line in late), late[:3]
+    assert all(line.endswith(f"dropped, the next look for a better way asks again ({nv.BETTER_EVERY_S:.2f} s on)")
+               for line in late), late[:3]
+    assert not trace["splices"] and not any(marks)
+    assert all(b - a >= nv.BETTER_EVERY_S - 1e-6 for a, b in zip(looks, looks[1:])), looks
 
 
 @REAL
