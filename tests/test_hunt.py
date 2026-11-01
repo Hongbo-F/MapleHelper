@@ -774,6 +774,19 @@ def test_a_made_up_look_leaves_the_sweeps_itinerary_as_it_was():
     assert (h._sweeper.current, h._sweeper.dest, dict(h._pile_of), h._swept_for, h._sweep_said, list(h.said)) == before
 
 
+def test_the_grinds_way_back_to_its_stop_is_never_cut_for_a_pile_on_it():
+    """The grind's way back to its stop (behavior.grind's `_back`, 'back to spot'): the sweep doesn't call her off it for
+    a pile on her way (`_sweep_calls`), as it does a trip's; until 2026-10-31 it did, and the pass after the cut didn't
+    sweep on that way, so she set off again, cut again, about 900 times in a row on the harness's seed 9."""
+    coins = _pile(5, platform=2, items=("mesos",), worth=33.4, xs=(300.0,), status="seen")
+    coins.x, coins.last_seen = 300.0, time.monotonic()
+    h = _line_hunt([coins])
+    h.obj = SimpleNamespace(kind="spot", why="travel", platform=3, x=600.0)
+    assert h._sweep_calls(_on_line(1, 0.0))
+    h.obj = SimpleNamespace(kind="spot", why="back to spot", platform=3, x=600.0)
+    assert not h._sweep_calls(_on_line(1, 0.0))
+
+
 def test_leaving_a_ground_the_sweep_has_its_budgets_over_the_whole_way_out():
     """DEPART_BUDGETS: the piles on her way out within twice the sweep's budget over the whole way from when she
     decided (sweep.budget_for of the straight way then), less the straight way on from where she is, not a fresh

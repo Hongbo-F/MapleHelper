@@ -1198,9 +1198,13 @@ class Hunt:
         the next pass. On a look made up from another (Scene.what_if: the navigator's, her put where a chain ends) the
         sweep's itinerary, its piles and what it said stay as they were: until the review of 2026-10-30 such a solve
         took the itinerary she was on (sweep.Sweeper: kept unless another is clearly better) for one from a place she
-        wasn't at, and logged its "later, ..." from there."""
+        wasn't at, and logged its "later, ..." from there. Never on the grind's way back to its stop (behavior.grind's
+        `_back`, 'back to spot'): from 2026-10-31 (the rebase onto master 58dca1a) a pile on that way cut the trip,
+        whose next pass (`_while_travelling`, which didn't sweep on it then) sent her off again, about 900 times in a
+        row on the harness's seed 9 (60 s on 19, the objective's clock its end)."""
         o = self.obj
-        if o is None or o.kind not in ("spot", "pile") or (o.kind == "pile" and o.why != "sweep"):
+        if o is None or o.kind not in ("spot", "pile") or (o.kind == "pile" and o.why != "sweep") \
+                or o.why == "back to spot":
             return False
         keep = None
         if getattr(s, "what_if", False) and hasattr(self, "_sweeper"):
