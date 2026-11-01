@@ -385,6 +385,72 @@ def test_a_jump_throw_up_close_is_jittered_over_the_keys_the_stance_finds_as_sur
         plan_of(stance(400, 500, floor, [pig(475, 500, floor.id)], facing=RIGHT)).room is None  # (not sure)
 
 
+def test_every_jump_attack_is_jittered_and_recorded_those_keyed_unsure_over_the_whole_room(monkeypatch):
+    """behavior.fight.jittered's JITTER_ALL (the review of 2026-11-01, its F2): a jump attack the stance keyed at its
+    own key, with no shot and no room (a jump throw up close not sure, at a snail; a jump back; 'tap first' not sure),
+    is keyed over the soonest's whole room from the key her actions press (40 to 55; a jump back's turn 120 to 135, a
+    jump throw turning in the air the same), its plan not sure; its 'jump' record says 'unsure' (or its plan's why), not
+    sure, the jump's kind ('back' for a jump back, which turns her), the base and the jitter, and 'jump_keys' its press.
+    Without JITTER_ALL, or without the look, as before: the stance's key, no record."""
+    import random
+    from types import SimpleNamespace
+    from collections import Counter
+    from maplehelper.engine import LEFT, RIGHT
+    from gamelab import telemetry
+    from gamelab.attack.stance import JumpPlan, plan_of
+    from gamelab.behavior import fight
+    from gamelab.control import actions as actions_mod
+    floor = plat(LEDGE, 500, 400)
+    m = pig(470, 500, floor.id)
+    plans = []
+    monkeypatch.setattr(actions_mod.client, "submit",
+                        lambda events, **kw: plans.append(events) or {"sent": [list(e) for e in events]})
+    key = lambda name: SimpleNamespace(name=name)
+    s = SimpleNamespace(where=SimpleNamespace(x=400.0, y=500.0), platform=floor, monsters=[m])
+
+    def thrown(act, facing, seed=3):
+        a = actions_mod.Actions(SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), attack=key("f"),
+                                                lucky_seven=None, pick_up=key("z"), hp_potion=None, chair=None))
+        a.facing = facing
+        h = SimpleNamespace(actions=a, jitter=random.Random(seed), log=lambda line: None, jump_counts=Counter(),
+                            danger=None, model=LEDGE)
+        plans.clear()
+        with telemetry.captured() as records:
+            assert fight.throw_act(h, s, act)
+        (events,) = plans
+        at = lambda k: next(e[0] for e in events if e[1] == k and e[2] == "down")
+        jump = next((r for r in records if r["topic"] == "jump"), None)
+        keys = next((r for r in records if r["topic"] == "jump_keys"), None)
+        return at("f") - at("alt"), jump, keys
+    turn = fight.reach.turn_key_ms(fight.MONSTER_TOP["pig"])  # (a pig's: 120 by the search's model)
+    cases = ((("jump_throw", RIGHT), RIGHT, 40, "unsure", "up", False),
+             (("jump_throw", RIGHT), LEFT, max(40, turn), "unsure", "up", True),
+             (("jump_back", RIGHT), LEFT, max(turn, physics.JUMP_BACK_ATTACK_MS), "jump back", "back", True),
+             (("jump_throw", RIGHT, JumpPlan(40, 0, False, "tap first")), LEFT, 40, "tap first", "up", False))
+    for act, facing, base, why, kind, turned in cases:
+        seen = set()
+        for seed in range(40):
+            gap, jump, keys = thrown(act, facing, seed)
+            assert base <= gap <= base + reach.JITTER_FIRST_MS, (act, gap)
+            seen.add(gap)
+            assert (jump["kind"], jump["jump"], jump["base_ms"], jump["key_ms"], jump["jitter_ms"], jump["window"],
+                    jump["sure"], jump["turn"]) == (why, kind, base, gap, gap - base,
+                                                    [base, base + reach.JITTER_FIRST_MS], False, turned), jump
+            assert keys["n"] == jump["n"] and keys["pressed_ms"] == gap
+        assert len(seen) > 8  # (drawn over the room)
+    sure = ("jump_throw", RIGHT, JumpPlan(40, 0, True, "close", room=(40, 45)))
+    gap, jump, _ = thrown(sure, RIGHT)
+    assert 40 <= gap <= 45 and jump["sure"] is True  # (a sure one's room as before)
+    h = SimpleNamespace(actions=SimpleNamespace(faces=lambda d: True), jitter=random.Random(1), model=LEDGE)
+    plain = ("jump_throw", RIGHT)
+    assert fight.jittered(h, plain) is plain  # (no look: as before)
+    assert plan_of(fight.jittered(h, plain, s)).room == (40, 55) and not plan_of(fight.jittered(h, plain, s)).sure
+    monkeypatch.setattr(fight, "JITTER_ALL", False)
+    assert fight.jittered(h, plain, s) is plain
+    gap, jump, keys = thrown(plain, RIGHT)
+    assert gap == 40 and jump is None and keys is None
+
+
 def test_a_jump_throw_up_close_keeps_its_jitter_to_keys_whose_line_is_clear(monkeypatch):
     """attack.stance._jittered_up (ROOM_LINE, the review of 2026-11-01): on Tree Dungeon's slopes a close jump throw's
     later keys had their star stopped by her floor or one just over her where the key's hit (on 33 at x 126.9 facing

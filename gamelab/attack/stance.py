@@ -571,7 +571,9 @@ class JumpPlan:
     before the jump (an attack too soon in the jump to turn first: a short monster); why it was chosen (`why`: the
     telemetry 'jump' record's kind) and the shot it makes (attack.reach.Shot), if worked out; `room`, the keys about
     `key_ms` a jitter may key it at where it has no shot (a jump throw up close: _from_here), each as sure as it, and
-    the monster it's for (`target`: the shot's is its own). `keys`: those, or its shot's window."""
+    the monster it's for (`target`: the shot's is its own). `keys`: those, or its shot's window. `sure` False: a room
+    whose keys nothing checked (a jump attack keyed as the stance's own, given the jitter's whole room as it's carried
+    out: behavior.fight.jittered's JITTER_ALL, the review of 2026-11-01)."""
     key_ms: int = physics.JUMP_ATTACK_MS
     way: int = 0
     air_turn: bool = True
@@ -579,6 +581,7 @@ class JumpPlan:
     shot: reach.Shot | None = None
     room: tuple[int, int] | None = None
     target: Monster | None = None
+    sure: bool = True
 
     @property
     def keys(self) -> tuple[int, int] | None:
