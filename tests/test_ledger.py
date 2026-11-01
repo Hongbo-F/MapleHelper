@@ -553,7 +553,7 @@ def test_a_pile_holds_an_older_ones_age_only_while_a_drop_of_it_is_seen():
     `born`) only while a look still sees a drop where the older's lay."""
     from gamelab.behavior.ledger import Pile, survival
     store = DropStore()
-    old = Pile(100.0, -200.0, 19, 0.0, True, status="seen", last_seen=140.0, xs=(125.0,))  # (a kill at 0, a drop at 125)
+    old = Pile(100.0, -200.0, 19, 0.0, True, status="seen", last_seen=140.0, xs=(125.0,))  # (killed at 0, one at 125)
     new = Pile(140.0, -200.0, 19, 150.0, True)  # (a kill at 150 by it)
     store.piles = [old, new]
     both = [_coin(125.0), _coin(145.0), _coin(150.0)]  # (125 nearer the new pile: it takes the old drop)

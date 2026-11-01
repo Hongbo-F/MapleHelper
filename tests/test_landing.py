@@ -73,8 +73,8 @@ def test_her_landings_are_priced_by_her_touches_hp_and_rate_not_tree_dungeons():
     (stance.Prices: behavior.fight.landing_prices) a landing is priced by the kind's touch (attack.danger's
     Danger.taken of her max HP as read, at the user's reference prices), her EXP a second (Hunter.exp_rate, else the
     live 6.85 wherever no grind loop sets one) and the share of her touches that hurt (her own, as 10 touches at the
-    live 70% would be); stance's constants until her max HP is read. The live Horny Mushroom's numbers give the constants
-    back."""
+    live 70% would be); stance's constants until her max HP is read. The live Horny Mushroom's numbers give the
+    constants back."""
     from gamelab.behavior import fight, hunt
     touch_share = 112.0 / 840.0
     danger = SimpleNamespace(taken=lambda kind: touch_share if kind == "horny-mushroom" else 0.05)

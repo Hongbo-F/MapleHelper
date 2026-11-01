@@ -501,11 +501,12 @@ MID_MEETS = True  # a landing she runs on from priced by its touch alone; False:
 # live numbers alone: a touch of a kind its HP (attack.danger's Danger.taken of her max HP as perception reads it) in
 # potions at the user's reference prices (behavior.hunt.HP_PER_MESO at MESO_EXP), her EXP a second the hunt's
 # (Hunter.exp_rate: the grind's loop's rate) or RATE_PRIOR where it has none, the share of her touches that hurt her own
-# (her MISS popups) as HURT_PRIOR touches at the live share would be. Tree Dungeon's numbers stay in two of them: before
-# her max HP is read stance's constants price every landing, and her EXP a second is the live thief's there wherever no
-# grind loop sets one (the hunt loop's and a tour's landings, always: only behavior.grind sets Hunter.exp_rate). Her rate
-# is taken within RATE_BAND of RATE_PRIOR either way (from the independent check of 2026-11-01: a loop's rate early in a
-# grind, or one near 0, priced a landing by 1 / rate without bound). False: stance's constants.
+# (her MISS popups) as HURT_PRIOR touches at the live share would be. Tree Dungeon's numbers stay in two of them:
+# before her max HP is read stance's constants price every landing, and her EXP a second is the live thief's there
+# wherever no grind loop sets one (the hunt loop's and a tour's landings, always: only behavior.grind sets
+# Hunter.exp_rate). Her rate is taken within RATE_BAND of RATE_PRIOR either way (from the independent check of
+# 2026-11-01: a loop's rate early in a grind, or one near 0, priced a landing by 1 / rate without bound). False:
+# stance's constants.
 OWN_PRICES = True
 RATE_PRIOR = 6.85  # EXP a second: the live thief's on Tree Dungeon (2026-10-25)
 RATE_BAND = 4.0    # guess: her EXP a second taken between RATE_PRIOR / 4 and 4 times it (the grind's loops: 4.4-8.1)
@@ -520,7 +521,8 @@ def landing_prices(h, danger) -> Prices | None:
     if most is None:
         return None
     rate = getattr(h, "exp_rate", None)
-    rate = RATE_PRIOR if rate is None or not rate > 0 else min(max(rate, RATE_PRIOR / RATE_BAND), RATE_PRIOR * RATE_BAND)
+    low, high = RATE_PRIOR / RATE_BAND, RATE_PRIOR * RATE_BAND
+    rate = RATE_PRIOR if rate is None or not rate > 0 else min(max(rate, low), high)
     rep = getattr(h, "report", None)
     touches, misses = getattr(rep, "touches", 0), getattr(rep, "misses", 0)
     hurt = (touches - misses + HURT_PRIOR * HURT_SHARE) / (touches + HURT_PRIOR)

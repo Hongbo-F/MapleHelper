@@ -289,8 +289,8 @@ HURT_SHARE = 0.7        # of her touches that hurt (live: 30% evaded), until her
 @dataclass(frozen=True)
 class Prices:
     """What a landing costs her, s of her hunting (`landing`): `touch(kind)` EXP a touch of `kind` takes in potions,
-    `rate` her EXP a second (over 0: behavior.fight.landing_prices keeps it in a band about a prior), `hurt` the share of
-    her touches that hurt."""
+    `rate` her EXP a second (over 0, behavior.fight.landing_prices bounding it), `hurt` the share of her touches that
+    hurt."""
     touch: Callable[[str], float]
     rate: float
     hurt: float = HURT_SHARE

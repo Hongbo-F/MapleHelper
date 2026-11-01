@@ -581,8 +581,8 @@ class Looter:
 def _earned(line: str) -> tuple[str, str | None] | None:
     """A pickup log line that says an item was earned: (its tab, the item's kind, None where the line doesn't tell it),
     None for any other line. The name by maplehelper's loot-line parser against the game's item names (parse_loot,
-    ITEM_NAMES), a cut one it leaves open the one priced drop it starts (PRICES: see ITEM_TABS); the tab as the line says
-    it, else the kind's (`tab_of`: OCR's "(Ete)")."""
+    ITEM_NAMES), a cut one it leaves open the one priced drop it starts (PRICES: see ITEM_TABS); the tab as the line
+    says it, else the kind's (`tab_of`: OCR's "(Ete)")."""
     tab = EARNED.search(line)
     got = parse_loot(line, ITEM_NAMES)
     name = got.item if got is not None and got.kind == "item" else None

@@ -445,8 +445,8 @@ def test_the_pickup_logs_cut_names_are_read_as_their_items():
     2026-10-26), which the regex of the name before "x1" read as a kind of its own ('horny-mushroo...'). Read by
     maplehelper's loot-line parser against the game's item names (looting._earned: parse_loot, ITEM_NAMES), the live
     fixture's lines come out as their items, a cut name the item names leave open ("Orange Mushro...") the one priced
-    drop it starts, a misread tab ("(Ete)") the kind's; a line with no name read tells the tab alone. The simulator's log
-    cuts them as the game does (world.log_name)."""
+    drop it starts, a misread tab ("(Ete)") the kind's; a line with no name read tells the tab alone. The simulator's
+    log cuts them as the game does (world.log_name)."""
     import json
     from gamelab.behavior.looting import _earned
     from gamelab.sim.world import log_name
