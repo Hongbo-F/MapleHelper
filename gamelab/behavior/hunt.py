@@ -1423,7 +1423,9 @@ class Hunt:
         now: else the next pass's sweep decides again: the guard shot first, or the pile left), each bunch of its drops
         seen (PILE_GAP) walked to from the nearer end and stood on, a press of pick-up for each drop and one more (its
         drops not seen yet, the walk over SPREAD either side of where her kill died, pressing all the way); a drop still
-        where she stood twice can't be picked up (looting.cant_pick: someone else's, or her inventory full). One try of
+        where she stood twice can't be picked up (looting.cant_pick: someone else's, or her inventory full); drops seen
+        by it that are all items of a full tab (looting.Looter.can_take) none to take, its try spent and nothing walked
+        (from the review of 2026-10-31: they were taken for none seen yet, and its spread walked). One try of
         the pile's (PILE_TRIES); a telemetry event 'pick'. What's left the next look's drops show (the next pass's sweep:
         until 2026-10-30 a mop-up of its own, 0.3 s and a look between its rounds)."""
         here, x = s.platform.id, s.where.x
@@ -1431,7 +1433,12 @@ class Hunt:
         if why is not None or guards:
             return None
         looter = self.h.looter
-        seen = [d for d in looter.wanted(s.loot) if d.platform == here and abs(d.x - pile.x) <= LOOT_REACH]
+        near = [d for d in s.loot if d.platform == here and abs(d.x - pile.x) <= LOOT_REACH]
+        seen = looter.wanted(near)
+        can = getattr(looter, "can_take", None)
+        if not seen and can is not None and any(not d.mesos and not can(d.item.kind) for d in near):
+            self._tried(pile)  # (drops there, items of a full tab alone: nothing to take, not its spread walked)
+            return None
         kept = self._stood.get(id(pile))
         if kept is None or kept[0] is not pile:
             kept = self._stood[id(pile)] = (pile, [])
