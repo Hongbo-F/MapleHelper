@@ -884,6 +884,27 @@ def test_a_trip_mode_needs_an_escort_unless_it_avoids_monsters(model):
         escorted.go(0, mode="sneak")
 
 
+def test_the_nearest_safe_platform_is_found_from_where_she_is_once_off_a_rope():
+    """Tour.nearest_safe with her hanging on a rope: off it first (Navigator._onto_platform), then the one she's on if
+    it's safe, else the quickest by route from it."""
+    from types import SimpleNamespace
+
+    from gamelab.behavior.tour import Tour
+    on_rope = SimpleNamespace(where=SimpleNamespace(platform=None, x=-80.0))
+    off = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=10), x=-80.0))
+    got, planned = [], []
+    tour = object.__new__(Tour)
+    tour.nav = SimpleNamespace(mover=SimpleNamespace(settle=lambda n: on_rope),
+                               _onto_platform=lambda s: got.append(s) or off,
+                               planner=SimpleNamespace(plan=lambda a, x, b: planned.append((a, x, b))))
+    tour.safe = {10, 25}
+    assert tour.nearest_safe() == 10 and got == [on_rope] and not planned
+    tour.safe = {25}
+    with pytest.raises(RuntimeError):  # (no route planned to 25: none reachable)
+        tour.nearest_safe()
+    assert planned == [(10, -80.0, 25)]
+
+
 def test_the_trip_to_stand_by_goes_in_the_mode_asked_and_avoids_monsters_without_an_escort():
     """Tour.stand_by: over to the nearest safe platform in the mode asked (the navigator's own by default: the tour's;
     the hunt loop's transit), avoiding monsters without an escort, and there she stands: no chair, no waiting for her

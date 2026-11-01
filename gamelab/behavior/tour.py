@@ -171,8 +171,13 @@ class Tour:
     # --- standing by ----------------------------------------------------------------------------
 
     def nearest_safe(self) -> int:
-        """The safe platform quickest to get to by route: the one she's on, if it's safe."""
+        """The safe platform quickest to get to by route: the one she's on, if it's safe. On a rope, or not landed yet,
+        from the platform she's on once off it (Navigator._onto_platform): from none, no route was planned, and a stop
+        while she hung on a rope ended the run, "no safe platform reachable" (the simulator, 2026-10-31,
+        loop_tree_grind_rope_top: the hunt's stop on the rope 11 -> 10)."""
         s = self.nav.mover.settle(3)  # she may still be falling (knocked off a platform)
+        if s.where.platform is None:
+            s = self.nav._onto_platform(s)
         here = s.where.platform
         if here is not None and here.id in self.safe:
             return here.id
