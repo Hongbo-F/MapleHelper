@@ -2532,13 +2532,101 @@ deaths, falls out of the map or stops. Against the switches alone (the commit th
 loot +0.8 (6.6), HP -0.28 bars (0.22): what came after them is the same in the 5-minute standard grind, its gain in the
 15-minute live drops' worlds (her drops' life).
 
-**Not done.** The seeds of the scenarios and tests the new monsters and these changes moved aren't re-picked, nor the
-goldens recorded (the fast suite's failures, 11 of 2,814: test_heading's three knock and turn cases,
-`loop_tree_ore_waits`, `nav_tree_rope_hit` and test_touches' MISS on a trip, `loop_tree_attack_unbound`,
-`loop_tree_grind_attack_key`, test_harness's glances in a minute's run; test_perception's look at a capture, this
-worktree's lab, and test_lie_yolo's 4-frames-a-second shadow under the suite's load, as before). The magician's grind
-isn't measured. Her pets' looting (the diagnosis: 71% of her drops that vanished did so 15 units or more from her) is the
-user's to confirm before the sweep counts on it. Live: not run.
+**Not done here.** The seeds of the scenarios and tests the new monsters and these changes moved (the fast suite's
+failures, 11 of 2,814: test_heading's three knock and turn cases, `loop_tree_ore_waits`, `nav_tree_rope_hit` and
+test_touches' MISS on a trip, `loop_tree_attack_unbound`, `loop_tree_grind_attack_key`, test_harness's glances in a
+minute's run; test_perception's look at a capture, this worktree's lab, and test_lie_yolo's 4-frames-a-second shadow
+under the suite's load, as before) were re-picked and the goldens recorded after it (the next section). The magician's
+grind isn't measured. Her pets' looting (the diagnosis: 71% of her drops that vanished did so 15 units or more from her)
+is the user's to confirm before the sweep counts on it. Live: not run.
+
+## The branch measured for the record, its seeds re-picked, its goldens recorded again (2026-10-31, the evening)
+
+This round's evaluation (D:/MapleHelper-scratch/replan/loot/eval: `ab/`, `master_loot/`, `live/`, `seeds/`, `golden/`,
+`tests/`): master 072e1ec its tip at the start and the end; the branch's tip f405198 measured (bd94884's code, the
+README after it), the re-picks after it changing no harness run (`spot` below). Master's harness has no mesos, items,
+drops left or cash keys: its 48 seeds were run again in its own checkout with the branch's formulas added
+(`master_loot/loot_run.py`), every key both have the same to the digit as master's cache on all 48. Cash at the user's
+prices for both sides: an Orange Potion 125 mesos, a Blue 100.
+
+**The standard grind against master, 48 seeds of 5 minutes** (`ab/std48.txt`, `std48_loot_paired.txt`):
+
+| | master | branch | branch - master (se) |
+|---|---|---|---|
+| EXP a minute | 308.6 | 322.7 | +14.0 (8.3), +4.5%, better on 28 |
+| kills | 43.6 | 45.9 | +2.3 (1.1) |
+| loot's worth a minute (all mesos: the standard world drops coins) | 236.6 | 244.8 | +8.2 (7.6) |
+| her drops' worth left a minute | 11.8 | 12.1 | +0.3 (2.7) |
+| drops' share | 0.953 | 0.952 | -0.001 (0.011) |
+| cash a minute at the user's prices | -443 | -549 | -106 (30) |
+| touches / those that hurt | 71.6 / 45.9 | 84.2 / 54.5 | +12.6 (2.6) / +8.6 (2.0) |
+| hurt at piles / on trips | 19.0 / 12.7 | 12.7 / 11.8 | -6.3 (1.7) / -0.9 (0.6) |
+| HP lost (bars) / HP potions / MP potions | 5.97 / 18.3 / 11.1 | 7.28 / 22.3 / 11.9 | +1.31 (0.31) / +4.0 (1.0) / +0.7 (0.5) |
+| longest idle (s) / knock falls | 20.6 / 9.6 | 21.8 / 10.8 | +1.2 (1.4) / +1.2 (0.5) |
+
+No deaths, falls out of the map or stops on either side; the harness's bar isn't passed (EXP better on 28 of 48 where it
+asks 39, the worst seed -27%). `--world tick-respawn` gives the same table to the digit on both sides: the server's
+respawn has been every world's since master's merges of 2026-10-31, the world kept for runs saved under its name. With
+each monster back on its own clock instead (`--world clock-respawn`, every world's respawn until then; `ab/clock.txt`,
+48 seeds): EXP a minute 334.3 -> 366.6 (+32.3, se 8.0, +9.7%; better on 36), loot 254.8 -> 266.2 (+11.4, se 7.3), drops'
+share 0.904 -> 0.903, touches +6.5 (2.7), those that hurt +6.1 (2.1), HP lost +1.00 bars (0.30), HP potions 20.6 ->
+23.7, knock falls +1.8 (0.6), cash -527 -> -610 a minute; no deaths, falls or stops.
+
+**15 minutes against master, 12 seeds** (`ab/std15.txt`, master's seeds run fresh): EXP a minute 306.4 -> 300.6 (-5.8,
+se 15.0; better on 5), loot 252.9 -> 245.1 (-7.8, se 11.8), drops' share 0.922 -> 0.894 (-0.028, se 0.019), touches +8.1
+(6.5), HP lost +0.87 bars (0.64), HP potions 53.4 -> 55.9, hurt at piles 64.3 -> 35.3, cash -473 -> -504. The harness's
+presets give her 60 HP potions (Realism.potions): at 15 minutes they run out on both sides and the safety stop follows,
+master on 2 of 12 seeds (at 850 and 880 s), the branch on 4 (585-887 s; seed 8 had drunk its 60 by 585 s), so the
+5-minute lead isn't seen at 15 within the stops' noise, and the loot the 5-minute runs hide (the design: 11% of her
+drops' worth expiring at 15 minutes) leans to master here.
+
+**Within the branch, the live drops' worlds against its rebase tip** (7c25120: the branch on master 072e1ec before this
+round's parts; `live/`). `drop-takers` changed this round (11e9236), so the rebase tip ran in the tip's takers' world
+(`loot_run.py --new-takers`: the same draws from the same generator as world.others_life); `map-drops` alone is the same
+world on both sides as committed (`ab --base 7c25120`).
+
+| tip against 7c25120 | `map-drops`, 48 seeds of 5 min | with `drop-takers`, 48 of 5 | with `drop-takers`, 12 of 15 |
+|---|---|---|---|
+| EXP a minute | 292.7 -> 325.1, +32.4 (8.5) | 292.9 -> 324.7, +31.8 (8.6) | 285.6 -> 315.9, +30.3 (12.8) |
+| loot's worth a minute | 129.5 -> 142.5, +13.1 (6.9) | 127.4 -> 140.5, +13.0 (7.2) | 129.0 -> 146.2, +17.2 (10.1) |
+| mesos / items a minute | +8.3 (5.6) / +4.7 (1.9) | +8.7 (5.9) / +4.3 (2.0) | +12.6 (8.5) / +4.6 (2.7) |
+| her drops' worth left a minute | 8.2 -> 8.8 (+0.6, 2.1) | 10.7 -> 11.4 (+0.7, 2.1) | 18.6 -> 24.1 (+5.5, 5.7) |
+| drops' share | 0.940 -> 0.942 | 0.920 -> 0.923 | 0.880 -> 0.861 |
+| longest idle (s) | 32.6 -> 24.5 (-8.0, 2.2) | 32.9 -> 24.5 (-8.5, 2.3) | 45.1 -> 29.8 (-15.3, 7.1) |
+| touches / those that hurt | +12.5 (2.0) / +9.8 (1.5) | +12.5 (2.0) / +9.9 (1.5) | +34.9 (7.8) / +31.8 (4.4) |
+| hurt at piles | 5.8 -> 8.6 | 5.6 -> 8.4 | 15.1 -> 28.3 |
+| HP lost (bars) / HP potions | +1.37 (0.24) / +4.3 (0.8) | +1.39 (0.25) / +4.4 (0.8) | +4.66 (0.85) / +14.1 (2.6) |
+| cash a minute at the user's prices | -543 -> -671 | -548 -> -679 | -498 -> -641 |
+| knock falls / safety stops | +1.9 (0.6) / none | +2.0 (0.5) / none | +8.5 (2.8) / 0 -> 5 of 12 |
+
+Her EXP up beyond 2 se in every one, her items in the 5-minute ones, her mesos within; at 15 minutes the tip drank all
+60 of her potions on 7 of 12 seeds (the rebase tip 27-54) and stopped on 5 (728-881 s); her drops' worth left leans up
+there, within 2 se.
+
+**The scenarios and tests re-picked** (03e36b3; each docstring says why and which of the seeds tried pass; `seeds/`):
+loop_tree_ore_waits 14 -> 22 (of 1-40 22, 23, 25, 37), loop_tree_23_near_misses 6 -> 1 (of 1-13 1, 3, 5, 7, 10, 11),
+loop_tree_grind_attack_key and loop_tree_attack_unbound 1 -> 2 (of 1-13 all but 1, 5, 10; on 1 the doubt came at 131 s,
+too late for the check), nav_tree_rope_hit 2 -> 1, master's (of 1-24 eighteen, test_touches' MISS on the trip with it),
+test_heading's turned frame 1 -> 2, knock-turned frame 72 -> 25 and weak wrong frames 3 -> 1 (where they fail, a kill is
+lost, as master's code loses 3 of 16 of the same kill), test_harness's look-cost minute 1 -> 3 (no glance in seed 1's
+minute). nav_tree_landing_shot_first stays expected to fail (DYING_AWAY: none of seeds 1-40); nav_tree_landing_no_shot
+is master's (NO_LANDING_SHOT, its session's to fix; seed 9 of 1-40 shows it here).
+
+**Goldens:** Tree Dungeon's 43 recorded again (`golden record --jobs 4` into `golden/rec1`, the five re-picked into
+`rec2`), each one's expectations checked on its new trace (41 of 43; nav_tree_landing_shot_first and
+nav_tree_landing_no_shot expected to fail as in test_sim), installed in the worktree's lab/golden (those before in
+`golden/before`), `golden check --jobs 4`: 43 of 43.
+
+**Tests** (`tests/`): the fast suite (4 workers) 2,811 passed, 72 skipped, 2 xfailed (the two landings above), 1 failed:
+test_perception's look at a capture (tag_template_full.npy isn't in this worktree's lab, as before); the slow tests of
+the simulator's files the changes touch (test_sim, test_retreat, test_probe: `--slow -m slow`) 35 passed. The re-pick
+commit's harness runs are the tip's to the digit (`harness spot` of seeds 3 and 9: `ab/spot.txt`).
+
+**Open, for the user.** How many HP potions she carries: at the branch's 4.5 a minute in the standard grind (master's
+3.7) the harness's 60 last about 13 minutes, and once they're gone the safety stop ends the hunt; live hunts run longer.
+The 5-minute EXP lead over master is within 2 se at 48 seeds of the standard grind (beyond it with the old respawn clock
+and against the rebase tip), and not seen at 15 minutes, where her loot leans to master's (drops' share -0.028, se
+0.019). Her pets' looting, MESO_EXP 0.5 and the magician's grind as in the section before.
 
 ## Localization
 
