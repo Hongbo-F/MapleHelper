@@ -593,24 +593,24 @@ class DropMix:
 
 
 TREE_DROP_MIX = DropMix()
-# Her drops taken by others or gone (Realism.drop_takers; the harness's `--world drop-takers`), fitted to how long the
-# perception service saw her drops lie on the live thief run of 2026-10-30 (the loot design's Kaplan-Meier, her picks
-# censored: D:/MapleHelper-scratch/replan/loot/survival.py): still there at 5, 10, 20, 30, 60, 90, 120, 150 s 94, 90,
-# 84, 74, 55, 42, 26 and 9% of them, none by DROP_LIFE. Each of her drops gets a life drawn from that curve, never under
-# Realism.rival_owns (nobody else can pick hers up before), and is taken ('other') then if she hasn't picked it up: the
-# default world leaves every drop of hers lying DROP_LIFE (180 s), and the simulator credited her with 94% of them
-# (master's crowd baseline) where live she picked up 67-71%.
-HER_DROPS_LAST = ((0.0, 1.0), (5.0, 0.94), (10.0, 0.90), (20.0, 0.84), (30.0, 0.74), (60.0, 0.55), (90.0, 0.42),
-                  (120.0, 0.26), (150.0, 0.09), (180.0, 0.0))
+# Her drops taken by others (Realism.drop_takers; the harness's `--world drop-takers`), as the live evidence has it (the
+# loot designs of 2026-10-31: D:/MapleHelper-scratch/replan/loot/diag, live_km.txt, and design): hers alone for
+# Realism.rival_owns (the killer's ownership: HeavenMS's 15 s, not measured on this server), then taken by someone else
+# at TAKE_RATE a minute, else lying DROP_LIFE (HeavenMS's 180 s; one live expiry pass took four drops 198-228 s old).
+# The perception service's own, her pets' pick-ups (71% of her drops that vanished did so 15 units or more from her, the
+# pickup log saying "earned" by her pets and not by her) and the detector's misses taken out: 95%, 88% and 86% of her
+# drops still lying at 15, 60 and 90 s, at most about 0.1 a minute left to others, and of 1,580 vanishings of hers timed
+# to within 1 s 5 with another player within 60 units, all under 15 s old. TAKE_RATE 0.05 is a guess inside that bound.
+# Until 2026-10-31 each drop's life was drawn from the live service's raw curve (HER_DROPS_LAST: 55% still there at 60
+# s, 26% at 120, none at 180), which counted her pets' pick-ups and the detector's misses as takings: about 4 times her
+# real loss.
+TAKE_RATE = 0.05
 
 
-def drop_life(u: float, curve: tuple = HER_DROPS_LAST) -> float:
-    """The age at which a drop's still-there share on `curve` ((s, share) from (0, 1) down) falls to `u` (0-1): its life
-    drawn by inverting the curve, straight between its points."""
-    for (t0, s0), (t1, s1) in zip(curve, curve[1:]):
-        if s1 <= u <= s0:
-            return t0 if s0 == s1 else t0 + (s0 - u) / (s0 - s1) * (t1 - t0)
-    return curve[-1][0]
+def others_life(u: float, owns: float, rate: float = TAKE_RATE) -> float:
+    """When one of her drops is taken by others (s from its landing), `u` uniform in (0, 1]: `owns` (her ownership) and
+    an exponential at `rate` a minute after it (DROP_LIFE and more: it lies its whole life)."""
+    return owns + (-math.log(max(u, 1e-12)) / (rate / 60.0) if rate > 0 else math.inf)
 
 
 def game_drops(model) -> tuple:
@@ -828,8 +828,8 @@ class Realism:
                                  # (): mesos, and a pig's leather (ITEM_OF)
     drop_mix: DropMix | None = None  # what a kill drops, fitted to the live service's sightings (TREE_DROP_MIX: the
                                      # harness's `--world map-drops`), from a generator of its own; None: `drops`
-    drop_takers: bool = False    # her drops taken by others at a life drawn from the live curve (HER_DROPS_LAST: the
-                                 # harness's `--world drop-takers`), from a generator of its own; False: they lie
+    drop_takers: bool = False    # her drops taken by others once past rival_owns, at TAKE_RATE a minute (others_life:
+                                 # the harness's `--world drop-takers`), from a generator of its own; False: they lie
                                  # DROP_LIFE
     splices: bool = True         # the player takes splices (sim.fakes.FakePlayer.splices, control.client.can_splice);
                                  # False: a player started before them, every replanned chain a cut and a resend (the
@@ -3127,9 +3127,9 @@ class World:
                 x = min(max(mx + rng.uniform(-10, 10), p.left + 3), p.right - 3)
                 drops.append(Drop(kind, x, p.y_at(x), p.id, t + DROP_DELAY))
         self._push(self.ms + int(DROP_DELAY * 1000), "loot", drops)
-        if self.realism.drop_takers:  # (taken by others at a life drawn from the live curve, never before she owns it)
+        if self.realism.drop_takers:  # (taken by others once she owns them no more, at TAKE_RATE a minute)
             for d in drops:
-                life = max(drop_life(self._taker_rng.random()), self.realism.rival_owns)
+                life = others_life(1.0 - self._taker_rng.random(), self.realism.rival_owns)
                 if life < DROP_LIFE:
                     self._push(self.ms + int((DROP_DELAY + life) * 1000), "others_take", [d])
         if self.realism.respawn_tick <= 0:

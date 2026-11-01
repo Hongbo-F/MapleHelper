@@ -836,7 +836,9 @@ def loop_tree_grind_drops(sim):
     fewer than four drops; of seeds 1-10, 2, 3, 6 and 8 meet all of this.) (Seed 3 since work/replan's rebase onto the
     server's respawn and the chase with where she stands to fight after its review (2026-10-31:
     D:/MapleHelper-scratch/replan/pos/fix/out/scan_A.txt, scan_B.txt): on seed 2 she picked up fewer than four drops, no
-    mesos; of seeds 1-10, 3, 5, 6 and 8-10 meet all of this.)"""
+    mesos; of seeds 1-10, 3, 5, 6 and 8-10 meet all of this.) (Since 2026-10-31 `--world drop-takers` has hers taken by
+    others only once past her ownership, at world.TAKE_RATE a minute (others_life: the live curve counted her pets'
+    pick-ups and the detector's misses): met on seed 3 still.)"""
     return _grind(3)(sim)
 
 

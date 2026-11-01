@@ -275,9 +275,10 @@ WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
 # ... and her drops as the perception service saw them live (the loot design, 2026-10-30: D:/MapleHelper-scratch/replan/
 # loot): what a kill drops fitted to its sightings (`map-drops`: world.TREE_DROP_MIX, Realism.drop_mix: 0.64 drops a
 # kill, 57% mesos, by its kind's amounts, piles of 1-4, 20 units apart on alternating sides), where the default world drops
-# one coin a kill; and her drops taken by others as long as they lay live (`drop-takers`: world.HER_DROPS_LAST,
-# Realism.drop_takers: 55% still there at 60 s, 26% at 120), where the default world leaves them 180 s. With the default
-# world the simulator credited her with 94% of her drops (master's crowd baseline) where live she picked 67-71%.
+# one coin a kill; and her drops taken by others (`drop-takers`: Realism.drop_takers, world.others_life: once past her
+# ownership, Realism.rival_owns, at world.TAKE_RATE a minute, 0.05: 13% of those she leaves gone by 180 s), where the
+# default world leaves them 180 s. Until 2026-10-31 `drop-takers` drew each life from the live service's raw curve (55%
+# still there at 60 s, 26% at 120), which counted her pets' pick-ups and the detector's misses as takings.
 WORLDS["map-drops"] = {"drop_mix": TREE_DROP_MIX}
 WORLDS["drop-takers"] = {"drop_takers": True}
 # ... and the player started before splices (`no-splices`: Realism.splices, sim.fakes.FakePlayer.splices): every chain

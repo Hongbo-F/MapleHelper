@@ -1,14 +1,15 @@
 """The simulator's drops fitted to the live service's sightings (sim.world.DropMix, `--world map-drops`) and her drops
-taken by others as long as they lay live (HER_DROPS_LAST, `--world drop-takers`): each against the numbers it was
-fitted to (the loot design of 2026-10-30, D:/MapleHelper-scratch/replan/loot)."""
+taken by others once past her ownership (others_life, TAKE_RATE, `--world drop-takers`): each against the numbers it
+was fitted to (the loot designs of 2026-10-30 and 31, D:/MapleHelper-scratch/replan/loot)."""
 
+import math
 import random
 from types import SimpleNamespace
 
 import pytest
 
 from gamelab.sim import harness
-from gamelab.sim.world import HER_DROPS_LAST, TREE_DROP_MIX, DropMix, World, drop_life
+from gamelab.sim.world import DROP_LIFE, TAKE_RATE, TREE_DROP_MIX, DropMix, World, others_life
 
 
 def _platform():
@@ -61,13 +62,15 @@ def test_map_drops_are_kept_on_the_platform():
         assert all(-497.0 <= d.x <= 497.0 for d in World._mixed_drops(world, m, 495.0, 0.0))
 
 
-def test_drop_takers_lives_follow_the_live_curve():
+def test_drop_takers_take_hers_only_past_her_ownership_at_their_rate():
+    """Nothing taken before rival_owns (15 s); after it at TAKE_RATE a minute: of the drops she leaves alone, about 13%
+    gone by DROP_LIFE (180 s), the rest lying their whole life."""
     rng = random.Random(5)
-    lives = [max(drop_life(rng.random()), 15.0) for _ in range(20000)]
-    for t, share in HER_DROPS_LAST:
-        if t >= 15.0:  # (nobody else picks hers up before she owns them no more: rival_owns)
-            assert sum(life > t for life in lives) / len(lives) == pytest.approx(share, abs=0.015), t
-    assert drop_life(1.0) == 0.0 and drop_life(0.0) == 180.0 and drop_life(0.55) == pytest.approx(60.0)
+    lives = [others_life(1.0 - rng.random(), 15.0) for _ in range(20000)]
+    assert min(lives) >= 15.0 and others_life(1.0, 15.0) == 15.0
+    gone = sum(life < DROP_LIFE for life in lives) / len(lives)
+    assert gone == pytest.approx(1.0 - math.exp(-TAKE_RATE / 60.0 * (DROP_LIFE - 15.0)), abs=0.01)
+    assert 0.12 < gone < 0.14 and others_life(0.5, 15.0, rate=0.0) == math.inf
 
 
 def test_the_harness_worlds_switch_them_on():
