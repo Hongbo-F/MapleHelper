@@ -324,40 +324,31 @@ def _horny(platform=3):
     return SimpleNamespace(kind="horny-mushroom", platform=platform, x=200.0, y=-60.0)
 
 
-def test_exp_before_loot_a_pile_that_will_still_be_there_waits_for_what_is_in_reach():
-    """The user, 2026-10-24: "The hunt should be driven by maximizing the exp gain". A valuable pile 10 s old (how long it
-    lies: ledger.SURVIVAL), nobody by it: with a Horny Mushroom in reach she shoots first; with nothing in reach it
-    goes."""
+def test_exp_before_loot_a_valuable_pile_waits_for_what_is_in_reach():
+    """The user, 2026-10-24: "The hunt should be driven by maximizing the exp gain"; 2026-11-01: "My idea is just
+    picking up mesos and items as we kill mobs". A valuable pile 10 s old: with a Horny Mushroom in reach she shoots
+    first, said once; with nothing in reach it goes; a monster not worth hunting in reach doesn't hold it up."""
     ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
     h = _shooter([ore])
     s = _scene()
-    assert 0.0 < h._at_risk(s, ore, 4.0) < 0.01  # (by her drops' survival: ledger.SURVIVAL, hers alone OWN_S)
-    assert not h._loot_first(s, ore, [_horny()])
-    assert ("sapphire-ore on platform 2 at x 100 (worth 120, at risk 0%) against 10.0 EXP a second in reach for 4 s, "
-            "6.6 s there and back: shooting first") in h.said[-1]  # (3 s to it: the planner's 2, and 1 to get off)
+    assert not h._loot_first(s, ore, [_horny()]) and not h._loot_first(s, ore, [_horny()])
+    assert h.said == ["  sapphire-ore on platform 2 at x 100 (worth 120) against 10.0 EXP a second in reach for 4 s: "
+                      "shooting first"]
     assert h._loot_first(s, ore, [])  # nothing in reach: at once
-    h.kinds = {"horny-mushroom"}  # a monster not worth hunting in reach doesn't hold it up
+    h.kinds = {"horny-mushroom"}
     assert h._loot_first(s, ore, [SimpleNamespace(kind="slime", platform=3, x=0.0, y=0.0)])
 
 
-
-
-def test_exp_before_loot_another_player_by_a_pile_puts_it_at_risk_once_it_is_not_hers_alone():
+def test_exp_before_loot_has_no_exchange_of_mesos_for_exp_even_with_another_player_by_the_pile():
+    """The review of 2026-11-01: until then a valuable pile at risk (another player by it once it was no longer hers
+    alone: RIVAL_TAKES) went first where what waiting would likely lose of it, at MESO_EXP an meso, was more than what's
+    in reach would give over the trip there and back (120 x 0.5 x 0.5 = 30 against the regular attack's 3.6 EXP a second
+    x 6.6 s). Now it waits for what's in reach whatever its worth, at whatever rate; none of that exchange is left."""
     rival = SimpleNamespace(rival=True, near=lambda x, y, dx, dy: True, x=120.0)
-    s = _scene()
-    young = _pile(2)
-    h = _shooter([young], players=[rival])
-    assert h._at_risk(s, young, 4.0) < 0.05  # hers alone until OWN_S: 2 + 4 + 3 + 0.6 s in (its survival alone)
-    assert h._at_risk(s, young, 10.0) == hunt.RIVAL_TAKES
-    theirs = _pile(40, hers=False)
-    assert h._at_risk(s, theirs, 0.0) == hunt.RIVAL_TAKES
-    assert _shooter([theirs])._at_risk(s, theirs, 0.0) == 0.0  # nobody by it
-    # A valuable pile at risk so goes first where it's worth more than what's in reach would give over the trip: 120 x
-    # 0.5 x 0.5 = 30 against the regular attack's 3.6 EXP a second x 6.6 s (24); not against Lucky Seven's 12.1 (80)
     ore = _pile(20, hers=False, items=("sapphire-ore",), worth=120.0, dearest=120.0)
-    assert _shooter([ore], kill_s=11.0, players=[rival])._loot_first(s, ore, [_horny()])
-    assert not _shooter([ore], kill_s=3.3, players=[rival])._loot_first(s, ore, [_horny()])
-    assert not _shooter([ore], kill_s=11.0)._loot_first(s, ore, [_horny()])  # nobody by it: its survival alone
+    for kill_s in (3.3, 11.0, 60.0):
+        assert not _shooter([ore], kill_s=kill_s, players=[rival])._loot_first(_scene(), ore, [_horny()])
+    assert not hasattr(hunt, "RIVAL_TAKES") and not hasattr(Hunt, "_at_risk")
 
 
 def test_a_trip_for_a_pile_that_went_first_is_called_off_for_what_goes_first_now():
@@ -429,11 +420,11 @@ def test_on_another_map_a_drop_is_valuable_at_twice_its_bronze_coin():
 
 
 def test_a_pile_is_rushed_and_put_first_only_for_what_she_can_take():
-    """The independent check of 2026-11-01: rule 6a went by the pile's dearest drop and its whole worth, and EXP before
-    loot by its whole worth, a full tab's items too: with her Etc tab full she rushed a pile of a coin and an ore for
-    the coin. Now by the dearest drop she can take (Hunt._dearest: looting.Looter.can_take) and her worth of it
-    (Hunt._worth): on Tree Dungeon (a bronze coin 33.4, valuable from 66.8) a coin and a Silver Ore (80) with Etc full
-    is neither rushed nor put ahead of a Horny Mushroom in reach; with room, both; a Magic Potion (Use) still is."""
+    """The independent check of 2026-11-01: rule 6a went by the pile's dearest drop and its whole worth, a full tab's
+    items too: with her Etc tab full she rushed a pile of a coin and an ore for the coin. Now by the dearest drop she
+    can take (Hunt._dearest: looting.Looter.can_take): on Tree Dungeon (a bronze coin 33.4, valuable from 66.8) a coin
+    and a Silver Ore (80) with Etc full isn't rushed; with room it is; a Magic Potion (Use) still is. Neither goes ahead
+    of a Horny Mushroom in reach (EXP before loot, from the review of that day)."""
     from gamelab.behavior.looting import Worth, tab_of
     tree_worth = Worth({"bronze": 33.4, "gold": 51.5})
     ore = _pile(20, hers=False, items=("mesos", "silver-ore"), worth=113.4, dearest=80.0, each=(33.4, 80.0), mesos=True)
@@ -444,7 +435,7 @@ def test_a_pile_is_rushed_and_put_first_only_for_what_she_can_take():
         h.h.looter = SimpleNamespace(inventory_full=bool(full), items_full=False,
                                      can_take=lambda k, full=full: k == "mesos" or tab_of(k) not in full)
         assert (h._valuable_pile(_scene()) is ore) == rushed and h._dearest(ore) == (80.0 if rushed else 33.4)
-        assert h._loot_first(_scene(), ore, [_horny()]) == rushed
+        assert not h._loot_first(_scene(), ore, [_horny()])  # (EXP before loot: what's in reach first, whatever)
     potion = _pile(5, items=("mesos", "magic-potion"), worth=283.4, dearest=250.0, each=(33.4, 250.0), mesos=True)
     h.h.drops.known = [potion]
     assert h._valuable_pile(_scene()) is potion and h._dearest(potion) == 250.0

@@ -12,7 +12,7 @@ in the order listed, 6 before 3):
   6a  valuable pile    a pile with a drop worth VALUABLE mesos or more on its own (looting.Worth: the game
                        data's prices; on the first map a Slime Bubble, a White Potion, a gold coin; on another
                        twice its bronze coin, `valuable`) within VALUABLE_TRAVEL: at once with nothing in reach,
-                       travelling or not; with something in reach only if it goes first (EXP before loot, below)
+                       travelling or not; with something in reach it waits (EXP before loot, below)
    2  high ground      on a platform she can't safely stand on, with a spot that reaches her ground: back up;
                        also back to the spot from any other platform (after a pile there), unless the
                        ground is in reach from it or she's leaving
@@ -51,12 +51,10 @@ soon after its kill, ALLOW_OLD once it's old or more dangerous than where she st
 
 EXP before loot (`_loot_first`; the user, 2026-10-24: "The hunt should be driven by maximizing the exp gain"): no pile
 goes ahead of shooting what's in reach by a fixed priority. The sweep comes after the shooting rules (until 2026-11-01
-pricing her time at the more of the loop's rate and what's in reach would give: `_time_worth`). A valuable one (6a) that
-will still be
-there when she has killed what's in reach waits; one at risk by then (`_at_risk`: its survival over the wait, another
-player by it once it's no longer hers alone) goes first only if what waiting would likely lose of it, at MESO_EXP an
-meso, is more than the EXP she'd make from what's in reach (Attacks.kill_s) over the trip there and back. A trip for a
-valuable pile is called off when that no longer holds (a monster comes into reach): the pile stays known, and is gone for
+pricing her time at the more of the loop's rate and what's in reach would give: `_time_worth`). A valuable one (6a)
+waits while something is in reach (until the review of 2026-11-01 one at risk by then went first if what waiting would
+likely lose of it, at MESO_EXP an meso, was more than the EXP she'd make from what's in reach over the trip there and
+back). A trip for a valuable pile is called off when a monster comes into reach: the pile stays known, and is gone for
 again once nothing is in reach. In the live hunts of 2026-10-24 (1474 looks with a wanted monster in reach on another
 platform than hers), she didn't throw within 1.5 s on 184: on 78 she was picking up a pile, on 43 the valuable pile rule
 had her off to one (20 of those deciding it or on the way).
@@ -241,13 +239,14 @@ UNSEEN_ATTACK = True
 # 66.8, its ores but Bronze and the Magic Potion; on West Rocky Mountain II 51.8, its Opal, Orihalcon, Silver, Emerald
 # and Adamantium Ores and a gold coin).
 VALUABLE = 30.0
-# EXP before loot (`_loot_first`) and a bar of her HP's price (`bar_exp`): what a meso is worth to her in EXP. A guess
-# putting EXP first, the user's to choose (the loot design: "the user is short on mesos: a reason to consider 1.0"): at
-# it a valuable ore on Tree Dungeon (looting.Worth.valuable 66.8) is worth 33 EXP, under a Horny Mushroom's kill (41),
-# and an at-risk pile 4 s there and back goes first when what's in reach makes her under 8 EXP a second (the regular
-# attack's 3.7 at a Horny Mushroom; Lucky Seven's 12.5 doesn't let it). Until 2026-11-01 the sweep's price of her time
-# too (its break-even a second of her way at rate / MESO_EXP: at the live thief's 6.9 EXP a second, 13.9 mesos); from
-# then its piles go by the seconds each may add to her way (`_allow`), not by an exchange the user wasn't sure of.
+# A bar of her HP's price (`bar_exp`): what a meso is worth to her in EXP. A guess putting EXP first, the user's to
+# choose (the loot design: "the user is short on mesos: a reason to consider 1.0"). Until 2026-11-01 the sweep's price
+# of her time too (its break-even a second of her way at rate / MESO_EXP: at the live thief's 6.9 EXP a second, 13.9
+# mesos), and until the review of that day EXP before loot's (`_loot_first`: an at-risk valuable pile went first when
+# what waiting would likely lose of it was worth more at it than what's in reach would give over the trip); from then
+# her piles go by the seconds each may add to her way (`_allow`) and wait for what's in reach, not by an exchange the
+# user wasn't sure of ("I'm not sure about this currency conversion. My idea is just picking up mesos and items as we
+# kill mobs"): it prices her touches alone (HP, potions, mesos).
 MESO_EXP = 0.5
 # What her potions cost, by what they give: the user's reference prices of 2026-10-31 ("2HP/mesos and 1MP/mesos, use
 # these as reference price. We may be well losing money by grinding, which is fine"), HP_PER_MESO HP and MP_PER_MESO MP
@@ -269,7 +268,6 @@ DEPART_BUDGETS: float | None = 2.0
 # meet hers standing on it (Danger.beside: her full box against theirs, as attack.stance's BESIDE), from 2026-10-31;
 # False: the pile's own platform's alone, as before.
 BESIDE_GUARDS = True
-RIVAL_TAKES = 0.5      # guess: the chance another player by a pile that isn't hers alone takes it before she's there
 EXP_FIRST = True       # EXP before loot on; off, the piles' fixed priorities as before (6a and 6 ahead of shooting)
 VALUABLE_TRAVEL = 15.0  # ... when it's this many s of travel away at most (the urgent piles' 12 s, and a little),
 VALUABLE_TRIES = 2      # ... this many times at most (then it's a pile like the others): by one, a monster can stand
@@ -1619,30 +1617,26 @@ class Hunt:
 
     def _loot_first(self, s: Scene, p: Pile, monsters, say: bool = True) -> bool:
         """EXP before loot: whether pile `p` goes ahead of shooting what's in reach of `monsters` from where she stands
-        in look `s` (_shoot_rate). With nothing in reach, it does. Else only if what waiting would likely lose of it (its
-        worth to her x `_at_risk` after the time to kill what's in reach, at MESO_EXP an meso: `_worth`, a full tab's
-        items worth nothing) is more than the EXP she'd make from what's in reach over the trip there and back (and
-        PICK_S on it). Said in her log when the answer for a pile changes (`say`)."""
+        in look `s` (_shoot_rate): only with nothing in reach. Said in her log when it waits (`say`). Until the review
+        of 2026-11-01 one at risk by then (its survival over the kills, another player by it once it was no longer hers
+        alone: RIVAL_TAKES, 0.5) went first when what waiting would likely lose of it, at MESO_EXP an meso, was more
+        than the EXP she'd make from what's in reach over the trip there and back: an exchange the user wasn't sure of
+        ("My idea is just picking up mesos and items as we kill mobs"), and none went first so in the simulator's runs
+        (the build's strict EXP first, her drops as live, the same to the digit on 12 seeds of 15 minutes)."""
         if not EXP_FIRST:
             return True
         rate, busy = self._shoot_rate(s, monsters)
         if rate <= 0.0:
             return True
-        risk = self._at_risk(s, p, busy)
-        to = self._travel_to_pile(s, p)
-        trip = 2 * to + PICK_S
-        worth = self._worth(p)  # (but for a full tab's items: the independent check of 2026-11-01)
-        first = risk * worth * MESO_EXP > rate * trip
-        if say and self._loot_said.get(id(p)) != first:
-            self._loot_said[id(p)] = first
-            what = (f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {worth:.0f}, at risk "
-                    f"{risk:.0%}) against {rate:.1f} EXP a second in reach for {busy:.0f} s, {trip:.1f} s there and back")
-            self.log(what + (": the pile first" if first else ": shooting first"))
+        if say and self._loot_said.get(id(p)) is not False:
+            self._loot_said[id(p)] = False
+            worth = self._worth(p)  # (but for a full tab's items: the independent check of 2026-11-01)
+            self.log(f"  {_contents(p)} on platform {p.platform} at x {p.x:.0f} (worth {worth:.0f}) against {rate:.1f} "
+                     f"EXP a second in reach for {busy:.0f} s: shooting first")
             if telemetry.recording():
-                telemetry.emit("event", kind="loot_first", first=first, worth=round(worth, 1), risk=round(risk, 2),
-                               rate=round(rate, 2), busy=round(busy, 1), trip=round(trip, 1), platform=p.platform,
-                               x=round(p.x))
-        return first
+                telemetry.emit("event", kind="loot_first", first=False, worth=round(worth, 1), rate=round(rate, 2),
+                               busy=round(busy, 1), platform=p.platform, x=round(p.x))
+        return False
 
     def _shoot_rate(self, s: Scene, monsters) -> tuple[float, float]:
         """EXP a second she'd make shooting the wanted ones of `monsters` in reach from where she stands in look `s` (as
@@ -1658,22 +1652,6 @@ class Hunt:
         busy = sum(self.h.attacks.kill_s(m) for m in near)
         exp = sum(self.tour.exp.get(m.kind, self._avg_exp()) for m in near)
         return (exp / busy if busy > 0 else 0.0), busy
-
-    def _at_risk(self, s: Scene, p: Pile, wait: float) -> float:
-        """The chance pile `p` is gone if she first shoots for `wait` s, then goes for it, that it wouldn't be going now:
-        by its survival (Pile.still: ledger.SURVIVAL) at her getting there then against now (0 if it's gone before she
-        could be there going now); RIVAL_TAKES at least if another player is by it (players.near_rival) and it isn't
-        hers alone by then (OWN_S; a pile no kill of hers explains never is)."""
-        now = time.monotonic()
-        to = self._travel_to_pile(s, p) + PICK_S
-        going = p.still(now, to)
-        if going <= SURVIVE_MIN:
-            return 0.0
-        risk = max(0.0, 1.0 - p.still(now, wait + to) / going)
-        players = (self._seen or s).players
-        if near_rival(players, p.x, p.y) is not None and (not p.hers or now - p.since + wait + to >= OWN_S):
-            risk = max(risk, RIVAL_TAKES)
-        return risk
 
     def _call_off(self, o: Objective, why: str | None = None) -> None:
         """Her trip for a pile ends where she is (something in reach goes first now, or `why`: a monster would meet her
