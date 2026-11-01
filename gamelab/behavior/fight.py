@@ -678,8 +678,9 @@ def jittered(h: "Hunter", act: tuple, s: Scene | None = None) -> tuple:
     base = int(round(attack_gap(h.actions, act, _turn_key(h, s, act))))
     room = (base, base + (reach.JITTER_FIRST_MS if JITTER_ALL else 0))
     plan = plan if plan is not None else JumpPlan(base, 0, True, UNSURE[act[0]])
-    return (act[0], act[1], replace(plan, key_ms=rng.randint(*room), room=room, sure=False,
-                                    why=plan.why or UNSURE[act[0]]), *act[3:])
+    key = rng.randint(*room) if JITTER_ALL else base  # (off: nothing drawn, the others' draws as before)
+    return (act[0], act[1], replace(plan, key_ms=key, room=room, sure=False, why=plan.why or UNSURE[act[0]]),
+            *act[3:])
 
 
 def log_jump(h: "Hunter", s: Scene, act: tuple) -> int | None:
