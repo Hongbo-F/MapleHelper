@@ -2412,6 +2412,125 @@ the loot work. The harness's standard grind against 5680edc (12 seeds): EXP a mi
 loot's worth a minute 238.3 -> 210.4 (-11.7%, beyond 2 se), drops' share 0.956 -> 0.920, touches 67.4 -> 66.1, HP lost
 5.83 -> 5.70 bars, longest idle 19.8 -> 36.3 s (the way back's loop, fixed next).
 
+**Rebased a fourth time, onto master 072e1ec (2026-10-31, ~20:00; the tip before it kept as
+backup/replan-pre-rebase5-72a2910; D:/MapleHelper-scratch/replan/loot/fix/rebase5).** Master's one since 5680edc: the
+stack's monsters turn where the game turns them (monsters.walk_edges: 20 from a platform's end, one rule with the
+simulator, in attack.danger, motion.flow, MonsterTrack, the tracker and behavior.probe). The conflicts: seeds and notes
+in gamelab/sim/scenarios.py and tests/test_ropes.py (master's seeds: `loop_tree_23` 3, `loop_tree_23_near_misses` 6,
+`loop_tree_ore_waits` 14, `loop_tree_safety_stop` 1, `loop_tree_attack_misses` 4, `loop_tree_attack_no_darts` 4, the
+rope wait 11), and attack/danger.py's `walk`, where master's walk_edges and the branch's `level` (her full box) both go.
+The end tree equals a three-way merge with these, file by file (rebase5/check).
+
+## Her drops, her HP and her backpack at the user's prices (2026-10-31)
+
+The user's decisions (2026-10-31 ~16:00): of "as safe as master with less EXP and loot, or as first built with more EXP
+and loot and more touches", "More exp and loot"; "2HP/mesos and 1MP/mesos, use these as reference price. We may be well
+losing money by grinding, which is fine"; on loot, "we shouldn't let loot expire and we shouldn't wait too long and take
+a long detour to pick them up. But we also need to watch for backpack full scenario". The designs:
+D:/MapleHelper-scratch/replan/loot (price: the trade-off; diag: the loot; design: the plan), this round's
+D:/MapleHelper-scratch/replan/loot/fix (each part's runs and pairings, `stage_tools/paired.py`). Every number here is in
+master 5680edc's or 072e1ec's world (the v83 client's monsters), 12 seeds paired against the commit before unless said;
+"loot" is loot's worth a minute (value_per_min), "the live drops' worlds" `--world map-drops --world drop-takers`.
+
+**The way back's loop** (hunt._sweep_calls): a pile on the grind's way back to its stop cut the trip, whose next pass
+didn't sweep on it, about 900 times in a row on seed 9 after the rebase onto 58dca1a; never cut now.
+
+**The user's prices** (hunt.HP_PER_MESO 2, MP_PER_MESO 1, `bar_exp`): a bar of her HP is its potions' mesos at MESO_EXP,
+193.5 EXP at the simulator's 774 HP (patrol.HP_PRICE, its default), worked out at every look from her max HP as read
+(Grind._price_hp: 210 live at the thief's 840, 157 at the magician's 628), where 250 everywhere; the harness's
+cash_per_min prices her potions by what they give (an Orange Potion 125 mesos, the Blue 100), where 160 and 200 were
+guesses; the thief's pet's MP potion 100 (LEVEL_25's Blue), the profiles' hp_price their bars. Her MP isn't priced (her
+attack mix decides it) and nothing keeps mesos back (cash flow isn't a constraint, their word).
+
+**The positioning switches as first built** (the trade-off round's R2): BACK off, stance.BESIDE on, her trips' touches
+charged to the stop she's going to (the review's fix 5 undone), the hook of a stop she hasn't been at unscaled
+(Patrol.hook_scale gone: fix 6 undone), the way back finishing and sweeping as any trip (fix 4 undone, moot with BACK
+off); the review's fix 3 (each touch by the kind nearest her), HP_BY_TOUCHES, STAY_NET, BESIDE_GUARDS, STOP_DANGER 2.0
+and HP_PRIOR_S 20 kept. The commits reproduce the round's in-process patches (price/var.py,
+`oldcharge+noscale+oldback+prices+noback+beside`) to the digit on all 12 seeds. Its idle hypothesis (Patrol.wait_gain
+gross against a bar net of HP) was refuted there: netting it changed nothing to the digit.
+
+| standard grind, 5 minutes | master | branch | branch - master (se) |
+|---|---|---|---|
+| 12 seeds on 5680edc: the rebased tip, EXP a minute | 298.4 | 287.4 | -11.0 (14.3) |
+| ... with the fix, the prices and the switches | 298.4 | 336.2 | +37.8 (12.3), +12.7%, better on 10 |
+| 48 seeds on 072e1ec: EXP a minute | 308.6 | 323.8 | +15.2 (8.2), +4.9%, better on 32 |
+| kills | 43.6 | 46.1 | +2.5 (1.1) |
+| loot | 236.6 | 244.0 | +7.4 (7.8) |
+| drops' share | 0.953 | 0.951 | -0.002 (0.012) |
+| touches / those that hurt | 71.6 / 45.9 | 84.8 / 56.0 | +13.2 (2.9) / +10.1 (2.3) |
+| hurt at piles / on trips / standing or fighting | 19.0 / 12.7 / 33.2 | 12.0 / 12.2 / 43.8 | -7.0 (1.7) / -0.6 (0.8) / +10.6 (2.1) |
+| HP lost (bars) / HP potions | 5.97 / 18.3 | 7.56 / 23.2 | +1.59 (0.35) / +5.0 (1.1) |
+| knock falls | 9.6 | 10.7 | +1.1 (0.6) |
+| cash a minute at the user's prices | -443 | -575 | -132 (30) |
+
+No deaths, falls out of the map or safety stops on either side. On 5680edc against the rebased tip (12 seeds): EXP +48.8
+(13.3), loot +46.2 (11.1), longest idle -17.0 s (4.2), touches +12.3 (5.8), HP +1.45 bars (0.75). Master's newest world
+(072e1ec's monsters turning by the game's walk edge) moved master's own grind on seeds 1-12 from 298.4 to 335.7 EXP a
+minute, where the branch's moved from 336.2 to 342.7: the lead it holds at 48 seeds is under 2 se. It is the "more EXP,
+more touches" trade the user chose: her HP stays within the stop rule by her pet's potions.
+
+**The sweep's guards turn where the game turns them** (hunt._reach_of: walk_edges, where its platform's ends): 48 seeds,
+EXP -6.0 (6.2), loot -1.8 (5.7), touches -1.7 (2.0), HP -0.22 bars (0.23): neutral, kept as one rule with the stack's
+danger. The design's other monster predictions against the v83 monsters: the chase keeps its way by her, so one turned
+at its platform's end walks back to that end, where `sweep.meets`' bounce has it walk away; a stand's check samples it
+from now and one reaching the pile's end meets her there on its first approach (a guard, or the pile left), so only the
+turn after is off. Tree Dungeon's Slimes, that jump between 31-33, take 1.2% of her HP a touch, under DANGER_MIN: they
+guard nothing and count in no danger.
+
+**Her drops' life by the evidence** (ledger.SURVIVAL[True]: hers alone for OWN_S 15 s, then others' at TAKE_RATE 0.05 a
+minute, gone at EXPIRE_S 180 s; ledger.HELD_AGE: a pile holding an older one's drops takes its age), where the live
+service's raw curve (55% at 60 s, 26% at 120) counted her pets' pick-ups and the detector's misses as takings, and she
+gave up on her own piles at 150-165 s. The simulator's `--world drop-takers` the same way (world.others_life; it drew
+each life from that raw curve). Kept: no worse beyond 1 se on EXP or drops' share in the 5-minute standard grind, better
+in the live drops' worlds.
+
+| C4b against C4a | EXP a minute | loot | drops' share | HP lost (bars) |
+|---|---|---|---|---|
+| standard, 5 minutes | 327.7 -> 318.8, -9.0 (11.0) | 265.5 -> 249.9, -15.6 (11.4) | 0.968 -> 0.968 | +0.19 (0.35) |
+| standard, 15 minutes | 308.9 -> 314.2, +5.2 (11.1) | 249.8 -> 254.8, +5.0 (10.3) | 0.893 -> 0.903 | -0.39 (0.50) |
+| live drops, 15 minutes | 307.6 -> 328.5, +20.8 (10.1) | 142.2 -> 148.4, +6.2 (9.9); items +4.8 (3.2) | 0.846 -> 0.854 | -0.61 (0.46) |
+
+**Her drops in the next stop's choice** (grind.DROPS_IN_CHOICE, Patrol.choose's `bonus`: a visit's sweep from the stop's
+place): off. 15-minute standard runs EXP -4.4 (7.1), loot -4.6 (7.0), drops' share 0.903 -> 0.892; the live drops'
+worlds EXP -8.9 (3.5: worse on 6 seeds, better on none), loot +0.8 (1.2). The design's rule (loot up, EXP not worse
+beyond 1 se) not met.
+
+**A guard shot from a place on her way to a pile** (the design's step 4): not built this round; the guards on screen but
+out of a star's reach from where she stands still leave their pile for later.
+
+**The stance's touch prices** (stance.TOUCH_EXP 28: the live Horny Mushroom's 112 HP at the user's prices; MEET_PRICE_S
+2.86, LANDING_PRICE_S 1.36, where 2.5 and 1.2): one seed of 12 changed (EXP +1.6 on average), kept.
+
+**Her backpack by tab** (looting.tab_of, Looter.full, can_take, items_full; hunt._takes, `_worth`): a full tab is
+learned where items stay under her after two stands, from the game's full message (it names no tab: the stuck items'
+tabs) or FAILED_PICKS failures in a row, an "earned. (Tab)" line in the same read clearing that tab, and retried after
+TAB_RETRY_S (600 s); its items are left and not gone for, mesos and the other tab's items still taken, a pile priced by
+what she can take; her log and a telemetry event 'inventory' say each change, the 'drops' record has full_tabs. The
+simulator's `--world etc-full` (her Etc tab full from the start) and `fills-up` (full after 6 items), with `map-drops`,
+and the metrics pick_refused and stands_for_nothing. The standard grind is the same to the digit. Against the one flag
+(the commit before), 12 seeds of 5 minutes:
+
+| | EXP a minute | loot | items picked | pick-ups refused | stands for nothing |
+|---|---|---|---|---|---|
+| etc-full | 326.4 -> 331.2, +4.8 (13.3) | 103.0 -> 88.5, -14.5 (9.2) | 0.42 -> 0.58 | 41.9 -> 36.6 | 4.5 -> 5.1 |
+| fills-up | 345.5 -> 334.8, -10.8 (7.3) | 126.5 -> 124.7, -1.8 (3.4) | 6.17 -> 6.08 | 23.8 -> 21.9 | 3.1 -> 3.3 |
+
+Per tab she leaves no more of her drops' worth than the one flag did in these worlds' 5 minutes (her Use drops, the
+potions, are 1-2% of a kill's items on Tree Dungeon), and her loot leans lower in etc-full, within 2 se. In this process
+(c8v/var8.py, against the one flag): an unseen pile no candidate once any tab is full (the flag's rule) EXP +6.0 (9.2),
+loot -5.1 (5.5), touches +6.6 (2.4); a pile priced at all it holds EXP +17.2 (14.7), loot -10.3 (9.5), stands for
+nothing +1.3 (0.6): neither kept. What the tabs add is past these runs: Use items taken with Etc full, the full tab
+cleared by an item earned into it or tried again after TAB_RETRY_S (the flag was never cleared), and the log line saying
+so.
+
+**Not done.** The seeds of the scenarios and tests the new monsters and these changes moved aren't re-picked, nor the
+goldens recorded (the targeted tests' failures: test_heading's three knock and turn cases, `loop_tree_ore_waits`,
+`nav_tree_rope_hit` and test_touches' MISS on a trip, `loop_tree_lie_detector_grind`, `loop_tree_attack_unbound`,
+`loop_tree_grind_attack_key`, `loop_tree_attack_no_darts`, test_harness's glances in a minute's run). The magician's
+grind isn't measured. Her pets' looting (the diagnosis: 71% of her drops that vanished did so 15 units or more from her)
+is the user's to confirm before the sweep counts on it. Live: not run.
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.
