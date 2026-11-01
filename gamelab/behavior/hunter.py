@@ -234,6 +234,8 @@ class Hunter:
             log(note)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
+        self.exp_rate: float | None = None  # EXP a second her hunting makes, as the hunt has it (the grind's loop's rate:
+                                            # the landings' prices, behavior.fight.landing_prices); None: not known
         # Her kills her EXP told of: when, and the kind its gain's size named (None: not known). The last EXP_MEMORY s
         # of them, for kill() to match to its target (`take_exp`), and the latest few for the fights and the ledger to
         # place (`told`).

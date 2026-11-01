@@ -180,10 +180,14 @@ class Grind(Hunt):
     def _price_hp(self) -> None:
         """What a bar of her HP costs (Patrol.hp_price, the loop's and her stays' price of her touches): its potions at
         the user's reference prices (hunt.bar_exp) from her max HP as perception reads it (Hunter.max_hp: her HUD's
-        number), patrol.HP_PRICE until it's read."""
+        number), patrol.HP_PRICE until it's read. And her EXP a second (Hunter.exp_rate: the loop's, Plan.rate), what
+        her landings' prices weigh her time by (behavior.fight.landing_prices)."""
         most = getattr(self.h, "max_hp", None)
         if most is not None:
             self.patrol.hp_price = bar_exp(most)
+        plan = self.patrol.plan
+        if plan is not None and plan.rate > 0:
+            self.h.exp_rate = plan.rate
 
     def _learn_hp(self, s: Scene) -> None:
         """Her HP bar between two looks (HP_GAP_S apart at most), what went charged to the platform she was on

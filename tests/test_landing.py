@@ -65,6 +65,34 @@ def test_a_landing_and_a_meeting_are_priced_by_a_touch_at_the_users_prices():
     assert st.TOUCH_EXP == 112.0 / hunt.HP_PER_MESO * hunt.MESO_EXP
     assert st.MEET_PRICE_S == round(st.TOUCH_EXP / 6.85 * 0.7, 2)
     assert st.LANDING_PRICE_S == round((5.7 + 0.13 * st.TOUCH_EXP) / 6.85, 2)
+    assert st.LANDING_LOST_S == round(5.7 / 6.85, 2) and st.HURT_SHARE == 0.7
+
+
+def test_her_landings_are_priced_by_her_touches_hp_and_rate_not_tree_dungeons():
+    """The review of 2026-10-31 (one map's monster and rate frozen into general constants): with her prices
+    (stance.Prices: behavior.fight.landing_prices) a landing is priced by the kind's touch (attack.danger's
+    Danger.taken of her max HP as read, at the user's reference prices), her EXP a second (Hunter.exp_rate, else the
+    live 6.85) and the share of her touches that hurt (her own, as 10 touches at the live 70% would be); stance's
+    constants until her max HP is read. The live Horny Mushroom's numbers give the constants back."""
+    from gamelab.behavior import fight, hunt
+    touch_share = 112.0 / 840.0
+    danger = SimpleNamespace(taken=lambda kind: touch_share if kind == "horny-mushroom" else 0.05)
+    h = SimpleNamespace(max_hp=840.0, exp_rate=None, report=SimpleNamespace(touches=0, misses=0))
+    p = fight.landing_prices(h, danger)
+    assert p.touch("horny-mushroom") == pytest.approx(112.0 / hunt.HP_PER_MESO * hunt.MESO_EXP) and p.rate == 6.85
+    assert p.meet_s("horny-mushroom") == pytest.approx(st.MEET_PRICE_S, abs=0.01)
+    assert p.landing_s("horny-mushroom") == pytest.approx(st.LANDING_PRICE_S, abs=0.01)
+    h.exp_rate, h.report = 3.4, SimpleNamespace(touches=30, misses=0)  # (half the rate, every touch of hers hurt)
+    q = fight.landing_prices(h, danger)
+    assert q.hurt == pytest.approx((30 + 7) / 40) and q.meet_s("horny-mushroom") > 2.5 * p.meet_s("horny-mushroom")
+    assert q.meet_s("green-mushroom") < q.meet_s("horny-mushroom")
+    assert fight.landing_prices(SimpleNamespace(max_hp=None), danger) is None
+    near = [(GREEN, 530.0, 530.0)]  # (a Green by her where she lands: not sure, and a meeting)
+    flat = FLAT
+    plain = st.landing(flat, 500, near, HALVES, TOPS, air=False)
+    priced = st.landing(flat, 500, near, HALVES, TOPS, air=False, prices=q)
+    assert plain.meets and plain.price_s == st.LANDING_PRICE_S + st.MEET_PRICE_S
+    assert priced.price_s == pytest.approx(q.landing_s(GREEN) + q.meet_s(GREEN))
 
 
 def test_a_landing_is_priced_by_what_her_first_attack_there_surely_takes(tree_map):

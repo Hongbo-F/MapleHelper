@@ -275,8 +275,32 @@ MEET_PRICE_S = 2.86     # ... more where one walks into her before her first att
 # What a touch costs her in EXP: the live Horny Mushroom's 112 HP (her touches of 2026-10-25) in potions at the user's
 # reference prices (behavior.hunt: HP_PER_MESO 2 HP a meso, 56 mesos, at MESO_EXP 0.5), from 2026-10-31; until then
 # about 25, a guess (LANDING_PRICE_S 1.2, MEET_PRICE_S 2.5). Its numbers written here (this package doesn't read
-# behavior's): tests/test_landing.py pins them to hunt's prices.
+# behavior's): tests/test_landing.py pins them to hunt's prices. These are Tree Dungeon's live numbers, the defaults
+# only: from the review of 2026-10-31 (one map's monster and rate frozen into general constants) a landing is priced by
+# `Prices` where the caller has them (behavior.fight's FightOnTheWay.landings: the kind's touch, attack.danger's
+# Danger.taken, of her max HP as read, at the user's prices; her hunt's EXP a second; the share of her touches that
+# hurt), LANDING_LOST_S of her time and LANDING_TOUCHES touches for a landing not sure, a touch for one that meets her.
 TOUCH_EXP = 28.0
+LANDING_LOST_S = 0.83   # s of her hunting a not-sure landing lost (live 5.7 EXP at her 6.85 EXP a second) ...
+LANDING_TOUCHES = 0.13  # ... and its touches more than a sure one's (live)
+HURT_SHARE = 0.7        # of her touches that hurt (live: 30% evaded), until her own say otherwise
+
+
+@dataclass(frozen=True)
+class Prices:
+    """What a landing costs her, s of her hunting (`landing`): `touch(kind)` EXP a touch of `kind` takes in potions,
+    `rate` her EXP a second, `hurt` the share of her touches that hurt."""
+    touch: Callable[[str], float]
+    rate: float
+    hurt: float = HURT_SHARE
+
+    def landing_s(self, kind: str) -> float:
+        """A landing with no attack sure to take the nearest (`kind`): LANDING_LOST_S and LANDING_TOUCHES touches."""
+        return LANDING_LOST_S + LANDING_TOUCHES * self.touch(kind) / self.rate
+
+    def meet_s(self, kind: str) -> float:
+        """... more where it walks into her before her first attack there: a touch, but for those she evades."""
+        return self.hurt * self.touch(kind) / self.rate
 WALL_ROOM = HER_HALF + 3.0  # units a move away keeps from a wall end of her platform (a knock can't take her off it):
                             # her half width and the slack of her dot
 MAX_MOVES = 2          # guess: steps away in a row without a throw between (her decisions are made again at each look)
@@ -431,7 +455,8 @@ CLEAR_LANDING = Landing(None, None, False, True, 0.0)
 
 def landing(platform: Platform, x: float, near, halves: dict[str, float] | None = None,
             tops: dict[str, float] | None = None, danger: Danger | None = None,
-            can_jump: Callable[[float, float], bool] | None = None, air: bool = True) -> Landing:
+            can_jump: Callable[[float, float], bool] | None = None, air: bool = True,
+            prices: Prices | None = None) -> Landing:
     """A landing at map x on `platform`, with the monsters on it `near`, each (kind, map x when she lands, map x when her
     first attack there starts: LANDING_SETTLE_S and GROUND_PICK_S after the landing; as its walk has it, one walking at
     her stopping where it meets her, Pace's PACE_STOP). One whose body meets hers at either, or that passes her between,
@@ -439,7 +464,8 @@ def landing(platform: Platform, x: float, near, halves: dict[str, float] | None 
     (reach.ground_sure: past its claw's edge) or, with no platform overhead (`can_jump`), a jump in place keyed 40 ms after
     the jump key does (reach.air_sure, CLEAR_MARGIN farther: jump_reach on her level; the slope where it will be), and one
     of a kind that hits hard (`danger`) is at least its keep-off off (Danger.keep_off: a Horny Mushroom 169). Its price
-    LANDING_PRICE_S where it isn't sure, MEET_PRICE_S more where one meets her; 0 for a clear landing, with nobody on
+    LANDING_PRICE_S where it isn't sure, MEET_PRICE_S more where one meets her (with `prices`, Prices.landing_s and
+    meet_s for the nearest's kind: hers, not Tree Dungeon's); 0 for a clear landing, with nobody on
     the platform, or with the nearest past where her attack from the ground reaches (ground_sure's farthest: nothing to
     take there, nor coming at her by then; the reviews of 2026-10-27: on Tree Dungeon's floor, 530 wide, a Green 500 off
     was priced as one 52 off). What surely takes it is reach's for her attack (ground_sure), and the jump in place only
@@ -471,7 +497,10 @@ def landing(platform: Platform, x: float, near, halves: dict[str, float] | None 
         sure = reach.air_sure(gap - CLEAR_MARGIN, dy, top, half, physics.JUMP_ATTACK_MS)
     if sure and danger is not None and gap < danger.keep_off(kind):
         sure = False
-    price = (0.0 if sure else LANDING_PRICE_S) + (MEET_PRICE_S if meets else 0.0)
+    if prices is None:
+        price = (0.0 if sure else LANDING_PRICE_S) + (MEET_PRICE_S if meets else 0.0)
+    else:
+        price = (0.0 if sure else prices.landing_s(kind)) + (prices.meet_s(kind) if meets else 0.0)
     return Landing(round(gap, 1), kind, meets, sure, price)
 
 
@@ -486,13 +515,13 @@ def first_attack_s(landed: float) -> float:
 def landing_of(platform: Platform, x: float, monsters: list[Monster], lead: float, pace: Pace = NO_PACE,
                halves: dict[str, float] | None = None, tops: dict[str, float] | None = None,
                danger: Danger | None = None, can_jump: Callable[[float, float], bool] | None = None,
-               air: bool = True) -> Landing:
+               air: bool = True, prices: Prices | None = None) -> Landing:
     """`landing` for a landing at map x on `platform` `lead` s after the look, the monsters on it of `monsters` (a look's)
     walked on by `pace` (where each will be when she lands, and when her first attack there starts: first_attack_s)."""
     after = first_attack_s(lead)
     near = [(m.kind, pace.at(m, x, lead, platform), pace.at(m, x, after, platform))
             for m in monsters if m.platform == platform.id]
-    return landing(platform, x, near, halves, tops, danger, can_jump, air)
+    return landing(platform, x, near, halves, tops, danger, can_jump, air, prices)
 
 
 def move_limits(model: MapModel, platform: Platform) -> tuple[float, float]:

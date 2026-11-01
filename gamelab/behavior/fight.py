@@ -25,7 +25,8 @@ from maplehelper.game import COMBAT
 
 from .. import character, directions, paths, telemetry
 from ..attack import reach
-from ..attack.stance import (AWAY, FLINCH_HOLD_S, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace, act_text,
+from ..attack.stance import (AWAY, FLINCH_HOLD_S, HURT_SHARE, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace,
+                             Prices, act_text,
                              air_gap, decide, first_attack_s, held_step, jump_hits, landing, move_limits, open_above,
                              pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
@@ -496,6 +497,29 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
 STALE_S = FADE_S
 UNSEEN_PRICE = 0.25
 MID_MEETS = True  # a landing she runs on from priced by its touch alone; False: as the route's last's
+# The landings' prices hers (`landing_prices`, from the review of 2026-10-31: attack.stance.Prices), not Tree Dungeon's
+# live numbers: a touch of a kind its HP (attack.danger's Danger.taken of her max HP as perception reads it) in potions at
+# the user's reference prices (behavior.hunt.HP_PER_MESO at MESO_EXP), her EXP a second the hunt's (Hunter.exp_rate: the
+# grind's loop's rate) or RATE_PRIOR before it has one, the share of her touches that hurt her own (her MISS popups) as
+# HURT_PRIOR touches at the live share would be. False: stance's constants.
+OWN_PRICES = True
+RATE_PRIOR = 6.85  # EXP a second: the live thief's on Tree Dungeon (2026-10-25)
+HURT_PRIOR = 10    # touches
+
+
+def landing_prices(h, danger) -> Prices | None:
+    """Her landings' prices (OWN_PRICES): None until her max HP is read (stance's constants meanwhile)."""
+    from .hunt import HP_PER_MESO, MESO_EXP  # (behavior.hunt imports this module)
+    most = getattr(h, "max_hp", None)
+    if most is None:
+        return None
+    rate = getattr(h, "exp_rate", None)
+    rate = rate if rate is not None and rate > 0 else RATE_PRIOR
+    rep = getattr(h, "report", None)
+    touches, misses = getattr(rep, "touches", 0), getattr(rep, "misses", 0)
+    hurt = (touches - misses + HURT_PRIOR * HURT_SHARE) / (touches + HURT_PRIOR)
+    exp_hp = float(most) / HP_PER_MESO * MESO_EXP
+    return Prices(lambda kind: danger.taken(kind) * exp_hp, rate, hurt)
 
 
 def _air() -> bool:
@@ -1525,6 +1549,7 @@ class FightOnTheWay:
             return None
         tops, halves = body_sizes(model)
         air = _air()
+        prices = landing_prices(h, danger) if OWN_PRICES else None
 
         def judge(leg, last: bool = True):
             q, x = leg.end.platform, leg.end.x
@@ -1535,9 +1560,10 @@ class FightOnTheWay:
             fresh = [mo for mo in mine if mo.seen_at >= -STALE_S]
             if fresh:
                 near = [(mo.kind or "pig", mo.at(t0, q), mo.at(t1, q)) for mo in fresh]
-                got = landing(q, x, near, halves, tops, danger, jump, air)
+                got = landing(q, x, near, halves, tops, danger, jump, air, prices)
                 if not last and MID_MEETS:  # (a landing she runs on from: its touch alone)
-                    return (MEET_PRICE_S, None) if got.meets else (0.0, None)
+                    meet = MEET_PRICE_S if prices is None else prices.meet_s(got.kind)
+                    return (meet, None) if got.meets else (0.0, None)
                 if got.price_s > 0:
                     return got.price_s, min(fresh, key=lambda mo: abs(mo.at(t1, q) - x))
             if not last and MID_MEETS:
@@ -1545,7 +1571,7 @@ class FightOnTheWay:
             unseen = [(mo.kind or "pig", mo.at(t0, q), mo.at(t1, q)) for mo in mine if mo.seen_at < -STALE_S] \
                 + ([(kind, sx, sx) for sx, kind in danger.free_points(q.id, mine)] if UNSEEN_PRICE > 0 else [])
             if unseen and UNSEEN_PRICE > 0:
-                got = landing(q, x, unseen, halves, tops, danger, jump, air)
+                got = landing(q, x, unseen, halves, tops, danger, jump, air, prices)
                 if got.price_s > 0:
                     return UNSEEN_PRICE * got.price_s, None
             return 0.0, None
