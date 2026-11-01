@@ -2,6 +2,8 @@
 and every pile she knows of, kept from every look and every throw, whoever makes them. Nothing decides
 from them yet (step 4 of docs/hunt-modes.md), so they're checked against the simulated world."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -495,17 +497,39 @@ def test_only_a_strip_sure_of_it_sees_a_pile_empty_and_a_missed_pile_is_hers_aga
 
 
 def test_a_pile_lies_by_the_live_survival_not_a_fixed_life():
-    """ledger.SURVIVAL (the live Kaplan-Meier): a pile of hers 100 s old is still there more often than not given it
-    was seen at 60 s (0.36 / 0.55), where DROP_LIFE (90 s) had dropped it; given it was seen a moment ago, about all of
-    it; one never seen, from its kill."""
-    from gamelab.behavior.ledger import Pile, survival
-    assert survival(0.0) == 1.0 and survival(60.0) == pytest.approx(0.55) and survival(200.0) == 0.0
+    """ledger.SURVIVAL by the live evidence (2026-10-31): hers lie whole for OWN_S (her ownership), then are taken by
+    others at TAKE_RATE a minute (0.89 still there at 150 s), and none past EXPIRE_S; a pile of hers seen at 100 s is
+    still there 20 s on more than 95 times in 100, where the raw curve (0.26 / 0.42 at 120 and 100 s) gave it 60;
+    given it was seen a moment ago, about all of it; one never seen, from its kill. Others' are the raw curve still."""
+    from gamelab.behavior.ledger import EXPIRE_S, OWN_S, TAKE_RATE, Pile, survival
+    assert survival(0.0) == survival(OWN_S) == 1.0 and survival(150.0) == pytest.approx(0.89, abs=0.01)
+    assert survival(150.0) == pytest.approx(math.exp(-TAKE_RATE / 60.0 * (150.0 - OWN_S)))
+    assert survival(EXPIRE_S) == 0.0 and survival(200.0) == 0.0 and survival(EXPIRE_S - 1.0) > 0.85
     assert survival(60.0, hers=False) == pytest.approx(0.57) and survival(150.0, hers=False) == pytest.approx(0.03)
-    p = Pile(0.0, 0.0, 3, 0.0, True, status="seen", last_seen=60.0)
-    assert p.still(100.0) == pytest.approx(survival(100.0) / survival(60.0))
+    p = Pile(0.0, 0.0, 3, 0.0, True, status="seen", last_seen=100.0)
+    assert p.still(120.0) == pytest.approx(survival(120.0) / survival(100.0)) and p.still(120.0) > 0.95
     p.last_seen = 99.9
     assert p.still(100.0) == pytest.approx(1.0, abs=0.01) and p.still(100.0, 30.0) < p.still(100.0, 5.0)
     assert Pile(0.0, 0.0, 3, 0.0, True).still(10.0) == pytest.approx(survival(10.0))
+
+
+def test_a_pile_of_hers_holding_an_older_one_s_drops_keeps_that_one_s_age():
+    """HELD_AGE: every drop seen goes to its nearest pile, so a newer kill's pile by her older drops takes them and the
+    older pile, seen empty twice, turns gone: the one holding its drops takes its age (the drops'), not the newer
+    kill's; one of another's or too far off doesn't."""
+    from gamelab.behavior.ledger import Pile
+    store = DropStore()
+    old = Pile(100.0, -200.0, 19, 10.0, True, status="seen", last_seen=40.0, xs=(100.0,))
+    new = Pile(130.0, -200.0, 19, 90.0, True)
+    far = Pile(400.0, -200.0, 19, 95.0, True)
+    theirs = Pile(70.0, -200.0, 19, 5.0, False, status="seen", last_seen=40.0, xs=(70.0,))
+    store.piles = [old, new, far, theirs]
+    seen = [_coin(125.0), _coin(400.0)]  # (her old drops by 125: nearer the new kill's pile, it takes them)
+    store._sighting(100.0, seen, lambda pid, x: True, True)
+    assert new.status == far.status == "seen" and old.empty_since == 100.0 and new.since == 90.0
+    store._sighting(100.0 + EMPTY_LOOKS, seen, lambda pid, x: True, True)
+    assert old.status == "gone" and new.since == 10.0 and far.since == 95.0
+    assert theirs.status == "gone" and new.since == 10.0  # (another's turning gone gives nobody its age)
 
 
 def test_an_expected_pile_is_worth_its_kinds_drops():

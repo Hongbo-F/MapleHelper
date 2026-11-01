@@ -93,7 +93,8 @@ def test_a_pile_worth_less_a_second_than_her_time_is_left():
 
 def test_she_goes_back_for_a_fresh_pile_behind_her_not_an_old_one():
     """Going on to x 600, a pile 120 behind her: a fresh one of hers (still 0.99 by her getting there) pays for its 1.9
-    s back and forth, the same worth 140 s old (by then a fifth as likely to lie there: ledger.SURVIVAL) doesn't."""
+    s back and forth, the same worth a fifth as likely to lie there by then (another's 140 s old: ledger.SURVIVAL)
+    doesn't."""
     fresh = _spot("fresh", -120.0, worth=40.0, still=lambda dt: 0.99)
     old = _spot("old", -120.0, worth=40.0, still=lambda dt: 0.2)
     assert sweep.plan([fresh], (1, 0.0), (1, 600.0), 6.0, line, 0.5).keys() == ("fresh",)

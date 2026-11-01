@@ -13,7 +13,7 @@ from gamelab.attack.spots import Spot
 from gamelab.behavior import hunt, sweep
 from gamelab.behavior.fight import FightState
 from gamelab.behavior.hunt import Hunt, Objective, Visit
-from gamelab.behavior.ledger import DROP_LANDS, Pile
+from gamelab.behavior.ledger import DROP_LANDS, EXPIRE_S, Pile
 from gamelab.localization import mapdata
 
 from test_sim import KEYS, tree
@@ -331,9 +331,9 @@ def test_exp_before_loot_a_pile_that_will_still_be_there_waits_for_what_is_in_re
     ore = _pile(10, items=("sapphire-ore",), worth=120.0, dearest=120.0)
     h = _shooter([ore])
     s = _scene()
-    assert 0.0 < h._at_risk(s, ore, 4.0) < 0.05  # (by the live survival: ledger.SURVIVAL, 2-3% lost over 4 s)
+    assert 0.0 < h._at_risk(s, ore, 4.0) < 0.01  # (by her drops' survival: ledger.SURVIVAL, hers alone OWN_S)
     assert not h._loot_first(s, ore, [_horny()])
-    assert ("sapphire-ore on platform 2 at x 100 (worth 120, at risk 3%) against 10.0 EXP a second in reach for 4 s, "
+    assert ("sapphire-ore on platform 2 at x 100 (worth 120, at risk 0%) against 10.0 EXP a second in reach for 4 s, "
             "6.6 s there and back: shooting first") in h.said[-1]  # (3 s to it: the planner's 2, and 1 to get off)
     assert h._loot_first(s, ore, [])  # nothing in reach: at once
     h.kinds = {"horny-mushroom"}  # a monster not worth hunting in reach doesn't hold it up
@@ -522,11 +522,14 @@ def _remembered(kind, pid, x, age, model):
 
 def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
     """Not a fixed life (DROP_LIFE, 90 s, until 2026-10-30): a pile of hers 100 s old, never seen since her kill, lies
-    there still 37% of the time live (ledger.SURVIVAL) and is gone for; at 175 s under SURVIVE_MIN, not. Another's
-    once past its killer's ownership (OWN_S, where OTHERS_AFTER waited 30 s); one stood on or gone for PILE_TRIES times,
-    not; nor one seen gone."""
+    there still 93% of the time (ledger.SURVIVAL, by the live evidence since 2026-10-31: hers alone for OWN_S, others'
+    0.05 a minute after) and is gone for, one 170 s old too (the raw curve until then, 3%, under SURVIVE_MIN from about
+    163 s), and one 150 s old seen 10 s ago; past EXPIRE_S, not. Another's once past its killer's ownership (OWN_S,
+    where OTHERS_AFTER waited 30 s); one stood on or gone for PILE_TRIES times, not; nor one seen gone."""
     h = _hunt([])
-    assert h._candidate(_pile(10)) and h._candidate(_pile(100)) and not h._candidate(_pile(175))
+    seen = _pile(150, status="seen", last_seen=time.monotonic() - 10.0)
+    assert h._candidate(_pile(10)) and h._candidate(_pile(100)) and h._candidate(_pile(170)) and h._candidate(seen)
+    assert not h._candidate(_pile(EXPIRE_S + 1))
     assert not h._candidate(_pile(10, hers=False)) and h._candidate(_pile(hunt.OWN_S + 1, hers=False))
     assert not h._candidate(_pile(10, tries=hunt.PILE_TRIES)) and h._candidate(_pile(10, tries=hunt.PILE_TRIES - 1))
     assert not h._candidate(_pile(10, status="gone"))

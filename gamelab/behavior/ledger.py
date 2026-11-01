@@ -41,6 +41,7 @@ ledger against its world (tests/test_ledger.py), and the hunt loop reads the dro
 """
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 from maplehelper.engine import RIGHT
@@ -77,21 +78,30 @@ TRACK_GAIN_S = 0.02  # s: a track bound to a gain (tracking.Track.gain) is a kil
 FOLLOW_S = 3.0      # s after a kill that its place follows its track (it walks on until her star lands, and the
                     # tracker may put the gain on another until tracking.REBIND_S + CONFIRM_S)
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
-# How long drops lie (`survival`): the share of them still there at an age (s since her kill, or since another's was
-# first seen), as the perception service saw them on the thief's live run of 2026-10-30 02:03-02:48 (the loot design's
-# Kaplan-Meier, her picks censored: D:/MapleHelper-scratch/replan/loot/survival.py), hers and others'. Live, 12.1% of the
-# drops seen on 3 looks or more (76 of 628, worth 2,012 over 112 minutes) were seen lying past 90 s, which the hunt loop's
-# DROP_LIFE (90 s) had left; the last sightings' p99 138 s. A measured prior with the detector's misses in it (a drop
-# judged gone, then found again as another, shows as lost): to fit again on the 15-a-second telemetry. None past 180 s.
-SURVIVAL = {True: ((0.0, 1.0), (5.0, 0.94), (10.0, 0.90), (20.0, 0.84), (30.0, 0.74), (60.0, 0.55), (90.0, 0.42),
-                   (120.0, 0.26), (150.0, 0.09), (180.0, 0.0)),
-            False: ((0.0, 1.0), (5.0, 0.92), (10.0, 0.83), (20.0, 0.75), (30.0, 0.70), (60.0, 0.57), (90.0, 0.31),
-                    (120.0, 0.22), (150.0, 0.03), (180.0, 0.0))}
 # s a kill's drops are its killer's alone (the game's ownership: nobody else can pick them up meanwhile; looting.
 # cant_pick has seen mesos she stood on twice stay): another's pile is worth a trip once past it. The simulator's
 # (sim.world.Realism.rival_owns), not measured; until 2026-10-30 the hunt loop waited OTHERS_AFTER (30 s, a guess) for
 # drops no kill of hers explains, and live 30% of others' drops were gone within those 30 s.
 OWN_S = 15.0
+# How long drops lie (`survival`): the share of them still there at an age (s since her kill, or since another's was
+# first seen). Hers by the live evidence (from 2026-10-31, the loot designs: D:/MapleHelper-scratch/replan/loot/diag,
+# live_km.txt, and design): hers alone for OWN_S, then taken by someone else at TAKE_RATE a minute, gone at EXPIRE_S, as
+# the simulator's drop-takers world has them (sim.world.others_life). The perception service's own, her pets' pick-ups
+# (71% of her drops that vanished did so 15 units or more from her) and the detector's misses taken out, 95%, 88% and
+# 86% of her drops were still lying at 15, 60 and 90 s: at most about 0.1 a minute left to others. Until then hers were
+# the service's raw curve (the thief's live run of 2026-10-30, her picks censored: 55% at 60 s, 26% at 120, 9% at 150),
+# which counted those as takings, so with SURVIVE_MIN she gave up on her own piles at 150-165 s, and in 15-minute runs
+# of the harness's standard grind 11% of her drops' worth expired lying in her store. Others' as before: that raw curve
+# (live, 12.1% of the drops seen on 3 looks or more were seen lying past 90 s; the last sightings' p99 138 s).
+TAKE_RATE = 0.05   # a minute: others taking her drops once past OWN_S (a guess inside the live bound)
+EXPIRE_S = 180.0   # s her drops lie at most (HeavenMS's 180 s, checked every 10 s; one live expiry pass took four drops
+                   # 198-228 s old)
+SURVIVAL = {True: ((0.0, 1.0), (OWN_S, 1.0))
+                  + tuple((t, math.exp(-TAKE_RATE / 60.0 * (t - OWN_S)))
+                          for t in (30.0, 60.0, 90.0, 120.0, 150.0, EXPIRE_S - 10.0, EXPIRE_S - 0.01))
+                  + ((EXPIRE_S, 0.0),),
+            False: ((0.0, 1.0), (5.0, 0.92), (10.0, 0.83), (20.0, 0.75), (30.0, 0.70), (60.0, 0.57), (90.0, 0.31),
+                    (120.0, 0.22), (150.0, 0.03), (180.0, 0.0))}
 # s a pile seen gone stays in the store before it's dropped. Nothing reads a gone pile but the hunt loop's
 # count of the ones she went for (kept in DropStore.gone_tried), so this only bounds the store: kept
 # forever, every kill added a pile, and every look went through all of them.
@@ -100,6 +110,11 @@ GONE_KEEP_S = 300.0
 # strip's search misses drops under a monster or another player (74 of 962 whole strips over the simulator's drops, the
 # review of 2026-10-30), and the rotation is back on a strip in 1.2-2.4 s. Later, they may be another's kill's.
 REVIVE_S = 30.0
+# Whether a pile of hers holding drops another of hers held before keeps that one's age (`_sighting`), from 2026-10-31:
+# every drop seen goes to its nearest pile within LOOT_REACH, so a newer kill's pile by her older drops takes them, the
+# older pile turns gone, and the drops were priced by the newer's age (on the harness's seed 5, a pile from a kill at
+# 118.7 s held drops from kills at 22-57 s). False: each pile its own kill's age, as before.
+HELD_AGE = True
 # What a pile no look has seen yet is worth (Pile.value), in mesos: a kill's pile is coins most often (63-80% of
 # each kind's piles seen where her kills died on 2026-10-21; looting.COINS), and its item is worth less than they are
 # but for the Slime Bubble (looting.PRICES). That's the first map's; on another a bronze coin of its own (Pile.unseen,
@@ -570,6 +585,12 @@ class DropStore:
                 elif t - p.empty_since >= EMPTY_LOOKS:
                     p.status, p.gone_at = "gone", t
                     self.gone_tried += p.tries > 0
+                    if HELD_AGE and p.hers:  # (its drops another pile of hers by it holds now: theirs, its age)
+                        held = [q for q in known if q.hers and id(q) in mine and q.platform == p.platform
+                                and abs(q.x - p.x) <= LOOT_REACH]
+                        if held:
+                            q = min(held, key=lambda q: abs(q.x - p.x))
+                            q.since = min(q.since, p.since)
         taken: set[int] = set()
         for d in sorted(loose, key=lambda d: (d.platform, d.x)):
             if id(d) in taken:
