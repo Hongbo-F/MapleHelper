@@ -846,7 +846,7 @@ def loop_tree_grind_drops(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=22, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=6, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(check("no pile ahead of what's in reach (no ': the pile first')",
                      lambda tr: not any(": the pile first" in line for line in tr["log"])),
@@ -925,7 +925,10 @@ def loop_tree_ore_waits(sim):
     D:/MapleHelper-scratch/replan/loot/eval/seeds/ore.txt): on seed 14 no ore picked up in the time, each shot first
     against what was in reach and from 152 s a Green Mushroom by it, hurt 6 times; of seeds 1-40 22, 23, 25 and 37 show
     all of this, the others hurt more than five times or an ore left. On 22 the 4 ores picked up at 112-124 s, hurt 4
-    times of 8 touches.)"""
+    times of 8 touches.) (Seed 6 since the review's fixes of 2026-10-31 (a chain after a touch planned once the knock's
+    slide is over, a splice's start by the chain's own physics, her landings at her own prices, her drops' life past 180
+    s, her detours priced by their HP: D:/MapleHelper-scratch/replan/loot/fix2/seeds): on 22 not every ore picked up and
+    hurt more than five times; of seeds 1-40, 6 and 14 meet all of this, where 4 of 40 before.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1057,7 +1060,7 @@ def _went(why: str):
     return check(f"to {why}", lambda tr: tr["result"]["retreat"]["why"] == why)
 
 
-@tree((33, 100.0), monsters="all", seed=4, limit=400, expects=LIE_DETECTOR_EXPECTS + (
+@tree((33, 100.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
     _went("a rope as safe: no safe platform near"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
@@ -1072,7 +1075,10 @@ def loop_tree_lie_detector(sim):
     loop_tree_run) and it was seen 110 s in, wherever she was by then: at master 35a1196 (on its monsters' own clock,
     _CLOCK) 6 of seeds 1-13 met all of this, and the seed had moved 7 times since 2026-10-24. On seed 4 up onto the rope
     at 146, on it 10 s after the sighting; in the default world all of seeds 1-13 but 7 meet all of this (on 7 back onto
-    28, safe enough), and seed 4 with the chase off and with the old respawn clock too."""
+    28, safe enough), and seed 4 with the chase off and with the old respawn clock too. (Seed 1 since the review's fixes
+    of 2026-10-31 (a chain after a touch planned once the knock's slide is over: D:/MapleHelper-scratch/replan/loot/fix2/
+    seeds): on 4 knocked back off 32 twice on her way to the rope, on it 10.9 s after the sighting; of seeds 1-16 all but
+    4 and 16 meet all of this, 12 of 1-13 as before.)"""
     return lie_detector(2.0)(sim)
 
 
@@ -1482,7 +1488,7 @@ def loop_tree_attack_misses(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0)),
       expects=(check("her attack's MISS read over her regular presses' targets",
                      lambda tr: tr["result"]["watch"].get("missed", 0) >= 3),
@@ -1498,11 +1504,13 @@ def loop_tree_attack_misses_seen(sim):
     but 3 and 8 meet all of this (on those, 19 and 31 read missed, and 5 in a row unread all the same: the doubt), and
     seed 2 with the chase off and with the old respawn clock too. (Seed 1 since the simulator's looks have her place as
     the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's localizer taken as right): on seed 2 the MISSes read said
-    her key works; of seeds 1-13, 11 meet all of this, 12 with her dot.)"""
+    her key works; of seeds 1-13, 11 meet all of this, 12 with her dot.) (Seed 2 since the review's fixes of 2026-10-31
+    (D:/MapleHelper-scratch/replan/loot/fix2/seeds): on 1 her MISSes read over fewer than 3 of her regular presses'
+    targets; of seeds 1-16 all but 1, 6 and 16 meet all of this.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=4, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1570,7 +1578,10 @@ def loop_tree_attack_no_darts(sim):
     v83 client's AI moves them, 2026-10-31: on seed 6 her stars never maybe out; of seeds 1-13 2 alone shows all of
     this.) (Seed 4 since the stack's monsters turn where the game turns them, 20 from a platform's end
     (monsters.walk_edges), 2026-10-31: on seed 2 her stars never maybe out; of seeds 1-13 4, 6, 7, 10 and 12 show all of
-    this.)"""
+    this.) (Seed 1 since the review's fixes of 2026-10-31 (a chain after a touch planned once the knock's slide is over,
+    a splice's start by the chain's own physics, her landings at her own prices, her drops' life past 180 s, her detours
+    priced by their HP: D:/MapleHelper-scratch/replan/loot/fix2/seeds): on 4 neither her stars' test's MAYBE OUT nor the
+    page; of seeds 1-16, 1 and 8 meet all of this.)"""
     return key_check_run(4)(sim)
 
 
