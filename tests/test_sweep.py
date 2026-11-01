@@ -92,9 +92,9 @@ def test_with_survival_the_solve_is_within_a_hair_of_brute_force():
 
 
 def test_a_pile_is_taken_within_its_allowance_and_left_over_it():
-    """A pile 200 units off her way there and back (2.7 s, and its 0.3 s stand): taken with a fresh pile's 3 s, left with
-    an old one's 1 s (behavior.hunt.ALLOW_FRESH, ALLOW_OLD: no late trip for an old far pile), said why; one 50 off (0.7
-    s and its stand) taken with 1 s too: on her way."""
+    """A pile 200 units off her way there and back (2.7 s, and its 0.3 s stand): taken with a fresh pile's 3 s, left
+    with an old one's 1 s (behavior.hunt.ALLOW_FRESH, ALLOW_OLD: no late trip for an old far pile), said why; one 50 off
+    (0.7 s and its stand) taken with 1 s too: on her way."""
     far = 400 / WALK + 0.3
     assert sweep.plan([_spot("fresh", 200.0, allow=3.0)], (1, 0.0), (1, 0.0), line).keys() == ("fresh",)
     it = sweep.plan([_spot("old", 200.0, allow=1.0)], (1, 0.0), (1, 0.0), line)
@@ -106,8 +106,8 @@ def test_a_pile_is_taken_within_its_allowance_and_left_over_it():
 
 
 def test_an_itinerary_is_within_the_sum_of_its_piles_allowances():
-    """Two fresh piles 150 either side of her (2.0 s there and back and its stand each, 3.0 s allowed each): both, 4.6 s,
-    within their 6 s together, though over either's alone."""
+    """Two fresh piles 150 either side of her (2.0 s there and back and its stand each, 3.0 s allowed each): both, 4.6
+    s, within their 6 s together, though over either's alone."""
     a, b = _spot("a", -150.0, allow=3.0), _spot("b", 150.0, allow=3.0)
     it = sweep.plan([a, b], (1, 0.0), (1, 0.0), line)
     assert set(it.keys()) == {"a", "b"} and 3.0 < it.extra <= it.allowed == 6.0

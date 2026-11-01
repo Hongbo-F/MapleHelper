@@ -45,9 +45,9 @@ D:/MapleHelper-scratch/replan/loot) she picked up 199 mesos' worth a minute of t
 user's own play 306 of 437), and lost 100 a minute: 47% of that waiting on PILE_CLEAR (12-28% of those waits for the
 pile's own dying monster), 28% known and never gone for, 15% yielded to something in reach; 48% of it lay within 2 s of
 her way while it lasted, and half her departures from a stop came within 3 s of a kill of hers, before its drops landed.
-The sweep takes all of those as one choice, until 2026-11-01 priced in her time (the loop's rate, a meso MESO_EXP), within
-a budget of her way's time; from then each pile within the seconds it may add to her way (`_allow`: ALLOW_FRESH soon after
-its kill, ALLOW_OLD once it's old or more dangerous than where she stands), the most mesos within those.
+The sweep takes all of those as one choice, until 2026-11-01 priced in her time (the loop's rate, a meso MESO_EXP),
+within a budget of her way's time; from then each pile within the seconds it may add to her way (`_allow`: ALLOW_FRESH
+soon after its kill, ALLOW_OLD once it's old or more dangerous than where she stands), the most mesos within those.
 
 EXP before loot (`_loot_first`; the user, 2026-10-24: "The hunt should be driven by maximizing the exp gain"): no pile
 goes ahead of shooting what's in reach by a fixed priority. The sweep comes after the shooting rules (until 2026-11-01
@@ -315,25 +315,36 @@ PLAYER_PILES = False
 # scratch/replan/loot2/design/pets), her pets' share of the drops she came near without standing on them 25-40% by an
 # approach of 60-150 units, the snail tags by her 53-102 units from her (the golden clip's quartiles), and a drop gone a
 # median 0.71-0.83 s after her closest approach, p90 2-4 s: PET_NEAR and PET_WAIT are guesses built on those. In the
-# simulator's pet-loot world (world.Realism.pets, fitted to the same records) ... False: none left to them.
+# simulator's grind with Meat and her pets (`--world meat --world pet-loot`: world.Realism.pets, fitted to the same
+# records; 24 seeds of 15 minutes, D:/MapleHelper-scratch/replan/loot2/impl), on top of the allowances (`_allow`): EXP a
+# minute +9.8 (se 5.0), kills +3.9 (1.9), loot's worth +2.0 (4.8), her pets' share of her pick-ups 0.31 -> 0.36, her
+# drops' share 0.944 -> 0.921 (-0.023, se 0.009), her drops expiring 7.3 -> 10.8 a run; without them EXP +3.6 (6.9),
+# loot +3.6 (6.7). Counted from a pile's landing alone (a pile she comes near later hers at once: 12 seeds, without the
+# allowances) EXP +3.9 where +7.9; left to them only while she stays (not on her way, nor as she leaves: 12 seeds, with
+# the allowances) EXP -1.5 (8.5), loot -2.0 (7.5). False: none left to them.
 PET_LOOT = True
 PET_NEAR = 100.0
 PET_WAIT = 4.0
 PET_KEEP = 64  # (piles whose time by her is kept before the gone ones are dropped)
-# What a pile may add to her way (`_allow`: the sweep's allowance of it, sweep.Spot.allow; an itinerary within the sum of
-# its piles'), from 2026-11-01, in seconds rather than at MESO_EXP an meso against her time (the user: "I imagine piles
-# should be picked up soon after killing. If a pile is about to expire, it probably means they aren't important enough
-# to get picked up anyway. I think a real human would bias route planning to pick up piles"; "I'm not sure about this
-# currency conversion. My idea is just picking up mesos and items as we kill mobs"): ALLOW_FRESH while it's FRESH_S old
-# or younger (from its kill, or its first sighting), down to ALLOW_OLD at OLD_S and ALLOW_OLD after (on her way only: no
-# late trips for old far piles, nothing for their expiry), and ALLOW_OLD at the most where the danger at it (attack.
-# danger, with the look's monsters) is SAFER_MARGIN over where she stands ("try not to hit by mobs just for picking up
-# loots": grind.BACK_MARGIN's, a third of a Horny Mushroom's touch on Tree Dungeon; the HP price of PILE_HP's place).
-# Guesses: in the user's own play (the golden clip, 26 drops) her drops went a median 3.7 s after the kill, p90 18.9 s,
-# the bot's live a median 6.0 and p90 55.9; its live detours for them a median 0.81 s, p90 1.83 s. In the design's
-# prototypes (D:/MapleHelper-scratch/replan/loot2/design: 15-minute grinds with Meat and her pets, 24 seeds) ALLOW_FRESH
-# 2 s cost loot (-25 a minute at 5 minutes, se 14.5), OLD_S 30 s and ALLOW_OLD 0.5 picked up less on 24 seeds, and
-# without SAFER_MARGIN the rules cost EXP (-9.6 a minute, se 6.6).
+# What a pile may add to her way (`_allow`: the sweep's allowance of it, sweep.Spot.allow; an itinerary within the sum
+# of its piles'), from 2026-11-01, in seconds rather than at MESO_EXP an meso against her time (the user: "I imagine
+# piles should be picked up soon after killing. If a pile is about to expire, it probably means they aren't important
+# enough to get picked up anyway. I think a real human would bias route planning to pick up piles"; "I'm not sure about
+# this currency conversion. My idea is just picking up mesos and items as we kill mobs"): ALLOW_FRESH while it's FRESH_S
+# old or younger (from its kill, or its first sighting), down to ALLOW_OLD at OLD_S and ALLOW_OLD after (on her way
+# only: no late trips for old far piles, nothing for their expiry), and ALLOW_OLD at the most where the danger at it
+# (attack. danger, with the look's monsters) is SAFER_MARGIN over where she stands ("try not to hit by mobs just for
+# picking up loots": grind.BACK_MARGIN's, a third of a Horny Mushroom's touch on Tree Dungeon; the HP price of PILE_HP's
+# place). Guesses: in the user's own play (the golden clip, 26 drops) her drops went a median 3.7 s after the kill, p90
+# 18.9 s, the bot's live a median 6.0 and p90 55.9; its live detours for them a median 0.81 s, p90 1.83 s. In the
+# design's prototypes (D:/MapleHelper-scratch/replan/loot2/design: 15-minute grinds with Meat and her pets, 24 seeds)
+# ALLOW_FRESH 2 s cost loot (-25 a minute at 5 minutes, se 14.5), OLD_S 30 s and ALLOW_OLD 0.5 picked up less on 24
+# seeds, and without SAFER_MARGIN the rules cost EXP (-9.6 a minute, se 6.6). As built
+# (D:/MapleHelper-scratch/replan/loot2/impl, the same grind, 24 seeds of 15 minutes, against the sweep at MESO_EXP): EXP
+# -3.1 (5.3), loot's worth +15.9 (5.2), her drops' share 0.905 -> 0.944 (+0.039, se 0.008), her drops expiring 12.2 ->
+# 7.3 a run, touches -9.8 (4.9); with PET_LOOT EXP +6.7 (5.8), loot +17.9 (5.9), share +0.015 (0.011), touches -5.5
+# (4.2), potions -4.6 (3.0). Scaled down by what a pile is worth to her against her map's bronze coin (12 seeds, her
+# drops as live: `--world map-drops`) EXP -17.3 (7.8), loot -13.2 (5.2): not taken.
 ALLOW_FRESH = 3.0
 FRESH_S = OWN_S
 OLD_S = 60.0
@@ -1144,7 +1155,8 @@ class Hunt:
         stretch (`_extent`) within PET_NEAR of her, and she not yet PET_WAIT s by it (from its drops' landing at the
         soonest: DROP_LANDS after its kill; counted afresh once she's farther)."""
         s = getattr(self, "_s", None)  # (her last pass's look: where she, and her pets with her, are)
-        if not PET_LOOT or not p.hers or s is None or s.platform is None or s.where is None                 or p.platform != s.platform.id:
+        if not PET_LOOT or not p.hers or s is None or s.platform is None or s.where is None \
+                or p.platform != s.platform.id:
             return False
         by = self.__dict__.setdefault("_pet_by", {})  # pile (its key) -> since when she's been by it (tests make a
         # hunt without __init__)

@@ -5,8 +5,8 @@ are in the way, try not to hit by mobs just for picking up loots"; 2026-11-01: "
 after killing. If a pile is about to expire, it probably means they aren't important enough to get picked up anyway";
 the designs and their measurements: D:/MapleHelper-scratch/replan/loot, loot2). Pure, as behavior.patrol is: the hunt
 loop gives it the pick spots (the drop store's piles, each with what it's worth, when its drops land, how long it's
-likely to lie, what guards it and how much it may cost her way) and her route times (motion.route.Planner.arrive), and it
-gives back an itinerary.
+likely to lie, what guards it and how much it may cost her way) and her route times (motion.route.Planner.arrive), and
+it gives back an itinerary.
 
 An orienteering problem in seconds, not in an exchange of mesos for EXP: of the candidates, the set and the order that
 pick up the most of
@@ -14,25 +14,25 @@ pick up the most of
     sum of worth_i x P(still there when she gets there | there now)
 
 (her pets' pick-ups and hers alike: what's left of a pile is what a look sees), within what they may cost her way: each
-spot's own `allow` (s it may add to her way on its own: the hunt's, by the pile's age and the danger there, Hunt._allow),
-and the whole itinerary's `extra` (the time the route through them and on to where she's going takes over going there
-straight, the landings waited for in it, not its guards' kill times: those are EXP) within the sum of its spots'
-allowances, and within `budget` where one is given (the hunt loop's lull and its way out). Of those that pick up as much
-(to GAIN_TIE), the quickest. Until 2026-11-01 the most of worth x MESO_EXP and the guards' EXP less her time's worth (the
-loop's rate x extra) within a budget of max(BUDGET_MIN, BUDGET_SHARE x the straight way), each spot CAND_S (5 s) at most:
-the user wasn't sure of that exchange ("My idea is just picking up mesos and items as we kill mobs"), and at a stop its
-2 s budget never fetched a fresh coin 160 units off (the independent check of 2026-11-01, finding 2). Every spot's stand
-is checked against the monsters that count where she'd stand, each walking the way perception says it heads at its
-kind's speed from the game data, turned back at its platform's ends (`meets`: her body's box against theirs over the
-stand and STAND_PAST_S more); one that meets a monster she can shoot first from where she is has the shot in its time (a
-Guard: "kill all the mobs that are in the way"), one that meets another is left out for this solve ("try not to hit by
-mobs just for picking up loots"). Her legs between spots are the navigator's trips, planned and replanned at every state
-against every monster as any trip (control.navigator: REPLAN, its shots first at what's in its way).
+spot's own `allow` (s it may add to her way on its own: the hunt's, by the pile's age and the danger there,
+Hunt._allow), and the whole itinerary's `extra` (the time the route through them and on to where she's going takes over
+going there straight, the landings waited for in it, not its guards' kill times: those are EXP) within the sum of its
+spots' allowances, and within `budget` where one is given (the hunt loop's lull and its way out). Of those that pick up
+as much (to GAIN_TIE), the quickest. Until 2026-11-01 the most of worth x MESO_EXP and the guards' EXP less her time's
+worth (the loop's rate x extra) within a budget of max(BUDGET_MIN, BUDGET_SHARE x the straight way), each spot CAND_S (5
+s) at most: the user wasn't sure of that exchange ("My idea is just picking up mesos and items as we kill mobs"), and at
+a stop its 2 s budget never fetched a fresh coin 160 units off (the independent check of 2026-11-01, finding 2). Every
+spot's stand is checked against the monsters that count where she'd stand, each walking the way perception says it heads
+at its kind's speed from the game data, turned back at its platform's ends (`meets`: her body's box against theirs over
+the stand and STAND_PAST_S more); one that meets a monster she can shoot first from where she is has the shot in its
+time (a Guard: "kill all the mobs that are in the way"), one that meets another is left out for this solve ("try not to
+hit by mobs just for picking up loots"). Her legs between spots are the navigator's trips, planned and replanned at
+every state against every monster as any trip (control.navigator: REPLAN, its shots first at what's in its way).
 
 Solved exactly in its travel: of at most MAX_CAND candidates (the most worth for their insertion's time first, each
 alone within its allowance), a dynamic program over subsets with the last spot visited (the least time to have picked up
-a set ending at a spot), each set's quickest order weighed by the survival of its drops at its arrivals (they change by a
-few % over the seconds a sweep takes). On the live thief run of 2026-10-30 the prototype (sweep_proto.py, without
+a set ending at a spot), each set's quickest order weighed by the survival of its drops at its arrivals (they change by
+a few % over the seconds a sweep takes). On the live thief run of 2026-10-30 the prototype (sweep_proto.py, without
 monsters or survival) solved 353 times at a median 0.62 ms (p99 4.9, the most 8.4), 3 candidates at the median, 8 at the
 most.
 

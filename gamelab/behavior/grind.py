@@ -121,8 +121,8 @@ STAY_NET = True
 # a visit to each would pick up, the sweep's round trip from its place; in 15-minute runs of the standard grind EXP a
 # minute -4.4 (se 7.1), loot -4.6 (7.0), in the live drops' worlds EXP -8.9 (3.5) for loot +0.8 (1.2). PILE_HP, on from
 # the review of 2026-10-31: the sweep's seconds dearer by the HP a second her touches took while she was after a pile;
-# in the live drops' worlds her time on her drops -7.3 s, touches that hurt there -0.85 (0.59), EXP -0.7 (3.8); its place
-# is the allowance's SAFER_MARGIN, a pile more dangerous than where she stands on her way only.)
+# in the live drops' worlds her time on her drops -7.3 s, touches that hurt there -0.85 (0.59), EXP -0.7 (3.8); its
+# place is the allowance's SAFER_MARGIN, a pile more dangerous than where she stands on her way only.)
 
 
 class Grind(Hunt):

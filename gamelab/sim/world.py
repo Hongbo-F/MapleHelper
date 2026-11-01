@@ -511,9 +511,9 @@ PET_FULLNESS = 60.0
 # after it, 2-4% with her on another platform; in the golden clip the snail tags by her were 53 / 73 / 102 units from
 # her (quartiles), under her 48% of the time (trailing her climbs). v83's follow isn't read from the client: the numbers
 # are a coarse grid's (10 settings x 4 seeds, then 12) against those tables. With them the simulator's pets take 31% of
-# her pick-ups, by her closest approach 0.96 / 0.73 / 0.63 / 0.63 / 0.29 where live 0.73 / 0.57 / 0.49 / 0.40 / 0.32 (the
-# same shape, about 0.15 high), and 7% of her drops are taken 45-150 units from her where live 23% (no setting tried
-# passed 11%: the simulator's grind walks onto its piles more than the live bots did).
+# her pick-ups, by her closest approach 0.96 / 0.73 / 0.63 / 0.63 / 0.29 where live 0.73 / 0.57 / 0.49 / 0.40 / 0.32
+# (the same shape, about 0.15 high), and 7% of her drops are taken 45-150 units from her where live 23% (no setting
+# tried passed 11%: the simulator's grind walks onto its piles more than the live bots did).
 PET_SPEED = 80.0         # units a second (60 / 80 / 120 tried)
 PET_FOLLOW = (40.0, 70.0)  # units from her each stops at (25/45 to 90/150 tried)
 PET_WANDER = 80.0        # units either side of her it wanders within (40 / 80 / 140 tried)
@@ -3484,9 +3484,9 @@ class World:
     def _pets_step(self, dt: float) -> None:
         """Her pets' step (Realism.pets, every PET_STEP_MS; out where she is at the first): each on her platform walks
         to its PET_FOLLOW from her at PET_SPEED, or within it wanders by her (PET_WANDER, at half that), is on hers
-        PET_HOP_S after she's on another (its PET_FOLLOW behind her), and takes what it's on that she could take (hers or
-        past its owner's time, fitting her tabs: World.takes) as her pick-up does (_take). On a rope or in the air she
-        leaves them where they are."""
+        PET_HOP_S after she's on another (its PET_FOLLOW behind her), and takes what it's on that she could take (hers
+        or past its owner's time, fitting her tabs: World.takes) as her pick-up does (_take). On a rope or in the air
+        she leaves them where they are."""
         t = self.t
         if self.pets is None:
             pid = None if self.plat is None else self.plat.id
