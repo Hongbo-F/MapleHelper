@@ -81,8 +81,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    value_per_min, the mesos' worth she picked up a minute: mesos_per_min of it her mesos',
                    items_per_min her items' (items_picked of them); drops_left_per_min, the worth of her drops she
                    left (taken by others, or lain their whole life); cash_per_min, value_per_min less her potions at
-                   HP_POTION_PRICE and MP_POTION_PRICE (guesses); pick_age, the median age of her drops as she picked
-                   them up (s from their landing)
+                   the user's reference prices (behavior.hunt: HP_PER_MESO HP and MP_PER_MESO MP a meso, by what each
+                   of hers gives: the simulator's Orange Potion 125 mesos, its Blue 100); pick_age, the median age of
+                   her drops as she picked them up (s from their landing)
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   safety_stops     the safety stop (behavior.safety: her HP under her reserve, her profile's hits of the map's largest
@@ -158,6 +159,7 @@ from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 
 from ..analysis import coverage
+from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import worth_for
 from ..paths import LAB, REPO
 from .world import (DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
@@ -609,6 +611,9 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
     gaps = [b - a for a, b in zip(times, times[1:])]
     waits = _waits(records)
     start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    her = world.character  # (what her potions cost: what each gives at the user's reference prices)
+    hp_potion = world._potion() * her.max_hp / HP_PER_MESO
+    mp_potion = her.mp_potion / MP_PER_MESO
     return {
         "exp": world.exp,
         "exp_per_min": round(world.exp / (horizon / 60), 2),
@@ -650,8 +655,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "items_per_min": round(sum(worth(d) for d in drops if d.taken_by == "her" and not d.mesos) / (horizon / 60), 2),
         "items_picked": sum(1 for d in drops if d.taken_by == "her" and not d.mesos),
         "drops_left_per_min": round(sum(worth(d) for d in left) / (horizon / 60), 2),
-        "cash_per_min": round((sum(worth(d) for d in drops if d.taken_by == "her") - world.potions_used * HP_POTION_PRICE
-                               - world.mp_potions * MP_POTION_PRICE) / (horizon / 60), 2),
+        "cash_per_min": round((sum(worth(d) for d in drops if d.taken_by == "her") - world.potions_used * hp_potion
+                               - world.mp_potions * mp_potion) / (horizon / 60), 2),
         "pick_age": round(ages[len(ages) // 2], 2) if ages else None,
         "longest_idle": round(max(gaps, default=0.0), 1),
         "stuck_s": round(sum(max(0.0, g - IDLE_GRACE) for g in gaps), 1),
@@ -878,10 +883,6 @@ def _trips(world, records: list[dict], end: float) -> dict:
 # her objective is a pile (a trip for one: its 'hunt' record's objective "pile on ..."), she's on her drops.
 PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull loot", "loot elsewhere",
               "sweep", "sweep: landing", "sweep: clear first")  # (the loot sweep's, behavior.sweep, from 2026-10-30)
-# What her potions cost at a shop, for cash_per_min (guesses: v83's prices, not this game's, not read): an Orange Potion
-# (her pet drinks those on Tree Dungeon: hunt.HP_EXP) 160 mesos, a Blue Potion 200.
-HP_POTION_PRICE = 160.0
-MP_POTION_PRICE = 200.0
 
 
 def _on_piles(world, records: list[dict], end: float) -> dict:

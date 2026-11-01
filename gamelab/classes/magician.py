@@ -144,9 +144,11 @@ POLICY = Policy(default_mode="skill",     # Magic Claw whenever her MP pays for 
 PET = Pet(hp_warning=0.55, mp_warning=0.05, hp_heal=250.0, mp_heal=185.0)  # hp_warning live (2026-10-29: her pet drank
                                           # at 359 and 335 of 628, 57% and 53%); the rest PLACEHOLDER (the thief's pet): her pet,
                                           # its auto-potion thresholds and potions -- the user's answer; `pet --read` (L0)
-PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=250.0, ground_danger=2.0, hp_exp=250.0,
+PRIORS = Priors(kill_s_per_exp=0.085, danger_hp_s=0.0175, hp_price=157.0, ground_danger=2.0,
                 seen_share=0.3, threat_s=1.7, keep_danger=0.08, meet_s=8.0)  # PLACEHOLDER (the thief's): re-tuned in
-                                          # the simulator with her HP and DEF (S7), then her live kill times (L2)
+                                          # the simulator with her HP and DEF (S7), then her live kill times (L2); but
+                                          # hp_price, a bar of her 628 HP at the user's prices (behavior.hunt.bar_exp,
+                                          # worked out live from her max HP as read: Patrol.hp_price)
 # The safety stop's reserve: three of the map's largest touches (behavior.safety: worked out live, at her level and DEF as
 # perception reads them, over the map's kinds). The user, 2026-10-28: "Well for thief with high evasion this should be 2
 # hits, 3 for magician". Where that's at or over her pet's warning at her max HP (her HUD's), a command that hunts

@@ -203,7 +203,6 @@ class Priors:
     danger_hp_s: float     # patrol.DANGER_HP_S
     hp_price: float        # patrol.HP_PRICE
     ground_danger: float   # behavior.hunt.GROUND_DANGER
-    hp_exp: float          # hunt.HP_EXP
     seen_share: float      # behavior.tour.SEEN_SHARE
     threat_s: float        # attack.danger.THREAT_S
     keep_danger: float     # danger.KEEP_DANGER

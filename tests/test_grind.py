@@ -878,7 +878,7 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
     clock = [100.0]
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     # A Horny Mushroom on her platform 100 units off, in reach: its 41 EXP over its kill (11.8 EXP/s, less what touches
-    # there cost her meanwhile: 0.7, grind.STAY_NET) beats the loop's rate: she stays.
+    # there cost her meanwhile at a bar's 193.5 EXP: 0.6, grind.STAY_NET) beats the loop's rate: she stays.
     m = _sight(model, HORNY, 250, 0)
     g, s = _at_stop(model, p, ids[0], 150.0, [m], 1.0)
     assert g._held(s) and g._stay_gain(s, g._held(s)) > p.plan.rate
@@ -888,7 +888,7 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
     for dt in (0.0, grind.LEAVE_CONFIRM_S + 0.01):
         clock[0] += dt
         reason = g._leaving(s, g._held(s))
-    assert reason == "11.0 EXP/s here, going on gives 20.0"
+    assert reason == "11.2 EXP/s here, going on gives 20.0"
     # Her kill emptied the point a moment ago: what comes back meanwhile is a few EXP a second at the refill's rate
     # (Patrol.wait_gain), so she doesn't wait for it; nor, watched empty after that, later.
     p.replan(0.0, force=True)
@@ -1379,6 +1379,25 @@ def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_
         assert g._stay_gain(s, [m]) == pytest.approx(gain)
     finally:
         grind.STAY_NET = True
+
+
+def test_a_bar_of_her_hp_is_priced_by_her_max_hp_as_read_at_the_users_prices():
+    """Patrol.hp_price (the user, 2026-10-31: "2HP/mesos and 1MP/mesos, use these as reference price"): what a bar of
+    her HP costs, its potions' mesos at MESO_EXP (hunt.bar_exp), from her max HP as perception reads it (the magician's
+    628: 157 EXP), patrol.HP_PRICE (the simulator's her, 774 HP: 193.5) until it's read; the loop's rate and a stop's
+    net go by it."""
+    from gamelab.behavior import hunt
+    model, a, b, p = _two_areas()
+    g = object.__new__(Grind)
+    g.patrol, g.h = p, SimpleNamespace(max_hp=None)
+    g._price_hp()
+    assert p.hp_price == patrol.HP_PRICE == hunt.bar_exp(774.0) == 193.5
+    g.h.max_hp = 628.0
+    g._price_hp()
+    assert p.hp_price == 157.0
+    j = p.stop_on(a[0])
+    p.learn_hp(a[0], 1.0, 60.0)
+    assert p.net(j, 100.0) == pytest.approx(100.0 * (1 - 157.0 * p.kill_s * p.hp_rate(a[0], p.stops[j].x)))
 
 
 def test_the_hook_of_a_stop_she_has_not_been_at_is_scaled_by_what_she_lost_against_it_where_she_has():

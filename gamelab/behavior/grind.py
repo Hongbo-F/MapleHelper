@@ -58,8 +58,7 @@ from ..localization.scene import Scene
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
-from .hunt import FINISH_S, PASSING_S, Hunt, Objective, Visit
-from . import patrol as patrol_mod
+from .hunt import FINISH_S, PASSING_S, Hunt, Objective, Visit, bar_exp
 from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
@@ -105,7 +104,7 @@ TOUCH_GAP_S = 30.0     # s between two looks at most for the touches between the
                        # come between her moves)
 TOUCH_NEAR = 100.0     # units between her body and a monster's at most for its kind to be a touch's (`_touch_share`)
 # Whether what staying at a stop gives (`_stay_gain`) is net of what touches there cost meanwhile (Patrol.hp_rate at
-# HP_PRICE), as the loop's rate is (Patrol.rate), from 2026-10-31; False: its EXP alone, as before. With HP_BY_TOUCHES,
+# hp_price), as the loop's rate is (Patrol.rate), from 2026-10-31; False: its EXP alone, as before. With HP_BY_TOUCHES,
 # her way back and the sweep's guards, in the harness's standard grind (as above: cmp_G.txt) touches 86.8 -> 80.8 (se
 # 3.0), those that hurt 57.3 -> 53.1 (se 2.4), HP potions 24.5 -> 22.8, EXP a minute 385 -> 365 (se 16); with the
 # stops weighing danger and the HP priced as the hunt loop's too (behavior.patrol: STOP_DANGER, HP_PRICE, HP_PRIOR_S,
@@ -158,7 +157,16 @@ class Grind(Hunt):
         if s.where is not None:
             self.patrol.belief.update(s.t, self.h.memory, s.players if s.dot is not None else None)
         self._learn_hp(s)
+        self._price_hp()
         return s
+
+    def _price_hp(self) -> None:
+        """What a bar of her HP costs (Patrol.hp_price, the loop's and her stays' price of her touches): its potions at
+        the user's reference prices (hunt.bar_exp) from her max HP as perception reads it (Hunter.max_hp: her HUD's
+        number), patrol.HP_PRICE until it's read."""
+        most = getattr(self.h, "max_hp", None)
+        if most is not None:
+            self.patrol.hp_price = bar_exp(most)
 
     def _learn_hp(self, s: Scene) -> None:
         """Her HP bar between two looks (HP_GAP_S apart at most), what went charged to the platform she was on
@@ -344,7 +352,7 @@ class Grind(Hunt):
     def _stay_gain(self, s: Scene, held: list[Monster]) -> float:
         """EXP a second of staying at the stop (see the top): the `held` monsters' EXP over their kill time and the
         walk to where she gets at the nearest of them, less what touches at the stop cost her meanwhile (STAY_NET:
-        Patrol.hp_rate at HP_PRICE); with none, the respawns expected in reach (Patrol.wait_gain)."""
+        Patrol.hp_rate at Patrol.hp_price); with none, the respawns expected in reach (Patrol.wait_gain)."""
         if not held:
             return self.patrol.wait_gain(self.stop, s.t)
         here, x, avg = s.platform, s.where.x, self._avg_exp()
@@ -357,7 +365,7 @@ class Grind(Hunt):
         gain = exp / (exp * self.patrol.kill_s + walk)
         if STAY_NET and self.stop is not None:  # (less what touches there cost meanwhile, as the loop's rate)
             st = self.patrol.stops[self.stop]
-            gain -= patrol_mod.HP_PRICE * self.patrol.hp_rate(st.platform, st.x)
+            gain -= self.patrol.hp_price * self.patrol.hp_rate(st.platform, st.x)
         return gain
 
     def _next_dest(self, s: Scene) -> tuple[int, float] | None:

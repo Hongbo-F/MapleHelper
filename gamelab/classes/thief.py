@@ -82,12 +82,13 @@ SAFETY_HITS = 3
 PET = Pet(hp_warning=0.70,                  # sim.world.PET_HP (behavior.safety: her pet at 70%)
           mp_warning=0.05,                  # sim.world.PET_MP
           hp_heal=250.0,                    # sim.world.HP_POTION
-          mp_heal=185.0)                    # sim.world.MP_POTION
+          mp_heal=100.0)                    # sim.world.LEVEL_25.mp_potion (a Blue Potion: live she drinks 95-100; it
+                                            # was world.MP_POTION's 185, LEVEL_24's, until 2026-10-31)
 PRIORS = Priors(kill_s_per_exp=0.085,       # behavior.patrol.KILL_S_PER_EXP
                 danger_hp_s=0.0175,         # patrol.DANGER_HP_S
-                hp_price=250.0,             # patrol.HP_PRICE
+                hp_price=193.5,             # patrol.HP_PRICE: a bar at the user's prices (hunt.bar_exp), worked out
+                                            # live from her max HP as read (Patrol.hp_price; 210 at her 840)
                 ground_danger=2.0,          # behavior.hunt.GROUND_DANGER
-                hp_exp=250.0,               # hunt.HP_EXP
                 seen_share=0.3,             # behavior.tour.SEEN_SHARE
                 threat_s=1.7,               # attack.danger.THREAT_S
                 keep_danger=0.08,           # danger.KEEP_DANGER

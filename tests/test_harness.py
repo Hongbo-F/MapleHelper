@@ -252,6 +252,12 @@ def test_outcomes_are_read_from_the_world(model):
     assert out["kills"] == 1 and out["exp"] == 2 and out["exp_per_min"] == 2.0
     assert out["drops"] == 1 and out["drops_share"] == 1.0 and out["backstops"] == {"LOOT_SECONDS": 1}
     assert out["longest_idle"] == pytest.approx(60.0 - 3.0, abs=0.6)  # from her pick-up to the end
+    # Her potions at the user's reference prices (hunt.HP_PER_MESO, MP_PER_MESO), by what each of hers gives.
+    from gamelab.behavior import hunt
+    w.potions_used, w.mp_potions = 2, 3
+    hp_potion = w._potion() * w.character.max_hp / hunt.HP_PER_MESO
+    cash = harness.outcomes(w, [], 60.0)["cash_per_min"]
+    assert cash == pytest.approx(out["value_per_min"] - 2 * hp_potion - 3 * w.character.mp_potion / hunt.MP_PER_MESO)
     w.drops[0].taken_by, w.drops[0].since = "", 0.0  # a drop left lying its whole life counts as missed
     assert harness.outcomes(w, [], DROP_LIFE + 1)["drops_share"] == 0.0
 

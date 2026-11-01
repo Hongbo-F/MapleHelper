@@ -318,10 +318,12 @@ def test_the_thiefs_profile_is_todays_constants():
     assert (p.attack_score, p.attack_margin) == (heading.ATTACK_SCORE, heading.ATTACK_MARGIN)
     assert t.policy.unseen == ("regular" if hunt.UNSEEN_ATTACK else "none")
     assert (t.pet.hp_warning, t.pet.mp_warning, t.pet.hp_heal, t.pet.mp_heal) == (
-        world.PET_HP, world.PET_MP, world.HP_POTION, world.MP_POTION)
+        world.PET_HP, world.PET_MP, world.HP_POTION, world.LEVEL_25.mp_potion)
     r = t.priors
     assert (r.kill_s_per_exp, r.danger_hp_s, r.hp_price) == (patrol.KILL_S_PER_EXP, patrol.DANGER_HP_S, patrol.HP_PRICE)
-    assert (r.ground_danger, r.hp_exp, r.seen_share) == (hunt.GROUND_DANGER, hunt.HP_EXP, tour.SEEN_SHARE)
+    assert (r.ground_danger, r.seen_share) == (hunt.GROUND_DANGER, tour.SEEN_SHARE)
+    # A bar of her HP at the user's reference prices (2 HP a meso, at MESO_EXP): the simulator's her, 774 HP.
+    assert patrol.HP_PRICE == hunt.bar_exp(world.LEVEL_25.max_hp) == 193.5
     assert (r.threat_s, r.keep_danger, r.meet_s) == (danger.THREAT_S, danger.KEEP_DANGER, navigator.MEET_S)
     c = config.Character()
     assert (c.avoid, c.mp_regen) == (world.EVADE_ACC, world.MP_REGEN)

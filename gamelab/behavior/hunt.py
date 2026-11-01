@@ -67,7 +67,7 @@ its EXP in its worth), any other leaves the pile out until a look sees it clear.
 trips, planned and replanned at every state against every monster, with its shots first at what's in the way. Live on
 2026-10-25 all 12 of the Horny Mushrooms' touches and all 3 knocks off 23 came on stays on 23 for drops; until 2026-10-30
 a pile waited while one was within PILE_CLEAR (100 units) of where she'd go for it, whatever its way, and was priced by
-the HP the rest of its danger would cost (HP_EXP a bar). And what her fights go by takes those about her that the look
+the HP the rest of its danger would cost (250 EXP a bar). And what her fights go by takes those about her that the look
 didn't find (`_unseen`: the feed's hidden tracks, her memory's of the last UNSEEN_S): around her for the stance's danger
 and its moves, and those on her platform that count as a danger as targets too (`_with_unseen`).
 
@@ -209,12 +209,6 @@ STUCK_S = 120.0        # backstop: s without a kill, a pick-up or a new ground b
 STUCK_CHECKS = True
 STALL_WAIT_S = 30.0    # ... its check put off (no quiet moment), the hunt goes on this long more for one
 PICK_S = 0.6           # s standing on a pile (4 presses): rule 6a's trips (the sweep's stands are each pile's own)
-# What a bar of her HP is worth in EXP (her pet drinks Orange Potions of 250 HP at its 70% warning, sim.world.HP_POTION,
-# PET_HP: 6 in the 10.95 minutes live on 2026-10-25; about 160 mesos each at a shop, a guess: v83's price; so a bar of her
-# 774 HP is 3.1 of them, 500 mesos, 250 EXP at MESO_EXP). Until 2026-10-30 a pile's price, the HP its danger would cost;
-# since, no pile is gone for where a monster would meet her (the sweep's guards): kept for what reads it (the profile's).
-# The user is short of money for potions.
-HP_EXP = 250.0
 # Whether her fights, her drops' price and guards and her throws' attack go by the monsters about her that a look didn't
 # find (`_unseen`: localization.unseen); off, by the look's alone (and the fight's own hidden ones), as before. With her
 # trips' (control.navigator.UNSEEN_TRIPS: the numbers there).
@@ -249,6 +243,15 @@ VALUABLE = 30.0
 # of her way at rate / MESO_EXP: at 0.5 and the live thief's 6.9 EXP a second, 13.9 mesos (about 2 s for the drops she
 # lost live, sweep.BUDGET_MIN); at 1.0, 6.9 (about 3 s).
 MESO_EXP = 0.5
+# What her potions cost, by what they give: the user's reference prices of 2026-10-31 ("2HP/mesos and 1MP/mesos, use
+# these as reference price. We may be well losing money by grinding, which is fine"), HP_PER_MESO HP and MP_PER_MESO MP
+# a meso, so a 100-HP Red Potion 50 mesos, the simulator's 250-HP Orange Potion 125 and the 100-MP Blue Potion 100. Cash
+# flow isn't a constraint (the user's word), so nothing in the planner keeps mesos back: a bar of her HP is the mesos
+# its potions cost at MESO_EXP (`bar_exp`), and her MP isn't priced (her attack mix decides it: attack.choice, mp_floor
+# 0). Until then a bar was 250 EXP everywhere (patrol.HP_PRICE, this module's HP_EXP: 3.1 Orange Potions at a guessed
+# 160 mesos), now 193.5 at the simulator's 774 HP, 210 at the live thief's 840 and 157 at the magician's 628.
+HP_PER_MESO = 2.0
+MP_PER_MESO = 1.0
 # Leaving a ground, the sweep's piles on her way out (`_leave`) within this many of the sweep's budgets over the whole
 # way (sweep.budget_for of the straight way from where she decided to go: DEPART_BUDGETS x max(BUDGET_MIN, half of it)
 # more than it, from then on), not one budget at each solve from wherever she is: re-solved at every pass with a fresh
@@ -298,6 +301,11 @@ PLAYER_DY = 100.0
 # after its kill, before they were worth a trip anyway (then OTHERS_AFTER, 30 s), so only piles taken for no kill of
 # hers were left; whether a real player's are worth leaving is for the game to say.
 PLAYER_PILES = False
+
+
+def bar_exp(max_hp: float) -> float:
+    """What a bar of her HP (`max_hp` HP) costs in EXP: its potions' mesos (HP_PER_MESO HP a meso) at MESO_EXP."""
+    return max_hp / HP_PER_MESO * MESO_EXP
 
 
 def _keep_off(o: "Objective") -> tuple[int, ...]:

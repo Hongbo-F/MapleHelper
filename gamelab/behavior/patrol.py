@@ -40,7 +40,7 @@ The loop (Patrol.best): a closed round of stops (LOOP_MIN to LOOP_MAX), chosen b
 spawn point it reaches gives its EXP (times her share) each time she comes round and finds it back (`caught`: what's
 back a cycle after she found it free, at the refill's rate); the cycle is the round's route times, STOP_S a stop and her
 shooting (her kill time a point of EXP, KILL_S_PER_EXP, learned from her throws), less what the danger hook says touches
-would cost there (HP_PRICE EXP a bar of HP). Grown from each of the SEEDS best stops by adding the stop that raises the
+would cost there (hp_price EXP a bar of HP). Grown from each of the SEEDS best stops by adding the stop that raises the
 rate most (at its cheapest place in the round), the best round kept. Standing at one stop (camping) is a round of one
 (Patrol.camping), which grinding never takes up but logs, to compare. A new round replaces the one she follows only when
 it's LOOP_GAIN better by the same belief, and not within LOOP_MIN_S of the last change (no flip-flopping), unless the
@@ -59,7 +59,7 @@ the stops due elsewhere the one expected to give the most a second, if more than
 she's on her way to; and a stop whose monsters she has seen (her memory, not the belief's guesses: a pile of one monster
 or more, PULL_MIN) pulls her off it when it pays for its detour against the loop: what it's expected to give (Patrol.
 expect: the monsters seen, and the belief's stock at its other points, her share), less what touches there cost her
-while she shoots it (Patrol.net: HP_PRICE a bar of HP, by hp_rate, as the loop's rate counts its stops'), PULL_GAIN
+while she shoots it (Patrol.net: hp_price a bar of HP, by hp_rate, as the loop's rate counts its stops'), PULL_GAIN
 times what the loop gives in the time the detour costs her, at the loop's long-run EXP a second (Plan.rate, by the same
 belief: the refill as learned, others' share; as of the latest replan, every REPLAN_S). The detour
 (Patrol.detour) is its kills (her kill time), STOP_S, and the travel there and on from there to the loop's next stop,
@@ -202,12 +202,14 @@ DANGER_HP_S = 0.0175
 # model's (attack.danger.DANGER_MIN: on Tree Dungeon a Horny Mushroom takes 16.1% of her 752 HP at level 24, a Green
 # Mushroom 7.2%, a Slime 1.2%; on the first map no kind counts).
 DANGER_MIN = danger_model.DANGER_MIN
-# What a bar of her HP costs her, in EXP (her pet's potions, and the risk): the hunt loop's (behavior.hunt.HP_EXP: a bar
-# of her 774 HP 3.1 Orange Potions, 500 mesos at a guessed 160 each, 250 EXP at MESO_EXP 0.5), from 2026-10-31; until
-# then 100, a guess of its own, and the loop and her stays priced her touches at the top of Tree Dungeon's tower at
-# 0.07-0.15 bars a round where she lost 3 bars a minute on 10 (D:/MapleHelper-scratch/replan/pos). At 50 mesos a potion a
-# bar would be 78 EXP: the user's to set, by what potions cost.
-HP_PRICE = 250.0
+# What a bar of her HP costs her, in EXP (her pet's potions): the mesos its potions cost at the user's reference price
+# (behavior.hunt.bar_exp: HP_PER_MESO 2 HP a meso, at MESO_EXP 0.5), worked out at every look from her max HP as
+# perception reads it (behavior.grind's `_look`: Patrol.hp_price), this until it's read (and for a patrol with no
+# hunter): the simulator's her (sim.world.LEVEL_25), 774 HP, 387 mesos, 193.5 EXP. From 2026-10-31 ~16:00; before, 250
+# (3.1 Orange Potions at a guessed 160 mesos each), and until earlier that day 100, a guess of its own, at which the
+# loop and her stays priced her touches at the top of Tree Dungeon's tower at 0.07-0.15 bars a round where she lost 3
+# bars a minute on 10 (D:/MapleHelper-scratch/replan/pos).
+HP_PRICE = 193.5
 # A stop's place along its platform (stops_of) weighs the EXP it reaches against its danger there as the hunt loop
 # weighs a ground's (behavior.hunt.GROUND_DANGER: 1 - 2 x the danger, never under 0), from 2026-10-31: on Tree Dungeon
 # 7's stop moves from x -95 (1 unit off its Horny Mushroom's point at -94, danger 0.27) to -31 (0.22), 13's from -35 to
@@ -759,6 +761,7 @@ class Patrol:
         self.hp_seen: Counter = Counter()  # platform -> the share of her HP she has seen go there (learn_hp) ...
         self.hp_time: Counter = Counter()  # ... over this many s there
         self.hp_hook = 0.0                 # ... and what the danger hook said she'd lose meanwhile (hook_scale)
+        self.hp_price = HP_PRICE           # EXP a bar of her HP (behavior.grind sets it from her max HP as read)
         self._legs: dict[tuple[int, int], float | None] = {}
 
     def platform_of(self, i: int) -> int:
@@ -865,7 +868,7 @@ class Patrol:
             cycle = max(base + shoot, 1e-6)
             refill = b.others + back_share * full_n / cycle / weight
         exp, hp = back_share * full, back_share * full_hp
-        return Plan(loop, (exp - HP_PRICE * hp) / cycle, cycle, travel, shoot, exp, len(pts), hp)
+        return Plan(loop, (exp - self.hp_price * hp) / cycle, cycle, travel, shoot, exp, len(pts), hp)
 
     def camping(self, t: float | None = None) -> Plan | None:
         """The best round of one stop: standing there, each point's monster killed as it comes back (caught). Grinding
@@ -1001,10 +1004,10 @@ class Patrol:
         return None if on is None else detour_s(exp, self.kill_s, far, on, far_next)
 
     def net(self, j: int, exp: float) -> float:
-        """`exp` EXP shot at stop j less what touches there cost her meanwhile (HP_PRICE EXP a bar of her HP, at her
+        """`exp` EXP shot at stop j less what touches there cost her meanwhile (`hp_price` EXP a bar of her HP, at her
         kill time and the HP she loses there a second: hp_rate), as the loop's rate is (Plan.rate)."""
         s = self.stops[j]
-        return exp * (1.0 - HP_PRICE * self.kill_s * self.hp_rate(s.platform, s.x))
+        return exp * (1.0 - self.hp_price * self.kill_s * self.hp_rate(s.platform, s.x))
 
     def choose(self, t: float, here: int | None, x: float | None, current: int | None = None,
                skip: Iterable[int] = (), heading: int | None = None, peek: bool = False) -> tuple[int | None, dict]:
