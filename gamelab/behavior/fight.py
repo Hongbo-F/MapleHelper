@@ -642,7 +642,10 @@ def _moved(s: Scene, x: float) -> Scene:
 # recorded, so the later analysis would have seen only attacks picked for being sure. Now those too, over the whole of
 # the soonest's room (reach.JITTER_FIRST_MS later, never sooner), their plan not sure (JumpPlan.sure False: nothing
 # checked their keys; their 'jump' record says so, and analysis.jumps groups them apart). Their kind (the record's
-# `kind`): their plan's why where it has one ('tap first', 'up onto 22'), else UNSURE's. False: as before.
+# `kind`): their plan's why where it has one ('tap first', 'up onto 22'), else UNSURE's. On the harness standard's 96
+# seeds (D:/MapleHelper-scratch/replan/speed/fix/out/t_jall_96.txt) against them keyed as before: EXP a minute -4.7 (se
+# 4.8), loot -6.5 (4.2), touches that hurt +1.9 (1.1), her jump attacks +3.4 a run and those wasted +1.9 (0.8). False:
+# keyed as before, at the stance's own key, and recorded all the same (their room that key alone, no jitter).
 JITTER_ALL = True
 UNSURE = {"jump_throw": "unsure", "jump_back": "jump back"}  # the kind of a jump attack keyed as the stance's own
 
@@ -658,7 +661,8 @@ def jittered(h: "Hunter", act: tuple, s: Scene | None = None) -> tuple:
     sure by the stance's own check, its line clear); with JITTER_ALL and look `s`, any other jump attack (the stance
     keyed it at its own key: not sure up close, at a snail, a jump back, a jump up onto the platform above) over the
     soonest's whole room from the key her actions would press (attack_gap, turning in the air as they'd turn her), its
-    plan not sure (JumpPlan.sure False). Drawn from `h.jitter` (a random.Random: the system's live, seeded by the run's
+    plan not sure (JumpPlan.sure False); without JITTER_ALL, at that key, its plan's room the key alone (recorded, not
+    jittered: its keys as without a plan). Drawn from `h.jitter` (a random.Random: the system's live, seeded by the run's
     seed in the simulator, sim.scenarios.Sim.hunter, so a run is the same when run again), here as the attack is carried
     out, not in the search, which stays deterministic; as it was without one (`h.jitter` None: tests' hunters). Its path
     (FightState.aimed) was worked out at the stance's own key: the jitter moves her feet at most 7 units then."""
@@ -669,10 +673,10 @@ def jittered(h: "Hunter", act: tuple, s: Scene | None = None) -> tuple:
     if plan is not None and plan.keys is not None:
         lo, hi = plan.keys
         return (*act[:2], replace(plan, key_ms=rng.randint(lo, hi)), *act[3:])
-    if not JITTER_ALL or s is None or getattr(h.actions, "faces", None) is None:
+    if s is None or getattr(h.actions, "faces", None) is None:
         return act
     base = int(round(attack_gap(h.actions, act, _turn_key(h, s, act))))
-    room = (base, base + reach.JITTER_FIRST_MS)
+    room = (base, base + (reach.JITTER_FIRST_MS if JITTER_ALL else 0))
     plan = plan if plan is not None else JumpPlan(base, 0, True, UNSURE[act[0]])
     return (act[0], act[1], replace(plan, key_ms=rng.randint(*room), room=room, sure=False,
                                     why=plan.why or UNSURE[act[0]]), *act[3:])

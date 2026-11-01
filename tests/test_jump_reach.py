@@ -391,7 +391,8 @@ def test_every_jump_attack_is_jittered_and_recorded_those_keyed_unsure_over_the_
     is keyed over the soonest's whole room from the key her actions press (40 to 55; a jump back's turn 120 to 135, a
     jump throw turning in the air the same), its plan not sure; its 'jump' record says 'unsure' (or its plan's why), not
     sure, the jump's kind ('back' for a jump back, which turns her), the base and the jitter, and 'jump_keys' its press.
-    Without JITTER_ALL, or without the look, as before: the stance's key, no record."""
+    Without the look, as before: the stance's key, no record; without JITTER_ALL, the stance's key, recorded (its room
+    the key alone)."""
     import random
     from types import SimpleNamespace
     from collections import Counter
@@ -446,9 +447,10 @@ def test_every_jump_attack_is_jittered_and_recorded_those_keyed_unsure_over_the_
     assert fight.jittered(h, plain) is plain  # (no look: as before)
     assert plan_of(fight.jittered(h, plain, s)).room == (40, 55) and not plan_of(fight.jittered(h, plain, s)).sure
     monkeypatch.setattr(fight, "JITTER_ALL", False)
-    assert fight.jittered(h, plain, s) is plain
-    gap, jump, keys = thrown(plain, RIGHT)
-    assert gap == 40 and jump is None and keys is None
+    for act, facing, base, why, kind, turned in cases:
+        gap, jump, keys = thrown(act, facing)
+        assert gap == base and (jump["kind"], jump["jitter_ms"], jump["window"], jump["sure"]) == (
+            why, 0, [base, base], False) and keys["pressed_ms"] == base
 
 
 def test_a_jump_throw_up_close_keeps_its_jitter_to_keys_whose_line_is_clear(monkeypatch):
