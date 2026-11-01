@@ -2389,6 +2389,29 @@ master's seeds where both sides re-picked (`loop_tree_ore_waits` 6 where the bra
 where 3), both sides' notes in each docstring in the order written, master's last; all to be re-picked after the loot
 work. The harness's standard grind against 58dca1a, 12 seeds: `ab.txt` there.
 
+**Rebased a third time, onto master 5680edc (2026-10-31, ~19:40; this round's
+D:/MapleHelper-scratch/replan/loot/fix/rebase4, the tip before it kept as backup/replan-pre-rebase4-7580237).** Master's
+two since 58dca1a: the nearest safe platform from a rope, off it first (6a970fe, `Tour.nearest_safe`), and the
+simulator's monsters as the v83 client's AI moves them (5680edc: whole 90 ms AI steps, a chase keeping its way, a
+20-unit walk edge, the push after a hit, Tree Dungeon's Slimes jumping 33 -> 32 -> 31; every simulator number moves
+with it, master's too). The conflicts were seeds and notes alone: gamelab/sim/scenarios.py at five of the branch's
+commits and tests/test_heading.py's knock-turned frame at its review's re-picks, master's seeds where both sides
+re-picked (`loop_tree_ore_waits` 24, `loop_tree_attack_no_darts` 2, `nav_tree_landing_shot_first` 8, the knock-turned
+frame 72, its check the branch's: blind eyes send more stars the wrong way than the frame does), both sides' notes in
+the order written, master's last. sim/world.py merged clean and fits: the branch's live drops (`DropMix`,
+`drop_takers`' 'others_take' events) are made at a kill from the monster's platform as master's own drops are (a
+jumper's is the one it stands on, or jumped from in the air), and its splices' `withdraw_from` acts on her key events,
+which the monsters' AI doesn't touch. The end tree equals a three-way merge of 7580237 and 5680edc with these
+resolutions, file by file. On it (`rebase4/targeted_out.txt`, `suite_out.txt`, `ab_tip.txt`): the targeted tests
+(42 files, master's new tests/test_sim_mobs.py among them, passing) 1,138 passed, 7 failed; the fast suite 2,795
+passed, 9 failed, all seeds or set-ups the new monsters moved (test_heading's three knock and turn cases,
+`loop_tree_ore_waits`, `loop_tree_attack_misses_seen`, `nav_tree_rope_hit` and with it test_touches' MISS on a trip,
+`loop_tree_safety_stop`: stopped on the rope during the navigator's "up again" plan, whose last 'up' release isn't a
+retreat plan's) but test_perception's look at a capture (this worktree's lab, as before); left for the re-picks after
+the loot work. The harness's standard grind against 5680edc (12 seeds): EXP a minute 298.4 -> 287.4 (-3.7%, se 4.8%),
+loot's worth a minute 238.3 -> 210.4 (-11.7%, beyond 2 se), drops' share 0.956 -> 0.920, touches 67.4 -> 66.1, HP lost
+5.83 -> 5.70 bars, longest idle 19.8 -> 36.3 s (the way back's loop, fixed next).
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.
