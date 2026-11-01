@@ -666,7 +666,8 @@ def log_jump(h: "Hunter", s: Scene, act: tuple) -> int | None:
     throw_act), so a live run shows how often each fires (sim.harness counts them: attack_kinds' `chosen`) and what came
     of it (its kills: the ledger's; analysis.jumps). A jump throw up close (its plan's room, no shot: the stance's
     _from_here) too, from 2026-11-01: its why 'close' (or 'tap first'), a jump in place at the nearest monster on her
-    platform the way it throws (as the stance's), its turn in the air as her actions will make it, her rise as keyed;
+    platform the way it throws (its plan's `target`: the stance's, hidden under its damage numbers or not), its turn in
+    the air as her actions will make it, her rise as keyed;
     nothing in her log but that line. Returns `n` (None: no shot, no room)."""
     plan = plan_of(act)
     if plan is None or plan.keys is None:
@@ -697,7 +698,7 @@ def _log_close(h: "Hunter", s: Scene, act: tuple, plan) -> int | None:
         return None
     x, y, here = s.where.x, s.where.y, s.platform.id
     way = [m for m in s.monsters if m.platform == here and (m.x > x) == (act[1] == RIGHT)]
-    t = min(way, key=lambda m: abs(m.x - x)) if way else None
+    t = plan.target if plan.target is not None else min(way, key=lambda m: abs(m.x - x)) if way else None
     if hasattr(h, "jump_counts"):
         h.jump_counts[f"{plan.why}: up"] += 1
     n = getattr(h, "jumps_logged", 0) + 1

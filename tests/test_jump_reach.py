@@ -350,6 +350,7 @@ def test_a_jump_throw_up_close_is_jittered_over_the_keys_the_stance_finds_as_sur
             act = stance(400, 500, floor, [m], facing=facing)
             plan = plan_of(act)
             assert act[:2] == ("jump_throw", RIGHT) and plan.why == why and plan.key_ms == 40 and plan.shot is None
+            assert plan.target is m
             lo, hi = plan.room
             assert lo == 40 and hi == 45 and plan.keys == plan.room
             for k in range(lo, hi + 1, reach.KEY_CHECK_MS):  # (every key of it as sure as the key: a pig standing)

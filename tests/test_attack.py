@@ -19,10 +19,10 @@ from gamelab.perception.mobs import Mob
 
 
 def no_room(act: tuple) -> tuple:
-    """A stance's act with its jump throw's jitter room left out (attack.stance.JumpPlan.room, from 2026-11-01: a jump
-    throw up close's own), for comparing its plan as before."""
+    """A stance's act with its jump throw's jitter room and target left out (attack.stance.JumpPlan.room, target, from
+    2026-11-01: a jump throw up close's own), for comparing its plan as before."""
     plan = stance_mod.plan_of(act)
-    return act if plan is None else (*act[:2], stance_mod.replace(plan, room=None), *act[3:])
+    return act if plan is None else (*act[:2], stance_mod.replace(plan, room=None, target=None), *act[3:])
 
 PLAT = Platform(0, [Segment(0, 500, 1000, 500)])      # her platform
 BELOW = Platform(1, [Segment(1100, 560, 1600, 560)])  # 60 below, to the right
