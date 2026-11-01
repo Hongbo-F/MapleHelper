@@ -102,6 +102,16 @@ def test_the_splice_point_on_a_run_from_standing_is_where_the_chains_physics_has
     _, mid = nav._splice_point(r, 0.5)
     assert mid.v == pytest.approx(149.0) and mid.x == pytest.approx(
         100.0 + engine.run_x(0.5 - LAGS.on, 0.0, 1, SHOE)) and mid.x < 174.5 - 15
+    # A leg from a time whose press rounds up to the next whole ms (flow.ms: 0.4006 s, down at 401 ms): the arrow is
+    # looked for as of that ms (sp.t0 + 1e-4 missed it, and the span's x was taken: the review of 2026-11-01).
+    from gamelab.motion.flow import _ground, ms
+    for t0 in (0.4, 0.4003, 0.4006, 0.4009):
+        start = Body(t0, 100.0, a)
+        x1 = _ground(start, 1, t0 + 1.0)[0]
+        leg = Leg(Move("walk", 1, 1, 100.0, x1, "right"), start, Body(t0 + 1.0, x1, a, run=1),
+                  [Span(1, t0, t0 + 1.0, 100.0, x1)], [])
+        _, body = nav._splice_point(nv._Running("p", [leg], 100.0, False, arrows=((ms(t0), 1, True),)), t0 + 0.3)
+        assert body.x == pytest.approx(_ground(start, 1, t0 + 0.3)[0]) and body.run == 1
     monkeypatch.setattr(nv, "SPLICE_PHYSICS", False)
     assert nav._splice_point(r, 0.5)[1].x == pytest.approx(174.5)
 

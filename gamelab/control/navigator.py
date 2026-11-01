@@ -2829,8 +2829,10 @@ class Navigator:
                     # in the new plan: up the tower from 13 she ran off 11's end and out of the map, its review's
                     # fix of 2026-10-30)
                     b0 = leg.start
+                    # (the arrow as of its press's whole ms, as the plan's keys have it, flow.ms: a leg from 0.4006 s
+                    # has it down at 401 ms, which sp.t0 + 1e-4 missed; the review of 2026-11-01)
                     if SPLICE_PHYSICS and d and abs(sp.t0 - b0.t) < 1e-6 and abs(sp.x0 - b0.x) < 1e-6 \
-                            and _arrow_at(running.arrows, sp.t0 + 1e-4) == d:
+                            and _arrow_at(running.arrows, ms(sp.t0) / 1000) == d:
                         x, v = _ground(b0, d, t)  # (the leg's run from its start, its arrow held all along)
                         return t, Body(0.0, x, self.model.platform(sp.platform), d, v=v)
                     return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform), d, v=v if d else 0.0)
