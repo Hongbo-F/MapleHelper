@@ -57,6 +57,16 @@ def mon(x, platform=0, kind=GREEN, y=500.0, bar=None):
     return Monster(Mob(kind, 0, 0, 30, 30, 0.9), x, y, platform, bar=bar)
 
 
+def test_a_landing_and_a_meeting_are_priced_by_a_touch_at_the_users_prices():
+    """stance.TOUCH_EXP: the live Horny Mushroom's 112 HP in potions at the user's reference prices (behavior.hunt's
+    HP_PER_MESO, at MESO_EXP); MEET_PRICE_S a touch at her live 6.85 EXP a second but for the 30% she evades,
+    LANDING_PRICE_S the live landing's 5.7 EXP and 0.13 touches."""
+    from gamelab.behavior import hunt
+    assert st.TOUCH_EXP == 112.0 / hunt.HP_PER_MESO * hunt.MESO_EXP
+    assert st.MEET_PRICE_S == round(st.TOUCH_EXP / 6.85 * 0.7, 2)
+    assert st.LANDING_PRICE_S == round((5.7 + 0.13 * st.TOUCH_EXP) / 6.85, 2)
+
+
 def test_a_landing_is_priced_by_what_her_first_attack_there_surely_takes(tree_map):
     # Her first attack after landing at 500: where the nearest will be then. A Green standing 52 off (its body clear of
     # hers, 28 and 22): neither a throw from the ground (the claw would swipe it: its edge 105) nor a jump in place (sure
@@ -473,8 +483,8 @@ def test_the_monster_by_a_trips_last_landing_is_shot_first_walked_to_or_waited_o
     assert not got and ev == ["went"] and "(LAND_WAITS)" in records[0]["why"] and "(LAND_WAITS)" in logs[-1]
     got, _, esc, logs, ev = run(always)  # (standing on: nothing for it but to go)
     assert not got and ev == ["went"] and esc.calls == []
-    assert logs[-1] == (f"  landing on 24 by the green-mushroom anyway (price 1.2 s): its walk as seen doesn't clear "
-                        f"the landing within {nav_mod.WAIT_AHEAD:.1f} s")
+    assert logs[-1] == (f"  landing on 24 by the green-mushroom anyway (price {st.LANDING_PRICE_S:.1f} s): its walk as "
+                        f"seen doesn't clear the landing within {nav_mod.WAIT_AHEAD:.1f} s")
     assert records[0]["price"] == st.LANDING_PRICE_S and "nowhere" in records[0]["shot"]
     got, _, esc, _, ev = run(always, clear=1, shots=nav_mod.MAX_FIGHTS)  # (shot at MAX_FIGHTS times already)
     assert not got and esc.calls == [] and "(MAX_FIGHTS)" in records[0]["shot"]

@@ -267,10 +267,16 @@ FLINCH_HOLD_S = 0.9
 # don't account for (a respawn there lands on her: 55 of the 93 first clearing steps live ended within 50 of one), and
 # at most MAX_MOVES in a row without a throw.
 LANDING_SETTLE_S = STEP_SETTLE_S  # s from a landing to her first keys there: its slide, and the look after it
-LANDING_PRICE_S = 1.2  # s of hunting a landing with no attack sure to take the nearest monster costs: a prior from the live
-                       # numbers above (5.7 EXP at her 6.85 EXP a second, 0.83 s, and 0.13 touches at about 25 EXP each)
-MEET_PRICE_S = 2.5     # ... more where one walks into her before her first attack there: a touch (25 EXP, 3.6 s, but
-                       # for the 30% she evades)
+LANDING_PRICE_S = 1.36  # s of hunting a landing with no attack sure to take the nearest monster costs: a prior from the
+                        # live numbers above (5.7 EXP at her 6.85 EXP a second, 0.83 s, and 0.13 touches at TOUCH_EXP
+                        # each, 0.53 s)
+MEET_PRICE_S = 2.86     # ... more where one walks into her before her first attack there: a touch (TOUCH_EXP, 4.1 s,
+                        # but for the 30% she evades)
+# What a touch costs her in EXP: the live Horny Mushroom's 112 HP (her touches of 2026-10-25) in potions at the user's
+# reference prices (behavior.hunt: HP_PER_MESO 2 HP a meso, 56 mesos, at MESO_EXP 0.5), from 2026-10-31; until then
+# about 25, a guess (LANDING_PRICE_S 1.2, MEET_PRICE_S 2.5). Its numbers written here (this package doesn't read
+# behavior's): tests/test_landing.py pins them to hunt's prices.
+TOUCH_EXP = 28.0
 WALL_ROOM = HER_HALF + 3.0  # units a move away keeps from a wall end of her platform (a knock can't take her off it):
                             # her half width and the slack of her dot
 MAX_MOVES = 2          # guess: steps away in a row without a throw between (her decisions are made again at each look)
