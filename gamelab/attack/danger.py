@@ -178,8 +178,14 @@ class Danger:
 
     def taken(self, kind: str) -> float:
         """The share of her HP a touch by `kind` takes, whether it counts as a danger or not (a Slime's 1.2% on Tree
-        Dungeon, under DANGER_MIN), 0 if it isn't known: what she loses, for the HP her stops cost (behavior.grind)."""
-        return self.takes.get(kind, 0.0)
+        Dungeon, under DANGER_MIN): what she loses, for the HP her stops cost (behavior.grind) and her landings' prices
+        (behavior.fight.landing_prices). A kind the map's game data doesn't have (a track of no kind, '', which her
+        landings' judge takes for a 'pig') the map's hardest-touching kind's, as the navigator's stand-in for the
+        monster that touched her is (Navigator._toucher); 0 with none known. Until the review of 2026-11-01 0, so a
+        meeting with one was priced at nothing (no shot first, no wait at a trip's last landing), where stance's flat
+        MEET_PRICE_S had priced it."""
+        share = self.takes.get(kind)
+        return share if share is not None else max(self.takes.values(), default=0.0)
 
     def keep_off(self, kind: str) -> float:
         """How near a monster of `kind` on her platform she lets it come (middle to middle) before she moves away: where

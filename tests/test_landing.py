@@ -260,6 +260,27 @@ def test_a_trips_last_move_lands_where_her_first_attack_is_sure(tree_map):
     assert fight.FightOnTheWay(SimpleNamespace(danger=None, model=tree_map)).landings([green]) is None
 
 
+def test_a_meeting_with_a_monster_of_no_known_kind_is_priced_as_the_maps_hardest_touch(tree_map):
+    """The review of 2026-11-01: with her own prices (fight.landing_prices) a touch of a kind the map's game data
+    doesn't have (a track of no kind, '', which the judge takes for a 'pig') was priced 0 (Danger.taken), so a meeting
+    with one cost nothing: no shot first, no wait at a trip's last landing, where stance's flat MEET_PRICE_S had priced
+    it. It's the map's hardest-touching kind's now (the navigator's stand-in for the monster that touched her,
+    Navigator._toucher): the Horny Mushroom's on Tree Dungeon."""
+    d = danger_mod.of_map(tree_map, HER)
+    assert d.taken("") == d.taken("pig") == d.taken(HORNY) == max(d.takes.values()) > d.taken(GREEN) > 0
+    h = SimpleNamespace(danger=d, model=tree_map, max_hp=HER.hp, exp_rate=None,
+                        report=SimpleNamespace(touches=0, misses=0))
+    p = fight.landing_prices(h, d)
+    assert p.meet_s("") == p.meet_s(HORNY) > 0.5 * st.MEET_PRICE_S
+    # 25 up onto 24 (the test before's way), one of no kind standing where it lands her: the meeting priced.
+    path = [m for m in Planner(tree_map).moves if (m.kind, m.src, m.dst) == ("jump_up", 25, 24)]
+    legs, _, _ = Flow(tree_map, KEYS).chain(path, Body(0.0, 140.0, tree_map.platform(25)), [])
+    x = legs[-1].end.x
+    nobody = MonsterTrack(24, x, speed=0.0, half=28.0, vx=0.0, height=56.0, kind="", top=56.0)
+    price, by = fight.FightOnTheWay(h).landings([nobody])(legs[-1])
+    assert by is nobody and price == pytest.approx(p.landing_s(HORNY) + p.meet_s(HORNY))
+
+
 def test_grind_stops_stand_clear_of_their_platforms_spawn_points(tree_map, monkeypatch):
     kinds, exp = {GREEN, HORNY}, {GREEN: 26.0, HORNY: 41.0}
     points = patrol.points_of(tree_map, kinds, exp)
