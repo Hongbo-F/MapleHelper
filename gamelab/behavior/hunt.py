@@ -25,11 +25,12 @@ in the order listed, 6 before 3):
                        and not killed (fight.owed), when a throw from here or a walk of fight.FINISH_WALK at
                        most along her platform gets to them (fight.finish_act), FINISH_S at most per
                        objective; she used to leave monsters half hunted
-   S  sweep            the loot sweep (behavior.sweep, from 2026-10-30): travelling, the piles worth their time on
-                       her way to where she's going; at a ground with nothing in reach, those worth a round trip
-                       from her spot; leaving it, before she goes, those worth their time on her way to the next
-                       (`_sweep`, `_sweep_act`: a guard shot first, the trip to a pile, its stand, its drops' landing
-                       waited for)
+   S  sweep            the loot sweep (behavior.sweep, from 2026-10-30): travelling, the piles within what each may
+                       add to her way to where she's going (`_allow`: by its age, and the danger there, from
+                       2026-11-01); at a ground with nothing in reach, those within it of a round trip from her
+                       spot; leaving it, before she goes, those within it of her way to the next (`_sweep`,
+                       `_sweep_act`: a guard shot first, the trip to a pile, its stand, its drops' landing waited
+                       for); a fresh pile of hers by her left to her pets a moment (`_pets_first`)
    7  better spot      wanted monsters seen out of reach, and a spot that reaches clearly more of them
    9  wait             monsters about or due back: stand still, for the patience at most, where she is or at the
                        safest place along her platform that still has the ground's spawn points in reach
@@ -44,11 +45,14 @@ D:/MapleHelper-scratch/replan/loot) she picked up 199 mesos' worth a minute of t
 user's own play 306 of 437), and lost 100 a minute: 47% of that waiting on PILE_CLEAR (12-28% of those waits for the
 pile's own dying monster), 28% known and never gone for, 15% yielded to something in reach; 48% of it lay within 2 s of
 her way while it lasted, and half her departures from a stop came within 3 s of a kill of hers, before its drops landed.
-The sweep takes all of those as one choice, priced in her time (the loop's rate), within a budget of her way's time.
+The sweep takes all of those as one choice, until 2026-11-01 priced in her time (the loop's rate, a meso MESO_EXP), within
+a budget of her way's time; from then each pile within the seconds it may add to her way (`_allow`: ALLOW_FRESH soon after
+its kill, ALLOW_OLD once it's old or more dangerous than where she stands), the most mesos within those.
 
 EXP before loot (`_loot_first`; the user, 2026-10-24: "The hunt should be driven by maximizing the exp gain"): no pile
-goes ahead of shooting what's in reach by a fixed priority. The sweep comes after the shooting rules, and prices her time
-at the more of the loop's rate and what's in reach would give (`_time_worth`). A valuable one (6a) that will still be
+goes ahead of shooting what's in reach by a fixed priority. The sweep comes after the shooting rules (until 2026-11-01
+pricing her time at the more of the loop's rate and what's in reach would give: `_time_worth`). A valuable one (6a) that
+will still be
 there when she has killed what's in reach waits; one at risk by then (`_at_risk`: its survival over the wait, another
 player by it once it's no longer hers alone) goes first only if what waiting would likely lose of it, at MESO_EXP an
 meso, is more than the EXP she'd make from what's in reach (Attacks.kill_s) over the trip there and back. A trip for a
@@ -92,7 +96,7 @@ comment says what it did show; how long drops lie is ledger.SURVIVAL, the live s
 import random
 import time
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from maplehelper.engine import LEFT, RIGHT
 
@@ -237,13 +241,13 @@ UNSEEN_ATTACK = True
 # 66.8, its ores but Bronze and the Magic Potion; on West Rocky Mountain II 51.8, its Opal, Orihalcon, Silver, Emerald
 # and Adamantium Ores and a gold coin).
 VALUABLE = 30.0
-# EXP before loot (`_loot_first`) and the sweep's price of her time: what a meso of drops is worth to her in EXP. A
-# guess putting EXP first, the user's to choose (the loot design: "the user is short on mesos: a reason to consider
-# 1.0"): at it a valuable ore on Tree Dungeon (looting.Worth.valuable 66.8) is worth 33 EXP, under a Horny Mushroom's
-# kill (41), and an at-risk pile 4 s there and back goes first when what's in reach makes her under 8 EXP a second (the
-# regular attack's 3.7 at a Horny Mushroom; Lucky Seven's 12.5 doesn't let it). The sweep's break-even is worth a second
-# of her way at rate / MESO_EXP: at 0.5 and the live thief's 6.9 EXP a second, 13.9 mesos (about 2 s for the drops she
-# lost live, sweep.BUDGET_MIN); at 1.0, 6.9 (about 3 s).
+# EXP before loot (`_loot_first`) and a bar of her HP's price (`bar_exp`): what a meso is worth to her in EXP. A guess
+# putting EXP first, the user's to choose (the loot design: "the user is short on mesos: a reason to consider 1.0"): at
+# it a valuable ore on Tree Dungeon (looting.Worth.valuable 66.8) is worth 33 EXP, under a Horny Mushroom's kill (41),
+# and an at-risk pile 4 s there and back goes first when what's in reach makes her under 8 EXP a second (the regular
+# attack's 3.7 at a Horny Mushroom; Lucky Seven's 12.5 doesn't let it). Until 2026-11-01 the sweep's price of her time
+# too (its break-even a second of her way at rate / MESO_EXP: at the live thief's 6.9 EXP a second, 13.9 mesos); from
+# then its piles go by the seconds each may add to her way (`_allow`), not by an exchange the user wasn't sure of.
 MESO_EXP = 0.5
 # What her potions cost, by what they give: the user's reference prices of 2026-10-31 ("2HP/mesos and 1MP/mesos, use
 # these as reference price. We may be well losing money by grinding, which is fine"), HP_PER_MESO HP and MP_PER_MESO MP
@@ -316,6 +320,25 @@ PET_LOOT = True
 PET_NEAR = 100.0
 PET_WAIT = 4.0
 PET_KEEP = 64  # (piles whose time by her is kept before the gone ones are dropped)
+# What a pile may add to her way (`_allow`: the sweep's allowance of it, sweep.Spot.allow; an itinerary within the sum of
+# its piles'), from 2026-11-01, in seconds rather than at MESO_EXP an meso against her time (the user: "I imagine piles
+# should be picked up soon after killing. If a pile is about to expire, it probably means they aren't important enough
+# to get picked up anyway. I think a real human would bias route planning to pick up piles"; "I'm not sure about this
+# currency conversion. My idea is just picking up mesos and items as we kill mobs"): ALLOW_FRESH while it's FRESH_S old
+# or younger (from its kill, or its first sighting), down to ALLOW_OLD at OLD_S and ALLOW_OLD after (on her way only: no
+# late trips for old far piles, nothing for their expiry), and ALLOW_OLD at the most where the danger at it (attack.
+# danger, with the look's monsters) is SAFER_MARGIN over where she stands ("try not to hit by mobs just for picking up
+# loots": grind.BACK_MARGIN's, a third of a Horny Mushroom's touch on Tree Dungeon; the HP price of PILE_HP's place).
+# Guesses: in the user's own play (the golden clip, 26 drops) her drops went a median 3.7 s after the kill, p90 18.9 s,
+# the bot's live a median 6.0 and p90 55.9; its live detours for them a median 0.81 s, p90 1.83 s. In the design's
+# prototypes (D:/MapleHelper-scratch/replan/loot2/design: 15-minute grinds with Meat and her pets, 24 seeds) ALLOW_FRESH
+# 2 s cost loot (-25 a minute at 5 minutes, se 14.5), OLD_S 30 s and ALLOW_OLD 0.5 picked up less on 24 seeds, and
+# without SAFER_MARGIN the rules cost EXP (-9.6 a minute, se 6.6).
+ALLOW_FRESH = 3.0
+FRESH_S = OWN_S
+OLD_S = 60.0
+ALLOW_OLD = 1.0
+SAFER_MARGIN = 0.05
 
 
 def bar_exp(max_hp: float) -> float:
@@ -1172,34 +1195,35 @@ class Hunt:
         bunches = len(_piles(list(p.xs))) if p.xs else 1
         return (n + bunches) * PILE_EVERY_MS / 1000 + (hi - lo) / WALK_SPEED
 
-    def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float, float | None]:
-        """The sweep's terms on her way to `dest` as of look `s`: what her time is worth (`_time_worth`) and its budget
-        (None: sweep.budget_for's). In a lull at the ground she's at (a round trip back to its spot, nothing wanted left
-        on it, `_nothing_here`, and a kill of hers there due back, `_due_back`), her time is worth nothing until the
-        respawn and the budget is that wait (rule 8's, lull loot, until 2026-10-30: in the simulator's loop_lull_loot,
-        with a 2 s budget for her round trips from 13 to 12's drops, she picked up 5 piles in 3 minutes where 20)."""
+    def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float | None, float]:
+        """The sweep's terms on her way to `dest` as of look `s`: a budget for its whole itinerary (None: its piles'
+        allowances alone, `_allow`) and the least any pile may add to her way (0: its own allowance). In a lull at the
+        ground she's at (a round trip back to its spot, nothing wanted left on it, `_nothing_here`, and a kill of hers
+        there due back, `_due_back`), her time is worth nothing until the respawn: that wait, as both (rule 8's, lull
+        loot, until 2026-10-30: in the simulator's loop_lull_loot, with a 2 s budget for her round trips from 13 to 12's
+        drops, she picked up 5 piles in 3 minutes where 20). Leaving it, what's left of her way out's allowance
+        (DEPART_BUDGETS). Until 2026-11-01 her time's worth too (`_time_worth`: the loop's rate, or what's in reach)."""
         v = self.visit
         if dest is not None and v is not None and v.arrived is not None and dest == self._home() \
                 and self._nothing_here(s) \
                 and (due := self._due_back()) is not None and due > 0.0 and self._shoot_rate(s, list(s.monsters))[0] <= 0:
-            return 0.0, max(sweep.BUDGET_MIN, due)
+            return max(sweep.BUDGET_MIN, due), due
         depart = getattr(self, "_depart", None)
         if depart is not None and getattr(self, "_exit_reason", None) is not None and s.platform is not None:
             # (leaving: what's left of her way out's allowance, less the straight way on from here: DEPART_BUDGETS)
             direct = (self._arrive(s.platform.id, s.where.x, *dest) or 0.0) if dest is not None else 0.0
-            return self._time_worth(s, dest), max(0.0, depart[1] - (time.monotonic() - depart[0]) - direct)
-        return self._time_worth(s, dest), None
+            return max(0.0, depart[1] - (time.monotonic() - depart[0]) - direct), 0.0
+        return None, 0.0
 
-    def _time_worth(self, s: Scene, dest: tuple[int, float] | None = None) -> float:
-        """What her time is worth now, EXP a second, on her way to `dest` (the sweep's price of it: the marginal value
-        theorem's bar, as at a stop): what she makes at this ground (`_rate_here`), on her way to one what the best gives
-        (`_best_rate`), or, more, what's in reach now (`_shoot_rate`: EXP before loot)."""
-        v, rate = self.visit, 0.0
-        if v is not None and v.arrived is not None:
-            rate = self._rate_here()
-        elif s.platform is not None and (best := self._best_rate(s)) is not None:
-            rate = best[0]
-        return max(rate, self._shoot_rate(s, list(s.monsters))[0])
+    def _allow(self, p: Pile, now: float) -> float:
+        """The s pile `p` may add to her way (sweep.Spot.allow) by its age (from its kill, or its first sighting):
+        ALLOW_FRESH to FRESH_S, ALLOW_OLD from OLD_S, straight between."""
+        age = now - p.since
+        if age <= FRESH_S:
+            return ALLOW_FRESH
+        if age >= OLD_S:
+            return ALLOW_OLD
+        return ALLOW_FRESH + (ALLOW_OLD - ALLOW_FRESH) * (age - FRESH_S) / (OLD_S - FRESH_S)
 
     def _dest(self, o: "Objective | None") -> tuple[int, float] | None:
         """Where objective `o` takes her (platform, map x), the sweep's way on; None: none."""
@@ -1226,11 +1250,11 @@ class Hunt:
 
     def _sweep(self, s: Scene, dest: tuple[int, float] | None, say: bool = True) -> "sweep.Stop | None":
         """The loot sweep's next stop from look `s` on her way to `dest` (platform, x; None: nowhere after it), or None:
-        of the drop store's candidates as pick spots (`_spots`: their worth, stands, landings, survival and guards), by
-        her route times (`_arrive`), her time worth `_time_worth` for that way and its budget (`_sweep_terms`: in a lull,
-        the wait for the respawn; behavior.sweep: the itinerary she's on kept unless another is clearly better,
-        sweep.Sweeper). Solved once a look for each `dest`; the itinerary said
-        and recorded (a 'sweep' record) when it changes (`say`)."""
+        of the drop store's candidates as pick spots (`_spots`: their worth, stands, landings, survival, guards and
+        allowances), by her route times (`_arrive`), within the way's terms (`_sweep_terms`: in a lull, the wait for the
+        respawn; leaving, her way out's budget; behavior.sweep: the itinerary she's on kept unless another is clearly
+        better, sweep.Sweeper). Solved once a look for each `dest`; the itinerary said and recorded (a 'sweep' record)
+        when it changes (`say`)."""
         if s.where is None or s.platform is None:
             return None
         key = (s, dest)  # (the look itself, not its id: one gone, another may take its id, and a solve for it be
@@ -1241,13 +1265,14 @@ class Hunt:
         if not hasattr(self, "_sweeper"):  # (tests make a hunt without __init__)
             self._sweeper, self._pile_of, self._stood, self._sweep_said = sweep.Sweeper(), {}, {}, None
         spots_, out = self._spots(s)
-        self._spots_at = (getattr(s, "t", None), spots_)  # (the grind's choice of its next stop counts their worth)
-        if not spots_:  # (nothing to pick up: no itinerary, nor her time's price worked out)
+        if not spots_:  # (nothing to pick up: no itinerary, nor its terms worked out)
             self._sweeper.drop()
             self._swept_for, self._swept = key, None
             return None
-        rate, budget = self._sweep_terms(s, dest)
-        it = self._sweeper.solve(spots_, (s.platform.id, s.where.x), dest, rate, self._arrive, MESO_EXP, budget)
+        budget, floor = self._sweep_terms(s, dest)
+        if floor > 0.0:  # (a lull's: every pile may take its wait)
+            spots_ = [replace(sp, allow=max(sp.allow, floor)) for sp in spots_]
+        it = self._sweeper.solve(spots_, (s.platform.id, s.where.x), dest, self._arrive, budget)
         it.out.update(out)
         self._swept_for, self._swept = key, it.first
         said = (it.keys(), dest)
@@ -1257,7 +1282,7 @@ class Hunt:
                 self.log("  sweep: " + ", then ".join(
                     f"{_contents(self._pile_of[st.spot.key])} on {st.spot.platform} at x {st.spot.x:.0f}"
                     + (f" (a {', '.join(g.monster.kind for g in st.spot.guards)} shot first)" if st.spot.guards else "")
-                    for st in it.stops) + f": {it.extra:+.1f} s on her way for {it.gain:.0f} EXP's worth")
+                    for st in it.stops) + f": {it.extra:+.1f} s on her way for {it.value:.0f} mesos' worth")
             if telemetry.recording():
                 telemetry.emit("sweep", dest=None if dest is None else [dest[0], round(dest[1])],
                                candidates=len(spots_), **it.record())
@@ -1322,10 +1347,16 @@ class Hunt:
         """The drop store's candidates (`_candidate`) as the sweep's pick spots as of look `s`, and why each pile left
         out was (by its key): each where its drops lie (`_extent`, its middle), its worth (Pile.value), its stand
         (`_stand_s`), s until its drops land (an expected pile's: DROP_LANDS after the kill), its survival from now
-        (Pile.still) and what's to be shot first (`_guards`, by when she'd be there going now: `_travel_to_pile`)."""
+        (Pile.still), what's to be shot first (`_guards`, by when she'd be there going now: `_travel_to_pile`) and the s
+        it may add to her way (`_allow`; ALLOW_OLD at most where the danger there is SAFER_MARGIN over where she
+        stands: attack.danger with the look's monsters)."""
         now = time.monotonic()
         out, found = {}, []
         self._pile_of = {}
+        d = getattr(self.h, "danger", None)  # (tests make a hunter without one)
+        here = None
+        if d is not None and d.any and s.platform is not None and s.where is not None:
+            here = d.at(s.platform.id, s.where.x, s.monsters)
         for p in self.h.drops.known:
             if not self._candidate(p):
                 continue
@@ -1343,8 +1374,11 @@ class Hunt:
                 out[p.key] = "unsafe: " + why
                 continue
             self._pile_of[p.key] = p
+            allow = self._allow(p, now)
+            if here is not None and d.at(p.platform, (lo + hi) / 2, s.monsters) > here + SAFER_MARGIN:
+                allow = min(allow, ALLOW_OLD)  # (more dangerous there than where she is: on her way only)
             found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, self._worth(p), stand, lands,
-                                    (lambda dt, p=p: p.still(now, dt)), guards))
+                                    (lambda dt, p=p: p.still(now, dt)), guards, allow))
         return found, out
 
     def _about(self, s: Scene, pid: int, xs: tuple[float, ...] = ()) -> tuple[list[Monster], list[Monster]]:

@@ -124,12 +124,10 @@ def test_the_next_stop_goes_round_the_loop_and_skips_what_she_has_just_emptied()
     assert info["skipped"][0]["due"] == pytest.approx(1.5 + patrol.refill_median() - 2.0, abs=0.1)
 
 
-def test_her_drops_by_a_stop_count_in_what_it_gives_next(monkeypatch):
-    """grind.DROPS_IN_CHOICE (2026-10-31: "we shouldn't let loot expire"; off by default, measured): the stop she'd
-    skip as just emptied isn't, with her drops by it worth more than SKIP_FULL of what it holds full (Patrol.choose's
-    `bonus`, said in the choice: info["drops"]); switched on, the grind's bonus is the loot sweep's round trip from the
-    stop's place over the latest solve's spots (60 mesos lying there: 30 EXP at MESO_EXP less her stand at the loop's
-    rate), nothing for one over its budget (and no bonus at all without spots)."""
+def test_her_drops_by_a_stop_count_in_what_it_gives_next():
+    """Patrol.choose's `bonus` (2026-10-31: "we shouldn't let loot expire"): the stop she'd skip as just emptied isn't,
+    with her drops by it worth more than SKIP_FULL of what it holds full, said in the choice (info["drops"]). The grind
+    gives none since 2026-11-01 (its DROPS_IN_CHOICE, off and measured worse, priced them at MESO_EXP an meso)."""
     model, ids, far, p = _column()
     p.belief.update(0.0, Memory(model))
     p.replan(0.0)
@@ -143,22 +141,7 @@ def test_her_drops_by_a_stop_count_in_what_it_gives_next(monkeypatch):
     j, info = p.choose(2.0, p.platform_of(nxt), 150.0, current=nxt, peek=True,
                        bonus=lambda k: 25.0 if k == after else 0.0)
     assert j == after and info["drops"] == 25.0 and "25 of it her drops" in grind.choice_text(info)
-    # The grind's bonus: the sweep's round trip from each stop's place over the latest solve's spots.
-    from gamelab.behavior import sweep
-    assert not grind.DROPS_IN_CHOICE
-    monkeypatch.setattr(grind, "DROPS_IN_CHOICE", True)
-    from gamelab.behavior.hunt import MESO_EXP
-    g = object.__new__(Grind)
-    g.patrol = p
-    st = p.stops[after]
-    g._arrive = lambda a, ax, b, bx: abs(bx - ax) / 149.0 if a == b else 30.0
-    g._spots_at = (2.0, [sweep.Spot("coins", st.platform, st.x + 10.0, 60.0, 0.4)])
-    s = SimpleNamespace(t=2.5)
-    bonus = g._drops_bonus(s)
-    gain = 60.0 * MESO_EXP - p.plan.rate * (0.4 + 2 * 10.0 / 149.0)
-    assert bonus(after) == pytest.approx(gain) and bonus(p.stop_on(far)) == 0.0
-    g._spots_at = (2.0, [])
-    assert g._drops_bonus(s) is None
+    assert not hasattr(grind, "DROPS_IN_CHOICE") and not hasattr(Grind, "_drops_bonus")
 
 
 def _beside(off: float):
@@ -1296,18 +1279,18 @@ def test_leaving_a_stop_the_sweep_has_her_drops_on_her_way_to_the_next_stop_firs
     assert asked == [(p.stops[j].platform, p.stops[j].x)] and acted == ["a stop"]
 
 
-def test_her_time_is_worth_what_staying_gives_on_a_round_trip_from_the_stop_and_the_loops_rate_on_her_way():
-    """The sweep's price of her time (`_time_worth`): at the stop, a round trip back to its place costs what staying
-    there gives (`_stay_gain`); on her way anywhere else, the loop's rate (Plan.rate: going on)."""
+def test_the_grinds_sweep_has_its_piles_allowances_alone():
+    """The grind's sweep terms (`_sweep_terms`, from 2026-11-01): no budget and no floor, each pile within what it
+    may add to her way (Hunt._allow), at a stop or on her way, whatever staying there or the loop gives; until then her
+    time's worth (`_time_worth`: what staying gives on a round trip from the stop, else the loop's rate) and PILE_HP's
+    price of the HP her detours cost."""
     from gamelab.attack.spots import Spot
     model, ids, far, p = _column()
     p.replan(0.0, force=True)
     g, s = _at_stop(model, p, ids[0], 150.0, [_sight(model, HORNY, 250, 0)], 1.0)
     g.visit.spot = Spot(ids[0], 150.0, 1.0, True)
-    g._shoot_rate = lambda s, monsters: (0.0, 0.0)
-    stay = g._stay_gain(s, g._held(s))
-    assert g._time_worth(s, (ids[0], 150.0)) == pytest.approx(stay) and stay > p.plan.rate
-    assert g._time_worth(s, (ids[1], 150.0)) == pytest.approx(p.plan.rate)
+    assert g._sweep_terms(s, (ids[0], 150.0)) == g._sweep_terms(s, (ids[1], 150.0)) == (None, 0.0)
+    assert not hasattr(grind, "PILE_HP") and not hasattr(Grind, "_time_worth") and not hasattr(Grind, "pile_hp_rate")
 
 
 def test_got_to_a_stop_and_left_somewhere_worse_she_goes_back_to_it_before_she_shoots_from_there(monkeypatch):
@@ -1411,45 +1394,6 @@ def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_
         assert g._stay_gain(s, [m]) == pytest.approx(gain)
     finally:
         grind.STAY_NET = True
-
-
-def test_her_detours_for_drops_are_priced_by_the_hp_they_cost_her_too():
-    """grind.PILE_HP (the review of 2026-10-31, the user's "try not to hit by mobs just for picking up loots"): the
-    touches that took HP while she was after a pile (an objective that's a pile, as of the look before) are learned as
-    bars a second (pile_hp_rate, PILE_HP_PRIOR_S of none to start from), and the sweep's seconds are dearer than her
-    time's worth by Patrol.hp_price times that; touches while she was after a spot aren't counted; off, her time
-    alone."""
-    from gamelab.attack.danger import Danger
-    from gamelab.attack.spots import Spot
-    from gamelab.behavior.hunt import Visit
-    from test_danger import HER, build
-    model = build([(0, 0, 300, 0), (0, -200, 300, -200)], [("19", 150, 0), ("19", 150, -200), ("13", 50, -200)])
-    pid = _pid(model, 150, 0)
-    p = _patrol(model, lambda a, b: 2.0)
-    g = _grind(model, {HORNY})
-    g.patrol, g.stop = p, p.stop_on(pid)
-    g.h.danger, g.h.report, g._hp = Danger(model, HER), SimpleNamespace(touches=0, misses=0), None
-    g.visit = Visit(pid, Spot(pid, 150.0, 1.0, False), arrived=time.monotonic())
-    look = lambda t: SimpleNamespace(platform=model.platform(pid), where=SimpleNamespace(x=150.0), hp=0.9, t=t,
-                                     monsters=[])
-    g.obj = SimpleNamespace(kind="spot")
-    g._learn_hp(look(10.0))
-    g.h.report.touches = 1  # (after a spot: not the pile's)
-    g._learn_hp(look(12.0))
-    assert g.pile_hp_rate() == 0.0
-    g.obj = SimpleNamespace(kind="pile")
-    g._learn_hp(look(13.0))
-    g.h.report.touches = 3  # (two that took HP after a pile, nobody by her: the hardest-hitting kind's)
-    g._learn_hp(look(18.0))
-    share = g.danger.taken(HORNY)
-    assert g.pile_hp_rate() == pytest.approx(2 * share / (5.0 + grind.PILE_HP_PRIOR_S))
-    g._time_worth = lambda s, dest=None: 4.0
-    assert g._sweep_terms(look(18.0), None) == (pytest.approx(4.0 + p.hp_price * g.pile_hp_rate()), None)
-    grind.PILE_HP = False
-    try:
-        assert g._sweep_terms(look(18.0), None) == (4.0, None)
-    finally:
-        grind.PILE_HP = True
 
 
 def test_a_bar_of_her_hp_is_priced_by_her_max_hp_as_read_at_the_users_prices():

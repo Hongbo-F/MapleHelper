@@ -620,16 +620,14 @@ def test_a_pile_of_hers_by_her_is_left_to_her_pets_for_a_moment(monkeypatch):
     assert h._candidate(fresh) and h._candidate(landing)
 
 
-def _line_hunt(piles, rate=4.0):
-    """_hunt with the sweep's reads: route times on a line of platforms (a walk, and 1.5 s a platform between), her time
-    worth `rate` EXP a second."""
+def _line_hunt(piles):
+    """_hunt with the sweep's reads: route times on a line of platforms (a walk, and 1.5 s a platform between)."""
     h = _hunt(piles)
 
     def arrive(src, x, dst, dst_x=None, keep_off=()):
         return abs((dst_x if dst_x is not None else x) - x) / 149.0 + 1.5 * abs(dst - src)
     h.nav.planner.arrive = arrive
     h.nav.planner.travel = lambda src, x, dst, keep_off=(): 1.5 * abs(dst - src)
-    h._time_worth = lambda s, dest=None: rate
     h.log, h.said = (lambda line: h.said.append(line)), []
     h.model = None
     return h
@@ -640,28 +638,36 @@ def _on_line(pid, x):
                            t=time.monotonic(), players=[])
 
 
-def test_the_sweep_takes_a_pile_on_her_way_when_it_pays_for_its_time():
-    """From x 0 on platform 1 to x 600 on 3, coins on 2 at x 300 (on her way: 0.6 s more for its stand) worth a bronze
-    coin's 33.4 at MESO_EXP 0.5 (16.7 EXP): taken at 4 EXP a second, not at 80; and said."""
+def test_the_sweep_takes_a_pile_within_what_it_may_add_to_her_way():
+    """From x 0 on platform 1 to x 600 on 3, coins on 2 at x 300 (on her way: 0.24 s more for its stand): taken fresh
+    and old (on her way: ALLOW_OLD), and said; coins 150 behind her on 1 (2.0 s there and back, and the stand) taken
+    fresh (ALLOW_FRESH 3 s), not 70 s old (ALLOW_OLD 1 s: no late trips for old far piles), whatever her time's
+    worth (the user, 2026-11-01: "piles should be picked up soon after killing")."""
     coins = _pile(5, platform=2, items=("mesos",), worth=33.4, xs=(300.0,), status="seen")
     coins.x, coins.last_seen = 300.0, time.monotonic()
     h = _line_hunt([coins])
     stop = h._sweep(_on_line(1, 0.0), (3, 600.0))
     assert stop is not None and h._pile_of[stop.spot.key] is coins and stop.spot.stand == pytest.approx(0.24)
-    assert h.said[-1].startswith("  sweep: mesos on 2 at x 300: ")
-    assert _line_hunt([coins], rate=80.0)._sweep(_on_line(1, 0.0), (3, 600.0)) is None
+    assert stop.spot.allow == hunt.ALLOW_FRESH and h.said[-1].startswith("  sweep: mesos on 2 at x 300: ")
+    coins.since -= 70.0
+    assert _line_hunt([coins])._sweep(_on_line(1, 0.0), (3, 600.0)).spot.allow == hunt.ALLOW_OLD
+    behind = _pile(5, platform=1, items=("mesos",), worth=33.4, xs=(-150.0,), status="seen")
+    behind.x, behind.last_seen = -150.0, time.monotonic()
+    assert _line_hunt([behind])._sweep(_on_line(1, 0.0), (1, 0.0)) is not None
+    behind.since -= 70.0
+    assert _line_hunt([behind])._sweep(_on_line(1, 0.0), (1, 0.0)) is None
 
 
-def test_the_sweep_waits_for_a_kills_drops_to_land_only_where_that_pays():
+def test_the_sweep_waits_for_a_kills_drops_to_land_within_what_the_pile_may_add_to_her_way(monkeypatch):
     """By her kill of a Horny Mushroom (its pile expected: looting.expected_worth's 23.5 on Tree Dungeon's worth), its
-    drops 1.0 s from landing (DROP_LANDS after the kill), 1.8 s in all with its stand and back: she waits for them at 2
-    EXP a second, not at 10."""
+    drops 1.0 s from landing (DROP_LANDS after the kill), about 1.7 s in all with its stand and back: she waits for them
+    within a fresh pile's ALLOW_FRESH, not within 1.5 s."""
     kill = _pile(DROP_LANDS - 1.0, platform=1)
     kill.x, kill.unseen = 20.0, 23.5
-    h = _line_hunt([kill], rate=2.0)
-    stop = h._sweep(_on_line(1, 0.0), (1, 0.0))
+    stop = _line_hunt([kill])._sweep(_on_line(1, 0.0), (1, 0.0))
     assert stop is not None and stop.spot.lands == pytest.approx(1.0, abs=0.05)
-    assert _line_hunt([kill], rate=10.0)._sweep(_on_line(1, 0.0), (1, 0.0)) is None
+    monkeypatch.setattr(hunt, "ALLOW_FRESH", 1.5)
+    assert _line_hunt([kill])._sweep(_on_line(1, 0.0), (1, 0.0)) is None
 
 
 def _walker(kind, pid, x, facing, model, pose="move"):
@@ -889,9 +895,35 @@ def test_leaving_a_ground_the_sweep_has_its_budgets_over_the_whole_way_out():
     h._exit_reason = "nothing came into reach"
     decided = time.monotonic() - 3.0  # (she decided 3 s ago, her way out then 1.5 s straight: 1.5 + 2 x 2.0 = 5.5 s)
     h._depart = (decided, 1.5 + hunt.DEPART_BUDGETS * sweep.budget_for(1.5))
-    rate, budget = h._sweep_terms(s, (2, 0.0))  # (1.5 s straight on from here)
-    assert budget == pytest.approx(5.5 - 3.0 - 1.5, abs=0.05)
+    budget, floor = h._sweep_terms(s, (2, 0.0))  # (1.5 s straight on from here)
+    assert budget == pytest.approx(5.5 - 3.0 - 1.5, abs=0.05) and floor == 0.0
     h._depart = (decided - 10.0, h._depart[1])
-    assert h._sweep_terms(s, (2, 0.0))[1] == 0.0
-    h._exit_reason = None  # (not leaving: the sweep's own budget)
-    assert h._sweep_terms(s, (2, 0.0))[1] is None
+    assert h._sweep_terms(s, (2, 0.0))[0] == 0.0
+    h._exit_reason = None  # (not leaving: its piles' allowances alone)
+    assert h._sweep_terms(s, (2, 0.0)) == (None, 0.0)
+
+
+def test_a_pile_may_add_to_her_way_by_its_age_and_less_where_it_is_more_dangerous():
+    """`_allow` (the user, 2026-11-01: "piles should be picked up soon after killing. If a pile is about to expire, it
+    probably means they aren't important enough to get picked up anyway"): ALLOW_FRESH to FRESH_S, ALLOW_OLD from OLD_S,
+    straight between; and ALLOW_OLD at most for a pile where the danger is SAFER_MARGIN over where she stands ("try not
+    to hit by mobs just for picking up loots"): on Tree Dungeon's made-up 23 and 24, fresh drops by the Horny Mushroom's
+    spawn point on the ground, she on her spot beside it, against drops on her spot's platform. A bar of her HP is still
+    its potions' mesos at MESO_EXP (bar_exp: the HP price of her touches, not of loot)."""
+    h = _hunt([])
+    now = time.monotonic()
+    assert h._allow(_pile(5), now) == h._allow(_pile(hunt.FRESH_S), now) == hunt.ALLOW_FRESH
+    assert h._allow(_pile(hunt.OLD_S + 1), now) == hunt.ALLOW_OLD
+    mid = (hunt.FRESH_S + hunt.OLD_S) / 2
+    assert h._allow(_pile(mid), now) == pytest.approx((hunt.ALLOW_FRESH + hunt.ALLOW_OLD) / 2, abs=0.01)
+    m, ground, spot = _ground()
+    by_point = Pile(790.0, 500.0, ground, now - 3.0, True, status="seen", xs=(785.0, 795.0), last_seen=now)
+    by_her = Pile(960.0, 480.0, spot, now - 3.0, True, status="seen", xs=(955.0, 965.0), last_seen=now)
+    h = _priced(m, [by_point, by_her], travel=0.1)
+    s = _on(spot, 1060.0, m)
+    d = h.h.danger
+    assert d.at(ground, 790.0, []) > d.at(spot, 1060.0, []) + hunt.SAFER_MARGIN >= d.at(spot, 960.0, [])
+    found, out = h._spots(s)
+    allow = {h._pile_of[sp.key] is by_point: sp.allow for sp in found}
+    assert allow == {True: hunt.ALLOW_OLD, False: hunt.ALLOW_FRESH} and not out
+    assert hunt.bar_exp(774.0) == 774.0 / hunt.HP_PER_MESO * hunt.MESO_EXP == 193.5

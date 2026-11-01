@@ -23,12 +23,13 @@ What changes from the hunt loop (the rules not named here are its own, unchanged
   2026-10-31, `_back_due`: the hunt loop's 'back to spot', by the danger), and rule 1 yields to her way back unless a
   monster is on her.
 - On the legs: the hunt loop's rule 4, shooting in passing (anything a star reaches, any platform), its finishing (4b)
-  and the loot sweep's piles on her way to the stop (behavior.sweep: those worth their time, within its budget): kills
+  and the loot sweep's piles on her way to the stop (behavior.sweep: each within what it may add to her way): kills
   and pick-ups between moves, without stopping to clear a ground. Every RECHOOSE_S of a trip to a stop, a pile of
   monsters seen elsewhere (Patrol.choose with the stop she's heading to as the default) takes her there instead, and on
   a trip to one that no longer pays for its detour back to the loop's next stop (`_interrupt`, `_while_travelling`).
-- Her drops (from 2026-10-30, the loot sweep): at a stop, with nothing in reach, those worth a round trip from its place
-  at what staying there gives (`_stay_gain`); leaving it, before she goes, those worth their time on her way to the next
+- Her drops (from 2026-10-30, the loot sweep): at a stop, with nothing in reach, those within what each may add to a
+  round trip from its place (Hunt._allow: until 2026-11-01 those worth it at what staying there gives, `_stay_gain`, at
+  MESO_EXP an meso); leaving it, before she goes, those within it of her way to the next
   stop (`_leave`: Patrol.choose's, peeked), the drops of her last kills there waited for where that pays (live on
   2026-10-30 half her departures from a stop, 24 of 50, came within 3 s of a kill of hers, before its drops landed: 21 of
   those kills' drops were never seen, 10 picked up, 3 lost). Until then only the hunt loop's piles here (5: on her
@@ -57,8 +58,8 @@ from ..localization.monsters import Monster
 from ..localization.scene import Scene
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
-from . import fight, sweep
-from .hunt import MESO_EXP, PASSING_S, Hunt, Objective, Visit, bar_exp
+from . import fight
+from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
@@ -115,29 +116,13 @@ TOUCH_NEAR = 100.0     # units between her body and a monster's at most for its 
 # stops weighing danger and the HP priced as the hunt loop's too (behavior.patrol: STOP_DANGER, HP_PRICE, HP_PRIOR_S,
 # cmp_J.txt) 77.6 touches, 50.0 hurt, 6.6 bars of HP (8.0), 20.3 potions, 359 EXP a minute.
 STAY_NET = True
-# Whether the next stop's choice (Patrol.choose, `_instead`) counts what a visit to each stop would pick up of her drops
-# (`_drops_bonus`: the loot sweep's round trip from its place, sweep.plan at the loop's rate, MESO_EXP, its budget),
-# from 2026-10-31: the user's "we shouldn't let loot expire and we shouldn't wait too long and take a long detour to
-# pick them up". In 15-minute runs of the harness's standard grind 11% of her drops' worth expired lying in her store,
-# every one more than the sweep's CAND_S off her way or over its budget for most of its life, on platforms her loop
-# didn't pass: a stop by them, otherwise as good, is the cheap way to them. False: the stops' monsters alone, as before.
-# Off, measured (12 seeds against the commit before, paired: D:/MapleHelper-scratch/replan/loot/fix/c5): in 15-minute
-# runs of the standard grind EXP a minute -4.4 (se 7.1), loot's worth -4.6 (7.0), drops' share -0.011; in the live drops'
-# worlds (map-drops, drop-takers) EXP -8.9 (se 3.5, worse on 6 seeds, better on none) for loot +0.8 (1.2), the 5-minute
-# standard grind changing 2 seeds of 12. Her drops' life by the evidence (ledger.SURVIVAL) is what keeps more of them
-# from expiring there.
-DROPS_IN_CHOICE = False
-# Her detours for her drops priced by the HP they cost her too (PILE_HP, from the review of 2026-10-31, against the user's
-# "try not to hit by mobs just for picking up loots"): the sweep's seconds (`_sweep_terms`) dearer than her time's worth
-# by Patrol.hp_price times the bars a second her touches took while she was after a pile (an objective that's a pile,
-# its trips included: `_learn_touches`, as the stops' are learned), PILE_HP_PRIOR_S of none to start from. Until then
-# her time alone, and in the live drops' worlds (map-drops, drop-takers, 48 seeds of 5 minutes) she was on her drops 27%
-# longer than at the rebase tip, touched there as often a second. On (48 seeds paired against off,
-# D:/MapleHelper-scratch/replan/loot/fix2/sweephp): there her time on her drops -7.3 s (se 2.0), touches that hurt
-# there -0.85 (0.59), loot's worth a minute -2.5 (2.7), EXP -0.7 (3.8); in the standard grind (24 seeds) EXP +10.2
-# (3.5), loot -0.3 (3.8), hurt at piles +1.0 (0.9). False: her time alone.
-PILE_HP = True
-PILE_HP_PRIOR_S = 20.0
+# (Until 2026-11-01, two switches priced her drops in EXP at MESO_EXP an meso, which the sweep no longer does: its
+# piles each within what it may add to her way, Hunt._allow. DROPS_IN_CHOICE, off: the next stop's choice counted what
+# a visit to each would pick up, the sweep's round trip from its place; in 15-minute runs of the standard grind EXP a
+# minute -4.4 (se 7.1), loot -4.6 (7.0), in the live drops' worlds EXP -8.9 (3.5) for loot +0.8 (1.2). PILE_HP, on from
+# the review of 2026-10-31: the sweep's seconds dearer by the HP a second her touches took while she was after a pile;
+# in the live drops' worlds her time on her drops -7.3 s, touches that hurt there -0.85 (0.59), EXP -0.7 (3.8); its place
+# is the allowance's SAFER_MARGIN, a pile more dangerous than where she stands on her way only.)
 
 
 class Grind(Hunt):
@@ -161,8 +146,6 @@ class Grind(Hunt):
         self._reroute = False                     # a pile seen on a trip (or hers gone): to it at the next pass
         self._start = time.monotonic()
         self._hp: tuple | None = None  # the last look's (time, HP or touches told, platform), for learn_hp
-        self._pile_hp = [0.0, 0.0]  # (s after a pile, bars her touches took then): PILE_HP
-        self._pile_at: tuple | None = None  # ... and the last look's (time, touches told, after a pile)
         self._stated = time.monotonic()
 
     def run(self, minutes: float):
@@ -178,7 +161,7 @@ class Grind(Hunt):
         are the game's clocks, which ran on, and aren't moved."""
         super()._paused(seconds)
         self._start += seconds
-        self._alt = self._hp = self._pile_at = None
+        self._alt = self._hp = None
 
     # --- what she knows ------------------------------------------------------------------------------------
 
@@ -223,13 +206,6 @@ class Grind(Hunt):
         told = getattr(rep, "touches", 0) - getattr(rep, "misses", 0)
         pid = self.visit.ground if self.visit is not None else None
         last, self._hp = self._hp, (s.t, told, pid)
-        o = getattr(self, "obj", None)
-        piled, self._pile_at = getattr(self, "_pile_at", None), (s.t, told, o is not None and o.kind == "pile")
-        if piled is not None and piled[2] and d is not None and 0 < s.t - piled[0] <= TOUCH_GAP_S:  # (PILE_HP)
-            new = max(0, told - piled[1])
-            acc = self.__dict__.setdefault("_pile_hp", [0.0, 0.0])
-            acc[0] += s.t - piled[0]
-            acc[1] += new * self._touch_share(s) if new else 0.0
         if last is None or last[2] is None or d is None or not 0 < s.t - last[0] <= TOUCH_GAP_S:
             return
         new = max(0, told - last[1])
@@ -422,31 +398,12 @@ class Grind(Hunt):
         stop = self.patrol.stops[j]
         return stop.platform, stop.x
 
-    def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float, float | None]:
-        """The sweep's terms: her time's worth (`_time_worth`) and, with PILE_HP, the HP a second after her drops has
-        cost her (`pile_hp_rate` at Patrol.hp_price), sweep.budget_for's budget (no lulls: she doesn't wait for respawns
-        at a stop)."""
-        worth = self._time_worth(s, dest)
-        return worth + (self.patrol.hp_price * self.pile_hp_rate() if PILE_HP else 0.0), None
-
-    def pile_hp_rate(self) -> float:
-        """Bars of her HP a second her touches have taken while she was after a pile (PILE_HP), PILE_HP_PRIOR_S of none
-        to start from."""
-        spent, bars = getattr(self, "_pile_hp", None) or (0.0, 0.0)
-        return bars / (spent + PILE_HP_PRIOR_S)
-
-    def _time_worth(self, s: Scene, dest: tuple[int, float] | None = None) -> float:
-        """What her time is worth now, EXP a second, on her way to `dest` (the sweep's price of it): at the stop, on a
-        round trip back to it, what staying there gives (`_stay_gain`, by her memory's monsters she gets at from her
-        platform: `_held`); else the loop's rate (Plan.rate: going on); or, more, what's in reach now (EXP before
-        loot)."""
-        v, plan = self.visit, self.patrol.plan
-        if v is not None and v.arrived is not None and dest is not None and dest == self._home() \
-                and s.platform is not None and s.platform.id == v.ground:
-            rate = self._stay_gain(s, self._held(s))
-        else:
-            rate = 0.0 if plan is None else plan.rate
-        return max(rate, self._shoot_rate(s, list(s.monsters))[0])
+    def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float | None, float]:
+        """The sweep's terms: its piles' allowances alone (Hunt._allow), no budget, no floor (no lulls: she doesn't wait
+        for respawns at a stop). Until 2026-11-01 her time's worth (`_time_worth`: what staying at the stop gives on a
+        round trip back to it, else the loop's rate, or what's in reach) with PILE_HP's price of the HP her detours
+        cost, at MESO_EXP an meso."""
+        return None, 0.0
 
     def _instead(self, s: Scene, heading: int | None = None) -> tuple[int | None, dict]:
         """Where she'd go instead as of look `s` (Patrol.choose, peeked: with the stop she's `heading` to as the
@@ -455,28 +412,9 @@ class Grind(Hunt):
         if a is None or a[1] != heading or not 0 <= s.t - a[0] < RECHOOSE_S:
             skip = [g for g, until in self._skip.items() if until > time.monotonic()]
             j, info = self.patrol.choose(s.t, s.platform.id, s.where.x, current=self.stop if heading is None else None,
-                                         skip=skip, heading=heading, peek=True, bonus=self._drops_bonus(s))
+                                         skip=skip, heading=heading, peek=True)
             self._alt = a = (s.t, heading, j, info)
         return a[2], a[3]
-
-    def _drops_bonus(self, s: Scene):
-        """DROPS_IN_CHOICE: what a visit to stop j would pick up of her drops, in EXP (Patrol.choose's `bonus`): the
-        loot sweep's round trip from the stop's place (sweep.plan from it back to it, its budget, at the loop's rate
-        and MESO_EXP), over the pick spots of the hunt loop's latest solve (`_spots`, its guards and survival as of
-        then: within RECHOOSE_S of look `s`); None where there are none."""
-        got = getattr(self, "_spots_at", None)
-        if not DROPS_IN_CHOICE or got is None or not got[1] or got[0] is None or not 0 <= s.t - got[0] <= RECHOOSE_S:
-            return None
-        spots_, plan, memo = got[1], self.patrol.plan, {}
-        rate = 0.0 if plan is None else max(0.0, plan.rate)
-
-        def bonus(j: int) -> float:
-            if j not in memo:
-                st = self.patrol.stops[j]
-                it = sweep.plan(spots_, (st.platform, st.x), (st.platform, st.x), rate, self._arrive, MESO_EXP)
-                memo[j] = max(0.0, it.value)
-            return memo[j]
-        return bonus
 
     def _leaving(self, s: Scene, held: list[Monster]) -> str | None:
         """Why she leaves the stop now, or None to stay (see the top)."""
