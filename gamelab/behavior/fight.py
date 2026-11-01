@@ -520,7 +520,7 @@ def landing_prices(h, danger) -> Prices | None:
     if most is None:
         return None
     rate = getattr(h, "exp_rate", None)
-    rate = min(max(rate, RATE_PRIOR / RATE_BAND), RATE_PRIOR * RATE_BAND) if rate is not None and rate > 0         else RATE_PRIOR
+    rate = RATE_PRIOR if rate is None or not rate > 0 else min(max(rate, RATE_PRIOR / RATE_BAND), RATE_PRIOR * RATE_BAND)
     rep = getattr(h, "report", None)
     touches, misses = getattr(rep, "touches", 0), getattr(rep, "misses", 0)
     hurt = (touches - misses + HURT_PRIOR * HURT_SHARE) / (touches + HURT_PRIOR)

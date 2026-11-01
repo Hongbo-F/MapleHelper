@@ -105,7 +105,8 @@ def test_her_landings_rate_is_kept_in_a_band_about_the_prior():
     h = SimpleNamespace(max_hp=840.0, exp_rate=None, report=SimpleNamespace(touches=0, misses=0))
     low, high = fight.RATE_PRIOR / fight.RATE_BAND, fight.RATE_PRIOR * fight.RATE_BAND
     for rate, taken in ((None, fight.RATE_PRIOR), (0.0, fight.RATE_PRIOR), (-2.0, fight.RATE_PRIOR),
-                        (float("nan"), fight.RATE_PRIOR), (0.01, low), (0.2, low), (5.4, 5.4), (8.14, 8.14), (90.0, high)):
+                        (float("nan"), fight.RATE_PRIOR), (0.01, low), (0.2, low), (5.4, 5.4), (8.14, 8.14),
+                        (90.0, high)):
         h.exp_rate = rate
         p = fight.landing_prices(h, danger)
         assert p.rate == pytest.approx(taken)

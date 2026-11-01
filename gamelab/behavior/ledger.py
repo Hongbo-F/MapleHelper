@@ -494,7 +494,8 @@ class Pile:
 
     @property
     def born(self) -> float:
-        """When its oldest drop fell: its kill (or its first sighting), or an older pile's whose drops it holds (`aged`)."""
+        """When its oldest drop fell: its kill (or its first sighting), or an older pile's whose drops it holds
+        (`aged`)."""
         return self.since if self.aged is None else min(self.since, self.aged)
 
     def still(self, now: float, dt: float = 0.0) -> float:
