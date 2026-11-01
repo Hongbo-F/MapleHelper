@@ -266,6 +266,9 @@ def test_the_harness_think_clock_is_think_charged_at_every_read_too():
     assert "think_clock" in baseline.uncacheable(baseline.params(harness.run_one, run + (1.0,)))
     p = _parsed(["run", "loop-grind", "--think-clock", "3"])
     assert p.think_clock == 3.0 and p.think == 0.0 and harness._command_line(p)[-2:] == ["--think-clock", "3.0"]
+    assert harness._name(p) == "loop-grind-game-think-clock3"  # (not the plain run's name: the review of 2026-11-01)
+    assert harness._name(_parsed(["run", "loop-grind", "--think", "1.5"])) == "loop-grind-game-think1.5"
+    assert harness._name(_parsed(["run", "loop-grind"])) == "loop-grind-game"
     with pytest.raises(SystemExit):
         _parsed(["run", "loop-grind", "--think", "1", "--think-clock", "3"])
 

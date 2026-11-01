@@ -1530,8 +1530,11 @@ def _run_options(r: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 
 def _name(args) -> str:
-    """A run's default name to save it under."""
+    """A run's default name to save it under (with --think or --think-clock, saying so: until the review of 2026-11-01
+    such a run's name was the plain run's, and saved over it)."""
     return (f"{args.policy}-{args.preset}"
+            + (f"-think{args.think:g}" if args.think else "")
+            + (f"-think-clock{args.think_clock:g}" if args.think_clock else "")
             + (f"-{args.costs}" if args.costs != "coded" else "")
             + (f"-ways{args.ways}" if args.ways is not None else "")
             + (f"-{args.map}" if args.map != FIRST_MAP else "")
