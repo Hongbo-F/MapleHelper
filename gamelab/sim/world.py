@@ -1045,7 +1045,7 @@ HP_POTION = 250.0
 # 60 Orange Potions ran out within 15 minutes, the safety stop ending 7 of 12 of the standard grind's runs.
 MEAT_HP = 160.0
 POTIONS = 250
-LEVEL_24 =Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=601.0, pet_mp=PET_MP, potion=HP_POTION)
+LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=601.0, pet_mp=PET_MP, potion=HP_POTION)
 # ... and from 2026-10-25 at level 25: HP 774 and MP 623 (her bars' numbers), her stars as read off the monsters' bars
 # then (attack.choice.STAR and SKILL_STAR: the regular star 20-140, Lucky Seven's two of 96-192), drawn so with `spread`
 # (harness.ATTACK_HER), her Lucky Seven at level 16 (14 MP), her pet's MP potions Blue Potions (100) and its HP
