@@ -262,6 +262,30 @@ def test_outcomes_are_read_from_the_world(model):
     assert harness.outcomes(w, [], DROP_LIFE + 1)["drops_share"] == 0.0
 
 
+def test_her_inventorys_tabs_in_the_world_refuse_a_full_tabs_items_and_fill_up(model):
+    """Realism.full_tabs and fills_after (the harness's `--world etc-full`, `fills-up`): with her Etc tab full a cap
+    under her stays, refused with the game's message (World.pick_refused), while a potion goes into her Use tab, said
+    "earned. (Use)", which fills with it; a stand there with nothing she could take is stands_for_nothing."""
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 100.0, drops=[("horny-mushroom-cap", c.id, 100.0)],
+                    realism=Realism(full_tabs=("Etc",), fills_after=(("Use", 1),))))
+    assert harness.WORLDS["etc-full"] == {"full_tabs": ("Etc",)}
+    assert harness.WORLDS["fills-up"] == {"fills_after": (("Etc", 6),)}
+    tap(w, 0.5, "z", 0.04)
+    w.advance(1.0)
+    cap = w.drops[0]
+    assert not cap.gone and w.pick_refused >= 1 and w.messages[-1][1] == world_mod.FULL_MESSAGE
+    start = 1000.0
+    records = [{"topic": "session", "t": start},
+               {"topic": "event", "kind": "pick", "t": start + 0.5, "platform": c.id, "x": 100.0}]
+    out = harness.outcomes(w, records, 60.0)
+    assert out["pick_refused"] == w.pick_refused and out["stands_for_nothing"] == 1
+    w.drops.append(dataclasses.replace(cap, kind="red-potion", since=w.t))
+    tap(w, 1.5, "z", 0.04)
+    w.advance(2.0)
+    assert w.drops[-1].taken_by == "her" and w.messages[-1][1].endswith("earned. (Use)") and "Use" in w.full_at
+
+
 def test_attacks_chosen_at_a_monster_dead_by_then_are_counted_from_their_records(model):
     """at_dead, casts_at_dead (harness._at_dead): an 'attack' record whose target (its kind, platform and x) had died
     within DEAD_BEFORE_S before it, within DEAD_NEAR of where it was seen; mp_per_kill; dropped, the 'dropped'

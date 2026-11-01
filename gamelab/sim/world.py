@@ -536,6 +536,12 @@ SIDE_INSET = 25.0
 ROPE_REACH_CLIENT = GRAB_SURE
 MESSAGE_FOR = 5.0        # s a pickup message stays in the log on screen
 FULL_MESSAGE = "You can't get anymore items."
+
+
+def tab_of(kind: str) -> str:
+    """The inventory tab an item of `kind` goes into in the simulator: Use for a potion, Etc for the rest (as its
+    pickup log says them; behavior.looting.tab_of reads the game data's, which agrees for Tree Dungeon's drops)."""
+    return "Use" if kind.endswith("-potion") else "Etc"
 # The message bar's line when the game refuses an attack on a rope (live on 2026-10-26: perception.messages); it stays
 # up until another line replaces it (none does in the simulator)
 ROPE_REFUSAL = "That cannot be used while you're on a rope or ladder."
@@ -809,6 +815,10 @@ class Realism:
                                  # random points clear of monsters by SPAWN_CLEAR; 0: `respawn` s after its death, each
                                  # on its own (the default until 2026-10-31; harness `--world clock-respawn`)
     respawn_cap: float | None = None
+    full_tabs: tuple = ()        # her inventory's tabs full from the start ("Use", "Etc": a drop of one refused with
+                                 # FULL_MESSAGE; the harness's `--world etc-full`); (): room for everything
+    fills_after: tuple = ()      # ((tab, n), ...): a tab full once she has picked up n items into it (the harness's
+                                 # `--world fills-up`)
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     hurt: tuple = ()             # ((kind, share), ...): the map's monsters of that kind there at the start have that
                                  # share of their HP left, their bars up (hurt by someone before her: as by the crowd
@@ -1888,6 +1898,13 @@ class World:
         # The game data's level of each kind on the map (MapModel.mob_level, by kind): her hit check's (evade_chance)
         self._mob_levels = {kind_of(name): level for name, level in getattr(model, "mob_level", {}).items()}
         self.inventory_full = inventory_full
+        # Her inventory's tabs (Realism.full_tabs, fills_after; `inventory_full`: every item tab): those full, when each
+        # filled (s), and the items picked into each
+        self.full_at: dict[str, float] = {tab: 0.0 for tab in (("Use", "Etc") if inventory_full else ())
+                                          + tuple(self.realism.full_tabs)}
+        self._fills = dict(self.realism.fills_after)
+        self.tab_items: dict[str, int] = {}
+        self.pick_refused = 0  # pick-ups refused for want of room
         self.kills: dict[str, int] = {}
         self.touches = 0                # monsters touching her (evaded ones too)
         self.evaded = 0
@@ -3340,15 +3357,21 @@ class World:
                        and (d.owner == "her" or t >= d.since + self.realism.rival_owns)),
                       key=lambda d: (abs(d.x - self.x), d.x))
         for d in near:
-            if d.mesos or not self.inventory_full:
+            tab = None if d.mesos else tab_of(d.kind)
+            if tab is None or tab not in self.full_at:
                 d.gone, d.taken_at, d.taken_by = True, t, "her"
                 self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
                 self.messages.append((t, f"You have gained mesos (+{d.amount or 15})" if d.mesos else
-                                      f"{d.kind.replace('-', ' ').title()} x1 earned. "
-                                      + ("(Use)" if d.kind.endswith("-potion") else "(Etc)")))
+                                      f"{d.kind.replace('-', ' ').title()} x1 earned. ({tab})"))
                 self.note(f"picks up {d.kind} at x {d.x:.0f}")
+                if tab is not None:
+                    self.tab_items[tab] = self.tab_items.get(tab, 0) + 1
+                    if self.tab_items[tab] >= self._fills.get(tab, math.inf):
+                        self.full_at[tab] = t
+                        self.note(f"her {tab} tab is full now")
                 return
         if near:
+            self.pick_refused += 1
             self.messages.append((t, FULL_MESSAGE))
             self.note("can't pick up: inventory full")
 

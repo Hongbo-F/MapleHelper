@@ -160,10 +160,10 @@ from concurrent.futures import ProcessPoolExecutor
 
 from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
-from ..behavior.looting import worth_for
+from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
 from .world import (DROP_LIFE, HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, NEAR_SEEN,
-                    OFF_SEEN, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism)
+                    OFF_SEEN, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -281,6 +281,11 @@ WORLDS["solo"] = {"camps": (), "rival_every": 0.0}
 # still there at 60 s, 26% at 120), which counted her pets' pick-ups and the detector's misses as takings.
 WORLDS["map-drops"] = {"drop_mix": TREE_DROP_MIX}
 WORLDS["drop-takers"] = {"drop_takers": True}
+# ... and her inventory (the user, 2026-10-31: "we also need to watch for backpack full scenario"): her Etc tab full
+# from the start (`etc-full`), or once she has picked up 6 items into it (`fills-up`: a guess, about a minute of the
+# live drops' items), where the default world has room for everything; with `map-drops` for items to fill it.
+WORLDS["etc-full"] = {"full_tabs": ("Etc",)}
+WORLDS["fills-up"] = {"fills_after": (("Etc", 6),)}
 # ... and the player started before splices (`no-splices`: Realism.splices, sim.fakes.FakePlayer.splices): every chain
 # replanned while one runs (control.navigator.REPLAN) a cut and a resend, every key let go between, as live until the
 # elevated player is restarted on this code (control.client.can_splice: lab/player.json); the review of 2026-10-30
@@ -673,6 +678,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "wait_hp_lost": round(sum(hp for t, hp in world.touch_log if t <= end and any(a <= t <= b for a, b in waits)),
                               3),
         **_on_piles(world, records, end),
+        **_full_stands(world, records, end),
         "knock_falls": sum(1 for k in world.knock_log if k[0] <= end),
         "knock_fall_dy": round(sum(k[3] for k in world.knock_log if k[0] <= end), 1),
         "pet_potions": world.pet_potions,
@@ -884,6 +890,26 @@ def _trips(world, records: list[dict], end: float) -> dict:
 # her objective is a pile (a trip for one: its 'hunt' record's objective "pile on ..."), she's on her drops.
 PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull loot", "loot elsewhere",
               "sweep", "sweep: landing", "sweep: clear first")  # (the loot sweep's, behavior.sweep, from 2026-10-30)
+
+
+def _full_stands(world, records: list[dict], end: float) -> dict:
+    """pick_refused, the pick-ups the world refused her for want of room; stands_for_nothing, her stands at a pile (the
+    hunt loop's 'pick' events, in world time up to `end`) with drops lying within LOOT_REACH of it and none she could
+    take: every one an item of a tab full by then (World.full_at). Both 0 where her inventory has room for
+    everything."""
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    nothing = 0
+    if start is not None and world.full_at:
+        for r in records:
+            if r.get("topic") != "event" or r.get("kind") != "pick" or r["t"] - start > end:
+                continue
+            t = r["t"] - start
+            here = [d for d in world.drops if d.platform == r.get("platform")
+                    and abs(d.x - r.get("x", 0.0)) <= LOOT_REACH and d.since <= t < d.since + DROP_LIFE
+                    and (d.taken_at is None or d.taken_at >= t)]
+            if here and not any(d.mesos or world.full_at.get(tab_of(d.kind), math.inf) > t for d in here):
+                nothing += 1
+    return {"pick_refused": world.pick_refused, "stands_for_nothing": nothing}
 
 
 def _on_piles(world, records: list[dict], end: float) -> dict:
