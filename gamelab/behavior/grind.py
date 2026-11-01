@@ -58,7 +58,7 @@ from ..localization.scene import Scene
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
-from .hunt import FINISH_S, PASSING_S, Hunt, Objective, Visit, bar_exp
+from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
@@ -84,9 +84,12 @@ STATE_EVERY_S = 60.0   # s between two 'grind' records 'state' (what it did so f
 # doesn't shoot in passing on the platform she leaves. BACK_TRIES a visit at the most, BACK_REST_S apart (guesses:
 # unbounded, a prototype sent her back 124 times in a run, each trip cut short by what came into reach). False: she
 # shoots from where she is, as before. With the sweep's guards (behavior.hunt.BESIDE_GUARDS), in the harness's standard
-# grind (12 seeds of 5 minutes, paired against the branch before: pos/impl/out/cmp_E.txt) touches 86.8 -> 81.2 a run
-# (se 4.0), those at piles 16.1 -> 12.2 (se 2.0), EXP a minute 385 -> 373 (se 16).
-BACK = True
+# grind (12 seeds of 5 minutes, paired against the branch before: pos/impl/out/cmp_E.txt) touches 86.8 -> 81.2 a run (se
+# 4.0), those at piles 16.1 -> 12.2 (se 2.0), EXP a minute 385 -> 373 (se 16). Off from 2026-10-31 ~16:00, the user's
+# choice of "more exp and loot" over as safe as master: at their prices, the rest as first built (12 seeds,
+# D:/MapleHelper-scratch/replan/loot/price), off made 18.6 EXP a minute more (se 11.9) and 15.0 more loot, 2.8 touches
+# and 0.33 bars of HP fewer (the simulator's crowd takes her about 6 bars a run whatever she does).
+BACK = False
 BACK_MARGIN = 0.05
 BACK_TRIES = 3
 BACK_REST_S = 5.0
@@ -94,11 +97,13 @@ BACK_REST_S = 5.0
 # charged to the platform she's on (False, until 2026-10-31), where her pet's potions net out touches and her trips
 # aren't looked at (in the simulator's grind on Tree Dungeon it saw 3.27 of the 8.68 bars she lost on seed 1, and none
 # of what she lost on 9 and 8 counted against the loop's stops, 10 and 7); or her touches (True: `_learn_touches`),
-# charged to the stop she's at, on its platform or wherever a knock (or a pile) took her from it, each at the share of
-# her HP a touch by the kind nearest her takes (`_touch_share`). Her trips' touches and time aren't a stop's (hp_rate
-# is HP a second at a stop, which her stays and the loop's shooting are priced by): until the review of 2026-10-31
-# they were charged to the stop she was going to, every touch as the map's hardest-hitting kind's (on Tree Dungeon a
-# Horny Mushroom's 0.156, a Green Mushroom's 0.07 and a Slime's 0.012 too).
+# charged to the stop she's at or going to, her trips' time and touches too, each at the share of her HP a touch by the
+# kind nearest her takes (`_touch_share`: until the review of 2026-10-31 every touch as the map's hardest-hitting
+# kind's, on Tree Dungeon a Horny Mushroom's 0.156 where a Green Mushroom takes 0.07 and a Slime 0.012). From that
+# review to the user's choice that evening ("more exp and loot") a stop was charged only what she lost having got to
+# it (on its platform or wherever a knock took her from it), her trips not: at their prices, the rest as first built
+# (12 seeds, D:/MapleHelper-scratch/replan/loot/price), charging the trips again made 22.4 EXP a minute more (se 10.5)
+# and 19.5 more loot for 0.16 bars of HP (se 0.61).
 HP_BY_TOUCHES = True
 TOUCH_GAP_S = 30.0     # s between two looks at most for the touches between them to be charged (the grind's looks
                        # come between her moves)
@@ -132,7 +137,7 @@ class Grind(Hunt):
         self._alt: tuple | None = None            # where she'd go instead: (when, heading, stop, choose's info)
         self._reroute = False                     # a pile seen on a trip (or hers gone): to it at the next pass
         self._start = time.monotonic()
-        self._hp: tuple | None = None  # the last look's (time, HP or touches told, platform or visit), for learn_hp
+        self._hp: tuple | None = None  # the last look's (time, HP or touches told, platform), for learn_hp
         self._stated = time.monotonic()
 
     def run(self, minutes: float):
@@ -183,16 +188,16 @@ class Grind(Hunt):
     def _learn_touches(self, s: Scene) -> None:
         """HP_BY_TOUCHES: the touches that took HP she was told of since the last look (the hunter's: Hunter.report, a
         MISS not), each the share of her HP a touch by the kind nearest her takes (`_touch_share`), with the time since
-        (TOUCH_GAP_S at the most), charged to the stop she's at (Patrol.learn_hp, at its place): got to it, the same
-        visit both looks, wherever along the way a knock took her. Not on her trips (see the top)."""
-        rep, d, v = self.h.report, self.danger, self.visit
+        (TOUCH_GAP_S at the most: her trips' too), charged to the stop she's at or going to (Patrol.learn_hp: the
+        visit's ground as of the last look)."""
+        rep, d = self.h.report, self.danger
         told = getattr(rep, "touches", 0) - getattr(rep, "misses", 0)
-        at = v if v is not None and v.arrived is not None else None
-        last, self._hp = self._hp, (s.t, told, at)
-        if last is None or at is None or last[2] is not at or d is None or not 0 < s.t - last[0] <= TOUCH_GAP_S:
+        pid = self.visit.ground if self.visit is not None else None
+        last, self._hp = self._hp, (s.t, told, pid)
+        if last is None or last[2] is None or d is None or not 0 < s.t - last[0] <= TOUCH_GAP_S:
             return
         new = max(0, told - last[1])
-        self.patrol.learn_hp(at.ground, new * self._touch_share(s) if new else 0.0, s.t - last[0], at.spot.x)
+        self.patrol.learn_hp(last[2], new * self._touch_share(s) if new else 0.0, s.t - last[0])
 
     def _touch_share(self, s: Scene) -> float:
         """The share of her HP a touch she was told of in look `s` took: a touch by the kind of the monster nearest her
@@ -288,11 +293,14 @@ class Grind(Hunt):
 
     def _back(self, s: Scene) -> None:
         """Back to the stop's place (`_back_due`), 'back to spot': a trip as any (the navigator's: planned and
-        replanned at every state against every monster), with no shooting in passing on the platform she leaves, no
-        finishing on the way of what she has hurt (rule 4b: the objective's FINISH_S spent, as a sweep stop's) and no
-        sweep of piles on the way (the hunt loop's `_while_travelling`): until the review of 2026-10-31 a fresh
-        objective gave her 8 s of finishing there, and 3 of the 8 trips back in Tree Dungeon's goldens went straight to
-        a sweep of the platform she was sent back from."""
+        replanned at every state against every monster), with no shooting in passing on the platform she leaves, her
+        finishing on the way of what she has hurt (rule 4b) and the sweep of piles on the way as on any trip ("kill all
+        the mobs that are in the way", "pick as much as possible": the user, 2026-10-30), but never cut for one
+        (hunt's `_sweep_calls`). From the review of 2026-10-31 to the user's choice that evening the way back neither
+        finished nor swept (3 of the 8 trips back in Tree Dungeon's goldens had gone straight to a sweep of the platform
+        she was sent back from): with BACK on, at their prices, the rest as first built (12 seeds,
+        D:/MapleHelper-scratch/replan/loot/price), finishing and sweeping on it made 14.5 EXP a minute more (se 6.4) and
+        15.0 more loot, 4.2 touches fewer."""
         v, d = self.visit, self.danger
         v.backs += 1
         self._back_rest = time.monotonic() + BACK_REST_S
@@ -302,7 +310,6 @@ class Grind(Hunt):
         self._to_spot_obj(v.spot)
         self.obj.why = "back to spot"
         self.obj.passing[s.platform.id] = PASSING_S
-        self.obj.finishing = FINISH_S
         return self._travel("back to spot")
 
     def _backing(self, s: Scene) -> bool:
@@ -546,7 +553,7 @@ class Grind(Hunt):
                 "refills": b.refills, "watched_s": round(b.watched_s), "kill_s": round(p.kill_s, 4),
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
-                       if p.hp_time[pid] >= HP_LOG_S}, "hook_scale": round(p.hook_scale(), 3),
+                       if p.hp_time[pid] >= HP_LOG_S},
                 "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}}
 
     def _log_grind(self) -> None:
@@ -559,7 +566,7 @@ class Grind(Hunt):
                  f"loop, {d['skips']} stops skipped; a free point refilling at {d['refill_tick']:.0%} a tick lately "
                  f"(x{d['refill_scale']:.2f} the prior's pace; {d['refills']} refills seen, {d['watched_s']} s of "
                  f"points seen free), a kill {d['kill_s']:.3f} s a point of EXP, others take {d['takes']}; HP bars a "
-                 f"minute by {'stop' if HP_BY_TOUCHES else 'platform'} ({HP_LOG_S:.0f} s there at least; x"
-                 f"{d['hook_scale']:.2f} the danger hook's) {d['hp']}; kills by platform: "
+                 f"minute by {'stop' if HP_BY_TOUCHES else 'platform'} ({HP_LOG_S:.0f} s there at least) {d['hp']}; "
+                 f"kills by platform: "
                  + ", ".join(f"{pid}: {n} ({e:.0f} EXP)" for pid, (n, e) in d["credit"].items()))
         telemetry.emit("grind", what="end", **d)

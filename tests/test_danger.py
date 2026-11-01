@@ -136,12 +136,12 @@ def test_one_walking_a_platform_just_under_or_over_hers_touches_her_where_they_o
     assert d.at(here, 350) == 0.0  # under the one above: not touched
 
 
-def test_one_walking_a_platform_just_under_or_over_hers_counts_as_on_hers_where_their_bodies_meet(monkeypatch):
+def test_one_walking_a_platform_just_under_or_over_hers_counts_as_on_hers_where_their_bodies_meet():
     """Danger.beside (the review of 2026-10-31: her full box against theirs): the one 30 below on 600..1000 touches her
     from her x 578 on (its platform's end less her half), the one 70 above walks over her head, a kind that doesn't count
-    and one on her own platform aren't 'beside' her; stance's `beside` (her fights': BESIDE, off by default) counts it
-    as on hers."""
-    monkeypatch.setattr(stance, "BESIDE", True)
+    and one on her own platform aren't 'beside' her; stance's `beside` (her fights': BESIDE, on by default since
+    2026-10-31) counts it as on hers."""
+    assert stance.BESIDE
     model = build([(300, 500, 700, 500), (600, 530, 1000, 530), (0, 430, 400, 430)],
                   [("19", 800, 530), ("19", 200, 430), ("7", 900, 530)])
     d = Danger(model, HER)
@@ -161,9 +161,9 @@ def test_a_fight_keeps_off_one_that_hits_hard_on_the_platform_just_under_hers_as
     """attack.stance's BESIDE: a Horny Mushroom on the platform 30 under hers (its top reaches into her) within its
     keep-off (169) is escaped (a jump back, throwing) as one on hers is; without, at 150 off she threw from where she
     stood, and 60-100 off stepped back from under it toward its end of the platform. Out of its keep-off, a throw.
-    A move along her platform into its body is no escape (_into). (Off by default: in the harness her fights shot less
-    and were touched no less.)"""
-    monkeypatch.setattr(stance, "BESIDE", True)
+    A move along her platform into its body is no escape (_into). (On by default since 2026-10-31, the user's "more exp
+    and loot": in the harness at their prices she made more EXP with it, touched no more.)"""
+    assert stance.BESIDE
     model = build([(0, 500, 1000, 500), (300, 530, 1000, 530)], [("19", 800, 530)])
     d = Danger(model, HER)
     p, low = model.platform_under(400, 500), model.platform_under(800, 531)

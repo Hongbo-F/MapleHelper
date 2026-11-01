@@ -1274,11 +1274,12 @@ def test_her_time_is_worth_what_staying_gives_on_a_round_trip_from_the_stop_and_
 
 
 def test_got_to_a_stop_and_left_somewhere_worse_she_goes_back_to_it_before_she_shoots_from_there(monkeypatch):
-    """Back to the stop (grind.BACK, the review of 2026-10-31): got to the stop on A (its place 250 from A's Horny
-    Mushroom point), a knock left her on B between two Horny Mushroom points (100 either side): the danger there is
-    BACK_MARGIN and more over the stop's place's, so she goes back first; not from a platform as safe (C, none about),
-    nor on the stop's platform, nor before she got to it, nor more than BACK_TRIES times a visit, nor within BACK_REST_S
-    of the last. And rule 1 yields to her way back unless a monster's body is on hers (CONTACT_SLACK)."""
+    """Back to the stop (grind.BACK, the review of 2026-10-31; off by default since the user's "more exp and loot"
+    that evening): got to the stop on A (its place 250 from A's Horny Mushroom point), a knock left her on B between two
+    Horny Mushroom points (100 either side): the danger there is BACK_MARGIN and more over the stop's place's, so with
+    it on she goes back first; not from a platform as safe (C, none about), nor on the stop's platform, nor before she
+    got to it, nor more than BACK_TRIES times a visit, nor within BACK_REST_S of the last. And rule 1 yields to her way
+    back unless a monster's body is on hers (CONTACT_SLACK)."""
     from gamelab.attack.danger import Danger
     from gamelab.attack.spots import Spot
     from gamelab.behavior.hunt import Hunt, Visit
@@ -1295,10 +1296,9 @@ def test_got_to_a_stop_and_left_somewhere_worse_she_goes_back_to_it_before_she_s
                                monsters=list(monsters))
     on_b = at(b, 700.0)
     assert g.danger.at(b, 700.0, []) > g.danger.at(a, 300.0, []) + grind.BACK_MARGIN
-    assert g._back_due(on_b) and not g._back_due(at(c, 1700.0)) and not g._back_due(at(a, 100.0))
-    monkeypatch.setattr(grind, "BACK", False)
-    assert not g._back_due(on_b)
+    assert not grind.BACK and not g._back_due(on_b)
     monkeypatch.setattr(grind, "BACK", True)
+    assert g._back_due(on_b) and not g._back_due(at(c, 1700.0)) and not g._back_due(at(a, 100.0))
     g.visit.arrived = None
     assert not g._back_due(on_b)
     g.visit.arrived, g.visit.backs = time.monotonic(), grind.BACK_TRIES
@@ -1320,11 +1320,11 @@ def test_got_to_a_stop_and_left_somewhere_worse_she_goes_back_to_it_before_she_s
 def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_of_it():
     """grind.HP_BY_TOUCHES and STAY_NET (2026-10-31): the touches that took HP she was told of since the last look (a
     MISS not), each the share of her HP a touch by the kind nearest her takes (`_touch_share`), with the time since
-    (TOUCH_GAP_S at the most), are charged to the stop she's at (got to it, the same visit), wherever a knock took her
-    from it, not the platform she's on (her HP bar between looks, before, netted her pet's potions out); not her trips
-    (the review of 2026-10-31: they were charged to the stop she was going to, every touch as the map's hardest-hitting
-    kind's); and what staying at the stop gives is less HP_PRICE times what she loses a second there (Patrol.hp_rate),
-    as the loop's rate is."""
+    (TOUCH_GAP_S at the most: a trip's too), are charged to the stop she's at or going to (the visit's ground), wherever
+    a knock took her, not the platform she's on (her HP bar between looks, before, netted her pet's potions out and
+    missed her trips; from the review of 2026-10-31 to the user's "more exp and loot" that evening, her trips weren't
+    charged); and what staying at the stop gives is less Patrol.hp_price times what she loses a second there
+    (Patrol.hp_rate), as the loop's rate is."""
     from gamelab.attack.danger import Danger
     from gamelab.attack.spots import Spot
     from gamelab.behavior.hunt import Visit
@@ -1354,18 +1354,13 @@ def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_
     assert p.hp_time[ids[0]] == pytest.approx(2.0) and p.hp_seen[ids[0]] == pytest.approx(2 * green + horny)
     g._learn_hp(on(ids[0], 12.0 + grind.TOUCH_GAP_S + 1))  # (a gap too long: not charged)
     assert p.hp_time[ids[0]] == pytest.approx(2.0)
-    # On a trip (on her way to a stop, not got to it): not a stop's.
+    # On a trip (on her way to the stop above, not got to it): the stop she's going to's, her trip's time too.
     g.visit = Visit(ids[1], Spot(ids[1], 150.0, 1.0, False))
     g._learn_hp(on(ids[0], 20.0))
     g.h.report.touches = 5
-    g._learn_hp(on(ids[0], 21.0, [seen(HORNY, 160.0, 0.0, ids[0])]))
-    assert p.hp_time[ids[1]] == 0.0 and p.hp_time[ids[0]] == pytest.approx(2.0)
-    # Got to it, a new visit: from its first look on.
-    g.visit.arrived = time.monotonic()
-    g._learn_hp(on(ids[1], 22.0))
-    g.h.report.touches = 6
-    g._learn_hp(on(ids[1], 23.0, [seen(HORNY, 160.0, -200.0, ids[1])]))
-    assert p.hp_time[ids[1]] == pytest.approx(1.0) and p.hp_seen[ids[1]] == pytest.approx(horny)
+    g._learn_hp(on(ids[0], 24.0, [seen(HORNY, 160.0, 0.0, ids[0])]))
+    assert p.hp_time[ids[1]] == pytest.approx(4.0) and p.hp_seen[ids[1]] == pytest.approx(horny)
+    assert p.hp_time[ids[0]] == pytest.approx(2.0)
     g.visit = Visit(ids[0], Spot(ids[0], 150.0, 1.0, False), arrived=time.monotonic())
     g.stop = p.stop_on(ids[0])
     # Staying: the held monster's EXP over its kill time, less what touches there cost meanwhile.
@@ -1373,7 +1368,7 @@ def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_
     s = SimpleNamespace(platform=model.platform(ids[0]), where=SimpleNamespace(x=150.0, y=0.0), monsters=[m], t=30.0)
     g.tour, g._hits = SimpleNamespace(exp={HORNY: 41.0}), (lambda s, m: True)
     gain = 41.0 / (41.0 * p.kill_s)
-    assert g._stay_gain(s, [m]) == pytest.approx(gain - patrol.HP_PRICE * p.hp_rate(ids[0], 150.0))
+    assert g._stay_gain(s, [m]) == pytest.approx(gain - p.hp_price * p.hp_rate(ids[0], 150.0))
     grind.STAY_NET = False
     try:
         assert g._stay_gain(s, [m]) == pytest.approx(gain)
@@ -1398,23 +1393,3 @@ def test_a_bar_of_her_hp_is_priced_by_her_max_hp_as_read_at_the_users_prices():
     j = p.stop_on(a[0])
     p.learn_hp(a[0], 1.0, 60.0)
     assert p.net(j, 100.0) == pytest.approx(100.0 * (1 - 157.0 * p.kill_s * p.hp_rate(a[0], p.stops[j].x)))
-
-
-def test_the_hook_of_a_stop_she_has_not_been_at_is_scaled_by_what_she_lost_against_it_where_she_has():
-    """Patrol.hook_scale (the review of 2026-10-31): the danger hook's HP at a stop she hasn't been at is the hook times
-    what she has lost against it everywhere she learned it (HOOK_PRIOR_HP counted in), so a stop she's been at doesn't
-    look many times dearer than one she hasn't only for having been looked at; where what she lost is what the hook
-    said, nothing changes."""
-    model, a, b, p = _two_areas()
-    hook = patrol.DANGER_HP_S * p.danger(b[0], 150.0)
-    assert p.hook_scale() == 1.0 and p.hp_rate(b[0], 150.0) == pytest.approx(hook)
-    p.learn_hp(a[0], patrol.DANGER_HP_S * p.danger(a[0], p.stops[p.stop_on(a[0])].x) * 120.0, 120.0)
-    assert p.hook_scale() == pytest.approx(1.0) and p.hp_rate(b[0], 150.0) == pytest.approx(hook)
-    # Ten times what the hook says, a minute more on the first area's: the other's are dearer too, by what she lost
-    # against the hook over the three minutes (its prior in).
-    said = patrol.DANGER_HP_S * p.danger(a[0], p.stops[p.stop_on(a[0])].x)
-    p.learn_hp(a[0], 10 * said * 60.0, 60.0)
-    scale = p.hook_scale()
-    assert scale == pytest.approx((patrol.HOOK_PRIOR_HP + said * (120 + 600)) / (patrol.HOOK_PRIOR_HP + said * 180))
-    assert 3.0 < scale < 4.0 and p.hp_rate(b[0], 150.0) == pytest.approx(hook * scale)
-    assert p.hp_rate(b[0], 150.0) > 0.5 * p.hp_rate(a[0], p.stops[p.stop_on(a[0])].x)

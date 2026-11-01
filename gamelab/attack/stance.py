@@ -304,9 +304,12 @@ ESCAPE_STEP = 20
 # sweep, on 9 between 8 and 10 above all (40-50 apart), where her fights went by her own platform's alone. Off: in the
 # harness's standard grind (12 seeds of 5 minutes, paired against the branch before; the sweep's guards and her way back
 # to the stop on in both, pos/impl/out/cmp_A2.txt, cmp_E.txt) on, 86.3 touches a run and 357 EXP a minute, off 81.2 and
-# 373 (kills 50.7 against 52.8): her fights kept off what could touch her from under or over her and shot less, and
-# were touched no less (the danger she escapes to, Danger.at, has them already). True: on.
-BESIDE = False
+# 373 (kills 50.7 against 52.8): her fights kept off what could touch her from under or over her and shot less, and were
+# touched no less (the danger she escapes to, Danger.at, has them already). True: on. On from 2026-10-31 ~16:00, the
+# user's choice of "more exp and loot": at their prices, the rest as first built (BACK off, her trips' touches charged
+# to the stop she's going to, the hook unscaled; 12 seeds, D:/MapleHelper-scratch/replan/loot/price), on made 19.7 EXP a
+# minute more (se 14.5) with 4.3 touches that hurt fewer (se 2.9) and 0.55 bars of HP less (se 0.47).
+BESIDE = True
 AWAY = "away"  # a step away from a close monster ('back', side, units, AWAY): what MAX_MOVES counts
 HELD_STEP = 30.0  # units a step off a spot of the magician's held goes (held_step): past behavior.attacks.HOLD_MOVED's
                   # 20 as her x reads it, a band and a half of her search

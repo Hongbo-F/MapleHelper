@@ -619,7 +619,8 @@ def test_a_monster_on_the_platform_just_under_a_pile_guards_it_as_one_on_the_pil
     platform 30 under the ground (its top, 51, reaches into her standing there) is by the drops at 745-755 as she
     stands there, as one on the ground would be: shot first, or the pile left. One on a platform 70 under it walks
     under her feet: nothing. Until then the pile's own platform's alone guarded it. And rule 1, with her fights'
-    BESIDE (off by default), counts the one under her, too close (inside its keep-off), as one on her platform."""
+    BESIDE (on by default since 2026-10-31), counts the one under her, too close (inside its keep-off), as one on her
+    platform."""
     from test_danger import build
     m = build([(500, 500, 900, 500), (900, 480, 1100, 480), (400, 530, 900, 530), (400, 570, 900, 570)],
               [("19", 800, 500)])
@@ -636,10 +637,10 @@ def test_a_monster_on_the_platform_just_under_a_pile_guards_it_as_one_on_the_pil
     assert _priced(m, [pile], travel=0.1)._guards(deeper, pile, 1.1, 0.5) == ((), None)
     monkeypatch.setattr(hunt, "BESIDE_GUARDS", False)
     assert _priced(m, [pile], travel=0.1)._guards(s, pile, 1.1, 0.5) == ((), None)
-    # Rule 1 with her fights' BESIDE (off by default): the one under her 120 off (its keep-off 169) is too close; 70
+    # Rule 1 with her fights' BESIDE (on by default): the one under her 120 off (its keep-off 169) is too close; 70
     # under her it isn't on her level.
     from gamelab.attack import stance
-    monkeypatch.setattr(stance, "BESIDE", True)
+    assert stance.BESIDE
     h = _priced(m, [], travel=0.1)
     h._halves = {"horny-mushroom": 28.0}
     h.h.actions = SimpleNamespace(facing="right", lock_until=0.0, attack_at=None)
