@@ -3,7 +3,8 @@
     python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs 4] [--save NAME]
                                              [--costs coded|measured|measured-1366] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
-                                             [--attack choice|skill|regular] [--cache]
+                                             [--attack choice|skill|regular] [--think K | --think-clock K]
+                                             [--cache]
     python -m gamelab.sim.harness cached POLICY [run's options] [--sha master]   a commit's cached seeds, read
     python -m gamelab.sim.harness ab POLICY [run's options] [--base master] [--metric KEY ...] [--max-seeds 48]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE    two saved runs, seed by seed, against the bar
@@ -14,13 +15,13 @@ POLICY: tour, loop, loop-grind (the hunting commands), or walk (movement only, a
 
 `--cache` reads the seeds this checkout's code (its commit's) has already run with the same arguments from the baseline
 cache (sim.baseline: D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json) and runs only the others,
-keeping them; a checkout whose code isn't as committed, or a run with `--think`, runs them all and keeps none. `cached` reads a
-commit's (master's) without running anything, and saves them as a run for `compare`, which also takes a cache's folder.
-`ab` runs this checkout against a base commit's cached seeds, 12, then 24 and 48 only while a headline difference (EXP
-a minute, touches, deaths, falls out of the map, stops, and each --metric) is within 2 standard errors and not zero
-(seeds that differ with a mean difference of 0 among them), or has under 2 seeds with a value on both sides; a
---metric no seed's result has is refused (the base's missing seeds run in its own checkout by
-D:/MapleHelper-scratch/baselines/base.py, with the environment its key resolved). `spot` is a reviewer's
+keeping them; a checkout whose code isn't as committed, or a run with `--think` or `--think-clock`, runs them all and
+keeps none. `cached` reads a commit's (master's) without running anything, and saves them as a run for `compare`,
+which also takes a cache's folder. `ab` runs this checkout against a base commit's cached seeds, 12, then 24 and 48
+only while a headline difference (EXP a minute, touches, deaths, falls out of the map, stops, and each --metric) is
+within 2 standard errors and not zero (seeds that differ with a mean difference of 0 among them), or has under 2 seeds
+with a value on both sides; a --metric no seed's result has is refused (the base's missing seeds run in its own
+checkout by D:/MapleHelper-scratch/baselines/base.py, with the environment its key resolved). `spot` is a reviewer's
 check of a saved run (or a cache's folder): a seed or two run again with the arguments each result records, the same
 to the digit or the keys that differ, instead of the whole table again. README: Checking a change.
 
@@ -433,15 +434,20 @@ def _only(policy, grounds: tuple[int, ...]):
 # --- one run -------------------------------------------------------------------------------------------
 
 def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
-             map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (), attack: str | None = None):
+             map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (), attack: str | None = None,
+             think_clock: float = 0.0):
     """The Scenario for one run: the policy hunting on map `map_id` from its START_AT[seed] (STARTS) in world `seed`
     until the horizon. `think`: charge the stack's own computing to the fake clock (fakes.Clock; the runs then vary a
-    little); `world`: the switches of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default);
+    little), at the fakes' calls; `think_clock` in its place: so, times it, and at every read of the clock too, as it
+    goes (fakes.Clock.reads: a replan's own computing can make it late, navigator.SPLICE_LATE_S); `world`: the switches
+    of WORLDS on; `grounds`: the hunting grounds the policy may hunt (_only; all of them by default);
     `attack`: the stack's attack a throw (behavior.attacks.MODES), with her as ATTACK_HER (None: the regular attack,
     her as the map has her)."""
     from . import scenarios
     if map_id not in PRESET_MAPS.get(preset, (map_id,)):
         raise ValueError(f"preset {preset} is map {', '.join(map(str, PRESET_MAPS[preset]))}'s alone")
+    if think and think_clock:
+        raise ValueError("think or think_clock, not both")
     noise, realism = PRESETS[preset]
     her = scenarios.her_on(map_id)[1]
     for name in world:
@@ -459,16 +465,18 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
                               + (f":attack-{attack}" if attack else ""),
                               fn,
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
-                              realism=realism, may_die=True, think=think, map_id=map_id,
+                              realism=realism, may_die=True, think=think_clock or think, think_reads=bool(think_clock),
+                              map_id=map_id,
                               her=her if world or attack else None, attack=attack)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
             costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
-            world: tuple = (), grounds: tuple = (), attack: str | None = None) -> dict:
+            world: tuple = (), grounds: tuple = (), attack: str | None = None, think_clock: float = 0.0) -> dict:
     """Run one hunt and return what it gave (outcomes). `costs`: what the simulator's looks take (COSTS); `ways`:
     the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on;
-    `attack`: the stack's attack a throw (scenario)."""
+    `attack`: the stack's attack a throw; `think`, `think_clock`: the stack's computing charged to the clock (scenario;
+    the result has `think_clock` only where it's set)."""
     from .. import telemetry
     from ..localization import feed
     from ..motion import route
@@ -485,7 +493,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
             route.ROUTES = ways
         with telemetry.captured() as records:
             trace, sim = scenarios.run_sim(scenario(policy, seed, preset, minutes, think, map_id, world, grounds,
-                                                    attack))
+                                                    attack, think_clock))
     finally:
         for name, value in before.items():
             setattr(fakes, name, value)
@@ -499,6 +507,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         out["grounds"] = list(grounds)
     if attack:
         out["attack"] = attack
+    if think_clock:
+        out["think_clock"] = think_clock
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     f = trace["feed"]
     out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
@@ -1039,18 +1049,19 @@ def _waits(records: list[dict]) -> list[tuple[float, float]]:
 
 def run_many(policy: str, seeds: int, preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
              costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP,
-             world: tuple = (), grounds: tuple = (), attack: str | None = None) -> list[dict]:
+             world: tuple = (), grounds: tuple = (), attack: str | None = None,
+             think_clock: float = 0.0) -> list[dict]:
     return run_seeds(policy, list(range(1, seeds + 1)), preset, minutes, jobs, think, costs, ways, map_id, world,
-                     grounds, attack)
+                     grounds, attack, think_clock)
 
 
 def run_seeds(policy: str, seeds: list[int], preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
               costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (),
-              grounds: tuple = (), attack: str | None = None,
+              grounds: tuple = (), attack: str | None = None, think_clock: float = 0.0,
               done: Callable[[int, dict], None] | None = None) -> list[dict]:
     """run_many on the seeds named, their results in that order; `done(seed, result)` as each run ends (in the order
     they end, with `jobs` processes)."""
-    args = [(policy, k, preset, minutes, think, costs, ways, map_id, tuple(world), tuple(grounds), attack)
+    args = [(policy, k, preset, minutes, think, costs, ways, map_id, tuple(world), tuple(grounds), attack, think_clock)
             for k in seeds]
     if jobs <= 1 or not args:
         out = []
@@ -1075,12 +1086,12 @@ def run_seeds(policy: str, seeds: list[int], preset: str, minutes: float, jobs: 
 
 def cache_of(policy: str, preset: str, minutes: float, think: float = 0.0, costs: str = "coded",
              ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (), grounds: tuple = (),
-             attack: str | None = None, code: str | None = None, commit: str | None = None):
+             attack: str | None = None, think_clock: float = 0.0, code: str | None = None, commit: str | None = None):
     """The baseline cache of a run's arguments on code `code` (baseline.code_id: a commit's; None: this checkout's,
     while its code is as committed), or (None, why there's none). `commit`: the commit, for its meta.json."""
     from . import baseline
     p = baseline.params(run_one, (policy, 0, preset, minutes, think, costs, ways, map_id, tuple(world),
-                                  tuple(grounds), attack))
+                                  tuple(grounds), attack, think_clock))
     if why := baseline.uncacheable(p):
         return None, why
     if code is None:
@@ -1093,14 +1104,15 @@ def cache_of(policy: str, preset: str, minutes: float, think: float = 0.0, costs
 
 def cached_run(policy: str, seeds: list[int], preset: str, minutes: float, jobs: int = 1, think: float = 0.0,
                costs: str = "coded", ways: int | None = None, map_id: int = FIRST_MAP, world: tuple = (),
-               grounds: tuple = (), attack: str | None = None, say: Callable[[str], None] = print) -> list[dict]:
+               grounds: tuple = (), attack: str | None = None, think_clock: float = 0.0,
+               say: Callable[[str], None] = print) -> list[dict]:
     """run_seeds through the baseline cache: the seeds this checkout's commit has cached for these arguments read, the
     others run and kept (each as it ends, while the checkout's code is still as committed); all of them as read back
-    from their files. A checkout with changes, or a run that isn't deterministic (`think`), runs them all and keeps
-    none, and `say`s why."""
+    from their files. A checkout with changes, or a run that isn't deterministic (`think`, `think_clock`), runs them all
+    and keeps none, and `say`s why."""
     from . import baseline
-    cache, why = cache_of(policy, preset, minutes, think, costs, ways, map_id, world, grounds, attack)
-    run = (policy, preset, minutes, jobs, think, costs, ways, map_id, world, grounds, attack)
+    cache, why = cache_of(policy, preset, minutes, think, costs, ways, map_id, world, grounds, attack, think_clock)
+    run = (policy, preset, minutes, jobs, think, costs, ways, map_id, world, grounds, attack, think_clock)
     if cache is None:
         say(f"cache: not used: {why}")
         return [baseline.plain(r) for r in run_seeds(policy, seeds, *run[1:])]
@@ -1468,10 +1480,11 @@ def main(argv: list[str] | None = None) -> int:
         return ab(args)
     if args.cache:
         results = cached_run(args.policy, list(range(1, args.seeds + 1)), args.preset, args.minutes, args.jobs,
-                             args.think, args.costs, args.ways, args.map, tuple(args.world), args.grounds, args.attack)
+                             args.think, args.costs, args.ways, args.map, tuple(args.world), args.grounds, args.attack,
+                             args.think_clock)
     else:
         results = run_many(args.policy, args.seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
-                           args.ways, args.map, tuple(args.world), args.grounds, args.attack)
+                           args.ways, args.map, tuple(args.world), args.grounds, args.attack, args.think_clock)
     print(table(results))
     name = args.save or _name(args)
     save(name, results)
@@ -1486,8 +1499,13 @@ def _run_options(r: argparse.ArgumentParser) -> argparse.ArgumentParser:
     r.add_argument("--minutes", type=float, default=20.0)
     r.add_argument("--preset", choices=sorted(PRESETS), default="game")
     r.add_argument("--jobs", type=int, default=1)
-    r.add_argument("--think", type=float, default=0.0,
-                   help="charge the stack's computing to the fake clock, times this (1: this computer's speed)")
+    thinks = r.add_mutually_exclusive_group()
+    thinks.add_argument("--think", type=float, default=0.0,
+                        help="charge the stack's computing to the fake clock, times this (1: this computer's speed), "
+                             "at the fakes' calls (a read of the clock inside it doesn't move: a replan is never late)")
+    thinks.add_argument("--think-clock", type=float, default=0.0, metavar="K",
+                        help="as --think K, and at every read of the clock too, as it goes: a replan's own computing "
+                             "can make it late (navigator.SPLICE_LATE_S), as live")
     r.add_argument("--save",
                    help="name to save the results under (default: POLICY-PRESET, then -COSTS and -waysN)")
     r.add_argument("--ways", type=int, help="the ways her trips choose among (route.ROUTES; default: route's own)")
@@ -1526,6 +1544,8 @@ def _command_line(args) -> list[str]:
            "--map", str(args.map)]
     if args.think:
         out += ["--think", repr(args.think)]
+    if args.think_clock:
+        out += ["--think-clock", repr(args.think_clock)]
     if args.ways is not None:
         out += ["--ways", str(args.ways)]
     for w in args.world:
@@ -1540,7 +1560,7 @@ def _command_line(args) -> list[str]:
 def _run_args(args) -> tuple:
     """A run's arguments after the policy and seeds (cache_of's)."""
     return (args.preset, args.minutes, args.think, args.costs, args.ways, args.map, tuple(args.world), args.grounds,
-            args.attack)
+            args.attack, args.think_clock)
 
 
 def _cached(args) -> int:
@@ -1574,7 +1594,8 @@ def _cached(args) -> int:
     return 0
 
 
-SPOT_KEYS = ("policy", "preset", "minutes", "think", "costs", "ways", "map", "world", "grounds", "attack")
+SPOT_KEYS = ("policy", "preset", "minutes", "think", "costs", "ways", "map", "world", "grounds", "attack",
+             "think_clock")
 
 
 def spot(results: list[dict], seeds: list[int], jobs: int = 1, say: Callable[[str], None] = print) -> bool:
@@ -1595,7 +1616,7 @@ def spot(results: list[dict], seeds: list[int], jobs: int = 1, say: Callable[[st
         r = by_seed[ks[0]]
         again = run_seeds(r["policy"], ks, r["preset"], r["minutes"], jobs, r.get("think", 0.0),
                           r.get("costs", "coded"), r.get("ways"), r.get("map", FIRST_MAP), tuple(r.get("world", ())),
-                          tuple(r.get("grounds", ())), r.get("attack"))
+                          tuple(r.get("grounds", ())), r.get("attack"), r.get("think_clock", 0.0))
         for k, got in zip(ks, again):
             got, want = baseline.plain(got), by_seed[k]
             if got == want:
@@ -1677,7 +1698,7 @@ def ab(args) -> int:
             print(f"--metric {', '.join(absent)}: in none of the base's results; the candidate's are looked at "
                   f"after its seeds", flush=True)
         cand += cached_run(args.policy, seeds, args.preset, args.minutes, args.jobs, args.think, args.costs,
-                           args.ways, args.map, tuple(args.world), args.grounds, args.attack,
+                           args.ways, args.map, tuple(args.world), args.grounds, args.attack, args.think_clock,
                            say=lambda line: print("candidate " + line, flush=True))
         if n == 0 and (unknown := [m for m in extra if not any(has_metric(r, m) for r in base + cand)]):
             known = sorted({k for r in base + cand for k in _paths(r)})

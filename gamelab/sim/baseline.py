@@ -7,8 +7,8 @@ side of a comparison that doesn't change (master's) is run once and read after (
 
 ROOT is D:/MapleHelper-scratch/baselines (GAMELAB_BASELINES says otherwise). Only deterministic results go in: a run of
 the same code with the same arguments on the same seed gives the same dict to the digit (the harness's runs are
-PYTHONHASHSEED=0, her stats fixed, the world and the policy seeded); `think` charges this computer's own computing to
-the clock (fakes.Clock), so a run with it isn't cached. Timing benches never are: what they measure is the computer.
+PYTHONHASHSEED=0, her stats fixed, the world and the policy seeded); `think` and `think_clock` charge this computer's
+own computing to the clock (fakes.Clock), so a run with either isn't cached. Timing benches never are: what they measure is the computer.
 
 The code's identity (`identity`, `code_id`) is its commit's code: a SHA-1 of the commit's tree under gamelab/,
 gamedata/, maplehelper/ and config.toml (every file's mode, blob and path; the Markdown, which nothing runs, left out),
@@ -55,7 +55,7 @@ REPO = Path(__file__).resolve().parents[2]
 CODE = ("gamelab", "gamedata", "maplehelper", "config.toml")  # what identity() requires as committed
 NOT_CODE = (":(exclude,glob)**/*.md",)                      # ... but these (nothing runs them)
 CORE = ("policy", "preset", "minutes", "think", "costs", "ways", "map_id", "world", "grounds", "attack")
-UNCACHED = {"think": 0.0}  # arguments whose other values aren't deterministic, and so not cached
+UNCACHED = {"think": 0.0, "think_clock": 0.0}  # arguments whose other values aren't deterministic, and so not cached
 # The installed packages a run imports, by module, and the distributions that could give each (OpenCV's four wheels:
 # this env has two, opencv-python and opencv-python-headless, either one's files cv2's).
 PACKAGES = {"numpy": ("numpy",),

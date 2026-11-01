@@ -261,9 +261,9 @@ def test_a_new_spawn_into_a_leg_is_replanned_within_a_state_and_spliced_with_no_
     assert trace["result"]["replans"] >= 1
 
 
-def _spawn_run(wrap=None, realism=None):
+def _spawn_run(wrap=None, realism=None, think: float = 0.0, reads: bool = False):
     """The spawn into a later landing (_spawn_into_landing) up the tower from the floor's right, `wrap(sim, nav)` on the
-    navigator first: (trace, sim, the spawn's state)."""
+    navigator first (`think`, `reads`: the clock's, fakes.Clock): (trace, sim, the spawn's state)."""
     state: dict = {}
     hook = _spawn_into_landing(state)
 
@@ -275,7 +275,7 @@ def _spawn_run(wrap=None, realism=None):
         return nav.go(6, seconds=90)
 
     sc = scenarios.Scenario("replan spawn", None, (33, 300.0), monsters=None, seed=1, limit=120, map_id=scenarios.TREE,
-                            realism=realism)
+                            realism=realism, think=think, think_reads=reads)
     trace, sim = _run(sc, go)
     assert state, "no chain with a later landing to spawn into"
     return trace, sim, state
@@ -510,6 +510,41 @@ def test_better_ways_are_switched_to_with_hysteresis_never_dithering(monkeypatch
                for line in late), late[:3]
     assert not trace["splices"] and not any(marks)
     assert all(b - a >= nv.BETTER_EVERY_S - 1e-6 for a, b in zip(looks, looks[1:])), looks
+
+
+@REAL
+def test_with_the_clock_read_as_it_goes_a_slow_replan_is_late_by_its_own_computing(monkeypatch):
+    """The harness's --think-clock (fakes.Clock.reads): the stack's computing charged at every read of the clock too, so
+    a replan's own computing makes it late. The spawn's replans made to take 0.2 s of this computer's (its real clock
+    faked, moving only while their chains are planned): dropped as too late, nothing spliced. With --think alone
+    (charged at the fakes' calls) the deadline can't fire: the same 0.2 s, and the splice goes, the player taking it
+    late (the latency analysis of 2026-11-01)."""
+    from gamelab.sim import fakes
+    real = {"t": 0.0}
+    monkeypatch.setitem(fakes._REAL, "perf_counter", lambda: real["t"])
+
+    def wrap(sim, nav):
+        real_switch, real_chain = nav._switch, nav.flow.chain
+        inside = {"on": False}
+
+        def chain(*a, **k):
+            if inside["on"]:
+                real["t"] += 0.2
+            return real_chain(*a, **k)
+
+        def switch(*a, **k):
+            inside["on"] = True
+            try:
+                return real_switch(*a, **k)
+            finally:
+                inside["on"] = False
+        nav.flow.chain, nav._switch = chain, switch
+    trace, sim, state = _spawn_run(wrap, think=1.0, reads=True)
+    assert any("replanned too late (200 ms" in line for line in trace["log"]), trace["log"][:60]
+    assert not trace["splices"]
+    trace, sim, state = _spawn_run(wrap, think=1.0)
+    assert not any("replanned too late" in line for line in trace["log"])
+    assert trace["splices"] and max(p.spliced["late_ms"] for p in sim.player.order if p.spliced) >= 100
 
 
 @REAL

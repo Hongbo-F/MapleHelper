@@ -23,12 +23,13 @@ def test_the_key_covers_every_argument_of_a_run_but_the_seed():
     assert set(p) == set(baseline.CORE) and "seed" not in p
     assert p["world"] == ["zero-walls", "near-misses", "walkers"] and p["minutes"] == 5.0
     other = {"policy": "loop-grind", "preset": "crowd-17", "minutes": 10.0, "think": 1.0, "costs": "coded",
-             "ways": 3, "map_id": 10000012, "world": ("zero-walls",), "grounds": (23,), "attack": "skill"}
+             "ways": 3, "map_id": 10000012, "world": ("zero-walls",), "grounds": (23,), "attack": "skill",
+             "think_clock": 1.0}
     names = list(baseline.inspect.signature(harness.run_one).parameters)
     assert set(other) == set(names) - {"seed"}  # (every argument of run_one tried)
     keys = {_key()}
     for name, value in other.items():
-        args = list(RUN)
+        args = list(RUN) + [0.0] * (len(names) - len(RUN))  # (a later switch at its default: think_clock)
         args[names.index(name)] = value
         keys.add(_key(tuple(args)))
     assert len(keys) == len(other) + 1  # each argument changes the key
@@ -131,6 +132,8 @@ def test_think_isnt_cached():
     assert "think" in baseline.uncacheable(baseline.params(harness.run_one, thinking))
     cache, why = harness.cache_of("loop", "crowd", 5.0, 1.0, code="f" * 40)
     assert cache is None and "think" in why
+    cache, why = harness.cache_of("loop", "crowd", 5.0, think_clock=1.0, code="f" * 40)  # (--think-clock)
+    assert cache is None and "think_clock" in why
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -296,7 +299,8 @@ def test_ab_adds_seeds_only_while_a_headline_difference_is_within_2_se_and_not_z
 
 
 def _ab_args(**kw) -> Namespace:
-    a = dict(policy="loop", seeds=12, minutes=5.0, preset="crowd", jobs=1, think=0.0, save="abtest", ways=None,
+    a = dict(policy="loop", seeds=12, minutes=5.0, preset="crowd", jobs=1, think=0.0, think_clock=0.0, save="abtest",
+             ways=None,
              costs="measured", map=10002073, world=["walkers"], grounds=(), attack="choice", base="master",
              metric=["hurt"], max_seeds=48, fill=None)
     a.update(kw)
@@ -406,15 +410,16 @@ def test_a_spot_check_runs_a_saved_runs_seeds_again_with_their_own_arguments(mon
               "touches": 10, "nav": {"misses": 2}} for k in (1, 2, 3)]
     calls = []
 
-    def again(policy, seeds, preset, minutes, jobs, think, costs, ways, map_id, world, grounds, attack):
-        calls.append((policy, list(seeds), preset, minutes, think, costs, ways, map_id, world, grounds, attack))
+    def again(policy, seeds, preset, minutes, jobs, think, costs, ways, map_id, world, grounds, attack, think_clock):
+        calls.append((policy, list(seeds), preset, minutes, think, costs, ways, map_id, world, grounds, attack,
+                      think_clock))
         return [dict(saved[k - 1], nav={"misses": 2}, t=(1,)) if k != 3 else dict(saved[2], touches=11, t=(1,))
                 for k in seeds]
     monkeypatch.setattr(harness, "run_seeds", again)
     said = []
     saved = [dict(r, t=[1]) for r in saved]
     assert harness.spot(saved, [1, 2], say=said.append)
-    assert calls == [("loop", [1, 2], "crowd", 5.0, 0.0, "measured", 1, 10002073, ("walkers",), (), "choice")]
+    assert calls == [("loop", [1, 2], "crowd", 5.0, 0.0, "measured", 1, 10002073, ("walkers",), (), "choice", 0.0)]
     assert said[0].startswith("seed 1: the same to the digit")
     said.clear()
     assert not harness.spot(saved, [3], say=said.append)

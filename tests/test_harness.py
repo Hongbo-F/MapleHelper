@@ -225,6 +225,60 @@ def test_thinking_can_be_charged_to_the_fake_clock(monkeypatch):
     assert Clock().think == 0.0
 
 
+def test_with_reads_the_clock_moves_inside_the_stacks_computing(monkeypatch):
+    """The harness's --think-clock (Clock.reads, the latency analysis of 2026-11-01): a read of the clock inside the
+    stack's computing (monotonic, perf_counter, time) charges what was computed since the last charge first, times
+    `think`, so a replan's own computing moves it (navigator.SPLICE_LATE_S can fire). Off (--think alone, or nothing),
+    a read there gives the time of the last fake call, whatever was computed since."""
+    real = {"t": 10.0}
+    monkeypatch.setitem(fakes._REAL, "perf_counter", lambda: real["t"])
+    clock = Clock(think=2.0, reads=True)
+    clock.mark()       # a fake call ends at real 10.0 ...
+    real["t"] = 10.2   # ... and 0.2 s on the stack reads the clock: charged twice over, at once
+    t0 = clock.monotonic()
+    assert t0 - clock.start == pytest.approx(0.4)
+    real["t"] = 10.25
+    assert clock.time() - fakes.EPOCH == pytest.approx(0.5) and clock.monotonic() == pytest.approx(t0 + 0.1)
+    real["t"] = 10.3
+    clock.sleep(0.1)   # (a fake call: what's left charged, then its own time)
+    assert clock.elapsed == pytest.approx(0.7)
+    for off in (Clock(think=2.0), Clock(reads=True)):
+        off.mark()
+        real["t"] += 1.0
+        assert off.monotonic() == off.start and off.time() == fakes.EPOCH and not off.elapsed
+    assert not Clock().reads
+
+
+def test_the_harness_think_clock_is_think_charged_at_every_read_too():
+    """`--think-clock K` (run_one's `think_clock`): the run's clock charges the stack's computing times K at the fakes'
+    calls and at every read of it (Scenario.think_reads); not with --think too; not cached; a result says it only
+    where it's set, so every run without it is as before to the digit."""
+    sc = harness.scenario("loop-grind", 1, "crowd", 5.0, map_id=10002073, think_clock=3.0)
+    assert sc.think == 3.0 and sc.think_reads
+    plain = harness.scenario("loop-grind", 1, "crowd", 5.0, map_id=10002073, think=1.0)
+    assert plain.think == 1.0 and not plain.think_reads
+    assert not harness.scenario("loop-grind", 1, "crowd", 5.0, map_id=10002073).think_reads
+    with pytest.raises(ValueError):
+        harness.scenario("loop-grind", 1, "crowd", 5.0, map_id=10002073, think=1.0, think_clock=1.0)
+    from gamelab.sim import baseline
+    run = ("loop", 0, "crowd", 5.0, 0.0, "measured", None, 10002073, ("walkers",), (), "choice")
+    assert "think_clock" not in baseline.params(harness.run_one, run)  # (off: every cached key as before)
+    assert "think_clock" in baseline.uncacheable(baseline.params(harness.run_one, run + (1.0,)))
+    p = _parsed(["run", "loop-grind", "--think-clock", "3"])
+    assert p.think_clock == 3.0 and p.think == 0.0 and harness._command_line(p)[-2:] == ["--think-clock", "3.0"]
+    with pytest.raises(SystemExit):
+        _parsed(["run", "loop-grind", "--think", "1", "--think-clock", "3"])
+
+
+def _parsed(argv: list[str]):
+    """The harness's `run` options parsed from `argv` (run's own parser, _run_options)."""
+    import argparse
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest="cmd", required=True)
+    harness._run_options(sub.add_parser("run"))
+    return p.parse_args(argv)
+
+
 def _result(seed, epm, share=0.5, hp=0.1, died=None):
     return {"seed": seed, "exp_per_min": epm, "drops_share": share, "hp_lost": hp, "died_at": died}
 

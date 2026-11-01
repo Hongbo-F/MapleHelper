@@ -165,7 +165,7 @@ class SimTimeout(BaseException):
 
 class Clock:
     def __init__(self, start: float = START, limit: float | None = None, pace: float | None = None,
-                 think: float = 0.0):
+                 think: float = 0.0, reads: bool = False):
         self.start = self.now = start
         self.limit = limit  # s after the start; going past it raises SimTimeout
         self.pace = pace    # if set, simulated time also passes in real time, this many times faster
@@ -173,6 +173,12 @@ class Clock:
         # set, the stack's own computing between two of those (measured with the real perf_counter) is
         # charged too, times `think` (1.0: as fast as this computer). Off by default: it makes runs vary.
         self.think = think
+        # ... charged at those calls alone, a read of the clock inside the computing gives the time of the last one: a
+        # replan's own computing never made it late (navigator._switch's deadline, SPLICE_LATE_S, couldn't fire: the
+        # latency analysis of 2026-11-01). With `reads` too, it's charged as it goes: at every read of the clock
+        # (monotonic, perf_counter, time), what was computed since the last charge first, the world and the feed's
+        # frames going on meanwhile, as live (the harness's --think-clock). Off: as before, to the digit.
+        self.reads = reads
         self._mark: float | None = None
         # (period, fn): fn(t) at every frame the game shows, as time passes it (a continuous feed's frames:
         # localization.feed.SyncFeed.tick); None: no frames
@@ -214,7 +220,15 @@ class Clock:
             if self.limit is not None and self.now - self.start > self.limit:
                 raise SimTimeout(f"simulated run passed its {self.limit:.0f} s limit")
 
+    def _read(self) -> None:
+        """A read of the clock (`reads`): the stack's computing since the last charge charged first."""
+        if self._mark is not None:
+            self.charge()
+            self.mark()
+
     def monotonic(self) -> float:
+        if self.reads:
+            self._read()
         return self.now
 
     def sleep(self, seconds: float) -> None:
@@ -223,6 +237,8 @@ class Clock:
         self.mark()
 
     def time(self) -> float:
+        if self.reads:
+            self._read()
         return EPOCH + self.elapsed
 
     def strftime(self, fmt: str, t=None) -> str:

@@ -96,6 +96,7 @@ class Scenario:
     noise: Noise | None = None   # the real game's errors (world.Noise); None: none
     realism: Realism | None = None  # how busy and hard the map is (world.Realism); None: the default world
     think: float = 0.0           # charge the stack's computing to the fake clock (fakes.Clock); 0: free
+    think_reads: bool = False    # ... and at every read of the clock too, as it goes (fakes.Clock.reads)
     expects: tuple = ()          # (what, trace -> bool): what the scenario is there for (tests check them)
     may_die: bool = False        # unless set, every scenario also expects her alive at the end
     map_id: int = MAP_ID         # the map it's on (real_map)
@@ -126,7 +127,7 @@ class Sim:
         """`pace`: also let simulated time pass in real time, this many times faster (to watch it)."""
         self.model, self.scenario = model, sc
         self.keys, her = her_on(model.id)  # fixed, not config.toml's (control.timeline)
-        self.clock = Clock(limit=sc.limit, pace=pace, think=sc.think)
+        self.clock = Clock(limit=sc.limit, pace=pace, think=sc.think, reads=sc.think_reads)
         self.world = World(model, self.keys, sc.start, seed=sc.seed, monsters=sc.monsters, hp=sc.hp,
                            inventory_full=sc.inventory_full, facing=sc.facing, origin=self.clock.now,
                            drops=list(sc.drops), hanging=sc.hanging, noise=sc.noise, realism=sc.realism,
