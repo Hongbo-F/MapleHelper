@@ -1994,7 +1994,7 @@ The user, 2026-10-30: "We should also tweak the look picking logic since we are 
 
 **What the live runs said** (the thief's run of 02:03-02:48, the perception service's whole-screen view, against the user's own 5 minutes of play): she picked up 67% of the drops' worth seen (199 a minute; the user 70%, 306 of 437); she lost 100 a minute, 48% of it within 2 s of extra travel on her way while it lay there, 66% within 3; of what she lost, 47% waited on `PILE_CLEAR` (12-28% of those waits for the pile's own monster, drawn dying where it dropped them), 28% was known and never gone for, 15% yielded to something in reach; 15-24% of the piles' worth listed was the same drops counted by 2-3 piles; 12% of the drops lay past the 90 s `DROP_LIFE` the hunt loop left them at; half her departures from a stop (24 of 50) came within 3 s of a kill of hers, before its drops landed. Looting wasn't where her touches came from: 6.6 a minute on her drops against 11.3 the rest of the time.
 
-**The sweep** (`behavior/sweep.py`, pure, as patrol.py is): of the drop store's piles (`Hunt._spots`: each where its drops lie, what it's worth, its stand, when its drops land, how likely it is to lie there still), the set and the order that make the most of their worth at `MESO_EXP` (0.5 EXP a meso, the user's to choose: at 1.0 the break-even halves) and the guards' EXP, less her time at what it's worth (`_time_worth`: at a ground what she makes there, at a stop what staying gives, on her way the loop's rate or the best ground's, or more what's in reach now: EXP before loot), adding at most `BUDGET_MIN` (2 s) or `BUDGET_SHARE` (0.5) of her way's time, whichever is more, each candidate alone at most `CAND_S` (5 s) more (86% of what she lost live), the best `MAX_CAND` (8). Solved exactly in its travel (a dynamic program over subsets and the spot visited last; each set's quickest order weighed by its drops' survival at its arrivals) once a look for each way (`Hunt._sweep`), the itinerary she's on kept unless another is better by `KEEP_SHARE` (20%) and `KEEP_S` (0.5 s) of her time (`sweep.Sweeper`: patrol's two-pile flip-flop in loop_tree_grind_jump_key is the warning case). It's said in her log when it changes ("sweep: ..., then ...: +1.6 s on her way for 27 EXP's worth") and recorded (a 'sweep' record: its order, extra, value, budget, rate and why each candidate was left out: "cost", "budget", "no way", "expired", "unsafe: ...").
+**The sweep** (`behavior/sweep.py`, pure, as patrol.py is; as built on 2026-10-30: from 2026-11-01 no exchange of mesos for EXP, no price of her time, no `CAND_S` and no budget of its own, each pile within the seconds it may add to her way instead, "Loot as she kills" below): of the drop store's piles (`Hunt._spots`: each where its drops lie, what it's worth, its stand, when its drops land, how likely it is to lie there still), the set and the order that make the most of their worth at `MESO_EXP` (0.5 EXP a meso, the user's to choose: at 1.0 the break-even halves) and the guards' EXP, less her time at what it's worth (`_time_worth`: at a ground what she makes there, at a stop what staying gives, on her way the loop's rate or the best ground's, or more what's in reach now: EXP before loot), adding at most `BUDGET_MIN` (2 s) or `BUDGET_SHARE` (0.5) of her way's time, whichever is more, each candidate alone at most `CAND_S` (5 s) more (86% of what she lost live), the best `MAX_CAND` (8). Solved exactly in its travel (a dynamic program over subsets and the spot visited last; each set's quickest order weighed by its drops' survival at its arrivals) once a look for each way (`Hunt._sweep`), the itinerary she's on kept unless another is better by `KEEP_SHARE` (20%) and `KEEP_S` (0.5 s) of her time (`sweep.Sweeper`: patrol's two-pile flip-flop in loop_tree_grind_jump_key is the warning case). It's said in her log when it changes ("sweep: ..., then ...: +1.6 s on her way for 27 EXP's worth") and recorded (a 'sweep' record: its order, extra, value, budget, rate and why each candidate was left out: "cost", "budget", "no way", "expired", "unsafe: ...").
 - *Where it runs* (the hunt loop's rules 5, 5b, 6, 8 and 10 gone into one, "sweep"; 6a, a valuable pile at once with nothing in reach, kept): travelling, the piles worth their time on her way to where she's going (`_while_travelling`); at a ground with nothing in reach, those worth a round trip from its spot (`Hunt._at_ground`; in a lull, nothing wanted left on the ground and a kill of hers there due back, her time worth nothing until the respawn and the budget that wait, `_sweep_terms`: rule 8's, lull loot; grinding, from the stop's place at what staying there gives: `Grind._at_ground`, `_stay_gain`); leaving it, before she goes, those on her way to the next ground (`Hunt._leave`: the best other ground's spot) or stop (`Grind._leave`: Patrol.choose's, peeked), the drops of her last kills there waited for where that pays (an expected pile's landing, `DROP_LANDS` after the kill, counts as time on her way).
 - *A pile's trip* is an objective as any ('sweep': `_go_for`, its stops sharing the trip's budgets in passing as rule 5b's did), its itinerary's way on carried with it (`Objective.after`); every pass on the way the sweep is solved again from where she is (`_on_sweep`): the same pile first, on; another, a guard to shoot first or none, the objective under it and what the sweep has now. A trip to a spot stops for a pile the sweep now has on her way (`_sweep_calls`, the navigator's `until`).
 - *Its stand* (`_stand`, at her arrival or when she's by it): each bunch of its drops seen (`looting.PILE_GAP`) walked to from the nearer end, a press of pick-up for each drop and one more (`PILE_EVERY_MS` apart); a kill's drops not seen yet, a walk over `SPREAD` (30 units) either side of where it died, pressing; a drop still where she stood twice can't be picked up (`looting.cant_pick`); `PILE_TRIES` (3) stands or trips at most; a telemetry event 'pick'. What's left the next look's drops show (until now a mop-up of its own, 0.3 s and a look between its rounds: `walk_piles`, `mop_up`, `collect` and `sweep_through` are the tour's alone now).
@@ -2656,7 +2656,12 @@ of 15 minutes (fix2/m15/std15.txt) against master's 2. With her potions endless 
 process, master's in its own checkout; every run whose 60 lasted the same to the digit as the harness's) neither side
 stops: EXP a minute 308.7 -> 325.7 (+17.0, se 6.6, better on 10 of 12), loot 254.2 -> 259.4 (+5.2, 6.4), her lowest HP
 54% on both, HP potions 53.9 -> 63.8. How many potions she carries live is the user's to say. Master's retreat dying 2
-of 36 times with an empty pet is master's (its own study: 12 of 144).
+of 36 times with an empty pet is master's (its own study: 12 of 144). (Corrected after the independent check of
+2026-11-01, its finding 3: these 15-minute runs are a6a2c28's code, before PILE_HP and this round's other commits, not
+1ff93e6's; at 1ff93e6 itself, 60 potions, 12 seeds: EXP 306.4 -> 301.4, -5.0 (se 9.9), loot -16.1 (10.3), drops' share
+0.922 -> 0.871, the stop on 7 of 12 against master's 2 (D:/MapleHelper-scratch/replan/verify/repro/m15_tip.txt); endless
+potions were never run on 1ff93e6. The tip's own at 15 minutes, with her real stock: "The tip measured for the record"
+below.)
 
 **Hurt at piles in the live drops' worlds** (+50% at 5 minutes, +87% at 15 against the rebase tip 7c25120). Fixed by the
 trips' fix above with the rest, and priced (0f00476): `grind.PILE_HP`, her detours for drops dearer by the HP a second
@@ -2689,7 +2694,10 @@ same to the digit.
 past 180 s, any time in `EXPIRE_PASS_S` (60 s, a guess: the one live pass took drops 198-228 s old), so a pile seen
 lying past 180 s is still gone for; the drop-takers world the same (`world.expiry_life`). The self-fit: not a defect,
 stated (ledger's note): the planner and that world share their guesses on purpose, and the standard world (gone at 180
-s, nobody taking hers) is where the belief is checked against a world it isn't fitted to.
+s, nobody taking hers) is where the belief is checked against a world it isn't fitted to. (Corrected after the
+independent check of 2026-11-01: the standard world checks nothing of the server's drop life either, its 180 s being
+HeavenMS's, the planner's own EXPIRE_S. The drop life is assumed, and the simulator can't test it: "The tip measured
+for the record" below.)
 
 **One map's numbers in stance's prices.** Fixed (a6a2c28): `stance.Prices` with `fight.landing_prices`, a touch of the
 kind its HP (Danger.taken of her max HP as read) at the user's prices, her EXP a second the grind's loop's
@@ -2722,12 +2730,13 @@ eval/master_loot):
 
 No deaths, falls out of the map or stops; the harness's bar isn't passed (better on 28 of 48 where it asks 39, the worst
 seed -30%). Against a0d3420 (48 seeds): EXP +9.9 (6.2), loot -1.9 (6.4), drops' share -0.010 (0.008), HP lost +0.50 bars
-(0.24), knock falls -0.7 (0.6). At 15 minutes (12 seeds, the harness's 60 potions): EXP 306.4 -> 299.2 (-7.1, se 9.8),
-loot -16.1 (11.3), drops' share 0.922 -> 0.876, the stop on 8 of 12 (master 2): the potions, above. Endless potions
-(a6a2c28's code, before PILE_HP): EXP +17.0 (6.6), loot +5.2 (6.4), drops' share 0.922 -> 0.890 (-0.033, se 0.013),
-longest idle +5.6 s (1.8). Her drops' share at 15 minutes is below master's either way: master's rule 6 fetches piles
-about to expire, the sweep priced them (MESO_EXP 0.5) and, at a stop, left those over its 2 s budget (not CAND_S: the
-independent check's finding 2; from 2026-11-01 each pile's allowance instead, "Loot as she kills" below).
+(0.24), knock falls -0.7 (0.6). At 15 minutes (12 seeds, the harness's 60 potions; a6a2c28's code too, corrected after
+the independent check: 1ff93e6's own EXP -5.0, se 9.9, share 0.871, the stop on 7 of 12): EXP 306.4 -> 299.2 (-7.1,
+se 9.8), loot -16.1 (11.3), drops' share 0.922 -> 0.876, the stop on 8 of 12 (master 2): the potions, above. Endless
+potions (a6a2c28's code, before PILE_HP): EXP +17.0 (6.6), loot +5.2 (6.4), drops' share 0.922 -> 0.890 (-0.033, se
+0.013), longest idle +5.6 s (1.8). Her drops' share at 15 minutes is below master's either way: master's rule 6 fetches
+piles about to expire, the sweep priced them (MESO_EXP 0.5) and, at a stop, left those over its 2 s budget (not CAND_S:
+the independent check's finding 2; from 2026-11-01 each pile's allowance instead, "Loot as she kills" below).
 
 **The hunt loop** (`ab loop`, the same world, 12 seeds: nobody had measured it this round; master's seeds filled by
 base.py, fix2/ab/loop.txt): EXP a minute 267.6 -> 297.5 (+30.0, se 12.0, +11.2%, better on 8), loot 219.9 -> 246.0
@@ -2916,6 +2925,162 @@ fast suite (4 workers): 2,832 passed, 72 skipped, 2 xfailed, 2 failed: test_perc
 worktree's lab lacks tag_template_full.npy, as before) and loop_tree_attack_no_darts, whose seed 1 no longer says
 "MAYBE OUT" (its out-of-darts chain is a run's luck: the next stage's re-pick). The goldens weren't recorded again: the
 next stage's.
+
+## The tip measured for the record against master 072e1ec (2026-11-01, the day)
+
+This round's evaluation (D:/MapleHelper-scratch/replan/loot2/eval: `ab/` the harness's runs, `out/` the runs in process
+by `drv3.py`, paired by `cmp3.py`, her trips' landings by `misses.py`; `seeds/`, `golden/`, `tests/`): master 072e1ec
+its tip at the start and the end; the tip measured daa7e52 (3d8526a's code; its runs are 9fd2a6f's to the digit, so the
+15-minute seeds of "Loot as she kills" are this tip's: its 12 standard seeds the same, and seeds 1 and 24 of the
+15-minute ones run again here), the re-picks after it (0341007) changing no harness run (the 48 standard seeds run again
+in process on 0341007, the same to the digit as the ab's). Master's harness has no loot keys but loot's worth and its
+share: its seeds were run again in its own checkout (ov-base, under the baselines' lock) with the tip's formulas added
+(`drv3.py`), every key both have the same to the digit as master's cache on all 48; her pets on master by the build's
+prototype (impl/drv2.py, the tip's `pet-loot` to the digit). Cash at the user's prices: an Orange Potion 125 mesos, a
+Meat 80, a Blue 100. "Loot" is loot's worth a minute (`value_per_min`, her pets' pick-ups in it).
+
+**The harness standard against master, 48 seeds of 5 minutes** (`ab/std48.txt`; master's loot keys
+`out/master_std48.json`, its pick-ups' age `master_std48b.json`; no pets in this world, a coin a kill lying 180 s):
+
+| 48 seeds of 5 minutes | master | tip | tip - master (se) |
+|---|---|---|---|
+| EXP a minute | 308.6 | 330.2 | +21.6 (9.2), +7.0%, better on 30 |
+| kills | 43.6 | 47.0 | +3.3 (1.3) |
+| loot (all mesos: the standard world drops coins) | 236.6 | 245.4 | +8.8 (6.5) |
+| her drops' share picked | 0.953 | 0.930 | -0.023 (0.012) |
+| her drops' worth left a minute / expiring a run | 11.8 / 1.8 | 18.6 / 2.8 | +6.8 (3.2) / +1.0 (0.5) |
+| her pick-ups' age, the median, s | 9.8 | 9.8 | -0.0 (0.8) |
+| touches / those that hurt | 71.6 / 45.9 | 84.1 / 54.6 | +12.5 (2.7) / +8.6 (2.0) |
+| hurt at piles / on trips | 19.0 / 12.7 | 12.9 / 12.3 | -6.1 (1.8) / -0.4 (0.8) |
+| s on piles a run | 156 | 108 | -48 (5) |
+| HP lost (bars) / HP potions / MP potions | 5.97 / 18.3 / 11.1 | 7.35 / 22.5 / 12.2 | +1.38 (0.31) / +4.3 (1.0) / +1.1 (0.5) |
+| longest idle (s) / knock falls | 20.6 / 9.6 | 21.0 / 9.9 | +0.5 (1.4) / +0.3 (0.6) |
+| her trips landing elsewhere than planned, in all | 8 | 9 | |
+| cash a minute at the user's prices | -443 | -562 | -119 (28) |
+
+No deaths, falls out of the map or safety stops on either side; the harness's bar isn't passed (EXP better on 30 of 48
+where it asks 39, the worst seed -33%). EXP beyond 2 se, loot within; her drops' share 0.023 short of master's (t -1.9)
+and 1.0 more of her drops expiring a run, beyond 2 se. This world has no pets to take what PET_LOOT leaves a moment (its
+pet drinks her potions and takes nothing; the build's hunt loop there: share -0.037, se 0.013), and no pile past 60 s is
+gone for beyond 1 s of her way; at 1ff93e6 (48 seeds, the last round) her share was 0.942.
+
+**15 minutes with her real stock** (250 Meat, `--world meat`, 48 seeds of 15 minutes: at 24 her loot was within 2 se;
+with her pets too, `--world pet-loot`, as she plays, 24 seeds, nothing borderline; the tip's by the harness,
+`ab/meat15_48.txt` and the build's impl/out/ab_both_15.txt, its seeds 1 and 24 run again here the same to the digit,
+`ab/spot_meatpets15.txt`; master's `out/master_meat15_48.json` and `out/master_meatpets15.json`, the build's
+impl/out/M15x.json to the digit with the loot keys):
+
+| 15 minutes | Meat, 48 seeds: master | tip | tip - master (se) | Meat and her pets, 24: master | tip | tip - master (se) |
+|---|---|---|---|---|---|---|
+| EXP a minute | 297.8 | 319.0 | +21.1 (4.9), better on 35 | 300.0 | 327.6 | +27.6 (7.0), better on 19 |
+| kills | 126.5 | 135.4 | +8.9 (2.1) | 127.9 | 139.4 | +11.5 (2.8) |
+| loot | 246.2 | 257.4 | +11.2 (4.6) | 261.3 | 276.9 | +15.7 (5.9) |
+| her own / her pets' pick-ups | - | - | - | 163.8 / 97.5 | 176.0 / 100.9 | +12.2 (4.4) / +3.4 (5.9) |
+| her drops' share picked | 0.932 | 0.900 | -0.032 (0.008) | 0.950 | 0.921 | -0.030 (0.010) |
+| her drops expiring, a run | 8.2 | 12.8 | +4.6 (1.1) | 6.3 | 10.8 | +4.5 (1.4) |
+| her pick-ups' age, the median, s | 11.6 | 9.2 | -2.4 (0.6) | 7.8 | 6.0 | -1.9 (0.6) |
+| touches / those that hurt | 211.6 / 135.7 | 234.7 / 149.7 | +23.1 (5.0) / +14.0 (3.7) | 221.3 / 140.3 | 233.1 / 147.3 | +11.8 (7.7) / +7.0 (4.9) |
+| hurt at piles / s on piles | 62.6 / 513 | 36.3 / 331 | -26.3 (3.0) / -182 (10) | 61.4 / 490 | 34.1 / 310 | -27.3 (3.6) / -179 (13) |
+| HP lost (bars) | 17.8 | 19.8 | +2.0 (0.6) | 18.7 | 19.0 | +0.3 (0.8) |
+| Meat drunk a run (the most) | 85.3 (130) | 94.9 (131) | +9.7 (2.9) | 89.5 (117) | 91.0 (114) | +1.5 (3.7) |
+| safety stops / deaths / falls out | 0 / 0 / 0 | 0 / 0 / 0 | | 0 / 0 / 0 | 0 / 0 / 0 | |
+| cash a minute at the user's prices | -486 | -552 | -66 (17) | -498 | -510 | -11 (21) |
+
+No safety stops on any side; the 250 Meat never near running out (the most a run drank, 131). Her EXP and loot are above
+master's beyond 2 se in both worlds. Her drops' share is 0.030-0.032 short of master's, and 4.5-4.6 more of her drops
+expire a run: master's rule 6 goes for piles about to expire, and this tip goes for none past `OLD_S` (60 s) beyond 1 s
+of her way (the user's "If a pile is about to expire, it probably means they aren't important enough to get picked up
+anyway"). What she picks up she picks up sooner (the median 1.9-2.4 s younger), with about a third less time on her
+piles and 42-45% fewer touches that hurt her there; her touches in all +11% (Meat alone) and +5% (with her pets), the
+"more EXP" trade. With her pets her Meat is master's (+1.5 a run), without them +9.7. With the harness's 60 Orange
+Potions (its crowd preset) the safety stop ended 7 of 12 of the 15-minute grinds at 1ff93e6 against master's 2 (the
+independent check's repro); with her real stock it ends none.
+
+**Her trips with the player started before splices** (`--world no-splices`: every replan of a running chain a cut and a
+resend, as live until the user's UAC restart of the elevated player; 48 seeds of 5 minutes, the standard world
+otherwise; `out/tip_nosplice48.json`, with splices `out/tip_std48.json`, master `out/master_std48.json`; each landing
+elsewhere than planned with what her log said in the 3 s before it, `misses.py`):
+
+| 48 seeds of 5 minutes | master | tip, spliced | tip, cut and resent |
+|---|---|---|---|
+| replans of a running chain | none (master has none) | 238 spliced | 237 cut and resent |
+| her trips landing elsewhere than planned | 8 | 9 | 9 |
+| ... with nothing in the 3 s before (a jump or a drop short) | 6 | 2 | 5 |
+| ... after a touch (the knock's replan with it) | 2 (0) | 4 (2) | 2 (2) |
+| ... after a splice / a cut and resend | - | 3 | 2 |
+| ... falls among them (onto a lower platform, or none) | 8 | 9 | 9 |
+| ... the jump onto 13 landing on 15 (from 14, or 12 by 14) | 0 | 4 | 6 |
+| EXP a minute | 308.6 | 330.2 | 318.3 |
+| touches / HP lost (bars) | 71.6 / 5.97 | 84.1 / 7.35 | 83.5 / 7.34 |
+
+Cut and resent against spliced (the same seeds): EXP a minute -11.9 (se 7.4), loot -7.2 (6.9), touches -0.6 (2.2), HP
+lost -0.01 bars (0.24), knock falls +0.6 (0.5), plans cut short by a hit +3.9 (1.9), the same 9 landings elsewhere, no
+deaths, falls or stops; against master EXP +9.7 (7.3), loot +1.5 (6.5), touches +11.9 (2.9). The cut and resend leans to
+cost EXP (within 2 se; every key let go for the cut, 15-35 ms, where a splice keeps her arrow held) and nothing in
+safety or in her landings. Of the tip's 18 landings elsewhere in both worlds, 10 are one jump: onto 13 (the top
+cluster's left shelf) from 14, landing on 15 below, mostly on the sweep's way to a pile on 13 or 11 ("sweep: drops on 13
+at x -30: +0.8 s on her way"); master never lands short there in its 48 (its 8: onto 16 three times, 25 twice, 11, 12
+and 13; 2 after a touch). A jump the planner's physics has reaching 13 that the world's doesn't: open (not looked into
+here).
+
+**The hunt loop** (`ab loop`, the standard world, 12 seeds of 5 minutes: `ab/loop12.txt`, master's loot keys
+`out/master_loop12.json`; its 12 seeds on 0341007 the same to the digit as 51546c71's cache): EXP a minute 267.6 ->
+297.2 (+29.6, se 11.1, better on 9), kills +3.3 (1.9), loot 219.9 -> 223.2 (+3.3, 10.0), her drops' share 0.967 -> 0.946
+(-0.022, 0.017), expiring +0.9 a run (0.7), her pick-ups' age 7.2 -> 7.5 s, touches +5.1 (5.1), those that hurt -0.7
+(3.3), HP lost the same (4.53 bars), HP potions the same (13.8), time on piles 132 -> 90 s, cash -301 -> -314; no
+deaths, falls or stops. With Meat and her pets (`--world meat --world pet-loot`, master's by the prototype,
+`out/master_loop_mp12.json`): EXP a minute 258.8 -> 290.0 (+31.2, se 8.8, better on 10), kills +4.1 (1.3), loot 223.2 ->
+234.9 (+11.7, 9.9; her pets' +8.9), her drops' share 0.980 -> 0.963 (-0.017, 0.016), hurt at piles 9.3 -> 6.1 (-3.3,
+1.5), touches +4.5 (4.1), Meat +1.6 a run (2.7), cash -248 -> -300; no deaths, falls or stops. Her EXP up beyond 2 se in
+both worlds, her loot and share within, the share leaning to master's.
+
+**What caps her piles at this tip** (the 'sweep' records of the tip's 96 standard runs, spliced and cut and resent: one
+each time her itinerary changed, with why each pile it left out was): no budget at the grind's stops (every one of its
+6,042 itineraries her piles' allowances alone; the hunt loop's lull and way out have theirs), and of the 37,136 times a
+pile was left out, 73% for its own allowance: 51% `ALLOW_OLD`'s 1 s (a pile 60 s old or more, or more dangerous where it
+lies than where she stands, `SAFER_MARGIN`), 15% while aging between, 8% `ALLOW_FRESH`'s 3 s; 27% unsafe (a monster at
+its stand that she can't shoot first: "try not to hit by mobs just for picking up loots"); the sum of an itinerary's
+allowances 9 times (0.02%), `MAX_CAND` 21. So it's each pile's own allowance that binds, `ALLOW_OLD` above all: not
+`CAND_S` nor the stop's 2 s budget (both gone), nor the sum.
+
+**Her drops' life is assumed, and the simulator can't test it.** What the planner believes of how long her drops lie
+(ledger.SURVIVAL) is guesses: hers alone `OWN_S` (15 s, HeavenMS's, not measured here), then taken by others at
+`TAKE_RATE` (0.05 a minute, a guess inside the live bound), gone at the server's expiry pass past `EXPIRE_S` (180 s,
+HeavenMS's) any time in `EXPIRE_PASS_S` (60 s, from the one live pass: four drops 198-228 s old). The simulator can't
+say whether they're right: its standard world has her drops lie `DROP_LIFE`, the same 180 s, nobody taking them, and its
+drop-takers world draws each drop's life from the planner's own guesses (world.others_life, expiry_life), so in neither
+can the server differ from the belief. Only a live watch measures it (Respawns and drop life: one kill's drops left
+lying 4 minutes in view). At this tip it decides less than it did: a pile past `OLD_S` (60 s) may add `ALLOW_OLD` (1 s)
+to her way at most, nothing goes for its expiry, and the survival only weighs a pile's worth and leaves out one under
+`SURVIVE_MIN` (5%) likely to lie there still.
+
+**The scenarios re-picked** (0341007; each docstring says why and which of the seeds tried pass; `seeds/s16.txt`, in the
+goldens' environment): loop_tree_23 3 -> 1 (on 3 seven kills, the rule 'shoot' under 20 times; of 1-16 1, 4, 5, 6, 9 and
+12), loop_tree_23_near_misses 1 -> 10 (on 1 13 kills; of 1-16 10, 12 and 16), loop_tree_attack_no_darts 1 -> 2 (on 1 her
+stars' test cast nothing in its 10 s, so no MAYBE OUT and one page; of 1-16, 2 and 12). **Goldens:** Tree Dungeon's 43
+recorded again (`golden record --jobs 4` into `golden/rec1`, the three re-picked into `rec2`), each one's expectations
+checked on its new trace: 41 of 43 (nav_tree_landing_shot_first and nav_tree_landing_no_shot expected to fail,
+DYING_AWAY and NO_LANDING_SHOT in test_sim, as before); installed in the worktree's lab/golden (those before in
+`golden/before`), `golden check --jobs 4`: 43 of 43 match. **Tests** (`tests/`): the fast suite (4 workers) 2,833
+passed, 72 skipped, 2 xfailed (the two landings above), 1 failed: test_perception's look at a capture (this worktree's
+lab lacks tag_template_full.npy, as before); loop_tree_attack_no_darts, failing in the build on its seed 1, passes on 2.
+The slow tests of the simulator's files the changes touch (test_sim, test_retreat, test_probe and test_stat_window,
+`--slow -m slow`): 37 passed, the two re-picked loops among them.
+
+**Corrections to the sections before** (the independent check's finding 3). "The review's findings fixed": its 15-minute
+numbers with 60 potions and endless potions are a6a2c28's, now said where they stand, with 1ff93e6's own (EXP -5.0, se
+9.9, share 0.871, the stop on 7 of 12; endless potions never ran on 1ff93e6); its drop life's "the standard world is
+where the belief is checked" corrected (above). "Smarter looting": its sweep as built then, said as such. The cap that
+binds is named here as measured (each pile's own allowance; the 2 s budget at a stop and `CAND_S` are gone), and every
+number in this section is this tip's own.
+
+**Open, for the user.** Her drops' share is below master's in every world here (0.023 at 5 minutes, 0.030-0.032 at 15
+minutes, 0.017-0.022 in the hunt loop) and more of her drops expire: the goal's "loot at or above master's" holds for
+loot's worth (above, beyond 2 se, at 15 minutes) but not for the share. The build's allowances without PET_LOOT kept
+master's share at 15 minutes with her pets (-0.007, se 0.009) for EXP +17.8 a minute over master, against +27.6 with it
+("Loot as she kills"): theirs to choose. Her touches and HP lost stay over master's, the trade they chose. The jump onto
+13 from 14 that lands her on 15 (10 of the tip's 18 landings elsewhere here, none of master's) is the navigation's to
+look at next. Her drops' life stays an assumption until a live watch measures it.
 
 ## Localization
 
