@@ -345,7 +345,8 @@ class Hunter:
         shots = paths.of().heading_shots  # (hers)
         self._shots = len(list(shots.glob("*.png"))) if shots.exists() else 0
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
-                                  self.drops.on_look, self.wounds.on_look, self.memory.on_look, self._misses,
+                                  self.drops.on_look, self.looter.on_look, self.wounds.on_look, self.memory.on_look,
+                                  self._misses,
                                   self.attacks.on_look, self._chat_seen]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
                                          self.attacks.on_throw,  # (a cast's MP)

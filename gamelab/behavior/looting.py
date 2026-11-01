@@ -55,12 +55,15 @@ FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up
 # them top to bottom, oldest first; the simulator's log the same), so an "earned" line before the full message (the item
 # that filled the tab, then the next refused) says nothing of room now, one after it does; and a full tab takes more of a
 # kind she holds a part-filled stack of (v83: no free slot, but a stack below its most): the kinds she has picked up this
-# run (`held`: stood on while their tab had room, `stood_on`, or earned by the log's word, her pets' too) are still taken
-# from a full tab until one stays under her (`refused`: its stack full too), a kind she doesn't hold needs a slot and
-# isn't. Until then any "earned" line of a tab in the read kept it from being marked full, and one refused kind marked
+# run (`held`: stood on while their tab had room and gone from the pile by the looks after, `stood_on` and `on_look`, or
+# earned by the log's word, her pets' too) are still taken from a full tab until one stays under her (`refused`: its
+# stack full too), a kind she doesn't hold needs a slot and isn't. (Taken as hers on the stand alone, as first built, a
+# tab full from the start had every kind she stood on before she learned it taken for hers: 3.0 of her 5.2 stands a run
+# for nothing came after she had, in `--world etc-full`.) Until then any "earned" line of a tab in the read kept it from being marked full, and one refused kind marked
 # every kind of its tab full for TAB_RETRY_S.
 ITEM_TABS = ("Use", "Etc")
 TAB_RETRY_S = 600.0  # guess
+PICK_SEEN_S = 10.0   # s after a stand the looks have to show a kind gone from the pile she stood on (`on_look`)
 EARNED = re.compile(r"earned\W*\(\s*(equip|use|set-?up|etc|cash)\s*\)", re.I)
 EARNED_KIND = re.compile(r"([A-Za-z][A-Za-z' .-]*?)\s*x\s*\d+\s*earned", re.I)  # ... and the item's name before it
 DROPS_LAST = 90    # s remembered drops are worth going back for (they vanish, and others may take them)
@@ -250,6 +253,7 @@ class Looter:
         self.full: dict[str, tuple[float, str]] = {}  # tab -> (when she learned it's full, why): its items left
         self.held: set[str] = set()  # item kinds she has a stack of (see ITEM_TABS): taken from a full tab still ...
         self.refused: dict[str, float] = {}  # ... but these: kind -> when one stayed under her with its tab full
+        self._stands: list[tuple] = []  # (pile, kinds, when): her stands whose picks the looks after confirm (`on_look`)
         self.unpickable: list[tuple[float, int, float]] = []  # (x, platform, when) of drops she couldn't take
         self._failed_picks = 0  # items in a row that stayed under her (see FAILED_PICKS)
         # Whether a look's monsters call her off picking up (collect, mop_up), leaving the drops for later: the hunt
@@ -286,10 +290,28 @@ class Looter:
         self._retry()
         return tab_of(kind) not in self.full or kind in self.held and kind not in self.refused
 
-    def stood_on(self, kinds) -> None:
-        """She stood on drops of these kinds pressing pick-up: those whose tab has room she holds a stack of now (`held`;
-        one that stays under her is `cant_pick`'s)."""
-        self.held.update(k for k in kinds if k != MESOS and tab_of(k) not in self.full)
+    def stood_on(self, kinds, pile=None) -> None:
+        """She stood on drops of these kinds pressing pick-up, those whose tab has room: she holds a stack of them now
+        (`held`) once the looks after show them gone from `pile` (ledger.Pile: `on_look`), at once with no pile; one
+        that stays under her is `cant_pick`'s."""
+        kinds = {k for k in kinds if k != MESOS and tab_of(k) not in self.full}
+        if pile is None:
+            self.held.update(kinds)
+        elif kinds:
+            self._stands.append((pile, kinds, time.monotonic()))
+
+    def on_look(self, s) -> None:
+        """After a look (once the drop store has seen it): her stands' kinds the pile she stood on no longer holds, or
+        that the store has seen gone, she picked up (`held`); those still in it as seen since, she didn't."""
+        now, kept = time.monotonic(), []
+        for pile, kinds, at in self._stands:
+            if pile.status == "gone":
+                self.held.update(kinds)
+            elif pile.last_seen is not None and pile.last_seen > at:
+                self.held.update(k for k in kinds if k not in pile.items)
+            elif now - at < PICK_SEEN_S:
+                kept.append((pile, kinds, at))
+        self._stands = kept
 
     def _retry(self) -> None:
         """A tab full for TAB_RETRY_S taken as having room again (learned again at the next failure)."""

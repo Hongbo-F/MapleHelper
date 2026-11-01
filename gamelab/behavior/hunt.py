@@ -1467,7 +1467,7 @@ class Hunt:
             actions.pick_here(presses)
             stood.append(goal)
         if (on := getattr(looter, "stood_on", None)) is not None:  # (the kinds she holds: looting.ITEM_TABS)
-            on(d.item.kind for d in seen if not d.mesos)
+            on([d.item.kind for d in seen if not d.mesos], pile)
         self._tried(pile)
         self.h.report.loot_runs += 1
         self._idle_since = None

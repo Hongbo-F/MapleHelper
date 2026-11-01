@@ -440,6 +440,35 @@ def test_a_full_tab_still_takes_a_kind_she_holds_a_stack_of(monkeypatch):
     assert h.looter.can_take("horny-mushroom-cap") and set(h.looter.full) == {"Etc", "Use"}
 
 
+def test_a_kind_is_hers_once_the_looks_show_it_gone_from_the_pile_she_stood_on(monkeypatch):
+    """Looter.stood_on with the pile (the hunt's stands): a kind counts as one she holds a stack of (`held`) only once
+    the looks after show it gone from that pile (Looter.on_look, after the drop store's: the pile seen without it, or
+    gone), not on the stand alone: with her Etc tab full from the start, every kind she stood on before she learned it
+    was taken for hers (the review of 2026-10-31); one still lying there isn't, and a stand the looks don't confirm
+    within PICK_SEEN_S is let go."""
+    from gamelab.behavior import looting
+    from gamelab.behavior.ledger import Pile
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    h, _ = _mopper(monkeypatch, [])
+    took = Pile(500.0, 0.0, HERS, 90.0, True, status="seen", last_seen=99.0, items=("horny-mushroom-cap",))
+    left = Pile(700.0, 0.0, HERS, 90.0, True, status="seen", last_seen=99.0, items=("leather", "green-mushroom-cap"))
+    gone = Pile(900.0, 0.0, HERS, 90.0, True, status="seen", last_seen=99.0, items=("blue-mushroom-cap",))
+    late = Pile(1100.0, 0.0, HERS, 90.0, True, status="seen", last_seen=99.0, items=("snail-shell",))
+    for p in (took, left, gone, late):
+        h.looter.stood_on(list(p.items), p)
+    assert not h.looter.held
+    clock[0] = 101.0
+    took.items, took.last_seen = (), 101.0
+    left.items, left.last_seen = ("leather",), 101.0
+    gone.status = "gone"
+    h.looter.on_look(None)
+    assert h.looter.held == {"horny-mushroom-cap", "green-mushroom-cap", "blue-mushroom-cap"}
+    clock[0] = 100.0 + looting.PICK_SEEN_S + 1.0
+    h.looter.on_look(None)
+    assert not h.looter._stands and "snail-shell" not in h.looter.held
+
+
 def test_an_item_picked_up_resets_the_count_of_failed_picks(monkeypatch):
     h, _ = _mopper(monkeypatch, [[_loot("leather", 1100)], []])
     h.looter._failed_picks = 2
