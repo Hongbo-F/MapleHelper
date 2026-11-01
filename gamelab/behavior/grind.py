@@ -121,7 +121,12 @@ STAY_NET = True
 # pick them up". In 15-minute runs of the harness's standard grind 11% of her drops' worth expired lying in her store,
 # every one more than the sweep's CAND_S off her way or over its budget for most of its life, on platforms her loop
 # didn't pass: a stop by them, otherwise as good, is the cheap way to them. False: the stops' monsters alone, as before.
-DROPS_IN_CHOICE = True
+# Off, measured (12 seeds against the commit before, paired: D:/MapleHelper-scratch/replan/loot/fix/c5): in 15-minute
+# runs of the standard grind EXP a minute -4.4 (se 7.1), loot's worth -4.6 (7.0), drops' share -0.011; in the live drops'
+# worlds (map-drops, drop-takers) EXP -8.9 (se 3.5, worse on 6 seeds, better on none) for loot +0.8 (1.2), the 5-minute
+# standard grind changing 2 seeds of 12. Her drops' life by the evidence (ledger.SURVIVAL) is what keeps more of them
+# from expiring there.
+DROPS_IN_CHOICE = False
 
 
 class Grind(Hunt):
