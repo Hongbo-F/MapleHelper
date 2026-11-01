@@ -346,6 +346,14 @@ SWITCH_GAIN_S = 0.25         # s sooner a better way must get her there (a guess
 SWITCH_MIN_S = 0.5           # ... and s after the last switch at the soonest (a guess)
 SPLICE_DRIFT = 20.0          # map units: a replan goes from where the state has her if she's this near where the plan has
                              # her (else her off-path checks deal with it: OFF_SPAN)
+# Where a running chain has her at a splice, on its leg's run from the leg's start with the arrow held all along: by the
+# chain's own physics (flow._ground: the lag before the game sees the arrow, her speeding up from what she had), not the
+# run's span (a straight line from where it starts to where it ends, for monster checks: its mean speed and places off
+# by up to RUN_LAG of a run, 18 units, early on). From the review of 2026-10-31: the splice's start was the span's, and
+# 10 of the 28 trip landings elsewhere than planned in the harness's standard grind (48 seeds) came within 3 s of one
+# (the speed it gave her off the physics' by a median 29 units a second, 112 at p90); with this and KNOCK_STILL, 2 of 8,
+# master's 8 in all. False: the span's, as before.
+SPLICE_PHYSICS = True
 SPLICE_LATE_S = 0.05         # s: a replan done so late that the player would take it this much past its plan time 0, or
                              # past a takeoff's key of the running plan's (KEY_COMMIT_S), is dropped (_switch: the next
                              # state asks again): its start would be behind her (7.5 units at her run), or the takeoff's
@@ -356,7 +364,17 @@ KNOCK_AIR_S = 2 * KNOCK_VY / GRAVITY - STATE_S  # s after a touch's popup her kn
                                                 # less a state: no state sooner has her landed
 KNOCK_LAND_S = 0.8           # s at most a landing is waited for (then as before: recover)
 LANDED_DY = 6.0              # map units: on a platform at the height the state before had her, she's landed
-COMING = "a monster coming into its way"  # (the cut's reason starts so: Navigator._watch, _carry_out_chain)
+# ... and planned from once her slide has ended (KNOCK_STILL, from the review of 2026-10-31): a knock lands her going
+# ~140 units a second away from the monster, and she slides ~19 units braking, where the chain is planned from standing.
+# Planned from the first state on the ground, 73% of the 540 landings planned from in the harness's standard grind (48
+# seeds of 5 minutes) had her going over 50 units a second (a median 108, the world's), and 18 of her trips' 28
+# landings elsewhere than planned came right after one (the jump off 16 for 15 run off 16's end and down to 20, 421
+# units, twice on seed 39), where master's 8 in all. A state on the ground within KNOCK_STILL_DX of the one before
+# (45 units a second: the last fifteenth of a second of the slide's braking) has it over. False: the first state on
+# the ground, as before.
+KNOCK_STILL = True
+KNOCK_STILL_DX = 3.0         # map units from one state to the next (15 a second)
+COMING ="a monster coming into its way"  # (the cut's reason starts so: Navigator._watch, _carry_out_chain)
 TOUCHED = "touched"  # ... and a touch's (or her HP dropping): _touch_text
 # Landings with clearance (from 2026-10-27; the user: "the character should actively try to move away from the mob to
 # attack it"). With an escort that prices landings (Escort.landings: attack.stance.landing, what her first attack where a
@@ -2810,6 +2828,11 @@ class Navigator:
                     # go, and a splice there that took the slide for a run held its arrow on with no key to let it go
                     # in the new plan: up the tower from 13 she ran off 11's end and out of the map, its review's
                     # fix of 2026-10-30)
+                    b0 = leg.start
+                    if SPLICE_PHYSICS and d and abs(sp.t0 - b0.t) < 1e-6 and abs(sp.x0 - b0.x) < 1e-6 \
+                            and _arrow_at(running.arrows, sp.t0 + 1e-4) == d:
+                        x, v = _ground(b0, d, t)  # (the leg's run from its start, its arrow held all along)
+                        return t, Body(0.0, x, self.model.platform(sp.platform), d, v=v)
                     return t, Body(0.0, sp.x_at(t), self.model.platform(sp.platform), d, v=v if d else 0.0)
             for sp in leg.stands:
                 if sp.t0 - 1e-9 <= t <= sp.t1 + 1e-9:
@@ -2851,10 +2874,11 @@ class Navigator:
         with the monsters (Senses.look of that very state: no wait), for the next pass to plan from at once (no wait for
         her to stand still, no look of its own: recover's 0.13 s median, p90 0.33, and its look's frame, live): from
         KNOCK_AIR_S after the touch's popup (her knock's flight), the scene's mode 'ground' where it has one, else her
-        place on a platform at the height the state before had it (LANDED_DY), and the look standing (`standing`).
+        place on a platform at the height the state before had it (LANDED_DY), and the look standing (`standing`); with
+        KNOCK_STILL, once her slide has ended too (a state on the ground within KNOCK_STILL_DX of the one before it).
         None if none does within KNOCK_LAND_S (then she's waited for as before: recover)."""
         since = touch.get("at", time.monotonic()) if isinstance(touch, dict) else time.monotonic()
-        end, prev = time.monotonic() + KNOCK_LAND_S, None
+        end, prev, last = time.monotonic() + KNOCK_LAND_S, None, None
         while time.monotonic() < end:
             self.senses.wait_frame(GLANCE_S)
             self.senses.glance()
@@ -2866,6 +2890,13 @@ class Navigator:
             on = w[2] is not None and (mode == "ground" if mode is not None else
                                        prev is not None and abs(prev[1] - w[1]) <= LANDED_DY)
             prev = w
+            if KNOCK_STILL:  # (her slide over: this state's x by the last other state's on the ground)
+                seq = getattr(state, "seq", None)
+                if last is not None and seq == last[0]:
+                    continue  # (the same state glanced again)
+                still = on and last is not None and abs(w[0] - last[1]) <= KNOCK_STILL_DX
+                last = (seq, w[0]) if on else None
+                on = still
             if state.t < since + KNOCK_AIR_S or not on:
                 continue
             s = self.senses.look(mobs=True, wide=not self.fight, after=state.t)

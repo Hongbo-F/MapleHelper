@@ -82,6 +82,68 @@ def test_the_splice_point_holds_the_arrow_the_running_plans_keys_hold_not_the_wa
     assert k.events == [[250, "left", "up"], [251, "right", "down"]]
 
 
+def test_the_splice_point_on_a_run_from_standing_is_where_the_chains_physics_has_her(monkeypatch):
+    """SPLICE_PHYSICS (the review of 2026-10-31): on a leg's run from its start with its arrow held all along, the splice
+    point is where the chain's own physics has her (flow._ground: the arrow seen LAGS.on after its key, her speeding up
+    from standing), not the run's span (a straight line at its mean speed for monster checks): at 0.06 s she hasn't
+    moved yet, at 0.5 s she runs at full speed 149 (0.119 s behind a standing start's); the span had her 174.5 at 149
+    there, 100 + 5 at 0.06. Off: the span's, as before; with no keys known, the span's too."""
+    from gamelab.motion import body as engine
+    from gamelab.motion.flow import LAGS, SHOE
+    a, b, model = _platforms()
+    nav = nv.Navigator.__new__(nv.Navigator)
+    nav.model = model
+    run = Span(1, 0.0, 1.0, 100.0, 249.0)
+    jump = Leg(Move("jump", 1, 2, 249.0, 500.0, "right"), Body(0.0, 100.0, a), Body(1.6, 500.0, b, run=1, landed=True),
+               [run], [Arc(1.0, 1.5, 249.0, 500.0, 480.0, 440.0, -555.0)], stands=[Span(2, 1.5, 1.6, 480.0, 500.0)])
+    r = nv._Running("p", [jump], 100.0, False, arrows=((0, 1, True), (935, 1, False)))
+    _, early = nav._splice_point(r, 0.06)
+    assert early.x == pytest.approx(100.0) and early.v == pytest.approx(0.0) and early.run == 1
+    _, mid = nav._splice_point(r, 0.5)
+    assert mid.v == pytest.approx(149.0) and mid.x == pytest.approx(
+        100.0 + engine.run_x(0.5 - LAGS.on, 0.0, 1, SHOE)) and mid.x < 174.5 - 15
+    monkeypatch.setattr(nv, "SPLICE_PHYSICS", False)
+    assert nav._splice_point(r, 0.5)[1].x == pytest.approx(174.5)
+
+
+def test_after_a_touch_the_next_chain_waits_for_the_knocks_slide_to_end(monkeypatch):
+    """KNOCK_STILL (the review of 2026-10-31): the knock lands her sliding (~140 units a second, braking), and a chain
+    planned from the first state on the ground has her standing: 18 of 28 trip landings elsewhere than planned in the
+    harness's standard grind came right after one. Navigator._knock_landing takes the first state on the ground within
+    KNOCK_STILL_DX of the last other state on the ground (the same state glanced again isn't one), from KNOCK_AIR_S
+    after the touch; off, the first on the ground."""
+    from types import SimpleNamespace as NS
+    # (states 15 a second from the touch at 0: in the air, then down at x 100 sliding 9, 5, 2 units a state, then still)
+    xs = [None, None, None, 100.0, 109.0, 114.0, 116.0, 116.0, 116.0]
+    clock = {"t": 0.0}
+    looked = []
+
+    class Senses:
+        glanced = None
+
+        def wait_frame(self, s):
+            clock["t"] += 1.0 / 30  # (a glance every half state: each state glanced twice)
+
+        def glance(self):
+            i = min(int(clock["t"] * 15), len(xs) - 1)
+            x = xs[i]
+            self.glanced = NS(seq=i, t=i / 15, placed=True, mode="air" if x is None else "ground",
+                              where=(x if x is not None else 90.0 + 5 * i, 400.0, None if x is None else 1, None))
+
+        def look(self, mobs, wide, after):
+            looked.append(after)
+            return NS(where=NS(platform=1, x=self.glanced.where[0]), tag_seen=False, ground=None, t=after)
+
+    nav = nv.Navigator.__new__(nv.Navigator)
+    nav.senses, nav._mode = Senses(), nv.AVOID
+    monkeypatch.setattr(nv.time, "monotonic", lambda: clock["t"])
+    s = nav._knock_landing({"at": 0.0})
+    assert s.where.x == 116.0 and looked == [6 / 15]  # (109 -> 114 is 5 units on, 114 -> 116 is 2: over)
+    clock["t"], looked[:] = 0.0, []
+    monkeypatch.setattr(nv, "KNOCK_STILL", False)
+    assert nav._knock_landing({"at": 0.0}).where.x == 100.0 and looked == [3 / 15]
+
+
 def test_the_same_way_is_the_same_moves_of_the_route_wherever_they_take_off():
     """navigator._same_moves: a replan whose route goes the running one's way (each move's kind, from and onto, as far
     as both go) is the same way, however far apart its takeoffs (the flow's variety moves them from chain to chain):
