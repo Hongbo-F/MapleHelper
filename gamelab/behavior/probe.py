@@ -86,7 +86,7 @@ from ..attack.stance import JUMP_BACK_SPAN, open_above, pct
 from ..control import client
 from ..control.actions import JB_RUN_MS, JB_THROW_MS, JB_TURN_MS, STAR_DELAY_MS, TAP_MS
 from ..localization.mapdata import MapModel, MobBody
-from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, same, speeds
+from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, same, speeds, walk_edges
 from ..localization.scene import Scene
 from ..motion import body, physics
 from .fight import GUARD_PATIENCE, GUARD_SECONDS, IN_HER_WAY, UNPLACED_LOOKS
@@ -622,14 +622,13 @@ def in_front(s: Scene, side: str) -> list[Monster]:
 def x_after(m: Monster, lead: float, model: MapModel | None = None) -> float:
     """Where monster `m` (its middle) is `lead` s after the look that saw it: seen walking (its pose 'move', its
     way read), its kind's walking speed (monsters.speeds) that long the way it faces, turning back at the ends of
-    its platform's walk (its half width inside them, on `model`); else where the look has it."""
+    its platform's walk (monsters.walk_edges, on `model`); else where the look has it."""
     if lead <= 0 or m.pose != "move" or not m.facing:
         return m.x
     walk = speeds(model).get(m.kind, DEFAULT_SPEED) * lead
     if model is None or m.platform is None or not 0 <= m.platform < len(model.platforms):
         return m.x + m.facing * walk
-    p, half = model.platform(m.platform), reach.body_of(m.kind)[1]
-    lo, hi = p.left + half, max(p.left + half, p.right - half)
+    lo, hi = walk_edges(model.platform(m.platform))
     if hi <= lo:
         return lo
     u = (min(max(m.x, lo), hi) - lo + m.facing * walk) % (2 * (hi - lo))  # as it walks there and back
@@ -899,14 +898,14 @@ PICK_STEPS = 5
 def _walked(e: dict, dt: float, walk: dict[str, float], model: MapModel | None) -> float:
     """Where monster `e` of a throw's evidence was `dt` after the look that logged it, by its middle: seen walking
     (its pose 'move', its way read), its kind's walking speed (`walk`) that long the way it faced, kept to its
-    platform's walk (its half width inside the ends, on `model`); else (standing, flinching, or neither read: a log
-    from before they were kept) where that look had it."""
+    platform's walk (monsters.walk_edges, on `model`); else (standing, flinching, or neither read: a log from before
+    they were kept) where that look had it."""
     if not dt or e.get("pose") != "move" or not e.get("facing"):
         return e["x"]
     x = e["x"] + e["facing"] * walk.get(e["kind"], DEFAULT_SPEED) * dt
     if model is not None and e["platform"] is not None and 0 <= e["platform"] < len(model.platforms):
-        p, half = model.platform(e["platform"]), reach.body_of(e["kind"])[1]
-        x = min(max(x, p.left + half), max(p.left + half, p.right - half))
+        lo, hi = walk_edges(model.platform(e["platform"]))
+        x = min(max(x, lo), hi)
     return x
 
 

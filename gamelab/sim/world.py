@@ -284,9 +284,10 @@ AI_STEP = 0.09
 IDLE_THINK_MS = (1000, 2000)   # (least, span): (r + least) // 90 steps, r uniform in 0 to span - 1
 CHASE_THINK_MS = (800, 400)
 # A walking monster (move ability 1: no jump, no flight) turns WALK_EDGE along the foothold at its platform's end from
-# the end (FootholdTree::get_walk_edge, FUN_007f8d64), where the simulator had its body's half width (28 for Tree
-# Dungeon's kinds).
-WALK_EDGE = 20.0
+# the end (FootholdTree::get_walk_edge, FUN_007f8d64: localization.monsters.walk_edges, the stack's predictions' too),
+# where the simulator had its body's half width (28 for Tree Dungeon's kinds).
+WALK_EDGE = monster_data.WALK_EDGE
+walk_edges = monster_data.walk_edges
 # Her landings as the live diagnosis counted them (World.land_log): an attack played in the flight if keyed from
 # ATTACK_BEFORE_TAKEOFF_MS before she left the ground (a jump throw's key comes 40-120 ms after the jump key, and
 # her feet leave the ground about JUMP_LAG after it), and a fall within KNOCK_FALL_MS of a knock's landing the knock's
@@ -337,29 +338,6 @@ def think_steps(rng: random.Random, ms: tuple[int, int]) -> int:
     """A decision's AI steps (AI_STEP each): (r + least) // 90, r uniform in 0 to span - 1 (IDLE_THINK_MS,
     CHASE_THINK_MS)."""
     return (rng.randrange(ms[1]) + ms[0]) // 90
-
-
-_EDGES: dict[int, tuple] = {}
-
-
-def walk_edges(p: Platform) -> tuple[float, float]:
-    """Where a walking monster turns on platform p (x from, to): WALK_EDGE along its end footholds from its ends (the
-    middle of a platform too short for both)."""
-    kept = _EDGES.get(id(p))
-    if kept is not None and kept[0] is p:
-        return kept[1]
-
-    def margin(s) -> float:
-        dx = abs(s.x2 - s.x1)
-        length = math.hypot(dx, s.y2 - s.y1)
-        return 0.0 if length == 0 else min(WALK_EDGE, length) * dx / length
-
-    first = min(p.segments, key=lambda s: min(s.x1, s.x2))
-    last = max(p.segments, key=lambda s: max(s.x1, s.x2))
-    lo, hi = p.left + margin(first), p.right - margin(last)
-    edges = (lo, hi) if lo <= hi else ((p.left + p.right) / 2,) * 2
-    _EDGES[id(p)] = (p, edges)
-    return edges
 
 
 def pushed_x(start: float, to: float, tau: float) -> float:

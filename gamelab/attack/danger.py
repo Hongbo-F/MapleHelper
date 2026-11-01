@@ -35,7 +35,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from ..localization.mapdata import MapModel, Platform, Rope
-from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, speeds
+from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, speeds, walk_edges
 from ..motion.bodies import HER_HALF, HER_TALL
 from ..perception.kinds import kind_of
 
@@ -176,13 +176,12 @@ class Danger:
     def walk(self, t: Threat, q: Platform, mx: float, p: Platform, x: float) -> tuple[float, float] | None:
         """How far a monster of threat `t` at map x `mx` on platform `q` walks before it touches her standing at `x` on
         `p` (0: it does already), and how likely it goes there (1 along its platform, HOP_CHANCE off it); None if it
-        can't touch her there. Its middle keeps half its width inside its platform."""
+        can't touch her there. Its middle turns where the game turns it (walk_edges: WALK_EDGE from its platform's ends,
+        a kind that hops at the ends themselves; until 2026-10-31 half its width inside them)."""
         reach = t.half + HER_HALF
         if t.flies:  # no floor holds it: straight at her
             return _flight(t, mx, q.y_at(q.clamp(mx)), x, p.y_at(x)), 1.0
-        lo, hi = q.left + t.half, q.right - t.half
-        if hi < lo:
-            lo = hi = (q.left + q.right) / 2
+        lo, hi = walk_edges(q, t.hops)
         if q.id == p.id or -HER_TALL < q.y_at(q.clamp(x)) - p.y_at(x) < t.top:
             a, b = max(lo, x - reach), min(hi, x + reach)
             if a <= b:
@@ -240,13 +239,11 @@ class Danger:
         with her feet at y, and how likely (1); None if it can't. Her body is HER_HALF either side of the rope and
         HER_TALL up from her feet; its, half its width either side of its middle (kept on its platform) and from its
         feet up to the highest its frames reach (Threat.tall: a slime's hop, 66, where it stands 42-44). A flier goes
-        straight at her."""
+        straight at her. Its middle turns as in `walk`."""
         reach = t.half + HER_HALF
         if t.flies:
             return _flight(t, mx, q.y_at(q.clamp(mx)), rope.x, y), 1.0
-        lo, hi = q.left + t.half, q.right - t.half
-        if hi < lo:
-            lo = hi = (q.left + q.right) / 2
+        lo, hi = walk_edges(q, t.hops)
         a, b = max(lo, rope.x - reach), min(hi, rope.x + reach)
         if a > b:
             return None

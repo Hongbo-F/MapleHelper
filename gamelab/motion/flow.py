@@ -36,7 +36,7 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
-from ..localization.monsters import MonsterTrack
+from ..localization.monsters import MonsterTrack, walk_edges
 from . import bodies, body
 from .bodies import Arc, Climb
 from .physics import (DROP_LAG, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
@@ -816,7 +816,7 @@ class Flow:
             return _ground(b, d, t)[0]
 
         if HOP_AT_HER and mo.vx is None:  # its walking not known: as if it walked at her (the soonest it closes)
-            lo_c, hi_c = a.left + mo.half, a.right - mo.half
+            lo_c, hi_c = walk_edges(a)
 
             def mo_x(t: float) -> float:
                 x = mo.x - d * mo.speed * max(0.0, t - mo.seen_at)

@@ -22,6 +22,14 @@ SAME_DY = 40       # ... and how far up or down (map units)
 # the tracker measured in live runs were at that clamp. An upper bound for where they can get.
 MONSTER_SPEED = {"pig": 125.0, "orange-mushroom": 125.0, "slime": 100.0, "snail": 43.75}
 DEFAULT_SPEED = 125.0  # a monster of speed 0 (walkSpeed), for kinds the table and the map don't know
+# Where a walking monster's middle turns on its platform: WALK_EDGE along the foothold at the platform's end from the end,
+# as the v83 client has it (FootholdTree::get_walk_edge, FUN_007f8d64, in RustMS's copy of HeavenClient: a monster that
+# walks but neither jumps nor flies stops there); one that jumps walks on to the end itself (and jumps off it, or at the
+# wall there: sim.world.SimJumper). The stack's predictions (attack.danger, motion.flow, Monster.at, the tracker,
+# behavior.probe) had its body's half width inside each end (28 for Tree Dungeon's kinds, 8 short of the game) until
+# 2026-10-31 (the user: "align the stack's monster turn point (danger, flow, tracking, probe) with the game's 20-unit walk
+# edge, sharing one function with the simulator"); the simulator's walkers turn by it too (sim.world.SimMonster).
+WALK_EDGE = 20.0
 # Their bodies (map units), from the boxes (lt/rb) of their frames in the game data (Mob/<id>.img; mapdata
 # reads them with the map, MapModel.mob_bodies, and tests/test_attack.py checks these tables against it).
 # Half their width (half their widest stand or move frame), and how tall they are walking (the top of
@@ -113,6 +121,32 @@ def bodies(model: MapModel | None = None) -> dict[str, MobBody]:
     if model is not None:
         out.update({kind_of(name): b for name, b in model.mob_bodies.items()})
     return out
+
+
+_EDGES: dict[tuple[int, bool], tuple] = {}
+
+
+def walk_edges(p: Platform, jumps: bool = False) -> tuple[float, float]:
+    """Where a monster's middle turns on platform p (x from, to): WALK_EDGE along its end footholds from its ends (the
+    middle of a platform too short for both); one that `jumps`, the ends themselves."""
+    kept = _EDGES.get((id(p), jumps))
+    if kept is not None and kept[0] is p:
+        return kept[1]
+
+    def margin(s) -> float:
+        dx = abs(s.x2 - s.x1)
+        length = math.hypot(dx, s.y2 - s.y1)
+        return 0.0 if jumps or length == 0 else min(WALK_EDGE, length) * dx / length
+
+    if p.segments:
+        first = min(p.segments, key=lambda s: min(s.x1, s.x2))
+        last = max(p.segments, key=lambda s: max(s.x1, s.x2))
+        lo, hi = p.left + margin(first), p.right - margin(last)
+    else:
+        lo, hi = p.left + (0.0 if jumps else WALK_EDGE), p.right - (0.0 if jumps else WALK_EDGE)
+    edges = (lo, hi) if lo <= hi else ((p.left + p.right) / 2,) * 2
+    _EDGES[(id(p), jumps)] = (p, edges)
+    return edges
 
 
 def touch_box(kind: str, body: MobBody | None = None) -> tuple[float, float]:
@@ -272,10 +306,10 @@ class MonsterTrack:
         ends (a monster never walks off its platform: it turns there). Stopping at the end instead, a Horny Mushroom
         seen walking left on 31 at its left end (vx -59 between two looks, turning as they were taken) was planned for
         there 1.3 s on, and touched her at 137 units to the right as she jumped up from 33 under it (simulator,
-        loop_tree_run, 2026-10-24)."""
-        lo, hi = p.left + self.half, p.right - self.half
+        loop_tree_run, 2026-10-24). Its ends: walk_edges (until 2026-10-31 its half width inside them)."""
+        lo, hi = walk_edges(p)
         if hi <= lo:
-            return (p.left + p.right) / 2
+            return lo
         x = min(max(self.x, lo), hi) + (self.vx or 0.0) * max(0.0, t - self.seen_at)
         k = (x - lo) % (2 * (hi - lo))
         return lo + (k if k <= hi - lo else 2 * (hi - lo) - k)
@@ -304,7 +338,7 @@ class MonsterTrack:
         (review of the branch, 2026-10-24: 17 of 2625 random legs that touched)."""
         (a0, b0), (a1, b1) = self.reach(t0, p), self.reach(t1, p)
         lo, hi = min(a0, a1), max(b0, b1)
-        left, right = p.left + self.half, p.right - self.half
+        left, right = walk_edges(p)
         if self.vx and right > left:
             def leg_of(t: float) -> int:  # which of its walks between the ends: even ones go right
                 return math.floor((min(max(self.x, left), right) + self.vx * max(0.0, t - self.seen_at) - left)

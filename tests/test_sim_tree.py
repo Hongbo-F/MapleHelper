@@ -481,7 +481,9 @@ def test_on_tree_dungeon_23s_left_end_is_a_long_drop_its_left_part_is_under_22_a
     d = danger_mod.of_map(m, danger_mod.Her(hp=752.0, level=24.0))
     sp = spots.best_spot(m, 23, {"horny-mushroom", "green-mushroom"}, d)
     assert sp.platform == 24 and abs(sp.x - 272) >= spots.SPAWN_CLEAR and sp.coverage >= 0.95, sp
-    assert spots.best_spot(m, 7, {"horny-mushroom", "green-mushroom"}, d) == spots.Spot(8, 147.0, 1.0, False, 0.182)
+    # (7 from itself since the monsters turn where the game turns them, 20 from a platform's end, 2026-10-31: from 8 at
+    # 147, 0.182 while they turned their half width, 28, from its end)
+    assert spots.best_spot(m, 7, {"horny-mushroom", "green-mushroom"}, d) == spots.Spot(7, -60.0, 1.0, False, 0.252)
 
 
 # --- the game's key bindings (behavior.keycheck) -----------------------------------------------------------------

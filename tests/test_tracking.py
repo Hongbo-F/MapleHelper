@@ -83,8 +83,8 @@ def test_its_speed_is_its_kinds_from_the_game_data_the_way_it_heads_from_its_fir
 
 def test_its_prediction_turns_back_at_its_platforms_ends():
     """Where a track should be between detections walks on its heading and turns back at the end its centre can reach
-    (its platform's end less half its body: MonsterTrack.at's), for EXTRAPOLATE_S at most; clamped there until
-    2026-10-30. 80% of the turns on the user's own play came at the ends."""
+    (monsters.walk_edges: WALK_EDGE from its platform's end, the game's; its half body until 2026-10-31), for
+    EXTRAPOLATE_S at most; clamped there until 2026-10-30. 80% of the turns on the user's own play came at the ends."""
     from gamelab.localization import mapdata
     tree = {"info": {"VRLeft": 0, "VRTop": 0, "VRRight": 3000, "VRBottom": 1000},
             "foothold": {"1": {"1": {"1": {"x1": 400, "y1": 500, "x2": 1300, "y2": 500, "prev": 0, "next": 0}}}},
@@ -94,9 +94,9 @@ def test_its_prediction_turns_back_at_its_platforms_ends():
     tracker = MonsterTracker(model)
     run(tracker, [([sighting(1250, platform=pid)], view())])
     tr = tracker.tracks[1]
-    end = 1300 - tracking.MONSTER_HALF["pig"]  # (1266: where a pig's centre turns)
-    assert tracker.predicted(tr, tr.last_seen + 0.1) == pytest.approx(1250 + 12.5)  # (short of it)
-    assert tracker.predicted(tr, tr.last_seen + 0.2) == pytest.approx(end - (1250 + 25 - end))
+    end = 1300 - 20  # (1280: where a pig's centre turns)
+    assert tracker.predicted(tr, tr.last_seen + 0.2) == pytest.approx(1250 + 25)  # (short of it)
+    assert tracker.predicted(tr, tr.last_seen + 0.3) == pytest.approx(end - (1250 + 37.5 - end))
     assert tracker.predicted(tr, tr.last_seen + 5.0) == pytest.approx(end - (1250 + 62.5 - end))  # (EXTRAPOLATE_S)
     standing = MonsterTracker(model)
     run(standing, [([sighting(1250, pose="stand", platform=pid)], view())])

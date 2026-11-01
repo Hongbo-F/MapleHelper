@@ -46,6 +46,18 @@ def test_a_walker_turns_20_along_its_end_footholds_from_its_platforms_ends():
     assert 20.0 - 1e-9 <= min(xs) < 22.0 and 378.0 < max(xs) <= 380.0 + 1e-9
 
 
+def test_the_stack_predicts_the_turns_where_the_simulator_and_the_game_make_them():
+    """One rule for both (localization.monsters.walk_edges): the simulator's walkers turn by it, and the stack's
+    predictions of where a monster's middle turns (Monster.at, the tracker, attack.danger, motion.flow, behavior.probe)
+    go by it; a kind that jumps reaches its platform's ends (attack.danger's threats that hop)."""
+    from gamelab.localization import monsters
+    flat = Platform(0, [Segment(0, 500, 400, 500)])
+    assert W.walk_edges is monsters.walk_edges and W.WALK_EDGE == monsters.WALK_EDGE == 20.0
+    assert monsters.walk_edges(flat) == (20.0, 380.0) and monsters.walk_edges(flat, jumps=True) == (0.0, 400.0)
+    seen = monsters.MonsterTrack(0, 370.0, vx=100.0, seen_at=0.0, half=34.0)  # (its half width 34: it turned at 366)
+    assert seen.at(0.1, flat) == pytest.approx(380.0) and seen.at(0.2, flat) == pytest.approx(370.0)
+
+
 def test_chasing_by_her_it_keeps_the_way_it_chose_back_to_the_end_that_turned_it():
     """Mob::think: within AGGRO_PASS of her it keeps the way it chose, so the end of its platform that turned it is
     walked back to at its next decision (where the simulator had it go on the way the turn sent it, past her)."""

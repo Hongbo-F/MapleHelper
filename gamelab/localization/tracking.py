@@ -69,7 +69,8 @@ from ..character import THIEF_SHAPE, Shape
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
 from .mapdata import MapModel
-from .monsters import DEFAULT_SPEED, GAIN_AFTER_KEY, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds, walk_vx
+from .monsters import (DEFAULT_SPEED, GAIN_AFTER_KEY, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds, walk_edges,
+                       walk_vx)
 from .players import Player, near_rival
 from .rate import HZ
 
@@ -454,12 +455,11 @@ class MonsterTracker:
     # --- inside ---------------------------------------------------------------------------------------
 
     def _ends(self, tr: Track) -> tuple[float, float] | None:
-        """The ends its centre turns at on its platform (map x), or None (no platform, or no map)."""
+        """The ends its centre turns at on its platform (map x: monsters.walk_edges, until 2026-10-31 its half width
+        inside them), or None (no platform, or no map)."""
         if self.model is None or tr.platform is None:
             return None
-        p = self.model.platform(tr.platform)
-        half = MONSTER_HALF.get(tr.kind, 34.0)
-        return p.left + half, max(p.left + half, p.right - half)
+        return walk_edges(self.model.platform(tr.platform))
 
     def _walked(self, tr: Track, go: float) -> float:
         """Track `tr`'s place `go` units walked on from its last sighting (+ right), turning back at its platform's ends

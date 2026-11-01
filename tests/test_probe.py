@@ -117,15 +117,16 @@ def test_a_monster_behind_a_wall_still_counts_as_in_front(monkeypatch):
 
 def test_where_a_monster_will_be_when_the_attack_picks(monkeypatch):
     # A pig seen walking goes on at its kind's speed (125 units/s) the way it faces, turning back at the ends of
-    # its walk (its half width, 34, inside its platform's: B runs 200-400 on the step map); one standing, or with
-    # its way or its pose not read, stays where the look had it. A probe with at_pick throws by that (claw-down).
+    # its walk (monsters.walk_edges: 20 inside its platform's, the game's; its half width, 34, until 2026-10-31: B runs
+    # 200-400 on the step map); one standing, or with its way or its pose not read, stays where the look had it. A
+    # probe with at_pick throws by that (claw-down).
     model, a, b, _ = step_map()
 
     def pig(x, facing=-1, pose="move"):
         return Monster(Mob("pig", 0, 0, 30, 30, 0.9), x, 440.0, b.id, None, facing, pose)
     assert probe.x_after(pig(300, 1), 0.1, model) == pytest.approx(312.5)
-    assert probe.x_after(pig(360, 1), 0.1, model) == pytest.approx(359.5)   # to 366 and back
-    assert probe.x_after(pig(240), 0.1, model) == pytest.approx(240.5)      # to 234 and back
+    assert probe.x_after(pig(370, 1), 0.1, model) == pytest.approx(377.5)   # to 380 and back
+    assert probe.x_after(pig(230), 0.1, model) == pytest.approx(222.5)      # to 220 and back
     for still in (pig(360, 1, "stand"), pig(360, 1, "hit1"), pig(360, 0), pig(360, 1, "")):
         assert probe.x_after(still, 0.1, model) == 360
     # 220 off at the look, walking at her: 195 off 0.2 s later.
