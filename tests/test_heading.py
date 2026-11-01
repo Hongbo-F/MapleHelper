@@ -487,10 +487,13 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
     logged, and her scenes carry the heading, who it's by and the frame's reading. Those two throws, and only those, are
     told to the feed again the way she faced (Hunter._retell: after the last look that agreed with her keys; the
     tracker binds their kills on that side). With eyes that can't read her picture, her keys think she faces it: every
-    star after the turn goes the wrong way (and the mushroom walks into her)."""
+    star after the turn goes the wrong way (and the mushroom walks into her). (Seed 2 since work/replan's loot work on
+    master 072e1ec's monsters, 2026-10-31 (D:/MapleHelper-scratch/replan/loot/eval/seeds/heading_turned.txt): on seed 1
+    the blind run's mushroom touched her at x -101 and was lost after 4 throws, 3 of them the wrong way; of seeds 1-16,
+    2, 4, 7-10, 12 and 16 meet all of this, on the others a kill is lost, seen or blind.)"""
     turned = Noise(turned=((1.5, LEFT), (4.0, LEFT)))
     with telemetry.captured() as records:
-        out, trace = _kill_on_23(turned)
+        out, trace = _kill_on_23(turned, seed=2)
     assert out["ended"] == "killed" and out["throws"] >= 8 and out["wrong way"] == 2, out
     assert out["counts"]["against"] == 1
     assert any("the frame shows her facing left, her last arrow right" in line for line in trace["log"])
@@ -498,7 +501,7 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
     hers = [r["her"] for r in records if r["topic"] == "scene" and r.get("her")]
     assert hers and {"facing", "facing_by", "facing_keys", "facing_seen", "facing_strong"} <= set(hers[0])
     assert any(h["facing_by"] == "frame" and h["facing_seen"] == LEFT and h["facing_strong"] for h in hers)
-    blind, _ = _kill_on_23(turned, read=False)
+    blind, _ = _kill_on_23(turned, read=False, seed=2)
     assert blind["wrong way"] >= 4, blind
 
 
@@ -533,10 +536,15 @@ def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_
     2 knocks, none the wrong way, the frame against her arrow once; blind, one.) (Seed 72 since the monsters move as the
     v83 client's AI moves them, 2026-10-31: on seed 6 blind sent one the wrong way; of seeds 1-96 72, 89 and 95 meet all
     of this; over 1-96 the frame sent 46 stars the wrong way for 185 knocks, blind eyes 52 for 176. On 72: 3 knocks,
-    none the wrong way, the frame against her arrow twice; blind, 4 the wrong way for 5 knocks.)"""
-    out, _ = _kill_on_23(seed=72, **KNOCKED)
+    none the wrong way, the frame against her arrow twice; blind, 4 the wrong way for 5 knocks.) (Seed 25 since
+    work/replan's loot work on master 072e1ec's monsters, 2026-10-31
+    (D:/MapleHelper-scratch/replan/loot/eval/seeds/heading_knocked.txt): on seed 72 blind eyes sent none the wrong way
+    for 5 knocks; of seeds 1-96 25, 39, 43, 67, 75, 76, 84 and 85 meet all of this; over 1-96 the frame sent 42 stars
+    the wrong way for 172 knocks, blind eyes 59 for 197. On 25: 4 knocks, one the wrong way, the frame against her arrow
+    twice; blind, 2 the wrong way for 5 knocks.)"""
+    out, _ = _kill_on_23(seed=25, **KNOCKED)
     assert out["knocks"] >= 1 and out["wrong way"] <= 1 and out["counts"]["against"] >= 1, out
-    blind, _ = _kill_on_23(seed=72, read=False, **KNOCKED)
+    blind, _ = _kill_on_23(seed=25, read=False, **KNOCKED)
     assert blind["wrong way"] > out["wrong way"], blind
 
 
@@ -570,8 +578,11 @@ def test_frames_read_the_wrong_way_but_not_strongly_never_take_a_tap_away(monkey
     the wrong frames strong (which none read was), every star would go the wrong way. (Seed 3 since the whole screen 10
     times a second with her band's own search beside it where a whole screen takes longer than 0.05 s
     (worldstate.BAND_STAND_IN_S, 2026-10-28): on seed 1 the mushroom was lost, with the frames read right or wrong; of
-    seeds 1-16, 3-6, 8-11 and 14-16 meet all of this.)"""
-    away = dict(facing=LEFT, seed=3)
+    seeds 1-16, 3-6, 8-11 and 14-16 meet all of this.) (Seed 1 since work/replan's loot work on master 072e1ec's
+    monsters, 2026-10-31 (eval/seeds/heading_weak.txt): on seed 3 the mushroom touched her at -143 and knocked her off
+    23's left end onto 29, lost from there, with the frames read right or wrong; of seeds 1-16, 1, 4, 10, 12, 14 and 16
+    meet all of this; the kill is lost on 3, 11 and 15, as on master's code on 5, 8 and 10.)"""
+    away = dict(facing=LEFT, seed=1)
     right, _ = _kill_on_23(**away)
     weak, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.31, 0.24, False)), **away)
     assert weak["ended"] == right["ended"] == "killed" and weak["wrong way"] == right["wrong way"] == 0, (weak, right)

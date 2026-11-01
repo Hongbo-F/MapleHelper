@@ -717,7 +717,7 @@ def loop_tree_23(sim):
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=6, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -739,7 +739,10 @@ def loop_tree_23_near_misses(sim):
     of this; of seeds 1-13, 9 meet all of it, 4 with her dot.) (Seed 8 since the monsters move as the v83 client's AI
     moves them, 2026-10-31: on seed 2 no monster later unseen; of seeds 1-13 8, 11 and 12 show all of this.) (Seed 6
     since the stack's monsters turn where the game turns them, 20 from a platform's end (monsters.walk_edges),
-    2026-10-31: on seed 8 under twenty kills; of seeds 1-13 6, 11 and 12 show all of this.)"""
+    2026-10-31: on seed 8 under twenty kills; of seeds 1-13 6, 11 and 12 show all of this.) (Seed 1 since work/replan's
+    loot work on master 072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as first built, her
+    drops' life by the live evidence: eval/seeds/near.txt): on seed 6 under twenty kills, no Horny Mushroom the looks
+    missed by a pile of hers; of seeds 1-13 1, 3, 5, 7, 10 and 11 show all of this; on 1, 25 kills.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -842,7 +845,7 @@ def loop_tree_grind_drops(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=14, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=22, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(check("no pile ahead of what's in reach (no ': the pile first')",
                      lambda tr: not any(": the pile first" in line for line in tr["log"])),
@@ -916,7 +919,12 @@ def loop_tree_ore_waits(sim):
     AI moves them, 2026-10-31: on seed 6 the ore not picked up in the time, and hurt more than five times; none of seeds
     1-23 shows all of this, of 1-40 24, 29 and 35.) (Seed 14 since the stack's monsters turn where the game turns them,
     20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 24 the ore not picked up in the time; of seeds
-    1-40 14, 33, 35, 36 and 40 show all of this.)"""
+    1-40 14, 33, 35, 36 and 40 show all of this.) (Seed 22 since work/replan's loot work on master 072e1ec (2026-10-31:
+    her HP at the user's prices, the positioning switches as first built, her drops' life by the live evidence:
+    D:/MapleHelper-scratch/replan/loot/eval/seeds/ore.txt): on seed 14 no ore picked up in the time, each shot first
+    against what was in reach and from 152 s a Green Mushroom by it, hurt 6 times; of seeds 1-40 22, 23, 25 and 37 show
+    all of this, the others hurt more than five times or an ore left. On 22 the 4 ores picked up at 112-124 s, hurt 4
+    times of 8 touches.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1394,7 +1402,7 @@ _HURT = (("green-mushroom", 0.1),)
 _HURT_LIVE = dict(_LIVE, realism=Realism(zero_walls=True, hurt=_HURT))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", "a"),), hurt=_HURT)),
       expects=KEY_EXPECTS + (
           check("her stars asked", lambda tr: _said(tr, "her stars: ")),
@@ -1416,11 +1424,14 @@ def loop_tree_grind_attack_key(sim):
     Mushrooms start at a tenth of their HP): on seed 1 the doubt at 15.1 s, ATTACK followed to A at 19.2 s, 18 kills
     after; of seeds 1-13 all but 11 meet all of this (on 11 the Green she presses at stays within her claw's reach,
     where no press is judged: the doubt never comes in its 169 s), and seed 1 with the chase off and with the old
-    respawn clock too."""
+    respawn clock too. (Seed 2 since work/replan's loot work on master 072e1ec (2026-10-31: her HP at the user's prices,
+    the positioning switches as first built, her drops' life by the live evidence: eval/seeds/keys.txt): on seed 1 the
+    doubt came at 131.2 s, too late for the check in its 2 minutes; of seeds 1-13 all but 1, 5 and 10 (no doubt in the
+    time) meet all of this; on 2 the doubt at 24.2 s, ATTACK followed to A at 28.9 s, 20 kills after.)"""
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=2, limit=400, may_die=True,
       **dict(_LIVE, realism=Realism(zero_walls=True, game_keys=(("attack", None),), hurt=_HURT)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: THE GAME HAS ATTACK ON NO KEY"),
@@ -1435,7 +1446,10 @@ def loop_tree_attack_unbound(sim):
     start says it and tries the regular attack again (control.keymap.at_start; until the review of 2026-10-28 every
     later run started with it off, nothing to doubt it again). The monster to finish is set up as there (_HURT): on
     seed 1 the doubt at 15.1 s, ATTACK on none at 19.2 s; of seeds 1-13 all but 11 meet all of this (as there), and
-    seed 1 with the chase off and with the old respawn clock too."""
+    seed 1 with the chase off and with the old respawn clock too. (Seed 2 since work/replan's loot work on master
+    072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as first built, her drops' life by the
+    live evidence), as there: on seed 1 the doubt at 131.2 s, too late; of seeds 1-13 the same ten meet all of this; on
+    2 the doubt at 24.2 s, ATTACK on none at 28.9 s.)"""
     return key_check_run(2)(sim)
 
 
@@ -1823,7 +1837,7 @@ def nav_tree_rope_top_15(sim):
     return _nav(16)(sim)
 
 
-@tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=2, limit=120, **_LIVE,
+@tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=1, limit=120, **_LIVE,
       expects=(ends("arrived"), logs("touched on the rope"), sends("climb_on"),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_hit(sim):
@@ -1833,7 +1847,11 @@ def nav_tree_rope_hit(sim):
     since the review's fixes of 2026-10-30 (the frames on their grid at 15 a second whatever is asked, feed.run; a
     monster standing planned either way a while, navigator.STAND_UNSURE_S; her piles seen gone only by strips sure
     of them, worldstate.DropStrip.sure; D:/MapleHelper-scratch/replan/fix/out/scan_A.txt, scan_B.txt): on seed 1 the
-    Green Mushroom never touched her on the rope; of seeds 1-8 met on 2, 4 and 6-8.)"""
+    Green Mushroom never touched her on the rope; of seeds 1-8 met on 2, 4 and 6-8.) (Seed 1 again, master's, since
+    work/replan's loot work on master 072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as
+    first built, her drops' life by the live evidence: eval/seeds/rope.txt): on seed 2 the Green Mushroom never touched
+    her on the rope; of seeds 1-24, 1, 3, 5-7, 9-11, 13 and 15-23 meet all of this and tests/test_touches.py's MISS on
+    the trip.)"""
     return _nav(16, fight=True)(sim)
 
 

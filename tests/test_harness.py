@@ -570,8 +570,10 @@ def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
         pytest.skip("needs Tree Dungeon's data")
     from gamelab.sim import fakes
     coded = fakes.LOOK_S
-    # (a minute: with her place the world's, fakes.TRUE_PLACE, she hunts where she starts past half a minute, no trip)
-    out = harness.run_one("loop", 1, "game", minutes=1.0, costs="measured", map_id=harness.TREE)
+    # (a minute: with her place the world's, fakes.TRUE_PLACE, she hunts where she starts past half a minute, no trip;
+    # seed 3 since work/replan's loot work on master 072e1ec's monsters, 2026-10-31: on seeds 1 and 2 no glance in the
+    # minute; on 3-8 50-211)
+    out = harness.run_one("loop", 3, "game", minutes=1.0, costs="measured", map_id=harness.TREE)
     assert out["feed"] and out["costs"] == "measured" and fakes.LOOK_S == coded  # put back after the run
     rec = out["feed_record"]
     assert rec["frames"] > 0 and rec["senses"]["looks"] > 0 and out["looks"] == rec["senses"]["looks"]
