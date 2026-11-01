@@ -14,7 +14,7 @@ from gamelab.localization.pose import Localizer
 from gamelab.sim import fakes, harness, scenarios
 from gamelab.sim import world as world_mod
 from gamelab.sim.fakes import Clock, FakeEyes, SimTimeout
-from gamelab.sim.world import DROP_LIFE, Noise, Realism, World
+from gamelab.sim.world import DROP_LIFE, Noise, Realism, SimPet, World
 
 from maplehelper.keys import parse as K
 from test_sim import KEYS, plat, still, tap, tree
@@ -308,6 +308,69 @@ def test_her_inventorys_tabs_in_the_world_refuse_a_full_tabs_items_and_fill_up(m
     tap(w, w.t + 1.5, "z", 0.04)
     w.advance(w.t + 2.0)
     assert cap.taken_by == "her" and w.room_t is not None and not w.tab_full("Etc", w.t)
+
+
+def test_her_pets_trail_her_and_take_what_they_walk_over_as_her_pick_ups(model):
+    """Realism.pets (the harness's `--world pet-loot`; the user, 2026-11-01: "The pet will pick up whatever thing when
+    the pet walks past those loot. But the pet won't proactively go for the loot"): a pet of hers on her platform walks
+    to its PET_FOLLOW from her and takes a coin it passes, hers, with the game's line in her pickup log; not one on
+    another platform, another player's within its ownership, nor an item of a full tab; on her platform PET_HOP_S after
+    she's on another, behind her."""
+    from gamelab.sim.world import PET_FOLLOW, PET_HOP_S, PET_SPEED
+    assert harness.WORLDS["pet-loot"] == {"pets": 2}
+    b, c = plat(model, 360, 300), plat(model, 500, 400)
+    w = world(model, c.id, 100.0, drops=[("mesos", c.id, 250.0), ("mesos", b.id, 300.0), ("mesos", c.id, 600.0)],
+              realism=Realism(pets=1))
+    w.pets = [SimPet(c.id, 300.0, goal=300.0)]  # (200 units off her: it walks to her)
+    w.advance(0.5)
+    coin, far, other = w.drops
+    assert coin.gone and coin.taken_by == "her" and coin.pet and w.messages[-1][1] == "You have gained mesos (+15)"
+    assert not far.gone and not other.gone and w.picked == {"mesos": 1}
+    assert w.pets[0].x == pytest.approx(300.0 - PET_SPEED * 0.5, abs=PET_SPEED * 0.05 + 1)
+    w.advance(3.0)
+    assert abs(w.pets[0].x - 100.0) <= PET_FOLLOW[0] + world_mod.PET_WANDER  # (by her: following, then wandering)
+    # Another player's coin within its ownership, and her full Etc tab's cap, under the pet: left; a potion taken.
+    w = world(model, c.id, 100.0, drops=[("horny-mushroom-cap", c.id, 105.0), ("red-potion", c.id, 95.0)],
+              realism=Realism(pets=1, full_tabs=("Etc",)))
+    w.drops.append(dataclasses.replace(w.drops[0], kind="mesos", owner="rival", x=100.0))
+    w.advance(1.0)
+    cap, potion, theirs = w.drops
+    assert not cap.gone and potion.taken_by == "her" and potion.pet and not theirs.gone
+    assert w.messages[-1][1] == "Red Potion x1 earned. (Use)" and w.pick_refused == 0
+    w.advance(w.realism.rival_owns + 0.5)
+    assert theirs.taken_by == "her" and theirs.pet and not cap.gone
+    # She's on another platform (b): the pet is there PET_HOP_S on, its PET_FOLLOW behind her.
+    w = world(model, b.id, 300.0, facing="right", realism=Realism(pets=1))
+    w.advance(0.1)
+    w.pets[0].platform, w.pets[0].x = c.id, 600.0
+    w.advance(0.1 + PET_HOP_S - 0.1)
+    assert w.pets[0].platform == c.id
+    w.advance(0.1 + PET_HOP_S + 0.1)
+    assert w.pets[0].platform == b.id and w.pets[0].x == pytest.approx(300.0 - PET_FOLLOW[0], abs=PET_SPEED * 0.1)
+
+
+def test_outcomes_tell_her_pets_pick_ups_from_hers_and_where_she_was(model):
+    """harness._pets_took: pet_picks, pet_share, pet_value_per_min and her_value_per_min apart, drops_expired (hers
+    that lay their whole life), and the tables her pets were fitted by from World.path_log: taken_from (where she was
+    as each was taken) and approach (by her closest approach, those taken within APPROACH_TAKEN_S of it)."""
+    c = plat(model, 500, 400)
+    w = world(model, c.id, 100.0, drops=[("mesos", c.id, 100.0), ("mesos", c.id, 160.0), ("mesos", c.id, 400.0)],
+              realism=Realism(pets=1))
+    tap(w, 0.0, "z", 0.04)  # (hers under her, at once: before the pet's first step, which takes its own)
+    w.advance(0.15)
+    w.pets = [SimPet(c.id, 160.0, goal=160.0)]
+    w.advance(2.0)
+    mine, pets, left = w.drops
+    assert mine.taken_by == "her" and not mine.pet and pets.pet and not left.gone
+    mine.taken_at = 0.5  # (as if as the path log has her there)
+    left.since = -world_mod.DROP_LIFE  # (lain its whole life by now)
+    out = harness.outcomes(w, [], 60.0)
+    coin = harness.worth_for(model)("mesos")
+    assert (out["pet_picks"], out["pet_share"], out["drops_expired"]) == (1, 0.5, 1)
+    assert out["pet_value_per_min"] == pytest.approx(coin) and out["her_value_per_min"] == pytest.approx(coin)
+    assert out["value_per_min"] == pytest.approx(2 * coin)
+    assert out["taken_from"] == {"<=15": 1, "15-45": 0, "45-150": 1, ">150": 0, "off": 0}
+    assert out["approach"]["60"] == {"n": 1, "taken": 1} and len(w.path_log) == 20
 
 
 def test_attacks_chosen_at_a_monster_dead_by_then_are_counted_from_their_records(model):

@@ -497,6 +497,32 @@ KNOCK_FALL_DY = 30.0     # units: a knock that lands her this much lower than wh
 # first read feeds it once (60 -> 90), as she fed it at the start before it was read. The pet care reads it off the
 # world (sim.fakes.FakePetCare: no window, no OCR, no clicks).
 PET_FULLNESS = 60.0
+# Her pets as looters (Realism.pets: the harness's `--world pet-loot`; the user, 2026-11-01: "Has pick-up skills but not
+# exactly item pouch/meso magnet. The pet will pick up whatever thing when the pet walks past those loot. But the pet
+# won't proactively go for the loot"): her Snail pets (Item/Pet 5000054, 5000033: pickupItem 1, no sweepForDrop nor
+# longRange in the game data) trail her on her platform and take what they pass, never going for it (SimPet,
+# World._pets_step). Each walks toward her at PET_SPEED until it is its PET_FOLLOW from her (the first's the first
+# number), then wanders within PET_WANDER of her at half that, a new place every PET_WANDER_S; on another platform than
+# hers PET_HOP_S, it's on hers, its PET_FOLLOW behind her; it takes any drop she could (hers, or another's past its
+# ownership, that fits her tabs: World.takes) lying on its platform within PET_REACH of it, as her own pick-up (the same
+# log line, her tabs). Live (the perception service's 15 fps records of 2026-10-25 to 30, D:/MapleHelper-scratch/replan/
+# loot2/design/pets): of her drops she came within 15-30 units of without standing on them, 56% vanished with her more
+# than 15 off, 46% / 40% / 32% / 25% by her closest approach of 30-45 / 45-60 / 60-90 / 90-150, a median 0.71-0.83 s
+# after it, 2-4% with her on another platform; in the golden clip the snail tags by her were 53 / 73 / 102 units from
+# her (quartiles), under her 48% of the time (trailing her climbs). v83's follow isn't read from the client: the numbers
+# are a coarse grid's (10 settings x 4 seeds, then 12) against those tables. With them the simulator's pets take 31% of
+# her pick-ups, by her closest approach 0.96 / 0.73 / 0.63 / 0.63 / 0.29 where live 0.73 / 0.57 / 0.49 / 0.40 / 0.32 (the
+# same shape, about 0.15 high), and 7% of her drops are taken 45-150 units from her where live 23% (no setting tried
+# passed 11%: the simulator's grind walks onto its piles more than the live bots did).
+PET_SPEED = 80.0         # units a second (60 / 80 / 120 tried)
+PET_FOLLOW = (40.0, 70.0)  # units from her each stops at (25/45 to 90/150 tried)
+PET_WANDER = 80.0        # units either side of her it wanders within (40 / 80 / 140 tried)
+PET_WANDER_S = (1.0, 3.0)  # s between its wander's places, drawn
+PET_HOP_S = 1.0          # s she's on another platform before it's there too (1 and 3 tried)
+PET_REACH = 15.0         # units from it a drop is taken within (15 and 25 tried; her own PICK_REACH)
+PET_STEP_MS = 50         # ms between its steps
+PET_SCAN_S = 0.25        # s between its looks at the drops lying (one landed since is passed over until then)
+PATH_EVERY_MS = 100      # ms between two of her places in World.path_log (the harness's tables of where she was)
 # What isn't known of the game's physics, which the simulator can run either way (Realism.sides, zero_walls,
 # rope_reach; the defaults are the simulator's own, as its golden traces were recorded with):
 # - The map's sides. The simulator's: its platforms' outermost ends, which stop her in the air only. HeavenClient's
@@ -935,6 +961,8 @@ class Realism:
     # every look), her chat key (', CHAT+ as live) toggling it; `chat_stuck`: the key does nothing to it (a test's).
     chat: str | None = None
     chat_stuck: bool = False
+    pets: int = 0                # her pets out, looting as they trail her (PET_SPEED ...; the harness's `--world
+                                 # pet-loot`); 0: none takes anything (her pet's potions and food are Her.pet's)
 
 
 @dataclass(frozen=True)
@@ -1752,10 +1780,22 @@ class Drop:
     taken_by: str = ""             # ... and by whom ("her", "rival", or "other": Realism.drop_takers)
     amount: int = 0     # mesos: how many (Realism.drop_mix); 0: not drawn (the coin's worth: behavior.looting.Worth)
     life: float = DROP_LIFE  # s it lies unless taken: DROP_LIFE, or to the expiry pass past it (Realism.drop_takers)
+    pet: bool = False   # taken by a pet of hers (Realism.pets: taken_by "her", as her own)
 
     @property
     def mesos(self) -> bool:
         return self.kind == "mesos"
+
+
+@dataclass
+class SimPet:
+    """A pet of hers (Realism.pets, PET_SPEED ...): the platform it's on and its x there, since when she's been on
+    another (None: she isn't), and the place it wanders to and when it picks another."""
+    platform: int | None
+    x: float
+    off: float | None = None
+    goal: float = 0.0
+    next: float = 0.0
 
 
 @dataclass
@@ -1812,6 +1852,7 @@ class World:
         self._tick_rng = random.Random(f"ticks:{seed}")  # Realism.respawn_tick's draws
         self._mix_rng = random.Random(f"mix:{seed}")      # Realism.drop_mix's draws
         self._taker_rng = random.Random(f"takers:{seed}")  # Realism.drop_takers' draws
+        self._pet_rng = random.Random(f"pets:{seed}")      # Realism.pets' draws
         self._expiry_at = random.Random(f"expiry:{seed}").uniform(0.0, EXPIRE_PASS_S)  # ... and its expiry passes'
         # What a kill drops (Realism.drops; with MAP_DROPS, the map's)
         self._drop_table = game_drops(model) if self.realism.drops == MAP_DROPS else tuple(self.realism.drops)
@@ -1960,6 +2001,11 @@ class World:
         self.wrong_way = 0
         self.picked: dict[str, int] = {}
         self.messages: list[tuple[float, str]] = []
+        self.pets: list[SimPet] | None = None  # her pets (Realism.pets), out from their first step (_pets_step) ...
+        self._pet_drops: list[Drop] = []       # ... the drops lying as they last looked (PET_SCAN_S), and when
+        self._pet_scan_t = -1.0
+        self.path_log: list[tuple[float, int | None, float]] = []  # (s, the platform she stood on or None, x), every
+                                                                   # PATH_EVERY_MS
         self.chat: tuple[float, str] | None = None  # the message bar's game line, and since when (ROPE_REFUSAL)
         self.refused = 0  # her attacks refused on a rope
         self.portals = [pt for pt in model.portals if pt.kind == PORTAL_EXIT]
@@ -2154,6 +2200,11 @@ class World:
         if self.character.mp > 0 and self.mp < 1.0:
             self.mp = min(1.0, self.mp + MP_REGEN * dt / self.character.mp)
         self.ms += TICK_MS
+        if self.ms % PATH_EVERY_MS == 0:
+            self.path_log.append((self.t, self.plat.id if self.mode == "ground" and self.plat is not None else None,
+                                  self.x))
+        if self.realism.pets and self.ms % PET_STEP_MS == 0:
+            self._pets_step(PET_STEP_MS / 1000)
 
     def _through_portal(self) -> bool:
         """Up held: in an exit's box (mapdata.PORTAL_BOX) while she isn't on a rope or attacking (or sitting: the
@@ -3407,22 +3458,72 @@ class World:
         for d in near:
             tab = None if d.mesos else tab_of(d.kind)
             if tab is None or not self.tab_full(tab, t) or d.kind in self.tab_kinds.get(tab, {}):
-                d.gone, d.taken_at, d.taken_by = True, t, "her"
-                self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
-                self.messages.append((t, f"You have gained mesos (+{d.amount or 15})" if d.mesos else
-                                      f"{log_name(d.kind)} x1 earned. ({tab})"))
-                self.note(f"picks up {d.kind} at x {d.x:.0f}")
-                if tab is not None:
-                    self.tab_kinds.setdefault(tab, {}).setdefault(d.kind, t)
-                    self.tab_items[tab] = self.tab_items.get(tab, 0) + 1
-                    if self.tab_items[tab] >= self._fills.get(tab, math.inf):
-                        self.full_at[tab] = t
-                        self.note(f"her {tab} tab is full now")
+                self._take(d, t)
                 return
         if near:
             self.pick_refused += 1
             self.messages.append((t, FULL_MESSAGE))
             self.note("can't pick up: inventory full")
+
+    def _take(self, d: Drop, t: float, pet: bool = False) -> None:
+        """Drop `d` taken at t, by her pick-up key or by a pet of hers (`pet`: Realism.pets), hers either way: its line
+        in the pickup log ("You have gained mesos", "... x1 earned. (Etc)": a pet's in game too), into her tab."""
+        tab = None if d.mesos else tab_of(d.kind)
+        d.gone, d.taken_at, d.taken_by, d.pet = True, t, "her", pet
+        self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
+        self.messages.append((t, f"You have gained mesos (+{d.amount or 15})" if d.mesos else
+                              f"{log_name(d.kind)} x1 earned. ({tab})"))
+        self.note(f"{'her pet picks' if pet else 'picks'} up {d.kind} at x {d.x:.0f}")
+        if tab is not None:
+            self.tab_kinds.setdefault(tab, {}).setdefault(d.kind, t)
+            self.tab_items[tab] = self.tab_items.get(tab, 0) + 1
+            if self.tab_items[tab] >= self._fills.get(tab, math.inf):
+                self.full_at[tab] = t
+                self.note(f"her {tab} tab is full now")
+
+    def _pets_step(self, dt: float) -> None:
+        """Her pets' step (Realism.pets, every PET_STEP_MS; out where she is at the first): each on her platform walks
+        to its PET_FOLLOW from her at PET_SPEED, or within it wanders by her (PET_WANDER, at half that), is on hers
+        PET_HOP_S after she's on another (its PET_FOLLOW behind her), and takes what it's on that she could take (hers or
+        past its owner's time, fitting her tabs: World.takes) as her pick-up does (_take). On a rope or in the air she
+        leaves them where they are."""
+        t = self.t
+        if self.pets is None:
+            pid = None if self.plat is None else self.plat.id
+            self.pets = [SimPet(pid, self.x, goal=self.x) for _ in range(self.realism.pets)]
+        here = self.plat if self.mode == "ground" else None
+        if t - self._pet_scan_t >= PET_SCAN_S:
+            self._pet_drops = [d for d in self.drops if not d.gone and d.since + d.life > t]
+            self._pet_scan_t = t
+        for k, pet in enumerate(self.pets):
+            follow = PET_FOLLOW[k % len(PET_FOLLOW)]
+            if here is not None and here.id != pet.platform:
+                if pet.off is None:
+                    pet.off = t
+                if t - pet.off >= PET_HOP_S:  # (on hers now, behind her)
+                    side = 1.0 if self.facing == RIGHT else -1.0
+                    pet.platform, pet.x = here.id, min(max(self.x - side * follow, here.left), here.right)
+                    pet.off, pet.next = None, t
+            elif here is not None:
+                pet.off = None
+            if pet.platform is None:
+                continue
+            if here is not None and here.id == pet.platform:
+                gap = self.x - pet.x
+                if abs(gap) > follow:
+                    goal, speed = self.x - math.copysign(follow, gap), PET_SPEED
+                else:
+                    if t >= pet.next:
+                        pet.goal = self.x + self._pet_rng.uniform(-PET_WANDER, PET_WANDER)
+                        pet.next = t + self._pet_rng.uniform(*PET_WANDER_S)
+                    goal, speed = pet.goal, PET_SPEED / 2
+                step = max(-speed * dt, min(speed * dt, goal - pet.x))
+                pet.x = min(max(pet.x + step, here.left), here.right)
+            for d in self._pet_drops:
+                if (not d.gone and d.platform == pet.platform and d.since <= t < d.since + d.life
+                        and abs(d.x - pet.x) <= PET_REACH
+                        and (d.owner == "her" or t >= d.since + self.realism.rival_owns) and self.takes(d.kind, t)):
+                    self._take(d, t, pet=True)
 
     def tab_full(self, tab: str, t: float) -> bool:
         """Whether her inventory's `tab` was full at t (Realism.full_tabs, fills_after; room again from room_t)."""

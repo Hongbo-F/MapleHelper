@@ -83,7 +83,13 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    left (taken by others, or lain their whole life); cash_per_min, value_per_min less her potions at
                    the user's reference prices (behavior.hunt: HP_PER_MESO HP and MP_PER_MESO MP a meso, by what each
                    of hers gives: the simulator's Orange Potion 125 mesos, Meat 80 with `--world meat`, its Blue
-                   100); pick_age, the median age of her drops as she picked them up (s from their landing)
+                   100); pick_age, the median age of her drops as she picked them up (s from their landing);
+                   drops_expired, those of hers that lay their whole life
+  pet_picks        of her drops taken by her, those her pets took (`--world pet-loot`: world.Realism.pets), pet_share
+                   of them, pet_value_per_min their worth a minute and her_value_per_min her own key's (value_per_min
+                   both); taken_from, where she was when her drops were taken (units from them on their platform,
+                   'off' on another or in the air); approach, of her drops she came within 30 ... 300 of without
+                   standing on them, those taken within 8 s of it: the tables her pets were fitted by (world.PET_SPEED)
   longest_idle     the longest stretch without a kill or a pick-up, and stuck_s: the time beyond 60 s
                    in such stretches
   safety_stops     the safety stop (behavior.safety: her HP under her reserve, her profile's hits of the map's largest
@@ -144,6 +150,7 @@ PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden trac
 """
 
 import argparse
+import bisect
 import dataclasses
 import difflib
 import json
@@ -299,6 +306,11 @@ WORLDS["no-splices"] = {"splices": False}
 # 80 mesos at their prices) from a stock of world.POTIONS (250) a run, where the crowd preset has 60 Orange Potions
 # (250 HP), which ran out within 15 minutes.
 WORLDS["meat"] = {"potion": MEAT_HP, "potions": POTIONS}
+# ... and her two pets taking what they pass as they trail her (`pet-loot`: Realism.pets, world.PET_SPEED ...; the user,
+# 2026-11-01: they "will pick up whatever thing when the pet walks past those loot", never going for it), where the
+# other worlds' drops are hers to pick up alone: live, 26-29% of the drops taken on her platform went with her 45 units
+# or more off, or with her never within 15 of them.
+WORLDS["pet-loot"] = {"pets": 2}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -668,6 +680,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "mesos_per_min": round(sum(worth(d) for d in drops if d.taken_by == "her" and d.mesos) / (horizon / 60), 2),
         "items_per_min": round(sum(worth(d) for d in drops if d.taken_by == "her" and not d.mesos) / (horizon / 60), 2),
         "items_picked": sum(1 for d in drops if d.taken_by == "her" and not d.mesos),
+        **_pets_took(world, drops, horizon, worth),
         "drops_left_per_min": round(sum(worth(d) for d in left) / (horizon / 60), 2),
         "cash_per_min": round((sum(worth(d) for d in drops if d.taken_by == "her") - world.potions_used * hp_potion
                                - world.mp_potions * mp_potion) / (horizon / 60), 2),
@@ -707,6 +720,50 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "moves_away": _moves_away(records, end),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
     }
+
+
+TAKEN_BINS = ((15.0, "<=15"), (45.0, "15-45"), (150.0, "45-150"), (math.inf, ">150"))  # (_pets_took) units
+APPROACH_BINS = (30.0, 45.0, 60.0, 90.0, 150.0, 300.0)  # ... her closest approach's, past 15 (PICK_REACH)
+APPROACH_TAKEN_S = 8.0  # ... and s after it that a drop taken counts as taken by it
+
+
+def _pets_took(world, drops: list, horizon: float, worth: Callable) -> dict:
+    """Her pets' share of her pick-ups (world.Realism.pets: pet_picks, pet_share of her drops taken by her or them,
+    pet_value_per_min of the worth, her_value_per_min her own key's), drops_expired (hers that lay their whole life),
+    and the tables the pets were fitted by against the live records (world.PET_SPEED; World.path_log): `taken_from`,
+    where she was when her drops were taken, units from them on their platform (TAKEN_BINS; 'off' on another, or in the
+    air); `approach`, of her drops she came within APPROACH_BINS of (her nearest on their platform while they lay, past
+    15) without standing on them, those taken within APPROACH_TAKEN_S of it."""
+    path = getattr(world, "path_log", [])
+    ts = [p[0] for p in path]
+    taken = [d for d in drops if d.taken_by == "her"]
+    pets = [d for d in taken if getattr(d, "pet", False)]
+    where = {name: 0 for _, name in TAKEN_BINS} | {"off": 0}
+    for d in taken:
+        j = bisect.bisect_right(ts, d.taken_at) - 1
+        if j < 0:
+            continue
+        _, pid, x = path[j]
+        gap = abs(x - d.x)
+        where["off" if pid != d.platform else next(name for top, name in TAKEN_BINS if gap <= top)] += 1
+    approach = {str(int(b)): {"n": 0, "taken": 0} for b in APPROACH_BINS}
+    for d in drops:
+        end = d.taken_at if d.taken_by else min(d.since + d.life, horizon)
+        best = None
+        for i in range(bisect.bisect_left(ts, d.since), bisect.bisect_right(ts, end)):
+            if path[i][1] == d.platform and (best is None or abs(path[i][2] - d.x) < best[0]):
+                best = (abs(path[i][2] - d.x), path[i][0])
+        if best is None or best[0] <= 15.0 or best[0] > APPROACH_BINS[-1]:
+            continue
+        c = approach[str(int(next(b for b in APPROACH_BINS if best[0] <= b)))]
+        c["n"] += 1
+        c["taken"] += d.taken_by == "her" and d.taken_at - best[1] <= APPROACH_TAKEN_S
+    mins = horizon / 60
+    return {"pet_picks": len(pets), "pet_share": round(len(pets) / len(taken), 3) if taken else None,
+            "pet_value_per_min": round(sum(worth(d) for d in pets) / mins, 2),
+            "her_value_per_min": round(sum(worth(d) for d in taken if not getattr(d, "pet", False)) / mins, 2),
+            "drops_expired": sum(1 for d in drops if not d.taken_by and d.since + d.life <= horizon),
+            "taken_from": where, "approach": approach}
 
 
 def _moves_away(records: list[dict], end: float) -> dict:
