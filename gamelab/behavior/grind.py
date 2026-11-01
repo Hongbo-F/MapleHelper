@@ -127,6 +127,17 @@ STAY_NET = True
 # standard grind changing 2 seeds of 12. Her drops' life by the evidence (ledger.SURVIVAL) is what keeps more of them
 # from expiring there.
 DROPS_IN_CHOICE = False
+# Her detours for her drops priced by the HP they cost her too (PILE_HP, from the review of 2026-10-31, against the user's
+# "try not to hit by mobs just for picking up loots"): the sweep's seconds (`_sweep_terms`) dearer than her time's worth
+# by Patrol.hp_price times the bars a second her touches took while she was after a pile (an objective that's a pile,
+# its trips included: `_learn_touches`, as the stops' are learned), PILE_HP_PRIOR_S of none to start from. Until then
+# her time alone, and in the live drops' worlds (map-drops, drop-takers, 48 seeds of 5 minutes) she was on her drops 27%
+# longer than at the rebase tip, touched there as often a second. On (48 seeds paired against off,
+# D:/MapleHelper-scratch/replan/loot/fix2/sweephp): there her time on her drops -7.3 s (se 2.0), touches that hurt
+# there -0.85 (0.59), loot's worth a minute -2.5 (2.7), EXP -0.7 (3.8); in the standard grind (24 seeds) EXP +10.2
+# (3.5), loot -0.3 (3.8), hurt at piles +1.0 (0.9). False: her time alone.
+PILE_HP = True
+PILE_HP_PRIOR_S = 20.0
 
 
 class Grind(Hunt):
@@ -150,6 +161,8 @@ class Grind(Hunt):
         self._reroute = False                     # a pile seen on a trip (or hers gone): to it at the next pass
         self._start = time.monotonic()
         self._hp: tuple | None = None  # the last look's (time, HP or touches told, platform), for learn_hp
+        self._pile_hp = [0.0, 0.0]  # (s after a pile, bars her touches took then): PILE_HP
+        self._pile_at: tuple | None = None  # ... and the last look's (time, touches told, after a pile)
         self._stated = time.monotonic()
 
     def run(self, minutes: float):
@@ -165,7 +178,7 @@ class Grind(Hunt):
         are the game's clocks, which ran on, and aren't moved."""
         super()._paused(seconds)
         self._start += seconds
-        self._alt = self._hp = None
+        self._alt = self._hp = self._pile_at = None
 
     # --- what she knows ------------------------------------------------------------------------------------
 
@@ -210,6 +223,13 @@ class Grind(Hunt):
         told = getattr(rep, "touches", 0) - getattr(rep, "misses", 0)
         pid = self.visit.ground if self.visit is not None else None
         last, self._hp = self._hp, (s.t, told, pid)
+        o = getattr(self, "obj", None)
+        piled, self._pile_at = getattr(self, "_pile_at", None), (s.t, told, o is not None and o.kind == "pile")
+        if piled is not None and piled[2] and d is not None and 0 < s.t - piled[0] <= TOUCH_GAP_S:  # (PILE_HP)
+            new = max(0, told - piled[1])
+            acc = self.__dict__.setdefault("_pile_hp", [0.0, 0.0])
+            acc[0] += s.t - piled[0]
+            acc[1] += new * self._touch_share(s) if new else 0.0
         if last is None or last[2] is None or d is None or not 0 < s.t - last[0] <= TOUCH_GAP_S:
             return
         new = max(0, told - last[1])
@@ -403,9 +423,17 @@ class Grind(Hunt):
         return stop.platform, stop.x
 
     def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float, float | None]:
-        """The sweep's terms: her time's worth (`_time_worth`), sweep.budget_for's budget (no lulls: she doesn't wait for
-        respawns at a stop)."""
-        return self._time_worth(s, dest), None
+        """The sweep's terms: her time's worth (`_time_worth`) and, with PILE_HP, the HP a second after her drops has
+        cost her (`pile_hp_rate` at Patrol.hp_price), sweep.budget_for's budget (no lulls: she doesn't wait for respawns
+        at a stop)."""
+        worth = self._time_worth(s, dest)
+        return worth + (self.patrol.hp_price * self.pile_hp_rate() if PILE_HP else 0.0), None
+
+    def pile_hp_rate(self) -> float:
+        """Bars of her HP a second her touches have taken while she was after a pile (PILE_HP), PILE_HP_PRIOR_S of none
+        to start from."""
+        spent, bars = getattr(self, "_pile_hp", None) or (0.0, 0.0)
+        return bars / (spent + PILE_HP_PRIOR_S)
 
     def _time_worth(self, s: Scene, dest: tuple[int, float] | None = None) -> float:
         """What her time is worth now, EXP a second, on her way to `dest` (the sweep's price of it): at the stop, on a

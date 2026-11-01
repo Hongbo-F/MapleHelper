@@ -1413,6 +1413,45 @@ def test_what_a_stop_costs_is_learned_from_her_touches_and_staying_there_is_net_
         grind.STAY_NET = True
 
 
+def test_her_detours_for_drops_are_priced_by_the_hp_they_cost_her_too():
+    """grind.PILE_HP (the review of 2026-10-31, the user's "try not to hit by mobs just for picking up loots"): the
+    touches that took HP while she was after a pile (an objective that's a pile, as of the look before) are learned as
+    bars a second (pile_hp_rate, PILE_HP_PRIOR_S of none to start from), and the sweep's seconds are dearer than her
+    time's worth by Patrol.hp_price times that; touches while she was after a spot aren't counted; off, her time
+    alone."""
+    from gamelab.attack.danger import Danger
+    from gamelab.attack.spots import Spot
+    from gamelab.behavior.hunt import Visit
+    from test_danger import HER, build
+    model = build([(0, 0, 300, 0), (0, -200, 300, -200)], [("19", 150, 0), ("19", 150, -200), ("13", 50, -200)])
+    pid = _pid(model, 150, 0)
+    p = _patrol(model, lambda a, b: 2.0)
+    g = _grind(model, {HORNY})
+    g.patrol, g.stop = p, p.stop_on(pid)
+    g.h.danger, g.h.report, g._hp = Danger(model, HER), SimpleNamespace(touches=0, misses=0), None
+    g.visit = Visit(pid, Spot(pid, 150.0, 1.0, False), arrived=time.monotonic())
+    look = lambda t: SimpleNamespace(platform=model.platform(pid), where=SimpleNamespace(x=150.0), hp=0.9, t=t,
+                                     monsters=[])
+    g.obj = SimpleNamespace(kind="spot")
+    g._learn_hp(look(10.0))
+    g.h.report.touches = 1  # (after a spot: not the pile's)
+    g._learn_hp(look(12.0))
+    assert g.pile_hp_rate() == 0.0
+    g.obj = SimpleNamespace(kind="pile")
+    g._learn_hp(look(13.0))
+    g.h.report.touches = 3  # (two that took HP after a pile, nobody by her: the hardest-hitting kind's)
+    g._learn_hp(look(18.0))
+    share = g.danger.taken(HORNY)
+    assert g.pile_hp_rate() == pytest.approx(2 * share / (5.0 + grind.PILE_HP_PRIOR_S))
+    g._time_worth = lambda s, dest=None: 4.0
+    assert g._sweep_terms(look(18.0), None) == (pytest.approx(4.0 + p.hp_price * g.pile_hp_rate()), None)
+    grind.PILE_HP = False
+    try:
+        assert g._sweep_terms(look(18.0), None) == (4.0, None)
+    finally:
+        grind.PILE_HP = True
+
+
 def test_a_bar_of_her_hp_is_priced_by_her_max_hp_as_read_at_the_users_prices():
     """Patrol.hp_price (the user, 2026-10-31: "2HP/mesos and 1MP/mesos, use these as reference price"): what a bar of
     her HP costs, its potions' mesos at MESO_EXP (hunt.bar_exp), from her max HP as perception reads it (the magician's
