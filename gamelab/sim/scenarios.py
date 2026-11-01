@@ -40,8 +40,8 @@ from ..localization.mapdata import MapModel
 from ..control.navigator import Navigator
 from ..control.timeline import SIM_KEYS, SIM_KEYS_PET
 from ..behavior.tour import Tour
-from .fakes import (Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout, SimViolation,
-                    Trace, detector_kinds, patched)
+from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout,
+                    SimViolation, Trace, detector_kinds, patched)
 from . import harness
 from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, TREE_DROP_MIX, Her,
                     Noise, Realism, SimDied, World)
@@ -132,6 +132,7 @@ class Sim:
                            inventory_full=sc.inventory_full, facing=sc.facing, origin=self.clock.now,
                            drops=list(sc.drops), hanging=sc.hanging, noise=sc.noise, realism=sc.realism,
                            character=sc.her or her)
+        self.world.on_attack = self._attack_told
         self.eyes = FakeEyes(self.world, self.clock, model, guard=self.guard)
         self.trace = Trace(self.clock.now)
         self.player = FakePlayer(self.world, self.clock, self.trace, self.keys)
@@ -139,6 +140,16 @@ class Sim:
         self.files: dict[str, list[str]] = {}  # what the run wrote (under its stand-in for gamelab/lab)
         self.senses = []  # every hunter's (for the feed's record)
         self.feed = self._feed()
+
+    def _attack_told(self, row: tuple) -> None:
+        """One of her attacks as the world resolved it (a World.attack_log row) as a telemetry 'sim_attack' record:
+        the simulator's own outcome of it (kill, hit, swipe, miss, stopped, nothing), its plan's name, ground or air,
+        her rise, the kind it picked, for what's worked out from a simulated run's telemetry alone (analysis.jumps: her
+        jump attacks' outcomes by their jitter, `python -m gamelab jitter`); `key`, its key's time as the run's records
+        have theirs (time.time(): fakes.EPOCH on)."""
+        t, plan, mode, rise, kind, outcome, up = row
+        telemetry.emit("sim_attack", key=round(EPOCH + t, 3), plan=plan, mode=mode, rise=rise, kind=kind,
+                       outcome=outcome, up=up)
 
     def _feed(self):
         """Perception on the world, as live's service looks at the game (SyncFeed): its own eyes (their detectors free,

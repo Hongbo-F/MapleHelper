@@ -529,6 +529,66 @@ def test_a_jumps_kill_is_a_gain_soon_after_its_attack_key_not_one_after_a_later_
     assert jumps.outcomes(rows, gains=[gain(10.05)])[0]["outcome"] == "nothing seen"  # (too soon: not its)
 
 
+def _jitter_run(outcome_of, n=60, base=None, seed=3):
+    """A run's records of `n` jump attacks with jitter (fight.log_jump's 'jump', throw_act's 'jump_keys') and the
+    simulator's own outcome of each ('sim_attack'), `outcome_of(jitter, i)` saying which; every 7th not thrown."""
+    import random
+    from gamelab.sim.fakes import EPOCH
+    rng, rows = random.Random(seed), [{"t": EPOCH, "topic": "session"}]
+    for i in range(n):
+        b = base if base is not None else (reach.TOP_KEY_MS if i % 2 else reach.KEY_FIRST_MS)
+        room = (-reach.JITTER_TOP_MS, reach.JITTER_TOP_MS) if b == reach.TOP_KEY_MS else (0, reach.JITTER_FIRST_MS)
+        j = rng.randint(*room)
+        t = EPOCH + 10.0 * (i + 1)
+        rows.append({"t": t, "topic": "jump", "kind": "above", "jump": "up", "side": 1, "turn": False,
+                     "key_ms": b + j, "base_ms": b, "jitter_ms": j, "window": [b + room[0], b + room[1]],
+                     "rise": 50.0, "target": "pig", "dx": 120.0, "up": 80.0, "platform": 5, "x": 0.0, "n": i + 1})
+        thrown = i % 7 != 3
+        rows.append({"t": t + 0.9, "topic": "jump_keys", "n": i + 1, "thrown": thrown,
+                     "pressed_ms": b + j if thrown else None})
+        if thrown:
+            rows.append({"t": t + 0.6, "topic": "sim_attack", "key": t + 0.3 + (b + j) / 1000, "plan": "jump_throw",
+                         "mode": "air", "rise": 50.0, "kind": "pig", "outcome": outcome_of(j, i), "up": 80.0})
+        rows.append({"t": t + 2.0, "topic": "sim_attack", "key": t + 2.0, "plan": "throw", "mode": "ground",
+                     "rise": 0.0, "kind": "pig", "outcome": "kill", "up": 0.0})  # (a throw from the ground: not its)
+    return rows
+
+
+def test_the_jitter_report_tabulates_jump_attacks_by_jitter_and_asks_whether_it_predicts_a_hit(tmp_path):
+    """analysis.jumps' jitter report (`python -m gamelab jitter`): each 'jump' record with jitter joined to its
+    'jump_keys' (not thrown: no outcome taken from the next attack) and, in a simulated run, to the simulator's own
+    outcome of its attack ('sim_attack', its first jump attack keyed within MATCH_S); by base key, kind and jitter bin;
+    and the permutation test: a hit only keyed early at the top (jitter under 0) has a small p, one at random a
+    large one."""
+    import random
+    from gamelab.__main__ import main
+    from gamelab.analysis import jumps
+    rows = _jitter_run(lambda j, i: "kill" if j < 0 else "nothing", n=120, base=reach.TOP_KEY_MS)
+    got = jumps.jitter_rows(rows)
+    assert len(got) == 120 and sum(not r["thrown"] for r in got) == 17
+    assert all(r["outcome"] == ("not thrown" if not r["thrown"] else "kill" if r["jitter_ms"] < 0 else "nothing")
+               and r["source"] == "sim" for r in got)
+    assert all(r["pressed_jitter"] == r["jitter_ms"] for r in got if r["thrown"])
+    table = jumps.jitter_table(got)
+    bins = [line.split()[3] for line in table.splitlines()[1:] if line.split()[:3] == ["278", "up", "no"]]
+    assert bins == ["-20", "-15", "-10", "-5", "+0", "+5", "+10", "+15", "+20"], table
+    test = jumps.jitter_test(got)
+    p = float(test.splitlines()[1].split()[-1])
+    assert p < 0.01, test
+    flip = random.Random(11)
+    rows = _jitter_run(lambda j, i: "kill" if flip.random() < 0.5 else "miss", n=120)
+    got = jumps.jitter_rows(rows)
+    assert {jumps._bin(r) for r in got if r["base_ms"] == reach.KEY_FIRST_MS} == {0, 5, 10, 15}
+    test = jumps.jitter_test(got)
+    assert all(float(line.split()[-1]) > 0.05 for line in test.splitlines()[1:3]), test
+    path = tmp_path / "20261101-120000-sim-x.jsonl"
+    path.write_text("\n".join(__import__("json").dumps(r) for r in rows) + "\n", encoding="utf-8")
+    out = tmp_path / "report.txt"
+    assert main(["jitter", str(path), "--text", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+    assert "the simulator's own" in text and "does the jitter predict a hit?" in text and "  40 up" in text
+
+
 def test_the_jumps_of_the_hunt_of_2026_10_25_2343_as_the_perception_services_records_have_them():
     """analysis.jumps on the supervised hunt of 2026-10-25 23:43 (its six jump records and the records about them, the
     hunter's and the perception service's: tests/fixtures/jumps_2026-10-25), as the analysis of that night checked them

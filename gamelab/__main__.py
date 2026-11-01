@@ -2638,6 +2638,22 @@ def cmd_coverage(args) -> int:
     return 0
 
 
+def cmd_jitter(args) -> int:
+    """Her jump attacks' jitter against what came of them, from telemetry (analysis/jumps.py: jitter_report): by base
+    key (the soonest or the top's), jump kind and jitter bin, and whether the jitter predicts a hit. By default the
+    live telemetry (but the simulator's and the perception service's files). Offline: no game, no keys."""
+    from .analysis import jumps
+    files = ([Path(f) for f in args.files] if args.files else
+             [p for p in sorted(paths.TELEMETRY.glob("*.jsonl"))
+              if "-sim-" not in p.name and "-perceive" not in p.name])
+    lines = jumps.jitter_report(files)
+    print("\n".join(lines))
+    if args.text:
+        Path(args.text).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"report: {args.text}")
+    return 0
+
+
 def cmd_respawn(args) -> int:
     """Respawns, drop life and how full the platforms are, from telemetry (analysis/respawn.py): by default the
     live telemetry (but the simulator's files), against the map's own spawn fields. Offline: no game, no keys."""
@@ -3251,6 +3267,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="how often the runs' plans would go through a move with each trip choosing among N ways "
                         "(route.ROUTES; default: the navigator's own)")
     s.set_defaults(func=cmd_coverage)
+    s = sub.add_parser("jitter", help="her jump attacks' jitter against what came of them: by base key, jump kind and "
+                                      "jitter bin, and whether the jitter predicts a hit, from telemetry (offline; no "
+                                      "game, no keys)")
+    s.add_argument("files", nargs="*", help="telemetry files (.jsonl; default: the live ones in gamelab/lab/telemetry, "
+                                            "but the simulator's and the perception service's)")
+    s.add_argument("--text", help="also write the report to this file")
+    s.set_defaults(func=cmd_jitter)
     s = sub.add_parser("respawn", help="how long monsters take to come back after a kill, how long drops lie, and "
                                        "how full the platforms are, from telemetry (offline; no game, no keys)")
     s.add_argument("files", nargs="*", help="telemetry files (.jsonl; default: the live ones in gamelab/lab/telemetry, "

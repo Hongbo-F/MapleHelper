@@ -1877,6 +1877,7 @@ class World:
         # "nothing" (no monster picked, or one dead by then); how far above her feet the pick's were, + above). What
         # each kind of throw hit (sim.harness: `attack_kinds`).
         self.attack_log: list[tuple] = []
+        self.on_attack = None  # called with each attack_log row as it's logged (sim.scenarios.Sim: 'sim_attack')
         # Her stars' MISS popups (as the game draws one over a monster her star missed, where it was as the star landed:
         # FakeEyes.misses): (s it shows from, map x, the monster's feet's y, its height), Noise.miss_unseen's left out
         self.misses: list[tuple[float, float, float, float]] = []
@@ -3157,6 +3158,8 @@ class World:
             t, plan, mode, rise, kind, up, pick = how
             self.attack_log.append((round(t, 3), plan, mode, rise, kind, outcome, up))
             self.pick_log.append((round(t, 3), plan, mode, *pick, outcome))
+            if self.on_attack is not None:
+                self.on_attack(self.attack_log[-1])
 
     def _nearest_ahead(self, facing: str) -> tuple[float, float, "SimMonster"] | None:
         """The nearest live monster on the platform she last stood on ahead of her (its middle in front of hers): how far
