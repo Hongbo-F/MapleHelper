@@ -270,8 +270,8 @@ def test_a_monster_that_hits_hard_is_kept_off_and_escaped_to_the_least_danger():
     # attack 40 ms into the jump surely picks it 90 off (from 44); tapping the arrow on the ground first where she
     # doesn't surely face it (an air turn's attack, 120 ms into the jump, picks one on her level only from 144).
     near = seen("horny-mushroom", 590, 500, p.id)
-    assert stance.stance(500, 500, p, [near, behind], danger=d, facing="right")[:2] == ("jump_throw", "right")
-    from test_attack import no_room
+    from test_attack import close, no_room
+    assert no_room(stance.stance(500, 500, p, [near, behind], danger=d, facing="right")) == close("right")
     assert no_room(stance.stance(500, 500, p, [near, behind], danger=d)) == (
         "jump_throw", "right", stance.JumpPlan(40, 0, False, "tap first"))
     # A Green Mushroom (7.2%) is let come to the claw's reach, as before.

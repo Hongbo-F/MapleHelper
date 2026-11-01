@@ -24,6 +24,13 @@ def no_room(act: tuple) -> tuple:
     plan = stance_mod.plan_of(act)
     return act if plan is None else (*act[:2], stance_mod.replace(plan, room=None, target=None), *act[3:])
 
+
+def close(side: str, key: int = 40) -> tuple:
+    """A sure jump throw up close that way as the stance gives it, less its room and target (no_room): keyed `key` ms
+    after the jump key, in place, turning in the air if she must (the review of 2026-11-01: compared as `act[:2]`, the
+    tests no longer checked its key nor its turn)."""
+    return ("jump_throw", side, stance_mod.JumpPlan(key, 0, True, "close"))
+
 PLAT = Platform(0, [Segment(0, 500, 1000, 500)])      # her platform
 BELOW = Platform(1, [Segment(1100, 560, 1600, 560)])  # 60 below, to the right
 
@@ -118,7 +125,7 @@ def test_one_too_close_she_steps_to_where_her_next_throw_takes_it():
     tap = ("jump_throw", RIGHT, stance_mod.JumpPlan(40, 0, False, "tap first"))
     assert no_room(stance(60, 500, PLAT, [target(110)])) == tap
     assert stance_mod.plan_of(stance(60, 500, PLAT, [target(110)])).room is None  # (not sure: no jitter)
-    assert stance(60, 500, PLAT, [target(110)], facing=RIGHT)[:2] == ("jump_throw", RIGHT)
+    assert stance(60, 500, PLAT, [target(110)], facing=RIGHT) == ("jump_throw", RIGHT)  # (not sure: no plan)
     assert no_room(stance(500, 500, PLAT, [target(560), target(400)])) == tap
     assert stance(60, 500, PLAT, [target(70)], facing=RIGHT) == ("throw", RIGHT)
 
@@ -172,7 +179,7 @@ def test_a_throw_from_the_ground_is_a_star_only_past_the_claws_reach_by_the_mons
     room = stance_mod.plan_of(stance(500, 500, PLAT, [pig])).room  # (sure: its jitter's, 40 ms and later, each sure)
     assert room[0] == 40 and 40 <= room[1] <= 40 + reach.JITTER_FIRST_MS
     assert no_room(stance(500, 500, PLAT, [pig, target(350)])) == tap
-    assert stance(500, 500, PLAT, [pig], facing=RIGHT)[:2] == ("jump_throw", RIGHT)
+    assert no_room(stance(500, 500, PLAT, [pig], facing=RIGHT)) == close(RIGHT)
     assert decide(500, 500, PLAT, pig, []) == ("walk", LEFT, 120)
     assert stance(500, 500, PLAT, [target(615)]) == ("throw", RIGHT)
     assert decide(500, 500, PLAT, target(615), []) == ("throw", RIGHT)
@@ -418,7 +425,7 @@ def test_a_snail_too_close_is_never_jump_thrown_at_but_stepped_back_from_or_stab
     # JUMP_THROW_SNAILS brings back the jump throw at one, cornered or not.
     monkeypatch.setattr(stance_mod, "JUMP_THROW_SNAILS", True)
     assert stance(60, 500, PLAT, [target(110, kind="snail")])[:2] == ("jump_throw", RIGHT)
-    assert stance(500, 500, PLAT, [target(560, kind="snail")], facing=RIGHT)[:2] == ("jump_throw", RIGHT)
+    assert stance(500, 500, PLAT, [target(560, kind="snail")], facing=RIGHT) == ("jump_throw", RIGHT)
     # The kinds' sizes can come from the map's game data instead of the tables.
     assert stance(60, 500, PLAT, [target(110, kind="snail")], tops={"snail": 5.0}) == ("throw", RIGHT)
 
