@@ -524,6 +524,33 @@ def test_an_item_picked_up_resets_the_count_of_failed_picks(monkeypatch):
     assert h.looter._failed_picks == 0
 
 
+def test_the_count_of_failed_picks_starts_afresh_at_a_pick_the_looks_confirm_a_mark_and_a_retry(monkeypatch):
+    """The independent check of 2026-11-01: the hunt loop's stands (hunt._stand) have no mop-up, which alone reset
+    FAILED_PICKS' row, so in the grind three stuck items in a run, however far apart and with her picks between, marked
+    a tab full, and every later stuck item its tab. The row is broken by an item of a stand of hers the looks show gone
+    from its pile (Looter.on_look), and starts afresh once it marks a tab full or a tab is tried again (TAB_RETRY_S)."""
+    from gamelab.behavior import looting
+    from gamelab.behavior.ledger import Pile
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    h, _ = _mopper(monkeypatch, [])  # (no full message: the stuck items are someone else's)
+    for n, kind in enumerate(("horny-mushroom-cap", "magic-potion", "silver-ore")):
+        h.looter.cant_pick([_loot(kind, 100.0 * n)])
+        pile = Pile(500.0, 0.0, HERS, clock[0], True, status="seen", last_seen=clock[0], items=("topaz-ore",))
+        h.looter.stood_on(["topaz-ore"], pile)
+        clock[0] += 1.0
+        pile.items, pile.last_seen = (), clock[0]  # (her topaz ore gone from the pile she stood on: hers)
+        h.looter.on_look(None)
+        assert h.looter._failed_picks == 0 and not h.looter.full
+    for x in (100.0, 200.0, 300.0):  # (three in a row: the tabs full, then the row starts afresh)
+        h.looter.cant_pick([_loot("emerald-ore", x)])
+    assert set(h.looter.full) == {"Etc"} and h.looter._failed_picks == 0
+    h.looter.cant_pick([_loot("red-potion", 400.0)])
+    assert set(h.looter.full) == {"Etc"} and h.looter._failed_picks == 1
+    clock[0] += looting.TAB_RETRY_S
+    assert h.looter.can_take("emerald-ore") and not h.looter.full and h.looter._failed_picks == 0
+
+
 def test_remembered_drops_seen_gone_twice_are_forgotten_and_drops_seen_elsewhere_noted(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])

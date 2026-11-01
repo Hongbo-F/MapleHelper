@@ -72,7 +72,10 @@ FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up
 # a full Etc tab cleared it. And an "earned" line after the last refusal says its tab has room only for a kind that
 # didn't fit (stuck under her now, or `refused`): one more of a kind she holds a stack of, or may hold from before the
 # run, needs no slot (until then any such line in the read of a tab being learned kept it from being marked full, so
-# her stacks' top-ups, hers or her pets', stalled the learning).
+# her stacks' top-ups, hers or her pets', stalled the learning). FAILED_PICKS' row of items stuck under her is broken by
+# an item of a stand of hers the looks show gone from its pile (`on_look`: the hunt loop's stands, which no mop-up
+# follows) and starts afresh once it marks a tab full or a tab is tried again (`_retry`): until then only a mop-up's
+# item gone broke it, so in the grind three stuck items in a run, however far apart, marked every later one's tab full.
 ITEM_TABS = ("Use", "Etc")
 TAB_RETRY_S = 600.0  # guess
 PICK_SEEN_S = 10.0   # s after a stand the looks have to show a kind gone from the pile she stood on (`on_look`)
@@ -313,16 +316,20 @@ class Looter:
 
     def on_look(self, s) -> None:
         """After a look (once the drop store has seen it): her stands' kinds the pile she stood on no longer holds, or
-        that the store has seen gone, she picked up (`held`); those still in it as seen since, she didn't."""
-        now, kept = time.monotonic(), []
+        that the store has seen gone, she picked up (`held`), and FAILED_PICKS' row of items stuck under her is broken
+        (the hunt loop's stands have no mop-up to break it: `mop_up`); those still in it as seen since, she didn't."""
+        now, kept, took = time.monotonic(), [], set()
         for pile, kinds, at in self._stands:
             if pile.status == "gone":
-                self.held.update(kinds)
+                took.update(kinds)
             elif pile.last_seen is not None and pile.last_seen > at:
-                self.held.update(k for k in kinds if k not in pile.items)
+                took.update(k for k in kinds if k not in pile.items)
             elif now - at < PICK_SEEN_S:
                 kept.append((pile, kinds, at))
         self._stands = kept
+        if took:
+            self.held.update(took)
+            self._failed_picks = 0
 
     def _retry(self) -> None:
         """A tab full for TAB_RETRY_S taken as having room again (learned again at the next failure)."""
@@ -331,6 +338,7 @@ class Looter:
             del self.full[tab]
             for k in [k for k in self.refused if tab_of(k) == tab]:
                 del self.refused[k]
+            self._failed_picks = 0  # (a row of items stuck counted afresh)
             self._tell(tab, False, f"{TAB_RETRY_S / 60:.0f} minutes since it was: trying its items again")
 
     def _tell(self, tab: str, full: bool, why: str, kinds: tuple[str, ...] = ()) -> None:
@@ -566,6 +574,7 @@ class Looter:
             for k in kinds:
                 if tab_of(k) == tab:
                     self.refused[k] = now
+            self._failed_picks = 0  # (the row that marked it: the next counted afresh)
             self._tell(tab, True, why, tuple(k for k in kinds if tab_of(k) == tab))
 
 
