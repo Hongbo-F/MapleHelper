@@ -72,8 +72,9 @@ def test_her_landings_are_priced_by_her_touches_hp_and_rate_not_tree_dungeons():
     """The review of 2026-10-31 (one map's monster and rate frozen into general constants): with her prices
     (stance.Prices: behavior.fight.landing_prices) a landing is priced by the kind's touch (attack.danger's
     Danger.taken of her max HP as read, at the user's reference prices), her EXP a second (Hunter.exp_rate, else the
-    live 6.85) and the share of her touches that hurt (her own, as 10 touches at the live 70% would be); stance's
-    constants until her max HP is read. The live Horny Mushroom's numbers give the constants back."""
+    live 6.85 wherever no grind loop sets one) and the share of her touches that hurt (her own, as 10 touches at the
+    live 70% would be); stance's constants until her max HP is read. The live Horny Mushroom's numbers give the constants
+    back."""
     from gamelab.behavior import fight, hunt
     touch_share = 112.0 / 840.0
     danger = SimpleNamespace(taken=lambda kind: touch_share if kind == "horny-mushroom" else 0.05)
@@ -93,6 +94,22 @@ def test_her_landings_are_priced_by_her_touches_hp_and_rate_not_tree_dungeons():
     priced = st.landing(flat, 500, near, HALVES, TOPS, air=False, prices=q)
     assert plain.meets and plain.price_s == st.LANDING_PRICE_S + st.MEET_PRICE_S
     assert priced.price_s == pytest.approx(q.landing_s(GREEN) + q.meet_s(GREEN))
+
+
+def test_her_landings_rate_is_kept_in_a_band_about_the_prior():
+    """The independent check of 2026-11-01: a landing's price goes by 1 / her EXP a second, and a loop's rate early in a
+    grind or one near 0 priced it without bound. Her rate is taken within fight.RATE_BAND of RATE_PRIOR either way, and
+    RATE_PRIOR where the hunt has none or one not over 0."""
+    from gamelab.behavior import fight
+    danger = SimpleNamespace(taken=lambda kind: 112.0 / 840.0)
+    h = SimpleNamespace(max_hp=840.0, exp_rate=None, report=SimpleNamespace(touches=0, misses=0))
+    low, high = fight.RATE_PRIOR / fight.RATE_BAND, fight.RATE_PRIOR * fight.RATE_BAND
+    for rate, taken in ((None, fight.RATE_PRIOR), (0.0, fight.RATE_PRIOR), (-2.0, fight.RATE_PRIOR),
+                        (float("nan"), fight.RATE_PRIOR), (0.01, low), (0.2, low), (5.4, 5.4), (8.14, 8.14), (90.0, high)):
+        h.exp_rate = rate
+        p = fight.landing_prices(h, danger)
+        assert p.rate == pytest.approx(taken)
+        assert p.meet_s(HORNY) <= st.MEET_PRICE_S * fight.RATE_BAND + 0.01
 
 
 def test_a_landing_is_priced_by_what_her_first_attack_there_surely_takes(tree_map):

@@ -2693,8 +2693,12 @@ s, nobody taking hers) is where the belief is checked against a world it isn't f
 
 **One map's numbers in stance's prices.** Fixed (a6a2c28): `stance.Prices` with `fight.landing_prices`, a touch of the
 kind its HP (Danger.taken of her max HP as read) at the user's prices, her EXP a second the grind's loop's
-(`Hunter.exp_rate`), the share of her touches that hurt her own; the constants (Tree Dungeon's live numbers) only until
-her max HP is read. In the simulator they come out near the constants (her meeting 2.4-3.5 s, a landing 1.4-1.5).
+(`Hunter.exp_rate`), the share of her touches that hurt her own; the constants (Tree Dungeon's live numbers) until
+her max HP is read. (Corrected after the independent check of 2026-11-01: as first written here "only until her max HP
+is read", but her EXP a second stays the live thief's on Tree Dungeon, `fight.RATE_PRIOR` 6.85, wherever no grind
+loop sets one: the hunt loop's and a tour's landings, always, as only `behavior.grind` sets `Hunter.exp_rate`; and the
+share of her touches that hurt starts from the live 70%, `HURT_SHARE`, as 10 touches.) In the simulator they come out
+near the constants (her meeting 2.4-3.5 s, a landing 1.4-1.5).
 
 **Leftovers.** The README's older sections no longer give `HP_POTION_PRICE`/`MP_POTION_PRICE` and `HER_DROPS_LAST` as
 current; two docstring lines of 363 and 329 columns rewrapped (01075cf). **nav_tree_landing_shot_first** (master passes

@@ -498,23 +498,29 @@ STALE_S = FADE_S
 UNSEEN_PRICE = 0.25
 MID_MEETS = True  # a landing she runs on from priced by its touch alone; False: as the route's last's
 # The landings' prices hers (`landing_prices`, from the review of 2026-10-31: attack.stance.Prices), not Tree Dungeon's
-# live numbers: a touch of a kind its HP (attack.danger's Danger.taken of her max HP as perception reads it) in potions at
-# the user's reference prices (behavior.hunt.HP_PER_MESO at MESO_EXP), her EXP a second the hunt's (Hunter.exp_rate: the
-# grind's loop's rate) or RATE_PRIOR before it has one, the share of her touches that hurt her own (her MISS popups) as
-# HURT_PRIOR touches at the live share would be. False: stance's constants.
+# live numbers alone: a touch of a kind its HP (attack.danger's Danger.taken of her max HP as perception reads it) in
+# potions at the user's reference prices (behavior.hunt.HP_PER_MESO at MESO_EXP), her EXP a second the hunt's
+# (Hunter.exp_rate: the grind's loop's rate) or RATE_PRIOR where it has none, the share of her touches that hurt her own
+# (her MISS popups) as HURT_PRIOR touches at the live share would be. Tree Dungeon's numbers stay in two of them: before
+# her max HP is read stance's constants price every landing, and her EXP a second is the live thief's there wherever no
+# grind loop sets one (the hunt loop's and a tour's landings, always: only behavior.grind sets Hunter.exp_rate). Her rate
+# is taken within RATE_BAND of RATE_PRIOR either way (from the independent check of 2026-11-01: a loop's rate early in a
+# grind, or one near 0, priced a landing by 1 / rate without bound). False: stance's constants.
 OWN_PRICES = True
 RATE_PRIOR = 6.85  # EXP a second: the live thief's on Tree Dungeon (2026-10-25)
+RATE_BAND = 4.0    # guess: her EXP a second taken between RATE_PRIOR / 4 and 4 times it (the grind's loops: 4.4-8.1)
 HURT_PRIOR = 10    # touches
 
 
 def landing_prices(h, danger) -> Prices | None:
-    """Her landings' prices (OWN_PRICES): None until her max HP is read (stance's constants meanwhile)."""
+    """Her landings' prices (OWN_PRICES): None until her max HP is read (stance's constants meanwhile); her EXP a
+    second RATE_PRIOR where the hunt has none or one not over 0, else within RATE_BAND of it."""
     from .hunt import HP_PER_MESO, MESO_EXP  # (behavior.hunt imports this module)
     most = getattr(h, "max_hp", None)
     if most is None:
         return None
     rate = getattr(h, "exp_rate", None)
-    rate = rate if rate is not None and rate > 0 else RATE_PRIOR
+    rate = min(max(rate, RATE_PRIOR / RATE_BAND), RATE_PRIOR * RATE_BAND) if rate is not None and rate > 0         else RATE_PRIOR
     rep = getattr(h, "report", None)
     touches, misses = getattr(rep, "touches", 0), getattr(rep, "misses", 0)
     hurt = (touches - misses + HURT_PRIOR * HURT_SHARE) / (touches + HURT_PRIOR)
