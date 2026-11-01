@@ -251,6 +251,97 @@ def test_a_jump_shots_window_is_its_jitters_room_every_key_in_it_sure():
     assert [s.window for s in first] == [(reach.KEY_FIRST_MS, reach.KEY_FIRST_MS + reach.JITTER_FIRST_MS)]
 
 
+def test_her_jump_attacks_key_is_its_shots_jittered_within_its_window():
+    """behavior.fight.jittered: a jump attack's key drawn as it's carried out, uniform to the ms over its shot's window
+    (the top's 258-298, the soonest's 40-55: never sooner than its key), from the hunter's own generator (`jitter`:
+    seeded, the same draws again); none without one (a test's hunter) or a shot (the stance's own timing)."""
+    import random
+    from types import SimpleNamespace
+    from maplehelper.engine import RIGHT
+    from gamelab.attack.stance import JumpPlan, plan_of
+    from gamelab.behavior.fight import jittered
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 560)
+    m, level = pig(560, 400, up.id), pig(550, 480, floor.id)
+    top = min((s for s in cover(LEDGE, floor, 400, [m]).of(m) if s.kind == "up" and not s.turn), key=lambda s: s.key_ms)
+    soon = min((s for s in cover(LEDGE, floor, 400, [level]).of(level) if s.kind == "up" and not s.turn),
+               key=lambda s: s.key_ms)
+    for sh, lo, hi in ((top, 258, 298), (soon, 40, 55)):
+        assert sh.window == (lo, hi)
+        act = ("jump_throw", RIGHT, JumpPlan(sh.key_ms, 0, True, "above", sh))
+        h = SimpleNamespace(jitter=random.Random(7))
+        keys = [plan_of(jittered(h, act)).key_ms for _ in range(3000)]
+        assert min(keys) == lo and max(keys) == hi and set(keys) == set(range(lo, hi + 1))
+        assert abs(sum(keys) / len(keys) - (lo + hi) / 2) < 1.0
+        again = SimpleNamespace(jitter=random.Random(7))
+        assert [plan_of(jittered(again, act)).key_ms for _ in range(3000)] == keys
+        assert jittered(SimpleNamespace(), act) is act and jittered(SimpleNamespace(jitter=None), act) is act
+        kept = jittered(h, act)
+        assert kept[:2] == act[:2] and plan_of(kept).shot is sh and plan_of(kept).way == 0
+    plain = ("jump_throw", RIGHT, JumpPlan())
+    assert jittered(SimpleNamespace(jitter=random.Random(1)), plain) is plain
+
+
+def test_a_jump_attack_is_keyed_as_jittered_and_its_records_say_so(monkeypatch):
+    """fight.throw_act: the key plan has the attack key at the jittered key after the jump key; the 'jump' record has
+    its base key, jitter, the key sent, its window, the turn, her rise then (the arc's at the key sent), and `n`; the
+    'jump_keys' record after its keys how long after the jump key the player pressed the attack key (Actions.key_gap:
+    its answer's 'sent'), and that they went."""
+    import random
+    from types import SimpleNamespace
+    from collections import Counter
+    from maplehelper.engine import RIGHT
+    from gamelab import telemetry
+    from gamelab.attack.stance import JumpPlan
+    from gamelab.behavior import fight
+    from gamelab.control import actions as actions_mod
+    floor, up = plat(LEDGE, 500, 400), plat(LEDGE, 400, 560)
+    m = pig(560, 400, up.id)
+    sh = min((s for s in cover(LEDGE, floor, 400, [m]).of(m) if s.kind == "up" and not s.turn), key=lambda s: s.key_ms)
+    plans = []
+
+    def submit(events, **kw):  # the player: each key pressed 0.4 ms late, the attack's 1.6 ms
+        plans.append(events)
+        return {"sent": [[e[0] + (2.0 if e[1] == "f" else 0.4), *e[1:]] for e in events], "problems": []}
+    monkeypatch.setattr(actions_mod.client, "submit", submit)
+    key = lambda name: SimpleNamespace(name=name)
+    a = actions_mod.Actions(SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), attack=key("f"),
+                                            lucky_seven=None, pick_up=key("z"), hp_potion=None, chair=None))
+    a.facing = RIGHT
+    lines = []
+    h = SimpleNamespace(actions=a, jitter=random.Random(5), log=lines.append, jump_counts=Counter(), danger=None)
+    s = SimpleNamespace(where=SimpleNamespace(x=400.0, y=500.0), platform=floor, monsters=[m])
+    want = random.Random(5).randint(*sh.window)
+    with telemetry.captured() as records:
+        assert fight.throw_act(h, s, ("jump_throw", RIGHT, JumpPlan(sh.key_ms, 0, True, "above", sh)))
+    (events,) = plans
+    at = lambda k: next(e[0] for e in events if e[1] == k and e[2] == "down")
+    assert at("f") - at("alt") == want != sh.key_ms
+    jump = next(r for r in records if r["topic"] == "jump")
+    assert (jump["base_ms"], jump["key_ms"], jump["jitter_ms"], jump["window"], jump["turn"], jump["n"]) == (
+        reach.TOP_KEY_MS, want, want - reach.TOP_KEY_MS, list(sh.window), False, 1)
+    assert jump["rise"] == pytest.approx(physics.rise_after(want / 1000), abs=0.2)
+    keys = next(r for r in records if r["topic"] == "jump_keys")
+    assert keys == {**keys, "n": 1, "thrown": True, "pressed_ms": pytest.approx(want + 1.6)}
+    assert any(f"keyed at {want} ({want - reach.TOP_KEY_MS:+d})" in line for line in lines), lines
+    assert a.key_gap() == pytest.approx(want + 1.6)
+    a.sent = [[0.0, "alt", "down"]]  # (no attack key in the answer: not known)
+    assert a.key_gap() is None
+
+
+def test_a_simulated_runs_jitter_is_drawn_from_its_seed():
+    """sim.scenarios.Sim.hunter: her jitter's generator seeded by the scenario's seed, so a run is the same when run
+    again (its draws the same), another seed's others."""
+    from gamelab.sim import scenarios
+    sc = scenarios.SCENARIOS["nav_tree_up_by_29"]
+    draws = {}
+    for seed in (sc.seed, sc.seed, sc.seed + 1):
+        sim = scenarios.Sim(mapdata.load(sc.map_id), sc if seed == sc.seed else
+                            __import__("dataclasses").replace(sc, seed=seed))
+        with sim:
+            draws.setdefault(seed, []).append([sim.hunter().jitter.randint(0, 1000) for _ in range(5)])
+    assert draws[sc.seed][0] == draws[sc.seed][1] != draws[sc.seed + 1][0]
+
+
 def test_a_jump_forward_reaches_one_past_a_gap():
     # She stands at her platform's end; a pig across a gap is 440 off, past a star's reach (its near side 406 off):
     # from the ground and in place, out of reach; a jump forward over the gap carries her on as the attack starts.

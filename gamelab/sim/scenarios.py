@@ -268,6 +268,7 @@ class Sim:
             self.log(f"her keys: {start.source}")
         h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)
         h.config_keys = self.keys
+        h.jitter = random.Random(f"jitter:{self.scenario.seed}")  # (her jump attacks' jitter: the same run again)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         h.pet.trusted, h.pet.on_doubt = h._pet_key_trusted, h._pet_doubted  # (as Hunter's own: her pet food doubted)
         self.senses.append(h.senses)

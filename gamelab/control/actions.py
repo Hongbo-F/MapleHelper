@@ -185,6 +185,10 @@ class Actions:
         self.lock_until = 0.0  # when her last attack stops locking out the next one
         self.arrow_until = 0.0  # ... and stops swallowing arrows (ARROW_LOCK_MS after its key)
         self._attack_at = 0.0   # when the last attack key went down (time.monotonic)
+        # The player's answer to her last plan played here (its 'sent': each key as pressed, ms into the plan; None: none
+        # read), and the jump and attack keys of her last jump throw or jump back (key_gap)
+        self.sent: list | None = None
+        self._jump_keys: tuple[str, str] | None = None
         # Called at every throw with (when its attack key goes down, the way she throws): the kill ledger
         # (behavior.ledger) matches EXP gains to the stars that could have made them.
         self.throw_listeners: list = []
@@ -245,11 +249,29 @@ class Actions:
         Lie Detector alarm up (client.send's; these actions' own by default)."""
         self.hold_back(events)
         self._sent_at = time.monotonic()
+        self.sent = None
         try:
-            client.submit(events, lead_ms=0, focus=True, name=name, kind=kind or self.kind)
+            result = client.submit(events, lead_ms=0, focus=True, name=name, kind=kind or self.kind)
+            self.sent = result.get("sent") if isinstance(result, dict) else None
         finally:
             self.ended()  # (refused or cut short, keys may have gone too)
         self.pressed = True
+
+    def key_gap(self) -> float | None:
+        """How long after her last jump throw's or jump back's jump key its attack key went down, as the player pressed
+        them (ms: its answer's 'sent', control.player: when each key went out; the simulator's player answers with the
+        plan's own times), what the jump attack's jitter came to (behavior.fight.throw_act's 'jump_keys' record); None
+        if the answer has neither (refused, cut short, no attack key)."""
+        if self._jump_keys is None or not self.sent:
+            return None
+        jump, attack = self._jump_keys
+        downs = {}
+        for e in self.sent:
+            if len(e) >= 3 and e[2] == "down" and e[1] in (jump, attack) and e[1] not in downs:
+                downs[e[1]] = e[0]
+        if jump not in downs or attack not in downs or jump == attack:
+            return None
+        return round(downs[attack] - downs[jump], 1)
 
     def ended(self, tail_s: float = 0.0) -> None:
         """A plan of hers is over, its result just read (or it was cut short: every key let go now, `tail_s` 0): its
@@ -369,7 +391,8 @@ class Actions:
         where on the ground the claw only swipes (9-11 damage against 30-70 for a star, seen with slimes crowding her in
         the basin). The attack key comes `key_ms` after the jump key (JUMP_ATTACK_MS, 40, by default: while she's still
         low; the macro's F1 combo times it at 100 ms, and an attack starting that high in the jump went over a snail;
-        later in the jump it starts higher, for a monster on a platform above her: attack.reach.shots says when).
+        at the jump's top it starts 77 up, for a monster on a platform above her: attack.reach.shots says which, and
+        behavior.fight.jittered moves it a little).
         `way` 0 jumps in place: turning first, she taps the arrow in the air (AIR_TURN_MS after the jump key) and the
         attack comes `turn_key` after the jump key at the soonest (AIR_TURN_ATTACK_MS, AIR_TURN_LEAD_MS after the
         arrow; sooner for a monster too short to pick then: reach.turn_key_ms); with `air_turn` False (an attack that
@@ -388,6 +411,7 @@ class Actions:
         if key is None:
             return False
         turn, added = [], 0  # the arrow that turns her, and how much later it has her attack come
+        self._jump_keys = (jump, key)
         if way:
             arrow = self.arrow(RIGHT if way > 0 else LEFT)
             t = FORWARD_JUMP_MS
@@ -422,7 +446,8 @@ class Actions:
         key goes in right after lift-off: pressed later, the star left after she had landed. The caller
         makes sure there's room behind her. `key_ms`: the attack key that long after the jump key
         (AIR_TURN_ATTACK_MS, 120, by default: AIR_TURN_LEAD_MS after the turn's arrow; sooner for a monster too short
-        to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; later, for a monster higher up). With no
+        to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; the top's, reach.TOP_KEY_MS, for a monster
+        higher up; jittered: behavior.fight.jittered). With no
         attack to throw (`throw`'s), or her attack from the ground only (`ground_only`: the magician's), the jump away
         alone, turning toward it in the air."""
         self.wait_lock()
@@ -430,6 +455,7 @@ class Actions:
         away = self.arrow(directions.opposite(direction))
         toward, jump = self.arrow(direction), self.keys.jump.name
         throw_ms = JB_THROW_MS if key_ms is None else JB_RUN_MS + max(key_ms, JUMP_BACK_ATTACK_MS)
+        self._jump_keys = None if key is None else (jump, key)
         events = [[0, away, "down"], *tap(JB_RUN_MS, jump),
                   [JB_TURN_MS, away, "up"], *tap(JB_TURN_MS, toward),
                   *([] if key is None else tap(throw_ms, key))]
@@ -438,7 +464,8 @@ class Actions:
         self.play(sorted(events, key=lambda e: e[0]), "jump_back")  # the player wants them in time order
         self.facing = direction
         # Locked until the attack's lock ends, which is after she lands: counted, as a jump throw's, from when the plan
-        # is done, its last key the attack's (keyed 85-480 ms after the jump key, 0.89 s on; she lands 0.14-0.54 s
+        # is done, its last key the attack's (keyed 85-480 ms after the jump key until 2026-11-01, 120-298 since: the
+        # soonest or the top's, jittered; 0.89 s on; she lands 0.14-0.54 s
         # after it, 770 ms into the plan). Until 2026-10-25 it counted the attack key's time into the plan again (play
         # waits for the plan): 235 ms more before her next jump or attack, up to 630 with the attack keyed later
         # (review, 2026-10-25).
