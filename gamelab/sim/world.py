@@ -818,7 +818,10 @@ class Realism:
     full_tabs: tuple = ()        # her inventory's tabs full from the start ("Use", "Etc": a drop of one refused with
                                  # FULL_MESSAGE; the harness's `--world etc-full`); (): room for everything
     fills_after: tuple = ()      # ((tab, n), ...): a tab full once she has picked up n items into it (the harness's
-                                 # `--world fills-up`)
+                                 # `--world fills-up`); a kind she picked into it before still fits (a part-filled
+                                 # stack: v83's full tab has no free slot, her stacks take more), a new kind doesn't
+    room_at: float | None = None  # s: her full tabs have room again then (she sold or dropped things: the harness's
+                                  # `--world room-later`); None: never
     spawn_share: float = 1.0     # share of the map's spawn points that have a monster (seeded)
     hurt: tuple = ()             # ((kind, share), ...): the map's monsters of that kind there at the start have that
                                  # share of their HP left, their bars up (hurt by someone before her: as by the crowd
@@ -1904,6 +1907,9 @@ class World:
                                           + tuple(self.realism.full_tabs)}
         self._fills = dict(self.realism.fills_after)
         self.tab_items: dict[str, int] = {}
+        self.tab_kinds: dict[str, dict[str, float]] = {}  # ... and their kinds, when each first (her stacks: a full tab
+                                                          # takes more of those)
+        self.room_t: float | None = None  # when her full tabs had room again (Realism.room_at)
         self.pick_refused = 0  # pick-ups refused for want of room
         self.kills: dict[str, int] = {}
         self.touches = 0                # monsters touching her (evaded ones too)
@@ -3356,15 +3362,19 @@ class World:
                        and d.platform == self.plat.id and abs(d.x - self.x) <= PICK_REACH
                        and (d.owner == "her" or t >= d.since + self.realism.rival_owns)),
                       key=lambda d: (abs(d.x - self.x), d.x))
+        if self.realism.room_at is not None and t >= self.realism.room_at and self.room_t is None:
+            self.room_t = t  # (Realism.room_at: room in every tab again, for good)
+            self.note("her tabs have room again")
         for d in near:
             tab = None if d.mesos else tab_of(d.kind)
-            if tab is None or tab not in self.full_at:
+            if tab is None or not self.tab_full(tab, t) or d.kind in self.tab_kinds.get(tab, {}):
                 d.gone, d.taken_at, d.taken_by = True, t, "her"
                 self.picked[d.kind] = self.picked.get(d.kind, 0) + 1
                 self.messages.append((t, f"You have gained mesos (+{d.amount or 15})" if d.mesos else
                                       f"{d.kind.replace('-', ' ').title()} x1 earned. ({tab})"))
                 self.note(f"picks up {d.kind} at x {d.x:.0f}")
                 if tab is not None:
+                    self.tab_kinds.setdefault(tab, {}).setdefault(d.kind, t)
                     self.tab_items[tab] = self.tab_items.get(tab, 0) + 1
                     if self.tab_items[tab] >= self._fills.get(tab, math.inf):
                         self.full_at[tab] = t
@@ -3374,6 +3384,17 @@ class World:
             self.pick_refused += 1
             self.messages.append((t, FULL_MESSAGE))
             self.note("can't pick up: inventory full")
+
+    def tab_full(self, tab: str, t: float) -> bool:
+        """Whether her inventory's `tab` was full at t (Realism.full_tabs, fills_after; room again from room_t)."""
+        return self.full_at.get(tab, math.inf) <= t and (self.room_t is None or t < self.room_t)
+
+    def takes(self, kind: str, t: float) -> bool:
+        """Whether a drop of `kind` fitted her inventory at t: mesos, a tab with room, or a kind she had a stack of."""
+        if kind == "mesos":
+            return True
+        tab = tab_of(kind)
+        return not self.tab_full(tab, t) or self.tab_kinds.get(tab, {}).get(kind, math.inf) <= t
 
     # --- what can be seen -------------------------------------------------------------------------------
 

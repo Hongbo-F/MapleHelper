@@ -286,6 +286,10 @@ WORLDS["drop-takers"] = {"drop_takers": True}
 # live drops' items), where the default world has room for everything; with `map-drops` for items to fill it.
 WORLDS["etc-full"] = {"full_tabs": ("Etc",)}
 WORLDS["fills-up"] = {"fills_after": (("Etc", 6),)}
+# ... and (from the review of 2026-10-31, nothing had ever made room again) her full tabs with room again at 3 minutes
+# (`room-later`: she sold or dropped things, as whoever is at the PC might), with `etc-full` or `fills-up`; in v83 a full
+# tab still takes more of a kind she holds a part-filled stack of (Realism.fills_after), in every world.
+WORLDS["room-later"] = {"room_at": 180.0}
 # ... and the player started before splices (`no-splices`: Realism.splices, sim.fakes.FakePlayer.splices): every chain
 # replanned while one runs (control.navigator.REPLAN) a cut and a resend, every key let go between, as live until the
 # elevated player is restarted on this code (control.client.can_splice: lab/player.json); the review of 2026-10-30
@@ -895,11 +899,16 @@ PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull l
 def _full_stands(world, records: list[dict], end: float) -> dict:
     """pick_refused, the pick-ups the world refused her for want of room; stands_for_nothing, her stands at a pile (the
     hunt loop's 'pick' events, in world time up to `end`) with drops lying within LOOT_REACH of it and none she could
-    take: every one an item of a tab full by then (World.full_at). Both 0 where her inventory has room for
-    everything."""
+    take: every one an item of a tab full by then and of a kind she had no stack of (World.takes); and of those,
+    nothing_known, the stands after the hunt had learned that tab full (its 'inventory' events: the ones it could
+    have spared; before, a stand is how it learns). All 0 where her inventory has room for everything."""
     start = next((r["t"] for r in records if r.get("topic") == "session"), None)
-    nothing = 0
+    nothing = known = 0
     if start is not None and world.full_at:
+        learned: dict[str, list] = {}  # tab -> (t, full) as the hunt learned it
+        for r in records:
+            if r.get("topic") == "event" and r.get("kind") == "inventory" and r.get("why") != "its stack full too":
+                learned.setdefault(r.get("tab"), []).append((r["t"] - start, bool(r.get("full"))))
         for r in records:
             if r.get("topic") != "event" or r.get("kind") != "pick" or r["t"] - start > end:
                 continue
@@ -907,9 +916,11 @@ def _full_stands(world, records: list[dict], end: float) -> dict:
             here = [d for d in world.drops if d.platform == r.get("platform")
                     and abs(d.x - r.get("x", 0.0)) <= LOOT_REACH and d.since <= t < d.since + DROP_LIFE
                     and (d.taken_at is None or d.taken_at >= t)]
-            if here and not any(d.mesos or world.full_at.get(tab_of(d.kind), math.inf) > t for d in here):
+            if here and not any(d.mesos or world.takes(d.kind, t) for d in here):
                 nothing += 1
-    return {"pick_refused": world.pick_refused, "stands_for_nothing": nothing}
+                known += all(next((full for at, full in reversed(learned.get(tab_of(d.kind), [])) if at <= t), False)
+                             for d in here)
+    return {"pick_refused": world.pick_refused, "stands_for_nothing": nothing, "nothing_known": known}
 
 
 def _on_piles(world, records: list[dict], end: float) -> dict:

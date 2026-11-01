@@ -122,7 +122,7 @@ from .chatcheck import ChatDue
 from .statcheck import StatsDue
 from .fight import THROWS, FightState, Report, kills_text
 from .ledger import DROP_LANDS, OWN_S, Pile, dying
-from .looting import LOOT_REACH, MIN_WALK, PILE_GAP, SETTLE, STOOD_ON, _piles
+from .looting import LOOT_REACH, MIN_WALK, PILE_GAP, SETTLE, STOOD_ON, _piles, expected_worth
 from .tour import PRIOR
 
 IN_HER_WAY = fight.IN_HER_WAY  # any monster this close on her platform is a target, whatever its kind
@@ -1078,10 +1078,16 @@ class Hunt:
         return not looter.items_full
 
     def _worth(self, p: Pile) -> float:
-        """What pile `p` is worth to her (Pile.value) but for the items she can't take (their tabs full)."""
+        """What pile `p` is worth to her (Pile.value) but for the items she can't take (their tabs full): one no look
+        has seen yet (her kill's), its kind's expected drops but those (looting.expected_worth; until the review of
+        2026-10-31 all of them, a full tab's items too)."""
         looter = self.h.looter
         can = getattr(looter, "can_take", None)
-        if can is None or not looter.inventory_full or not p.items:
+        if can is None or not looter.inventory_full:
+            return p.value
+        if p.worth is None and p.kind is not None:
+            return expected_worth(p.kind, self.h.drops.value, can)
+        if not p.items:
             return p.value
         value = self.h.drops.value
         return max(0.0, p.value - sum(value(k) for k in p.items if k != MESOS and not can(k)))
@@ -1460,6 +1466,8 @@ class Hunt:
                 x, first = goal, False
             actions.pick_here(presses)
             stood.append(goal)
+        if (on := getattr(looter, "stood_on", None)) is not None:  # (the kinds she holds: looting.ITEM_TABS)
+            on(d.item.kind for d in seen if not d.mesos)
         self._tried(pile)
         self.h.report.loot_runs += 1
         self._idle_since = None

@@ -284,6 +284,23 @@ def test_her_inventorys_tabs_in_the_world_refuse_a_full_tabs_items_and_fill_up(m
     tap(w, 1.5, "z", 0.04)
     w.advance(2.0)
     assert w.drops[-1].taken_by == "her" and w.messages[-1][1].endswith("earned. (Use)") and "Use" in w.full_at
+    # The review of 2026-10-31: a full tab still takes a kind she picked into it before (a part-filled stack: v83), not
+    # a new kind; the stands for nothing after the hunt had learned the tab full are nothing_known's (before, a stand is
+    # how it learns); and `room-later` gives her full tabs room again.
+    w.drops.append(dataclasses.replace(cap, kind="red-potion", since=w.t))
+    w.drops.append(dataclasses.replace(cap, kind="blue-potion", since=w.t, x=100.0))
+    tap(w, 2.5, "z", 0.04)
+    tap(w, 2.7, "z", 0.04)
+    w.advance(3.0)
+    assert [d.taken_by for d in w.drops[-2:]] == ["her", ""] and w.takes("red-potion", w.t)
+    assert not w.takes("blue-potion", w.t) and not w.takes("horny-mushroom-cap", w.t) and w.takes("mesos", w.t)
+    learned = records + [{"topic": "event", "kind": "inventory", "t": start + 0.2, "tab": "Etc", "full": True}]
+    assert harness.outcomes(w, learned, 60.0)["nothing_known"] == 1 and out["nothing_known"] == 0
+    assert harness.WORLDS["room-later"] == {"room_at": 180.0}
+    w.realism = dataclasses.replace(w.realism, room_at=w.t + 1.0)
+    tap(w, w.t + 1.5, "z", 0.04)
+    w.advance(w.t + 2.0)
+    assert cap.taken_by == "her" and w.room_t is not None and not w.tab_full("Etc", w.t)
 
 
 def test_attacks_chosen_at_a_monster_dead_by_then_are_counted_from_their_records(model):

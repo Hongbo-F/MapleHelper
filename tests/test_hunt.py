@@ -539,6 +539,24 @@ def test_with_her_etc_tab_full_a_pile_of_etc_items_alone_is_no_candidate_and_one
     assert not h._candidate(_pile(10)) and looter.items_full
 
 
+def test_with_her_etc_tab_full_a_pile_not_seen_yet_is_worth_its_kinds_drops_but_its_etc_items():
+    """The review of 2026-10-31: a kill's pile no look has seen yet was priced at all its kind's expected drops
+    (looting.expected_worth) with her Etc tab full, its Etc items too; now at those she can take (Looter.can_take: the
+    mesos, a kind she holds a stack of), and all of it again once the tab has room."""
+    from gamelab.behavior.looting import Looter, Worth, expected_worth, tab_of
+    tree = Worth({"bronze": 33.4, "gold": 51.5})
+    h = _hunt([])
+    looter = Looter(SimpleNamespace(log=lambda m: None))
+    h.h.looter, h.h.drops.value = looter, tree
+    pile = _pile(10, kind="horny-mushroom", unseen=expected_worth("horny-mushroom", tree))
+    assert h._worth(pile) == pytest.approx(pile.value) and pile.value == pytest.approx(23.5, abs=0.1)
+    looter.full = {"Etc": (time.monotonic(), "test")}
+    no_etc = expected_worth("horny-mushroom", tree, lambda k: tab_of(k) != "Etc")  # (its mesos and potions)
+    assert h._worth(pile) == pytest.approx(no_etc) and no_etc < pile.value - 5.0
+    looter.held.add("horny-mushroom-cap")  # (a stack of caps of hers: still taken)
+    assert no_etc + 5.0 < h._worth(pile) <= pile.value
+
+
 def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
     """Not a fixed life (DROP_LIFE, 90 s, until 2026-10-30): a pile of hers 100 s old, never seen since her kill, lies
     there still 93% of the time (ledger.SURVIVAL, by the live evidence since 2026-10-31: hers alone for OWN_S, others'

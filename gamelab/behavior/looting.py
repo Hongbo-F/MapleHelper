@@ -51,9 +51,18 @@ FAILED_PICKS = 3   # items in a row that stayed under her with no item picked up
 # learned again at the next failure. Until then one flag for the whole run (`inventory_full`, now: any tab full): every
 # item left once it was set, nothing ever clearing it. Live a full inventory came once (2026-10-19, the first map's Etc
 # tab, a Snail Shell), never on Tree Dungeon.
+# From the review of 2026-10-31: the log's lines in their order (the game adds a line at the bottom and the OCR reads
+# them top to bottom, oldest first; the simulator's log the same), so an "earned" line before the full message (the item
+# that filled the tab, then the next refused) says nothing of room now, one after it does; and a full tab takes more of a
+# kind she holds a part-filled stack of (v83: no free slot, but a stack below its most): the kinds she has picked up this
+# run (`held`: stood on while their tab had room, `stood_on`, or earned by the log's word, her pets' too) are still taken
+# from a full tab until one stays under her (`refused`: its stack full too), a kind she doesn't hold needs a slot and
+# isn't. Until then any "earned" line of a tab in the read kept it from being marked full, and one refused kind marked
+# every kind of its tab full for TAB_RETRY_S.
 ITEM_TABS = ("Use", "Etc")
 TAB_RETRY_S = 600.0  # guess
 EARNED = re.compile(r"earned\W*\(\s*(equip|use|set-?up|etc|cash)\s*\)", re.I)
+EARNED_KIND = re.compile(r"([A-Za-z][A-Za-z' .-]*?)\s*x\s*\d+\s*earned", re.I)  # ... and the item's name before it
 DROPS_LAST = 90    # s remembered drops are worth going back for (they vanish, and others may take them)
 MIN_WALK = 10      # a sweep's stops nearer to her than this aren't walked to: she's there
 # Whether only a look that shows her standing can see a drop spot empty (`standing`). From mid-jump a look's loot
@@ -182,15 +191,17 @@ EXPECTED_DROPS = 0.64
 EXPECTED_MESOS = 0.57
 
 
-def expected_worth(kind: str | None, value: "Worth") -> float:
+def expected_worth(kind: str | None, value: "Worth", can: Callable[[str], bool] | None = None) -> float:
     """What a pile of a kill of a monster of `kind` is worth before a look sees it, on the map whose drops are worth
-    `value` (see EXPECTED_DROPS)."""
+    `value` (see EXPECTED_DROPS); with `can` (Looter.can_take: her inventory by tab), its items she can't take worth
+    nothing."""
     known = _BY_KIND.get(kind) if kind is not None else None
     if known is None or known.mesos is None:
         return value.coins["bronze"]
     rates = [(i, known.rates.get(i, min(known.rates.values(), default=0.002))) for i in known.items]
     total = sum(r for _, r in rates)
-    item = sum(r * value(kind_of(i)) for i, r in rates) / total if total else value.coins["bronze"]
+    item = sum(r * value(kind_of(i)) for i, r in rates if can is None or can(kind_of(i))) / total if total \
+        else value.coins["bronze"]
     return EXPECTED_DROPS * (EXPECTED_MESOS * sum(known.mesos) / 2 + (1 - EXPECTED_MESOS) * item)
 
 
@@ -237,6 +248,8 @@ class Looter:
         self.h = hunter
         self.pending: list[DropSpot] = []  # drops off her platform, left for later (the tour collects them)
         self.full: dict[str, tuple[float, str]] = {}  # tab -> (when she learned it's full, why): its items left
+        self.held: set[str] = set()  # item kinds she has a stack of (see ITEM_TABS): taken from a full tab still ...
+        self.refused: dict[str, float] = {}  # ... but these: kind -> when one stayed under her with its tab full
         self.unpickable: list[tuple[float, int, float]] = []  # (x, platform, when) of drops she couldn't take
         self._failed_picks = 0  # items in a row that stayed under her (see FAILED_PICKS)
         # Whether a look's monsters call her off picking up (collect, mop_up), leaving the drops for later: the hunt
@@ -266,24 +279,34 @@ class Looter:
         return all(tab in self.full for tab in ITEM_TABS)
 
     def can_take(self, kind: str) -> bool:
-        """Whether a drop of `kind` fits: mesos always, an item while its tab isn't known to be full."""
+        """Whether a drop of `kind` fits: mesos always, an item while its tab isn't known to be full, or one of a full
+        tab she holds a stack of (`held`) that hasn't stayed under her since (`refused`)."""
         if kind == MESOS:
             return True
         self._retry()
-        return tab_of(kind) not in self.full
+        return tab_of(kind) not in self.full or kind in self.held and kind not in self.refused
+
+    def stood_on(self, kinds) -> None:
+        """She stood on drops of these kinds pressing pick-up: those whose tab has room she holds a stack of now (`held`;
+        one that stays under her is `cant_pick`'s)."""
+        self.held.update(k for k in kinds if k != MESOS and tab_of(k) not in self.full)
 
     def _retry(self) -> None:
         """A tab full for TAB_RETRY_S taken as having room again (learned again at the next failure)."""
         now = time.monotonic()
         for tab in [tab for tab, (since, _) in self.full.items() if now - since >= TAB_RETRY_S]:
             del self.full[tab]
+            for k in [k for k in self.refused if tab_of(k) == tab]:
+                del self.refused[k]
             self._tell(tab, False, f"{TAB_RETRY_S / 60:.0f} minutes since it was: trying its items again")
 
     def _tell(self, tab: str, full: bool, why: str, kinds: tuple[str, ...] = ()) -> None:
         """A tab's state changed: her log, and a telemetry event 'inventory'."""
         if full:
             others = [t for t in ITEM_TABS if t != tab and t not in self.full]
-            self.h.log(f"  her {tab} tab is full ({why}): leaving {tab} items, still taking mesos"
+            stacks = sorted(k for k in self.held if tab_of(k) == tab and k not in self.refused)
+            self.h.log(f"  her {tab} tab is full ({why}): leaving {tab} items"
+                       + (f" but {', '.join(stacks)} (stacks of hers)" if stacks else "") + ", still taking mesos"
                        + "".join(f" and {t} items" for t in others))
         else:
             self.h.log(f"  her {tab} tab has room ({why})")
@@ -469,24 +492,47 @@ class Looter:
         now = time.monotonic()
         self.unpickable += [(d.x, d.platform, now) for d in stuck]
         self.h.log(f"  can't pick up {_summary(stuck)} at x {', '.join(f'{d.x:.0f}' for d in stuck)}: left")
-        kinds = tuple(sorted({d.item.kind for d in stuck if not d.mesos}))
-        tabs = {tab_of(k) for k in kinds} - set(self.full)
+        kinds = tuple(sorted({d.item.kind for d in stuck if not d.mesos} - set(self.refused)))
+        stacked = [k for k in kinds if tab_of(k) in self.full]  # (a kind she holds, of a tab full: its stack full too)
+        for k in stacked:
+            self.refused[k] = now
+            self.h.log(f"  her {k} stack is full too: leaving {k} with her {tab_of(k)} tab full")
+            telemetry.emit("event", kind="inventory", tab=tab_of(k), full=True, why="its stack full too", kinds=[k])
+        kinds = tuple(k for k in kinds if k not in stacked)
+        tabs = {tab_of(k) for k in kinds}
         if not tabs:
             return
         self._failed_picks += 1
-        text = self.h.senses.eyes.messages()
-        room = {m.group(1).replace("-", "").capitalize() for m in EARNED.finditer(text)}
-        for tab in sorted(room & set(self.full)):  # (an item earned into one: it has room)
+        lines = self.h.senses.eyes.messages().splitlines()  # (oldest first: see ITEM_TABS)
+        refusal = max((i for i, line in enumerate(lines) if says_full(line)), default=-1)
+        room = set()
+        for i, line in enumerate(lines):
+            if (m := EARNED.search(line)) is None:
+                continue
+            tab = m.group(1).replace("-", "").capitalize()
+            name = EARNED_KIND.search(line)
+            kind = kind_of(name.group(1).strip()) if name else None
+            if i > refusal and (kind is None or tab not in self.full or kind not in self.held):
+                room.add(tab)  # (earned after the last refusal: room then, a new kind's slot where it's full)
+            if kind is not None:
+                self.held.add(kind)  # (a stack of it with room, hers or her pets')
+                self.refused.pop(kind, None)
+        for tab in sorted(room & set(self.full)):  # (a new kind earned into one: it has room)
             del self.full[tab]
+            for k in [k for k in self.refused if tab_of(k) == tab]:
+                del self.refused[k]
             self._tell(tab, False, "an item earned into it")
-        if says_full(text):
-            why = f"the game says so: {' / '.join(line for line in text.splitlines() if says_full(line))}"
+        if refusal >= 0:
+            why = f"the game says so: {' / '.join(line for line in lines if says_full(line))}"
         elif self._failed_picks >= FAILED_PICKS:
             why = f"items stayed under her {self._failed_picks} times in a row"
         else:
             return
         for tab in sorted(tabs - room):
             self.full[tab] = (now, why)
+            for k in kinds:
+                if tab_of(k) == tab:
+                    self.refused[k] = now
             self._tell(tab, True, why, tuple(k for k in kinds if tab_of(k) == tab))
 
 

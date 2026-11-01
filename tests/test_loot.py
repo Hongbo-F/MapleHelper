@@ -391,8 +391,8 @@ def test_her_inventory_is_full_by_tab_and_an_item_earned_into_one_says_it_has_ro
     """Her inventory by tab (looting.ITEM_TABS, from 2026-10-31): Etc items stuck under her with the game's full message
     (which names no tab) mark her Etc tab full, not her Use tab: Etc items are left, a Use item and mesos still wanted,
     and drops still looked for as all kinds (items_full only once every item tab is). Later a Use item stuck with the
-    message and an "earned. (Etc)" line in the same read (her pets' pick-up, say): Use full, Etc with room again. And a
-    tab full TAB_RETRY_S ago is taken as having room again."""
+    message and an "earned. (Etc)" line after it in the same read (her pets' pick-up, say): Use full, Etc with room
+    again. And a tab full TAB_RETRY_S ago is taken as having room again."""
     from gamelab.behavior import looting
     full = "You can't get anymore items."
     h, _ = _mopper(monkeypatch, [[_loot("leather", 1100), _loot("mesos", 900)]] * 2 + [[_loot("leather", 1100)]],
@@ -401,12 +401,43 @@ def test_her_inventory_is_full_by_tab_and_an_item_earned_into_one_says_it_has_ro
     assert set(h.looter.full) == {"Etc"} and h.looter.inventory_full and not h.looter.items_full
     left = h.looter.wanted([_loot("leather", 700), _loot("red-potion", 720), _loot("mesos", 760)])
     assert [d.item.kind for d in left] == ["red-potion", "mesos"]
-    h.senses.eyes.text = "Leather x1 earned. (Etc)\n" + full
+    h.senses.eyes.text = full + "\nLeather x1 earned. (Etc)"
     h.looter.cant_pick([_loot("red-potion", 720)])
     assert set(h.looter.full) == {"Use"} and h.looter.can_take("leather") and not h.looter.can_take("red-potion")
     when, why = h.looter.full["Use"]
     h.looter.full["Use"] = (when - looting.TAB_RETRY_S, why)
     assert h.looter.can_take("red-potion") and not h.looter.full
+
+
+def test_the_pickup_log_is_read_in_its_order(monkeypatch):
+    """The review of 2026-10-31: the log's lines oldest first (looting.ITEM_TABS), so the leather that filled her Etc tab
+    ("earned") and then the next one refused, both in the read, mark Etc full (until then any "earned. (Etc)" line in the
+    read kept it from being marked); the leather is refused (its stack full too) though earned."""
+    full = "You can't get anymore items."
+    h, _ = _mopper(monkeypatch, [], text="Leather x1 earned. (Etc)\n" + full)
+    h.looter.cant_pick([_loot("leather", 1100)])
+    assert set(h.looter.full) == {"Etc"} and not h.looter.can_take("leather") and h.looter.can_take("red-potion")
+
+
+def test_a_full_tab_still_takes_a_kind_she_holds_a_stack_of(monkeypatch):
+    """v83: a full tab has no free slot, but a stack below its most takes more (looting.ITEM_TABS, the review of
+    2026-10-31). The kinds she stood on while their tab had room (Looter.stood_on: she holds them now) are still taken
+    once Etc is full on another kind's refusal; a kind she doesn't hold isn't; one of hers that stays under her twice
+    with Etc full is refused (no read of the log: its stack full too), and an "earned" line of it takes it back."""
+    full = "You can't get anymore items."
+    h, _ = _mopper(monkeypatch, [], text=full)
+    h.looter.stood_on(["horny-mushroom-cap", "mesos"])
+    assert h.looter.held == {"horny-mushroom-cap"}
+    h.looter.cant_pick([_loot("leather", 1100)])
+    assert set(h.looter.full) == {"Etc"} and not h.looter.can_take("leather")
+    assert h.looter.can_take("horny-mushroom-cap") and not h.looter.can_take("green-mushroom-cap")
+    reads = []
+    h.senses.eyes.messages = lambda: reads.append(1) or full
+    h.looter.cant_pick([_loot("horny-mushroom-cap", 1100)])
+    assert not h.looter.can_take("horny-mushroom-cap") and not reads and set(h.looter.full) == {"Etc"}
+    h.senses.eyes.messages = lambda: "Horny Mushroom Cap x1 earned. (Etc)\n" + full
+    h.looter.cant_pick([_loot("red-potion", 720)])
+    assert h.looter.can_take("horny-mushroom-cap") and set(h.looter.full) == {"Etc", "Use"}
 
 
 def test_an_item_picked_up_resets_the_count_of_failed_picks(monkeypatch):
