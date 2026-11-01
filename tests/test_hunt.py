@@ -597,6 +597,29 @@ def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
     assert not h._candidate(_pile(10)) and h._candidate(_pile(10, mesos=True))
 
 
+def test_a_pile_of_hers_by_her_is_left_to_her_pets_for_a_moment(monkeypatch):
+    """PET_LOOT (the user, 2026-11-01: her pets "will pick up whatever thing when the pet walks past those loot"): a
+    pile of hers on her platform 40 units off her is no candidate until she has been by it PET_WAIT s, from its drops'
+    landing at the soonest, then one; 190 units off (over PET_NEAR), on another platform, or another's past its
+    ownership, one at once; her time by it counted afresh once she has been farther; with PET_LOOT off, one at once."""
+    h = _hunt([])
+    h._s = SimpleNamespace(platform=SimpleNamespace(id=2), where=SimpleNamespace(x=60.0))  # (the piles at x 100, on 2)
+    fresh, landing = _pile(DROP_LANDS), _pile(0.5)  # (its drops just landed; landing in 1.5 s)
+    assert not h._candidate(fresh) and not h._candidate(landing)
+    assert h._pet_by[landing.key] == pytest.approx(landing.since + DROP_LANDS)  # (counted from the landing)
+    h._pet_by[fresh.key] -= hunt.PET_WAIT  # (PET_WAIT s on)
+    assert h._candidate(fresh) and not h._candidate(landing)
+    far = Pile(250.0, 0.0, 2, time.monotonic() - DROP_LANDS, True)
+    assert h._candidate(far) and h._candidate(_pile(DROP_LANDS, platform=3))
+    assert h._candidate(_pile(hunt.OWN_S + 1, hers=False))
+    h._s.where.x = 300.0  # (farther than PET_NEAR from it: counted afresh when she's back by it)
+    assert h._candidate(fresh) and fresh.key not in h._pet_by
+    h._s.where.x = 60.0
+    assert not h._candidate(fresh)
+    monkeypatch.setattr(hunt, "PET_LOOT", False)
+    assert h._candidate(fresh) and h._candidate(landing)
+
+
 def _line_hunt(piles, rate=4.0):
     """_hunt with the sweep's reads: route times on a line of platforms (a walk, and 1.5 s a platform between), her time
     worth `rate` EXP a second."""

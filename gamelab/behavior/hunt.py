@@ -303,6 +303,19 @@ PLAYER_DY = 100.0
 # after its kill, before they were worth a trip anyway (then OTHERS_AFTER, 30 s), so only piles taken for no kill of
 # hers were left; whether a real player's are worth leaving is for the game to say.
 PLAYER_PILES = False
+# Her pets take what they pass (the user, 2026-11-01: "The pet will pick up whatever thing when the pet walks past
+# those loot. But the pet won't proactively go for the loot"; her Snail pets' game data: pickupItem, no sweepForDrop):
+# a pile of hers on the platform she's on, its stretch PET_NEAR of her or nearer, is left to them (no candidate:
+# `_pets_first`) until she has been by it PET_WAIT s, from its drops' landing at the soonest; what they leave a look
+# shows, and the sweep has as before. Live (the perception service's 15 fps records of 2026-10-25 to 30, D:/MapleHelper-
+# scratch/replan/loot2/design/pets), her pets' share of the drops she came near without standing on them 25-40% by an
+# approach of 60-150 units, the snail tags by her 53-102 units from her (the golden clip's quartiles), and a drop gone a
+# median 0.71-0.83 s after her closest approach, p90 2-4 s: PET_NEAR and PET_WAIT are guesses built on those. In the
+# simulator's pet-loot world (world.Realism.pets, fitted to the same records) ... False: none left to them.
+PET_LOOT = True
+PET_NEAR = 100.0
+PET_WAIT = 4.0
+PET_KEEP = 64  # (piles whose time by her is kept before the gone ones are dropped)
 
 
 def bar_exp(max_hp: float) -> float:
@@ -1095,13 +1108,32 @@ class Hunt:
     def _candidate(self, p: Pile) -> bool:
         """Whether pile `p` is one to go for: not seen gone, on a platform, stood on or gone for fewer than PILE_TRIES
         times, hers or past its killer's ownership (OWN_S), something in it she can take (`_takes`: her inventory by
-        tab), not another player's (PLAYER_PILES), and likely to lie there still (Pile.still, SURVIVE_MIN:
+        tab), not another player's (PLAYER_PILES), likely to lie there still (Pile.still, SURVIVE_MIN:
         ledger.SURVIVAL, where until 2026-10-30 a pile was left at DROP_LIFE, 90 s, and another's waited OTHERS_AFTER,
-        30 s)."""
+        30 s), and not left to her pets for now (`_pets_first`)."""
         now = time.monotonic()
         return (p.status != "gone" and p.platform is not None and p.tries < PILE_TRIES
                 and (p.hers or now - p.since >= OWN_S) and self._takes(p)
-                and not self._theirs(p) and p.still(now) >= SURVIVE_MIN)
+                and not self._theirs(p) and p.still(now) >= SURVIVE_MIN and not self._pets_first(p, now))
+
+    def _pets_first(self, p: Pile, now: float) -> bool:
+        """PET_LOOT: whether pile `p` is left to her pets now: hers, on the platform her last look has her on, its
+        stretch (`_extent`) within PET_NEAR of her, and she not yet PET_WAIT s by it (from its drops' landing at the
+        soonest: DROP_LANDS after its kill; counted afresh once she's farther)."""
+        s = getattr(self, "_s", None)  # (her last pass's look: where she, and her pets with her, are)
+        if not PET_LOOT or not p.hers or s is None or s.platform is None or s.where is None                 or p.platform != s.platform.id:
+            return False
+        by = self.__dict__.setdefault("_pet_by", {})  # pile (its key) -> since when she's been by it (tests make a
+        # hunt without __init__)
+        lo, hi = self._extent(p)
+        if max(lo - s.where.x, s.where.x - hi, 0.0) > PET_NEAR:
+            by.pop(p.key, None)
+            return False
+        if len(by) > PET_KEEP:  # (bounded: the piles gone or picked up dropped)
+            known = {q.key for q in self.h.drops.known}
+            for k in [k for k in by if k not in known]:
+                del by[k]
+        return now - by.setdefault(p.key, max(now, p.since + DROP_LANDS)) < PET_WAIT
 
     def _theirs(self, p: Pile) -> bool:
         """Whether pile `p` is another player's (PLAYER_PILES): no kill of hers explains it, it holds nothing
