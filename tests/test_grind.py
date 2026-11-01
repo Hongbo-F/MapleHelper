@@ -124,12 +124,12 @@ def test_the_next_stop_goes_round_the_loop_and_skips_what_she_has_just_emptied()
     assert info["skipped"][0]["due"] == pytest.approx(1.5 + patrol.refill_median() - 2.0, abs=0.1)
 
 
-def test_her_drops_by_a_stop_count_in_what_it_gives_next():
-    """grind.DROPS_IN_CHOICE (2026-10-31: "we shouldn't let loot expire"): the stop she'd skip as just emptied isn't,
-    with her drops by it worth more than SKIP_FULL of what it holds full (Patrol.choose's `bonus`, said in the choice:
-    info["drops"]); the grind's bonus is the loot sweep's round trip from the stop's place over the latest solve's spots
-    (60 mesos lying there: 30 EXP at MESO_EXP less her stand at the loop's rate), nothing for one over its budget (and
-    no bonus at all without spots)."""
+def test_her_drops_by_a_stop_count_in_what_it_gives_next(monkeypatch):
+    """grind.DROPS_IN_CHOICE (2026-10-31: "we shouldn't let loot expire"; off by default, measured): the stop she'd
+    skip as just emptied isn't, with her drops by it worth more than SKIP_FULL of what it holds full (Patrol.choose's
+    `bonus`, said in the choice: info["drops"]); switched on, the grind's bonus is the loot sweep's round trip from the
+    stop's place over the latest solve's spots (60 mesos lying there: 30 EXP at MESO_EXP less her stand at the loop's
+    rate), nothing for one over its budget (and no bonus at all without spots)."""
     model, ids, far, p = _column()
     p.belief.update(0.0, Memory(model))
     p.replan(0.0)
@@ -145,6 +145,8 @@ def test_her_drops_by_a_stop_count_in_what_it_gives_next():
     assert j == after and info["drops"] == 25.0 and "25 of it her drops" in grind.choice_text(info)
     # The grind's bonus: the sweep's round trip from each stop's place over the latest solve's spots.
     from gamelab.behavior import sweep
+    assert not grind.DROPS_IN_CHOICE
+    monkeypatch.setattr(grind, "DROPS_IN_CHOICE", True)
     from gamelab.behavior.hunt import MESO_EXP
     g = object.__new__(Grind)
     g.patrol = p
