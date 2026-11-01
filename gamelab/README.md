@@ -2726,8 +2726,8 @@ seed -30%). Against a0d3420 (48 seeds): EXP +9.9 (6.2), loot -1.9 (6.4), drops' 
 loot -16.1 (11.3), drops' share 0.922 -> 0.876, the stop on 8 of 12 (master 2): the potions, above. Endless potions
 (a6a2c28's code, before PILE_HP): EXP +17.0 (6.6), loot +5.2 (6.4), drops' share 0.922 -> 0.890 (-0.033, se 0.013),
 longest idle +5.6 s (1.8). Her drops' share at 15 minutes is below master's either way: master's rule 6 fetches piles
-about to expire, the sweep prices them (MESO_EXP 0.5) and leaves those more than its CAND_S off her way; fetching them
-anyway is the user's call.
+about to expire, the sweep priced them (MESO_EXP 0.5) and, at a stop, left those over its 2 s budget (not CAND_S: the
+independent check's finding 2; from 2026-11-01 each pile's allowance instead, "Loot as she kills" below).
 
 **The hunt loop** (`ab loop`, the same world, 12 seeds: nobody had measured it this round; master's seeds filled by
 base.py, fix2/ab/loop.txt): EXP a minute 267.6 -> 297.5 (+30.0, se 12.0, +11.2%, better on 8), loot 219.9 -> 246.0
@@ -2802,6 +2802,121 @@ test_hunt (rule 6a and EXP before loot by what she can take), test_ledger (an ol
 test_replan (splices from 0.4000-0.4009 s). Each fails on 1ff93e6. The fast suite (2 workers): 2,827 passed, 72
 skipped, 2 xfailed, 1 failed: test_perception's look at a capture (this worktree's lab lacks tag_template_full.npy, as
 before).
+
+## Loot as she kills: her Meat, her pets, and the seconds a pile may cost her way (2026-11-01, the morning)
+
+The user's answers of 2026-11-01 ~02:00: her pet's HP potion is Meat, "Usually 200 or 300 pieces of meat (150HP)"; piles
+"should be picked up soon after killing. If a pile is about to expire, it probably means they aren't important enough
+to get picked up anyway. I think a real human would bias route planning to pick up piles"; her pets have "pick-up skills
+but not exactly item pouch/meso magnet. The pet will pick up whatever thing when the pet walks past those loot. But the
+pet won't proactively go for the loot"; and of MESO_EXP, "I'm not sure about this currency conversion. My idea is just
+picking up mesos and items as we kill mobs". The design (D:/MapleHelper-scratch/replan/loot2/design: prototypes measured
+in process) was built here (D:/MapleHelper-scratch/replan/loot2/impl), each part measured paired, 12 seeds and 24 where
+that was borderline, at 5 and 15 minutes, in a world with her real stock and her pets.
+
+- **Meat from a run's stock** (`--world meat`: world.MEAT_HP, POTIONS). Her pet drinks Meat, 160 HP by the game data
+  (item 2010003; 63 live rises of exactly 160 HP on 2026-10-30, the magician's pet), 80 mesos at the user's prices, from
+  250 a run (the middle of their 200-300; the user remembered 150 HP). The crowd preset's 60 Orange Potions ran out
+  within 15 minutes: in the design's runs (at 150 HP) the safety stop ended 7 of 12 of the tip's 15-minute grinds and
+  none with Meat, which gave the tip +21.3 EXP a minute (se 8.0) and +17.3 loot (6.3) over its own 60-potion runs. At 5
+  minutes the tip's runs are the same to the digit, but for its potions and cash. A world switch for now: master's code
+  has no such world, so the harness's cached baselines of master can't pair with it as a default.
+- **Her pets in the simulator** (`--world pet-loot`: Realism.pets, world.PET_SPEED ..., World._pets_step). Two Snail
+  pets trail her on her platform and take what they walk over (the game data's pickupItem, no sweepForDrop), as her
+  pick-ups, with the pickup log's line and her tabs (World._take). Their numbers are a coarse grid's against the
+  perception service's 15 fps records (world.PET_SPEED's note): 31% of her pick-ups theirs, the share by her closest
+  approach the live shape about 0.15 high, only 7% taken 45-150 units from her where live 23%. The outcomes show hers
+  and her pets' apart (`her_value_per_min`, `pet_value_per_min`, `pet_share`), `drops_expired`, and the fit's tables
+  (`taken_from`, `approach`). Checked against the design's prototype: the same runs to the digit (4 seeds).
+  Correction: her pets aren't "Coffee" and "Snailail", as the last round read the golden clip: "Coffee" was the end of
+  the player AnimalCoffee's tag over a snail, "Snailail" two "Snail" tags 14 px apart. Her pets are Snails named
+  "Snail", like other players'.
+- **A fresh pile by her left to her pets a moment** (hunt.PET_LOOT, PET_NEAR 100, PET_WAIT 4 s; `Hunt._pets_first` in
+  `_candidate`). A pile of hers on her platform within PET_NEAR of her isn't a candidate until she's been by it PET_WAIT
+  s, from its landing at the soonest; counted afresh once she's farther.
+- **Each pile within the seconds it may add to her way** (`Hunt._allow`, sweep.Spot.allow; behavior.sweep). No
+  exchange of mesos for EXP in the sweep, no price of her time, no CAND_S, no flat budget. A pile may add ALLOW_FRESH
+  (3 s) while it's FRESH_S (15 s, OWN_S) old or younger, down to ALLOW_OLD (1 s) at OLD_S (60 s) and after: no late
+  trips for old far piles, nothing for their expiry. Where the danger at it is SAFER_MARGIN (0.05) over where she
+  stands, ALLOW_OLD at most ("try not to hit by mobs just for picking up loots"). An itinerary stays within the sum of
+  its piles' allowances (its guards' kill times not counted: EXP), and the hunt loop's budget where it has one (its way
+  out; a lull's wait, every pile its wait too); of those, the most mesos likely still there, then the least time. This
+  replaces the independent check's finding 2: at a stop the 2 s budget never fetched a fresh coin 160 units off; now
+  it's fetched while fresh, and not once old. PILE_HP, the grind's DROPS_IN_CHOICE and `_time_worth` went with the
+  exchange (history in grind's comments). MESO_EXP stays for EXP before loot (`_loot_first`, rule 6a) and a bar of her
+  HP's price (`bar_exp`: her touches, her landings).
+
+**Measured: 15 minutes, 24 seeds,** the standard grind with Meat and her pets (`--world meat --world pet-loot` on the
+harness standard), against the tip before this round in the same world (0019017, its code 3d61066's) and against master
+072e1ec (in process, impl/drv2.py: the pets' prototype, the same world to the digit):
+
+| 24 seeds of 15 minutes | pets' moment alone | allowances alone | both (the tip) | the tip against master |
+|---|---|---|---|---|
+| EXP a minute | +3.6 (6.9) | -3.1 (5.3) | 320.9 -> 327.6, +6.7 (5.8) | 300.0 -> 327.6, +27.6 (7.0) |
+| kills | +1.3 (2.9) | -0.5 (2.2) | +3.4 (2.3) | +11.5 (2.8) |
+| loot's worth a minute | +3.6 (6.7) | +15.9 (5.2) | 259.0 -> 276.9, +17.9 (5.9) | 261.3 -> 276.9, +15.7 (5.9) |
+| her own / her pets' pick-ups | -16.1 (5.3) / +19.7 (5.0) | +10.3 (4.5) / +5.6 (3.1) | -4.0 (5.3) / +21.9 (4.0) | +12.2 (4.4) / +3.4 (5.9) |
+| her drops' share picked | -0.009 (0.009) | +0.039 (0.008) | 0.905 -> 0.921, +0.015 (0.011) | 0.950 -> 0.921, -0.030 (0.010) |
+| her drops expiring, a run | +1.5 (1.1) | -4.9 (1.0) | 12.2 -> 10.8 (1.4) | 6.3 -> 10.8, +4.5 (1.4) |
+| touches / those that hurt | +2.0 (6.3) / -1.6 (4.2) | -9.8 (4.9) / -4.5 (3.3) | -5.5 (4.2) / -5.5 (4.2) | +11.8 (7.7) / +7.0 (4.9) |
+| hurt at piles / s on piles | +4.0 (2.4) / +7.8 (9.9) | +2.2 (2.5) / +46 (8) | +3.7 (2.5) / +36 (13) | 61.4 -> 34.1 / 490 -> 310 |
+| HP potions (Meat) / cash a minute | -1.2 / -0.2 (17.0) | -0.8 / +15.4 (18.9) | -4.6 (3.0) / +39.2 (17.8) | +1.5 (3.7) / -11.5 (21.2) |
+
+No deaths, falls out of the map or safety stops on any side. Her pets' moment on top of the allowances: EXP +9.8 (se
+5.0), kills +3.9 (1.9), loot +2.0 (4.8), her drops' share -0.023 (0.009), 3.5 more of them expiring a run: it trades a
+little of her share for EXP, which the user puts first. The tip against master: EXP +27.6 and loot +15.7, both beyond 2
+se; her drops' share 0.030 short of master's (master's rule 6 fetches piles about to expire, and its time on piles is
+58% more, its hurt there 80% more). The allowances alone keep master's share (-0.007, se 0.009) for EXP +17.8 (5.2).
+
+**At 5 minutes** (12 seeds, the same world) every difference is within its noise (EXP's se 12-19 a minute): both against
+the tip before, EXP +0.3 (18.9), loot -2.8 (12.9), share -0.008 (0.010); against master EXP +9.2 (22.4), loot +3.9
+(15.5), touches +16.1 (4.5), HP potions +8.6 (2.7). Drops barely expire in 5 minutes, so 15 is the length that decides
+the loot rules. **The harness standard** (12 seeds of 5 minutes, no pets, 60 Orange Potions, against 3d61066:
+impl/out/ab_std.txt) is within its noise: EXP -6.0 (17.0), loot +10.0 (15.6), share +0.007 (0.019), touches +0.4 (4.0),
+potions +0.3 (1.6). **The hunt loop** (`ab loop`, 12 seeds of 5 minutes): with Meat and her pets, against 0019017
+(impl/out/ab_loop_mp.txt), EXP -7.6 (12.3), loot -6.7 (8.8), share -0.008 (0.018), hurt at piles -1.7 (1.6); in the
+standard world, no pets, against 3d61066 (ab_loop.txt), EXP -0.4 (11.9), loot -22.8 (15.9) and her drops' share 0.982
+-> 0.946 (-0.037, se 0.013): there PET_LOOT leaves her piles a moment to pets the world doesn't have (its pet drinks her
+potions but takes nothing), which a camping hunt pays for. **With her drops as live** (`--world map-drops`, Meat and her
+pets, 12 seeds of 15 minutes, against 0019017; master's code has no such world): EXP +23.3 (11.0), loot +15.6 (7.9),
+share -0.011 (0.027), her drops expiring +2.3 (1.9), touches -16.4 (5.7), those that hurt -11.9 (4.4), hurt at piles
+-6.4 (2.5), HP potions -7.0 (2.8), knock falls -2.8 (1.3).
+
+**Her backpack** (12 seeds of 5 minutes, her drops as live, `--world map-drops` with Meat and her pets, against
+0019017): with her Etc tab full from the start (`etc-full`) EXP -10.5 (16.2), loot -1.7 (10.4), share +0.031 (0.025),
+her stands for nothing -0.1 (0.6), refused picks +4.2 (4.8), but her time on piles +24 s and her hurt there +5.7 (1.8,
+beyond 2 se, 4.8 -> 10.5 a run): the allowance doesn't weigh what a pile is worth to her, so piles of a coin among a
+full tab's items get a fresh pile's 3 s. With it filling up (`fills-up`) EXP +24.5 (11.5), loot +20.1 (9.2), refused
+picks +4.3 (2.7). Scaling the allowance down by a pile's worth against her map's bronze coin took her hurt at piles in
+`etc-full` back (-6.9, se 1.5) but cost EXP -17.3 (7.8) and loot -13.2 (5.2) with the live drops at 15 minutes: not
+taken.
+
+**Tried and not taken** (12 seeds of 15 minutes each): her pets' moment from a pile's landing alone, a pile she comes
+near later hers at once (EXP +3.9 where the built rule +7.9, loot +2.8 where +7.6, without the allowances); her pets'
+moment only while she stays, not on her way nor as she leaves (with the allowances: EXP -1.5, se 8.5, loot -2.0, share
++0.002); EXP before loot strictly with a valuable pile's allowance doubled (the design's, not prototyped there): the
+same to the digit with the live drops at 15 minutes, no pile worth `valuable` (66.8 on Tree Dungeon) coming in 12 runs,
+so it was not built. Not built either, and owed their own 15-minute tables: her pets' bias for where she waits
+(`_safest_along`), for the navigator's routes and landings, and for the next stop (Patrol.choose).
+
+**Corrections to the sections before.** Their 15-minute numbers with endless potions are a6a2c28's (before PILE_HP), not
+1ff93e6's; the tip at 1ff93e6 at 15 minutes with the harness's 60 potions made EXP -5.0 (se 9.9) and loot -16.1 (10.3)
+against master, its share 0.871, the safety stop on 7 of 12 seeds against master's 2 (the independent check's
+finding 3). And the cap on her piles at a stop was the sweep's 2 s budget, not CAND_S. Both are moot at this tip: its
+15-minute numbers are the table above.
+
+**Tests:** test_sim_her (Meat from the stock), test_harness (the world's fields and a Meat's price; her pets trailing
+her and taking what they walk over, not another platform's, another's within its ownership nor a full tab's item, on
+her platform PET_HOP_S after her; the outcomes' pets apart, drops_expired, the tables), test_hunt (a pile by her left to
+her pets a moment; the sweep within a pile's allowance fresh and old, on and off her way; a landing within it; the
+allowance by age and by danger; the hunt's terms leaving), test_sweep (rewritten: the exact solve against brute force
+under allowances and budgets, a fresh coin 160 off her stop fetched, an itinerary within the sum, the most mesos then
+the least time, a guard's kill not charged, no rate anywhere), test_grind (its terms its piles' allowances alone). The
+fast suite (4 workers): 2,832 passed, 72 skipped, 2 xfailed, 2 failed: test_perception's look at a capture (this
+worktree's lab lacks tag_template_full.npy, as before) and loop_tree_attack_no_darts, whose seed 1 no longer says
+"MAYBE OUT" (its out-of-darts chain is a run's luck: the next stage's re-pick). The goldens weren't recorded again: the
+next stage's.
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.
