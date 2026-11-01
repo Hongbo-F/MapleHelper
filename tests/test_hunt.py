@@ -598,10 +598,13 @@ def test_a_pile_is_a_candidate_by_its_survival_its_owner_and_its_tries():
 
 
 def test_a_pile_of_hers_by_her_is_left_to_her_pets_for_a_moment(monkeypatch):
-    """PET_LOOT (the user, 2026-11-01: her pets "will pick up whatever thing when the pet walks past those loot"): a
-    pile of hers on her platform 40 units off her is no candidate until she has been by it PET_WAIT s, from its drops'
-    landing at the soonest, then one; 190 units off (over PET_NEAR), on another platform, or another's past its
-    ownership, one at once; her time by it counted afresh once she has been farther; with PET_LOOT off, one at once."""
+    """PET_LOOT (the user, 2026-11-01: her pets "will pick up whatever thing when the pet walks past those loot"; off by
+    default from the review of that day): a pile of hers on her platform 40 units off her is no candidate until she has
+    been by it PET_WAIT s, from its drops' landing at the soonest, then one; 190 units off (over PET_NEAR), on another
+    platform, or another's past its ownership, one at once; her time by it counted afresh once she has been farther;
+    with PET_LOOT off, one at once."""
+    assert not hunt.PET_LOOT
+    monkeypatch.setattr(hunt, "PET_LOOT", True)
     h = _hunt([])
     h._s = SimpleNamespace(platform=SimpleNamespace(id=2), where=SimpleNamespace(x=60.0))  # (the piles at x 100, on 2)
     fresh, landing = _pile(DROP_LANDS), _pile(0.5)  # (its drops just landed; landing in 1.5 s)
@@ -618,6 +621,25 @@ def test_a_pile_of_hers_by_her_is_left_to_her_pets_for_a_moment(monkeypatch):
     assert not h._candidate(fresh)
     monkeypatch.setattr(hunt, "PET_LOOT", False)
     assert h._candidate(fresh) and h._candidate(landing)
+
+
+def test_a_pile_left_to_her_pets_is_judged_from_the_look_asked_about_and_counted_from_her_own_looks(monkeypatch):
+    """The review of 2026-11-01: `_pets_first` read where she is from her last pass's look whatever look the candidate
+    was asked about (the navigator's on a trip, through _interrupt and _sweep_calls, and the made-up ones), so a pile
+    was judged by her from where her trip began. Now from the look asked about: one 40 units off where a look on her
+    trip has her is hers to wait for, though her pass's had her 300 off; one made up from another (Scene.what_if)
+    reads her time by it and starts or resets nothing."""
+    monkeypatch.setattr(hunt, "PET_LOOT", True)
+    h = _hunt([])
+    h._s = SimpleNamespace(platform=SimpleNamespace(id=2), where=SimpleNamespace(x=400.0))  # (the pass's: 300 off)
+    fresh = _pile(DROP_LANDS)
+    on_trip = SimpleNamespace(platform=SimpleNamespace(id=2), where=SimpleNamespace(x=60.0))
+    assert h._candidate(fresh) and not h._candidate(fresh, on_trip) and fresh.key in h._pet_by
+    made_up = SimpleNamespace(platform=SimpleNamespace(id=2), where=SimpleNamespace(x=400.0), what_if=True)
+    assert h._candidate(fresh, made_up) and fresh.key in h._pet_by  # (farther there: not reset)
+    other = _pile(DROP_LANDS)
+    near = SimpleNamespace(platform=SimpleNamespace(id=2), where=SimpleNamespace(x=60.0), what_if=True)
+    assert not h._candidate(other, near) and other.key not in h._pet_by  # (by it there: not started)
 
 
 def _line_hunt(piles):

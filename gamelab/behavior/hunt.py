@@ -321,8 +321,14 @@ PLAYER_PILES = False
 # drops' share 0.944 -> 0.921 (-0.023, se 0.009), her drops expiring 7.3 -> 10.8 a run; without them EXP +3.6 (6.9),
 # loot +3.6 (6.7). Counted from a pile's landing alone (a pile she comes near later hers at once: 12 seeds, without the
 # allowances) EXP +3.9 where +7.9; left to them only while she stays (not on her way, nor as she leaves: 12 seeds, with
-# the allowances) EXP -1.5 (8.5), loot -2.0 (7.5). False: none left to them.
-PET_LOOT = True
+# the allowances) EXP -1.5 (8.5), loot -2.0 (7.5). Off from the review of 2026-11-01 (D:/MapleHelper-scratch/replan/
+# loot2/check): it puts a pile of hers off for her pets, against "piles should be picked up soon after killing", and its
+# gain is the simulator's pets': they take 0.14-0.23 more of the drops she comes within 15-90 units of than hers did
+# live (by her closest approach), and without them (the harness standard's world) it cut 48 trips for piles short in 8
+# runs of 5 minutes, 9 of their 70 drops never picked up, the rest a median 3.7 s later; nothing shows the magician's
+# pet picks up at all. On the user's word (README: Loot as she kills). False: none left to them (her pets take what
+# they pass all the same: what they leave the looks show, and the sweep has).
+PET_LOOT = False
 PET_NEAR = 100.0
 PET_WAIT = 4.0
 PET_KEEP = 64  # (piles whose time by her is kept before the gone ones are dropped)
@@ -1139,31 +1145,39 @@ class Hunt:
         value = self.h.drops.value
         return max(0.0, p.value - sum(value(k) for k in p.items if k != MESOS and not can(k)))
 
-    def _candidate(self, p: Pile) -> bool:
-        """Whether pile `p` is one to go for: not seen gone, on a platform, stood on or gone for fewer than PILE_TRIES
-        times, hers or past its killer's ownership (OWN_S), something in it she can take (`_takes`: her inventory by
-        tab), not another player's (PLAYER_PILES), likely to lie there still (Pile.still, SURVIVE_MIN:
-        ledger.SURVIVAL, where until 2026-10-30 a pile was left at DROP_LIFE, 90 s, and another's waited OTHERS_AFTER,
-        30 s), and not left to her pets for now (`_pets_first`)."""
+    def _candidate(self, p: Pile, s: Scene | None = None) -> bool:
+        """Whether pile `p` is one to go for as of look `s` (None: her last pass's): not seen gone, on a platform,
+        stood on or gone for fewer than PILE_TRIES times, hers or past its killer's ownership (OWN_S), something in it
+        she can take (`_takes`: her inventory by tab), not another player's (PLAYER_PILES), likely to lie there still
+        (Pile.still, SURVIVE_MIN: ledger.SURVIVAL, where until 2026-10-30 a pile was left at DROP_LIFE, 90 s, and
+        another's waited OTHERS_AFTER, 30 s), and not left to her pets for now (`_pets_first`)."""
         now = time.monotonic()
         return (p.status != "gone" and p.platform is not None and p.tries < PILE_TRIES
                 and (p.hers or now - p.since >= OWN_S) and self._takes(p)
-                and not self._theirs(p) and p.still(now) >= SURVIVE_MIN and not self._pets_first(p, now))
+                and not self._theirs(p) and p.still(now) >= SURVIVE_MIN and not self._pets_first(p, now, s))
 
-    def _pets_first(self, p: Pile, now: float) -> bool:
-        """PET_LOOT: whether pile `p` is left to her pets now: hers, on the platform her last look has her on, its
-        stretch (`_extent`) within PET_NEAR of her, and she not yet PET_WAIT s by it (from its drops' landing at the
-        soonest: DROP_LANDS after its kill; counted afresh once she's farther)."""
-        s = getattr(self, "_s", None)  # (her last pass's look: where she, and her pets with her, are)
+    def _pets_first(self, p: Pile, now: float, s: Scene | None = None) -> bool:
+        """PET_LOOT: whether pile `p` is left to her pets now as of look `s` (None: her last pass's): hers, on the
+        platform the look has her on, its stretch (`_extent`) within PET_NEAR of her, and she not yet PET_WAIT s by it
+        (from its drops' landing at the soonest: DROP_LANDS after its kill; counted afresh once she's farther). Her time
+        by a pile is counted from her own looks alone: one made up from another (Scene.what_if: her put where a chain
+        ends) reads it and leaves it as it is. (Until the review of 2026-11-01 always as of her last pass's look: on a
+        trip the navigator's looks, and the made-up ones, judged a pile by her from where the trip began, and started or
+        reset its count from there.)"""
+        s = s if s is not None else getattr(self, "_s", None)  # (where she, and her pets with her, are)
         if not PET_LOOT or not p.hers or s is None or s.platform is None or s.where is None \
                 or p.platform != s.platform.id:
             return False
         by = self.__dict__.setdefault("_pet_by", {})  # pile (its key) -> since when she's been by it (tests make a
         # hunt without __init__)
+        made_up = getattr(s, "what_if", False)
         lo, hi = self._extent(p)
         if max(lo - s.where.x, s.where.x - hi, 0.0) > PET_NEAR:
-            by.pop(p.key, None)
+            if not made_up:
+                by.pop(p.key, None)
             return False
+        if made_up:
+            return now - by.get(p.key, max(now, p.since + DROP_LANDS)) < PET_WAIT
         if len(by) > PET_KEEP:  # (bounded: the piles gone or picked up dropped)
             known = {q.key for q in self.h.drops.known}
             for k in [k for k in by if k not in known]:
@@ -1370,7 +1384,7 @@ class Hunt:
         if d is not None and d.any and s.platform is not None and s.where is not None:
             here = d.at(s.platform.id, s.where.x, s.monsters)
         for p in self.h.drops.known:
-            if not self._candidate(p):
+            if not self._candidate(p, s):
                 continue
             lo, hi = self._extent(p)
             stand = self._stand_s(p)
@@ -1585,7 +1599,7 @@ class Hunt:
         best = None
         for p in self.h.drops.known:
             dear = self._dearest(p)
-            if dear is None or dear < self.valuable or p.rushed >= VALUABLE_TRIES or not self._candidate(p):
+            if dear is None or dear < self.valuable or p.rushed >= VALUABLE_TRIES or not self._candidate(p, s):
                 continue
             t = self._travel_to_pile(s, p) + PICK_S
             worth = self._worth(p)
