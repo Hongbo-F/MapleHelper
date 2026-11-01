@@ -27,8 +27,8 @@ from .. import character, directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import (AWAY, FLINCH_HOLD_S, HURT_SHARE, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN, Pace,
                              Prices, act_text,
-                             air_gap, decide, first_attack_s, held_step, jump_hits, landing, move_limits, open_above,
-                             pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
+                             air_gap, decide, first_attack_s, held_step, jump_hits, jump_room, landing, move_limits,
+                             open_above, pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
 from ..localization.mapdata import MapModel, MobBody
@@ -542,7 +542,10 @@ def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[M
     """What her attacks reach from where she stands in look `s` at `targets`, from the ground and from her jumps
     (attack.reach.coverage, by the map's bodies; `around`: every monster about her, each where it walks to by then:
     walk_on), as a callable working it out when first asked (attack.stance's `jumps`): None with JUMP_SHOTS off, or
-    for an attack she doesn't make from a jump (_air: the magician's Magic Claw)."""
+    for an attack she doesn't make from a jump (_air: the magician's Magic Claw). Of her jumps only those landing her
+    back where a jump shot of hers may (stance.jump_room: reach.shots' `lands`), the only ones whose shots anything
+    asking takes (stance._jump_shot, for the stance and jump_hits alike): the same answers, its keys tried for fewer
+    (from 2026-11-01, the latency analysis's option d: most of the worst searches' jumps landed elsewhere)."""
     if not JUMP_SHOTS or not _air() or s.where is None or s.platform is None:
         return None
     done = []
@@ -550,7 +553,7 @@ def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[M
     def cover() -> reach.Coverage:
         if not done:
             done.append(reach.coverage(model, s.platform, s.where.x, s.where.y, targets, sizes=bodies(model),
-                                       others=around, where=walk_on(model)))
+                                       others=around, where=walk_on(model), lands=jump_room(s.platform)))
         return done[0]
     return cover
 

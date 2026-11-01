@@ -1060,6 +1060,11 @@ class Shot:
         xs = [self.land_x, *(lx for _, (_, lx, _) in self.alts)]
         return min(xs), max(xs)
 
+    def lands_back(self, platform: Platform, lo: float, hi: float) -> bool:
+        """Whether its jump lands her back on `platform` between map x `lo` and `hi` however it goes
+        (jump_lands_back)."""
+        return jump_lands_back(platform, (self.land, self.land_x, self.land_s), self.alts, lo, hi)
+
     def text(self) -> str:
         """The shot for a log line: "a jump forward throwing right, the attack 40 ms in (40-120), 26 up: horny-mushroom
         +180"."""
@@ -1070,6 +1075,18 @@ class Shot:
         return (f"{jump} throwing {way}{' (turning in the air)' if self.turn and self.kind == 'up' else ''}, the "
                 f"attack {self.key_ms} ms in ({self.window[0]}-{self.window[1]}), {self.rise:.0f} up: "
                 f"{self.target.kind} {self.target.x - self.x:+.0f}")
+
+
+def jump_lands_back(platform: Platform, landing: tuple, alts: tuple, lo: float, hi: float) -> bool:
+    """Whether a jump landing at `landing` (physics.jump_landing's: platform, map x, s after lift-off), its other ways
+    of going at `alts` (Shot.alts), lands her back on `platform` between map x `lo` and `hi` however it goes: on it
+    every way (Shot.lands_sure), the least and the most x of them within (Shot.land_span). The stance's terms for a
+    shot of the jump (attack.stance._jump_shot), and so for its attack keys being tried at all (shots' `lands`)."""
+    land = landing[0]
+    if land is None or land.id != platform.id or not all(lv[0] is land for _, lv in alts):
+        return False
+    xs = [landing[1], *(lv[1] for _, lv in alts)]
+    return lo <= min(xs) and max(xs) <= hi
 
 
 Where = Callable[[Monster, float], float]  # a monster -> its map x that many s from now (its walk predicted)
@@ -1103,7 +1120,8 @@ def _air_pick(px: float, feet: float, side: int, rows: Placed, margin: float) ->
 
 def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster],
           sizes: dict[str, MobBody] | None = None, kinds: tuple[str, ...] = JUMP_KINDS,
-          where: Where | None = None, others: list[Monster] | None = None) -> list[Shot]:
+          where: Where | None = None, others: list[Monster] | None = None,
+          lands: tuple[float, float] | None = None) -> list[Shot]:
     """Every attack from map (x, y) on `platform` that surely hits one of `monsters`, from the ground and from her
     jumps: one Shot per target and way of attacking, from the ground and for each of `kinds` of jump
     (physics.jump_of) each way she can throw from it ('up' either way, with and without a turn in the air; 'forward'
@@ -1117,9 +1135,12 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
     are when the attack starts (physics.pose; _air_pick, AIR_MARGIN into it, at both ends of ATTACK_DECIDE_LAG_MS), of
     all of `others`, and its line not stopped (wall_in_way, from her feet then: stopped, the
     attack hits nothing); the monsters where `where` says they'll be (default: where they are). `sizes`: the kinds'
-    bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). Map units, y down.
-    Where `where` has the monsters at a time is worked out once a search (both sides of a kind of jump ask the same
-    times: from 2026-11-01, 39% of the slowest searches' time was it asked again)."""
+    bodies (localization.monsters.bodies: the map's game data; body_of's tables by default). `lands` (lo, hi): only the
+    jumps landing her back on `platform` between those map x however they go (jump_lands_back, worked out before their
+    keys are) have their shots tried, for an asker who takes no other (behavior.fight.jump_cover: the stance's); by
+    default every jump's. Map units, y down. Where `where` has the monsters at a time is worked out once a search
+    (both sides of a kind of jump ask the same times: from 2026-11-01, 39% of the slowest searches' time was it asked
+    again)."""
     others = monsters if others is None else others
     out: list[Shot] = []
     for m in monsters:
@@ -1160,6 +1181,8 @@ def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster]
             j = physics.jump_of(kind, way)
             landing = physics.jump_landing(model, platform, x, j)
             alts = tuple((v, physics.jump_landing(model, platform, x, v)) for v in physics.jump_variants(j))
+            if lands is not None and not jump_lands_back(platform, landing, alts, *lands):
+                continue  # (none of its shots would be taken)
             picks: dict[int, tuple] = {}
 
             def pick(k: int, j=j, landing=landing, picks=picks, side=side) -> tuple:

@@ -244,6 +244,53 @@ def test_a_search_asks_where_each_monster_will_be_once_a_time():
     assert len({t for _, t in asked}) * len(ms) == len(asked)  # (every monster placed at every time asked)
 
 
+def test_jumps_not_landing_her_back_where_a_jump_shot_may_have_no_keys_tried_and_the_answers_are_the_same():
+    # reach.shots' `lands` (from 2026-11-01: behavior.fight.jump_cover asks with stance.jump_room): a jump landing her
+    # anywhere but back on her platform within it however it goes (reach.jump_lands_back) has none of its attack keys
+    # tried, so no shot; every other shot the same, field for field, in the same order; and what the stance does and
+    # what the hunt counts in reach from a jump (stance.jump_hits) the same from what's left: stance._jump_shot takes
+    # no shot of such a jump, crowded (KNOCKBACK_ROOM) or not. A block 60 up over the floor from 300 to 700: from
+    # under it her jumps land on it, from by its ends some of their ways do, from farther off none.
+    from gamelab.attack import stance as stance_mod
+    from maplehelper.engine import LEFT, RIGHT
+    steps = build({"1": [seg(1, 0, 500, 1500, 500)], "2": [seg(2, 300, 440, 700, 440)]})
+    floor, block = plat(steps, 500, 100), plat(steps, 440, 400)
+    room = stance_mod.jump_room(floor)
+    assert room == stance_mod._stand_limits(floor, crowded=False)
+    lo, hi = stance_mod._stand_limits(floor, crowded=True)
+    assert room[0] <= lo and hi <= room[1]
+    dropped = kept = 0
+    for x in range(30, 1480, 45):
+        for ms in ([pig(x + 120, 440, block.id)], [pig(x - 150, 440, block.id), pig(x + 200, 500, floor.id)],
+                   [pig(x + 60, 500, floor.id), pig(x - 90, 440, block.id)]):
+            full = reach.coverage(steps, floor, x, 500, ms)
+            cut = reach.coverage(steps, floor, x, 500, ms, lands=room)
+            assert cut.shots == [s for s in full.shots if s.jump is None or s.lands_back(floor, *room)], x
+            dropped += len(full.shots) - len(cut.shots)
+            kept += sum(s.jump is not None for s in cut.shots)
+            for facing in (LEFT, RIGHT):
+                for m in ms:
+                    assert (stance_mod.jump_hits(x, 500, floor, m, full, facing, ms)
+                            == stance_mod.jump_hits(x, 500, floor, m, cut, facing, ms)), (x, m.x)
+                for toward in (0, 1, -1):
+                    assert (stance_mod.stance(x, 500, floor, ms, facing=facing, jumps=lambda: full, toward=toward)
+                            == stance_mod.stance(x, 500, floor, ms, facing=facing, jumps=lambda: cut,
+                                                 toward=toward)), (x, facing, toward)
+    assert dropped > 100 and kept > 100
+
+
+def test_her_jump_cover_tries_only_the_jumps_that_land_her_back_where_a_jump_shot_may(monkeypatch):
+    from types import SimpleNamespace
+    from gamelab.attack import stance as stance_mod
+    from gamelab.behavior import fight
+    floor = plat(LEDGE, 500, 400)
+    asked = []
+    monkeypatch.setattr(fight, "_air", lambda: True)
+    monkeypatch.setattr(reach, "coverage", lambda *a, **kw: asked.append(kw) or reach.Coverage([]))
+    s = SimpleNamespace(where=SimpleNamespace(x=400.0, y=500.0), platform=floor)
+    fight.jump_cover(LEDGE, s, [pig(600, 400, 1)], [])()
+    assert asked[0]["lands"] == stance_mod.jump_room(floor)
+
 
 # --- the world goes by the same model -------------------------------------------------------------------------------
 

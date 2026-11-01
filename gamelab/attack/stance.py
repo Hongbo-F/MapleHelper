@@ -688,6 +688,13 @@ def _stand_limits(platform: Platform, crowded: bool) -> tuple[float, float]:
     return platform.left + margin, platform.right - margin
 
 
+def jump_room(platform: Platform) -> tuple[float, float]:
+    """The most of `platform` a jump shot she takes lands her on: _jump_shot keeps a jump's landing to _stand_limits'
+    stretch, crowded (KNOCKBACK_ROOM narrower) or not, whoever asks (the stance, jump_hits), so a jump landing her
+    elsewhere makes none and its attack keys needn't be tried (behavior.fight.jump_cover: reach.shots' `lands`)."""
+    return _stand_limits(platform, crowded=False)
+
+
 def end_drop(model: MapModel, platform: Platform, side: int) -> float:
     """How far she'd fall knocked off `platform`'s end on `side` (-1 its left, +1 its right): down to the highest
     platform under the map x just past it (inf with none), 0 where a wall of its foothold group rises from that end
@@ -902,11 +909,9 @@ def _jump_shot(x: float, y: float, platform: Platform, wanted: list[Monster], co
                 continue
             if why == "passing" and sh.jump.way != toward:
                 continue
-            if sh.land is None or sh.land.id != platform.id or not sh.lands_sure:
+            if not sh.lands_back(platform, lo, hi):
                 continue
             near, far = sh.land_span
-            if not (lo <= near and far <= hi):
-                continue
             if sh.kind != "up":
                 end = far if sh.jump.way > 0 else near  # the farthest along her way it may take her
                 if why == "passing" and goal is not None and (end - goal) * sh.jump.way > PASS_SLACK:
