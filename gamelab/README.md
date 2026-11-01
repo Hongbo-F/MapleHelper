@@ -2751,10 +2751,10 @@ scenarios are the thief's).
 
 The independent check of 1ff93e6 (D:/MapleHelper-scratch/replan/verify/verdict.txt: not to merge as it was) confirmed
 eight findings. This round (D:/MapleHelper-scratch/replan/loot2/fix) fixed five of them and three of its nits, each
-with a test, on master 072e1ec. Finding 2 (the stop's 2 s sweep budget, piles about to expire) and 3 (the docs' 15-minute
-numbers) are left to the next stages: the user's answers of ~02:00 change them ("piles should be picked up soon after
-killing"; Meat, 150 HP, 200-300 a run; her pets take what they walk over). Finding 7 (cut and resend unmeasured since
-b9933ef) is a measurement for before the live grind.
+with a test, on master 072e1ec. Finding 2 (the stop's 2 s sweep budget, piles about to expire) and 3 (the docs'
+15-minute numbers) are left to the next stages: the user's answers of ~02:00 change them ("piles should be picked up
+soon after killing"; Meat, 150 HP, 200-300 a run; her pets take what they walk over). Finding 7 (cut and resend
+unmeasured since b9933ef) is a measurement for before the live grind.
 
 - **A monster of no known kind priced at nothing** (finding 1, a regression against master). `Danger.taken` of a kind
   the map's game data doesn't have ('', which the landings' judge takes for a 'pig') is now the map's hardest-touching
@@ -2765,14 +2765,15 @@ b9933ef) is a measurement for before the live grind.
   ("Orange Mushro...") is the one priced drop it starts; a misread tab ("(Ete)") is the kind's. Every "earned" line of
   the live fixture (tests/fixtures/pickup_log_lines_2026-10-26.json) now comes out as its item, where the regex read
   "Horny Mushroo... x1 earned. (Etc)" as a kind of its own, never one she held: her cap top-up into a known-full Etc tab
-  cleared it. An "earned" line after the last refusal says its tab has room only for a kind that didn't fit (stuck under
-  her now, or refused). A top-up of a stack she holds needs no slot; until now such a line kept a tab from being learned.
+  cleared it. An "earned" line after the last refusal says its tab has room only for a kind that didn't fit (stuck
+  under her now, or refused). A top-up of a stack she holds needs no slot; until now such a line kept a tab from being
+  learned.
   The simulator's log cuts names over 15 letters to 13 and "..." (`world.log_name`: Tree Dungeon's caps as the game cuts
   them).
 - **FAILED_PICKS never reset in the grind** (finding 5). The row of items stuck under her is broken by an item of a
-  stand of hers that the looks show gone from its pile (`Looter.on_look`). It starts afresh once it marks a tab full or a
-  tab is tried again. Only a mop-up reset it before, and the grind's stands have none: three stuck items in a run, however
-  far apart, marked every later one's tab full.
+  stand of hers that the looks show gone from its pile (`Looter.on_look`). It starts afresh once it marks a tab full or
+  a tab is tried again. Only a mop-up reset it before, and the grind's stands have none: three stuck items in a run,
+  however far apart, marked every later one's tab full.
 - **Rule 6a and EXP before loot priced items she can't take** (finding 6). They now go by the dearest drop she can take
   (`Hunt._dearest`, by `Pile.each`: what each drop seen is worth) and the pile's worth to her (`Hunt._worth`). With Etc
   full she had rushed a pile of a coin and an ore for the coin.
