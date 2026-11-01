@@ -748,6 +748,55 @@ def test_the_jitter_report_tabulates_jump_attacks_by_jitter_and_asks_whether_it_
     assert "the simulator's own" in text and "does the jitter predict a hit?" in text and "  40 up" in text
 
 
+def test_the_jitter_test_shuffles_within_each_room_and_counts_presses_as_they_went():
+    """analysis.jumps (the reviews of 2026-11-01): a jitter drawn from its own room (narrowed where the search found
+    later keys unsure) is shuffled only among attacks of the same room, so a target's geometry (here a narrow room's
+    attacks hitting a third of the time, a whole room's two thirds, whatever their jitter) passes for no jitter's effect,
+    where the old test, by group alone, saw a pattern; the jitter is the press's (`pressed_ms` less the base: a press 2 ms late bins as +2 more); an
+    attack pressed more than PRESS_OFF_MS off its key sent (her actions' turn in the air: 80 ms) isn't counted; a
+    record not sure (`sure` False: behavior.fight.JITTER_ALL) is its own group; each 'jump_keys' goes with the
+    'jump' just before it of its `n` (two hunters in one file, both numbering from 1); a record with no target doesn't
+    stop the looks' outcomes."""
+    import random
+    from gamelab.analysis import jumps
+    from gamelab.sim.fakes import EPOCH
+    rng, rows = random.Random(4), [{"t": EPOCH, "topic": "session"}]
+    for i in range(400):
+        narrow = i % 2 == 0
+        room = (0, 5) if narrow else (0, reach.JITTER_FIRST_MS)
+        j = rng.randint(*room)
+        t = EPOCH + 10.0 * (i + 1)
+        n = i % 200 + 1  # (a second hunter from the 201st: its own numbers from 1)
+        rows.append({"t": t, "topic": "jump", "kind": "close", "jump": "up", "side": 1, "turn": False,
+                     "key_ms": 40 + j, "base_ms": 40, "jitter_ms": j, "window": [40 + room[0], 40 + room[1]],
+                     "rise": 22.0, "target": "pig", "dx": 100.0, "up": 0.0, "platform": 5, "x": 0.0,
+                     "sure": True, "n": n})
+        rows.append({"t": t + 0.5, "topic": "jump_keys", "n": n, "thrown": True, "pressed_ms": 40 + j + 2.0})
+        rows.append({"t": t + 0.6, "topic": "sim_attack", "key": t + 0.3, "plan": "jump_throw", "mode": "air",
+                     "rise": 22.0, "kind": "pig", "up": 0.0,
+                     "outcome": "kill" if rng.random() < (1 / 3 if narrow else 2 / 3) else "nothing"})
+    got = jumps.jitter_rows(rows)
+    assert len(got) == 400 and all(r["pressed_ms"] == r["key_ms"] + 2.0 for r in got)  # (each its own press)
+    assert all(r["pressed_jitter"] == r["jitter_ms"] + 2.0 and not r["otherwise"] for r in got)
+    old = jumps._perm_p([[(float(r["jitter_ms"]), r["outcome"] in jumps.HITS) for r in got]], 500, random.Random(0))
+    assert old[1] < 0.01  # (by group alone: the whole rooms' larger jitters "predict" their hits)
+    test = jumps.jitter_test(got)
+    assert float(test.splitlines()[-1].split(" p ")[1].split()[0]) > 0.05 and "nothing to test" not in test, test
+    assert {jumps._room(r) for r in got} == {(0, 5), (0, 15)} and jumps._whole(got[0]) == (0, 15)
+    assert {jumps._bin(r) for r in got} == {0, 5, 10, 15}
+    table = jumps.jitter_table(got)
+    assert "narrow" in table.splitlines()[0]
+    turned = [{**r, "pressed_ms": r["pressed_ms"] + 80.0} if r["topic"] == "jump_keys" and r["t"] < EPOCH + 30.0
+              else r for r in rows]  # (the first two turned in the air at their actions' own key)
+    off = jumps.jitter_rows(turned)
+    assert sum(r["otherwise"] for r in off) == 2 and len(jumps._counted(off)) == 398
+    unsure = {**got[1], "sure": False, "kind": "unsure"}
+    assert jumps._group(unsure)[3] == "unsure" and jumps._group(got[1])[3] == "close"
+    blind = {"t": EPOCH + 5.0, "topic": "jump", "kind": "jump back", "jump": "back", "key_ms": 125, "target": None,
+             "platform": None, "x": 10.0, "dx": None, "up": None, "n": 1}
+    assert jumps.outcomes([blind])[0]["outcome"] == "nothing seen"
+
+
 def test_the_jumps_of_the_hunt_of_2026_10_25_2343_as_the_perception_services_records_have_them():
     """analysis.jumps on the supervised hunt of 2026-10-25 23:43 (its six jump records and the records about them, the
     hunter's and the perception service's: tests/fixtures/jumps_2026-10-25), as the analysis of that night checked them
