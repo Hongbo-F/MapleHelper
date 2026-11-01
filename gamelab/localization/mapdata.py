@@ -117,6 +117,12 @@ class Platform:
         return min(min(s.y1, s.y2) for s in self.segments)
 
     @property
+    def bottom(self) -> float:
+        """The y of its lowest point (y down: the most of its footholds' ends), where a floor dipping between its ends
+        is lower than either (Tree Dungeon's 13: -1182 and -1200 at its ends, -1177 at x -86)."""
+        return max(max(s.y1, s.y2) for s in self.segments)
+
+    @property
     def group(self) -> tuple[int, int] | None:
         """Its footholds' (layer, group) (Segment.group): platforms joined by a step wall share one."""
         return self.segments[0].group

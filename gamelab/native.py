@@ -622,7 +622,8 @@ class Refinds:
 
 
 class Map:
-    """A map's platforms laid out for `fly`: each one's ends, the y of its lower end and its segments (x1, y1, x2,
+    """A map's platforms laid out for `fly`: each one's ends, the y of its lowest point (Platform.bottom, native.c's
+    `low`: until the review of 2026-11-01 the y of its lower end, as body.fly had it) and its segments (x1, y1, x2,
     y2), in the map's order. Arrays of its own, kept with it while it's in use (motion.physics keeps one per map)."""
 
     def __init__(self, platforms: list):
@@ -630,7 +631,7 @@ class Map:
         counts = [len(p.segments) for p in platforms]
         self.arrays = [np.array([p.left for p in platforms], np.float64),
                        np.array([p.right for p in platforms], np.float64),
-                       np.array([max(p.y_at(p.left), p.y_at(p.right)) for p in platforms], np.float64),
+                       np.array([p.bottom for p in platforms], np.float64),
                        np.array(np.cumsum([0] + counts[:-1]), np.int32), np.array(counts, np.int32),
                        np.array([[s.x1, s.y1, s.x2, s.y2] for p in platforms for s in p.segments],
                                 np.float64).reshape(-1)]

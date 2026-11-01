@@ -574,12 +574,16 @@ def fly(model, x: float, y: float, vx: float, vy: float, *, shoe: Shoe, arrow: i
     walls = walls if walls is not None else walls_by(model, group)
     wall_xs, wall_ys = walls[0], walls[1]
     wall_ways = walls[2] if len(walls) > 2 else [0] * len(wall_xs)
-    # Only platforms she could reach in the time: within her sideways travel, at or below the top of the jump.
+    # Only platforms she could reach in the time: within her sideways travel, some of it at or below the top of the
+    # jump (its lowest point, Platform.bottom: until the review of 2026-11-01 its lower end's, and a floor dipping
+    # between its ends was passed through from a flight flown on in mid-air below them: on Tree Dungeon a jump from 14
+    # to 13, its arrow let go as she came down onto 13 at x -52 (1180 up there, 1182 and 1200 at its ends), flown on
+    # from there fell to 15, 10 of the branch's 18 landings elsewhere than planned on the harness's 48 seeds).
     reach = max(abs(vx), shoe.air_speed if arrow else 0.0) * limit + 1
     top = y - (vy * vy / (2 * shoe.gravity) if vy < 0 else 0) - 1
     # (A twin is never landed on: the platform it lies on is, mapdata.MapModel.twins.)
     plats = [q for q in model.places if q is not skip and q.right >= x - reach and q.left <= x + reach
-             and max(q.y_at(q.left), q.y_at(q.right)) >= top]
+             and q.bottom >= top]
     x0 = x
     i = bisect.bisect_left(wall_xs, x)
     side = _side_at(model.places, x, y) if i < len(wall_xs) and wall_xs[i] == x and not airborne else 0

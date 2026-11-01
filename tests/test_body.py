@@ -387,6 +387,30 @@ def test_a_step_through_a_platforms_corner_lands_on_it(model):
         assert physics.fly(model, x0, 355.0, 180.0, 0.0)[0] is f.platform  # the planner's is the engine's
 
 
+def test_a_floor_dipping_between_its_ends_is_landed_on_where_she_comes_down_onto_it():
+    """The review of 2026-11-01: body.fly (and native.fly, as motion.physics flies the planner's legs) looked only at
+    platforms with an end at or below the top of her flight, so a floor dipping lower than both its ends was passed
+    through: on Tree Dungeon a jump from 14 to 13 (1182 and 1200 at its ends, 1180 at x -52), its arrow let go as she
+    came down onto it, flown on from there fell to 15. Made up: D (-200..100) dips from y 915 and 900 at its ends to 930
+    at x -60, over a floor F at y 1000. Flown on in mid-air half a unit over D at x -70, coming down, she lands on D; a
+    jump straight up from F there (77 units: to y 923, over D's 929 there, under its ends) lands on D too, by both."""
+    t = tree()
+    t["foothold"] = {"1": {
+        "20": dict([seg(1, 20, 1, -200, 915, -60, 930, 0, 2), seg(1, 20, 2, -60, 930, 100, 900, 1, 0)]),
+        "21": dict([seg(1, 21, 3, -300, 1000, 300, 1000)]),
+    }}
+    t["life"], t["ladderRope"], t["portal"] = {}, {}, {}
+    m = mapdata.parse(1, t, "Test Map", {})
+    dip, floor = by_y(m, 930, -60), by_y(m, 1000, 0)
+    assert (dip.top, dip.bottom) == (900, 930) and max(dip.y_at(dip.left), dip.y_at(dip.right)) == 915
+    y = dip.y_at(-70.0) - 0.5
+    f = body.fly(m, -70.0, y, -149.0, 165.0, shoe=SHOE, arrow=0, walls=([], []), airborne=True)
+    assert f.platform is dip and -71.0 < f.land_x < -70.0
+    up = body.fly(m, -70.0, 1000.0, 0.0, -SHOE.vjump, shoe=SHOE, arrow=0, walls=([], []))
+    assert up.platform is dip and up.land_x == -70.0
+    assert physics.fly(m, -70.0, 1000.0, 0.0, -physics.JUMP_SPEED)[0] is dip  # (the planner's, in C where it's built)
+
+
 def test_long_falls_with_the_arrow_let_go_land_shorter():
     t = tree()
     t["foothold"]["5"] = {"9": dict([seg(1, 9, 30, -2000, 1000, 3000, 1000)])}  # a floor 500 below C

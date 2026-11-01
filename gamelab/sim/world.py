@@ -1940,7 +1940,7 @@ class World:
         self.knocked = False            # in the air from a monster's touch (KNOCK_STEERS)
         self.fell_out_at: float | None = None  # when she fell below the map's lowest floor (SimFellOut)
         self.left_map_at: float | None = None  # when she went through a portal (SimLeftMap)
-        self.bottom = max(max(q.y_at(q.left), q.y_at(q.right)) for q in model.platforms)  # its lowest floor
+        self.bottom = max(q.bottom for q in model.platforms)  # its lowest floor (until 2026-11-01 its ends')
         self.x, self.y = float(start[1]), p.y_at(start[1])
         self.vx = self.vy = 0.0         # her speed (units/s; y down)
         self.glide = 0.0                # on the ground: how far she moves each tick of the game's step (none from a
