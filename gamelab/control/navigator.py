@@ -564,7 +564,7 @@ HANG_S = 2.0
 # the hang is worth what it judges free soon, so standing ones are taken as they stand but for about a state and a
 # key's lag of setting off. Taken as standing (0) the harness's standard grind did no better (24 seeds, HANG_S 2 s:
 # EXP a minute -2.0%, touches at a rope's top -22.1%, against -0.6% and -21.3% at 0.3; 4.7 of its 5.2 hangs a run up
-# regardless where 4.8 of 5.3: what blocks the way up there is mostly a walker, or one chasing her).
+# regardless where 4.8 of 5.3: what blocks the way up there is mostly one at the top or walking by it).
 HANG_UNSURE_S = 0.3
 HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _carry_out_chain, _carry_out_move)
 # After the evade work's review (2026-10-29: D:/MapleHelper-scratch/evade/review; the fixes' runs and numbers in

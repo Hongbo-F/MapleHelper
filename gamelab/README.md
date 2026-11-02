@@ -503,7 +503,7 @@ With 200 stars (the review's runs, `fix2/darts`: Tree, crowd, choice, measured, 
 
 **To check in game** (supervised, after the user starts the player, and the perception service restarted for her place: its looks place her with `Localizer.where_dot` too): a `tour --loop --grind --map 10002073` as usual; on a touch up rope 4 "hit on the rope N under its top: up again", on 18 a moment later; at a rope's top a hang shows as "on a rope at x 102: getting off" (placed on the rope), "her dot never moved: on the rope ..." (a move from 18 that went nowhere) or "the game refused her presses: ..." (the bar read; "...; her dot where it was then: try 2" and "getting off down it" if the first try up didn't do it), never 20 refused presses and OUT OF DARTS. At the hunt's start the OCR's models load on their own thread (onnxruntime may print its lines then). The message bar's read and its crop at 1920x1080 aren't checked on a frame of that size.
 
-**Not done:** the touch on the rope isn't avoided (44 NO_WAIT and WAIT_LOOKS backstops on "climb -> 18" that night: shooting the mushroom first from 19, or another way up, is safe travel's), nor is a monster on the platform when she gets off at the top: up onto it with no look at what walks there (at 22:58 the mushroom that touched her walked on 18 by rope 4's top; in `loop_tree_rope_top` she's off at 4.17 s and a Green Mushroom on 18 touches her standing still at 5.6 s; on the climb on right after a touch she has the touch's invincibility still, 2.4 s and more later on the other ways she hasn't): waiting on the rope for it to walk off is safe travel's too; a hang 17 or less under a platform with no press, and no move from it or one 12 or less under (`STUCK_GAP`), isn't caught (standing by on it): the sprite tells it (a picture of her back cut from frame 900 matches the rope frames at a median 0.81, 0.59 at least, and the ground frames at 0.20, 0.32 at most: 1 ms a look; her heading pictures score 0.30 there and "tell" the wrong way on 40 of 76 rope frames: `diag/heading_scores.py`, one episode only), not built; the game's line for no stars is still not known; a refusal left up and the same one redrawn are the same px, so a second hang right after one at another rope's top (her dot elsewhere), with no other line between, counts its presses (the place and the move checks are for it); a press refused for its MP ("You don't have enough MP ...") left up starts no stretch again however long she stands there (not to hold off a real stop: out of darts standing still with that line left up).
+**Not done:** the touch on the rope isn't avoided (44 NO_WAIT and WAIT_LOOKS backstops on "climb -> 18" that night: shooting the mushroom first from 19, or another way up, is safe travel's), nor is a monster on the platform when she gets off at the top: up onto it with no look at what walks there (at 22:58 the mushroom that touched her walked on 18 by rope 4's top; in `loop_tree_rope_top` she's off at 4.17 s and a Green Mushroom on 18 touches her standing still at 5.6 s; on the climb on right after a touch she has the touch's invincibility still, 2.4 s and more later on the other ways she hasn't): waiting on the rope for it to walk off is safe travel's too (from 2026-11-02 a climb hangs under the top while the way up isn't clear: Hanging under a rope's top until the way up clears, below); a hang 17 or less under a platform with no press, and no move from it or one 12 or less under (`STUCK_GAP`), isn't caught (standing by on it): the sprite tells it (a picture of her back cut from frame 900 matches the rope frames at a median 0.81, 0.59 at least, and the ground frames at 0.20, 0.32 at most: 1 ms a look; her heading pictures score 0.30 there and "tell" the wrong way on 40 of 76 rope frames: `diag/heading_scores.py`, one episode only), not built; the game's line for no stars is still not known; a refusal left up and the same one redrawn are the same px, so a second hang right after one at another rope's top (her dot elsewhere), with no other line between, counts its presses (the place and the move checks are for it); a press refused for its MP ("You don't have enough MP ...") left up starts no stretch again however long she stands there (not to hold off a real stop: out of darts standing still with that line left up).
 
 ## Clearance and slopes: where a monster will be when her attack starts, and what a jump's attack takes (from 2026-10-27)
 
@@ -3858,6 +3858,115 @@ switched in its first 40 frames in 13 of 323 births against master's 5 (2 pairs 
 faint first sighting heading the wrong way: of record). The thresholds were chosen on the same 17 clips that show no
 false positive; out of sample, the review's 124 stills alone. The JPEG recordings can't test the watch (no newborn
 found there): live frames are lossless.
+
+## Hanging under a rope's top until the way up clears (from 2026-11-02)
+
+The roadmap of 2026-11-02 (D:/MapleHelper-scratch/rec-analysis/plans: ROADMAP.md item 9, problems.md P08, plan-touches.md
+B as critique-touches.md revised it), from the three recordings of RiceBaby grinding on Tree Dungeon (master 40ba190):
+19-23 of the hour's 170 touches came at the top of the rope at x -80 from 11 to 10, the camp's only way in (11 of them on
+the rope, 16-48 under its top), over 68 climbs up it; 24 of those climbs went past a Horny Mushroom regardless (NO_WAIT),
+about 13 were the mover's lone climb move, which nothing watched for the top, and a climb planned clear had a Horny walk
+to the top meanwhile with nothing reacting until the touch (CLIMB_LOOK only after one). On the frames of R2 #8 (f1648),
+R2 #24 (f4270) and R3 #34 (f1469) a Horny Mushroom on 10 stands or walks beside the rope's top each time, the touch as
+her head comes up past 10's surface (D:/MapleHelper-scratch/recfix/rope: r2_08.png, r2_24.png, r3_34.png). The user
+(2026-11-02): "5, 6, 7, 8, 9 in the roadmap ranked list seems to be safe and important work to carry on, do them now."
+
+**What she does** (`control/navigator.py`, `ROPE_HANG`): while she climbs a rope up to the platform at its top, her
+glances check the way up from the newest state (`_way_up`): the rest of the climb (at physics.CLIMB_SPEED, 117: live
+117-120, the longer the surer), her climb-over (flow.CLIMB_OVER) and STAND_PAST_S standing at the top, her box all the
+way (flow.danger, the client's box: 22 either side, 65 tall), against every monster of the state whose touch counts, on
+any platform (a walker on 9 by its left end, 40-60 over 10 there, can touch her as she climbs over the top at -80 too),
+each walking as followed (TURN_SLACK and 20 units a second of spread, as every chain plans them), a standing one setting
+off either way for HANG_UNSURE_S (0.3 s) at the most. Where it isn't clear she stops on the rope HANG_UNDER (80) under
+the top (`_hang_due`): the cut lets go of every key and the game keeps her where she is on a rope. It's decided at the
+glance before the one that would be too late, from her dot's height less what she climbs in the frame's age and the
+game's lag in letting go of up (HANG_LAG_S, body.Lags.off), at flow.ROPE_SPEED; past HANG_FLOOR (70 under) it's too
+late and the climb goes on as before; and only where the hang itself is clear of every monster for HANG_S
+(`_hang_safe`). Then she hangs (`_hang`), looking at every state: once the way up is clear she climbs the rest, held as
+her climb on after a touch holds it; after HANG_S (2 s, measured below against the roadmap's 4) she goes up regardless
+(a backstop event `HANG_S`, as a pass regardless goes), and a touch while she hangs ends it too (her invulnerability
+takes her past). A touch in the hang or in the climb after it, told then or later (the popup's lag), is the cut's
+(POST_HIT: no fight while her invulnerability lasts, so the next chain passes the monster in it, as after a touch on the
+rope).
+
+Every climb path: a chain's climb (`_watching`: `_hang_check`, the plan's Climb whose time is now and her dot on the
+rope above where she grabs it), the mover's lone climb move (`_move_watch`: the move cut, `HUNG`, and `_carry_out_move`
+hangs her), and a touch on the rope with the top taken (`_climb_on`, CLIMB_LOOK: down to HANG_UNDER only and the hang
+there, where it went down the whole rope). A cut for a hang isn't a miss (`st.stopped`). Each hang is a telemetry event
+`rope_hang` at its start (step `hang`: x, how far under) and its end (`clear`, `touched` or `regardless`: s, what blocked
+the way), for the records of the next live run.
+
+**Where she's out of reach** (tests/test_rope_hang.py): her feet 80 under the top of the rope at -80, no Horny on 10
+within reach of the rope (10 is flat at -1471 from -93 to -32 and rises 10 units within the 50 left of the rope a Horny's
+box reaches hers from) can overlap her box, nor one on 11 under it (its box tops out 179 under the rope's top); at 48
+under (R2 #24) one does. On Tree Dungeon's long ropes (190: -80 from 11 to 10, 111 and -8 up to 18) she grabs 158-176
+under the top and climbs to the hang's place; on the short ones (116: -192, -8 from 29, 146) she grabs about 76 under,
+so a cut there would leave her in reach: no hang (as before).
+
+**She can't cast on a rope**: the game refuses any skill there ("That cannot be used while you're on a rope or
+ladder.", read live for Lucky Seven on 2026-10-26: The top of a rope, above; the line names no skill), so a hang does
+nothing but wait.
+
+**The live hour, as an oracle** (D:/MapleHelper-scratch/recfix/rope/oracle.py, oracle.txt): of the hour's climbs the
+perception service's scenes show her 100 or less under the top of -80 (35 of the 68), the top was free for the 1.3 s
+of the rest of the climb, the climb-over and STAND_PAST_S at once on 20 (1 touched); on the other 15 (all 15 touched)
+the monsters as they really went freed it within 1 s on 5, 2 s on 8, 4 s on 11 (the last four at 4.2-8.2 s). So a hang
+can save at most about 11 of those 15 (8 within 2 s), at a median 1.5 s each, if it judged the way up as well as
+hindsight does.
+
+**In the simulator.** Its measure, the harness's `rope_tops` (sim.world's climb_log, grab_log, touch_place: her climbs
+up a rope, her grabs of one from below, her touches on a rope or within 40 of a rope she climbed over 2 s or less before;
+and the hangs from the 'rope_hang' events), in its own commit with nothing she does changed (the standard grind's 12
+seeds master 40ba190's cached results to the digit but for it). The thief's world has far more of them than live: 127
+over 92 grabs on the standard grind's 12 seeds, 1.38 a grab, against live's 0.3 a climb.
+
+`nav_tree_rope_top_10` (new): from 11 up to 10, a Horny Mushroom walking 10 by the top; on seed 8 she hangs 0.5 s 83
+under it and goes up untouched, on 10 0.5 s later than without the hang (touched on the rope 50 under, damage 118). On
+seeds 1-12, hang on against off (seeds_hang.py, seeds_top10e.json): touched on 2 of the 12 trips (1 on the rope) against
+5 (4 on the rope); 4 hangs, 2 up regardless after HANG_S (one of those touched); the 12 trips 54.2 s against 48.7.
+
+The standard thief grind (`ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world
+zero-walls --world near-misses --world walkers --minutes 5`) against the metric's commit 8008c01 (the base's seeds
+from the cache):
+
+24 seeds a row (D:/MapleHelper-scratch/recfix/rope: ab24_hang4.txt, ab24_hang2.txt, ab24_hang2_u0.txt and their saved
+runs; the base's mean first, each row's difference with its t):
+
+| | EXP a minute | touches | that hurt | at a rope's top | on a rope | grabs | hangs (up regardless) | hanging s | s a trip's arrival |
+|---|---|---|---|---|---|---|---|---|---|
+| base (8008c01) | 320.7 | 79.6 | 53.2 | 9.79 | 5.67 | 7.08 | - | - | 0.84 |
+| HANG_S 4 s | -4.2% (t -1.7) | -5.9% (-1.4) | -9.8% (-2.2) | -28.5% (-2.9) | -37.5% (-3.4) | -13.5% (-1.8) | 5.0 (4.1) | 18.1 | +28% (+4.2) |
+| **HANG_S 2 s** | -0.6% (-0.2) | -4.7% (-1.0) | -6.2% (-1.3) | -21.3% (-2.4) | -25.0% (-2.7) | -10.6% (-1.9) | 5.3 (4.8) | 10.5 | +13% (+2.0) |
+| 2 s, standing ones as standing | -2.0% (-0.8) | -0.9% (-0.2) | -3.7% (-0.9) | -22.1% (-2.3) | -26.5% (-2.5) | -11.8% (-2.1) | 5.2 (4.7) | 10.2 | +17% (+2.6) |
+
+No death, fall out of the map or stop in any. 2 s kept, for the EXP (the user's rule: EXP and loot over fewer touches;
+on the live hour 8 of the 11 hangs that hindsight says would have cleared within 4 s cleared within 2): a fifth fewer
+touches at the tops of ropes and EXP level. On the first 12 seeds 4 s had EXP level (-0.1%) and rope-top touches -38.6%,
+2 s EXP +6.7% (t +2.3): the next 12 took both back, a 5-minute run's spread. Most hangs end regardless, and standing
+ones taken as standing (blocking only within reach of the top itself) changed nothing: what blocks the way up in the
+thief's world is mostly a monster at the top or walking by it (with the walkers world's chase, perhaps one chasing her:
+not told apart). The thief's world has far more touches at ropes' tops than live (1.38 a grab against live's 0.3 a
+climb), so how much of this shows live is for the next supervised grind to say.
+
+Goldens (Tree Dungeon's 44): 24 the same; `nav_tree_rope_top_10` new; 19 recorded again, each apart from its first hang
+on (the commits say where, each). The Green Mushroom's point on 18 is at x 39, 47 from the top of the rope at -8 and 72
+from 111's, so in the goldens that climb to 18 the hangs mostly run to HANG_S: of the 38 hangs in the 18 grinds and hunts
+among them, 32 went up regardless (one seed each: touches 520 -> 543, EXP 12,689 -> 11,760 in 3,010 s -> 3,063; 15 of
+the 18 lower in EXP a second). Every one meets what it's there for. `nav_tree_rope_hit` expects the hang now (88 under
+for 2.1 s, up regardless, touched on the rope then, a MISS, on 16 at 7.1 s with 1 touch where 5.1 s with 1); her climb
+on after a touch (CLIMB_ON) is shown by tests/test_rope_top.py, test_evade.py and test_touches.py, without ROPE_HANG.
+
+**To check in game** (a supervised grind as RiceBaby): the log's "a horny-mushroom on 10 by its top: hanging on the rope
+at x -80, N under its top" and "hung N s, the way up clear ...", and the 'rope_hang' telemetry events; the touches at
+the top of -80 a climb (0.3 live on 2026-11-02, about 19-23 in 35 minutes over 68 climbs) and the hangs' seconds. The
+harness's thief world is the measure until her own simulator world is built (the roadmap's item 8).
+
+**Not done**: what a hang waits for is judged by the planner's reach (a walker's turn, a stander setting off), so in the
+simulator most hangs run to HANG_S, 18's ropes above all; a monster chasing her (the walkers world's aggro) stays at the
+top the whole budget, and nothing tells a hang that can't clear from one that can; the goldens' one-seed grinds lose EXP
+with it more than the 24 seeds do; the hang isn't watched for the Lie Detector (2 s at most, then the climb, before the
+next pass's look); the short ropes get no hang; the queued chain's climb (QUEUE_CHECK) is still withdrawn rather than
+hung on; `_meet` still waits on the floor below (WAIT_LOOKS) before a climb goes up and hangs.
 
 ## Localization
 
