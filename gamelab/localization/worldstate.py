@@ -146,12 +146,15 @@ DEATHS = True
 # (Mob.fading), until the whole screen finds each (spawns.SpawnWatch.handed: the same track on, its sighting the
 # search's): 229 of the 233 newborns whose start showed found at their first visible frame (the median; p90 the next),
 # where the whole screen found them a median 7 frames, 467 ms, later (README, Spawns seen as they fade in). Begun after
-# her look, while the whole screen's search finishes on its thread (HALVES). Only with the real detector at the game's
-# own 1366x768, the scene's locator (its camera registration on the map's art: localization.locate) and the watch's C
-# (native.spawns_lib; in numpy 13.6 ms a frame at the median, 132 at p99): 1.0-1.1 ms a frame at the median replayed on
-# the clips (p99 3.7-4.0, the most 7.1), 1.7-1.8 ms more per newborn followed; in the service's frame loop on the user's
-# own play the pass 1.0-1.4 ms longer at the median (12.7 against 11.7 ms on the crowd), 15 frames a second either way.
-# The simulator's eyes have none: its newborns are seen as its noise says (sim.world.Noise.spawn_found).
+# her look, while the whole screen's search finishes on its thread (HALVES). Only on a map it's measured on
+# (spawns.MEASURED: Tree Dungeon), with the real detector at the game's own 1366x768, the scene's locator (its camera
+# registration on the map's art: localization.locate) and the watch's C (native.spawns_lib; in numpy 13.6 ms a frame at
+# the median, 132 at p99): as fixed after the review of 2026-11-01 (points past the screen's edge looked at too), 1.19
+# ms a frame at the median replayed on the clips (p99 3.96, the most 7.3), 1.7 ms more per newborn followed; the golden
+# clip through the frame step as the service runs it, the watch off, on, on, off on an idle machine, the pass 11.03
+# against 12.74 ms at the median (p99 20.41 against 22.31), the watch 1.52 (p99 5.38), 15 frames a second either way.
+# The step counts 'newborns' only where the watch runs. The simulator's eyes have none: its newborns are seen as its
+# noise says (sim.world.Noise.spawn_found).
 SPAWNS = True
 # The drops searched without being asked: DROPS_STRIPS strips in view (scene.drop_strips: one over each stretch of level
 # ground of every platform) at most every DROPS_EVERY_S, by rotation (the one searched longest ago first, her platform's
@@ -352,7 +355,9 @@ class WorldStep:
             self._touch_of = (geo.frame_scale, self._new_touch_watch(geo.frame_scale))  # (made now, not mid-hunt)
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "wide": 0, "detections": 0, "matched": 0,
                        "bars": 0, "loot": 0, "loot wide": 0, "strips": 0, "exp gains": 0, "exp read": 0, "hits": 0,
-                       "touches": 0, "misses": 0, "touches by HP": 0, "newborns": 0}
+                       "touches": 0, "misses": 0, "touches by HP": 0}
+        if self.spawns is not None:
+            self.counts["newborns"] = 0  # (where the watch runs: the simulator's traces are as before it)
 
     def throw(self, t: float, side: str, attack: str | None = None) -> None:
         """She threw toward `side` at t (with `attack`: its id, if told)."""
@@ -487,10 +492,11 @@ class WorldStep:
         return got
 
     def _handed(self, s: Scene, born: list[spawns.Sighting], mobs: list[Mob], work: dict) -> list[Mob]:
-        """This frame's newborns (`born`) as detections beside the whole screen's (`mobs`): those it found too handed
-        over to it (spawns.SpawnWatch.handed: its sighting the frame's, the watch following them no more). `work` gets
-        how many it added ('newborns') and, of them, first found in this frame ('newborns found')."""
-        kept = self.spawns.handed(born, [(s.map_x(m.foot_x), s.map_y(m.feet_y)) for m in mobs])
+        """This frame's newborns (`born`) as detections beside the whole screen's (`mobs`): those it found too (a
+        monster of the newborn's kind by it) handed over to it (spawns.SpawnWatch.handed: its sighting the frame's, the
+        watch following them no more; one of another kind by it has the frame's place, the newborn followed on). `work`
+        gets how many it added ('newborns') and, of them, first found in this frame ('newborns found')."""
+        kept = self.spawns.handed(born, [(s.map_x(m.foot_x), s.map_y(m.feet_y), m.kind) for m in mobs])
         self.counts["newborns"] += sum(b.onset for b in kept)  # (the rest the watch's own: SpawnWatch.counts)
         work["newborns"], work["newborns found"] = len(kept), sum(b.onset for b in kept)
         return [b.mob(s.view) for b in kept]
@@ -498,11 +504,13 @@ class WorldStep:
     def _spawn_watch(self) -> "spawns.SpawnWatch | None":
         """The spawn watch for this map (perception.spawns.SpawnWatch.of: its spawn points on their platforms, its
         kinds' pictures from the game data, the map's art its locator's camera registration holds), where the look
-        frame is the game's own 1366x768 and the watch's C is built; None elsewhere (or without the game data)."""
+        frame is the game's own 1366x768 and the watch's C is built, on a map it's measured on (spawns.MEASURED); None
+        elsewhere (or without the game data)."""
         geo = getattr(self.eyes, "geo", None)
         reg = getattr(getattr(self.senses, "locator", None), "reg", None)
+        map_id = getattr(self.model, "id", None)
         if geo is None or reg is None or geo.look_scale != 1 or tuple(geo.client) != tuple(reg.size) \
-                or native.spawns_lib() is None:
+                or map_id not in spawns.MEASURED or native.spawns_lib() is None:
             return None
         points = spawn_points(self.model)
         ids = {kind_of(sp.name): sp.mob_id for sp in getattr(self.model, "spawns", ()) if sp.name}
@@ -511,7 +519,7 @@ class WorldStep:
         from .camreg import EXCLUDE, HUD_TOP
         art = reg.art
         try:
-            return spawns.SpawnWatch.of(points, ids, spawns.Art(art.rgb, (art.x0, art.y0), art.static),
+            return spawns.SpawnWatch.of(points, ids, spawns.Art(art.rgb, (art.x0, art.y0), art.static), map_id,
                                         exclude=EXCLUDE, bottom=HUD_TOP, size=tuple(reg.size))
         except (ImportError, FileNotFoundError, OSError, KeyError):  # (no game data here)
             return None

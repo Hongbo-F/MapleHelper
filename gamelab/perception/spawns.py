@@ -13,42 +13,49 @@ and every channel (the fit's residual 0.27-0.3 colour levels on those frames). T
 only at alpha 0.6-0.8: a median 7 frames, 468 ms, after it first shows, at alpha 0.63 (Horny Mushrooms 552 ms, Green
 ones 400); 878 newborns an hour came into view in the perception service's records of 2026-10-28..30.
 
-So at each point in view (its window fully in the play area, clear of the minimap and the quest helper) the frame is
-compared with the map's art there (the background is the map's own art drawn from the game data, localization.mapart,
-which the camera registration holds anyway: on Tree Dungeon every pixel of it is the fixed art, and a frame where
-nothing is drawn over a point is the art to the level), as the prototype of 2026-11-01 tuned it
-(D:/MapleHelper-scratch/spawn-fade/proto):
+So at each point in view (its window in the play area, clear of the chat box, the minimap and the quest helper; past
+the screen's top, left or right edge in part, the rest left out of the fit, `_shown`: until the review of 2026-11-01 a
+point not wholly on the screen wasn't looked at, 13.8% of the point-frames on the clips, two thirds of them at the
+screen's top; ONSET_COVERED) the frame is compared with the map's art there (the background is the map's own art drawn
+from the game data, localization.mapart, which the camera registration holds anyway: on Tree Dungeon every pixel of it
+is the fixed art, and a frame where nothing is drawn over a point is the art to the level), as the prototype of
+2026-11-01 tuned it (D:/MapleHelper-scratch/spawn-fade/proto):
 1. the empty test: fewer than EMPTY_COUNT pixels more than EMPTY_LEVELS off the art on any channel: nothing there;
 2. the onset fit: its kind's ONSET pictures, both ways, the feet within BAND units of the point along its platform and
    ROWS up or down, every STRIDE-th pixel of each picture (the game's alpha as each one's weight): with D = F - B and
    G = A (S - B) over a picture's pixels and channels, a = D.G / G.G, the share explained R2 = (D.G)^2 / (G.G D.D) and
    the residual sqrt((D.D - (D.G)^2 / G.G) / n); the hypothesis explaining the most of D.D with A_LO <= a <= A_HI and
-   MIN_USED of its pixels kept (below) is the point's, a newborn where a >= A_MIN, 1 - R2 <= U_MAX and the residual
-   <= RES_MAX;
+   MIN_USED of its pixels kept (below) is the point's, a newborn where A_MIN <= a <= A_START, 1 - R2 <= U_MAX and the
+   residual <= RES_MAX;
 3. each newborn found is followed from the next frame (`_follow`): every FOLLOW picture of its kind, its feet up to
    FOLLOW_SPEED the way each faces for the time since it was last found (at most FOLLOW_MOST_S) and BACK the other,
-   ROWS up or down, the same rule and its alpha not fallen by more than DROP_A; until the whole screen finds a monster
-   within HANDOVER_DX across and HANDOVER_DY down of it (`handed`: the frame's sighting is the whole screen's then, and
-   it's the tracks' alone), or its best fit is solid (a > A_HI at the rule's R2), or it's unfound LOST_AFTER frames.
+   ROWS up or down, the same rule and its alpha DROP_A under the most it's been at the least; until the whole screen
+   finds a monster of its kind within HANDOVER_DX across and HANDOVER_DY down of it (`handed`: the frame's sighting is
+   the whole screen's then, and it's the tracks' alone; one of another kind there has the frame's place, the newborn
+   followed on), or its best fit is solid (a > A_HI at the rule's R2), or it's unfound LOST_AFTER frames.
 Her box (HER_BOX about her feet) and the boxes of the monsters the frame before found (MOB_BOX about their feet: not
 this watch's own newborns, nor, at a point's onset, one ON_POINT of the point) are left out of the fit, and a hypothesis
 with less than MIN_USED of its pixels left isn't tried. A point within NEAR_POINT of a newborn followed on its platform
 isn't looked at for another.
 
 What it found (this module replayed as the prototype's phase 2 was, on every frame with a sure view of the 17 clips,
-18,190 frames, 323 births traced: README, Spawns seen as they fade in; the prototype's to the birth): no false positive,
-1,796 sightings (391 onsets); of the 233 newborns whose
-start shows, 229 found at their first visible frame (the median; p90 the next), at alpha 0.065, where the whole screen
-found them 7 frames (467 ms) later; of the 90 whose start was hidden (under her, players, pets, effects) 20. Against
-every one of the 153,474 point-frames labelled (empty, monsters, players, her, pets, effects, dying monsters, the Lie
-Detector), the nearest negative to the rule was a solid, partly covered Horny Mushroom at a 0.94 (1 - R2 0.040, residual
-17.7: 11.8 times past the thresholds); a view one px off loses newborns but made no false positive. Why the map's art,
-not a background learned: a running median of the point (a sample every 0.5 s, the last 11, her and the monsters masked)
-came within 3.9 times of the rule on her passing (alpha 0.11, residual 2.4), and plates kept from windows unchanged for
-0.6 s gave a false positive under a looser rule; the art is never fooled by her standing on a point for seconds, and it
-needs no warm-up. Pixels where the art isn't the map's fixed art alone (its `known`: animated objects, moving
-backgrounds) are left out of the fit; the kinds watched are MEASURED's only (another map's art and monsters haven't been
-measured so).
+18,190 frames, 323 births traced: README, Spawns seen as they fade in; as fixed after the review,
+D:/MapleHelper-scratch/spawn-fade/fix): no false positive, 1,796 sightings (350 onsets, none over A_START); of the 233
+newborns whose start shows, 229 found at their first visible frame (the median; p90 the next), at alpha 0.065, where the
+whole screen found them 7 frames (467 ms) later; of the 90 whose start was hidden (under her, players, pets, effects)
+20; and 8 newborns (47 sightings) at points past the screen's top, a newborn's fade each by its alpha's line and by eye.
+Against every one of the 153,474 point-frames labelled (empty, monsters, players, her, pets, effects, dying monsters,
+the Lie Detector), the nearest negative to the rule was a solid, partly covered Horny Mushroom at a 0.94 (1 - R2 0.040,
+residual 17.7: 11.8 times past the thresholds), over A_START now; over all the clips' 172,866 point-frames looked at,
+every fit an onset could start from (a <= A_START) within 14 times of the rule is a newborn under an effect or a player
+by eye (fix/margin.py); under a shade over the whole screen the nearest is a solid Green Mushroom under 20% black, 5.2
+times off (the golden clip, every 4th frame, 3-25% black or white). A view one px off loses newborns but made no false
+positive. Why the map's art, not a background learned: a running median of the point (a sample every 0.5 s, the last 11,
+her and the monsters masked) came within 3.9 times of the rule on her passing (alpha 0.11, residual 2.4), and plates
+kept from windows unchanged for 0.6 s gave a false positive under a looser rule; the art is never fooled by her standing
+on a point for seconds, and it needs no warm-up. Pixels where the art isn't the map's fixed art alone (its `known`:
+animated objects, moving backgrounds) are left out of the fit; the maps watched are MEASURED's only, and their kinds
+(another map's art and monsters haven't been measured so).
 
 A newborn can be hit while it fades (its HP bar shows from alpha about 0.36), but didn't touch her until it was solid
 (of her 34 touches on the golden clip, 1 in the 0.82 s after the map's respawn passes, against 3.9 at random: one clip
@@ -57,11 +64,11 @@ when it turns solid (localization.tracking: FADE_PER_S).
 
 The sums are integers (the game's alpha 0..255, its colours as they are), worked out in C where it's built (gamelab/
 spawns.c, native.spawns_lib: a run of 8 hypotheses one column apart in AVX2 lanes), else numpy: the same integers. In C
-on those 18,190 frames (one thread, Idle priority on CPUs 12-23, 2 such replays at once and nothing else heavy):
-0.98-1.10 ms a frame at the median over two replays (p90 1.4-1.5, p99 3.7-4.0, the most 6.8-7.1; 8.6 points in view,
-5.4 fitted), 1.7-1.8 ms more per newborn followed (4.6% of the frames follow one), where the prototype's (gathered
-lanes, float sums) took 2.2 ms and 3.3; numpy 13.6 ms a frame and 36 per newborn. Only at the game's own 1366x768, a
-map unit a px, with the view registered on the frame (localization.worldstate).
+on those 18,190 frames (one thread, Idle priority on CPUs 12-23, 2 such replays at once and nothing else heavy): 1.19 ms
+a frame at the median (p90 1.72, p99 3.96, the most 7.29; 9.5 points in view, 5.9 fitted; before the review's partly
+shown points 0.98-1.10, 8.6 and 5.4), 1.7 ms more per newborn followed (4.6% of the frames follow one), where the
+prototype's (gathered lanes, float sums) took 2.2 ms and 3.3; numpy 13.6 ms a frame and 36 per newborn. Only at the
+game's own 1366x768, a map unit a px, with the view registered on the frame (localization.worldstate).
 """
 
 import math
@@ -100,16 +107,32 @@ MIN_USED = 0.4       # ... with this share of its pixels left after the masks, a
 A_MIN = 0.02
 U_MAX = 0.008
 RES_MAX = 1.5
-DROP_A = 0.08        # a newborn followed doesn't fade out: its alpha may seem to fall this much at most
+# A newborn is found first at its point at this alpha at most (the review of 2026-11-01): a solid monster within BAND of
+# its point under a faint shade over the whole screen (the game's fade on a map change: 5% black, a 0.942) or a
+# see-through patch over it (10%) fits nearly as a newborn at a = 1 - the shade, 1.15-1.30 times off the rule where
+# unshaded the nearest negative is 11.8. Under A_START a shade must take 20% or more off it, and then fits 4.7 times
+# off at the nearest (made-up frames, every point: 20% black; a 30% patch of other art 3.7) and 5.2 on the golden clip's
+# frames. Of the 391 onsets replayed on the clips 48 were over 0.8, every one on a traced newborn (47 found at that
+# point in the 20 frames before, 46 handed to the whole screen that frame): without them each birth is found as before.
+A_START = 0.8
+# Whether a point's window reaching under the chat box or the game's windows is looked at in what shows (the review of
+# 2026-11-01: a window past the screen's edge is, in what's on the screen). Not: the rows just over the chat box are
+# drawn over now and then (its border, lines of text), so newborns there fit 2.5-5 levels off (none found there on the
+# clips), and a solid Slime cut by it came within 3.3 times of the rule where every other fit an onset could start
+# from on the clips within 14 times of it, in play or cut by the screen's top, left or right edge, was a newborn under
+# an effect or a player (D:/MapleHelper-scratch/spawn-fade/fix: margin.py, margin_final.py).
+ONSET_COVERED = False
+DROP_A = 0.08        # a newborn followed doesn't fade out: its alpha may seem to be this much under its most at most
 HANDOVER_DX, HANDOVER_DY = 15.0, 8.0  # units: the whole screen's monster this near a newborn is it
 LOST_AFTER = 2       # frames a newborn followed may go unfound (68 of 390 were lost to cover so, alpha 0.29 median)
 NEAR_POINT = 20.0    # units: a point with a newborn followed this near on its platform isn't looked at for another
 HER_BOX = (-40.0, -85.0, 40.0, 28.0)   # units about her feet left out of the fit, her body and name tag: x0, y0, x1, y1
 MOB_BOX = (-32.0, -58.0, 32.0, 4.0)    # ... and about a monster's feet (56 x 52 pictures)
 ON_POINT = (12.0, 8.0)  # units across, down: a monster the frame before found this near a point is left in at its onset
-# The kinds watched: those measured, Tree Dungeon's (its 15 Horny Mushroom, 14 Green Mushroom and 2 Slime points);
-# another map's until its frames have been replayed so (SpawnWatch.of leaves them out).
-MEASURED = ("horny-mushroom", "green-mushroom", "slime")
+# The maps watched and their kinds: those measured, Tree Dungeon's (its 15 Horny Mushroom, 14 Green Mushroom and 2 Slime
+# points); another map, its art and its monsters, not until its frames have been replayed so (SpawnWatch.of: none of
+# its points), the same kinds on it too (the first map's Slimes).
+MEASURED = {10002073: ("horny-mushroom", "green-mushroom", "slime")}
 
 
 class Floor(Protocol):
@@ -222,6 +245,12 @@ class Art:
         x0, y0 = self.origin
         return x0 <= X0 and y0 <= Y0 and X1 <= x0 + w and Y1 <= y0 + h
 
+    def clip(self, X0: int, Y0: int, X1: int, Y1: int) -> tuple[int, int, int, int]:
+        """Map box (X0, Y0)-(X1, Y1) cut to it."""
+        h, w = self.rgb.shape[:2]
+        x0, y0 = self.origin
+        return max(X0, x0), max(Y0, y0), min(X1, x0 + w), min(Y1, y0 + h)
+
     def crop(self, X0: int, Y0: int, X1: int, Y1: int) -> tuple[np.ndarray, np.ndarray | None]:
         """Map box (X0, Y0)-(X1, Y1) of it (a view, inside it: `inside`), and where it's known there (None: all of
         it)."""
@@ -260,7 +289,8 @@ class Sighting:
 
 @dataclass
 class _Newborn:
-    """A newborn followed: its point, kind, feet, alpha and picture as last found, when it was first and last found."""
+    """A newborn followed: its point, kind, feet, alpha and picture as last found, when it was first and last found, and
+    the most its alpha has been (`top`)."""
     point: int
     kind: str
     x: float
@@ -270,6 +300,7 @@ class _Newborn:
     since: float
     last: float
     misses: int = 0
+    top: float = 0.0
 
 
 @dataclass
@@ -285,11 +316,9 @@ class _Hyps:
     Y: np.ndarray
 
 
-def _hypotheses(pics: Pictures, which: Iterable[int], places: list[tuple[float, float]], rect,
-                screen: tuple[int, int, tuple] | None = None) -> _Hyps | None:
+def _hypotheses(pics: Pictures, which: Iterable[int], places: list[tuple[float, float]], rect) -> _Hyps | None:
     """Pictures `which` (indices into pics.list) with their feet at `places` ((X, Y) map units), those wholly inside map
-    box `rect` (X0, Y0, X1, Y1) and, with `screen` (the view's top-left and the screen boxes to keep clear of), whose
-    box on screen is clear of those; in runs (_Hyps), by picture, row and column; None where none is."""
+    box `rect` (X0, Y0, X1, Y1); in runs (_Hyps), by picture, row and column; None where none is."""
     X0, Y0, X1, Y1 = rect
     W, H = X1 - X0, Y1 - Y0
     which = np.asarray(list(which), np.int64)
@@ -300,11 +329,6 @@ def _hypotheses(pics: Pictures, which: Iterable[int], places: list[tuple[float, 
     c = np.rint(P[None, :, 0] - pics.ox[which][:, None]).astype(np.int64) - X0   # (pictures, places)
     r = np.rint(P[None, :, 1] - pics.oy[which][:, None]).astype(np.int64) - Y0
     ok = (c >= 0) & (r >= 0) & (c + pw <= W) & (r + ph <= H)
-    if screen is not None:
-        vx, vy, boxes = screen
-        left, top = c + (X0 - vx), r + (Y0 - vy)
-        for ex0, ey0, ex1, ey1 in boxes:
-            ok &= ~((left < ex1) & (ex0 < left + pw) & (top < ey1) & (ey0 < top + ph))
     wi, pj = np.nonzero(ok)
     if not len(wi):
         return None
@@ -388,14 +412,16 @@ def _boxes(rect, boxes) -> list[tuple[float, float, float, float]]:
     return [b for b in boxes if b[0] < X1 and X0 < b[2] and b[1] < Y1 and Y0 < b[3]]
 
 
-def _keep(rect, boxes, known: np.ndarray | None) -> np.ndarray | None:
-    """1 over map box `rect` but inside `boxes` (map units) and where the art isn't known; None where that's all of
-    it."""
+def _keep(rect, boxes, known: np.ndarray | None, shown: np.ndarray | None = None) -> np.ndarray | None:
+    """1 over map box `rect` but inside `boxes` (map units), where the art isn't known and (`shown`: 1 where its pixels
+    are in the play area) off it; None where that's all of it."""
     X0, Y0, X1, Y1 = rect
     boxes = _boxes(rect, boxes)
-    if not boxes and known is None:
+    if not boxes and known is None and shown is None:
         return None
-    k = np.ones((Y1 - Y0, X1 - X0), np.uint8) if known is None else np.ascontiguousarray(known, np.uint8)
+    k = np.ones((Y1 - Y0, X1 - X0), np.uint8) if known is None else np.array(known, np.uint8)
+    if shown is not None:
+        k &= shown
     for bx0, by0, bx1, by1 in boxes:
         c0, r0 = int(max(0, bx0 - X0)), int(max(0, by0 - Y0))
         c1, r1 = int(min(X1 - X0, bx1 - X0)), int(min(Y1 - Y0, by1 - Y0))
@@ -439,17 +465,19 @@ class SpawnWatch:
         self.points = [p for p in points if self.onset.get(p.kind) is not None and self.follow.get(p.kind) is not None]
         self._onsets = [_Onset(p, self.onset[p.kind], art) for p in self.points]
         self.newborns: list[_Newborn] = []
-        self.counts = {"frames": 0, "points": 0, "fits": 0, "follows": 0, "onsets": 0, "followed": 0, "handed": 0,
-                       "solid": 0, "lost": 0}
+        self.faded: list[tuple[int | None, float, float]] = []  # newborns seen fading out: platform, x, until when
+        self.counts = {"frames": 0, "points": 0, "partly": 0, "fits": 0, "follows": 0, "onsets": 0, "followed": 0,
+                       "handed": 0, "passed": 0, "solid": 0, "lost": 0, "out": 0}
 
     @classmethod
-    def of(cls, points: list[Point], ids: dict[str, int], art: Art, **kw) -> "SpawnWatch":
-        """The watch over these points (those of MEASURED's kinds) with each kind's pictures read from the game data
-        (ids: kind -> its monster's id; gamedata.canvas.mob_frames: in memory, nothing written)."""
+    def of(cls, points: list[Point], ids: dict[str, int], art: Art, map_id: int, **kw) -> "SpawnWatch":
+        """The watch over map `map_id`'s points (those of its MEASURED kinds: none on a map not measured) with each
+        kind's pictures read from the game data (ids: kind -> its monster's id; gamedata.canvas.mob_frames: in memory,
+        nothing written)."""
         from gamedata.canvas import mob_frames
         frames = {}
         for kind, mob_id in ids.items():
-            if kind_of(kind) not in MEASURED:
+            if kind_of(kind) not in MEASURED.get(map_id, ()):
                 continue
             try:
                 frames[kind_of(kind)] = mob_frames(mob_id, actions=FOLLOW)
@@ -480,60 +508,77 @@ class SpawnWatch:
             if got is not None and got[0] == "ok":
                 s = got[1]
                 nb.x, nb.y, nb.a, nb.picture, nb.last, nb.misses = s.x, s.y, s.a, s.picture, t, 0
+                nb.top = max(nb.top, s.a)
                 out.append(s)
             elif got is not None and got[0] == "solid":
                 nb.misses = -1   # (done: the whole screen's)
                 self.counts["solid"] += 1
+            elif got is not None and got[0] == "out":
+                nb.misses = -1   # (fading out: its place not looked at again until that fade's over)
+                self.faded.append((self.points[nb.point].platform, nb.x, t + 1.0 / FADE_PER_S))
+                self.counts["out"] += 1
             else:
                 nb.misses += 1
                 if nb.misses >= LOST_AFTER:
                     self.counts["lost"] += 1
         self.newborns = [nb for nb in self.newborns if 0 <= nb.misses < LOST_AFTER]
+        self.faded = [f for f in self.faded if t < f[2]]
         for i, (point, on) in enumerate(zip(self.points, self._onsets)):   # 2. every point in view
             if on.hyps is None:
                 continue
             X0, Y0, X1, Y1 = on.rect
             c0, r0, c1, r1 = X0 - vx, Y0 - vy, X1 - vx, Y1 - vy
-            if not self._in_play(c0, r0, c1, r1):
+            shown = self._shown(c0, r0, c1, r1, covered=ONSET_COVERED)
+            if shown is False:
                 continue
             self.counts["points"] += 1
+            self.counts["partly"] += shown is not None
             if any(self.points[nb.point].platform == point.platform and abs(nb.x - point.x) <= NEAR_POINT
-                   for nb in self.newborns):
+                   for nb in self.newborns) \
+                    or any(pl == point.platform and abs(x - point.x) <= NEAR_POINT for pl, x, _ in self.faded):
                 continue
-            window = frame[r0:r1, c0:c1]
+            window = self._window(frame, on.plate, c0, r0, c1, r1, shown)
             if self._empty(window, on.plate) < EMPTY_COUNT:
                 continue
             self.counts["fits"] += 1
             boxes = her_box + [b for fx, fy, b in mobs
                                if abs(fx - point.x) > ON_POINT[0] or abs(fy - on.y) > ON_POINT[1]]
-            keep = _keep(on.rect, boxes, on.known)
+            keep = _keep(on.rect, boxes, on.known, shown)
             sums = self._sums(window, on.plate, keep, on.hyps, on.pics)
             a, expl, r2, res = scores(sums)
             h = kept(sums, on.pics.k, a, expl)
-            if h is None or not passes(a[h], r2[h], res[h]):
+            if h is None or a[h] > A_START or not passes(a[h], r2[h], res[h]):
                 continue
             X, Y = float(on.hyps.X[h]), float(on.hyps.Y[h])
             if any(abs(nb.x - X) <= HANDOVER_DX and abs(nb.y - Y) <= HANDOVER_DY for nb in self.newborns):
                 continue   # (a newborn followed already, walked into this point's window)
             pic = on.pics.list[int(on.hyps.pic[h])]
             s = Sighting(i, point.kind, X, Y, float(a[h]), float(r2[h]), float(res[h]), pic, t, True)
-            self.newborns.append(_Newborn(i, point.kind, X, Y, s.a, pic, t, t))
+            self.newborns.append(_Newborn(i, point.kind, X, Y, s.a, pic, t, t, top=s.a))
             self.counts["onsets"] += 1
             out.append(s)
         self.counts["followed"] += sum(not s.onset for s in out)
         return out
 
-    def handed(self, sightings: list[Sighting], found: Iterable[tuple[float, float]]) -> list[Sighting]:
-        """This frame's sightings less those the whole screen found too (`found`: the feet of its monsters, map units:
-        within HANDOVER_DX across and HANDOVER_DY down), whose newborns are the tracks' from now on (not followed)."""
+    def handed(self, sightings: list[Sighting], found: Iterable[tuple[float, float, str]]) -> list[Sighting]:
+        """This frame's sightings less those the whole screen found too (`found`: its monsters' feet, map units, and
+        kind): a monster of a newborn's kind within HANDOVER_DX across and HANDOVER_DY down of it is it, the tracks'
+        from now on (not followed); one of another kind there has the frame's place (the sighting left out: not two
+        monsters where the search took it for another kind, as it did 3 of the 316 newborns it found on the clips, a
+        Green and a Horny Mushroom one for the other), the newborn still followed (it may be another walking past)."""
         found = list(found)
-        mine = [nb for nb in self.newborns
-                if any(abs(fx - nb.x) <= HANDOVER_DX and abs(fy - nb.y) <= HANDOVER_DY for fx, fy in found)]
-        if not mine:
+
+        def near(nb: _Newborn, same: bool) -> bool:
+            return any(abs(fx - nb.x) <= HANDOVER_DX and abs(fy - nb.y) <= HANDOVER_DY and (kind == nb.kind) == same
+                       for fx, fy, kind in found)
+        mine = [nb for nb in self.newborns if near(nb, True)]
+        passed = [nb for nb in self.newborns if nb not in mine and near(nb, False)]
+        if not mine and not passed:
             return sightings
         gone = {id(nb) for nb in mine}
-        points = {(nb.point, nb.since) for nb in mine}
+        points = {(nb.point, nb.since) for nb in mine + passed}
         self.counts["handed"] += len(mine)
+        self.counts["passed"] += len(passed)
         self.newborns = [nb for nb in self.newborns if id(nb) not in gone]
         return [s for s in sightings if (s.point, s.since) not in points]
 
@@ -546,15 +591,43 @@ class SpawnWatch:
 
     # --- inside ---------------------------------------------------------------------------------------------------
 
-    def _in_play(self, c0: float, r0: float, c1: float, r1: float) -> bool:
-        """Whether screen box (c0, r0)-(c1, r1) is wholly in the play area and clear of the game's windows."""
-        if c0 < 0 or r0 < 0 or c1 > self.size[0] or r1 > self.bottom:
+    def _shown(self, c0: int, r0: int, c1: int, r1: int, covered: bool = True) -> np.ndarray | bool | None:
+        """Which of screen box (c0, r0)-(c1, r1)'s pixels are in the play area and clear of the game's windows: None,
+        all of them; False, none (or, `covered` False, some under the chat box or the game's windows: none looked at);
+        else where (h x w, 1 where shown)."""
+        W, H = self.size[0], self.bottom
+        if c1 <= 0 or r1 <= 0 or c0 >= W or r0 >= H:
             return False
-        return not any(c0 < ex1 and ex0 < c1 and r0 < ey1 and ey0 < r1 for ex0, ey0, ex1, ey1 in self.exclude)
+        under = [b for b in self.exclude if c0 < b[2] and b[0] < c1 and r0 < b[3] and b[1] < r1]
+        if not covered and (r1 > H or under):
+            return False
+        if c0 >= 0 and r0 >= 0 and c1 <= W and r1 <= H and not under:
+            return None
+        shown = np.zeros((r1 - r0, c1 - c0), np.uint8)
+        shown[max(0, -r0):min(r1, H) - r0, max(0, -c0):min(c1, W) - c0] = 1
+        for ex0, ey0, ex1, ey1 in under:
+            shown[max(0, ey0 - r0):min(r1, ey1) - r0, max(0, ex0 - c0):min(c1, ex1) - c0] = 0
+        return shown if shown.any() else False
+
+    @staticmethod
+    def _window(frame: np.ndarray, plate: np.ndarray, c0: int, r0: int, c1: int, r1: int,
+                shown: np.ndarray | None) -> np.ndarray:
+        """Screen box (c0, r0)-(c1, r1) of `frame`: itself where it's all shown (`_shown` None), else the art there
+        (`plate`) with the frame's pixels shown over it (no difference where it isn't: those left out of the fit too,
+        `_keep`)."""
+        if shown is None:
+            return frame[r0:r1, c0:c1]
+        out = np.array(plate, np.uint8)
+        y0, x0, y1, x1 = max(0, r0), max(0, c0), min(r1, frame.shape[0]), min(c1, frame.shape[1])
+        part = out[y0 - r0:y1 - r0, x0 - c0:x1 - c0]
+        on = shown[y0 - r0:y1 - r0, x0 - c0:x1 - c0].astype(bool)
+        part[on] = frame[y0:y1, x0:x1, :3][on]
+        return out
 
     def _follow(self, frame: np.ndarray, view: tuple[int, int], nb: _Newborn, dt: float, her_box, mobs):
         """Newborn `nb`, last found `dt` s ago, looked for in this frame (the top, 3.): ("ok", its Sighting), ("solid",
-        None), ("no", None) or None (nowhere to look)."""
+        None), ("out", None) (found fainter than DROP_A under its most: fading out, not in), ("no", None) or None
+        (nowhere to look)."""
         pics, point = self.follow[nb.kind], self.points[nb.point]
         vx, vy = view
         reach = max(1, int(round(FOLLOW_SPEED * min(max(dt, 0.0), FOLLOW_MOST_S))))
@@ -562,39 +635,44 @@ class SpawnWatch:
         if not xs:
             return None
         ys = [point.floor.y_at(x) for x in xs]
-        rect = (max(int(math.floor(min(xs))) - pics.ext, vx), max(int(math.floor(min(ys))) - 1 - pics.up - 2, vy),
-                min(int(math.ceil(max(xs))) + pics.ext + 1, vx + self.size[0]),
-                min(int(math.ceil(max(ys))) + 1 + pics.down + 3, vy + self.bottom))
-        if rect[2] <= rect[0] or rect[3] <= rect[1] or not self.art.inside(*rect):
+        rect = self.art.clip(int(math.floor(min(xs))) - pics.ext, int(math.floor(min(ys))) - 1 - pics.up - 2,
+                             int(math.ceil(max(xs))) + pics.ext + 1, int(math.ceil(max(ys))) + 1 + pics.down + 3)
+        if rect[2] <= rect[0] or rect[3] <= rect[1]:
+            return None
+        X0, Y0, X1, Y1 = rect
+        shown = self._shown(X0 - vx, Y0 - vy, X1 - vx, Y1 - vy)
+        if shown is False:
             return None
         places = {False: [], True: []}
         for right in (False, True):
             lo, hi = (-BACK, reach) if right else (-reach, BACK)
             places[right] = [(nb.x + dx, point.floor.y_at(nb.x + dx) + dy) for dx in range(lo, hi + 1)
                              if point.on(nb.x + dx) for dy in ROWS]
-        clear = (vx, vy, self.exclude) if self.exclude else None
         parts = [h for right in (False, True)
                  if (h := _hypotheses(pics, [j for j, p in enumerate(pics.list) if p.right == right], places[right],
-                                      rect, clear)) is not None]
+                                      rect)) is not None]
         if not parts:
             return None
         hyps = parts[0] if len(parts) == 1 else _Hyps(
             rect, rect[2] - rect[0], rect[3] - rect[1], np.concatenate([h.runs for h in parts]),
             np.concatenate([h.pic for h in parts]), np.concatenate([h.X for h in parts]),
             np.concatenate([h.Y for h in parts]))
-        X0, Y0, X1, Y1 = rect
-        window = frame[Y0 - vy:Y1 - vy, X0 - vx:X1 - vx]
         plate, known = self.art.crop(*rect)
+        window = self._window(frame, plate, X0 - vx, Y0 - vy, X1 - vx, Y1 - vy, shown)
         boxes = her_box + [b for fx, fy, b in mobs if abs(fx - nb.x) > HANDOVER_DX or abs(fy - nb.y) > HANDOVER_DY]
-        sums = self._sums(window, plate, _keep(rect, boxes, known), hyps, pics)
+        sums = self._sums(window, plate, _keep(rect, boxes, known, shown), hyps, pics)
         a, expl, r2, res = scores(sums)
         h0 = int(np.argmax(expl))
         solid = a[h0] > A_HI and r2[h0] >= 1.0 - U_MAX
-        h = kept(sums, pics.k, a, expl, a >= nb.a - DROP_A)
-        if h is None:
-            return ("solid", None) if solid else None
-        if not passes(a[h], r2[h], res[h]):
-            return ("solid", None) if solid else ("no", None)
+        least = max(nb.top, nb.a) - DROP_A
+        h = kept(sums, pics.k, a, expl, a >= least)
+        if h is None or not passes(a[h], r2[h], res[h]):
+            if solid:
+                return "solid", None
+            o = kept(sums, pics.k, a, expl)
+            if o is not None and a[o] < least and passes(a[o], r2[o], res[o]):
+                return "out", None
+            return None if h is None else ("no", None)
         pic = pics.list[int(hyps.pic[h])]
         return "ok", Sighting(nb.point, nb.kind, float(hyps.X[h]), float(hyps.Y[h]), float(a[h]), float(r2[h]),
                               float(res[h]), pic, nb.since, False)

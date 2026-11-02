@@ -18,10 +18,11 @@ A monster found fading in at its spawn point (the frame step's spawn watch, perc
 until the whole screen finds it, a median 7 frames on) is a track like any other from its first sighting, its alpha in
 it (`fading`) and when it turns solid (`solid_at`: alpha FADE_PER_S a second), carried on that line once the whole
 screen has it (it finds them at alpha 0.6-0.8): a newborn can be hit while it fades, and didn't touch her until it was
-solid (perception.spawns). Such a sighting is the track of a monster first seen since its fade began (or seen fading
-itself) only, never an older one's (FADE_SLACK_S); and its track isn't dropped as a flicker (MIN_SEEN_S): the watch's
-sightings are a monster's (none false on the labelled clips), lost now and then for a frame or two under cover before
-the whole screen finds them (68 of 390).
+solid (perception.spawns). Such a sighting is the track of a monster first seen since its fade began only, never an
+older one's, nor the newborn's before it at its point (FADE_SLACK_S; until the review of 2026-11-01 a track seen fading
+itself was let take it: 4 times on the clips the next newborn at a point 7 s later took the last one's hidden track);
+and its track isn't dropped as a flicker (MIN_SEEN_S): the watch's sightings are a monster's (none false on the labelled
+clips), lost now and then for a frame or two under cover before the whole screen finds them (68 of 390).
 
 A track's place is its last detection's feet; its velocity is no measure of its own (the user, 2026-10-30: "Perception
 should only give mob heading, speed should come from data-mined game files"): its kind's speed from the game data the
@@ -523,8 +524,7 @@ class MonsterTracker:
                     continue
                 if t > tr.last_seen and self._stray(tr, m, t):
                     continue  # (her kill's monster, lost where her star landed on it)
-                if m.mob.fading is not None and tr.solid_at is None \
-                        and tr.first_seen < t - m.mob.fading / FADE_PER_S - FADE_SLACK_S:
+                if m.mob.fading is not None and tr.first_seen < t - m.mob.fading / FADE_PER_S - FADE_SLACK_S:
                     continue  # (a newborn isn't a monster seen before its fade began)
                 x = self.predicted(tr, t)
                 gap = abs(m.x - x)
