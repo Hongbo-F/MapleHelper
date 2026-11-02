@@ -49,7 +49,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from ..attack import reach
+from ..motion import physics
 from ..paths import TELEMETRY
 
 # s after an attack key that an EXP gain naming its target's kind is its kill: the gain showed 0.15-0.46 s after the
@@ -295,12 +295,14 @@ def _room(row: dict) -> tuple[int, int]:
     return lo - base, hi - base
 
 
+TOP_KEY_MS = round(physics.APEX_S * 1000)  # attack.reach's: the top's key (278), its jitter's whole room WHOLE_TOP,
+WHOLE_TOP = (-20, 20)                       # the soonest's WHOLE_FIRST (reach.JITTER_TOP_MS, JITTER_FIRST_MS; not
+WHOLE_FIRST = (0, 15)                       # imported: the analysis sits under attack, tests check they agree)
+
+
 def _whole(row: dict) -> tuple[int, int]:
-    """The whole room of its base key's jitter: the top's (attack.reach.TOP_KEY_MS) JITTER_TOP_MS either side, the
-    soonest's JITTER_FIRST_MS later."""
-    if row.get("base_ms") == reach.TOP_KEY_MS:
-        return -reach.JITTER_TOP_MS, reach.JITTER_TOP_MS
-    return 0, reach.JITTER_FIRST_MS
+    """The whole room of its base key's jitter: the top's (TOP_KEY_MS) WHOLE_TOP, the soonest's WHOLE_FIRST."""
+    return WHOLE_TOP if row.get("base_ms") == TOP_KEY_MS else WHOLE_FIRST
 
 
 def _label(g: tuple) -> str:

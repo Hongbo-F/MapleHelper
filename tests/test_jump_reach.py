@@ -785,6 +785,8 @@ def test_the_jitter_test_shuffles_within_each_room_and_counts_presses_as_they_we
     test = jumps.jitter_test(got)
     assert float(test.splitlines()[-1].split(" p ")[1].split()[0]) > 0.05 and "nothing to test" not in test, test
     assert {jumps._room(r) for r in got} == {(0, 5), (0, 15)} and jumps._whole(got[0]) == (0, 15)
+    assert (jumps.TOP_KEY_MS, jumps.WHOLE_TOP, jumps.WHOLE_FIRST) == (  # (reach's own, not imported there)
+        reach.TOP_KEY_MS, (-reach.JITTER_TOP_MS, reach.JITTER_TOP_MS), (0, reach.JITTER_FIRST_MS))
     assert {jumps._bin(r) for r in got} == {0, 5, 10, 15}
     table = jumps.jitter_table(got)
     assert "narrow" in table.splitlines()[0]
