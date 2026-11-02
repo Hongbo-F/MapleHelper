@@ -1061,6 +1061,7 @@ Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and p
 - **All of it together**, against the simulator before (harness, preset `game`, 20 seeds of 20 minutes): the hunt loop 123.3 -> 131.3 EXP a minute (better on 17 of 20 seeds, the worst 7% down), HP lost 2.55 -> 2.01 bars (182 -> 135 touches that hurt), drops picked up 88.1% -> 90.1%; the tour 88.6 -> 93.8 (better on 17 of 20, the worst 24% down), HP lost 2.52 -> 2.20 bars (180 -> 149), drops 91.7% -> 94.2%. She evades 52.5% (loop) and 53.1% (tour) of all touches. The world got easier, not harder: the push outweighs the rest. Without it (the frames, damage and evasion alone) it got a little harder: 119.7 and 87.8 EXP a minute.
 
 - `python -m gamelab sim tour_tree_run --speed 4` runs a scenario and records it for the mini-map: open `python -m gamelab minimap` first to watch it as it happens.
+- `python -m gamelab.analysis.walkfit RUN ...` measures her walk, her takeoffs, her steps and her trips' arrivals in any run's telemetry against the walk the run planned her moves at (Records to measure by).
 - `python -m gamelab.analysis.physics_check` replays her recorded movement (18 recordings, or the 6 kept as test fixtures) through the physics models and prints how far each is off (see Motion planning).
 - `python -m gamelab.sim.golden check` reruns every scenario and compares it with the golden trace recorded earlier: every key plan, log line and result. A refactor that leaves those byte-identical hasn't changed what she does. `record` rewrites the traces (after an intended change). Both take `--jobs N`, the scenarios on a pool of N processes, the same traces and output (Checking a change). The traces hold map data, so they stay in `lab/golden` (git-ignored): a branch worked on in a worktree of its own re-records them in its own `lab`, so once it's merged, `record` is run in the main checkout too (with the feed's searches off the frame loop, the route track and the other players together, 32 of master's 86: the other players' and her EXP number's 27 and the five `feed_*`; Found offline).
 
@@ -3858,6 +3859,111 @@ switched in its first 40 frames in 13 of 323 births against master's 5 (2 pairs 
 faint first sighting heading the wrong way: of record). The thresholds were chosen on the same 17 clips that show no
 false positive; out of sample, the review's 124 stills alone. The JPEG recordings can't test the watch (no newborn
 found there): live frames are lossless.
+
+## Records to measure by: the run summary, the trips, the passes, the loop's promise, and walkfit (from 2026-11-02)
+
+The analysis of the three recordings of 2026-11-02 (RiceBaby grinding Tree Dungeon on master 40ba190: R1 00:09:36-00:14:57,
+the hour 00:17:48-00:53:06 with R2 and R3 inside it; D:/MapleHelper-scratch/rec-analysis/plans, ROADMAP item 2) had to
+rebuild every measure from hand-made scripts hard-wired to that day's files and to the 125 units/s her walk was
+planned at, and found the run's own summary wrong. One telemetry pass so the next recorded run can be measured from its
+records alone, and `walkfit`, the walk check every motion fix needs. Nothing she does changes: the records only read
+what's there (the Tree goldens' plans, logs and worlds are byte-identical; 9 results' report lines changed, below).
+
+**The run summary** (`behavior.hunt.HuntReport`, the 'hunt done' line and a telemetry 'summary' record). R1's said 52
+kills, +1,731 off her EXP number and 80 throws, where the run had 53, +1,798 and 85
+(D:/MapleHelper-scratch/recfix/records). Three causes, each fixed:
+- Her EXP number's first reading came with her first kill. The perception service read the number at its start
+  (00:07:38) and the hunt, attaching at 00:09:36, hears only its changes; its meter took the first change as its first
+  reading, and that kill's 26 were lost. Each 'exp_gain' event now tells the number before it (`before`: worldstate's
+  meter's last reading), which the hunter's meter starts from (`hunter.feed_reads`). Replayed through the meter, R1's 53
+  changes read +1,798 from `before`, +1,772 without (tests/test_records.py, on R1's service records).
+- The navigator's shots clearing her way (4 in R1) count in the hunter's report, not the hunt's. `casts` is now every
+  throw of hers over the run; `throws` stays the hunt's own, what the grind learns its kill time from (Patrol.learn_kills:
+  unchanged).
+- At time-up (00:14:44.0) the hunt stopped counting, and its trip to stand by shot one more Horny (cast 00:14:44.3, its
+  41 EXP at 00:14:44.8). The stand-by's seconds and kills are the run's now (`standby_s`, `standby_kills`); the grind's
+  per-platform credit stays where she hunted.
+
+It also says her touches a minute (MISS too), her potions as her HP number's rises of `hunter.POTION_RISE_HP` (100) or
+more tell (her pet drinks them; the analysis counted 15 in R1 and 92 in the hour so), and her lowest HP as the number
+read. R1's, as the summary now writes it: `301 s and 13 s to stand by; grounds [...]; kills: 25 green-mushroom, 28
+horny-mushroom (EXP gains 53, EXP 1798; off her EXP number +1798, 343.6 a minute; 1 on her way to stand by); throws 85
+(5 clearing her way); piles 65; touches 29 (5.5 a minute), 0 MISS; potions 15 (2.9 a minute), lowest HP 527 of 842`
+(tests/test_records.py; the figures the analysis counted off R1's records). The hour's own summary can't be checked:
+that run was killed at 00:53:06 before writing one.
+
+**The records** (telemetry topics as before; the new fields only, each left out where it has nothing to say):
+
+| record | new fields | what for |
+|---|---|---|
+| `session` (a recording command's) | `physics`: character, class, SPEED and JUMP (%), walk and climb (units/s) | the walk the run planned her moves at (`motion.physics.record`): walkfit's yardstick |
+| `scene` (the hunt's looks) | `seq` (the perception service's frame number; its own scenes too), `age` (ms since the frame showed) | a decision matched to its frame: a recording's index.jsonl has the same `seq` |
+| `trip` | `on`, `x` (her last look's place as it ended; the arrival walk's own look), `walk` ([units asked, hold ms] each walk on to x) | an 'arrived' trip off its platform's end shows (P02) |
+| `event` backstop of a pass regardless | `move` [kind, src, dst, x], `blocker` {kind, platform, x, rel: same/above/below}, `waited` (looks), `blocked_s`, `shots`, `why_not` {safe, worth, last_shot}, `episode`, `nth` | why each pass happened; passes of one move within `navigator.PASS_EPISODE_S` (3.5 s) are one episode, so touches are counted once an episode (P04) |
+| `no_cast` | one for every cast her MP refuses (why 'MP', `mp` as reckoned, `cost`); the log still says the 1st, 10th and 100th | how often her reckoned MP refused a cast (P27) |
+| `sweep` | `to`: the next stop's peeked choice (`peek`: why, stop, travel, expected, seen, gain, skipped; `heading`), else the objective it's the place of, else her spot (`home`) | why a sweep headed where it did (P32: the 00:48:04 descent) |
+| `grind` 'state' and 'end' | `loop_s`, `loop_exp`, `loop_rate` (since the loop was taken up), `promised` (the loop's rate over her looks' time), `delivered` (EXP a minute, her kills' kinds), `rule_s` (s by hunt rule) | the loop's promise against what it gave (P30: 556 against 437 over the hour) |
+| `summary` (new) | the run's figures (`HuntReport.record`): kills, EXP both ways, throws and casts, touches, potions, lowest HP, a minute each, rules and their seconds | one record a run, for its README and its comparisons |
+| the service's `exp_gain` event | `before` [level, EXP] | what the hunt's meter starts from |
+
+Not here: each cast's target monster and side (work/rec-replay adds it), a perception record every frame while a hunt
+is attached (35 MB an hour more; the service's scenes stay every other frame), and the 10 s line's plate share split
+(P26).
+
+Their size: the hour's tour.jsonl was 12,588,941 bytes. At the new fields' sizes in the simulator's loop_tree_grind
+(19.6 bytes a scene, 17.8 a trip, 80.8 a sweep, 185 a backstop, 221 a grind state) and the hour's own counts (5,410
+scenes, 708 trips, 561 sweeps, 155 backstops, 25 states), about 12.79 MB: +1.6%, half of it the scenes' `seq` and `age`
+(D:/MapleHelper-scratch/recfix/records/scripts/sizes.py; estimated, the hour can't be run again). The service's
+perceive.jsonl grows by `before` on each EXP change (about 25 bytes, 400 an hour).
+
+**walkfit** (`python -m gamelab.analysis.walkfit RUN [RUN ...] [--planned UNITS] [--character ID] [--frames] [--json]`;
+`analysis/walkfit.py`). A RUN is a telemetry folder (a golden clip's `telemetry/` too) or files: the hunt's and the
+perception service's. It reads the planned walk off the run's session record (older runs: `--planned`, else the
+profile of `--character` as the code has it now, said as assumed) and gives, per run and per map: her steady walk
+(median, quartiles, se, n: tag-placed stretches of the service's scenes on one platform, 0.8 s or more, a line fitted
+past her run-up), against the planned and as the SPEED (%) that would plan it; her takeoffs on walk-then-jump first
+legs against the plan's (median, after walks of 100 or more, and against the engine at her measured walk); her steps'
+ratio, gone over asked; and her 'arrived' trips on another platform, with and without a touch 3 s before. `--frames`
+cuts each recording's folder to its frames' span. On R1-R3 (`--character magician`: her profile then planned 125):
+
+| run | min | walk: median (IQR) se, n | x planned | late, after 100+ (n) | vs engine at her walk | steps (n) | arrived: off / clean |
+|---|---|---|---|---|---|---|---|
+| R1's grind (tour 00:09:36) | 5.2 | 147.7 (146.5-149.1) 1.5, 13 | 1.182 | +11.3, +32.7 (21) | +3.8, +9.6 | 1.19 (5) | 30: 2 / 2 |
+| the hour (tour 00:17:48) | 35.2 | 148.2 (146.3-150.2) 0.4, 81 | 1.186 | +7.5, +24.9 (108) | +0.1, +3.0 | 1.19 (68) | 210: 18 / 15 |
+| Tree Dungeon, both | 40.4 | 148.2 (146.3-150.2) 0.4, 94 | 1.185 | +8.0, +25.3 (129) | +0.3, +3.9 | 1.19 (73) | 240: 20 / 17 |
+| `--frames`: R1 | 4.0 | 147.9 (145.9-149.0) 2.0, 10 | 1.184 | +14.2, +32.7 (16) | +4.4, +9.4 | 1.19 (5) | 27: 2 / 2 |
+| R2 | 5.0 | 147.5 (146.3-150.2) 0.9, 14 | 1.180 | +7.9, +21.5 (15) | +1.1, +3.7 | 1.21 (14) | 30: 2 / 2 |
+| R3 | 5.0 | 149.4 (145.8-150.6) 1.4, 12 | 1.195 | +6.9, +16.0 (21) | -2.9, -6.2 | 1.13 (11) | 23: 4 / 4 |
+
+The hour's row is the analysis' to the digit: 148.2 over 81 walks, se 0.4 (profile_checks.py); +7.5 / +24.9 over 108
+legs, +0.1 / +3.0 at 148.2 (engine_fit.py); 18 of 210 'arrived' trips elsewhere, 15 with no touch (arrived_wrong.py);
+steps 1.19, quartiles 1.14-1.22 over 68 (steps.py's "71 steps" counted the 3 asked under 30 units too, its ratio was over
+the same 68). Two differences, both of population: the slope of lateness on walk is 0.219 here over the 108 untouched
+legs of 20 units or more, 0.164 in takeoff_check.py over 133 legs with touched ones and walks of 5-20 among them; and the
+touches it leaves steps out for go by each touch's own moment (the service's 'touch' events' time less `late`, as the
+analysts' touch list had them): by the events' time alone 67 steps, not 68. The R3 quartile 0.18 is a step cut short
+where she stood. Tests: tests/test_walkfit.py on two stretches cut from the hour (tests/fixtures/records/hour-cut, 92 KB:
+the jumps 8->7 of 00:37:57.8 and 00:38:06.6 that ended on 9, the arrival walk off 10 at 00:41:10.99).
+
+**The goldens** that changed, their results' report line alone (plans, logs and worlds identical; 34 of 43 unchanged):
+
+| golden | what changed |
+|---|---|
+| loop_tree_23 | 1 s to stand by in its rate; touches, potions, lowest HP said |
+| loop_tree_23_near_misses | 57 throws (1 clearing her way), was 56; 1 s to stand by |
+| loop_tree_crowd | 129 throws (14 clearing her way), was 115; 10 s to stand by |
+| loop_tree_grind | 16 kills (+1 Green on her way to stand by), +551 off her number, was 15 and +525; 144 throws (3), was 141; 7 s to stand by |
+| loop_tree_grind_drops | 170 throws (4), was 166; 19 s to stand by |
+| loop_tree_mp_runs_out | 1 s to stand by; touches 0 |
+| loop_tree_run | 34 kills (+2 Greens on her way to stand by), +936, was 32 and +884; 215 throws (9), was 206; 16 s to stand by |
+| loop_tree_wait | 189 throws (24), was 165; 3 s to stand by |
+| loop_tree_walls | 210 throws (15), was 195; 2 s to stand by |
+
+**Open.** The potions are rises of her HP number of 100 or more: a Red Potion's 50 isn't counted, and a potion and a
+touch between two reads hide each other. walkfit compares a trip's `dst` with her platform as the records name them: a
+twin platform (MapModel.twins) would read as elsewhere. Old runs have no physics record: their planned walk is assumed
+from the profile now (a run before a speed change needs `--planned`). Her walk checked online, per map (ROADMAP item
+25), is not built: walkfit is its offline half.
 
 ## Localization
 
