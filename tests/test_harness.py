@@ -80,6 +80,39 @@ def test_near_her_on_her_platform_a_look_finds_a_monster_as_seldom_as_live(model
     assert (noise.near_seen, noise.off_seen) == (world_mod.NEAR_SEEN, world_mod.OFF_SEEN)
 
 
+def test_a_monster_back_at_its_spawn_point_is_found_once_its_fade_reaches_its_drawn_alpha(model):
+    """`--world spawn-fade` and `spawn-fade-wide` (Noise.spawn_found: world.SPAWN_FOUND, SPAWN_FOUND_WIDE, measured on
+    Tree Dungeon's clips): a monster back at its spawn point fades in over SPAWN_FADE_S, its alpha in what the looks
+    see (Mob.fading) while it does, and isn't found before its alpha reaches the one drawn for it, the tables' medians
+    0.098 (the spawn watch on) and 0.647 (the whole screen alone); a monster there from the start, or the noise off,
+    is drawn solid and found from the start, as before."""
+    for table, median in ((world_mod.SPAWN_FOUND, 0.098), (world_mod.SPAWN_FOUND_WIDE, 0.647)):
+        draws = sorted(Noise.found_at(table, (k + 0.5) / 1000) for k in range(1000))
+        assert draws[500] == pytest.approx(median, abs=0.01) and draws[0] >= table[0][0] and draws[-1] <= 1.0
+    b = plat(model, 360, 300)
+    clock = Clock()
+
+    def first_found(noise: Noise):
+        w = still(World(model, KEYS, (b.id, 100.0), monsters=[("Snail", b.id, 300.0)], origin=clock.now, noise=noise))
+        w.invulnerable_ms = 10 ** 9
+        h = Hunter(FakeEyes(w, clock, model), KEYS, model, log=lambda m: None)
+        w.monsters[0].born = w.t   # (back at its spawn point now)
+        for k in range(20):
+            got = h.look(wide=True).monsters
+            if got:
+                return k, got[0].fading
+            clock.advance_to(clock.now + 0.05)
+        return None, None
+    k, fading = first_found(Noise(spawn_found=world_mod.SPAWN_FOUND_WIDE))
+    assert k >= 1 and 0.2 <= fading < 1.0   # (the first looks, too early: unfound)
+    k0, fading0 = first_found(Noise())
+    assert (k0, fading0) == (0, None)
+    assert harness.WORLDS["spawn-fade"] == {"spawn_found": world_mod.SPAWN_FOUND}
+    assert harness.WORLDS["spawn-fade-wide"] == {"spawn_found": world_mod.SPAWN_FOUND_WIDE}
+    noise = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("spawn-fade",)).noise
+    assert noise.spawn_found == world_mod.SPAWN_FOUND and noise.near_seen == ()
+
+
 def test_a_monsters_pose_can_read_wrong_in_spells_as_the_templates_do_in_game(model):
     b = plat(model, 360, 300)
 

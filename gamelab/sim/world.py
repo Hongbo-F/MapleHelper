@@ -476,6 +476,21 @@ DIE_LOST_S = 0.17
 # after die1 began.
 DEATH_SEEN = 0.83
 DEATH_SEEN_AFTER = 0.14
+# A monster the map spawns fades in (Noise.spawn_found): from nothing to solid in SPAWN_FADE_S (alpha 1.224 a second,
+# 223 births on Tree Dungeon's lossless clips: perception.spawns.FADE_PER_S), and a look finds it only once its alpha
+# has reached the one drawn for it from a table of the share of newborns first found by then (each one's own draw, its
+# index and birth: then seen as any monster is, the rest of the noise as ever), its alpha in what the look sees
+# (Mob.fading) while it fades. Measured on those clips' 323 traced births (D:/MapleHelper-scratch/spawn-fade/integ,
+# cdf.py): with the frame step's spawn watch (perception.spawns, worldstate.SPAWNS) the watch or the whole screen first
+# found them at alpha 0.098 at the median (p10 0.039, p90 0.66: the ones whose start was hidden, under her, players or
+# effects, as late as the whole screen finds them), SPAWN_FOUND; the whole screen alone (before 2026-11-01) at 0.647
+# (p10 0.41, p90 0.89), SPAWN_FOUND_WIDE: 0.53 s later. A table's pairs (alpha, share first found by then), from the
+# faintest any was found at.
+SPAWN_FADE_S = 0.817
+SPAWN_FOUND = ((0.02, 0.0), (0.05, 0.204), (0.1, 0.579), (0.2, 0.734), (0.3, 0.737), (0.4, 0.762), (0.5, 0.793),
+               (0.6, 0.861), (0.7, 0.926), (0.8, 0.957), (0.9, 0.988), (1.0, 1.0))
+SPAWN_FOUND_WIDE = ((0.2, 0.0), (0.3, 0.006), (0.4, 0.093), (0.5, 0.207), (0.6, 0.409), (0.7, 0.576), (0.8, 0.771),
+                    (0.9, 0.904), (1.0, 1.0))
 POSE_SPELL_S = 1.0       # s a monster's pose reads right or wrong at a time (Noise.pose_wrong)
 HEADING_SPELL_S = 1.0    # s one pose of hers reads the wrong way at a time (Noise.heading_wrong in runs): a pose her
                          # pictures read wrong reads so on every frame while she holds it
@@ -825,6 +840,10 @@ class Noise:
                                  # detect_miss has it. NEAR_SEEN: as live; () off
     off_seen: float | None = None  # ... and one on another platform with this chance (OFF_SEEN: as live); None: as
                                    # detect_miss has it
+    spawn_found: tuple = ()      # ((alpha, share), ...): a monster back at its spawn point fades in (SPAWN_FADE_S) and
+                                 # isn't found before its alpha reaches one drawn from this table, its alpha in what's
+                                 # seen while it fades (SPAWN_FOUND: as live with the spawn watch; SPAWN_FOUND_WIDE: the
+                                 # whole screen alone); () off: drawn solid, and found, from its birth
     air_short: float = 0.0       # chance a monster on the platform she last stood on whose body is short of the star's
                                  # search's first band (point-blank: its far side within reach.SEARCH_START ahead of her)
                                  # takes the star of an attack from a jump all the same, nearer than the search's pick
@@ -850,6 +869,17 @@ class Noise:
     @staticmethod
     def during(spells: tuple, t: float) -> bool:
         return any(a <= t < b for a, b in spells)
+
+    @staticmethod
+    def found_at(table: tuple, u: float) -> float:
+        """The alpha a newborn is first found at, for a draw u in [0, 1) from spawn_found's `table` (its cumulative
+        shares, linear between its pairs)."""
+        a0, c0 = table[0]
+        for a1, c1 in table[1:]:
+            if u < c1:
+                return a0 + (a1 - a0) * (u - c0) / (c1 - c0) if c1 > c0 else a1
+            a0, c0 = a1, c1
+        return table[-1][0]
 
 
 @dataclass(frozen=True)
@@ -3560,6 +3590,14 @@ class World:
             elif m.died_at is not None and 0.0 <= t - m.died_at < m.fade:
                 out.append((m, m.died_x, m.y(m.died_x), False))
         return out
+
+    def fading(self, m: SimMonster) -> float | None:
+        """Monster `m`'s alpha while it fades in at its spawn point after coming back (Noise.spawn_found on:
+        SPAWN_FADE_S from its birth); None: drawn solid (there from the start, its fade over, or the noise off)."""
+        if not self.noise.spawn_found or m.born is None or not m.alive:
+            return None
+        a = (self.t - m.born) / SPAWN_FADE_S
+        return a if 0.0 <= a < 1.0 else None
 
     def drawn_bar(self, m: SimMonster) -> float | None:
         """The HP bar monster `m` is drawn with (its share left; None: none drawn, unhurt): a killed one drawn alive

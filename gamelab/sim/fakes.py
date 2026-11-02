@@ -725,7 +725,9 @@ class FakeEyes(Eyes):
                     else "move" if walking else "stand") if alive else ""
             if pose in ("move", "stand") and self._pose_wrong(m):
                 pose = "stand" if pose == "move" else "move"
-            mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9, float(cx), float(feet), way, pose)
+            fading = self.world.fading(m) if alive else None   # (fading in at its spawn point: Noise.spawn_found)
+            mob = Mob(m.kind, cx, feet - h // 2, w, h, 0.9, float(cx), float(feet), way, pose,
+                      fading=None if fading is None else round(fading, 3))
             if not (0 <= cx - w // 2 and cx + w // 2 <= FRAME[1]
                     and 0 <= mob.y - h // 2 and mob.y + h // 2 <= PLAY_BOTTOM):
                 continue
@@ -798,13 +800,17 @@ class FakeEyes(Eyes):
         return bool(self.noise.pose_wrong) and w.chance(f"pose:{m.idx}", int(w.t // POSE_SPELL_S)) < self.noise.pose_wrong
 
     def _unseen(self, m, alive: bool) -> bool:
-        """Whether this look misses monster `m` though it shows: hit and hiding under its damage numbers
+        """Whether this look misses monster `m` though it shows: fading in at its spawn point fainter than the alpha
+        drawn for it (Noise.spawn_found), hit and hiding under its damage numbers
         (Noise.hit_hidden), on her platform by how near her it is (Noise.near_seen: her body over it, as live) or on
         another (Noise.off_seen), or just not found (Noise.detect_miss). All are drawn per monster from the world's
         seeded chances, the hiding once per hit."""
         noise, w = self.noise, self.world
         if not alive and w.realism.dies_late and m.died_at is not None and w.t - m.died_at > DIE_LOST_S:
             return True  # (its death animation isn't among the detector's pictures: lost once it plays)
+        if alive and (a := w.fading(m)) is not None and a < noise.found_at(
+                noise.spawn_found, w.chance(f"spawn:{m.idx}", int(round(m.born * 1000)))):
+            return True  # (fading in at its spawn point, too faint yet for the looks: Noise.spawn_found)
         if alive and noise.hit_hidden and m.hit_at is not None:
             lo, hi = noise.hit_hidden
             if w.t < m.hit_at + lo + (hi - lo) * w.chance(f"hide:{m.idx}", int(round(m.hit_at * 1000))):

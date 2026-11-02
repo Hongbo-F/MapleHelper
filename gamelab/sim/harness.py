@@ -171,7 +171,8 @@ from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
 from .world import (HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, OFF_SEEN,
-                    POTIONS, ROPE_REACH_CLIENT, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
+                    POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp,
+                    Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -266,6 +267,11 @@ WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 # farther; one on another platform 70% (the live hunt of 2026-10-25), where the presets find it 90% of the time wherever
 # it is.
 WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
+# ... and the monsters the map spawns fading in, seen as late as live sees them (`spawn-fade`: world.SPAWN_FOUND, the
+# frame step's spawn watch on, as from 2026-11-01; Noise.spawn_found) or as the whole screen alone saw them before
+# (`spawn-fade-wide`: SPAWN_FOUND_WIDE, a median 0.53 s later), where every other world finds a newborn from its birth.
+WORLDS["spawn-fade"] = {"spawn_found": SPAWN_FOUND}
+WORLDS["spawn-fade-wide"] = {"spawn_found": SPAWN_FOUND_WIDE}
 # ... and her invulnerability after a touch as live (`walkers`: INVULNERABLE_LIVE; Realism.invulnerable), with the
 # monsters she hits chasing her (Realism.chase, world.AGGRO_S: every world's since 2026-10-31; till then this world's
 # alone, by chance, CHASE_TREE; and each monster back 17 s after its own death, RESPAWN_LIVE, until the server's respawn
@@ -312,7 +318,7 @@ WORLDS["meat"] = {"potion": MEAT_HP, "potions": POTIONS}
 # other worlds' drops are hers to pick up alone: live, 26-29% of the drops taken on her platform went with her 45 units
 # or more off, or with her never within 15 of them.
 WORLDS["pet-loot"] = {"pets": 2}
-NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen")  # WORLDS' fields that are world.Noise's
+NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
 # MP (Her.cast_mp: LEVEL_25's 14 of 623) and nothing with less, her attack
