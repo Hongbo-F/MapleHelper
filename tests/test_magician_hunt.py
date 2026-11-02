@@ -154,6 +154,21 @@ def test_she_casts_magic_claw_whenever_her_mp_pays_and_never_her_regular_attack(
     assert a.summary().startswith("Magic Claw 2, the regular attack 0 (no cast: MP 1)")
 
 
+def test_every_cast_her_mp_refuses_is_a_no_cast_record():
+    """Logged the 1st, 10th and 100th time, recorded every time (from 2026-11-02: how often her reckoned MP refused a
+    cast couldn't be told, P27 of the recordings' analysis), with her MP as reckoned and the cast's."""
+    from gamelab import telemetry
+    a, said = _her_attacks()
+    with telemetry.captured() as records:
+        for _ in range(3):
+            a.on_look(_look([("green-mushroom", 200.0, 0.5)], mp=15 / 1007))
+            assert a.key("right") is None
+    refused = [r for r in records if r["topic"] == "no_cast"]
+    assert a.counts["no cast: MP"] == 3 and sum("no cast (MP)" in line for line in said) == 1
+    assert len(refused) == 3 and all(r["why"] == "MP" and r["by"] == "key" and r["mp"] == 15 and r["cost"] == 20.0
+                                     and r["kind"] == "green-mushroom" for r in refused)
+
+
 def test_out_of_mp_when_her_mp_stays_under_two_casts():
     w = darts.MpWatch(20.0, 1007.0)
     t = 1000.0
