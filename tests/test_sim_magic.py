@@ -207,3 +207,59 @@ def test_her_wand_swings_at_nothing_and_her_keys_are_the_simulators():
     assert SIM_KEYS_MAGE.magic_claw.name == "shift" and SIM_KEYS_MAGE.lucky_seven is None
     assert world_mod._actions(SIM_KEYS_MAGE)["shift"] == "skill"
     assert "magic_claw" not in {f for f, _ in world_mod.ACTIONS if getattr(SIM_KEYS_PET, f, None) is not None}
+
+
+# --- the harness plays her (sim.harness --character magician) ----------------------------------------------------------
+
+def test_her_on_tree_is_the_magician_where_the_process_plays_her():
+    from gamelab.sim.world import LEVEL_25
+    assert scenarios.her_on(TREE, "magician") == (SIM_KEYS_MAGE, MAGE_32)
+    assert scenarios.her_on(TREE, "thief") == (SIM_KEYS_PET, LEVEL_25) == scenarios.her_on(TREE)  # (the tests: thief)
+    assert scenarios.her_on(1, "magician") == scenarios.her_on(1)  # (hers on Tree Dungeon alone)
+
+
+def test_the_harness_plays_whom_it_is_told():
+    from gamelab.sim import harness
+    assert harness._who(["run", "loop-grind", "--character", "magician"], {}) == ("magician", "")
+    assert harness._who(["run", "loop-grind"], {"GAMELAB_CHARACTER": "magician"}) == ("magician", "")  # (`ab`'s filler)
+    assert harness._who(["run", "loop-grind"], {}) == ("thief", "")
+    assert harness._who(["run", "x", "--character", "magician"], {"GAMELAB_CHARACTER": "thief"})[0] is None
+    assert harness._who(["run", "x", "--character", "warrior"], {})[0] is None
+    sc = harness.scenario("loop-grind", 1, "crowd", map_id=TREE, world=("zero-walls",), attack="choice")
+    assert sc.her.magic is None and sc.her.skill == world_mod.LUCKY_SEVEN and sc.book is None  # (the thief's, as ever)
+
+
+def test_her_damage_book_is_her_stacks_as_the_hour_began():
+    # Her stack's book when the hour of 2026-11-02 began: the fit its file had (her level-29 and 30 reads: 125-150 a hit),
+    # her level-31 and 32 reads too few for another (3 exact of 15), so a Green Mushroom (303 before its defence) is
+    # reckoned to outlive a cast as live (behavior.damage)
+    from gamelab.behavior import damage
+    book = damage.Book(scenarios.HER_BOOK, log=lambda line: None, level=lambda: 32)
+    book.path = None  # (nothing saved)
+    assert book.attack(damage.Attack("magic_claw", 2, 76, 267, 20.0)).lo == 125
+    assert book.attack(damage.Attack("magic_claw", 2, 76, 267, 20.0)).hi == 150
+    assert max(r.t for r in book.reads("magic_claw")) <= 1793607468.0  # (00:17:48, UTC-8)
+    assert damage.fit(book.reads("magic_claw"), 2) is None
+
+
+@pytest.mark.slow
+def test_a_simulated_grind_of_hers_casts_from_the_ground_inside_her_lock_never():
+    # The harness as her (a process of her own): her stack casts Magic Claw in her world, never in the air, never inside
+    # the world's lock (0.80 s), never her wand; its results say whom they are of
+    import json
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+    tree_map()
+    from gamelab.paths import REPO
+    with tempfile.TemporaryDirectory() as tmp:
+        name = Path(tmp) / "her.json"
+        done = subprocess.run([sys.executable, "-m", "gamelab.sim.harness", "run", "loop-grind", "--character",
+                               "magician", "--map", str(TREE), "--preset", "crowd", "--world", "zero-walls", "--seeds",
+                               "1", "--minutes", "0.75", "--save", str(name.with_suffix(""))], cwd=REPO,
+                              capture_output=True, text=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        r = json.loads(Path(name).read_text(encoding="utf-8"))[0]
+    assert r["character"] == "magician" and r["casts"] >= 5 and r["kills"] >= 2
+    assert r["air_presses"] == 0 and r["attack_locked"] == 0 and r["swings"] == 0 and r["misses"] == 0

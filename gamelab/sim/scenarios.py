@@ -38,13 +38,13 @@ from ..behavior.hunter import Hunter
 from ..behavior.safety import HuntStop, SafetyStop
 from ..localization.mapdata import MapModel
 from ..control.navigator import Navigator
-from ..control.timeline import SIM_KEYS, SIM_KEYS_PET
+from ..control.timeline import SIM_KEYS, SIM_KEYS_MAGE, SIM_KEYS_PET
 from ..behavior.tour import Tour
 from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout,
                     SimViolation, Trace, detector_kinds, patched)
 from . import harness
-from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, TREE_DROP_MIX, Her,
-                    Noise, Realism, SimDied, World)
+from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT,
+                    TREE_DROP_MIX, Her, Noise, Realism, SimDied, World)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -55,6 +55,15 @@ TREE = 10002073    # Victoria Road: Tree Dungeon, Forest Up North II, the third 
 # on 2026-10-25: world.LEVEL_25; level 24 until 2026-10-26), the same keys and pet. Any other map (the tests' synthetic
 # ones): the first map's.
 HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23), TREE: (SIM_KEYS_PET, LEVEL_25)}
+# ... and another character than the thief, by (map, her character's id), where the process plays her (gamelab.character:
+# GAMELAB_CHARACTER; the harness's `--character`): the magician on Tree Dungeon as the recordings of 2026-11-02 measured
+# her (world.MAGE_32: Magic Claw as the game casts it, her stat window, her walk), with Magic Claw on Shift (SIM_KEYS_MAGE).
+HERS = {(TREE, "magician"): (SIM_KEYS_MAGE, MAGE_32)}
+# Her damage book as her stack had learned it when the hour of 2026-11-02 began (00:17:48: lab/characters/magician/
+# damage.json, its reads up to then, of her level 31 and 32 and the one under, LEVELS_BACK), which a simulated run of hers
+# starts from as live's did (behavior.damage.Book: what she reckons a monster has left); without it her stack would go by
+# her profile's prior (2 x 76-267 a cast) until 15 exact reads of the run's own.
+HER_BOOK = Path(__file__).with_name("her_damage_book.json")
 _MODEL: dict[int, MapModel] = {}
 
 
@@ -75,9 +84,13 @@ def real_map(map_id: int = MAP_ID) -> MapModel | None:
     return _MODEL[map_id]
 
 
-def her_on(map_id: int) -> tuple:
-    """Her keys and her (world.Her) on map `map_id` (HER; the first map's on any other)."""
-    return HER.get(map_id, HER[MAP_ID])
+def her_on(map_id: int, who: str | None = None) -> tuple:
+    """Her keys and her (world.Her) on map `map_id`: character `who`'s (None: the one this process plays,
+    gamelab.character) where HERS has her there, else the thief's (HER; the first map's on any other)."""
+    if who is None:
+        from .. import character
+        who = character.active_id()
+    return HERS.get((map_id, who)) or HER.get(map_id, HER[MAP_ID])
 
 
 @dataclass
@@ -104,6 +117,8 @@ class Scenario:
     attack: str | None = None    # the stack's attack a throw (behavior.attacks.MODES); None: the hunter's own
     remembered: dict | None = None  # her keys as a read of the game's window left them (control.keymap.remember, in the
                                     # run's own lab), which her hunter starts with (keymap.at_start); None: none
+    book: Path | None = None     # her damage book to start from (behavior.damage: her own file in the run's lab, HER_BOOK
+                                 # for the magician in the harness); None: none, her profile's prior
     doc: str = ""
 
 
@@ -139,6 +154,7 @@ class Sim:
         self.active = False
         self.files: dict[str, list[str]] = {}  # what the run wrote (under its stand-in for gamelab/lab)
         self.senses = []  # every hunter's (for the feed's record)
+        self.books = []   # ... and their damage books (behavior.damage: none saved past the run, below)
         self.feed = self._feed()
 
     def _attack_told(self, row: tuple) -> None:
@@ -161,7 +177,10 @@ class Sim:
         from ..localization.worldstate import WorldStep
         self.frames = FakeEyes(self.world, self.clock, self.model, guard=self.guard)
         self.frames.detector, self.frames._loot = FakeDetector(detector_kinds(self.model)), FakeLoot()
-        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN))), self.frames.observe,
+        from .. import character
+        shape = character.active().shape  # (her Shape, as the live service's: localization.service.screen_world)
+        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN), shape=shape)),
+                        self.frames.observe,
                         guard=self.guard)
         self.clock.frames = (1.0 / GAME_HZ, feed.tick)
         return feed
@@ -234,6 +253,8 @@ class Sim:
 
     def __exit__(self, *exc) -> bool:
         self.active = False
+        for book in self.books:  # (its save at the process's end would write into the run's lab, gone by then)
+            book.path = None
         try:
             for path in sorted(self.folder.rglob("*")):
                 if path.is_file() and path.suffix in (".jsonl", ".json"):
@@ -277,7 +298,15 @@ class Sim:
             start = keymap.at_start(self.keys, "thief")
             keys = start.keys
             self.log(f"her keys: {start.source}")
+        if self.scenario.book is not None:  # (her damage book as her stack had learned it: Scenario.book)
+            from .. import paths
+            book = paths.of().damage
+            book.parent.mkdir(parents=True, exist_ok=True)
+            book.write_text(self.scenario.book.read_text(encoding="utf-8"), encoding="utf-8")
         h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)
+        if getattr(h.attacks, "book", None) is not None:  # (its fits at once, not on a thread: the same run every time)
+            h.attacks.book.threaded = False
+            self.books.append(h.attacks.book)
         h.config_keys = self.keys
         h.jitter = random.Random(f"jitter:{self.scenario.seed}")  # (her jump attacks' jitter: the same run again)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)

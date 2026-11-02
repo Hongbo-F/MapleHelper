@@ -4,7 +4,7 @@
                                              [--costs coded|measured|measured-1366] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
                                              [--attack choice|skill|regular] [--think K | --think-clock K]
-                                             [--cache]
+                                             [--character magician] [--cache]
     python -m gamelab.sim.harness cached POLICY [run's options] [--sha master]   a commit's cached seeds, read
     python -m gamelab.sim.harness ab POLICY [run's options] [--base master] [--metric KEY ...] [--max-seeds 48]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE    two saved runs, seed by seed, against the bar
@@ -12,6 +12,14 @@
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
 
 POLICY: tour, loop, loop-grind (the hunting commands), or walk (movement only, as the live QA walk: _walk).
+
+`--character magician` (from 2026-11-02; the thief by default, or GAMELAB_CHARACTER's) plays the magician: the run
+restarts itself with GAMELAB_CHARACTER=magician (her stack: her profile's stats, keys and Magic Claw, attack.magic's
+search for every decision, her Shape), the world her as the recordings of 2026-11-02 measured her (sim.scenarios.HERS:
+world.MAGE_32, Magic Claw as the game casts it, her walk 148.2 where her profile plans 125) on Tree Dungeon alone, her
+damage book as her stack had it then (sim.scenarios.HER_BOOK), `--attack` her profile's (Magic Claw whenever her MP pays,
+whatever is asked: ATTACK_HER is the thief's); her runs' results say `character`, and their baselines are cached under
+her own key (sim.baseline: the GAMELAB_* environment as resolved). README: The simulator's magician.
 
 `--cache` reads the seeds this checkout's code (its commit's) has already run with the same arguments from the baseline
 cache (sim.baseline: D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json) and runs only the others,
@@ -325,6 +333,10 @@ WORLDS["meat"] = {"potion": MEAT_HP, "potions": POTIONS}
 # other worlds' drops are hers to pick up alone: live, 26-29% of the drops taken on her platform went with her 45 units
 # or more off, or with her never within 15 of them.
 WORLDS["pet-loot"] = {"pets": 2}
+# ... and another player's kill of a monster she hurt giving her its EXP times the share of its HP she took
+# (`shared-exp`: world.Realism.shared_exp), as live on 2026-11-02 (the hour's 26 shares by the log, mostly +32-35 of a Horny
+# Mushroom's 41 after her first claw: the rule's 32.8-36.5; plans/problems.md P43), where the other worlds give nothing.
+WORLDS["shared-exp"] = {"shared_exp": True}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -469,7 +481,7 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
                                                   if k not in HER_FIELDS and k not in NOISE_FIELDS})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
-    if attack is not None:
+    if attack is not None and her.magic is None:  # (the thief's Lucky Seven: the magician's attack is her Magic Claw)
         her = dataclasses.replace(her, **ATTACK_HER)
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
@@ -480,7 +492,8 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
                               realism=realism, may_die=True, think=think_clock or think, think_reads=bool(think_clock),
                               map_id=map_id,
-                              her=her if world or attack else None, attack=attack)
+                              her=her if world or attack else None, attack=attack,
+                              book=scenarios.HER_BOOK if her.magic is not None else None)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
@@ -490,10 +503,13 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on;
     `attack`: the stack's attack a throw; `think`, `think_clock`: the stack's computing charged to the clock (scenario;
     the result has `think_clock` only where it's set)."""
-    from .. import telemetry
+    from .. import character, telemetry
+    from ..attack import magic
     from ..localization import feed
     from ..motion import route
     from . import fakes, scenarios
+    if not magic.applied():  # (the magician's Magic Claw for every decision, as `tour` sets it: nothing for the thief)
+        magic.apply(character.active())
     fakes_costs = {name: value for name, value in COSTS[costs].items() if name != "feed"}
     before = {name: getattr(fakes, name) for name in fakes_costs}
     routes, feed_costs = route.ROUTES, feed.COSTS
@@ -522,6 +538,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         out["attack"] = attack
     if think_clock:
         out["think_clock"] = think_clock
+    if (who := character.active_id()) != character.DEFAULT:  # (`--character`: the thief's results as they were)
+        out["character"] = who
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     f = trace["feed"]
     out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
@@ -744,7 +762,18 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "landing_events": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "landing")),
         "moves_away": _moves_away(records, end),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
+        **(_magic(world, end) if world.character.magic is not None else {}),
     }
+
+
+def _magic(world, end: float) -> dict:
+    """The magician's own (world.Her.magic): her casts a minute alive (casts_per_min), her attack keys pressed in the air
+    (air_presses: nothing cast), inside the last attack's lock (attack_locked: ignored by the game, so her stack's pace
+    is too quick for the world's lock if any), her wand's swings (swings: never, Attacks.no_regular), and her HP and MP
+    potions a minute (potions_per_min, mp_potions_per_min is everyone's)."""
+    return {"casts_per_min": round(world.casts / (end / 60), 2) if end else None, "air_presses": world.air_presses,
+            "attack_locked": world.attack_locked, "swings": world.swings,
+            "potions_per_min": round(world.potions_used / (end / 60), 2) if end else None}
 
 
 TAKEN_BINS = ((15.0, "<=15"), (45.0, "15-45"), (150.0, "45-150"), (math.inf, ">150"))  # (_pets_took) units
@@ -1417,27 +1446,40 @@ def check() -> int:
     return 1 if bad else 0
 
 
-def _thief_only() -> str | None:
-    """The scenarios are the thief's (a magician's come with the simulator's magic, the design's S6): a GAMELAB_CHARACTER
-    naming another, inherited by the run that restarts below, would play them with her stats (her class's fixed copy),
-    and `record` write that over the thief's traces. Why not, or None."""
+CHARACTERS = ("thief", "magician")  # the characters the simulator plays (sim.scenarios.HER, HERS)
+
+
+def _who(argv: list[str], environ=os.environ) -> tuple[str | None, str]:
+    """The character a run plays: `--character`, else GAMELAB_CHARACTER (as `ab` hands the base's filler the key's), else
+    the thief; (it, "") or (None, why not): one the simulator doesn't play, or the two naming different ones."""
     from ..character import DEFAULT, ENV
-    who = os.environ.get(ENV)
-    if who and who != DEFAULT:
-        return (f"{ENV} names {who}: the simulator's scenarios are the thief's until hers come (the design's S6); "
-                f"run it with {ENV} unset")
-    return None
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--character")
+    named = pre.parse_known_args(argv)[0].character
+    env = environ.get(ENV)
+    if named and env and env != named:
+        return None, f"{ENV} names {env} and --character {named}: one of them"
+    who = named or env or DEFAULT
+    if who not in CHARACTERS:
+        return None, f"the simulator plays {' or '.join(CHARACTERS)}, not {who}"
+    return who, ""
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if refused := _thief_only():
-        print(refused)
+    who, why = _who(argv)
+    if who is None:
+        print(why)
         return 2
+    from ..character import DEFAULT, ENV
     from ..motion.physics import FIXED_STATS
-    # The same set order in every run, and her stats as measured, not as config.toml has them.
-    if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":
+    # The same set order in every run, her stats as measured, not as config.toml has them, and the character it plays
+    # (GAMELAB_CHARACTER: her physics and her profile are the process's, gamelab.character)
+    if (os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1"
+            or os.environ.get(ENV, DEFAULT) != who):
         env = dict(os.environ, PYTHONHASHSEED="0", **{FIXED_STATS: "1"})
+        if who != DEFAULT:
+            env[ENV] = who
         return subprocess.call([sys.executable, "-X", "utf8", "-m", "gamelab.sim.harness", *argv], env=env,
                                cwd=str(REPO))
     p = argparse.ArgumentParser(prog="python -m gamelab.sim.harness")
@@ -1473,6 +1515,9 @@ def main(argv: list[str] | None = None) -> int:
     from . import scenarios
     if args.cmd == "spot":
         results = load(args.run)
+        if theirs := sorted({r.get("character", DEFAULT) for r in results} - {who}):
+            print(f"the run plays {', '.join(theirs)}: spot it with --character {theirs[0]}")
+            return 2
         seeds = args.seeds or sorted({min(r["seed"] for r in results), max(r["seed"] for r in results)})
         map_id = results[0].get("map", FIRST_MAP) if results else FIRST_MAP
         if not scenarios.available(map_id):
@@ -1491,6 +1536,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):
         print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
+        return 2
+    if who != DEFAULT and (args.map, who) not in scenarios.HERS:
+        print(f"the simulator plays {who} on map{'s' if len(scenarios.HERS) > 1 else ''} "
+              f"{', '.join(str(m) for m, w in scenarios.HERS if w == who)} alone (sim.scenarios.HERS): --map")
         return 2
     if args.cmd == "cached":
         return _cached(args)
@@ -1537,6 +1586,9 @@ def _run_options(r: argparse.ArgumentParser) -> argparse.ArgumentParser:
                    help="what isn't known of the game, switched on (WORLDS; again for another)")
     r.add_argument("--grounds", type=lambda v: tuple(int(g) for g in v.split(",")), default=(),
                    help="hunt only these grounds, e.g. 23 (default: all of them)")
+    r.add_argument("--character", choices=CHARACTERS, default=argparse.SUPPRESS,
+                   help="the character the run plays (default: GAMELAB_CHARACTER's, else the thief): the magician as "
+                        "the recordings of 2026-11-02 measured her (sim.scenarios.HERS), on Tree Dungeon")
     r.add_argument("--attack", choices=("choice", "skill", "regular"),
                    help="the stack's attack a throw (behavior.attacks), her Lucky Seven key casting it at its MP "
                         "(ATTACK_HER): choice, Lucky Seven but the regular attack to finish a monster and while her MP "
@@ -1556,7 +1608,14 @@ def _name(args) -> str:
             + (f"-{args.map}" if args.map != FIRST_MAP else "")
             + "".join(f"-{w}" for w in args.world)
             + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else "")
-            + (f"-attack-{args.attack}" if args.attack else ""))
+            + (f"-attack-{args.attack}" if args.attack else "")
+            + (f"-{_character()}" if _character() != "thief" else ""))
+
+
+def _character() -> str:
+    """The character this process plays (gamelab.character: the harness restarts itself with GAMELAB_CHARACTER)."""
+    from .. import character
+    return character.active_id()
 
 
 def _command_line(args) -> list[str]:
@@ -1575,6 +1634,8 @@ def _command_line(args) -> list[str]:
         out += ["--grounds", ",".join(map(str, args.grounds))]
     if args.attack:
         out += ["--attack", args.attack]
+    if _character() != "thief":
+        out += ["--character", _character()]
     return out
 
 
