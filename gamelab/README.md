@@ -2951,6 +2951,8 @@ comes of it, one line for every path:
   finds it again and `_switch` replans for it from there);
 - a better way: "dropped, the next look for a better way asks again (0.33 s on)" (`BETTER_EVERY_S`; nothing else
   changes for it: nothing is marked by a better way's look).
+(From the review of 2026-11-01 the next state asks again once in a row, `LATE_RETRIES`; dropped late again, the monster
+is asked about again 1.5 s on, `LATE_AGAIN_S`: The reviews' findings fixed, below.)
 A replan that ran with nothing to take (no route, nothing chains) still marks its monster (the review of 2026-10-30).
 The 'replan' event's "dropped: too late" says its kind (`of`) and what came of it (`then`). Each state asking again
 costs a replan's time again while the drops last (the one monster's drop below had room: she stopped).
@@ -3077,7 +3079,7 @@ The user, after the latency analysis: "You only need two jump attacks: one with 
 - **Two keys** (`reach.shots`; `KEY_FIRST_MS`, `TOP_KEY_MS`, `KEY_SLACK_MS`, `KEY_CHECK_MS`). Each jump and side tries the soonest key (40 ms after the jump key; a jump that turns her in the air, the turn's soonest, `turn_key_ms`: 120) and the top's (`TOP_KEY_MS = round(physics.APEX_S * 1000)`, 278: an attack starts `JUMP_LAG` after its key as the jump lifts off `JUMP_LAG` after its own, so keyed so it starts at her arc's top, 77 up), the sooner that surely picks the target winning (`Coverage.best`, the stance's order as before). Sure as before, the same pick 15 ms either side of the key and across the decide lag, now checked every 5 ms where the scan checked the two ends. From 2026-10-25 to now every key from the soonest to 480 was tried, 5 ms apart (about 89 a start; the user then: the timing "needs to be dynamic but preferably attack immediately after jump or at jump 2"); `KEY_LAST_MS` and `KEY_STEP_MS` are gone.
 - **The jitter** (`fight.jittered`, `JITTER_FIRST_MS` 15, `JITTER_TOP_MS` 20). A jump attack's key is its base key plus a jitter drawn as it's carried out (`throw_act`, as its key plan is made), uniform to the ms over its window: the soonest's up to 15 ms later, never sooner (sooner than 40 the game may take the attack on the ground, unmeasured; sooner than the turn's soonest a turn in the air went the wrong way more often live), the game's own spread of a key (`KEY_SLACK_MS`: `body.Lags`' 7.7 ms sd, twice), her feet 7 units higher at the most; the top's 20 ms either side (her arc flat there: within 0.4 units of the top). Drawn from the hunter's own generator (`Hunter.jitter`: the system's live; `sim.scenarios.Sim.hunter` seeds it by the scenario's seed, so a simulated run is the same to the digit when run again), not in the search, which stays deterministic.
 - **Still sure** (`Shot.window`). The search checks the pick over the whole room the jitter may take the key to, the slack about every key of it too; where it isn't sure all over that the window is narrowed to the keys about the key that are (a shot sure at its key alone is kept with no jitter, not dropped: dropping would lose shots the scan had at that very key, and the record says how much room there was). The window was the run of later keys that still picked the target (used by `Shot.text` and the 'jump' record alone); it's the jitter's room now.
-- **Up close too** (`stance._from_here`, `_jittered_up`, `JumpPlan.room`, `JumpPlan.keys`). Most of her jump throws aren't shots: a jump in place at a monster too close for the ground's star (28 a 5-minute run on the hunt loop against 4.3 shots), keyed 40 ms after the jump key (120 turning in the air; after a tap first). A sure one gets the keys after its key, up to 15 ms later, whose attack surely picks the monster too by the stance's own check (`reach.air_sure`, `CLEAR_MARGIN` farther, every 5 ms), up to the first that doesn't (40-45 at a pig 95-105 off on her floor); its plan says 'close' (or 'tap first'). One not sure keeps the stance's own key.
+- **Up close too** (`stance._from_here`, `_jittered_up`, `JumpPlan.room`, `JumpPlan.keys`). Most of her jump throws aren't shots: a jump in place at a monster too close for the ground's star (28 a 5-minute run on the hunt loop against 4.3 shots), keyed 40 ms after the jump key (120 turning in the air; after a tap first). A sure one gets the keys after its key, up to 15 ms later, whose attack surely picks the monster too by the stance's own check (`reach.air_sure`, `CLEAR_MARGIN` farther, every 5 ms), up to the first that doesn't (40-45 at a pig 95-105 off on her floor); its plan says 'close' (or 'tap first'). One not sure keeps the stance's own key. (From the review of 2026-11-01 each later key's line to it is checked too, `ROOM_LINE`, and one not sure is jittered over the whole of the soonest's room, `fight.JITTER_ALL`: The reviews' findings fixed, below.)
 - **Recorded.** Her log's jump line says the key as keyed ("the attack 278 ms in (258-298), 77 up: pig +150, keyed at 285 (+7)"; "jump (close): a jump in place throwing right, the attack 40 ms in (40-45), keyed at 43 (+3): pig +105"). The 'jump' record: the key sent (`key_ms`), the shot's own (`base_ms`), the jitter (`jitter_ms`), the room (`window`), the turn in the air, her rise at the attack's start as keyed, the target's kind, dx and height, the jump's kind and side, where she lands, its number (`n`); after its keys a 'jump_keys' record (by `n`): whether they went, and the attack key as the player pressed it after the jump key (`pressed_ms`: `Actions.key_gap`, from the player's answer's 'sent', which `Actions.play` keeps now; the simulator's player answers with the plan's own times). In a simulated run each of her attacks as the world resolved it is a 'sim_attack' record (`World.on_attack`, `Sim._attack_told`: its key's time, plan, ground or air, her rise, the kind it picked, its outcome), so the run's telemetry carries its own outcomes. `sim.harness.attack_kinds`' `chosen` counts the 'close' and 'tap first' ones too.
 - **The report** (`python -m gamelab jitter [FILES]`, `analysis.jumps.jitter_report`; by default the live telemetry). Each jump attack with jitter joined to its 'jump_keys' (not thrown: no outcome) and its outcome: the simulator's own in a simulated run's telemetry (its first jump attack keyed within 1.5 s of the record, as `attack_kinds` matches them), else the looks' (`outcomes`: a kill by its EXP gain, a hit by a bar lower, else nothing seen). By base key, jump kind, turn, close or shot, and 5 ms bin about a multiple of 5 (the soonest's 0 to +15, the top's -20 to +20): how many, kills, hits, misses, wasted, the share that hit, the targets' median distance and height; whether the jitter predicts a hit (a permutation test within each group with 2 hits and 2 not, and stratified over all of them: 2,000 shuffles, seeded); the player's presses against the keys sent. In the simulator the outcome follows its model of the pick, the one the search goes by, so a pattern there is the model's; the live grinds are where one means something.
 
@@ -3196,7 +3198,11 @@ seeds each, both borderline at 24: with Meat her share -0.020 (se 0.012) and tou
 | safety stops / deaths / falls out | 0 / 0 / 0 | 0 / 0 / 0 | | 0 / 0 / 0 | 0 / 0 / 0 | |
 | cash a minute at the user's prices | -486 | -525 | -39 (17) | -511 | -521 | -10 (18) |
 
-No safety stops on any side; the 250 Meat never near running out (the most a run drank, 113). Her EXP and loot are above
+Her pets are the simulator's (`--world pet-loot`, sim.world's pet: a pick-up chance by her closest approach, fitted by
+0019017): coarse where she passes near a pile, its share by closest approach about 0.15 over live's (7% taken 45-150
+units off where live had 23%), and taking 0.14-0.23 more of the drops she comes within 15-90 units of than her pets did
+live (d58224c), so the pet world's loot and share lean on that model. No safety stops on any side; the 250 Meat never
+near running out (the most a run drank, 113). Her EXP and loot are above
 master's beyond 2 se in both worlds (with her pets loot's t 2.2). Her drops' share is 0.013-0.019 short of master's
 (beyond 2 se with her pets) and 2.3-2.5 more of her drops expire a run: master's rule 6 goes for piles about to expire,
 the tip for none past `OLD_S` (60 s) beyond 1 s of her way (the user's "If a pile is about to expire, it probably means
@@ -3298,7 +3304,7 @@ time at Idle priority on CPUs 12-23, no other job of this run's; every pass's ou
 | ... `_interrupt` between chains: an hour; s an hour; the most (ms); over 15 ms an hour | 3,344; 19.3; 53.4-53.5; 576-580 | 2,127; 12.2-12.3; 82.4-87.8; 280-282 | 2,295; 3.3; 15.3-15.7; 1 |
 | the hunt loop: a state, median; p99; the most (ms) | 0.14; 0.47-0.48; 0.6 | 0.22; 1.92-1.96; 39.5-39.9 | 0.24; 1.67-1.69; 9.6-10.4 |
 | ... states an hour over 5; 15; 30; 50 ms | 0; 0; 0; 0 | 48-51; 21; 9; 0 | 15; 0; 0; 0 |
-| ... the "better" check's question: an hour; s an hour; median; the most (ms) | none | 69; 0.84; 7.8; 38.3-38.7 | 36; 0.08; 1.9; 7.3-7.4 |
+| ... the "better" check's question: an hour; s an hour; median; the most (ms) | none | 69; 0.84; 7.8; 38.3-38.7 | 36; 0.08; 1.9; 7.3-7.5 |
 | ... `_interrupt` between chains: an hour; s an hour; the most (ms); over 15 ms an hour | 3,123; 16.7; 39.9-40.6; 495-498 | 2,013; 14.7; 105.8-106.6; 351 | 1,902; 2.2; 34.6-36.5; 3 |
 
 The tip's worst state is a quarter of 666c54b's, none over 15 ms an hour where 666c54b had 18-21; its states' median is
@@ -3318,9 +3324,12 @@ the default's 12 seeds (EXP a minute 331.1, hurt 50.2, touches 78.9):
 | 3x again | 23.0 s | none | 31; 29% | -30.6 (14.4) | +5.5 (4.3) | +7.1 (6.1) |
 
 No replan of either kind was dropped as too late in the 48 runs (at 666c54b one, a better way's at 3x, in 48): her
-computing charged a run is 60-65% of 666c54b's (12.9 s at 1x, 35.6 at 3x), the search cheaper. The EXP lost is again the
-time she spends thinking while the world goes on, noisy (the two 1x passes 19 a minute apart); `--think-clock` stays a
-latency probe, not a measure of the change.
+computing charged a run, 7.8-7.9 s at 1x and 22-23 s at 3x, is 60-65% of what the bookkeeping stage charged (12.9 s at
+1x, 35.6 at 3x, on be5d4e6's code, 666c54b's search), a rough comparison only: real seconds from sessions at another
+load (8-27% CPU then, 0-6% here); the timing table above is the evidence. The no-room path ("dropped, the next state
+asks again") never fired in these runs nor the bookkeeping stage's 48 at 1x and 3x: its tests alone exercise it. The EXP
+lost is again the time she spends thinking while the world goes on, noisy (the two 1x passes 19 a minute apart);
+`--think-clock` stays a latency probe, not a measure of the change.
 
 **Her jump attacks' jitter** (`python -m gamelab jitter` on the 48 standard runs' telemetry, `tel/std48`,
 `jitter_std48.txt`; `jitter_bins.py`, `jitter_bins_std48.txt`): 932 jump attacks with jitter in 4 simulated hours (931
@@ -3364,13 +3373,176 @@ tip's own (or master's, 0019017's, a16dcf0's and 666c54b's as said).
 **Open, for the user.** Her drops' share at 15 minutes is 0.013-0.019 short of master's, and 2.3-2.5 more of her drops
 expire a run (master fetches piles about to expire; the tip lets a pile past `OLD_S` add 1 s at most), and in the hunt
 loop 0.027-0.033 short; loot's worth is above master's in the grind's worlds, beyond 2 se. Her two jump attacks cost the
-hunt loop EXP (their section: -21.8 a minute, se 10.3); against master it is still +18.4 (8.0). Her touches and HP lost
+hunt loop EXP (their section: -21.8 a minute, se 10.3); against master it is still +18.4 (8.0). In the jump stage they
+cost grinding's share too, against its own base 3255623 (0.973 -> 0.944 on 12 seeds, t -4.3, every one of the 9 seeds
+that differ worse; not looked into there), hidden here by the 48 seeds against master (0.953 both): the next section
+measures it on 48. Her touches and HP lost
 stay a little over master's in the grind (+10%, +0.8 bars at 5 minutes), the "more EXP" trade they chose. The chain from
 29 climbing onto 27 and jumping on to 26 lands her short, spliced or cut and resent alike (5 of the tip's 13 landings
 elsewhere): the navigation's to look at. 58% of her jump attacks (keyed at the stance's own key, unsure or without a
 plan) have no jitter and no record, so the jitter report sees 42% of them: whether those too should be jittered and
 recorded is theirs to say. Her drops' life stays an assumption until a live watch measures it, and the jitter's pattern
 a question for the live grinds.
+
+## The reviews' findings fixed, and the branch measured again (2026-11-01, late)
+
+The two reviews of e7932ad (D:/MapleHelper-scratch/replan/speed/review: the adversarial review of 666c54b..e7932ad;
+`speed/adv`: the independent check of the record above) found one defect, in the jitter up close, and gaps; each is
+fixed here or said why not. This round's measurements: D:/MapleHelper-scratch/replan/speed/fix (`out/` the runs in
+process by `drv5.py`, the record stage's drv4.py with `--set MODULE:NAME=VALUE` switches; `tables.py`, `chosen.py`,
+`same_runs.py`; the harness's own `ab` runs in `out/ab_*.txt`; `golden/`, `tests/`, `bench/`).
+
+**The findings, one by one.**
+- *A close jump throw's jitter room ignored its line* (the first review's finding 1, MEDIUM): fixed, 99506a4.
+  `stance._jittered_up` widened the room (40 ms on, up to `JITTER_FIRST_MS`) by `reach.air_sure` alone; on a slope her
+  floor, or one just over her, stopped the star of a later key where the key's hit (Tree Dungeon's 33 at x 126.9 at a
+  Horny Mushroom 107 off: keyed 40 the world's star hits, 41-55 stopped). Now each later key's line too (`ROOM_LINE`,
+  `_from_here`'s `clear`: `reach.wall_in_way` from her feet as its attack starts, at both ends of the decide lag as
+  `air_sure`'s pick, to where the monster is then). On 300 of the world's close throws at a lone still mushroom on Tree
+  Dungeon floors (`world_rooms.py`): room keys the world's star doesn't hit with 185 of 4,150 (22 throws) -> 0 of 3,490
+  (with the line at the attack's start alone, 10 of 3,940); rooms whole (40-55) 236 -> 177. On the harness standard's 12
+  seeds no run changes (with `ROOM_LINE` off the same to the digit): its close throws there have no later key whose line
+  is stopped.
+- *58% of her jump attacks neither jittered nor recorded* (the first review's finding 4b, the second's F2): fixed,
+  7cb9e9d, d89ce8e and e8c1403. `fight.jittered`'s `JITTER_ALL`: a jump attack the stance keyed at its own key, with no
+  shot and no room (a jump throw up close not sure, 'tap first' not sure, at a snail, a jump back, a jump up onto the
+  platform above, `ESCAPE_UP`), is keyed over the soonest's whole room from the key her actions would press (40-55; 120-135
+  turning in the air or a jump back's), never sooner, its plan not sure (`JumpPlan.sure` False), and recorded as the
+  others ('jump' with `sure`, its kind 'unsure', 'jump back', 'tap first' or 'up onto N'). In the 48 standard runs every
+  jump attack has its record now (2,393; 932 of 2,213 before). With `JITTER_ALL` off they are keyed as before and still
+  recorded (their room the key alone, nothing drawn): 12 standard seeds the previous tip's to the digit on every key but
+  the records' own counts (`out/same_off12.txt`; `random.randint` over one key still takes bits from the generator, so a
+  draw there had moved the sure ones' draws after it: e8c1403).
+- *The jitter analysis's gaps* (the first review's finding 4, the second's F1): fixed, 30bd23c and ba1e4b2. The window and the
+  jitter were confounded (a room narrowed by the target's geometry gives no large jitter): `jitter_test` shuffles within
+  each room alone (`_room`, with its base key, kind, turn and shot/close/unsure), `jitter_table` says each bin's share of
+  narrowed rooms. The jitter is the press's (`pressed_jitter`), and a press more than `PRESS_OFF_MS` (5) off its key sent
+  (her actions turning her in the air at their own key where the stance had her facing it, 76-80 ms off) isn't counted.
+  A 'jump_keys' record goes with the 'jump' record just before it with its `n` (each hunter numbers its own from 1). A
+  record with no target doesn't stop `outcomes`. The soonest's small jitter against the game's own spread of a key (sd
+  4.6 ms against about 11-13, seen at the game's 30 ms steps) is not a defect but a limit: a pattern within 0 to +15
+  shows only over many attacks (the module's docstring says so); the top's -20 to +20 is wider.
+- *A late monster replan retried at every state* (the first review's finding 3, LOW-MEDIUM): fixed, 76adfef. The next
+  state asks again `LATE_RETRIES` (1) times in a row; dropped late again, the monster is marked for `LATE_AGAIN_S`
+  (`REACT_AGAIN_S` / 2, 1.5 s), then asked about again; the log says so. It never fires in the harness's runs (no monster
+  replan was dropped late at 1x or 3x of its computing charged, here or in the bookkeeping stage): its tests alone.
+- *The two keys' cost, grinding's share of her drops* (the first review's finding 2, the second's F3): measured, not a
+  cost at 48 seeds. Against the jump stage's base 3255623 (`ab ... --base 3255623`, its seeds 13-48 filled; `out/
+  t_prev_vs_325_48.txt`) the previous tip's share is 0.953 against 0.960 (-0.007, se 0.006): seeds 1-12 had it -0.028
+  (t -4.3, as the jump stage saw), seeds 13-48 +0.001 (0.007); its EXP +0.4 (7.3), loot -1.3 (7.1). The hunt loop's
+  EXP cost of the two keys stays the user's call (-21.8 a minute on 24 seeds in their section).
+- *Tests weakened* (the first review's finding 5): fixed, 270c87e: the ten `act[:2]` assertions compare the whole act
+  less its room and target again (`test_attack.close`, `no_room`), or the act itself where the stance keys it unsure.
+- *Nits*: the default save name (7a69c7a: "-think1.5", "-think-clock3", where such a run's save had gone over the
+  plain run's); `ab` handing `--think-clock` to an old base's filler can't happen (a run with it has no cache, so `ab`
+  stops with "no baseline" before any filler); `outcomes` with no target (30bd23c). Not changed: in the hunt loop's lull
+  an old pile still gets the whole wait (the loot review's finding 5 in part): the wait is time with nothing to kill, so
+  it costs no EXP, and a pile more dangerous than where she stands keeps its cap (666c54b), the user's "not hit just for
+  loot"; native.c's comment on `low[q]` (the y of a platform's lower end; `Platform.bottom` since d81f904, as native.py's
+  `Map` says): native.c is master's unchanged, its DLL named by its source's hash, so a comment would have every
+  machine build it again at the merge.
+- *The record section's own* (the second's F3-F6): its "Open, for the user" says the share cost against 3255623, its
+  pet worlds the pets model's coarseness, its think-clock comparison what it compares, its timing cell 7.3-7.5 ms.
+
+**What every jump attack jittered costs** (`JITTER_ALL` on against off, the same seeds; `out/t_jall_96.txt`,
+`t_pets_jall_72.txt`, `t_variants12.txt`):
+
+| | EXP a minute | loot | touches that hurt | hurt at piles | her jump attacks a run; wasted |
+|---|---|---|---|---|---|
+| the harness standard, 96 seeds | -4.7 (se 4.8) | -6.5 (4.2) | +1.9 (1.1) | +1.4 (0.7) | +3.4 (1.4); +1.9 (0.8) |
+| 15 minutes with Meat, 48 | -5.7 (4.8) | -5.3 (4.4) | +0.3 (3.0) | -1.9 (2.1) | +0.8 |
+| 15 minutes with Meat and her pets, 72 | +7.3 (3.6) | +4.4 (3.4) | +1.5 (2.3) | +5.5 (1.6) | +1.6 (2.8) |
+| the hunt loop, 12 | +1.4 (15.2) | -2.2 (17.1) | -0.6 (3.2) | -1.4 (1.6) | +1.3 (3.9) |
+
+No measurable cost to EXP or loot (of either sign by the world), a little more hurt at piles in two of the four (her
+pets' world's 1-48 +8.8, 49-72 -1.1), more of her jump attacks and of them wasted in the standard world (the jitter's
+hit rates by bin show no trend within the unsure ones: 43, 41, 44 and 45% at 40 ms). Kept on as the user asked for "the
+40 ms" keys jittered; `JITTER_ALL = False` keys them as before and keeps the records.
+
+**Against master 072e1ec**, the tip's code (2cf35e5; its runs 7a69c7a's to the digit on 12 seeds, `out/
+same_default12.txt`: the commits after it change nothing it does by default but four scenarios' seeds):
+
+| | master | tip | tip - master (se) |
+|---|---|---|---|
+| the harness standard, 96 seeds of 5 minutes (`out/ab_std96.txt`; borderline at 48: EXP +9.0, se 8.4) | | | |
+| EXP a minute | 302.7 | 323.5 | +20.9 (5.6), better on 62 |
+| loot a minute (coins) | 231.0 | 251.0 | +20.0 (4.3) |
+| her drops' share picked (no pets in this world) | 0.958 | 0.953 | -0.004 (0.007) |
+| hurt at piles / on trips | 19.2 / 13.2 | 12.3 / 12.0 | -6.9 (1.2) / -1.2 (0.6) |
+| touches that hurt / HP lost (bars) / HP potions | 46.1 / 5.94 / 18.1 | 52.3 / 6.97 / 21.3 | +6.1 (1.4) / +1.04 (0.23) / +3.2 (0.7) |
+| safety stops, deaths, falls out; landings elsewhere | 0, 0, 0; 13 | 0, 0, 0; 6 | |
+| 15 minutes with her 250 Meat, 48 seeds (`out/t_meat15_48.txt`) | | | |
+| EXP a minute / loot | 297.8 / 246.2 | 314.5 / 260.8 | +16.6 (5.8) / +14.6 (4.7) |
+| her drops' share / expiring a run | 0.932 / 8.2 | 0.915 / 10.9 | -0.017 (0.009) / +2.7 (1.2) |
+| hurt at piles / HP lost / Meat a run (the most) | 62.6 / 17.8 / 85.3 (130) | 33.1 / 19.1 / 91.5 (120) | -29.5 (2.9) / +1.3 (0.6) / +6.2 (2.8) |
+| ... with her pets too, 48 seeds (`out/t_meatpets15_48.txt`) | | | |
+| EXP a minute / loot | 297.8 / 255.8 | 320.6 / 269.3 | +22.8 (4.9) / +13.5 (4.9) |
+| her own pick-ups / her pets' (a minute) | 160.9 / 95.0 | 184.8 / 84.5 | +23.9 (3.8) / -10.4 (3.6) |
+| her drops' share / expiring a run | 0.952 / 6.0 | 0.928 / 9.4 | -0.023 (0.007) / +3.4 (0.8) |
+| hurt at piles / HP lost / Meat a run (the most) | 60.4 / 18.8 / 90.1 (125) | 35.5 / 19.8 / 94.9 (128) | -24.9 (2.8) / +1.0 (0.7) / +4.8 (3.2) |
+| the hunt loop, 24 seeds of 5 minutes (`out/ab_loop24.txt`; at 12 its share -0.046, se 0.012) | | | |
+| EXP a minute / loot | 276.2 / 230.5 | 279.4 / 209.0 | +3.2 (8.9) / -21.4 (8.0) |
+| her drops' share / hurt at piles | 0.972 / 11.3 | 0.930 / 6.5 | -0.042 (0.010) / -4.7 (1.3) |
+| HP lost / HP potions | 4.35 / 13.3 | 4.25 / 12.9 | -0.10 (0.32) / -0.4 (1.0) |
+| ... with Meat and her pets, 12 seeds (`out/t_loop_mp12.txt`) | | | |
+| EXP a minute / loot / her drops' share | 258.8 / 223.2 / 0.980 | 278.9 / 208.8 / 0.950 | +20.0 (12.3) / -14.5 (9.2) / -0.030 (0.013) |
+
+No safety stops, deaths or falls out of the map in any world on either side; the 250 Meat never near running out.
+Grinding is above master on EXP and loot in every world, beyond 2 se; her share is master's at 5 minutes, 0.017-0.023
+short at 15 (beyond 2 se with her pets), 2.7-3.4 more of her drops expiring a run; her touches and HP lost a little
+over master's (the "more EXP" trade). The hunt loop is master's on EXP and under it on loot (-9%) and share (-4.2
+points), beyond 2 se at 24 seeds: master's rule 6 fetches piles about to expire, the tip's piles past `OLD_S` add 1 s
+at most. Her pets' numbers lean on the simulator's coarse pet model (above).
+
+**The jitter report on these runs** (`python -m gamelab jitter`, `out/jitter_std48.txt`, `out/jitter_loop24.txt`):
+the 48 standard runs' 2,393 jump attacks, all thrown and matched to the world's outcome, 8 pressed more than 5 ms off
+their key (not counted): sure jump throws up close 703 at 40 ms and 14 at 120 turning, unsure ones 1,275 at 40, 139 at
+120 turning and 12 jump backs, shots 135 at the soonest and 103 at the top. Within each room the jitter predicts nothing (each group's p 0.02 to
+1.0, the one under 0.05 12 jump backs; all of them p 0.20 over 2,314 attacks in 16 rooms); the hunt loop's 24 runs, 775
+attacks, p 0.76. As expected: the simulator's attack starts at its key plus `JUMP_LAG` exactly. Live:
+`python -m gamelab jitter` on a grind's telemetry (by default every live file in gamelab/lab/telemetry; the perception
+service's records in the same folder give the outcomes).
+
+**Re-picked** (2cf35e5; each docstring says why, `seeds/`): every jump attack jittered moved which seeds of four
+"a run's luck" checks meet them: loop_tree_wait 7 -> 1 (of 1-24, 12 meet it; 7 with JITTER_ALL off),
+loop_tree_ore_waits 6 -> 26 (none of 1-24, 7 of 25-64; 2 of 1-24 off), loop_tree_attack_no_darts 6 -> 12 (1 of 1-24; 2
+off), tests/test_ropes.py's rope wait 1 -> 4 (5 of 1-12). **Goldens:** Tree Dungeon's 43 recorded on the tip
+(`golden/rec1`, the re-picked three `golden/rec2`), each one's expectations met but the two expected not to
+(nav_tree_landing_shot_first, nav_tree_landing_no_shot: DYING_AWAY and NO_LANDING_SHOT in test_sim); against the
+record's traces 16 the same to the byte, 27 not (their jump attacks keyed otherwise); installed in the worktree's
+lab/golden (the record's in `golden/before`), `golden check --jobs 4`: 43 of 43 match. **Tests** (`tests/`): the fast
+suite (4 workers) 2,859 passed, 72 skipped, 2 xfailed, 1 failed (test_perception's look at a capture: this worktree's
+lab lacks tag_template_full.npy, as before); the slow tests of the simulator's files (test_sim, test_retreat,
+test_probe, test_stat_window, `--slow -m slow`) 37 passed. The new tests fail on the old code (the close room's line,
+every jump attack's record, the room's shuffle, the late replans' backoff).
+
+**Timed** (`bench_d.py`, `sum_bench.py`, `bench_summary.txt`: the record's method; grinding's 12 seeds, an hour, the
+hunt loop's 4 scaled to one; two passes each of the record's tip, e7932ad, on an export of it (`src_e79`), and this
+tip, in turn; the CPU mode idle, the game's client open with nothing driving it and another session's web UI up, 0-4%
+CPU around the passes, 4 runs at a time at Idle priority on CPUs 12-23, no other job of this run's; each pass's
+outcomes its code's other's; the two codes' runs aren't the same states, every jump attack jittered on this one):
+
+| | e7932ad | the tip |
+|---|---|---|
+| grinding: a state, median; p99; the most (ms) | 0.22; 1.63; 10.6-10.9 | 0.21; 1.49-1.54; 6.8-7.1 |
+| ... states an hour over 5; 15 ms | 15-16; 0 | 21; 0 |
+| ... the "better" check's question: median; the most (ms) | 1.9; 7.3-7.5 | 0.7; 5.5-5.6 |
+| ... `_interrupt` between chains: s an hour; the most (ms); over 15 ms an hour | 3.3; 15.4-16.5; 1-2 | 3.3-3.4; 8.6-8.7; 0 |
+| the hunt loop: a state, median; p99; the most (ms) | 0.25; 1.66-1.67; 8.2-8.6 | 0.23-0.24; 1.78-1.82; 11.2-11.5 |
+| ... states an hour over 5; 15 ms | 15; 0 | 18-21; 0 |
+| ... `_interrupt` between chains: s an hour; the most (ms) | 2.1-2.2; 9.0-9.2 | 2.5-2.6; 6.9-7.3 |
+
+The same as before within the passes' spread: no state over 15 ms an hour on either, the worst 7-11 ms (the close
+throws' line check is 6 line tests a sure close throw's decision, 4 us each by the grid). Master's and 666c54b's on
+this machine are the record's passes above (grinding's worst state 7.4 and 45-46 ms, between chains 19.3 and 12.2 s
+an hour).
+
+**Open, for the user.** Whether every jump attack stays jittered (`JITTER_ALL`; off, the analysis keeps its records,
+the sure ones jittered as before). The two keys' hunt-loop cost (-21.8 EXP a minute in their section) and, new here at
+24 seeds, the hunt loop's loot and share under master's beyond 2 se (-21.4 a minute, -0.042), with its EXP master's:
+master fetches piles about to expire, the tip doesn't. Her share at 15 minutes 0.017-0.023 short of master's, 2.7-3.4
+more of her drops expiring a run. Her drops' life and her pets' pick-ups are the simulator's assumptions (the record
+section); the jitter's pattern is a question for the live grinds, its report ready for them.
 
 ## Localization
 
