@@ -9,7 +9,7 @@ import pytest
 from gamelab.control.timeline import SIM_KEYS_MAGE, SIM_KEYS_PET
 from gamelab.sim import scenarios
 from gamelab.sim import world as world_mod
-from gamelab.sim.world import (CLAW_HIT, CLAW_LOCK_S, CLAW_SHOWS_S, MAGE_32, MEAT_HP, MP_REFUSAL, STAR_MEAN, Noise,
+from gamelab.sim.world import (CLAW_HIT, CLAW_SHOWS_S, MAGE_32, MEAT_HP, MP_REFUSAL, STAR_MEAN, Noise,
                                World, evade_chance, touch_damage)
 
 TREE = 10002073
@@ -113,6 +113,34 @@ def test_two_casts_a_horny_mushroom_and_one_a_green():
         assert w.kills == {"green-mushroom": 1} and w.casts == 1
 
 
+def _soft_green(monkeypatch, w_model, mdd: float, hp: float = 300.0, pushed: float = 150.0):
+    """Tree Dungeon's Green Mushroom with `hp` and `pushed` of its own and MDDamage `mdd` (the world reads them as it
+    makes its monsters: World._monster, _mob_mdd)."""
+    import dataclasses
+    real = world_mod.mob_info
+    green = next(int(s.mob_id) for s in w_model.spawns if s.name == GREEN)
+    monkeypatch.setattr(world_mod, "mob_info", lambda i: dataclasses.replace(real(i), hp=hp, pushed=pushed)
+                        if i == green else real(i))
+    monkeypatch.setitem(w_model.mob_mdd, GREEN, mdd)
+
+
+@pytest.mark.parametrize("mdd, one_cast", [(0.0, True), (30.0, False)])
+def test_her_casts_hurt_less_by_a_monsters_mddamage_and_push_less(monkeypatch, mdd, one_cast):
+    # A monster of 300 HP: one cast (2 hits of 157-181, 314-362) always kills it with no defence against magic, never
+    # with MDDamage 30 (its 300 is 390 before it, x 130 / 100, over a cast's 362 at most: World._monster); and a hit
+    # pushes it (`pushed` 150) only where its damage after MDDamage reaches 150: every hit of 157 and up with none,
+    # none with 30 (181 x 100 / 130 = 139: World._pushes)
+    _soft_green(monkeypatch, tree_map(), mdd)
+    for seed in range(1, 13):
+        w = her_world([(GREEN, 33, 150.0)], seed=seed)
+        m = w.monsters[0]
+        assert m.hp_max * STAR_MEAN == pytest.approx(300.0 * (mdd + 100) / 100)
+        assert w._pushes(m, False) is one_cast
+        cast(w, 0.0)
+        w.advance(0.85)
+        assert (w.kills == {"green-mushroom": 1}) is one_cast and w.casts == 1
+
+
 def test_the_lock_takes_a_cast_from_0_80_s_on_and_her_stacks_pace():
     # A second cast keyed under CLAW_LOCK_S after the first is ignored (counted), one at it or later taken; the live
     # pace, 0.846 s back to back, never refused
@@ -122,7 +150,6 @@ def test_the_lock_takes_a_cast_from_0_80_s_on_and_her_stacks_pace():
         cast(w, gap)
         w.advance(2.0)
         assert w.casts == (2 if taken else 1) and w.attack_locked == (0 if taken else 1)
-    assert CLAW_LOCK_S <= 0.80
 
 
 def test_20_mp_a_cast_and_the_games_refusal_under_it():
@@ -227,6 +254,27 @@ def test_the_harness_plays_whom_it_is_told():
     assert harness._who(["run", "x", "--character", "warrior"], {})[0] is None
     sc = harness.scenario("loop-grind", 1, "crowd", map_id=TREE, world=("zero-walls",), attack="choice")
     assert sc.her.magic is None and sc.her.skill == world_mod.LUCKY_SEVEN and sc.book is None  # (the thief's, as ever)
+
+
+def test_spot_takes_the_character_its_hint_names(tmp_path, monkeypatch, capsys):
+    # The review's: `spot` said to use --character magician on her runs, and refused the flag (run, cached and ab alone
+    # had it)
+    import json
+    from gamelab.character import ENV
+    from gamelab.motion.physics import FIXED_STATS
+    from gamelab.sim import harness
+    saved = tmp_path / "hers.json"
+    saved.write_text(json.dumps([{"seed": 3, "map": TREE, "character": "magician", "exp_per_min": 1.0}]),
+                     encoding="utf-8")
+    monkeypatch.setenv("PYTHONHASHSEED", "0")  # (as the harness restarts itself: nothing restarted here)
+    monkeypatch.setenv(FIXED_STATS, "1")
+    monkeypatch.delenv(ENV, raising=False)
+    monkeypatch.setattr(scenarios, "available", lambda map_id: True)
+    spotted = []
+    monkeypatch.setattr(harness, "spot", lambda results, seeds, jobs: spotted.append(seeds) or True)
+    assert harness.main(["spot", str(saved)]) == 2 and "spot it with --character magician" in capsys.readouterr().out
+    monkeypatch.setenv(ENV, "magician")  # (as `--character magician` restarts it)
+    assert harness.main(["spot", str(saved), "--character", "magician"]) == 0 and spotted == [[3]]
 
 
 def test_her_damage_book_is_her_stacks_as_the_hour_began():

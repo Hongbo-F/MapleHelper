@@ -845,7 +845,32 @@ def test_a_monster_touching_her_hurts_and_knocks_her_back(model, monkeypatch):
     assert w.touches == 1 and w.hp == pytest.approx(1 - world_mod.TOUCH_DAMAGE) and w.mode == "air"
     w.advance(0.9)  # invulnerable for a second
     assert w.touches == 1 and w.plat is c and w.vx == 0
-    assert 45 <= 400 - w.x <= 70  # knocked back ~58 units, away from it (lab/hits.jsonl's median push)
+    assert 80 <= 400 - w.x <= 95  # knocked back ~87 units, away from it (R1-R3's frames: 84-93 from standing)
+
+
+@pytest.mark.parametrize("knock, air, flown, high, rest", [
+    (None, (0.26, 0.28), (70, 76), (17.5, 19), (84, 90)),                     # the client's, as R1-R3's frames
+    (world_mod.KNOCK_PLANNER, (0.21, 0.23), (37, 42), (11.5, 12.5), (50, 60)),  # the planner's, as until 2026-11-02
+])
+def test_a_knock_flies_her_as_the_client_and_lands_her_at_her_walk(model, monkeypatch, knock, air, flown, high, rest):
+    # world.KNOCK_VX, KNOCK_VY: 270 out and up (RustMS's port of the v83 client; R1-R3's 15 fps frames, 18 units a frame
+    # in the air): 0.27 s in the air on flat ground, 18 high, landing 73 away; then at her walk's speed at most
+    # (KNOCK_LANDS_WALKING: the frames' slide of 11-19.5 after it, where 270 braked would slide 30), 87 in all.
+    # Realism.knock KNOCK_PLANNER (`--world planner-knock`): motion.physics's 180 and 220, 40 in the air, ~55 in all.
+    monkeypatch.setattr(world_mod, "EVADE", 0.0)
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 420.0)], realism=world_mod.Realism(knock=knock)))
+    up, top = None, 0.0
+    while w.mode != "air":
+        w.advance(w.t + 0.005)
+        up = w.t
+    while w.mode == "air":
+        top = max(top, 500 - w.y)
+        w.advance(w.t + 0.005)
+    assert w.touches == 1 and air[0] <= w.t - up + 0.005 <= air[1]
+    assert flown[0] <= 400 - w.x <= flown[1] and high[0] <= top <= high[1]
+    w.advance(w.t + 0.6)
+    assert w.vx == 0 and rest[0] <= 400 - w.x <= rest[1]
 
 
 def test_the_arrow_she_holds_doesnt_steer_a_knocks_flight(model, monkeypatch):
@@ -1004,6 +1029,14 @@ def test_a_monster_touches_her_as_the_client_tests_it_her_a_line_50_tall(model, 
 
     assert touched(433.0) == 1 and touched(444.0) == 0
     assert touched(444.0, (world_mod.HER_HALF, world_mod.HER_HEIGHT)) == 1
+
+    def over(bottom: float) -> int:  # a box whose bottom is `bottom` above her feet (a hopping slime's, say)
+        w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 400.0)]))
+        w.monsters[0].body = lambda t, flinching=False: (-34.0, 34.0, bottom, bottom + 30.0)
+        w.advance(0.1)
+        return w.touches
+
+    assert over(49.0) == 1 and over(51.0) == 0  # the line's 50
 
 
 def test_a_newborn_touches_her_only_once_it_has_faded_in(model, monkeypatch):

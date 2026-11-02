@@ -178,9 +178,9 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, MEAT_HP,
-                    NEAR_SEEN, OFF_SEEN, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S, TREE_AIR,
-                    TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
+from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LIVE, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS,
+                    MEAT_HP, NEAR_SEEN, OFF_SEEN, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S,
+                    TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -287,6 +287,11 @@ WORLDS["spawn-fade-wide"] = {"spawn_found": SPAWN_FOUND_WIDE}
 # 2026-11-02, where it now touches only once it has faded in (world.NEWBORN_SOLID_S: none of the 72 live touches by a
 # spawn point came before 0.82 s after the respawn pass).
 WORLDS["newborns-touch"] = {"newborns_touch": True}
+# ... and her knock as the planner has it (`planner-knock`: Realism.knock, world.KNOCK_PLANNER: motion.physics's 180 out
+# and 220 up, landing at the speed she flew; ~58 units on flat ground, 0.22 s in the air), as every world had it until
+# 2026-11-02, where it is now the client's (world.KNOCK_VX, KNOCK_VY: 270 and 270, landing at her walk's speed at most;
+# ~87, 0.27 s, as R1-R3's 15 fps frames have it).
+WORLDS["planner-knock"] = {"knock": KNOCK_PLANNER}
 # ... and her invulnerability after a touch as live (`walkers`: INVULNERABLE_LIVE; Realism.invulnerable), with the
 # monsters she hits chasing her (Realism.chase, world.AGGRO_S: every world's since 2026-10-31; till then this world's
 # alone, by chance, CHASE_TREE; and each monster back 17 s after its own death, RESPAWN_LIVE, until the server's respawn
@@ -1247,6 +1252,8 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     every = cand  # deaths count on every seed, compared or not: "no death" isn't a comparison
     if (maps := _maps(base, cand)) is not None:
         return False, [maps, "does NOT pass the bar"]
+    if (who := _characters(base, cand)) is not None:
+        return False, [who, "does NOT pass the bar"]
     base, cand = _paired(base, cand)
     if len(cand) < MIN_PAIRS:
         return False, [f"{len(cand)} seed(s) in both runs: the bar needs {MIN_PAIRS}", "does NOT pass the bar"]
@@ -1294,6 +1301,14 @@ def _maps(base: list[dict], cand: list[dict]) -> str | None:
     first map's), or None."""
     a, b = ({r.get("map", FIRST_MAP) for r in runs} for runs in (base, cand))
     return None if a == b and len(a) == 1 else f"the runs are on different maps ({sorted(a)} and {sorted(b)})"
+
+
+def _characters(base: list[dict], cand: list[dict]) -> str | None:
+    """Why two saved runs can't be compared: they play different characters (runs saved before the character was kept
+    are the thief's), or None."""
+    from ..character import DEFAULT
+    a, b = ({r.get("character", DEFAULT) for r in runs} for runs in (base, cand))
+    return None if a == b and len(a) == 1 else f"the runs play different characters ({sorted(a)} and {sorted(b)})"
 
 
 def save(name: str, results: list[dict]) -> None:
@@ -1514,6 +1529,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--seeds", type=lambda v: [int(k) for k in v.split(",")],
                    help="the seeds to run again, e.g. 3,9 (default: its first and its last)")
     s.add_argument("--jobs", type=int, default=1)
+    s.add_argument("--character", choices=CHARACTERS, default=argparse.SUPPRESS,
+                   help="the character the saved run plays (default: GAMELAB_CHARACTER's, else the thief)")
     sub.add_parser("check")
     args = p.parse_args(argv)
     from . import scenarios

@@ -25,7 +25,7 @@ from gamelab.perception.heading import Heading, Reading
 from gamelab.perception.nametag import NameTag
 from gamelab.screen import NATIVE, STRETCHED
 from gamelab.sim import scenarios
-from gamelab.sim.world import HER_HALF, HER_HEIGHT, LEVEL_25, Noise, Realism
+from gamelab.sim.world import HER_HALF, HER_HEIGHT, KNOCK_PLANNER, LEVEL_25, Noise, Realism
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LABELS = json.loads((FIXTURES / "heading" / "labels.json").read_text(encoding="utf-8"))
@@ -448,7 +448,8 @@ def test_her_keys_say_her_facing_beyond_doubt_only_well_after_her_arrow_with_no_
 needs_tree = pytest.mark.skipif(not scenarios.available(TREE), reason="needs Tree Dungeon's game data (gamedata/data)")
 
 
-NO_CHASE = Realism(chase=False)
+NO_CHASE = Realism(chase=False, knock=KNOCK_PLANNER)  # (and her knock as when these were measured: the client's since
+                                                     # 2026-11-02 flies her farther, 87 units, not 58)
 
 
 def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushrooms=(120.0,), facing=RIGHT, her=None):
@@ -510,8 +511,9 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
 # none of seeds 1-32 keeps the single seed's case below: what's tested is her heading after a knock, not the knocks;
 # the monsters walk as with nobody there and come back on their own clock, as then: Realism.chase off, respawn_tick 0)
 KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False, respawn_tick=0.0,
-                               her_box=(HER_HALF, HER_HEIGHT)),  # (her body as when these were measured: the
-               start=0.0,                                         # client's line since 2026-11-02 knocks her less)
+                               her_box=(HER_HALF, HER_HEIGHT), knock=KNOCK_PLANNER),  # (her body and knock as when
+               start=0.0,                    # these were measured: the client's line since 2026-11-02 knocks her less,
+                                             # and the client's knock flies her farther)
                mushrooms=(160.0, -150.0), her=dataclasses.replace(LEVEL_25, avoid=None))
 
 

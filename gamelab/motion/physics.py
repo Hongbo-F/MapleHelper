@@ -66,7 +66,9 @@ RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)  # 0.119 s: a standing start lag
 TURN_EXTRA = body.run_time(100.0, -WALK_SPEED, 1, SHOE) - body.run_time(100.0, 0.0, 1, SHOE)  # 0.16 s
 # Her knock when a monster touches her (from sim.world, where it was fitted: hits.jsonl's pushes on her own level, quartiles
 # 21 / 58 / 87 units; ~40 units in the air for 0.22 s and a ~19-unit slide on landing): away from the monster at KNOCK_VX,
-# up at KNOCK_VY (control.navigator: when the state after a touch can have her on the ground again, KNOCK_AIR_S).
+# up at KNOCK_VY (control.navigator: when the state after a touch can have her on the ground again, KNOCK_AIR_S). The
+# simulator's world has its own from 2026-11-02 (sim.world.KNOCK_VX: the client's 270 out and up, 0.27 s in the air,
+# as R1-R3's 15 fps frames have it): the planner's isn't changed.
 KNOCK_VX, KNOCK_VY = 180.0, 220.0
 JUMP_LAG = LAGS.jump  # 0.065 s from the jump key to leaving the ground
 DROP_LAG = LAGS.drop  # 0.28 s from the jump key (down held) to falling through (0.28-0.34 in 4 drops on the

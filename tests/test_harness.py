@@ -329,6 +329,16 @@ def test_the_bar_needs_more_exp_on_most_seeds_and_nothing_worse():
     assert not harness.compare(base, [_result(k, 60.0, died=100.0 if k == 5 else None) for k in range(1, 11)])[0]
 
 
+def test_the_bar_refuses_runs_of_two_characters():
+    # As runs on two maps: the review's (2026-11-02), a thief's run against a magician's was judged by the bar
+    base = [_result(k, 50.0) for k in range(1, 11)]
+    hers = [dict(_result(k, 60.0), character="magician") for k in range(1, 11)]
+    ok, lines = harness.compare(base, hers)
+    assert not ok and lines[0] == "the runs play different characters (['thief'] and ['magician'])"
+    assert harness.compare([dict(r, character="magician") for r in base], hers)[0]
+    assert harness.compare([dict(r, character="thief") for r in base], [_result(k, 60.0) for k in range(1, 11)])[0]
+
+
 def test_outcomes_are_read_from_the_world(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right"))

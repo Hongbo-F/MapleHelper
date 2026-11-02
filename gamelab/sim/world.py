@@ -50,8 +50,9 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   by this game's own hit check (game_hit_chance: her level, the monster's accuracy and level); the others take a share
   of her HP by the monster's touch damage (game data:
   about 1.6% for a pig, 0.3% for a snail, give or take 70%; or, her DEF known, by meowdb's formula: Her) and
-  knock her back ~58 units (the median
-  logged push; the arrow she holds doesn't steer that flight, KNOCK_STEERS). At 0% HP she dies, and the
+  knock her back ~87 units on flat ground (the client's push, 270 out and up, landing at her walk's speed at most:
+  KNOCK_VX, KNOCK_VY, KNOCK_LANDS_WALKING, as R1-R3's frames; the arrow she holds doesn't steer that flight,
+  KNOCK_STEERS). At 0% HP she dies, and the
   run ends (SimDied); up held at a portal (mapdata.PORTAL_BOX: from 100 above it to 25 below, in the air too, as
   HeavenClient has it) takes her through it, out of the map, and the run ends too (SimLeftMap);
 - the attack picks its target when it starts, physics.JUMP_LAG after its key (the same input lag as a
@@ -178,7 +179,9 @@ ROPE_JUMP = rope_jump(SHOE)  # (the planner's shoe's: the world's own is World.r
 # client's touch test (from 2026-11-02): RustMS's copy of HeavenClient, aligned with the v83 client, has a monster touch
 # her where its frame's box (Mob::is_in_range: the bounds of the frame it shows, as SimMonster.body has them) meets
 # her as a line 50 tall, from where she was a frame before to where she is, with no width of its own
-# (MapMobs::find_colliding; D:/MapleHelper-scratch/spawn-fade/mech/rustms); the -22..22 x 65 box of the client's
+# (MapMobs::find_colliding; D:/MapleHelper-scratch/spawn-fade/mech/rustms). The world (World._touch) tests the line at
+# her x now alone, the box's edges not touching: from one 5 ms tick to the next she goes 0.75 units at her walk (1.35 in
+# a knock's flight), so the sweep and the edge are left out; the -22..22 x 65 box of the client's
 # FUN_0045183b (MobAttackRules.h `user_body`) is where a monster's own attacks land, which Tree Dungeon's don't have.
 # Live it fits the touches as her invulnerability ends: of BugBaby's grinds of 2026-10-30 (02:03-02:49, 16:31-17:37:
 # the perception service's tracks; D:/MapleHelper-scratch/recfix/sim/live_boxtest.py), with the nearest seen monster of
@@ -321,15 +324,28 @@ walk_edges = monster_data.walk_edges
 # landdiag.py).
 ATTACK_BEFORE_TAKEOFF_MS = 150
 KNOCK_FALL_MS = 500
-# Its knockback: ~40 units in the air (0.22 s) and a ~19-unit slide on landing, ~58 in all on flat ground
-# (hits.jsonl's pushes on her own level: quartiles 21 / 58 / 87 units). Those are all hits with no key
-# pressed since the look before (Hunter._log_hit), so what an arrow held does to the flight isn't measured.
-# By the engine's air steering the opposite arrow would brake it at 200 units/s² (45 units on flat ground
-# instead of 56, toward the monster) and the one held away would carry her on, landing at full speed (65).
-# False: the arrow does nothing until she lands, as the fit had it (and the simulator before it ran on the
-# engine); on the ground it walks her as ever.
+# Its knockback, the world's own from 2026-11-02 (Realism.knock), apart from the planner's (motion.physics.KNOCK_VX,
+# KNOCK_VY: the navigator's KNOCK_AIR_S): away from the monster and up at 270 units/s each (KNOCK_VX, KNOCK_VY: the v83
+# client's push as RustMS's port of it has it, "away from the mob and up at 270 px/s", rising about 18 and landing about
+# 73 away from standing; D:/MapleHelper-scratch/spawn-fade/mech/rustms/agent_docs_client.md.txt), 0.27 s in the air on
+# flat ground, and landing with her speed along the ground at most her walk's (KNOCK_LANDS_WALKING), braked from there
+# as ever: ~73 units in the air and a ~14 slide, ~87 in all. R1-R3's lossless 15 fps frames agree (the replay kit's
+# dumps of master 40ba190's perception on them: D:/MapleHelper-scratch/recfix/sim-fix/knock_fit.py, knock_fit.txt; the
+# 9 touches that hurt her standing and landed her where she stood): 18 units a frame in the air (270 a second), the
+# flight fitted at 262-270 out and 275-280 up (a median rise of 19.1 seen: 270's is 18.2), landing a median 73.3 away;
+# then 11-19.5 more (a median 15.1, the 5 with no key after them) at 8, 4 and 2 units a frame, as her walk braked at 800
+# slides (14, at 8.2, 4.5 and 2.7), where 270 braked by the engine (1600 down to her walk, then 800) slides 30; 84-93 in
+# all. Until then the planner's 180 and 220 (KNOCK_PLANNER: `--world planner-knock`), ~40 in the air (0.22 s) and a
+# ~19 slide, ~58 in all, fitted to hits.jsonl's pushes on her own level (quartiles 21 / 58 / 87, from the looks, not
+# frames). Those are all hits with no key pressed since the look before (Hunter._log_hit), and R1-R3's knocks have
+# none in the air either, so what an arrow held does to the flight isn't measured. By the engine's air steering the
+# opposite arrow would brake it at 200 units/s² (toward the monster) and the one held away would carry her on. False:
+# the arrow does nothing until she lands, as the fit had it (and the simulator before it ran on the engine); on the
+# ground it walks her as ever.
 KNOCK_STEERS = False
-KNOCK_VX, KNOCK_VY = physics.KNOCK_VX, physics.KNOCK_VY  # (motion.physics has them since 2026-10-30: the navigator's)
+KNOCK_VX, KNOCK_VY = 270.0, 270.0
+KNOCK_LANDS_WALKING = True
+KNOCK_PLANNER = (physics.KNOCK_VX, physics.KNOCK_VY, False)  # (vx, vy, KNOCK_LANDS_WALKING) as until 2026-11-02
 HITS = {"pig": 3, "orange-mushroom": 3, "slime": 2, "snail": 1}  # HP in stars
 # A kind HITS doesn't have takes as many stars as hers need on average to kill it (stars_to_kill, rounded): a star of
 # hers did 30-70 damage on the first map (a claw swipe 9-11: README, Attack; at level 23 not measured yet), less the
@@ -1089,6 +1105,10 @@ class Realism:
     newborns_touch: bool = False  # a monster the map has just spawned touches her from its birth (as the world had it
                                   # until 2026-11-02: the harness's `--world newborns-touch`); False: only once it has
                                   # faded in, NEWBORN_SOLID_S after (as live)
+    knock: tuple[float, float, bool] | None = None  # her knock (vx, vy, whether she lands from it at her walk's speed
+                                  # at most): None, the world's own (KNOCK_VX, KNOCK_VY, KNOCK_LANDS_WALKING: the
+                                  # client's, as R1-R3's frames have it, from 2026-11-02); KNOCK_PLANNER, the planner's
+                                  # (motion.physics), as until then (the harness's `--world planner-knock`)
     # The game's own key bindings where they aren't her keys' (behavior.keycheck): (her GameKeys field, the key the game
     # has it on, None: on no key), e.g. (("attack", "a"),): her configured attack key then does nothing (as live on
     # 2026-10-28 00:30, the user's own play having moved it), A attacks. The backslash opens the KEY BINDINGS window
@@ -2852,12 +2872,15 @@ class World:
         """Down on platform q at x, going sideways at vx (0 if a wall stopped her): she slides on as the
         ground brakes her (or runs on, with the arrow), except while an attack plays: it stops her. Five
         jump-backs and jump-throws landing during their attack slid 1.4-2.9 units, where braking alone
-        has 7.6-11.7 (research: 60 fps recordings). Between the game's steps she stands where she lands until
-        the next (body.LANDING_ENDS_STEP)."""
+        has 7.6-11.7 (research: 60 fps recordings). Landing from a knock she goes on at her walk's speed at most
+        (KNOCK_LANDS_WALKING: R1-R3's frames). Between the game's steps she stands where she lands until the next
+        (body.LANDING_ENDS_STEP)."""
         if self.knocked and self._knocked_from is not None:
             t0, src, y0 = self._knocked_from
             if q.id != src and q.y_at(x) - y0 > KNOCK_FALL_DY:
                 self.knock_log.append((t0, src, q.id, round(q.y_at(x) - y0, 1)))
+        if self.knocked and self._knock()[2]:
+            vx = min(max(vx, -self.shoe.vmax), self.shoe.vmax)
         self._knocked_from = None
         self._log_landing(q, x)
         self.mode, self.plat, self.flight, self.last_plat, self.group, self.knocked = "ground", q, None, q, q.group, False
@@ -3042,7 +3065,13 @@ class World:
         if not self.knocked or self._knocked_from is None:  # (a touch in a knock's flight: from where the first was)
             self._knocked_from = (self.t, self.last_plat.id, self.last_plat.y_at(self.last_plat.clamp(self.x)))
         self.knocked = True
-        self._launch(away * KNOCK_VX, -KNOCK_VY, self.ms + TICK_MS)  # after this tick's motion
+        vx, vy, _ = self._knock()
+        self._launch(away * vx, -vy, self.ms + TICK_MS)  # after this tick's motion
+
+    def _knock(self) -> tuple[float, float, bool]:
+        """Her knock as this world has it (Realism.knock): (vx, vy, whether she lands from it at her walk's speed at
+        most)."""
+        return self.realism.knock or (KNOCK_VX, KNOCK_VY, KNOCK_LANDS_WALKING)
 
     def _potion(self) -> float:
         """The share of her HP a potion of hers heals: Her.potion over her HP, or POTION_HP where that isn't known."""
