@@ -21,6 +21,11 @@ def served(tmp_path, monkeypatch):
     (s / "problems.json").write_text(json.dumps([{"frames": [1, 2], "what": "a miss"}]), encoding="utf-8")
     (s / "secret.txt").write_text("no", encoding="utf-8")
     (tmp_path / "golden" / "no-frames").mkdir()
+    g = tmp_path / "golden" / "group-a" / "clip-1"
+    (g / "frames").mkdir(parents=True)
+    (g / "frames" / "00000.jpg").write_bytes(b"g0")
+    (g / "README.md").write_text("clip 1", encoding="utf-8")
+    (g.parent / "loose.txt").write_text("no", encoding="utf-8")
     monkeypatch.setattr(review, "ROOT", tmp_path / "golden")
     srv = ThreadingHTTPServer(("127.0.0.1", 0), web._Handler)
     srv.feed = None  # (only the review's routes are asked)
@@ -49,9 +54,22 @@ def test_the_sets_a_viewer_its_meta_frames_and_a_videos_byte_ranges(served):
     assert len(get(served + "/review/overlay-a/overlay.mp4")[2]) == 1024
 
 
+def test_a_group_lists_its_sets_and_serves_each_as_a_set_one_level_down(served):
+    top = get(served + "/review")[2]
+    assert b'href="/review/group-a/"' in top and b"clip-1" not in top
+    assert b'href="/review/group-a/clip-1/"' in get(served + "/review/group-a/")[2]
+    assert b"group-a/clip-1" in get(served + "/review/group-a/clip-1/")[2]
+    meta = json.loads(get(served + "/review/group-a/clip-1/meta.json")[2])
+    assert (meta["name"], meta["frames"], meta["files"]) == ("clip-1", 1, ["README.md"])
+    assert get(served + "/review/group-a/clip-1/frames/00000.jpg")[2] == b"g0"
+    assert get(served + "/review/group-a/clip-1/README.md")[2] == b"clip 1"
+
+
 @pytest.mark.parametrize("path", ["/review/../golden/overlay-a/secret.txt", "/review/overlay-a/secret.txt",
                                   "/review/overlay-a/frames/..%2fsecret.txt", "/review/no-frames/",
-                                  "/review/overlay-a/frames/1.jpg", "/reviewx"])
+                                  "/review/overlay-a/frames/1.jpg", "/reviewx", "/review/group-a/loose.txt",
+                                  "/review/group-a/clip-2/", "/review/group-a/group-a/clip-1/",
+                                  "/review/overlay-a/clip-1/", "/review/group-a/../overlay-a/secret.txt"])
 def test_nothing_outside_a_set_is_served(served, path):
     with pytest.raises(urllib.error.HTTPError) as e:
         get(served + path)

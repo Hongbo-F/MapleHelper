@@ -5,8 +5,11 @@ overlay-quick-2min, the overlay tool's output), stepped through one frame at a t
 A set is a folder under ROOT (GAMELAB_REVIEW_ROOT, else the scratch folder's golden-tree beside the repo) with a
 `frames/` folder of 00000.jpg ...; it may have legend.png, overlay.mp4 (served with byte ranges: a phone's video player
 asks for them), README.md, LEGEND.md and problems.json ([{"frames": [a, b], "what": "..."}], the frames worth a look).
-    /review                       the sets
-    /review/<set>/                the viewer
+A group is a folder under ROOT with no frames/ of its own and sets in it (the user, 2026-11-01: "put all of them under
+the same review folder? e.g. `/review/ld-movers-kf/xxxx`"); one level only.
+    /review                       the sets and the groups
+    /review/<group>/              a group's sets
+    /review/<set>/                the viewer (in a group, /review/<group>/<set>/ and so on below)
     /review/<set>/meta.json       its frame count and problems
     /review/<set>/frames/N.jpg    a frame; legend.png, overlay.mp4, README.md, LEGEND.md
 Names are checked (letters, digits, - and _; frames by number), so nothing outside a set is served."""
@@ -36,6 +39,23 @@ def sets(root: Path | None = None) -> list[str]:
         return []
 
 
+def groups(root: Path | None = None) -> list[str]:
+    """The groups under `root` (ROOT): folders with no frames/ folder and sets in them, by name."""
+    root = root or ROOT
+    try:
+        return sorted(d.name for d in root.iterdir()
+                      if d.is_dir() and NAME.match(d.name) and not (d / "frames").is_dir() and sets(d))
+    except OSError:
+        return []
+
+
+def _listing(handler, title: str, links: list[tuple[str, str]]) -> None:
+    body = "".join(f'<li><a href="{href}">{text}</a></li>' for href, text in links) or "<li>none</li>"
+    handler._send(200, (f"<!doctype html><meta name=viewport content='width=device-width'><title>{title}</title>"
+                        f"<body style='font:16px sans-serif;background:#111;color:#eee'><h3>{title}</h3>"
+                        f"<ul>{body}</ul>").encode(), "text/html; charset=utf-8")
+
+
 def meta(folder: Path) -> dict:
     frames = sorted(p.name for p in (folder / "frames").iterdir() if FRAME.match(p.name))
     try:
@@ -53,11 +73,17 @@ def handle(handler, path: str, root: Path | None = None) -> bool:
     root = root or ROOT
     parts = [p for p in path.split("/")[2:] if p]
     if not parts:
-        body = "".join(f'<li><a href="/review/{n}/">{n}</a></li>' for n in sets(root)) or "<li>none</li>"
-        handler._send(200, (f"<!doctype html><meta name=viewport content='width=device-width'><title>Review</title>"
-                            f"<body style='font:16px sans-serif;background:#111;color:#eee'><h3>Recordings</h3>"
-                            f"<ul>{body}</ul>").encode(), "text/html; charset=utf-8")
+        _listing(handler, "Recordings", [(f"/review/{g}/", f"{g}/") for g in groups(root)]
+                 + [(f"/review/{n}/", n) for n in sets(root)])
         return True
+    if NAME.match(parts[0]) and parts[0] in groups(root):
+        group = parts[0]
+        if len(parts) == 1:
+            _listing(handler, group, [(f"/review/{group}/{n}/", n) for n in sets(root / group)])
+            return True
+        root, parts, label = root / group, parts[1:], f"{group}/"
+    else:
+        label = ""
     name = parts[0]
     folder = root / name
     if not NAME.match(name) or not (folder / "frames").is_dir():
@@ -65,7 +91,7 @@ def handle(handler, path: str, root: Path | None = None) -> bool:
         return True
     rest = parts[1:]
     if not rest:
-        handler._send(200, viewer(name), "text/html; charset=utf-8")
+        handler._send(200, viewer(label + name), "text/html; charset=utf-8")
     elif rest == ["meta.json"]:
         handler._send(200, json.dumps(meta(folder)).encode(), "application/json")
     elif len(rest) == 2 and rest[0] == "frames" and FRAME.match(rest[1]):
