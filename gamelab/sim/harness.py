@@ -253,7 +253,7 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
@@ -337,6 +337,10 @@ WORLDS["pet-loot"] = {"pets": 2}
 # (`shared-exp`: world.Realism.shared_exp), as live on 2026-11-02 (the hour's 26 shares by the log, mostly +32-35 of a Horny
 # Mushroom's 41 after her first claw: the rule's 32.8-36.5; plans/problems.md P43), where the other worlds give nothing.
 WORLDS["shared-exp"] = {"shared_exp": True}
+# ... and her walk in the world as her planner has it (`walk-planned`: world.Her.walk_speed None, physics.SHOE), where her own
+# world walks her at her measured speed (the magician's 148.2 against her profile's 125: world.MAGE_32): what the
+# planner's speed error costs her (the roadmap's item 1, P01). The thief's world is the planner's already.
+WORLDS["walk-planned"] = {"walk_speed": None}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's

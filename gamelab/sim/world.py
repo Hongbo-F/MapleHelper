@@ -3235,7 +3235,7 @@ class World:
         what = "Magic Claw" if action == "skill" else "her swing"
         if self.mode != "ground":
             self.air_presses += 1
-            self.note(f"{what} pressed in the air: nothing")
+            self.note(f"{what} pressed in the air ({self._key_tag or 'no plan'}): nothing")
             return
         skill = action == "skill"
         if skill and not self._cast():

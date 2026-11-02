@@ -263,3 +263,13 @@ def test_a_simulated_grind_of_hers_casts_from_the_ground_inside_her_lock_never()
         r = json.loads(Path(name).read_text(encoding="utf-8"))[0]
     assert r["character"] == "magician" and r["casts"] >= 5 and r["kills"] >= 2
     assert r["air_presses"] == 0 and r["attack_locked"] == 0 and r["swings"] == 0 and r["misses"] == 0
+
+
+def test_her_walk_as_planned_is_a_world_of_its_own():
+    # `--world walk-planned`: her world's walk the planner's (her profile's 125), what the planner's error costs her
+    import dataclasses
+    from gamelab.motion import physics
+    from gamelab.sim import harness
+    assert harness.WORLDS["walk-planned"] == {"walk_speed": None} and "walk_speed" in harness.HER_FIELDS
+    assert world_mod.her_shoe(dataclasses.replace(MAGE_32, walk_speed=None)) is physics.SHOE
+    assert world_mod.her_shoe(MAGE_32).vmax == pytest.approx(148.2)
