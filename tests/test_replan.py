@@ -393,7 +393,10 @@ def test_a_monster_whose_replan_was_dropped_late_with_no_room_to_stop_is_asked_a
     assert len(asks) > i + 1 and asks[i + 1][0] - asks[i][0] <= 0.15 + 2 * nv.STATE_S + 1e-6, asks
     said = [line for line in trace["log"] if "replanned too late" in line]
     assert len(said) == 1 and nv.COMING in said[0] and said[0].endswith("dropped, the next state asks again"), said
-    assert any(sp[0] >= asks[i + 1][0] - 1e-6 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
+    # (the trace's splice times are rounded to the ms, Trace.at: a splice at the ask itself can read up to 0.5 ms before
+    # it. Here the ask came at 1.1972 s and its splice read 1.197; before, a later splice met the test, and with
+    # navigator.ROPE_HANG's hang at the top of the rope at 146 at 6.8 s, HANG_S 2 s, none comes later)
+    assert any(sp[0] >= asks[i + 1][0] - 5e-4 - 1e-9 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
     assert not any("plan cut short" in line and nv.COMING in line for line in trace["log"])
 
 

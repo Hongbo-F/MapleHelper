@@ -520,41 +520,51 @@ CLIMB_LOOK = True
 # ROPE_HANG (from the three recordings of RiceBaby grinding on Tree Dungeon on 2026-11-02, the roadmap's item 9, P08:
 # D:/MapleHelper-scratch/rec-analysis/plans): while she climbs a rope up to the platform at its top, a chain's climb or
 # the mover's lone climb move, her glances check the way up from the newest state: where the rest of the climb, the
-# climb-over and STAND_PAST_S standing at the top would meet a monster (_way_up: flow.danger, her box all the way, against
-# every monster the state has whose touch counts, on any platform, each walking as followed, her invulnerability
-# counted), she stops on the rope HANG_UNDER under its top (the cut lets go of every key; the game keeps her where she is
-# on a rope) and hangs there (_hang), where no monster's body reaches her, looking at every state; once the way up is
+# climb-over and STAND_PAST_S standing at the top would meet a monster (_way_up: flow.danger, her box all the way,
+# against every monster the state has whose touch counts, on any platform, each walking as followed, her invulnerability
+# counted), she stops on the rope HANG_UNDER under its top (the cut lets go of every key; the game keeps her where she
+# is on a rope) and hangs there (_hang), where no monster's body reaches her, looking at every state; once the way up is
 # clear she climbs the rest, as her climb on after a touch holds it (_climb_on), and after HANG_S she goes up regardless
 # (a backstop event, as a pass regardless). A touch on the rope with the top taken (CLIMB_LOOK) hangs too, down to
 # HANG_UNDER first, where it went down the whole rope. Live that hour 19-23 of the 170 touches were at the top of the
 # rope at x -80 from 11 to 10 (11 of them on the rope, 16-48 under its top: R2 #8, #24, R3 #34 on their frames, a Horny
-# Mushroom on 10 beside the rope's top each time), over 68 climbs up it, 24 of them past a Horny regardless (NO_WAIT) and
-# about 13 the mover's lone climb move, which nothing watched for the top; she can't cast on a rope ("That cannot be used
-# while you're on a rope or ladder.", the game's line for any skill), so nothing else is to be done there. False: as
-# before.
+# Mushroom on 10 beside the rope's top each time), over 68 climbs up it, 24 of them past a Horny regardless (NO_WAIT)
+# and about 13 the mover's lone climb move, which nothing watched for the top; she can't cast on a rope ("That cannot be
+# used while you're on a rope or ladder.", the game's line for any skill), so nothing else is to be done there. False:
+# as before.
 ROPE_HANG = True
 # Her feet this far under the rope's top at least where she hangs: she's 65 tall (bodies.HER_TALL, the client's box), so
 # a monster standing at the top can't reach her body, with 15 more for her dot's error (to about 11 units) and the slope
 # by the top (platform 10 rises 10 units within the 50 left of the rope at -80 that a Horny's box reaches hers from).
-# HANG_FLOOR: past this (her feet nearer the top) there's no hanging, the climb goes on as before. On Tree Dungeon's long
-# ropes (190 long: -80 from 11 to 10, 111 and -8 up to 18) she grabs them 158-176 under the top, so she climbs to it;
-# on the short ones (116: -192, -8 from 29, 146) she grabs them about 76 under, and no hang is made there.
+# HANG_FLOOR: past this (her feet nearer the top) there's no hanging, the climb goes on as before. On Tree Dungeon's
+# long ropes (190 long: -80 from 11 to 10, 111 and -8 up to 18) she grabs them 158-176 under the top, so she climbs to
+# it; on the short ones (116: -192, -8 from 29, 146) she grabs them about 76 under, and no hang is made there.
 HANG_UNDER = 80.0
 HANG_FLOOR = 70.0
 # The cut is decided at the glance before the one that would be too late: from her dot's height (on the rope above where
-# she grabbed it: in the jump at it no cut), less what she climbs in the glance's frame age and the game's lag in letting
-# go of up (motion.body.Lags.off, 68 ms), at flow.ROPE_SPEED (130; live 117-120, so she stops a little lower).
+# she grabbed it: in the jump at it no cut), less what she climbs in the glance's frame age and the game's lag in
+# letting go of up (motion.body.Lags.off, 68 ms), at flow.ROPE_SPEED (130; live 117-120, so she stops a little lower).
 HANG_LAG_S = 0.068
-HANG_S = 4.0  # s she hangs at most: about a touch's price (attack.stance.MEET_PRICE_S, 2.86 s) and the climb down saved
+# HANG_S: the most she hangs. The roadmap's 4 s (about a touch's price, attack.stance.MEET_PRICE_S 2.86 s, and the climb
+# down it saves) against 2 s, the harness's standard thief grind (loop-grind, Tree, crowd, choice, measured, zero-walls,
+# near-misses, walkers, 5 minutes), 24 seeds each against the same base (D:/MapleHelper-scratch/recfix/rope: ab24_hang4,
+# ab24_hang2): 4 s EXP a minute -4.2% (t -1.7), touches at a rope's top -28.5% (t -2.9), touches that hurt -9.8% (t
+# -2.2), 18.1 s of hanging a run; 2 s EXP -0.6% (t -0.2), touches at a rope's top -21.3% (t -2.4), that hurt -6.2% (t
+# -1.3), 10.5 s of hanging. 2 s, for the EXP (the user's rule: EXP and loot over fewer touches). On the live hour 8 of
+# the 11 hangs that hindsight says would have cleared within 4 s cleared within 2 (the oracle below).
+HANG_S = 2.0
 # The monsters as the hang judges the way up: each walking as followed (TURN_SLACK and 20 units a second of spread, as
 # every chain plans them), but one standing may set off either way for HANG_UNSURE_S at the most, not the chains'
 # STAND_UNSURE_S (1 s): a Horny standing anywhere on 10's left part (-163 to -32, its Horny point at -109) is within
-# 50 + 100 of the rope's top at -80, so at 1 s no hang there ever ended before HANG_S (the rope-top scenario's seeds:
-# 18 of 19 hangs up regardless after 4 s). On the hour's 35 climbs that perception saw 100 or less under the top, the top
-# was free for the 1.3 s of the rest of the climb, the climb-over and STAND_PAST_S at once on 20 (1 touched), and on 11
-# of the other 15 (14 touched) within 4 s by where the monsters really went (0.3-3.9 s, D:/MapleHelper-scratch/recfix/
-# rope/oracle.py): the hang is worth what it judges free soon, so standing ones are taken as they stand but for about
-# a state and a key's lag of setting off.
+# 50 + 100 of the rope's top at -80, so at 1 s hardly a hang there ended before HANG_S (a first rope-top scenario, two
+# Horny Mushrooms by the top, seeds 1-12: 18 of 19 hangs up regardless after 4 s; 12 of 19 at 0.3 s). On the hour's 35
+# climbs that perception saw 100 or less under the top, the top was free for the 1.3 s of the rest of the climb, the
+# climb-over and STAND_PAST_S at once on 20 (1 touched), and on the other 15 (all 15 touched) the monsters as they
+# really went freed it within 1 s on 5, 2 s on 8, 4 s on 11 (D:/MapleHelper-scratch/recfix/rope/oracle.py, oracle.txt):
+# the hang is worth what it judges free soon, so standing ones are taken as they stand but for about a state and a
+# key's lag of setting off. Taken as standing (0) the harness's standard grind did no better (24 seeds, HANG_S 2 s:
+# EXP a minute -2.0%, touches at a rope's top -22.1%, against -0.6% and -21.3% at 0.3; 4.7 of its 5.2 hangs a run up
+# regardless where 4.8 of 5.3: what blocks the way up there is mostly a walker, or one chasing her).
 HANG_UNSURE_S = 0.3
 HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _carry_out_chain, _carry_out_move)
 # After the evade work's review (2026-10-29: D:/MapleHelper-scratch/evade/review; the fixes' runs and numbers in
@@ -2160,7 +2170,8 @@ class Navigator:
             if str(cut).startswith(HUNG) and getattr(self, "_hang_at", None) is not None:  # (ROPE_HANG: the hang, up)
                 text, self._hang_at = self._hang(*self._hang_at), None
                 touch = self._hang_touch  # (a touch in it, or in the climb after, is the cut's: POST_HIT)
-                cut = MoveCut(f"{HUNG}: {text}" if touch is None else f"{_touch_text(touch, s.hp, s.hp)} ({HUNG}: {text})")
+                cut = MoveCut(f"{HUNG}: {text}" if touch is None
+                              else f"{_touch_text(touch, s.hp, s.hp)} ({HUNG}: {text})")
             st.trip.time["move"] += time.monotonic() - t2
             st.moved_at = time.monotonic()
             after = self.recover()
@@ -2215,8 +2226,10 @@ class Navigator:
         since, hp0, by = s.t, s.hp, {move.src, move.dst}
         stood = [None]
         self._hang_at = None
-        rope = next((r for r in self.model.ropes if (r.x, r.top, r.bottom) == (move.rope_x, move.rope_top,
-                                                                              move.rope_bottom)), None)             if ROPE_HANG and move.kind == "climb" else None
+        rope = None
+        if ROPE_HANG and move.kind == "climb":
+            rope = next((r for r in self.model.ropes
+                         if (r.x, r.top, r.bottom) == (move.rope_x, move.rope_top, move.rope_bottom)), None)
         grab = route.grab_height(self.model.platform(move.src).y_at(move.rope_x), rope) if rope is not None else None
 
         def watch() -> str | None:
@@ -3234,8 +3247,8 @@ class Navigator:
         after it (None: none), which the caller takes as the cut's (POST_HIT: no fight while her invulnerability after
         it lasts, so the next chain passes the monster in it, as after a touch on the rope; taken as no touch,
         nav_tree_rope_hit, from 19 up to 16, fought the Green Mushroom by the top after the hang, was knocked back down
-        to 19 and climbed again, 105 s and 37 touches, where 9.1 s and 1 so). A touch told only after it (the popup's
-        lag) is taken so by the caller too (_carry_out_chain, _carry_out_move)."""
+        to 19 and climbed again, 105 s and 37 touches with HANG_S 4 s, where 7.1 s and 1 so). A touch told only after it
+        (the popup's lag) is taken so by the caller too (_carry_out_chain, _carry_out_move)."""
         start, under = time.monotonic(), y - rope.top
         since = getattr(self.senses, "glanced_at", None)
         self.log(f"    {why}: hanging on the rope at x {rope.x:.0f}, {under:.0f} under its top")

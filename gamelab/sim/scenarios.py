@@ -1915,11 +1915,11 @@ def nav_tree_rope_hit(sim):
     her on the rope; of seeds 1-24, 1, 3, 5-7, 9-11, 13 and 15-23 meet all of this and tests/test_touches.py's MISS on
     the trip.)
     (From 2026-11-02, navigator.ROPE_HANG: the Green Mushroom by the top makes her stop on the rope 88 under it and
-    hang there; it stands within reach of the top the whole HANG_S, so she goes up regardless after 4.1 s, touched on
-    the rope then (damage 56, no knock), and her invulnerability after it takes her past it (the touch is the cut's:
-    POST_HIT), on 16 at 9.1 s with 1 touch where 5.1 s with 1 (climbed on after a touch 45 under the top). Her climb on
-    after a touch, CLIMB_ON, isn't shown here any more: tests/test_rope_top.py and tests/test_evade.py, and the grinds'
-    goldens, where a monster comes to the top after she's past the hang's place.)"""
+    hang there; it stays within reach of the top the whole HANG_S, so she goes up regardless after 2.1 s, touched on the
+    rope then (a MISS, no knock), and her invulnerability after it takes her past it (the touch is the cut's: POST_HIT),
+    on 16 at 7.1 s with 1 touch where 5.1 s with 1 (climbed on after a touch 55 under the top). Her climb on after a
+    touch, CLIMB_ON, isn't shown here any more: tests/test_rope_top.py, test_evade.py and test_touches.py (without
+    ROPE_HANG).)"""
     return _nav(16, fight=True)(sim)
 
 
@@ -1940,7 +1940,7 @@ def nav_tree_rope_top_10(sim):
     seed 8 she hangs 0.5 s 83 under the top and goes up untouched, on 10 0.5 s later than without the hang (touched on
     the rope 50 under its top then, damage 118, and up again). On seeds 1-12 (D:/MapleHelper-scratch/recfix/rope/
     seeds_hang.py): touched on 2 of the 12 trips (1 on the rope) where without the hang on 5 (4 on the rope); 4 hangs, 2
-    of them up regardless after HANG_S (one of those touched); the 12 trips 58.2 s in all against 48.7."""
+    of them up regardless after HANG_S (one of those touched); the 12 trips 54.2 s in all against 48.7."""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(10, mode=TRANSIT)
 
