@@ -83,6 +83,22 @@ class Search:
         """... and the highest."""
         return self.window(self.bands - 1)[1]
 
+    def band(self, ahead: float, dy: float, half: float, top: float) -> int | None:
+        """The first band a body overlaps (strictly, sideways and up and down: attack.reach.search_band's rule), its
+        middle `ahead` in front of her, its feet `dy` below hers (+ below), `half` wide either side and `top` tall;
+        None: the search doesn't pick it (behind her, its far side within `start`, its near side at `range` or past, or
+        no band's window reaching it)."""
+        near, far, bottom, roof = ahead - half, ahead + half, -dy, top - dy
+        if far <= self.start or near >= self.range or far <= near:
+            return None
+        first = max(0, int((near - self.start) // self.step))
+        last = min(self.bands - 1, math.ceil((far - self.start) / self.step) - 1)
+        for k in range(first, last + 1):
+            lo, hi = self.window(k)
+            if bottom < hi and roof > lo:
+                return k
+        return None
+
 
 @dataclass(frozen=True)
 class Geometry:
@@ -132,6 +148,18 @@ class AttackSpec:
 
 
 @dataclass(frozen=True)
+class KillCredit:
+    """Which monster her kill was, where her attack picks by the client's own search and no star flies (the
+    magician's Magic Claw; localization.tracking `_picks`, `_let_go`; the hunt following the tracker's corrections:
+    behavior.ledger, grind, localization.memory). The thief has none: his stars' nearest-ahead box and timings
+    (tracking's constants)."""
+    search: Search          # the search her attack picks by: each candidate's first band from where she was at the pick
+    tie: int                # the bands past the first in which the monster she aimed at still comes first (0: only in
+                            # the first band itself)
+    lands_s: float          # s after the key her hit shows on the monster: it walks on till then, then dies where it is
+
+
+@dataclass(frozen=True)
 class Shape:
     """What localization takes of her attacks (their union): which monsters a use of one went at, and how long
     after its key what it did can show. Passed into the trackers (MonsterTracker, Memory, Senses); THIEF_SHAPE is
@@ -151,6 +179,7 @@ class Shape:
     order: str                          # "line": the first in a star's way | "band": the first band, any in it
     look_band: tuple[float, float]      # how far above and below her feet a look searches (attack.reach.LOOK_*)
     shows_wait_s: float                 # a look for the next attack waits for a kill to show this long at most
+    kill: KillCredit | None = None      # her kill's monster by the client's search (None: the thief's stars)
 
 
 @dataclass(frozen=True)
