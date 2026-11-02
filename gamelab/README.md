@@ -3088,7 +3088,7 @@ The user, after the latency analysis: "You only need two jump attacks: one with 
 
 | | grinding, 12 seeds | hunt loop, 24 seeds |
 |---|---|---|
-| EXP a minute | 317.1 -> 331.1 (+14.0, se 13.2) | 298.6 -> 276.7 (-21.8, se 10.3: beyond 2 se) |
+| EXP a minute | 317.1 -> 331.1 (+14.0, se 13.2) | 298.6 -> 276.7 (-21.8, se 10.3: beyond 2 se; these seeds' luck, none on 96: The two keys' cost on 96 seeds, and a third key, below) |
 | kills a run | 45.2 -> 47.7 (+2.5, se 1.7) | 42.5 -> 39.6 (-3.0, se 1.5) |
 | touches | 80.0 -> 78.9 (-1.1, se 5.2) | 58.8 -> 61.0 (+2.2, se 3.8) |
 | hurt (touches that took HP) | 53.9 -> 50.2 (-3.8, se 4.5) | 32.8 -> 36.1 (+3.3, se 2.4) |
@@ -3096,7 +3096,7 @@ The user, after the latency analysis: "You only need two jump attacks: one with 
 | her drops picked up | 0.973 -> 0.944 (t -4.3) | 0.954 -> 0.949 |
 | jump attacks wasted (stopped, none picked) | 33.0% -> 34.3% | 33.7% -> 35.1% |
 
-No deaths, falls out of the map or stops. **The hunt loop's cost, taken apart** (variant.py, 24 seeds each, paired; attack_time.py): the tip with the 89-key search and no jitter is 3255623 to the digit on all 24 (the records change nothing); the two keys alone, no jitter, -20.2 EXP a minute (se 6.6, 16 seeds worse, 3 better, 5 the same), kills -2.8 (se 1.1); the shots' jitter on that -1.7 (se 7.6), the jitter up close on that +0.1 (se 8.3); the hunt's own "in reach from a jump" (`Hunt._jump_hits`, and with it the trip's question) by the 89 keys with her attacks by the two, -0.8 against the two keys everywhere (18 of 24 runs the same): not the hunt's questions. What it shows as: her attacks a run 142.6 -> 136.8 (throws from the ground 109.5 -> 103.7), her jump shots 4.25 -> 3.58 a run, keyed later (75 -> 134 ms at the median), the next attack no later (1.58 -> 1.24 s at the median), their kills 2.00 -> 1.83 a run; 4.9 s more a run on trips (se 2.6), 3.2 more waiting (se 3.7). So the loss is in what her stance does without the mid-rise shots (the 48% of soonest keys between the two: at the top or none instead), not in the jumps' own outcomes or the jitter; the rule is as the user gave it, the 89 keys not put back: the user decides. Grinding shows no cost (+4.4%, se 4.2%) but picks up 3% fewer of its drops (all 9 seeds that differ). Her trips' landings elsewhere than planned (the harness's `nav` misses and falls, 0 on 3255623's 36 runs) came 3 times in grinding's 12 and 2 in the hunt loop's 24 (5 with the two keys alone): not looked into.
+No deaths, falls out of the map or stops. **The hunt loop's cost, taken apart** (variant.py, 24 seeds each, paired; attack_time.py): the tip with the 89-key search and no jitter is 3255623 to the digit on all 24 (the records change nothing); the two keys alone, no jitter, -20.2 EXP a minute (se 6.6, 16 seeds worse, 3 better, 5 the same), kills -2.8 (se 1.1) (seeds 1-24's: on 96 the 89 keys are +0.8 over the two, se 3.6: The two keys' cost on 96 seeds, and a third key, below); the shots' jitter on that -1.7 (se 7.6), the jitter up close on that +0.1 (se 8.3); the hunt's own "in reach from a jump" (`Hunt._jump_hits`, and with it the trip's question) by the 89 keys with her attacks by the two, -0.8 against the two keys everywhere (18 of 24 runs the same): not the hunt's questions. What it shows as: her attacks a run 142.6 -> 136.8 (throws from the ground 109.5 -> 103.7), her jump shots 4.25 -> 3.58 a run, keyed later (75 -> 134 ms at the median), the next attack no later (1.58 -> 1.24 s at the median), their kills 2.00 -> 1.83 a run; 4.9 s more a run on trips (se 2.6), 3.2 more waiting (se 3.7). So on these seeds the loss was in what her stance does without the mid-rise shots (the 48% of soonest keys between the two: at the top or none instead), not in the jumps' own outcomes or the jitter; on 96 seeds there is none to find, and the user kept the two keys (below). Grinding shows no cost (+4.4%, se 4.2%) but picks up 3% fewer of its drops (all 9 seeds that differ). Her trips' landings elsewhere than planned (the harness's `nav` misses and falls, 0 on 3255623's 36 runs) came 3 times in grinding's 12 and 2 in the hunt loop's 24 (5 with the two keys alone): not looked into.
 
 **Timed** (`bench_d.py` and `sum_bench.py`, option d's: a watch-loop state on the real clock less the fake clock's advances, the "better" check's question, the replans, each outermost `_interrupt` by who asked; grinding's 12 seeds, an hour, the hunt loop's 4 scaled to one; two passes each, 3255623 then the tip (c9bf6a9; a229088 changes a record alone) then again, on an export of 3255623, `speed/j/src_325`; the CPU mode idle, the game's client open with nothing driving it, 2-3% CPU between the passes, 4 runs at a time at Idle priority on CPUs 12-23, no other job of this run's). Before -> after:
 
@@ -3247,8 +3247,8 @@ wasted 13.9% -> 16.1%), cash -301 -> -264; no deaths, falls or stops. With Meat 
 (+25.8, se 15.2, better on 10), kills +4.0 (2.3), loot 223.2 -> 213.8 (-9.5, 12.3; her own -8.4, her pets' -1.1), her
 drops' share 0.980 -> 0.947 (-0.033, 0.015), expiring +1.0 a run (0.6), hurt at piles the same (9.3), touches +3.5
 (3.4), Meat -0.7 a run (1.9), cash -248 -> -270; no deaths, falls or stops. Her EXP up in both worlds (beyond 2 se in
-the standard one), less than a16dcf0's (+29.6 and +31.2: her two jump attacks' cost to the hunt loop, -21.8 a minute on
-24 seeds in their section); her loot and share under master's, the share beyond 2 se with her pets.
+the standard one), less than a16dcf0's (+29.6 and +31.2; put down then to her two jump attacks' cost to the hunt loop, -21.8 a
+minute on 24 seeds in their section, which 96 seeds don't bear out: The two keys' cost on 96 seeds, and a third key, below); her loot and share under master's, the share beyond 2 se with her pets.
 
 **With her Etc tab full** (the loot review's world: `--world meat --world pet-loot --world map-drops --world etc-full`,
 her drops as live; `ab ... --base 0019017` and `--base 666c54b`, 24 seeds of 5 minutes, borderline at 12;
@@ -3371,8 +3371,9 @@ tip's own (or master's, 0019017's, a16dcf0's and 666c54b's as said).
 
 **Open, for the user.** Her drops' share at 15 minutes is 0.013-0.019 short of master's, and 2.3-2.5 more of her drops
 expire a run (master fetches piles about to expire; the tip lets a pile past `OLD_S` add 1 s at most), and in the hunt
-loop 0.027-0.033 short; loot's worth is above master's in the grind's worlds, beyond 2 se. Her two jump attacks cost the
-hunt loop EXP (their section: -21.8 a minute, se 10.3); against master it is still +18.4 (8.0). In the jump stage they
+loop 0.027-0.033 short; loot's worth is above master's in the grind's worlds, beyond 2 se. Her two jump attacks' cost to the
+hunt loop's EXP (their section: -21.8 a minute, se 10.3, on 24 seeds) isn't there on 96 (The two keys' cost on 96 seeds, and a third key, below);
+against master it is +18.4 (8.0). In the jump stage they
 cost grinding's share too, against its own base 3255623 (0.973 -> 0.944 on 12 seeds, t -4.3, every one of the 9 seeds
 that differ worse; not looked into there), hidden here by the 48 seeds against master (0.953 both): the next section
 measures it on 48. Her touches and HP lost
@@ -3429,7 +3430,7 @@ process by `drv5.py`, the record stage's drv4.py with `--set MODULE:NAME=VALUE` 
   cost at 48 seeds. Against the jump stage's base 3255623 (`ab ... --base 3255623`, its seeds 13-48 filled; `out/
   t_prev_vs_325_48.txt`) the previous tip's share is 0.953 against 0.960 (-0.007, se 0.006): seeds 1-12 had it -0.028
   (t -4.3, as the jump stage saw), seeds 13-48 +0.001 (0.007); its EXP +0.4 (7.3), loot -1.3 (7.1). The hunt loop's
-  EXP cost of the two keys stays the user's call (-21.8 a minute on 24 seeds in their section).
+  EXP cost of the two keys (-21.8 a minute on 24 seeds in their section): none measurable on 96 (next section).
 - *Tests weakened* (the first review's finding 5): fixed, 270c87e: the ten `act[:2]` assertions compare the whole act
   less its room and target again (`test_attack.close`, `no_room`), or the act itself where the stance keys it unsure.
 - *Nits*: the default save name (7a69c7a: "-think1.5", "-think-clock3", where such a run's save had gone over the
@@ -3537,11 +3538,51 @@ this machine are the record's passes above (grinding's worst state 7.4 and 45-46
 an hour).
 
 **Open, for the user.** Whether every jump attack stays jittered (`JITTER_ALL`; off, the analysis keeps its records,
-the sure ones jittered as before). The two keys' hunt-loop cost (-21.8 EXP a minute in their section) and, new here at
-24 seeds, the hunt loop's loot and share under master's beyond 2 se (-21.4 a minute, -0.042), with its EXP master's:
+the sure ones jittered as before). New here at 24 seeds, the hunt loop's loot and share
+under master's beyond 2 se (-21.4 a minute, -0.042), with its EXP master's (the two keys' cost to it, -21.8 in their
+section, isn't there on 96 seeds: next section):
 master fetches piles about to expire, the tip doesn't. Her share at 15 minutes 0.017-0.023 short of master's, 2.7-3.4
 more of her drops expiring a run. Her drops' life and her pets' pick-ups are the simulator's assumptions (the record
 section); the jitter's pattern is a question for the live grinds, its report ready for them.
+
+## The two keys' cost on 96 seeds, and a third key (2026-11-01, late)
+
+The user, on the two keys' -21.8 in the hunt loop: finish them and merge, "then measure what a 3rd key would help", and
+prepare it if the measurement is good. Measured on master 23e34d8 (D:/MapleHelper-scratch/three-keys: the probe's export
+`src`, its `reach.MID_KEY_MS`, `MID_TURN_KEY_MS` and `JITTER_MID_MS` off by default; `harness/out` the runs and tables,
+`replay` the searches, `stance` the stance's own choices; `final.txt`). The bar, set before measuring: a gain beyond 2
+se, or at least 10.9 EXP a minute (half the 21.8) at t 1.5. None met it, and the user kept the two keys: nothing built.
+
+**The two keys' cost again** (the 89 keys against the two, no jitter either side, the hunt loop, paired by seed;
+`harness/out/t_ceiling_loop96.txt`):
+
+| seeds | EXP a minute (se) | loot a minute (se) |
+|---|---|---|
+| 1-24 | +20.2 (6.6) | +12.2 (5.0) |
+| 25-48 | -8.8 (8.7) | -7.5 (7.3) |
+| 49-96 | -4.2 (4.2) | -3.1 (4.4) |
+| all 96 | +0.8 (3.6) | -0.3 (3.2) |
+
+Seeds 1-24 give the jump stage's own number, so its -21.8 (and the two keys alone's -20.2) were those seeds' luck: on
+96 the two keys cost the hunt loop nothing measurable (at most about 8 a minute, 3%, at 95%), as grinding at 48 (The
+reviews' findings fixed, above). The shots they lose (6% of the targets with a jump shot lose every one, many more are
+keyed later) don't come out as less EXP: the stance finds another attack.
+
+**A third key on her way up** (paired against master; S/T the straight jumps' key and the turning ones', ms after the
+jump key, jittered 15 either side; the hunt loop to 96 seeds while borderline, grinding 48):
+
+| S/T | hunt loop EXP | hunt loop loot | grinding EXP | grinding loot |
+|---|---|---|---|---|
+| 150/180 | +5.5 (3.4, t 1.6) | +1.7 (3.7) | +5.3 (5.3) | +7.5 (5.3) |
+| 180/180 | +5.5 (3.6) | +5.1 (3.7) | -2.2 (4.4) | +3.1 (5.0) |
+| 150/150 | +3.6 (4.9; 48 seeds) | +0.6 (5.2) | +3.5 (4.5) | +9.3 (4.7) |
+
+The two +5.5 share master's runs (their gains correlate 0.62; together +5.5, se 3.1). Touches and hurt the same; no
+deaths, falls or stops. About 2 third-key attacks a run in the hunt loop (76% hit or kill), and the top's key from 1.8 a
+run to 0.35: the jitter report's top would have few. On the 5,938 recorded searches made again (`replay/replay3.py`): of
+4,595 targets with a jump shot by the 89 keys the two keys lose 279, and a third key wins back 25-39 of them (14% at
+most; most lost ones hit only on her way down, past the top); it keys the shots sooner (later than the 89 keys' by
+55-93 ms at the median against 148), for at most 5% more search (2.68 -> 2.81 s for all of them).
 
 ## Localization
 
