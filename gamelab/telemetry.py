@@ -56,8 +56,14 @@ Topics (map units; producers build the records, ui.state folds them):
   trip      dst, result; on, x, walk [[units, hold ms]]       control.navigator, at every trip's end (from
                                                                2026-11-02 where she was as it ended, and its
                                                                arrival walk: navigator._trip_end)
-  no_cast   why, side, by, kind, x; mp, cost                   behavior.attacks: a cast not sent (every one her
-                                                               MP refuses from 2026-11-02, with her MP reckoned)
+  attack    key, why, kind, left, dead, hp, mp, platform,      behavior.attacks, each throw's attack and why
+            x; track, side                                     (Attacks._say; from 2026-11-02 its target's
+                                                               track, the perception service's, and the side:
+                                                               localization.tracking counts her aim against her
+                                                               kill's binding, the replay kit's feed reads both)
+  no_cast   why, side, by, kind, platform, x, track; mp,       behavior.attacks: a cast not sent (every one her
+            cost                                               MP refuses from 2026-11-02, with her MP reckoned;
+                                                               its target's fields an attack record's)
   sweep     dest, candidates, order, extra, value, direct,     behavior.hunt, its itinerary when it changes (from
             budget, out; to                                    2026-11-02 why its way goes on to dest: Hunt._sweep_to)
   grind     what (loop, next, state, end), ...; state and     behavior.grind (from 2026-11-02 the loop's promise
@@ -81,7 +87,10 @@ Topics (map units; producers build the records, ui.state folds them):
             gain, share; let_go's kind, gain, why; retold's    not hers), backstop, follow, probe, retold (a
             key, side; backstop's (a pass regardless, from     throw told again the way the frame showed her
             2026-11-02) move, blocker, waited, blocked_s,      facing), landing (a trip's last landing priced:
-            shots, why_not, episode, nth
+            shots, why_not, episode, nth; kill_moved's         control.navigator), kill_moved (her kill put on
+            gained, old, old_platform, old_x, new,             another monster by the tracker, from 2026-11-02:
+            platform, x; rope_hang's step, x, under, s         behavior.ledger), rope_hang (a hang under a rope's
+                                                               top and its end, from 2026-11-02:
                                                                control.navigator); `watch` and the perception
                                                                service:
                                                                died, exp_gain, hp_drop, touch, touch_fix, victim (a gain bound to
