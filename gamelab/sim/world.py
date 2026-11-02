@@ -9,7 +9,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   (on average Lags.on and Lags.off after the key), so a tap is as long as the game sees it (2 ms longer
   on average, a whole number of steps), and she turns when it sees the press; of the arrows it sees held,
   the one pressed last counts. The steps fall every 30 ms from a phase drawn from the seed (step_phase);
-- on the ground, at each step, the arrow it sees speeds her up at 1400 units/s² to physics.WALK_SPEED
+- on the ground, at each step, the arrow it sees speeds her up at 1400 units/s² to her walk speed (the
+  planner's physics.WALK_SPEED, or her own, Her.walk_speed: World.shoe, apart from the planner's)
   (turning her round the same way), and none brakes her at 800 (body.ground_step over the step), and she
   runs the step evenly; walking past a platform's end she falls, unless a wall rises there;
 - the jump key lifts her off at the step after the game sees it (Lags.jump, 65 ms, after the key on
@@ -163,7 +164,14 @@ REGRAB_AFTER = 0.3       # s after leaving a rope before up grabs one again
 # 178 ± 18 units/s sideways and rose about 16-20 units, which fits these better than what the simulator
 # used before (149 out, 220 up: a 12-unit rise), by about 2 sd: weak, so False puts those back.
 ROPE_JUMP_SHOE = True
-ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_SHOE else (WALK_SPEED, 220.0))
+
+
+def rope_jump(shoe: body.Shoe) -> tuple[float, float]:
+    """A jump off a rope sideways with `shoe` (the world's: World.shoe), out and up, units/s (ROPE_JUMP_SHOE)."""
+    return (shoe.rope_vx * shoe.vmax, shoe.rope_vy * shoe.vjump) if ROPE_JUMP_SHOE else (shoe.vmax, 220.0)
+
+
+ROPE_JUMP = rope_jump(SHOE)  # (the planner's shoe's: the world's own is World.rope_jump)
 # Her body for the world's touches (Realism.her_box), (half its width, its height) about her feet. By default the
 # client's touch test (from 2026-11-02): RustMS's copy of HeavenClient, aligned with the v83 client, has a monster touch
 # her where its frame's box (Mob::is_in_range: the bounds of the frame it shows, as SimMonster.body has them) meets
@@ -1074,6 +1082,21 @@ class Her:
                                  # ahead on her platform took MP 54 times in 200 (27%; 76% at 100-120, where the claw's
                                  # boxes end), and by eye on the recordings of 2026-10-26 every press at one on or under
                                  # her was a swipe of 15-24 or a MISS, no MP
+    walk_speed: float | None = None  # map units a second the world walks her at (her_shoe: the game's Physics.img shoe at
+                                 # the SPEED that walks her so, her JUMP the planner's); None: the planner's own
+                                 # (physics.SHOE), as the world had it for everyone until 2026-11-02. Apart from the
+                                 # planner's, a wrong speed in her profile shows in the world (her steps overshoot, her
+                                 # jumps after a run carry farther than planned), as it did live (MAGE_32)
+
+
+def her_shoe(her: Her) -> body.Shoe:
+    """The shoe the world walks and jumps her with: the planner's (physics.SHOE) unless Her.walk_speed says otherwise,
+    then the game's Physics.img shoe at the SPEED that walks her at it (walkSpeed x SPEED / 100), her JUMP the
+    planner's. Only her walk differs: the acceleration, braking and the air's drag are the game data's for everyone."""
+    if her.walk_speed is None:
+        return SHOE
+    speed = 100.0 * her.walk_speed / body.PHYSICS_IMG["walkSpeed"]
+    return body.Shoe.from_physics(body.PHYSICS_IMG, speed, physics.CHARACTER.jump)
 
 
 LEVEL_19 = Her()
@@ -1897,6 +1920,10 @@ class World:
         (Her)."""
         self.model = model
         self.character = character
+        # Her walk as the world moves her (Her.walk_speed: her_shoe), apart from the planner's physics.SHOE, and her jump
+        # off a rope sideways with it
+        self.shoe = her_shoe(character)
+        self.rope_jump = rope_jump(self.shoe)
         self.origin = origin       # clock time of ms 0
         self.ms = 0
         self.seed = seed
@@ -2587,7 +2614,7 @@ class World:
             lag = self._lag(f"{action} up", LAGS.off, LAGS.sd_off)
             if self.noise.walk_jitter and not {"left", "right"} & self.held.keys():
                 # letting go of the last arrow: she runs on a little longer or stops a little sooner
-                lag += (2 * self.chance("walk") - 1) * self.noise.walk_jitter / WALK_SPEED
+                lag += (2 * self.chance("walk") - 1) * self.noise.walk_jitter / self.shoe.vmax
             self._seen_later(action, False, at, lag)
 
     # --- her motion -------------------------------------------------------------------------------------
@@ -2605,7 +2632,7 @@ class World:
             if not d and not self.vx:
                 self.glide = 0.0
                 return
-            self.vx, dx = body.ground_step(self.vx, d, SHOE, STEP_MS / 1000)
+            self.vx, dx = body.ground_step(self.vx, d, self.shoe, STEP_MS / 1000)
             self.glide = dx * TICK_MS / STEP_MS
         if not self.glide:
             return
@@ -2636,7 +2663,7 @@ class World:
         with the map's sides stopping her like walls (the planner never jumps at them), and the walls by the
         game's rule (body.wall_table: those joined to the floor under her, and with Realism.zero_walls group 0's)."""
         walls = body.wall_table(self.model, self.realism.zero_walls)
-        return body.fly(self.model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls,
+        return body.fly(self.model, x, y, vx, vy, shoe=self.shoe, arrow=arrow, skip=skip, walls=walls,
                         sides=self.sides, dt=TICK_MS / 1000, path=True, airborne=airborne)
 
     def _steer(self) -> int:
@@ -2667,10 +2694,10 @@ class World:
         d = self.arrow()
         if self.mode == "ground" and pressed_on != "rope":
             self.knocked = False
-            self._launch(body.takeoff(self.vx, d, SHOE), -SHOE.vjump, self.ms)
+            self._launch(body.takeoff(self.vx, d, self.shoe), -self.shoe.vjump, self.ms)
         elif self.mode == "rope" and pressed_on == "rope" and d:
             self._leave_rope()
-            self._launch(d * ROPE_JUMP[0], -ROPE_JUMP[1], self.ms)
+            self._launch(d * self.rope_jump[0], -self.rope_jump[1], self.ms)
 
     def _air(self) -> None:
         f = self.flight

@@ -132,6 +132,33 @@ def test_walking_is_the_engines(model):
         assert abs(hold_ms(np.mean(rests)) - ms) <= 10  # physics.hold_ms: the hold for what she walked
 
 
+def test_her_walk_in_the_world_can_differ_from_the_planners(model):
+    # Her.walk_speed: the world walks her at her own speed (the magician's 148.2 units/s, where her profile plans 125),
+    # the game data's shoe at that SPEED (accelerating, braking and in the air as anyone's), her JUMP the planner's; by
+    # default the planner's own shoe, to the bit.
+    c = plat(model, 500, 400)
+    assert world(model, c.id, 100.0).shoe is physics.SHOE
+    her = world_mod.Her(walk_speed=148.2)
+    shoe = world_mod.her_shoe(her)
+    assert shoe.vmax == pytest.approx(148.2) and shoe.vjump == physics.SHOE.vjump and shoe.acc == physics.SHOE.acc
+    for ms in (300, 1000):
+        rests = []
+        for phase in PHASES:
+            w = world(model, c.id, 100.0, step_phase=phase, character=her)
+            tap(w, 0.0, "right", ms / 1000)
+            w.advance(3.0)
+            rests.append(w.x - 100)
+        assert np.mean(rests) == pytest.approx(body.hold_distance(ms, shoe, physics.LAGS), abs=0.5)
+    # A second's hold walks her 148.2 + 6.2 units in all (the slide after the release included), not the planner's
+    assert body.hold_distance(1000, shoe, physics.LAGS) - body.hold_distance(1000, physics.SHOE, physics.LAGS) == \
+        pytest.approx(148.2 - physics.WALK_SPEED, abs=0.5)
+    w = World(model, KEYS, (c.id, 700.0), monsters=None, hanging=400.0, character=her)  # off a rope: her own shoe's
+    w.key(0.3, "left", True)
+    tap(w, 0.33, "alt", 0.04)
+    w.advance(0.41)
+    assert w.flight.speeds[0] == pytest.approx((-1.3 * 148.2, -0.5 * physics.JUMP_SPEED))
+
+
 def test_taps_move_her_as_long_as_the_game_sees_them_held(model):
     c = plat(model, 500, 400)
     for hold in (0.107, 0.05, 0.02):  # 20.8, 5.6 and 1.3 units by the engine, over the game's steps
