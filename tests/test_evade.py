@@ -120,6 +120,11 @@ def test_with_no_refuge_she_goes_past_the_monster_in_the_way_as_a_watched_chain_
     backstops = [kw["text"] for t, kw in events if t == "event" and kw.get("kind") == "backstop"]
     assert backstops and backstops[0].startswith("NO_REFUGE") and "past the snail" in backstops[0]
     assert any(kw.get("step") == "pass" for t, kw in events if t == "event")
+    # (its record says why: the move, the snail in its way on her platform, the looks waited, the shots, its episode)
+    rec = next(kw for t, kw in events if t == "event" and kw.get("kind") == "backstop")
+    assert rec["move"][:3] == [path[0].kind, path[0].src, path[0].dst] and (rec["episode"], rec["nth"]) == (1, 1)
+    assert rec["blocker"] == {"kind": "snail", "platform": s.where.platform.id, "x": pytest.approx(360.0, abs=1),
+                              "rel": "same"} and rec["waited"] == 0 and rec["shots"] == 0
     assert st.refuge is None and st.passed == (s.where.platform.id, NOW)
     assert st.evade_key is None and st.evade_since is None  # (made: its budget gone with it, BLOCK_MEMORY's _made)
 
@@ -679,6 +684,9 @@ def test_a_blocked_moves_budget_is_kept_over_a_touched_pass_and_the_next_block_g
     assert len(carried) == 2 and not any("waiting" in line for line in said)
     passes = [kw["text"] for t, kw in events if t == "event" and kw.get("kind") == "backstop"]
     assert len(passes) == 2 and all(p.startswith("EVADE_S") for p in passes)
+    # (the two passes of the move within PASS_EPISODE_S: one episode, the second its 2nd; the snail on D, above her)
+    recs = [kw for t, kw in events if t == "event" and kw.get("kind") == "backstop"]
+    assert [(r["episode"], r["nth"]) for r in recs] == [(1, 1), (1, 2)] and recs[0]["blocker"]["rel"] == "above"
     nav._made(st, [path[0]], True)  # (made: its budget gone)
     assert st.evade_key is None and st.evade_since is None and k not in st.blocks
     other = replace(path[0], x=path[0].x + 1.0)  # (another move: its own budget, this one's kept by)

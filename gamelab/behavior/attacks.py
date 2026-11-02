@@ -859,6 +859,12 @@ class Attacks:
                 self.log(f"    no cast ({why}): her regular attack isn't thrown"
                          + (f" (her MP {self.mp * self.max_mp:.0f} under a cast's {self.skill.mp:g}: her pet's MP "
                             f"potions)" if why == "MP" and self.mp is not None and self.skill is not None else ""))
+            if telemetry.recording():  # (every one, from 2026-11-02: the log says the 1st, 10th and 100th alone, so
+                # how often her reckoned MP refused a cast couldn't be told, P27 of the recordings' analysis)
+                telemetry.emit("no_cast", why=why, side=side, by="key", kind=None if target is None else target.kind,
+                               x=None if target is None else round(target.x, 1),
+                               mp=None if self.mp is None else round(self.mp * self.max_mp),
+                               cost=None if self.skill is None else self.skill.mp)
             return None
         self._target, self._regular, self._asked = target, attack is self.regular, True
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None

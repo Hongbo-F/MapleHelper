@@ -1471,7 +1471,9 @@ class JumpSpace:
         return cls(model, walls, sides, reach, {})
 
     def shoe(self, speed: float) -> body.Shoe:
-        """A monster's shoe: walking at `speed`, jumping at the jump speed (100%)."""
+        """A monster's shoe: walking at `speed`, jumping at the jump speed (100%). No SPEED_BONUS: the client's hidden
+        20 Speed is a character's (motion.body); a monster walks v83's 125 x (1 + its speed/100), as Tree Dungeon's at
+        speed -20 walked 99 and 98 in the recordings of 2026-11-02, against 100."""
         if speed not in self.shoes:
             self.shoes[speed] = body.Shoe.from_physics(body.PHYSICS_IMG, 100 * speed / body.PHYSICS_IMG["walkSpeed"],
                                                        100.0)

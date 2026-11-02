@@ -53,6 +53,7 @@ from ..localization.worldstate import HP_GAP_S, TOUCH_SAME_S, reading_of, to_sce
 from ..motion import physics
 from ..perception import drops, exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes
+from ..perception.exp_number import ExpReading
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from ..perception.touches import DAMAGE, HP, MISS, POPUP
@@ -84,6 +85,13 @@ HIT_EXACT_S = 1.0     # s: a touch's text has her HP number's drop if it read on
 HP_NUMBER_WAIT_S = 10.0  # s of looks with her HP number never read: said once (the safety stop on her bar then, under
                          # bootstrap.UNREAD_SHARE of it: the perception service not restarted since 2026-10-28, a client
                          # it can't read at, such as the stretched 1920x1080, where it reads none)
+# HP: her HP number rising this much or more from one read to the next is a potion drunk (Report.drinks; her pet drinks
+# them for her). Her potions heal 150-160 (Meat 160 by the game data, Orange Potions 150), her regen between two reads a
+# few HP, a touch takes HP away: on 2026-11-02 rises of 100 or more counted 15 potions in R1's 5.35 minutes and 92 in the
+# hour, as the HP her pets' potions gave and the Meat carried (D:/MapleHelper-scratch/rec-analysis/plans/scripts/
+# numbers.py). A Red Potion's 50 wouldn't be counted, nor, from the review of 2026-11-02, a rise to a max HP other than
+# the read before's: a level's refill (R1 had none: its 15 rises were +160 each).
+POTION_RISE_HP = 100
 PLAN_DEF_STEP = 5.0  # her DEF for the positioning model (attack.danger) to this (her fit's middle moves a little with
                      # every touch: the places she stands by made again only when it moves this much)
 # The safety stop raised at the look or glance it's due at, whoever took it (Senses.checks and glance_checks:
@@ -154,6 +162,20 @@ def kinds_of(gains: list[Gain]) -> frozenset | None:
     return frozenset(k for g in gains for k in g.kinds)
 
 
+def feed_reads(events, meter: ExpMeter) -> list[tuple]:
+    """Her EXP number's readings in a feed's `events` (worldstate's 'exp_gain' and 'exp_read'), as `meter` takes them:
+    (t, reading, changed) each. A meter that has never read the number (a hunt attaching to the perception service
+    after it read it: it then hears only its changes) starts from what the first change says the number was before it
+    (worldstate's `before`), so that change's gain counts: until 2026-11-02 the first reading came with her first kill,
+    and its EXP was lost (R1 of 2026-11-02: 26, behavior.hunt.HuntReport)."""
+    reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in events if e.kind in ("exp_gain", "exp_read")]
+    first = next((e for e in events if e.kind == "exp_gain" and e.data.get("before")), None)
+    if meter.at is None and first is not None and not any(r[0] < first.t for r in reads):
+        level, exp = first.data["before"]
+        reads.insert(0, (first.t, ExpReading(exp, None, () if level is None else (level,)), False))
+    return reads
+
+
 class Hunter:
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
@@ -196,6 +218,7 @@ class Hunter:
         self.hp_follow = hp_number.Follow()  # her HP number off her own looks (without a feed: the feed's step reads it)
         self.lv_follow = lv_number.Follow()  # ... and her level's digits
         self._hp_box_t: float | None = None  # ... the last look it was seen on
+        self._read_max: int | None = None    # ... and the max HP its last read said (a level's refill isn't a potion)
         self._last_touch: tuple[float, int, int] | None = None  # her HP number's last touch: when, HP before, after
         self._first_look: float | None = None  # her first look's time, and whether her HP number not read since ...
         self._unread_said = False              # ... HP_NUMBER_WAIT_S has been said
@@ -673,11 +696,11 @@ class Hunter:
         HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
         (statcheck.borne); her level if nothing has read it; her max MP her casts are reckoned at (config.toml's until
         now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED and JUMP said
-        where config.toml's, which plan her moves, differ. Her reserve made again (_reserve_check: what changed said
-        with it)."""
+        where her profile's, which plan her moves, differ, with the walk and jump each gives (statcheck.moves_notes).
+        Her reserve made again (_reserve_check: what changed said with it)."""
         from ..motion import physics
         from .bootstrap import HerStats as Stats
-        from .statcheck import MP_SPAN, borne, disagreement
+        from .statcheck import MP_SPAN, borne, disagreement, moves_notes
         st, notes = self.stats, []
         level, most = reading.level, reading.max_hp
         scene = getattr(self.stat_check, "scene", None)
@@ -708,12 +731,7 @@ class Hunter:
             else:
                 notes.append(f"her stat window's max MP {mp} not taken ({why}): her casts reckoned at "
                              f"{self.max_mp:g} as before")
-        c = physics.CHARACTER
-        for name, mine in (("speed", c.speed), ("jump", c.jump)):
-            v = reading.get(name)
-            if v is not None and abs(float(v) - float(mine)) >= 1.0:
-                notes.append(f"her {name.upper()} {v}% by her stat window, config.toml [character] {name} {mine:g}: "
-                             "her moves planned by config.toml's")
+        notes.extend(moves_notes(reading, physics.CHARACTER))
         if reading.wdef is not None:
             session = self.stat_check._session() if self.stat_check is not None else None
             note = st.see_window(reading.wdef, rows=self.touches.rows, level=level if level is not None else st.level,
@@ -1166,8 +1184,7 @@ class Hunter:
             touched = [{"kind": DAMAGE, "text": "", "at": s.t, "how": HP}] if lost > 0 and self._last_hp is not None \
                 else []
         else:
-            reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in s.events
-                     if e.kind in ("exp_gain", "exp_read")]
+            reads = feed_reads(s.events, self.meter)
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
             touched = [e.data for e in s.events if e.kind == "touch"]
             touched += self._untold(s, touched)
@@ -1221,6 +1238,10 @@ class Hunter:
             self._max_hp_seen(most)
             if before is not None and cur < before:
                 self._touched(t, before, cur, most)
+            last_max, self._read_max = getattr(self, "_read_max", None), most
+            if before is not None and cur - before >= POTION_RISE_HP and last_max in (None, most):
+                self.report.drinks += 1  # (a potion: her pet's, or hers; not a level's refill to a new max)
+            self.report.see_hp(cur)
         if exact is not None:
             self._max_hp_seen(exact[1])
         return exact
@@ -1495,9 +1516,12 @@ class Hunter:
     def _publish(self, s: Scene) -> None:
         """The look and the drops she remembers, for the mini-map (telemetry); with a feed, the deaths it saw that
         weren't hers ('died', as `watch` publishes them: analysis.respawn reads them as others' kills, a platform
-        emptied by someone else; hers are the 'kill' events already)."""
+        emptied by someone else; hers are the 'kill' events already). From 2026-11-02 the scene says how old its frame
+        was as the hunt got it (`age`, ms: the time since the screen showed it), with the feed's frame number (`seq`),
+        so a decision can be matched to the frame it was made on (P28 of the recordings' analysis)."""
         if telemetry.recording():
             record = s.record()
+            record["age"] = round((time.monotonic() - s.t) * 1000)
             if record["her"] is not None:  # which way she faces as best known (keys or frame: facing_by), by her keys
                 a = self.actions             # alone, and by the frame alone (and whether strongly: only a strong
                 # frame takes a throw's tap away, Actions.faces)

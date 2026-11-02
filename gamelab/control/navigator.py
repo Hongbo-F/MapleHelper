@@ -103,6 +103,10 @@ MEET_S = 8.0
 # a run against 1.5 (Tree Dungeon, crowd, zero-walls, near-misses, 8 seeds of 5 minutes, standard errors about 5% of
 # EXP). On because the live run's two touches after a pass regardless came from a Green Mushroom she had seen; to watch.
 LAST_SHOT = True
+# s: passes regardless of one move (its kind and platforms) within this of the last are one episode (the backstop
+# event's `episode`: _pass_record), so their touches are counted once an episode; the analysis of 2026-11-02 counted the
+# touches within 3.5 s of a pass as its (P04), and a cut-and-replan cycle passes the same move again within it.
+PASS_EPISODE_S = 3.5
 SETTLE_S = 0.35      # right after a plan she may still be sliding or landing this long
 ARRIVE_TOLERANCE = 20  # map units: close enough to the x she's sent to
 # Chains follow on from each other without a stop (follow): late in one, a look around decides whether
@@ -758,6 +762,10 @@ class TripState:
     past_why: str | None = None
     arrive_waits: int = 0  # looks it may wait on arrival for the walk on to x to clear (ARRIVE_STAND: go's) ...
     hold_x: bool = False   # ... and whether its x is what it's for (a retreat's place: go's arrive_waits given)
+    # Its arrival walk on to x (Mover.walk_to): its walks, [units asked, hold ms] each, and the look it ended with, for the
+    # 'trip' record (`_trip_end`: where she was as it ended)
+    walked: list | None = None
+    walked_to: Scene | None = None
 
     def __post_init__(self):
         self.evade_s = EVADE_S if self.evade_s is None else self.evade_s
@@ -832,6 +840,10 @@ class Navigator:
         self.chain_still: tuple[tuple[float, float], float] | None = None
         self.cut_still = False  # (the last chain cut short for her dot standing where it runs her: ROPE_CUT)
         self._tracks_at = time.monotonic()  # when the last pass's monsters were made (their plan time 0: _chain_monsters)
+        # Passes regardless, by move (kind, src, dst): [its episode's number, when the last was, passes in it] (the
+        # backstop events' episodes: _pass_record), and the episodes so far
+        self._episodes: dict[tuple, list] = {}
+        self._episode_n = 0
 
     @property
     def fight(self) -> bool:
@@ -921,7 +933,7 @@ class Navigator:
         finally:
             self._mode = self.mode
         if trip is not None:
-            telemetry.emit("trip", dst=st.dst, result=trip.result)
+            telemetry.emit("trip", dst=st.dst, result=trip.result, **_trip_end(st))
         return trip
 
     def _pass(self, st: TripState) -> Trip | None:
@@ -953,7 +965,8 @@ class Navigator:
             if fights and st.x is not None and self._clear_the_way(st, s, st.x):
                 return None  # look again after the fight
             if st.x is not None and self._arrival_clear(st, s):
-                self.mover.walk_to(st.x, tolerance=ARRIVE_TOLERANCE, s=s)
+                st.walked_to = self.mover.walk_to(st.x, tolerance=ARRIVE_TOLERANCE, s=s)
+                st.walked = list(getattr(self.mover, "walked", None) or ())
             elif st.trip.short and st.arrive_waits > 0:  # (ARRIVE_STAND: standing here clear, a look again)
                 st.arrive_waits -= 1
                 st.trip.waits += 1
@@ -1556,21 +1569,26 @@ class Navigator:
         hopped = self._chain(st, s, path, monsters, looked, hops=True)
         if hopped[0]:
             return hopped
-        if st.waited < WAIT_LOOKS and self._safe_to_stand(s.where.x, s.where.platform, move, monsters) \
-                and self._worth_waiting(move, start, monsters, linger, mo):
-            st.waited += 1
-            st.trip.waits += 1
-            self.log(f"  waiting for the {kind} to move off ({st.waited})")
-            time.sleep(WAIT_S)
-            return True
+        safe = worth = None  # (why she didn't wait, as far as it was asked: the backstop's record says)
+        if st.waited < WAIT_LOOKS:
+            safe = self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
+            worth = self._worth_waiting(move, start, monsters, linger, mo) if safe else None  # (None: not asked)
+            if worth:
+                st.waited += 1
+                st.trip.waits += 1
+                self.log(f"  waiting for the {kind} to move off ({st.waited})")
+                time.sleep(WAIT_S)
+                return True
         # (only where she can't stand and wait: with an escort, from a safe spot a refuge is waiting on for nothing)
         if EVADE and not self._safe_to_stand(s.where.x, s.where.platform, move, monsters)                 and self._evade_step(st, s, path, monsters, looked):
             return True  # look again: from the refuge, or after the chain the contact rule planned
-        if LAST_SHOT and mo is not None and self._last_shot(st, s, mo, planned_at):
+        last_shot = LAST_SHOT and mo is not None
+        if last_shot and self._last_shot(st, s, mo, planned_at):
             return True  # look again after the shot
         return self._regardless(st, s, path, monsters, looked, mo,
                                 f"WAIT_LOOKS: {move.kind} -> {move.dst} past a {kind} regardless" if st.waited >= WAIT_LOOKS
-                                else f"NO_WAIT: {move.kind} -> {move.dst} past a {kind} regardless")
+                                else f"NO_WAIT: {move.kind} -> {move.dst} past a {kind} regardless",
+                                why_not={"safe": safe, "worth": worth, "last_shot": last_shot})
 
     def _shoot_ahead(self, st: TripState, s: Scene, path: list[Move], monsters: list, legs: list[Leg]) -> bool:
         """A chain that stops short of a later leg for a monster whose touch counts (`legs`: as far as it goes): that
@@ -1622,15 +1640,18 @@ class Navigator:
         return True
 
     def _regardless(self, st: TripState, s: Scene, path: list[Move], monsters: list, looked: float,
-                    mo: MonsterTrack | None, why: str, blind: bool = False):
+                    mo: MonsterTrack | None, why: str, blind: bool = False, why_not: dict | None = None):
         """_meet's last resort: the chain planned as if monster `mo` weren't there (the others still kept clear of), or,
         `blind` (MEET_S), as before her chains kept clear of anything; None (the move on its own) if that chains nothing
         either. A backstop event says `why`. (Past MEET_S, kept clear of the others, the chain stopped short of the next
         one, where it could still touch her: up from Tree Dungeon's floor (33) she jumped onto the ledge 32 beside a
         Green Mushroom, short of the rope to 30 another walked the top of, was knocked back down, and did the same
         again for the 180 s of a trip to rest: simulator, loop_tree_run seed 4. Blind on every backstop, though, her
-        hunt loop's trips were touched 14% more often than with only `mo` left out: harness, 20 seeds.)"""
-        telemetry.emit("event", kind="backstop", text=why)
+        hunt loop's trips were touched 14% more often than with only `mo` left out: harness, 20 seeds.)
+        Its backstop event says why it came to this too (`_pass_record`; `why_not`: why _meet didn't wait, as far as it
+        asked: safe to stand, worth waiting, and whether its last shot was tried)."""
+        telemetry.emit("event", kind="backstop", text=why, **self._pass_record(st, s, path[0] if path else None, mo,
+                                                                               why_not))
         st.waited = 0
         st.refuge = None
         if not BLOCK_MEMORY:  # (kept till she makes the move: _made)
@@ -1641,6 +1662,40 @@ class Navigator:
         if not regardless[0] and EVADE and not blind:  # (never the mover for a move a monster is in the way of: blind)
             regardless = self._chain(st, s, path, [], looked, priced=monsters)
         return regardless if regardless[0] else None
+
+    def _pass_record(self, st: TripState, s: Scene, move: Move | None, mo: MonsterTrack | None,
+                     why_not: dict | None = None, waited: int | None = None) -> dict:
+        """A pass regardless as its backstop event records it (from 2026-11-02; P04 and P28 of the recordings'
+        analysis: 46-47 of the hour's 170 touches came within 3.5 s of one, and why each happened couldn't be told):
+        the move (`move`: kind, src, dst, x); the monster in its way (`blocker`: kind, its platform and x, and where
+        that is from hers, `rel`: same, above or below; none for MEET_S's blind pass); the looks waited for it
+        (`waited`), the s her chains had stopped short of such monsters (`blocked_s`, MEET_S's clock), the shots at
+        it in a row (`shots`); why she didn't wait (`why_not`: _meet's); and its episode (`episode`, a number, and
+        `nth` in it): passes of one move within PASS_EPISODE_S of the last are one episode, so the touches after them
+        are counted once an episode."""
+        now = time.monotonic()
+        out: dict = {"waited": st.waited if waited is None else waited, "shots": st.shots,
+                     "blocked_s": None if st.blocked is None else round(now - st.blocked, 2)}
+        if move is not None:
+            out["move"] = [move.kind, move.src, move.dst, round(move.x, 1)]
+            key, eps = (move.kind, move.src, move.dst), self.__dict__.setdefault("_episodes", {})
+            ep = eps.get(key)
+            if ep is None or now - ep[1] > PASS_EPISODE_S:
+                self._episode_n = getattr(self, "_episode_n", 0) + 1
+                ep = [self._episode_n, now, 0]
+            ep[1], ep[2] = now, ep[2] + 1
+            eps[key] = ep
+            out["episode"], out["nth"] = ep[0], ep[2]
+        if mo is not None:
+            here = s.where.platform if s.where is not None else None
+            rel = None
+            q = None if here is None else here if mo.platform == here.id else here.peer(mo.platform)
+            if q is not None:
+                rel = "same" if q is here else "above" if q.top < here.top else "below"
+            out["blocker"] = {"kind": mo.kind or None, "platform": mo.platform, "x": round(mo.x, 1), "rel": rel}
+        if why_not:
+            out["why_not"] = why_not
+        return out
 
     def _worth_waiting(self, move: Move, start: Body, monsters: list, linger: float, mo: MonsterTrack | None) -> bool:
         """Whether waiting a moment can clear the way of `move` of the monster `mo` that could touch her on it: its
@@ -1959,6 +2014,7 @@ class Navigator:
         blind = not legs
         if blind:
             legs, keys, chained = self._chain(st, s, path, [], looked, priced=monsters)
+        waited = st.waited
         st.waited = 0
         st.refuge = None
         if not BLOCK_MEMORY:  # (kept till she makes the move: _made)
@@ -1967,7 +2023,8 @@ class Navigator:
         names = ", ".join(sorted({t.kind or "monster" for t in past})) or "monster"
         text = f"{why}; {move.kind} -> {move.dst} past the {names}" + (" (blind)" if blind else "") \
             + (f" (clear of it from {within:.2f} s)" if within is not None else "")
-        telemetry.emit("event", kind="backstop", text=text)
+        telemetry.emit("event", kind="backstop", text=text,
+                       **self._pass_record(st, s, move, past[0] if past else None, waited=waited))
         if not legs:
             self.log(f"  {text}: nothing chains; the move alone")
             return False
@@ -3396,6 +3453,20 @@ def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float,
     the ways it chose among (`offered`: Navigator._route's), if it did."""
     return route_record(dst, path, start=(src, x), keep_off=st.keep_off - {dst}, avoid=sorted(st.avoid),
                         ways=offered)
+
+
+def _trip_end(st: TripState) -> dict:
+    """Where trip `st` left her, for its 'trip' record (from 2026-11-02): the platform (`on`) and x of its last look
+    (her arrival walk's own, Mover.walk_to's, if it walked on to x), and that walk (`walk`: [units asked, hold ms] each
+    of its walks). A trip that said 'arrived' while she was on another platform, off the end of the one it was going to
+    after its arrival walk, is told by `on` against `dst` (15 of the 210 'arrived' trips in the hour of 2026-11-02:
+    P02 of the recordings' analysis; analysis.walkfit counts them)."""
+    s = st.walked_to if st.walked_to is not None else st.last
+    w = None if s is None else s.where
+    out = {} if w is None else {"on": None if w.platform is None else w.platform.id, "x": round(w.x, 1)}
+    if st.walked:
+        out["walk"] = st.walked
+    return out
 
 
 def _platforms(path: list[Move]) -> set[int]:

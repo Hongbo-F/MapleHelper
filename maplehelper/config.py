@@ -77,9 +77,10 @@ class Timing:
 @dataclass(frozen=True)
 class Character:
     """Her stats that set how the game moves her, in % as the stat window shows them. The game walks her
-    at 125 units/s x SPEED/100 and jumps her at 555 units/s x JUMP/100 (its Physics.img), counting
-    SPEED from 80 to 140 and JUMP from 80 to 123. Gear and Haste raise them. gamelab plans her moves
-    with them (gamelab.motion.physics). And her MP and her Lucky Seven's skill level, which what a cast costs
+    at 125 units/s x (SPEED + 20)/100 (Physics.img's walkSpeed, and the 20 Speed this client adds to a character's
+    behind the scenes: gamelab.motion.body.SPEED_BONUS, meowdb's guide, her walks) and jumps her at 555 units/s x
+    JUMP/100, counting SPEED from 80 to 140 and JUMP from 80 to 120. Gear and Haste raise them. gamelab plans her
+    moves with them (gamelab.motion.physics). And her MP and her Lucky Seven's skill level, which what a cast costs
     and how many she has left come from (gamelab.attack.choice: Lucky Seven or the regular attack).
 
     Not here: her HP, her level and her DEF (W.DEF), what a monster's touch takes is measured against. They change
@@ -88,7 +89,11 @@ class Character:
     HUD's HP number, her level off its "LV." digits, her DEF off her stat window when it's read, else fitted to her
     touches). The user, 2026-10-28: "I thought hp and level will come from perception, please remove them completely
     from config.toml". A table that gives them is refused (PERCEIVED), so none lingers there unread."""
-    speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
+    speed: float = 99.2     # the walk she's planned at, 149.0 units/s (125 x (99.2 + 20)/100: what 119.2 under the
+                            # old formula walked, so the simulator's goldens and baselines stay as they are). Measured,
+                            # she walks 151.2 (243 walks on Tree Dungeon, 10-25 to 30), which her stat window's SPEED
+                            # 101 gives (151.25): to move to it with the simulator's next re-baselining
+                            # (README "Her walk speed")
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
     mp: float = 623.0       # her MP when full (her MP bar's number, level 25, 2026-10-25; 601 at level 24)
     lucky_seven: float = 16.0  # her Lucky Seven's skill level: 14 MP a cast in the game data (at 16 and 17); her MP

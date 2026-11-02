@@ -69,7 +69,7 @@ SESSION_S = 3 * 3600.0  # s: her stat window's read is this session's for this l
                         # (new gear on 10-26 to 10-28), so an evening's read isn't the next one's
 # What her stat window shows besides her W.DEF, kept with it in her stats file (`see_window`'s `read`): her level, max HP
 # and MP, ATTACK, ACCURACY and EVASION (her MISS chance and a touch's: not modelled from them yet), MAGIC, MAGIC DEF., her
-# four stats, SPEED and JUMP (config.toml's speed and jump plan her moves: said where they differ)
+# four stats, SPEED and JUMP (her profile's speed and jump plan her moves: said where they differ, statcheck.moves_notes)
 WINDOW_KEEPS = ("level", "hp", "mp", "attack", "acc", "eva", "magic", "mdef", "str", "dex", "int", "luk", "speed",
                 "jump")
 

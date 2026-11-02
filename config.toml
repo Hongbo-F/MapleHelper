@@ -47,14 +47,16 @@ buffer_window = 300   # combo button pressed in the last 300 ms of a running com
 slow_pause = 900
 recap = 3000
 
-# Her stats, in % as the stat window shows them: how fast the game walks her (125 units/s x SPEED/100)
-# and how high it jumps her (JUMP 100: 77 units). gamelab plans every move with them, so change them
-# when gear or Haste does. 119.2 is measured (she walks 149 units/s); her stat window would say exactly.
+# Her stats, in % as the stat window shows them: how fast the game walks her (125 units/s x (SPEED + 20)/100:
+# this client adds 20 Speed behind the scenes, gamelab README "Her walk speed") and how high it jumps her (JUMP
+# 100: 77 units). gamelab plans every move with them, so change them when gear or Haste does. 99.2 walks her
+# at 149 units/s, as 119.2 did under the old formula (125 x SPEED/100): she walks 151.2, which her stat
+# window's 101 gives (151.25); 99.2 stays until the simulator's goldens move with it.
 # Her MP when full and her Lucky Seven's level too: a throw is Lucky Seven only while she has MP for a cast
 # (gamelab.attack.choice). Not her HP, level or DEF: perception reads those (her HUD's HP number and "LV."
 # digits, her stat window or her touches: gamelab.behavior.bootstrap), and a line giving one is refused.
 [character]
-speed = 119.2
+speed = 99.2
 jump = 100
 mp = 623            # her MP when full: what her MP bar's share is of (Lucky Seven only with MP for a cast)
 lucky_seven = 16    # her Lucky Seven's skill level: its MP a cast in the game data (14 at 16 and 17: her bar fell

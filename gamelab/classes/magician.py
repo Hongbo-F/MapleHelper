@@ -36,7 +36,11 @@ MAGIC_ARMOR_MP = (8, 8, 8, 8, 8, 10, 10, 10, 10, 10, 13, 13, 13, 13, 13, 16, 16,
 ALERT_MS = 600  # a buff's cast plays alert2, 600 ms of frames [data: actions.json]; its lock: L0's casts
 
 FIXED_STATS = config.Character(
-    speed=100.0,        # her SPEED: her stat window, read live 2026-10-28 (lab/characters/magician/her_stats.json)
+    speed=100.0,        # her SPEED: her stat window, read live 2026-10-28 and 2026-11-02 at level 32
+                        # (lab/characters/magician/her_stats.json). It walks her at 150 units/s, 125 x (100 + 20)/100
+                        # (motion.body.SPEED_BONUS: the 20 this client adds, meowdb's); measured 149.4 over 66 walks of
+                        # 2026-11-02 (each walk's braking tail and Tree's slopes taken out; 148.2 raw over 81), where
+                        # it planned her at 125 until then (README "Her walk speed")
     jump=100.0,         # her JUMP: her stat window, the same read
     mp=1007.0,          # her MP when full: her stat window's MP 667/1007 at level 27 (the same read)
     lucky_seven=0.0,    # (not hers: a thief's skill)

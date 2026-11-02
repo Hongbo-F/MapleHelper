@@ -638,7 +638,9 @@ class WorldStep:
 
     def _vitals(self, s: Scene, t: float) -> list[Event]:
         """Her EXP number changed since the last frame (`exp_gain`, with the number as read: the kills its size was go
-        to the tracker, which puts each on a monster), or was read unchanged (`exp_read`: to start from, or to confirm a
+        to the tracker, which puts each on a monster; and from 2026-11-02 `before`, the level and EXP its last reading
+        said, which a hunt attaching after the service read it starts from: behavior.hunter, HuntReport), or was read
+        unchanged (`exp_read`: to start from, or to confirm a
         jump: ExpMeter.wants_reading); she was touched (`touch`: her popup, MISS or damage, or an HP drop no popup of
         hers was told for: _touched; `touch_fix`: a MISS told that took HP after all, FIX_MISS); her HP dropped
         (`hp_drop`); her HP number changed and read (`hp_read`: her HP and max HP, and the HP it said at the change
@@ -649,7 +651,12 @@ class WorldStep:
         if changed or self.meter.wants_reading(t):
             reading = exp_number.read(s.exp_box) if s.exp_box is not None else None
             if changed or (reading is not None and reading.exp is not None):
-                out.append(Event("exp_gain" if changed else "exp_read", t, data=reading_data(reading)))
+                data = reading_data(reading)
+                # (what it said before, for a client that never read it: only where that's the number just before
+                # this change, no change since unread, `run`, nor a jump waiting for a second reading, `held`)
+                if changed and self.meter.at is not None and not self.meter.run and self.meter.held is None:
+                    data["before"] = list(self.meter.at)
+                out.append(Event("exp_gain" if changed else "exp_read", t, data=data))
             self.counts["exp gains"] += changed
             self.counts["exp read"] += reading is not None and reading.exp is not None
             self._told(self.meter.update(t, reading, changed))
@@ -822,7 +829,7 @@ def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: b
               hp_of=getattr(st, "hp_of", None), level_of=getattr(st, "level_of", None), touch=getattr(st, "touch", None),
               feet=getattr(st, "feet", None), view=getattr(st, "view", None), view_sure=getattr(st, "view_sure", False),
               mode=getattr(st, "mode", None), confidence=getattr(st, "confidence", None),
-              chat=getattr(st, "chat", None), strips=list(getattr(st, "drops", None) or ()))
+              chat=getattr(st, "chat", None), strips=list(getattr(st, "drops", None) or ()), seq=st.seq)
     if mobs and s.tag is not None and s.where is not None:
         if wide:
             s.monsters = list(st.monsters)

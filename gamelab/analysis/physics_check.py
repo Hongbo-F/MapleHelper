@@ -12,6 +12,8 @@ The models, each with fixed lags:
   game's 30 ms steps can have against the keys (what the planner's closed forms expect). `--fit` adds the
   engine with its lags and its steps' phase fitted to each recording, which shows what is left once the
   lags' spread is taken out.
+The recordings are the thief's, so both models now walk her as the thief's profile does (SHOE: 149), whichever
+character the process plays (before 2026-11-02's review, that character's: the magician's 150 from her lab).
 
   python -m gamelab.analysis.physics_check                 every recording in CASES
   python -m gamelab.analysis.physics_check jb_k165 --fit   one, with the fitted lags too
@@ -30,6 +32,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from .. import paths
+from ..classes import thief
 from ..motion import body, physics
 from ..paths import RECORDINGS, REPO
 from . import recordings, scroll, track
@@ -136,9 +139,13 @@ class Steps:
     land_slide: float  # ... of which this much braking (the rest is the release's lag)
 
 
+# The recordings are the thief's: her shoe and the step model's constants from it, whoever the process plays (until the
+# review of 2026-11-02 they were the character's it played: from a checkout whose lab plays the magician, her 150
+# against the thief's 149). For the thief, physics' own, to the float.
+SHOE = physics.shoe_of(thief.FIXED_STATS)
 BEFORE = Steps(walk=149.0, run_lag=0.12, jump_lag=0.055, stop_run=27.0, land_slide=13.0)
-NOW = Steps(walk=physics.WALK_SPEED, run_lag=physics.RUN_LAG, jump_lag=physics.JUMP_LAG,
-            stop_run=physics.STOP_RUN, land_slide=physics.LAND_SLIDE)
+NOW = Steps(walk=SHOE.vmax, run_lag=physics.LAGS.on + SHOE.vmax / (2 * SHOE.acc), jump_lag=physics.JUMP_LAG,
+            stop_run=body.stop_distance(SHOE.vmax, SHOE, physics.LAGS), land_slide=body.slide(SHOE.vmax, SHOE))
 
 
 def steps(events, until: float, m: Steps, *, start: float = -0.1, dt: float = 0.001, floors=()) -> np.ndarray:
@@ -169,7 +176,7 @@ def steps(events, until: float, m: Steps, *, start: float = -0.1, dt: float = 0.
                 floor = level
         if j < len(jumps) and t >= jumps[j]:
             if ground:
-                ground, vy = False, -physics.JUMP_SPEED
+                ground, vy = False, -SHOE.vjump
             j += 1
         if ground:
             if d:
@@ -186,7 +193,7 @@ def steps(events, until: float, m: Steps, *, start: float = -0.1, dt: float = 0.
                 vx = _brake(vx, decel * dt)
             x += vx * dt
         else:
-            vy = min(vy + physics.GRAVITY * dt, physics.FALL_SPEED)
+            vy = min(vy + SHOE.gravity * dt, SHOE.fall)
             x, y = x + vx * dt, y + vy * dt
             if vy > 0 and y >= floor:
                 y, vy, ground = floor, 0.0, True
@@ -207,7 +214,7 @@ def engine(events, until: float, lags: body.Lags, floors=(), shoe: body.Shoe | N
            phase: float | None = None) -> np.ndarray:
     """The engine's (t, x, y) under a key timeline on flat ground: with the game's steps at `phase`, or
     (None) the mean of its paths over every phase they can have (body.phases)."""
-    paths = [np.array(body.replay(events, until + 0.02, shoe or physics.SHOE, lags, floors=floors, phase=ph).points)
+    paths = [np.array(body.replay(events, until + 0.02, shoe or SHOE, lags, floors=floors, phase=ph).points)
              for ph in (body.phases() if phase is None else [phase])]
     return np.mean(paths, axis=0)
 

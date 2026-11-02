@@ -145,6 +145,36 @@ def test_her_exp_gains_and_hits_come_as_events_at_their_frames(step):
     assert states[40].events[1].data["how"] == "hp" and states[-1].touch["kind"] == "damage"
 
 
+def test_a_change_of_her_exp_number_tells_what_it_said_before(step):
+    """Each change tells the number its last reading said (`before`, from 2026-11-02), which a hunt attaching later
+    starts from (behavior.hunter.feed_reads): before any reading, none."""
+    def each(k):
+        step.eyes.exp = 0 if k < 20 else 10 if k < 30 else 20
+        if k == 25:
+            step.meter.at = (31, 106302)  # (as a reading would have it)
+    states = frames(step, 40, each=each)
+    gains = [e for s in states for e in s.events if e.kind == "exp_gain"]
+    assert len(gains) == 2 and "before" not in gains[0].data and gains[1].data["before"] == [31, 106302]
+
+
+@pytest.mark.parametrize("pending", ["run", "held"])
+def test_a_change_after_one_unread_or_a_jump_held_tells_no_before(step, pending):
+    """`before` only where the meter's last reading is the number just before the change: with a change since that it
+    couldn't read (`run`) or a jump waiting for a second reading (`held`), none, and a hunt's meter starts from its own
+    first reading, as before 2026-11-02 (EXP from before the hunt isn't the hunt's: the review of 2026-11-02)."""
+    def each(k):
+        step.eyes.exp = 0 if k < 20 else 10 if k < 30 else 20
+        if k == 25:
+            step.meter.at = (31, 106302)
+            if pending == "run":
+                step.meter.run = [[24.0, 24.0, 1, False]]
+            else:
+                step.meter.held = (24.0, None, True)
+    states = frames(step, 40, each=each)
+    gains = [e for s in states for e in s.events if e.kind == "exp_gain"]
+    assert len(gains) == 2 and not any("before" in g.data for g in gains)
+
+
 def test_a_scene_from_a_state_is_the_look_it_stands_for(step):
     above = pig(1200, 300)  # on the platform 200 above: out of her band (100 up)
     step.eyes.mobs = [pig(1100), above]
@@ -153,6 +183,7 @@ def test_a_scene_from_a_state_is_the_look_it_stands_for(step):
     model = step.model
     band = to_scene(s, model, (100, 100))
     assert [m.x for m in band.monsters] == [pytest.approx(1100, abs=2)] and band.searched and not band.wide
+    assert band.seq == s.seq and band.record()["seq"] == s.seq  # (its frame number: a recording's frames by it)
     whole = to_scene(s, model, (100, 100), wide=True)
     assert sorted(round(m.y) for m in whole.monsters) == [300, 500] and whole.wide
     assert band.where.platform.id == model.platform_under(1000, 500).id and band.where.x == pytest.approx(1000, abs=12)
