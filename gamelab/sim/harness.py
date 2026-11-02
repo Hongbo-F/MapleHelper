@@ -170,9 +170,9 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, OFF_SEEN,
-                    POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp,
-                    Noise, Realism, tab_of)
+from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, MEAT_HP,
+                    NEAR_SEEN, OFF_SEEN, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S, TREE_AIR,
+                    TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -247,9 +247,12 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "knock-turns": {"knock_turns": True}}
 HER_FIELDS = ("defence", "evade", "potion", "stars")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
-# ... and her body as the client has it (`client-body`: 22 either side of her feet and 65 tall, motion.bodies, which the
-# planner keeps her clear of monsters by), not the simulator's 15 and 55 (world.HER_HALF, HER_HEIGHT).
+# ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
+# motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
+# (`wide-body`: 15 either side and 55 tall, world.HER_HALF, HER_HEIGHT), not the client's touch test (world.HER_TOUCH: a
+# line 50 tall over her feet, every world's since).
 WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
+WORLDS["wide-body"] = {"her_box": (HER_HALF, HER_HEIGHT)}
 # ... and the monsters' HP bars read empty once they're hurt (`bars-empty`: Realism.bars_empty, sim.fakes.FakeEyes.bar),
 # as the stack read them live at 1366x768 until 2026-10-25 (perception.hud.hp_bar took the bar's black frame for its
 # fill: 488 of 567 bars read 0), so what a monster has left was her throws' reckoning alone (behavior.attacks).
@@ -272,6 +275,10 @@ WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
 # (`spawn-fade-wide`: SPAWN_FOUND_WIDE, a median 0.53 s later), where every other world finds a newborn from its birth.
 WORLDS["spawn-fade"] = {"spawn_found": SPAWN_FOUND}
 WORLDS["spawn-fade-wide"] = {"spawn_found": SPAWN_FOUND_WIDE}
+# ... and a newborn touching her from its birth (`newborns-touch`: Realism.newborns_touch), as every world had it until
+# 2026-11-02, where it now touches only once it has faded in (world.NEWBORN_SOLID_S: none of the 72 live touches by a
+# spawn point came before 0.82 s after the respawn pass).
+WORLDS["newborns-touch"] = {"newborns_touch": True}
 # ... and her invulnerability after a touch as live (`walkers`: INVULNERABLE_LIVE; Realism.invulnerable), with the
 # monsters she hits chasing her (Realism.chase, world.AGGRO_S: every world's since 2026-10-31; till then this world's
 # alone, by chance, CHASE_TREE; and each monster back 17 s after its own death, RESPAWN_LIVE, until the server's respawn

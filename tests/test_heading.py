@@ -25,7 +25,7 @@ from gamelab.perception.heading import Heading, Reading
 from gamelab.perception.nametag import NameTag
 from gamelab.screen import NATIVE, STRETCHED
 from gamelab.sim import scenarios
-from gamelab.sim.world import LEVEL_25, Noise, Realism
+from gamelab.sim.world import HER_HALF, HER_HEIGHT, LEVEL_25, Noise, Realism
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LABELS = json.loads((FIXTURES / "heading" / "labels.json").read_text(encoding="utf-8"))
@@ -509,8 +509,9 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
 # MISSed EVADE_ACC over its accuracy, 29%; the world's 1.45 s and her avoid since 2026-10-28 knock her less often, and
 # none of seeds 1-32 keeps the single seed's case below: what's tested is her heading after a knock, not the knocks;
 # the monsters walk as with nobody there and come back on their own clock, as then: Realism.chase off, respawn_tick 0)
-KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False, respawn_tick=0.0),
-               start=0.0,
+KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False, respawn_tick=0.0,
+                               her_box=(HER_HALF, HER_HEIGHT)),  # (her body as when these were measured: the
+               start=0.0,                                         # client's line since 2026-11-02 knocks her less)
                mushrooms=(160.0, -150.0), her=dataclasses.replace(LEVEL_25, avoid=None))
 
 

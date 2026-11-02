@@ -956,9 +956,52 @@ def test_a_monster_touches_her_by_its_body_as_it_faces(model):
     m.info, m.t0, m.d, m.t1 = MUSHROOM, 0.0, 0, 1e9  # standing for good
     for facing, touched in ((-1, True), (1, False)):  # its cap reaches 36 behind it, 27 in front
         m.facing = facing
-        _put(w, "ground", 400.0 + 34 + world_mod.HER_HALF, c.y_at(400))
+        _put(w, "ground", 400.0 + 34 + world_mod.HER_TOUCH[0], c.y_at(400))
         w._touch()
         assert w.touches == int(touched), facing
+
+
+def test_a_monster_touches_her_as_the_client_tests_it_her_a_line_50_tall(model, monkeypatch):
+    """world.HER_TOUCH: the client's touch test (MapMobs::find_colliding) has her a line 50 tall over her feet, so a
+    monster touches her only where its frame's box takes her x in; with the world's old body (15 either side, 55 tall:
+    `--world wide-body`) one 10 short of her touched her too."""
+    monkeypatch.setattr(world_mod, "EVADE", 0.0)
+    c = plat(model, 500, 400)
+    assert world_mod.HER_TOUCH == (0.0, 50.0)
+
+    def touched(x, box=None) -> int:
+        w = still(world(model, c.id, x, monsters=[("Pig", c.id, 400.0)], realism=world_mod.Realism(her_box=box)))
+        w.monsters[0].info = None  # (its kind's box: 34 either side)
+        w.advance(0.1)
+        return w.touches
+
+    assert touched(433.0) == 1 and touched(444.0) == 0
+    assert touched(444.0, (world_mod.HER_HALF, world_mod.HER_HEIGHT)) == 1
+
+
+def test_a_newborn_touches_her_only_once_it_has_faded_in(model, monkeypatch):
+    """A monster the map has just spawned fades in over SPAWN_FADE_S and touches nothing till then (NEWBORN_SOLID_S:
+    live none of the 72 touches by a spawn point came before 0.82 s after its pass); then it touches as any. One there
+    from the start (born None) touches at once, and so does a newborn with Realism.newborns_touch (as until
+    2026-11-02)."""
+    monkeypatch.setattr(world_mod, "EVADE", 0.0)
+    c = plat(model, 500, 400)
+
+    def first_touch(born, **realism) -> float | None:
+        w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 405.0)],
+                        realism=world_mod.Realism(**realism)))
+        w.monsters[0].born = born
+        for i in range(1, 300):
+            w.advance(i * 0.005)
+            if w.touches:
+                return round(w.touch_log[0][0], 3)
+        return None
+
+    assert world_mod.NEWBORN_SOLID_S == world_mod.SPAWN_FADE_S == 0.817
+    assert first_touch(None) < 0.01
+    assert first_touch(0.0) == pytest.approx(0.817, abs=world_mod.TICK_MS / 1000)  # (the tick it's solid in)
+    assert first_touch(0.5) == pytest.approx(1.317, abs=world_mod.TICK_MS / 1000)
+    assert first_touch(0.0, newborns_touch=True) < 0.01
 
 
 def test_a_hit_pushes_a_monster_back_and_stands_it_while_it_flinches(model, monkeypatch):

@@ -38,9 +38,11 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   their platform too; a hit that doesn't kill pushes one KNOCK_MOB units back from her and stands it while it
   flinches (MOB_KNOCKBACK), never off its platform, if its damage reaches the monster's `pushed` in the game data
   (push_chance: any damage for the first map's kinds).
-  A monster touches her when its body overlaps hers (HER_HALF either side of her feet, HER_HEIGHT tall):
-  the box of the frame it shows then in the game data, walking, standing or flinching after a hit, turned
+  A monster touches her when its body meets hers (HER_TOUCH: as the client tests it, a line 50 tall over her
+  feet; Realism.her_box a box about them): the box of the frame it shows then in the game data, walking,
+  standing or flinching after a hit, turned
   the way it faces (SimMonster.body), so a hopping slime is off the ground and taller for 38% of its walk.
+  One the map has just spawned touches nothing until it has faded in (NEWBORN_SOLID_S after its birth, as live).
   A touch leaves her invulnerable for INVULNERABLE (1.45 s, as the frames have it; the sources 1.5), a MISS as much as
   damage. She evades it (a thief's "MISS": nothing else happens) with a chance inversely proportional to the
   monster's accuracy (game data: half a pig's touches, four in five of a snail's), or with her avoid known (Her.avoid)
@@ -162,9 +164,22 @@ REGRAB_AFTER = 0.3       # s after leaving a rope before up grabs one again
 # used before (149 out, 220 up: a 12-unit rise), by about 2 sd: weak, so False puts those back.
 ROPE_JUMP_SHOE = True
 ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_SHOE else (WALK_SPEED, 220.0))
-# Her body for the world's touches: 15 either side of her feet and 55 tall, as the simulator has had it (the hop was
-# timed in game with the 15: flow.HOP_HALF), or the client's (Realism.her_box, `--world client-body`): 22 either side,
-# 65 tall (motion.bodies, which the stack plans by: her trips, attack.danger).
+# Her body for the world's touches (Realism.her_box), (half its width, its height) about her feet. By default the
+# client's touch test (from 2026-11-02): RustMS's copy of HeavenClient, aligned with the v83 client, has a monster touch
+# her where its frame's box (Mob::is_in_range: the bounds of the frame it shows, as SimMonster.body has them) meets
+# her as a line 50 tall, from where she was a frame before to where she is, with no width of its own
+# (MapMobs::find_colliding; D:/MapleHelper-scratch/spawn-fade/mech/rustms); the -22..22 x 65 box of the client's
+# FUN_0045183b (MobAttackRules.h `user_body`) is where a monster's own attacks land, which Tree Dungeon's don't have.
+# Live it fits the touches as her invulnerability ends: of BugBaby's grinds of 2026-10-30 (02:03-02:49, 16:31-17:37:
+# the perception service's tracks; D:/MapleHelper-scratch/recfix/sim/live_boxtest.py), with the nearest seen monster of
+# her platform 0-25 units off her (middle to middle) 1.40 s after a touch the next touch came by 1.75 s 81% of the time
+# (n 78), 25-35 off 33% (n 27), 35-45 off 46% (n 24), 45-60 off 15% (n 34); in the world with 15 either side of her
+# 100%, 100%, 89% and 59% (12 runs of the standard grind, world truth: sim_boxtest.py), with this line 98%, 74%, 60% and
+# 52% (what's left there is her chasers walking in). Until then 15 either side and 55 tall (HER_HALF, HER_HEIGHT: the
+# harness's `--world wide-body`; the stack's hop was timed in game with the 15, flow.HOP_HALF), or the planner's
+# (`--world client-body`): 22 either side, 65 tall (motion.bodies, which the stack plans by: her trips,
+# attack.danger), the safe side for keeping clear.
+HER_TOUCH = (0.0, 50.0)
 HER_HALF = 15.0
 HER_HEIGHT = 55.0
 HER_BOX_CLIENT = (her_body.HER_HALF, her_body.HER_TALL)
@@ -487,6 +502,17 @@ DEATH_SEEN_AFTER = 0.14
 # (p10 0.41, p90 0.89), SPAWN_FOUND_WIDE: 0.53 s later. A table's pairs (alpha, share first found by then), from the
 # faintest any was found at.
 SPAWN_FADE_S = 0.817
+# ... and it touches her only once it has faded in (Realism.newborns_touch False: every world's from 2026-11-02, the
+# user's decision 2 of the recordings' roadmap; till then it touched from its birth, `--world newborns-touch`). Live,
+# RiceBaby's hour of 2026-11-02 00:17:48-00:53:06 (her 170 touches, all hurting, against the 7.115-s grid of the
+# respawn passes the spawn watch's 1,251 fading sightings fit; D:/MapleHelper-scratch/rec-analysis/plans/work/simulator/
+# touch_phase.py, touch_phase.txt): of the 72 with her within 45 of a spawn point of her platform none came 0-0.75 s
+# after a pass, the earliest at 0.82 s (five at 0.82-0.84), where about 5-6 were to be expected at the rate away from
+# the passes (Poisson's P(0) about 0.003), then 19 at 0.75-1.0 s. The one touch 0.24 s after a newborn's start away
+# from a point (00:48:18.6) had her at a rope's top 175 under it. So 0.82 s from the newborn's alpha 0, the fade's
+# end. A newborn walks while it fades (the world starts its walk at its birth: perception.spawns, 42 units by solid at
+# the median) and her attacks can hit it (spawns.FOLLOW has its hit frames), both as before.
+NEWBORN_SOLID_S = SPAWN_FADE_S
 SPAWN_FOUND = ((0.02, 0.0), (0.05, 0.204), (0.1, 0.579), (0.2, 0.734), (0.3, 0.737), (0.4, 0.762), (0.5, 0.793),
                (0.6, 0.861), (0.7, 0.926), (0.8, 0.957), (0.9, 0.988), (1.0, 1.0))
 SPAWN_FOUND_WIDE = ((0.2, 0.0), (0.3, 0.006), (0.4, 0.093), (0.5, 0.207), (0.6, 0.409), (0.7, 0.576), (0.8, 0.771),
@@ -946,8 +972,10 @@ class Realism:
                                  # (`--world joined-walls`)
     rope_reach: float = ROPE_REACH  # how far above her feet a rope's bottom can be for her to grab it
                                     # (ROPE_REACH_CLIENT: HeavenClient's)
-    her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_HALF
-                                                # and HER_HEIGHT; HER_BOX_CLIENT, the client's (motion.bodies)
+    her_box: tuple[float, float] | None = None  # her body for touches, (half its width, its height): None, HER_TOUCH
+                                                # (the client's touch test: a line 50 tall, from 2026-11-02);
+                                                # (HER_HALF, HER_HEIGHT), as until then; HER_BOX_CLIENT, the
+                                                # planner's (motion.bodies)
     rope_knocks: bool = False    # a touch knocks her off a rope (as the simulator had it until 2026-10-27); False: she
                                  # stays on it, her HP taken and her keys still held (up climbing on), as live on
                                  # 2026-10-26: 11 of 11 hits on a rope left her on it (behavior.darts' false stops)
@@ -971,6 +999,9 @@ class Realism:
                                  # default from 2026-10-31); False: they walk as with nobody there, hit or not (the
                                  # harness's `--world no-aggro`)
     invulnerable: float = INVULNERABLE  # s a touch leaves her invulnerable (INVULNERABLE_LIVE: as live)
+    newborns_touch: bool = False  # a monster the map has just spawned touches her from its birth (as the world had it
+                                  # until 2026-11-02: the harness's `--world newborns-touch`); False: only once it has
+                                  # faded in, NEWBORN_SOLID_S after (as live)
     # The game's own key bindings where they aren't her keys' (behavior.keycheck): (her GameKeys field, the key the game
     # has it on, None: on no key), e.g. (("attack", "a"),): her configured attack key then does nothing (as live on
     # 2026-10-28 00:30, the user's own play having moved it), A attacks. The backslash opens the KEY BINDINGS window
@@ -2818,15 +2849,16 @@ class World:
         if self.ms < self.invulnerable_ms or not self.monsters or self.dead:
             return
         t = self.t
-        half, tall = self.realism.her_box or (HER_HALF, HER_HEIGHT)
+        half, tall = self.realism.her_box or HER_TOUCH
         if self.mode == "ground":
             pids = self._near[self.plat.id]
         else:
             pids = [q.id for q in self.model.platforms if q.covers(self.x, 60) and -70 <= q.y_at(self.x) - self.y <= 70]
         near = [m for pid in pids for m in self._on(pid)]
         near += [j for j in self.jumpers if j.alive and j not in near and j.in_air(t)]  # (in the air from elsewhere)
+        solid = 0.0 if self.realism.newborns_touch else NEWBORN_SOLID_S
         for m in near:
-            if not m.alive:
+            if not m.alive or m.born is not None and t - m.born < solid:  # (fading in: it touches nothing yet)
                 continue
             mx = m.at(t)
             lo, hi, bottom, top = self.body(m)

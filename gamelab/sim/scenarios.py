@@ -1540,7 +1540,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=12, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1625,7 +1625,11 @@ def loop_tree_attack_no_darts(sim):
     D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt): on 6 no doubt of the regular attack before a key check's
     retreat at 174 s; of seeds 1-24, 12 alone meets all of this (with JITTER_ALL off 6 and 13). On 12: the doubt at
     61.1 s, a Horny Mushroom at 31%; MAYBE OUT at 68.7 s, ATTACK on Ctrl as configured at 69.8 s, paged; out of darts'
-    stop at 83.9 s, paged.)"""
+    stop at 83.9 s, paged.) (Seed 3 since the world's touches as live (2026-11-02: a newborn touches nothing while it
+    fades in, world.NEWBORN_SOLID_S, and her body for touches is the client's line, world.HER_TOUCH;
+    D:/MapleHelper-scratch/recfix/sim/seeds/no_darts.txt): on 12 her stars' test never said MAYBE OUT; of seeds 1-24 3,
+    5, 7, 13 and 14 meet all of this. On 3: the doubt at 76.2 s, a Horny Mushroom at 78%; MAYBE OUT at 83.9 s, ATTACK on
+    Ctrl as configured at 88.6 s, paged at 89.3 s; out of darts' stop at 116.4 s, paged.)"""
     return key_check_run(4)(sim)
 
 
