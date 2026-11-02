@@ -353,8 +353,9 @@ class Feed:
         st = newest_frame(list(self._states()))
         return st if st is not None and st.usable and st.t >= after else None
 
-    def throw(self, t: float, side: str, attack: str | None = None) -> None:
-        """She threw toward `side` at t (Actions.throw_listeners), with `attack` (its id: gamelab.character), if told."""
+    def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
+        """She threw toward `side` at t (Actions.throw_listeners), with `attack` (its id: gamelab.character) and `aim`
+        (the monster her attack choice aimed it at: tracking.MonsterTracker.throw), if told."""
 
     def close(self) -> None:
         pass
@@ -508,8 +509,8 @@ class SyncFeed(Feed):
     def drain_events(self, upto: float | None = None) -> list[Event]:
         return _drain(self.events, upto)
 
-    def throw(self, t: float, side: str, attack: str | None = None) -> None:
-        self.step.throw(t, side, attack)
+    def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
+        self.step.throw(t, side, attack, aim)
 
 
 # --- on saved frames and in tests -------------------------------------------------------------------------
@@ -562,5 +563,5 @@ class InlineFeed(Feed):
     def drain_events(self, upto: float | None = None) -> list[Event]:
         return _drain(self.events, upto)
 
-    def throw(self, t: float, side: str, attack: str | None = None) -> None:
-        self.step.throw(t, side, attack)
+    def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
+        self.step.throw(t, side, attack, aim)

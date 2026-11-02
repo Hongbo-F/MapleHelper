@@ -105,9 +105,10 @@ def test_a_kill_whose_exp_showed_before_time_up_is_the_hunts_not_the_stand_bys()
     h = SimpleNamespace(ledger=SimpleNamespace(kills=[green, horny]))
     g = object.__new__(Grind)
     g.h, g.report, g._kills_seen, g.credit = h, HuntReport(exp_gains=15, exp=400.0), 0, {}
+    g._credited, g._moves_seen = {}, 0  # (the ledger's moves followed: Grind._book_kills; none here)
     g.tour, g._avg_exp = SimpleNamespace(exp={"green-mushroom": 26.0, "horny-mushroom": 41.0}), lambda: 30.0
     g.visit = g.obj = None
-    g._over_at, g._s = 180.4, SimpleNamespace(platform=SimpleNamespace(id=7))  # (the loop over, her last look)
+    g._over_at, g._s = 180.4, SimpleNamespace(t=180.4, platform=SimpleNamespace(id=7))  # (the loop over, her last look)
     assert g._book_after() == [horny] and g._kills_seen == 2
     r = g.report
     assert (r.exp_gains, r.exp, r.standby_kills, r.on_the_way) == (17, 467.0, 1, 2) and g.credit == {7: [1, 26.0]}

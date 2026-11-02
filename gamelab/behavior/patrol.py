@@ -698,10 +698,12 @@ class Belief:
 
     def _take_events(self, t: float, memory) -> None:
         """Her memory's new events since the last update: her kills empty their points, and so do another player's
-        that the feed saw (taken: localization.memory's `theirs`); the monsters by another player gone or killed teach
-        `take`, one she killed left to her, one another took or looks forgot taken."""
+        that the feed saw (taken: localization.memory's `theirs`); a kill of hers moved onto another monster (moved:
+        localization.memory's `_take_moves`, the magician's) empties that one's point at the kill's time instead of the
+        one it was first put by, its kill time kept once; the monsters by another player gone or killed teach `take`,
+        one she killed left to her, one another took or looks forgot taken."""
         c = memory.counts
-        total = c["new"] + c["killed"] + c.get("taken", 0) + c["gone"] + c["aged"]
+        total = c["new"] + c["killed"] + c.get("taken", 0) + c.get("moved", 0) + c["gone"] + c["aged"]
         new, self._events = min(total - self._events, len(memory.events)), total
         for what, when, e in list(memory.events)[len(memory.events) - new:] if new > 0 else ():
             if what == "killed":
@@ -712,6 +714,22 @@ class Belief:
                     q = min(qs, key=lambda q: abs(q.x - x))
                     self.empty_since[q.id] = self.killed[q.id] = when
                     self.empty_seen[q.id] = when
+                if e.rival and e.id not in self._kept_ids:
+                    self._kept_ids.add(e.id)
+                    self.kept_by[e.kind] += 1
+            elif what == "moved" and e.moved_from is not None:
+                platform, kind, x, when = e.moved_from
+                qs = self._by.get((platform, kind))
+                if qs:  # (the point the kill was first put by: as it was, unless something has emptied it since)
+                    q = min(qs, key=lambda q: abs(q.x - x))
+                    if self.killed.get(q.id) == when:
+                        self.killed.pop(q.id)
+                        self.empty_since.pop(q.id, None)
+                qs = self._by.get((e.platform, e.kind))
+                if qs:
+                    q = min(qs, key=lambda q: abs(q.x - (e.died_x if e.died_x is not None else e.x)))
+                    self.empty_since[q.id] = self.killed[q.id] = when
+                    self.empty_seen[q.id] = max(when, self.empty_seen.get(q.id, -1e18))
                 if e.rival and e.id not in self._kept_ids:
                     self._kept_ids.add(e.id)
                     self.kept_by[e.kind] += 1

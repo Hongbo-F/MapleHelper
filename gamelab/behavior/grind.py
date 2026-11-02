@@ -60,6 +60,7 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
+from .ledger import FOLLOW_S
 from .patrol import TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
@@ -140,6 +141,8 @@ class Grind(Hunt):
                                        else (lambda pid, x: h.danger.at(pid, x)))
         self.stop: int | None = None              # the stop she's at or going to (patrol.stops)
         self.credit: dict[int, list] = {}         # platform -> [kills, EXP] of her kills that died there
+        self._credited: dict[int, tuple] = {}     # ... each recent kill's (by id): (it, the platform credited, its EXP)
+        self._moves_seen = 0                      # the ledger's moved kills taken (`_book_kills`)
         self.stays: list[float] = []              # s at each stop she got to
         self.pulls = self.skips = 0
         self._alt: tuple | None = None            # where she'd go instead: (when, heading, stop, choose's info)
@@ -250,14 +253,33 @@ class Grind(Hunt):
         return max((d.taken(k) for k in d.threats), default=0.0)
 
     def _book_kills(self, s: Scene, kills: list) -> None:
-        """The hunt loop's bookkeeping, and each kill of the hunt's credited to the platform it died on (`credit`)."""
+        """The hunt loop's bookkeeping, and each kill of the hunt's credited to the platform it died on (`credit`); one
+        the tracker put on a monster of another platform since (the ledger's `moved`: the magician's, whose kills go by
+        her search), its credit moved there (at every look: Hunt._book passes its new kills, none too)."""
         super()._book_kills(s, kills)
         avg = self._avg_exp()
         for k in kills:  # (the stand-by trip's aren't: the report has them, `credit` is where she hunted)
             _, exp = self._kill_exp(k, avg)
-            c = self.credit.setdefault(k.platform if k.placed else k.ground, [0, 0.0])
+            where = k.platform if k.placed else k.ground
+            c = self.credit.setdefault(where, [0, 0.0])
             c[0] += 1
             c[1] += exp
+            self._credited[id(k)] = (k, where, exp)
+        moved = getattr(self.h.ledger, "moved", ())
+        for _, k, _, _, _ in moved[self._moves_seen:]:
+            got = self._credited.get(id(k))
+            if got is None or not k.placed or k.platform is None or k.platform == got[1]:
+                continue
+            _, where, exp = got
+            if where in self.credit:
+                self.credit[where][0] -= 1
+                self.credit[where][1] -= exp
+            c = self.credit.setdefault(k.platform, [0, 0.0])
+            c[0] += 1
+            c[1] += exp
+            self._credited[id(k)] = (k, k.platform, exp)
+        self._moves_seen = len(moved)
+        self._credited = {i: v for i, v in self._credited.items() if s.t - v[0].t <= FOLLOW_S + 1.0}
 
     def _covered(self) -> set[int]:
         """The platforms the stop gets at: its own, and those of the spawn points it reaches."""

@@ -291,7 +291,7 @@ class Hunter:
         # The monsters she has seen anywhere, kept across looks (localization.memory), her kills (the ledger's) marking
         # the ones they were: after the ledger, so a look's kills are in it.
         self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
-                             theirs=lambda: self.ledger.theirs)
+                             theirs=lambda: self.ledger.theirs, moved=lambda: self.ledger.moved)
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'. Her skill cast
         # only at a body seen that her search picks, not dead, not again where it took no effect, where her profile
         # casts nothing at nothing (Policy.unseen 'none': the magician's Magic Claw; Attacks.picks)
@@ -1450,9 +1450,15 @@ class Hunter:
                        **({"shot": shot.name} if shot is not None else {}))
 
     def _tell_feed(self, when: float, side: str) -> None:
-        """A throw (Actions.throw_listeners) told to the feed (localization.tracking: whose kills are whose)."""
+        """A throw (Actions.throw_listeners) told to the feed (localization.tracking: whose kills are whose), with the
+        monster her attack choice aimed it at (Attacks.thrown, told before this listener: its track, kind, x and
+        platform as the look she chose on had it), which her kill goes on first where her search picks it as well as
+        any (tracking's band order: the magician's; the thief's stars go by their own order, the aim aside)."""
         self.told_throws.append([when, side])
-        self._feed_throw(when, side)
+        thrown = getattr(self.attacks, "thrown", None)
+        m = thrown[1] if thrown is not None and thrown[0] == when else None
+        aim = None if m is None else (getattr(m, "track", None), m.kind, round(m.x, 1), m.platform)
+        self._feed_throw(when, side, None, aim)
 
     def _retell(self, s: Scene, side: str) -> None:
         """Look `s`'s frame shows her facing `side`, otherwise than her keys had her (Actions.see): the throws told

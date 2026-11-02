@@ -359,9 +359,10 @@ class WorldStep:
         if self.spawns is not None:
             self.counts["newborns"] = 0  # (where the watch runs: the simulator's traces are as before it)
 
-    def throw(self, t: float, side: str, attack: str | None = None) -> None:
-        """She threw toward `side` at t (with `attack`: its id, if told)."""
-        self.tracker.throw(t, side, attack)
+    def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
+        """She threw toward `side` at t (with `attack`: its id, if told; `aim`: the monster her attack choice aimed it
+        at, if told, as tracking.MonsterTracker.throw takes it)."""
+        self.tracker.throw(t, side, attack, aim)
 
     def step(self, look: Callable[[bool], Observation], t: float, visible: bool = True, asks: Asks | None = None,
              why: str = "", bad: Problem | None = None) -> WorldState:

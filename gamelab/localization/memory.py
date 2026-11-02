@@ -111,6 +111,8 @@ class Remembered:
     state: str = "seen"   # "seen" (remembered), "killed" (by her: the ledger), "gone" (forgotten)
     ended: float | None = None  # when it was killed or forgotten
     died_x: float | None = None  # where the ledger placed its kill (killed)
+    moved_from: tuple | None = None  # her kill moved onto it (Memory._take_moves): where it was put first (platform,
+                                     # kind, x) and when (event 'moved')
 
     @property
     def live(self) -> bool:
@@ -173,18 +175,20 @@ class Memory:
     """The monsters she has seen, kept across looks (see the top). `kills`: the ledger's kills so far (behavior.ledger:
     each with t, kind, platform and x, and its track if the feed's tracker said which), read at every look for the new
     ones; None: none told. `dead`: the feed's tracks taken for dead (behavior.ledger.Ledger.dead), whose monsters are
-    killed, and `theirs` those of them another player killed (Ledger.theirs): 'taken', not 'killed'. `shape`: what
+    killed, and `theirs` those of them another player killed (Ledger.theirs): 'taken', not 'killed'. `moved`: her kills
+    the tracker put on another monster after the ledger had them (Ledger.moved: `_take_moves`). `shape`: what
     her attacks are to it (gamelab.character.Shape; the thief's: tracking's HIDE_S, HIT_AFTER_S, THROW_REACH,
     THROW_DY)."""
 
     def __init__(self, model: MapModel, kills: Callable[[], list] | None = None,
                  dead: Callable[[], object] | None = None, theirs: Callable[[], object] | None = None,
-                 shape: Shape = THIEF_SHAPE):
+                 moved: Callable[[], list] | None = None, shape: Shape = THIEF_SHAPE):
         self.model = model
         self.shape = shape
         self.kills = kills
         self.dead = dead
         self.theirs = theirs
+        self.moved = moved
         self.entries: list[Remembered] = []
         self.events: deque[tuple[str, float, Remembered]] = deque(maxlen=EVENTS)  # (what, when, the monster)
         self.covered: dict[int, float] = {}  # platform -> the latest look that covered all of it
@@ -196,6 +200,7 @@ class Memory:
         self._speeds = speeds(model)
         self._next_id = 1
         self._kills_seen = 0
+        self._moved_seen = 0
         self._throws: deque[tuple[float, int, float, float]] = deque(maxlen=16)  # (t, side +1/-1, her x, her y)
         self._her: tuple[float, float] | None = None
         self._recorded = -1e18
@@ -350,6 +355,7 @@ class Memory:
                 self._killed(min(near, key=lambda q: abs(q.x - k.x)), t, k.x)
         dead = self.dead() if self.dead is not None else ()
         theirs = self.theirs() if self.theirs is not None else ()
+        self._take_moves(t, dead)
         for e in [e for e in self.entries if e.live and getattr(e.monster, "track", None) is not None
                   and e.monster.track in dead]:
             if e.monster.track in theirs:  # (another player's kill: fading where it died, as one of hers)
@@ -359,6 +365,37 @@ class Memory:
             else:  # (hers, with no kill of hers on it yet)
                 self._killed(e, t, e.x)
         return unplaced
+
+    def _take_moves(self, t: float, dead) -> None:
+        """Her kills the tracker put on another monster since (`moved`: behavior.ledger.Ledger.moved, the magician's,
+        whose kills go by her search): the monster it was on, killed here by it (its track's), alive again where its
+        track isn't dead now (the tracker let it go: seen alive), back as it was; the one it's on now (its track's),
+        killed. Where one was alive again, that's the one kill moved, not another: event 'moved', not 'killed'
+        (patrol.Belief empties the new one's point for it at the kill's time, in place of the old one's, and keeps its
+        kill time once); else (none was killed here by it) 'killed'. Until 2026-11-02 each kill was taken once, as
+        first placed: on that night's recordings master's tracker first put 28 of her 149 labelled kills on another
+        monster (the replay kit's labels-v2), the real one remembered alive while the live one was killed here (a
+        target no more, a pile's guard a ghost: P14, P34)."""
+        if self.moved is None:
+            return
+        moved = self.moved()
+        new, self._moved_seen = moved[self._moved_seen:], len(moved)
+        for _, k, old, _, _ in new:
+            was = None
+            for e in self.entries:
+                if e.state == "killed" and old is not None and getattr(e.monster, "track", None) == old \
+                        and old not in dead:
+                    was = was or (e.platform, e.kind, e.x if e.died_x is None else e.died_x, e.ended)
+                    e.state, e.ended, e.died_x = "seen", None, None
+            track = getattr(k, "track", None)
+            if track:
+                for e in [e for e in self.entries if e.live and getattr(e.monster, "track", None) == track][:1]:
+                    if was is None:
+                        self._killed(e, t, k.x)
+                        continue
+                    e.state, e.ended, e.died_x, e.moved_from = "killed", t, k.x, was
+                    self.events.append(("moved", t, e))
+                    self.counts["moved"] = self.counts.get("moved", 0) + 1
 
     def _killed(self, e: Remembered, t: float, x: float | None) -> None:
         e.state, e.ended, e.died_x = "killed", t, x

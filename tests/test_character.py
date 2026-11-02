@@ -717,14 +717,19 @@ def test_the_attack_id_goes_through_the_feed_and_the_service():
     step = SimpleNamespace(throw=lambda *a: told.append(a))
     InlineFeed.throw(SimpleNamespace(step=step), 1.0, "left")
     SyncFeed.throw(SimpleNamespace(step=step, _settle=lambda now: None), 2.0, "right", "magic_claw")
-    assert told == [(1.0, "left", None), (2.0, "right", "magic_claw")]
+    InlineFeed.throw(SimpleNamespace(step=step), 3.0, "left", None, (7, "horny-mushroom", -40.0, 10))
+    assert told == [(1.0, "left", None, None), (2.0, "right", "magic_claw", None),
+                    (3.0, "left", None, (7, "horny-mushroom", -40.0, 10))]
     sent = []
     client = SimpleNamespace(hello=SimpleNamespace(throws=True), _send=lambda *a: sent.append(a))
     service.ServiceClient.throw(client, 1.0, "left")
     service.ServiceClient.throw(client, 2.0, "right", "magic_claw")
-    assert sent == [("throw", 1.0, "left"), ("throw", 2.0, "right", "magic_claw")]  # the thief's message as before
+    service.ServiceClient.throw(client, 3.0, "left", None, (7, "horny-mushroom", -40.0, 10))  # (her aim, told)
+    assert sent == [("throw", 1.0, "left"), ("throw", 2.0, "right", "magic_claw"),  # the thief's message as before
+                    ("throw", 3.0, "left", None, (7, "horny-mushroom", -40.0, 10))]
     told.clear()
     me = SimpleNamespace(runner=SimpleNamespace(step=step))
     for msg in sent:
         service.Service._take(me, None, msg, None)
-    assert told == [(1.0, "left", None), (2.0, "right", "magic_claw")]
+    assert told == [(1.0, "left", None, None), (2.0, "right", "magic_claw", None),
+                    (3.0, "left", None, (7, "horny-mushroom", -40.0, 10))]

@@ -25,7 +25,8 @@ from maplehelper import config
 from maplehelper.config import GameKeys
 from maplehelper.keys import parse as parse_key
 
-from ..character import AttackSpec, Box, Buff, Character, Geometry, Perception, Pet, Policy, Priors, Search, Shape
+from ..character import (AttackSpec, Box, Buff, Character, Geometry, KillCredit, Perception, Pet, Policy, Priors,
+                         Search, Shape)
 
 # [data] skills.json's tables, by skill level from 1 (tests/test_character.py checks them against it)
 MAGIC_CLAW_MP = (10, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 20)   # 2001003 mpCon
@@ -113,6 +114,16 @@ WAND = AttackSpec("wand", "attack", "the regular attack", "swinging", None, leve
                   defence="pdd", mp=0.0, ammo=0,
                   geometry=Geometry("melee", box=WAND_BOX, air=None, line=None, order="nearest"), **_TIMES)
 
+# Her kill's monster (localization.tracking's band order, from 2026-11-02): the client's search from where she was as
+# the cast picked, in its first band the oldest track first (the client takes the one that entered the map first), the
+# first band alone (tie 0: fitted on the recordings R1+R2 with her aim first in the band, the order before the review,
+# where a tie of 1 bound the same and let one more go and 2 bound 4 fewer right; not tried with the oldest first), her
+# hit landing lands_ms after the key (no flight: her victims stopped walking a median 0.49-0.50 s after the key on the
+# 130 labelled kills whose walk shows, D:/MapleHelper-scratch/recfix/credit/scripts/timings.py; 0.85 let 2 more go).
+# The monster her attack choice aimed the cast at decides nothing (it changed none of R1-R3's 164 first bindings when
+# it came first in the band: tracking.AIM_DX). README: Her kill's monster by Magic Claw's search.
+KILL = KillCredit(search=SEARCH, tie=0, lands_s=MAGIC_CLAW.lands_ms / 1000)
+
 # Her Shape (what localization takes of her attacks), from the search's outer bound with the thief's slack: a monster's
 # middle from 6 ahead of hers (its far side past 50, the widest body's half 34 back from it, and the thief's 10 behind for
 # what the tracker gets wrong) to 374 (its near side short of 300, the half, and the thief's 40 ahead); its feet up to 110
@@ -135,8 +146,9 @@ SHAPE = Shape(near=SEARCH.start - WIDEST_HALF - 10.0,           # 6
               order="band",
               look_band=(SEARCH.roof + 80, -SEARCH.floor + TALLEST_TOP + 15),  # (180, 124): attack.reach.LOOK_UP's 80
                                                                  # and LOOK_DOWN's 15 over the feet it picks
-              shows_wait_s=0.45)                                 # PLACEHOLDER (the thief's: the same lock prior) --
+              shows_wait_s=0.45,                                 # PLACEHOLDER (the thief's: the same lock prior) --
                                                                  # L1's lock
+              kill=KILL)
 POLICY = Policy(default_mode="skill",     # Magic Claw whenever her MP pays for a cast (design.md 4.6)
                 finish_with_regular=False,  # her regular attack is a swing up close [GK], not a star at range
                 regular_needs_box=True,   # PLACEHOLDER: the wand only at a monster in its box -- the user's answer

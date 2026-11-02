@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 
 from maplehelper.engine import RIGHT
 
+from .. import telemetry
 from ..attack import reach
 from ..localization.monsters import GAIN_AFTER_KEY, TRACK_SLACK, Monster, bodies, is_one, same, seen_again
 from ..localization.players import near_rival
@@ -207,6 +208,14 @@ class Ledger:
         self.unsure: set[int] = set()       # ... and those bound to a gain with no death seen yet (`_dead_of`)
         model = getattr(hunter, "model", None)  # each kind's death animation (`dying`), the map's game data
         self.die = {k: b.die_s for k, b in bodies(model).items()} if hasattr(model, "mob_bodies") else {}
+        # Whether the hunt follows the tracker's corrections (`moved`): where her kills are put on monsters by her
+        # search (her Shape's kill credit, the magician's: localization.tracking's band order); the thief's as before
+        shape = getattr(getattr(hunter, "senses", None), "shape", None)
+        self.follows = getattr(shape, "kill", None) is not None
+        # Her kills the tracker put on another monster after the hunt had them (`_follow`, with `follows`): (when, the
+        # kill as it is now, the track, platform and x it was on), for her memory (localization.memory: the old one
+        # alive again, the new one killed) and the grind's credit by platform (behavior.grind)
+        self.moved: list[tuple[float, Kill, int | None, int | None, float]] = []
 
     @property
     def placed(self) -> list[Kill]:
@@ -325,13 +334,31 @@ class Ledger:
             tr = _bound(s, k.gained)
             if tr is None:
                 if any(o.id == k.track for o in tracks):  # (let go: alive. Gone from the tracker: where it was last)
+                    self._moved(s.t, k, None)
                     k.track = 0
                 continue
+            if tr.id != k.track:
+                self._moved(s.t, k, tr)
             k.track, k.kind, k.platform, k.x, k.y = tr.id, tr.kind, tr.platform, tr.x, tr.y
             if tr.platform is not None:
                 k.ground = tr.platform
             if (p := k.pile) is not None and p.status == "expected" and tr.platform is not None:
                 p.x, p.y, p.platform = tr.x, tr.y, tr.platform
+
+    def _moved(self, t: float, k: Kill, tr) -> None:
+        """Kill `k`, on a track (or let go on none: 0), put by the tracker on track `tr` (None: let go, on none) at t:
+        kept in `moved` and told (telemetry event 'kill_moved'), where the hunt follows the tracker's corrections
+        (`follows`)."""
+        if not self.follows or k.track is None:
+            return
+        self.moved.append((t, k, k.track, k.platform, k.x))
+        if telemetry.recording():
+            gained = None if k.gained is None else round(k.gained, 3)
+            telemetry.emit("event", kind="kill_moved",
+                           text=f"her kill of {gained} from #{k.track} to " + ("none" if tr is None else f"#{tr.id}"),
+                           gained=gained, old=k.track, old_platform=k.platform, old_x=round(k.x, 1),
+                           new=None if tr is None else tr.id, platform=None if tr is None else tr.platform,
+                           x=None if tr is None else round(tr.x, 1))
 
     def _candidates(self, t: float, kind: str | None) -> list[tuple[_Throw, Monster]]:
         """What a gain seen at t can have been (of `kind`, if not None): the monsters in the paths of the throws of
