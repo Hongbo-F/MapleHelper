@@ -1261,7 +1261,7 @@ To check in game (none of this has been played):
 |---|---|
 | `mobs.py` | Finds snails, slimes, pigs and Orange Mushrooms, and any other kind with a colour gate learned for its map (below). It matches each monster's body-colour silhouette first, then checks the best spots with masked colour templates. The matches run on 6 threads, OpenCV letting go of Python's lock while it matches; which spots get checked doesn't depend on what the checks find, so they're all picked first, and the answers are the same as on one thread, in the same order. 21.6 ms for the fight's band around her and 76 ms for the whole screen (medians on the 17 bench frames), against 92 and 350 on one thread. What step 1 does after each match (windows with too little colour out, the peaks picked) is done in C (`gamelab/native.c`, called through ctypes, which lets go of Python's lock for it): in numpy it held the lock, so the threads took turns at it, 18 of the band's 34 ms (33.5 and 120 ms before it, timed back to back). The C does numpy's arithmetic in numpy's order, so the answers are the same to the bit (on all 31 saved 1920×1080 screenshots, and tests compare them on made-up ones); it's built with MSVC 2022's Build Tools the first time it's needed (`python -m gamelab.native` builds it now; see Motion planning), and without them the search runs in numpy as before (`bench-look` says which). More than 6 threads still don't help: the colour tests before the matches are numpy's. The first pass ignores windows with almost none of the monster's colour (summed from one integral image per kind): their normalised score is noise that can reach a perfect 1.0. The frame is also cut to an even size so the half-size mask is an exact shrink. An odd size (the fight's band was 151 rows) smeared faint colour into blank windows. In the basin, those fake matches took all 12 checks per monster type, so the fight never saw the snails and pigs at her level while a whole-screen look did. That's likely also why one pass over the whole screen once missed three slimes in plain view; whole-screen looks still go band by band. A monster found says which template matched it, and so what that template knows (`sprites.py`): where its feet are, which way it faces (the game's sprites face left; flipped, right) and its pose (standing, walking, flinching). It's placed where its feet are, not at its picture's middle and bottom: a sprite's origin is up to 8.5 units off its picture's middle, a slime's hop frames end 10-17 units above its feet, and the cut-outs were cut off anywhere from 9.5 units above the feet to 16 below. On 15 saved frames where she stands (`bodies`), monsters' feet came out -1.4 to +2.5 units from the surface they stand on (18 of them; sprites +1.4 on average), against -8.5 to +16.4 by the picture's bottom, and +7.7 for a pig on platform 26 480 units above her, whose hop frame matched best though its picture's bottom sat on the surface (the walking frames scored 0.83-0.88 against 0.91); on two recordings with the camera still, a snail's x strayed from a straight line by 1.5 and 1.6 units (rms; at most 4.8 and 5.2) against 2.4 and 3.5 (at most 13.4 and 9.8), when it jumped between a sprite and an off-centre cut-out. The way it faced was the way it moved in 192 of the 199 stretches of 0.6 s where it walked (the misses at turns). For the continuous feed a monster seen before is re-found 16 px around where it should be (`refind`): with the template that matched it last, 0.69 ms, else with its kind's templates in that window, 3.4 ms; on the 17 saved frames 84 of 84 were re-found where they were, and 84 of 84 moved 8 px. At the game's own 1366x768 the search is coarse to fine: step 1 at this scale, step 2 at full size around each place with several frames a place (see Screen size). Since 2026-10-27 step 1 is all in C (`gamelab/search.c`: the shrink, the colour tests, each silhouette scored exactly where the cover test keeps a window, the peaks and the places) and the gate's and checks' matches go in a few calls: a crowd's whole screen 115 ms of CPU on one thread to 20 (about 22 since the reviews: where OpenCV's noise could decide, those shapes master's way), master's answers (A cheaper whole screen). |
 | `sprites.py` | Templates for the monsters on the current map, made from the game's own sprites (every stand, move and hit frame) at their on-screen size, with what the game data says of each frame (`index.json`: its origin, the point that stands on the monster's feet, its body's box, its head, how long it shows). They're added to the screenshot cut-outs in `assets/mobs/`, which still catch monsters half hidden in plants. Each cut-out is matched once against its kind's sprites, both ways (`cutouts.json`): all 11 matched a frame at 0.86-0.98 (the other way round 0.29-0.52), which gives where their monster's feet are and which way it faces; under 0.85 a cut-out would stand on its middle and bottom instead. The four pig cut-outs are all the hop frame cut off 9.5 units above the feet, and three slime cut-outs reach 14-16 units below them (grass). Built on first use and kept with the other extracted data (git-ignored). At the game's own 1366x768 the templates are the game's pictures as they are, alpha and all (`sprites_x1`), and the cut-outs aren't used (see Screen size). |
-| `spawns.py` | Monsters fading in at their spawn points (`SpawnWatch`, from 2026-11-01): every spawn point in view on every frame whose view was registered on it, the frame against the map's own art there (localization.mapart: nothing learned), a blend of the point's kind's first pictures (stand/0, move/0, both ways, its feet within 4 units of the point) fitted exactly, a newborn where its alpha is 0.02 or more, 1 - R2 0.008 or less and the residual 1.5 colour levels or less; each newborn then followed in its stand, move and hit1 pictures until the whole screen finds it, its alpha in each sighting (`Mob.fading`). The sums in C (`gamelab/spawns.c`, integer, the same as numpy's). No false positive on the 153,474 labelled point-frames of Tree Dungeon's lossless clips; 229 of the 233 newborns whose start shows found at their first visible frame (the median), 7 frames sooner than the whole screen. See Spawns seen as they fade in. |
+| `spawns.py` | Monsters fading in at their spawn points (`SpawnWatch`, from 2026-11-01): every spawn point in view on every frame whose view was registered on it, the frame against the map's own art there (localization.mapart: nothing learned), a blend of the point's kind's first pictures (stand/0, move/0, both ways, its feet within 4 units of the point) fitted exactly, a newborn where its alpha is 0.02 or more, 1 - R2 0.008 or less and the residual 1.5 colour levels or less; each newborn then followed in its stand, move and hit1 pictures until the whole screen finds it, its alpha in each sighting (`Mob.fading`). The sums in C (`gamelab/spawns.c`, integer, the same as numpy's). No false positive on the 153,474 labelled point-frames of Tree Dungeon's lossless clips; 229 of the 233 newborns whose start shows found at their first visible frame (the median), 7 frames sooner than the whole screen. Of record, master's frame step against this one's on every usable recording (92 minutes): the whole screen's detections unchanged on every frame, none of the 1,477 sightings false, all 233 reported at frame 0 at the median (master 7, 469 ms), the pass 1.1 ms longer at the median (11.7 against 10.6). See Spawns seen as they fade in. |
 | `loot.py`, `drops.py` | Finds drops on the ground: what the map's monsters drop (on the first map Squishy Liquid, Slime Bubble, Leather, Pig's Head, Pig's Ribbon, Orange Mushroom Cap, Snail Shell; another map's from `drops.py`, below), the potions monsters this level drop (Red, Orange, White and Blue Potion), and bronze and gold mesos (3 spinning frames each; a coin found says which it is, `Item.coin`: their amount picks it). Templates are the game's own item pictures at their on-screen size, scaled by their opaque pixels only. A spot counts when the masked template matches (0.6) and its colours differ from the template's by at most 24 on average, checked where the picture covers whole pixels. The sea and island backdrop matched the Blue Potion's shape at 0.60-0.63, and UI buttons the White Potion's; they differed by 27-57, real drops by 12-19. Only a strip just above each platform is searched (drops lie on the ground), on 8 threads (3 since 2026-10-26: CPU), every strip's templates at once: 6.0 ms for her platform, 54 for every platform in view (medians on the 30 saved screenshots that place her, with and without mesos only), against 8.5 and 89 strip by strip on 4 threads, with the same drops in all 120 searches. On 110 saved frames it found all 18 drops and nothing else. Drops lay on the ground about 2 s after her EXP went up, and monsters are drawn in front of them. At the game's own 1366x768 the templates are the game's pictures as they are, and the shapes are matched on brightness alone, the colours checked as here (see Screen size). |
 | `nametag.py` | Her name tag, matched at full resolution (at half size the score swings between ~0.6 and ~0.9). Of the good matches in the play area, the one nearest where she was wins: her name also shows in the minimap, the bottom bar and the party list. A look searches within 240 px across and 120 down of where she was found last first: 3.4 ms, against 37 for the whole play area (`bench-look`, 17 saved frames, the same answers on all of them). The whole play area is searched when she isn't there (a warp, the tag hidden), and every 30th look anyway, so a wrong match can't stick. Since 2026-10-26 (CPU) a look searches within 80 px across and 40 down first (1.6 ms; then the 240 and 120). |
 | `plate.py`, `poses.py` | Her name plate's exact colours counted where her tag's gray match isn't sure, and her body by her poses where her plate doesn't show (from 2026-10-29; their inner loops in C, `gamelab/locate.c`; the service's from 2026-10-30, `localization/locate.py`): Her place by her plate and her body, Her place from the scene. |
@@ -3695,6 +3695,63 @@ priority on CPUs 12-23, `cpu_mode` idle, no replan bench running, one job of 2 w
   4.8); on the first 300 frames, 80 newborn sightings, 13.0 / 14.4 (p90 17.7 / 19.1, p99 20.9 / 21.6), the watch 1.3
   (p90 2.4, p99 6.0, the most 7.0); 15.0 frames a second and 0.45-0.51 cores either way.
 
+**Of record** (2026-11-01, the evening: master 072e1ec's frame step against this branch's, side by side on every usable
+recording; D:/MapleHelper-scratch/spawn-fade/record: replay_rec.py, run_all.py, analyze_rec.py, continuity.py,
+handover.py, bench_abba.py, sheets/). Each recording through the frame step as the service builds and runs it
+(`service.screen_world`'s eyes, senses and step, `service.SCHEDULE`, OpenCV on one thread, 1 ms timers, the eyes'
+recover on a frame that failed its checks), her place by the scene with the models of whoever played it (BugBaby or
+RiceBaby, read off the HUD), each frame handed over at its own time in the recording, paced as live, the next one read
+from disk after the pass: the 17 lossless clips (23.7 minutes, 20,600 frames: the golden clip and the 16 alarm clips,
+two of them at 10 frames a second) and the JPEG q75 ones (the 12 Lie Detectors' `before/` folders and 18 rolling
+recordings, 68.8 minutes, 61,604 frames).
+- *Nothing else changed*: on every frame of all 47, the whole screen's detections (the branch's monsters not fading)
+  and her place and view are master's to the pixel.
+- *Each traced birth's first report* (the measure stage's 323; a monster of its kind or twin within 15 units of its
+  fitted feet; frames and ms since its first visible frame, its alpha then):
+
+| births | master: found | frames | ms | alpha | branch: found | frames | ms | alpha | the watch's first |
+|---|---|---|---|---|---|---|---|---|---|
+| start seen, 233 | 227 | 7 (p90 10) | 469 (p10-p90 269-666, max 3,902) | 0.66 (0.38-0.89) | 233 | 0 (p90 1) | 0 (0-67, max 1,617) | 0.071 (0.04-0.10) | 230 |
+| start hidden, 90 | 90 | 7 (9) | 467 (316-615) | 0.62 | 90 | 6 (9) | 413 (85-604) | 0.57 | 18 |
+| Horny Mushroom, seen, 129 | 123 | 8 (10) | 552 (360-684) | 0.76 | 129 | 0 (1) | 0 (0-67) | 0.063 | 126 |
+| Green Mushroom, seen, 98 | 98 | 6 (9) | 400 (268-585) | 0.55 | 98 | 0 (1) | 0 (0-67) | 0.078 | 98 |
+| Slime, seen, 6 | 6 | 4.5 (7) | 299 (208-458) | 0.44 | 6 | 0 (0) | 0 (0-32) | 0.079 | 6 |
+| all 323 | 317 | 7 (10) | 468 (284-658) | 0.63 | 323 | 0 (7) | 0 (0-468) | 0.098 | 248 |
+
+  Held (3 frames in a row) at a median 534 ms with master's, at once with the branch's. Of the births whose start
+  showed, reported by frame 0, 1, 3, 5, 7, 10: master 0, 0, 14, 61, 126, 215 of 233, the branch 173, 227, 229, 231,
+  231, 232; earlier than master by a median 384 ms (p90 618) a birth, later on none. Master never reported 6 of them
+  while they showed. The 3 the search reported first in the branch too (the slowest 24 frames on) the watch missed at
+  their start: one under another player's attack and damage numbers, one beside drops on the ground, one with the
+  camera scrolling up as she climbed (record/sheets/r1_search_first_0.png).
+- *False positives: none.* The branch reports 1,477 monsters master doesn't (the watch's sightings, all on the lossless
+  clips): every one on a traced newborn (1,435 on the measure stage's births, 42 on those the prototype verified), and
+  each of the 254 tracks they began is a monster fading in by eye (record/sheets: its first sighting, 2, 5 and 10 frames
+  on, and the art behind it). On the JPEG recordings it reports nothing (no newborn passes the residual rule through
+  JPEG's noise: no ghost either; the watch takes 1.9 ms a frame there, every point failing the empty test).
+- *Tracks* (the lossless clips; master / the branch): tracks 755 / 768, flickers 73 / 67, lost in a crowd 69 / 74;
+  a newborn on two tracks in one frame 0 / 0, two reports of one place on two tracks 11 / 11 (none with a newborn);
+  births untracked over their first 40 frames 7 / 0. The hand-over: of the 247 births the watch reported, the search's
+  first report after the watch's last sighting was on the watch's track for 226, on another for 3 (the off-screen track
+  of a monster seen there before, as master took it too; the newborn under her for 6 frames, its track taken meanwhile
+  by another newborn 100 units off; two Green Mushrooms meeting at the point), and 18 weren't reported by the search in
+  their traced frames (covered, out of view). A birth's track switched in its first 40 traced frames in 12 births (13
+  times) against master's 5 (7): 4 of them in both; the branch's other 8 those 3 hand-overs, 2 newborns taken later by
+  a hidden older track at their point (master gave that track their first report), 2 pairs of newborns crossing on one
+  platform, and a solid monster's detection taken by a newborn's track that its faint first sighting had heading the
+  wrong way (the newborn then a new track). The next newborn at a point, 7 s on, took the hidden track of the one before
+  it 4 times (master's search did the same 2-7 frames later in 3, made a new track in 1: a fading sighting is barred
+  from older monsters' tracks, `FADE_SLACK_S`, but not from one seen fading itself). Of the watch's 254 tracks, 2 were
+  reported in 1-2 frames only (newborns lost under cover at once): not dropped as flickers (`MIN_SEEN_S`), they stay as
+  hidden tracks.
+- *The cost* (the golden clip's 4,507 frames through the frame step as above, one replay at a time, master, branch,
+  branch, master, 20 minutes; Idle priority on CPUs 12-23, `cpu_mode` idle, no replan bench running, the machine 2.5%
+  busy, nothing else of ours running): the pass 10.61 / 11.69 ms at the median (p90 15.33 / 16.43, p99 19.97 / 20.71,
+  the most 25.7 / 25.6), +1.08 ms; none over 66.7 ms; her look 6.8 and the search 7.5 either way; the watch 1.19 ms at
+  the median (p90 2.21, p99 4.85, the most 7.0). Over all 47 recordings with the two replays side by side: 13.67 /
+  14.68 ms at the median (p99 31.06 / 31.98), the watch 1.79 (p99 4.00); on the alarm clips 15.23 / 15.80 (p99 33.73 /
+  35.22), the watch 1.32 (p99 4.12) on the 85% of their frames with a sure view.
+
 **The simulator** (`sim.world.Noise.spawn_found`, `SPAWN_FADE_S`, `SPAWN_FOUND`, `SPAWN_FOUND_WIDE`, `World.fading`;
 `sim.fakes.FakeEyes._unseen`; harness `--world spawn-fade`, `--world spawn-fade-wide`). Its eyes found a monster back
 at its spawn point from its birth, drawn solid; its perception has no spawn watch. With `spawn-fade` a newborn fades in
@@ -3703,7 +3760,10 @@ clips' 323 births first found by then with the watch on (the watch or the whole 
 the median, p90 0.66, the hidden starts as late as the whole screen), its alpha in what the looks see while it fades
 (the tracker's `fading`, `solid_at` as live); `spawn-fade-wide` the same with the whole screen alone (0.647 at the
 median: as live was before). Every other world, the presets and the goldens as before (newborns seen from their birth,
-within a frame of live's with the watch for the 229 of 233 whose start shows). The harness (`run loop-grind --map
+within a frame of live's with the watch for the 229 of 233 whose start shows): Tree Dungeon's 42 goldens recorded with
+master 072e1ec's code and with this branch's are the same but for the step's counts in each trace (`feed.step`), which
+now have 'newborns' (0 in all 42), so `golden check` against master's traces says all 42 differ: they're recorded
+again when this is merged (spawn-fade/record/golden_072e1ec, golden_branch). The harness (`run loop-grind --map
 10002073 --preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers
 --minutes 5`, the worktree's lab/harness sf12-*, sf24-*): on 24 seeds with `spawn-fade` against without, EXP a minute
 293.3 against 310.2 (-16.8, se 9.1: within 2 se), touches that hurt 47.3 against 46.5 (+0.8, se 1.8), touches by a
@@ -3716,7 +3776,11 @@ first sightings of newborns in the 'tracks' records, against these). Newborns wh
 stand and move picture at the onset finds 12 more of them for about 3 times its cost. The planner doesn't use
 `fading`/`solid_at` yet (a newborn hittable, not touching, until solid). Other maps (animated art, layers in front of
 monsters, other kinds) aren't measured: their kinds aren't watched. The newborns' track mix-ups on a platform of two
-points (3 of 162) come from the tracker's gate, not the watch.
+points (3 of 162) come from the tracker's gate, not the watch; of record, a birth's track switched in its first 40
+frames in 12 of 323 births against master's 5, and the next newborn at a point took the last one's hidden track where
+master made a new one once (the rule above lets a fading sighting take any track seen fading, from an earlier spawn
+too: barring tracks first seen before its fade began whatever they were would close it, not tried). The JPEG
+recordings can't test the watch (no newborn found there): live frames are lossless.
 
 ## Localization
 
