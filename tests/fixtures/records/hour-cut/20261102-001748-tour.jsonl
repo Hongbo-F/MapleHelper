@@ -1,13 +1,18 @@
 {"t":1793607468.826,"topic":"session","map":10002073,"command":"tour","mode":"live"}
 {"t":1793608670.227,"topic":"scene","her":{"x":93.5,"y":-1561.6,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608670.235,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -274)"}
 {"t":1793608671.165,"topic":"scene","her":{"x":86.5,"y":-1561.2,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608671.175,"topic":"stance","act":"wait","text":"no cast: no effect (horny-mushroom +217)"}
 {"t":1793608671.224,"topic":"scene","her":{"x":86.5,"y":-1561.2,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608671.908,"topic":"scene","her":{"x":86.5,"y":-1561.2,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608671.988,"topic":"scene","her":{"x":86.5,"y":-1561.2,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608672.045,"topic":"scene","her":{"x":86.5,"y":-1561.2,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608672.961,"topic":"scene","her":{"x":154.5,"y":-1575.6,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608672.97,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +134)"}
 {"t":1793608673.434,"topic":"scene","her":{"x":154.5,"y":-1575.6,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608673.443,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +139)"}
 {"t":1793608674.27,"topic":"scene","her":{"x":154.5,"y":-1575.6,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608674.279,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -232)"}
 {"t":1793608675.255,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608675.429,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608675.626,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
@@ -17,6 +22,7 @@
 {"t":1793608676.43,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608676.627,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608676.829,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608676.838,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -214)"}
 {"t":1793608677.312,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608677.392,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608677.564,"topic":"scene","her":{"x":147.5,"y":-1574.4,"platform":8,"mode":"ground","how":"tag"}}
@@ -25,9 +31,13 @@
 {"t":1793608679.424,"topic":"scene","her":{"x":-57.5,"y":-1512.8,"platform":9,"mode":"ground","how":"tag"}}
 {"t":1793608679.436,"topic":"trip","dst":7,"result":"in position"}
 {"t":1793608679.505,"topic":"scene","her":{"x":-57.5,"y":-1512.8,"platform":9,"mode":"ground","how":"tag"}}
+{"t":1793608679.515,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +160, green-mushroom +220)"}
 {"t":1793608680.037,"topic":"scene","her":{"x":-55.5,"y":-1513.1,"platform":9,"mode":"ground","how":"tag"}}
+{"t":1793608680.047,"topic":"stance","act":"throw","text":"throwing right (green-mushroom +217, horny-mushroom +138)"}
 {"t":1793608680.907,"topic":"scene","her":{"x":-55.5,"y":-1513.1,"platform":9,"mode":"ground","how":"tag"}}
+{"t":1793608680.916,"topic":"stance","act":"throw","text":"throwing right (green-mushroom +218)"}
 {"t":1793608681.766,"topic":"scene","her":{"x":-55.5,"y":-1513.1,"platform":9,"mode":"ground","how":"tag"}}
+{"t":1793608681.779,"topic":"stance","act":"wait","text":"nothing in reach"}
 {"t":1793608681.833,"topic":"scene","her":{"x":-55.5,"y":-1513.1,"platform":9,"mode":"ground","how":"tag"}}
 {"t":1793608681.907,"topic":"scene","her":{"x":-55.5,"y":-1513.1,"platform":9,"mode":"ground","how":"tag"}}
 {"t":1793608682.0,"topic":"scene","her":{"x":-55.5,"y":-1513.1,"platform":9,"mode":"ground","how":"tag"}}
@@ -42,7 +52,9 @@
 {"t":1793608684.669,"topic":"trip","dst":8,"result":"arrived"}
 {"t":1793608684.764,"topic":"scene","her":{"x":167.5,"y":-1577.2,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608684.863,"topic":"scene","her":{"x":167.5,"y":-1577.2,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608684.872,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -303)"}
 {"t":1793608685.434,"topic":"scene","her":{"x":165.5,"y":-1576.9,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608685.443,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -286, horny-mushroom -296 hidden)"}
 {"t":1793608686.308,"topic":"scene","her":{"x":165.5,"y":-1576.9,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608686.33,"topic":"trip","dst":7,"result":"in position"}
 {"t":1793608686.436,"topic":"scene","her":{"x":165.5,"y":-1576.9,"platform":8,"mode":"ground","how":"tag"}}
@@ -52,7 +64,9 @@
 {"t":1793608688.507,"topic":"scene","her":{"x":-63.5,"y":-1512.1,"platform":9,"mode":"ground","how":"tag"}}
 {"t":1793608688.516,"topic":"stance","act":"back","text":"stepping away right 120"}
 {"t":1793608689.917,"topic":"scene","her":{"x":76.5,"y":-1523.5,"platform":9,"mode":"ground","how":"tag"}}
+{"t":1793608689.926,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -215)"}
 {"t":1793608690.438,"topic":"scene","her":{"x":74.5,"y":-1522.7,"platform":9,"mode":"ground","how":"tag"}}
+{"t":1793608690.448,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -266)"}
 {"t":1793608691.318,"topic":"scene","her":{"x":74.5,"y":-1522.7,"platform":9,"mode":"ground","how":"tag"}}
 {"t":1793608691.706,"topic":"chain","why":"done","text":"jump_up->8, jump->7 (done)","legs":[{"kind":"jump_up","src":9,"dst":8,"spans":[[9,74.5,74.5]],"end":{"t":0.545,"x":74.5,"platform":8}},{"kind":"jump","src":8,"dst":7,"spans":[[8,74.5,41.0]],"end":{"t":1.555,"x":-26.3,"platform":7}}]}
 {"t":1793608693.364,"topic":"scene","her":{"x":-43.5,"y":-1600.5,"platform":7,"mode":"ground","how":"tag"}}
@@ -62,23 +76,41 @@
 {"t":1793608694.635,"topic":"scene","her":{"x":-79.5,"y":-1598.8,"platform":7,"mode":"ground","how":"tag"}}
 {"t":1793608694.701,"topic":"scene","her":{"x":-79.5,"y":-1598.9,"platform":7,"mode":"ground","how":"tag"}}
 {"t":1793608855.913,"topic":"scene","her":{"x":131.5,"y":-1457.2,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608855.925,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -190, horny-mushroom -271)"}
 {"t":1793608856.453,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608856.464,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -130, horny-mushroom -224)"}
 {"t":1793608857.323,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.331,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -129)"}
 {"t":1793608857.387,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.396,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.457,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.466,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -129)"}
 {"t":1793608857.522,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.535,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.583,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.592,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.654,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.663,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.716,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.725,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.785,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.795,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.86,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.87,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.915,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.928,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608857.984,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608857.993,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608858.055,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608858.069,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608858.118,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608858.127,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608858.185,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608858.194,"topic":"stance","act":"wait","text":"no cast: unseen (horny-mushroom -130)"}
 {"t":1793608858.274,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608858.284,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -118)"}
 {"t":1793608858.785,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608858.794,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -118)"}
 {"t":1793608859.582,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608859.673,"topic":"scene","her":{"x":129.5,"y":-1457.5,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608859.684,"topic":"trip","dst":10,"result":"in position"}
@@ -97,7 +129,9 @@
 {"t":1793608864.53,"topic":"scene","her":{"x":19.5,"y":-1465.1,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608864.543,"topic":"stance","act":"back","text":"stepping away left 60"}
 {"t":1793608865.452,"topic":"scene","her":{"x":-53.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
+{"t":1793608865.461,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +227)"}
 {"t":1793608865.988,"topic":"scene","her":{"x":-45.5,"y":-1471.0,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608865.998,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +232)"}
 {"t":1793608866.835,"topic":"scene","her":{"x":-45.5,"y":-1471.0,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608866.948,"topic":"scene","her":{"x":-45.5,"y":-1471.0,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608866.96,"topic":"trip","dst":10,"result":"in position"}
@@ -110,8 +144,11 @@
 {"t":1793608872.838,"topic":"scene","her":{"x":216.5,"y":-1190.2,"platform":12,"mode":"ground","how":"tag"}}
 {"t":1793608872.956,"topic":"scene","her":{"x":216.5,"y":-1190.2,"platform":12,"mode":"ground","how":"tag"}}
 {"t":1793608873.601,"topic":"scene","her":{"x":193.5,"y":-1194.4,"platform":12,"mode":"ground","how":"tag"}}
+{"t":1793608873.612,"topic":"stance","act":"throw","text":"throwing left (green-mushroom -235, horny-mushroom -241)"}
 {"t":1793608874.105,"topic":"scene","her":{"x":193.5,"y":-1194.4,"platform":12,"mode":"ground","how":"tag"}}
+{"t":1793608874.114,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -242)"}
 {"t":1793608874.903,"topic":"scene","her":{"x":193.5,"y":-1194.4,"platform":12,"mode":"ground","how":"tag"}}
+{"t":1793608874.913,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -242)"}
 {"t":1793608875.777,"topic":"scene","her":{"x":193.5,"y":-1194.4,"platform":12,"mode":"ground","how":"tag"}}
 {"t":1793608875.892,"topic":"scene","her":{"x":193.5,"y":-1194.4,"platform":12,"mode":"ground","how":"tag"}}
 {"t":1793608875.905,"topic":"trip","dst":13,"result":"in position"}
@@ -148,6 +185,7 @@
 {"t":1793608890.386,"topic":"scene","her":{"x":55.5,"y":-1560.2,"platform":8,"mode":"ground","how":"tag"}}
 {"t":1793608890.395,"topic":"trip","dst":8,"result":"in position"}
 {"t":1793608890.471,"topic":"scene","her":{"x":55.5,"y":-1560.2,"platform":8,"mode":"ground","how":"tag"}}
+{"t":1793608890.479,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -145, horny-mushroom -248)"}
 {"t":1793608891.009,"topic":"event","kind":"touch"}
 {"t":1793608891.01,"topic":"scene","her":{"x":-7.3,"y":-1571.0,"platform":null,"mode":"air","how":"tag"}}
 {"t":1793608891.08,"topic":"scene","her":{"x":-30.4,"y":-1548.0,"platform":null,"mode":"air","how":"tag"}}
@@ -159,7 +197,9 @@
 {"t":1793608891.589,"topic":"scene","her":{"x":-86.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
 {"t":1793608891.671,"topic":"scene","her":{"x":-86.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
 {"t":1793608891.772,"topic":"scene","her":{"x":-86.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
+{"t":1793608891.781,"topic":"stance","act":"wait","text":"nothing in reach"}
 {"t":1793608891.891,"topic":"scene","her":{"x":-86.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
+{"t":1793608891.9,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +135)"}
 {"t":1793608892.409,"topic":"event","kind":"touch"}
 {"t":1793608892.414,"topic":"scene","her":{"x":-39.5,"y":-1490.1,"platform":null,"mode":"air","how":"tag"}}
 {"t":1793608892.481,"topic":"scene","her":{"x":-21.5,"y":-1484.0,"platform":null,"mode":"air","how":"tag"}}
@@ -169,7 +209,9 @@
 {"t":1793608892.822,"topic":"scene","her":{"x":14.5,"y":-1465.7,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608892.834,"topic":"stance","act":"back","text":"stepping away left 60"}
 {"t":1793608892.95,"topic":"scene","her":{"x":14.5,"y":-1465.7,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608892.961,"topic":"stance","act":"wait","text":"nothing in reach"}
 {"t":1793608893.024,"topic":"scene","her":{"x":14.5,"y":-1465.7,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608893.034,"topic":"stance","act":"wait","text":"nothing in reach"}
 {"t":1793608893.15,"topic":"scene","her":{"x":14.5,"y":-1465.7,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608893.161,"topic":"stance","act":"back","text":"stepping away left 60"}
 {"t":1793608894.093,"topic":"event","kind":"touch"}
@@ -185,11 +227,14 @@
 {"t":1793608894.63,"topic":"stance","act":"back","text":"stepping away left 67"}
 {"t":1793608895.555,"topic":"event","kind":"touch"}
 {"t":1793608895.556,"topic":"scene","her":{"x":-21.5,"y":-1469.8,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608895.565,"topic":"stance","act":"throw","text":"throwing left (horny-mushroom -101)"}
 {"t":1793608896.022,"topic":"scene","her":{"x":-12.5,"y":-1468.8,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608896.031,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +192)"}
 {"t":1793608896.942,"topic":"scene","her":{"x":-5.5,"y":-1468.0,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608897.021,"topic":"scene","her":{"x":-5.5,"y":-1468.0,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608897.03,"topic":"trip","dst":10,"result":"in position"}
 {"t":1793608897.133,"topic":"scene","her":{"x":-5.5,"y":-1468.0,"platform":10,"mode":"ground","how":"tag"}}
+{"t":1793608897.145,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +131)"}
 {"t":1793608897.804,"topic":"scene","her":{"x":-5.5,"y":-1468.0,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608897.821,"topic":"trip","dst":10,"result":"in position"}
 {"t":1793608897.87,"topic":"scene","her":{"x":-5.5,"y":-1468.0,"platform":10,"mode":"ground","how":"tag"}}
@@ -219,7 +264,9 @@
 {"t":1793608898.802,"topic":"scene","her":{"x":-5.5,"y":-1468.0,"platform":10,"mode":"ground","how":"tag"}}
 {"t":1793608898.811,"topic":"stance","act":"back","text":"stepping away left 40; no cast: dead (horny-mushroom +134)"}
 {"t":1793608899.6,"topic":"scene","her":{"x":-56.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
+{"t":1793608899.611,"topic":"stance","act":"throw","text":"throwing right (horny-mushroom +184)"}
 {"t":1793608900.137,"topic":"scene","her":{"x":-49.5,"y":-1471.0,"platform":10,"mode":"ground","how":"plate"}}
+{"t":1793608900.146,"topic":"stance","act":"throw","text":"throwing right (green-mushroom +110, horny-mushroom +213)"}
 {"t":1793608901.019,"topic":"event","kind":"touch"}
 {"t":1793608901.02,"topic":"scene","her":{"x":-25.0,"y":-1488.1,"platform":null,"mode":"air","how":"tag"}}
 {"t":1793608901.069,"topic":"scene","her":{"x":-6.7,"y":-1489.9,"platform":null,"mode":"air","how":"tag"}}

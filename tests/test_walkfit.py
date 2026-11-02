@@ -6,6 +6,7 @@ reads."""
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,8 +21,8 @@ def test_walkfit_on_the_hours_two_stretches():
     the engine at her walk: the lateness is her walk's), her steps
     1.19 times what was asked, and of 7 'arrived' trips 2 on another platform with no touch (00:41:10.99: off 10's end
     onto 12). The same measures over the whole hour: 148.2 (81 walks), +7.5 / +24.9 late (108 legs; +0.1 / +3.0 against
-    the engine at 148.2), steps 1.19 (68), 18 of 210 'arrived' elsewhere, 15 untouched (README: "Records to measure
-    by")."""
+    the engine at 148.2), steps 1.19 (52 walked), 18 of 210 'arrived' elsewhere, 15 untouched (README: "Records to
+    measure by")."""
     (f,) = walkfit.fit_runs([FIX / "hour-cut"], planned=125.0)
     assert f["planned"] == 125.0 and f["planned_from"] == "--planned" and f["by"] == "perception"
     w = f["walk"]
@@ -67,3 +68,36 @@ def test_walkfit_cuts_a_recordings_folder_to_its_frames(tmp_path):
     assert f["arrived"]["elsewhere"] == 2 and f["takeoff"]["long_n"] == 0  # (the second stretch alone)
 
 
+
+
+def _scenes(legs: list[tuple[float, float, float]], end: float, dt: float = 0.133) -> list[tuple]:
+    """Her scenes every `dt` s (the perception service's every other frame) on platform 7 until `end`, standing at x 0
+    but for `legs`: (start, how long, units) walks at a steady pace."""
+    out, t, x0 = [], 0.0, 0.0
+    while t <= end:
+        x = x0
+        for a, length, units in legs:
+            if t >= a:
+                x += units * min(1.0, (t - a) / length)
+        out.append((round(t, 3), x, 7, "ground", "tag"))
+        t += dt
+    return out
+
+
+def test_a_step_said_again_before_she_stood_still_or_undone_isnt_one():
+    """The stance says a step look after look while a knock holds it back (the hour's 'left 120' three times at
+    00:50:13.8-14.0, then 'right 67' twice, the second walked): only the step she walked is counted, and one that left
+    her the other way isn't (00:22:52.97's 'left 135', 9 units right); two steps walked within STEP_S of each other
+    both are (00:38:25.5 and 00:38:26.6)."""
+    said = [(10.0, "left 120"), (10.13, "left 120"), (10.26, "left 120"), (10.39, "right 67"), (10.52, "right 67")]
+    stances = [{"t": t, "act": "back", "text": f"stepping away {x}"} for t, x in said]
+    stances += [{"t": 11.6, "act": "throw", "text": "throwing right"},
+                {"t": 20.0, "act": "back", "text": "stepping away left 41"},
+                {"t": 21.1, "act": "back", "text": "stepping away left 30"},
+                {"t": 22.0, "act": "throw", "text": "throwing left"},
+                {"t": 30.0, "act": "back", "text": "stepping away left 135"},
+                {"t": 31.0, "act": "wait", "text": "nothing in reach"}]
+    scenes = _scenes([(10.7, 0.55, 80.0), (20.15, 0.35, -50.0), (21.25, 0.25, -36.0), (30.1, 0.1, 9.0)], 32.0)
+    run = SimpleNamespace(stances=stances, scenes=scenes, st=[q[0] for q in scenes], touched=lambda a, b: False)
+    got = walkfit.steps(run)
+    assert [(n, round(g)) for n, g in got] == [(67.0, 80), (41.0, 50), (30.0, 36)]

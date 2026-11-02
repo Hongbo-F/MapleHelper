@@ -25,8 +25,8 @@ and per map:
   (motion.body: run_time at the planned walk to the plan's takeoff, run_x there at the measured), the residual it
   leaves; and the line `late = slope x walk + b`.
 - steps: the stance's steps away ('stepping away left/right N' in the 'stance' records, act 'back'), touch-free, on one
-  platform: where she first stood still after moving against the N asked, for N of STEP_LEAST or more (median ratio,
-  quartiles, how many).
+  platform, the ones she walked (no stance record before she stood still, gone the way asked: `steps`): where she
+  first stood still after moving against the N asked, for N of STEP_LEAST or more (median ratio, quartiles, how many).
 - arrived: the trips that ended 'arrived' (the 'trip' records), and those whose last look had her on another platform
   than the trip's (`on`, from 2026-11-02; before, the run's last 'scene' record before the trip's), with and without a
   touch in the TOUCH_BEFORE_S before.
@@ -37,10 +37,11 @@ at 150 would have made of its keys: D:/MapleHelper-scratch/recfix/walk/scripts/e
 On R1-R3 of 2026-11-02 (`--planned 125`: they have no physics record, and her profile then planned 125) it
 reproduces the analysis to the digit: the hour's steady walk 148.2 over 81 walks (quartiles 146.3-150.2, se 0.4), its
 'arrived' trips 18 of 210 on another platform, 15 with no touch, its takeoffs +7.5 units late at the median and +24.9
-after walks of 100 or more over 108 legs, +0.1 and +3.0 against the engine at 148.2, its steps 1.19 (quartiles
-1.14-1.22) over the 68 of 30 units or more (the analysis' "71 steps" counted the 3 shorter ones too; its ratio was
-over the same 68). The slope of lateness on walk is 0.219 over these 108 legs; the analysis' 0.164 was over 133, touched
-legs and walks of 5-20 among them (README: "Records to measure by").
+after walks of 100 or more over 108 legs, +0.1 and +3.0 against the engine at 148.2. Its steps: 1.19 (quartiles
+1.16-1.23) over the 52 of 30 units or more she walked; the analysis' steps.py had 1.19 (1.14-1.22) over 68, each
+'stepping away' record a step (its "71 steps" the 3 shorter ones too), 15 of them said again before she stood still and
+one undone (`steps`). The slope of lateness on walk is 0.219 over these 108 legs; the analysis' 0.164 was over 133,
+touched legs and walks of 5-20 among them (README: "Records to measure by").
 
     python -m gamelab.analysis.walkfit RUN [RUN ...] [--planned UNITS] [--character ID] [--frames] [--json]
 
@@ -305,9 +306,17 @@ def engine_residuals(rows: list[tuple], planned: float, measured: float, jump: f
 
 
 def steps(run: Run) -> list[tuple[float, float]]:
-    """The stance's steps away, touch-free, on one platform: (units asked, units gone to where she first stood still)."""
+    """The stance's steps away, touch-free, on one platform: (units asked, units gone to where she first stood still).
+    Only the steps she walked: the hunt loop walks a step as it decides it and looks again once the hold is over
+    (Hunt._shoot), so a step whose next stance record (any act) came before she stood still wasn't walked (the
+    stance said it again look after look, 0.11-0.15 s apart, while a knock held the step back, fight.knocked_move,
+    or her next look decided something else), and one that left her where she started or the other way was undone by
+    something else; neither is counted. (Until the review of 2026-11-02 each record was a step: the hour's 'left 120'
+    said three times at 00:50:13.8-14.0, held back, then 'right 67' twice, counted as three steps gone -80 and two of
+    80. Of the 73 so counted over R1's grind and the hour, 15 weren't walked, their next record 0.31-1.18 s before she
+    stood still, the walked ones' 0.08 s or more after; and 00:22:52.97's 'left 135' left her 9 units right.)"""
     out = []
-    for r in run.stances:
+    for k, r in enumerate(run.stances):
         m = STEP_RE.search(r.get("text") or "")
         if r.get("act") != "back" or not m:
             continue
@@ -320,15 +329,19 @@ def steps(run: Run) -> list[tuple[float, float]]:
         seg = [q for q in run.scenes[i:i + 20] if q[0] <= t + STEP_S]
         if not seg or any(q[3] != "ground" or q[2] != run.scenes[i][2] for q in seg):
             continue
-        xs, moved, end = [q[1] for q in seg], False, None
-        for u, v in zip(xs, xs[1:]):
-            if abs(v - u) > STILL_UNITS:
+        moved, end = False, None
+        for u, v in zip(seg, seg[1:]):
+            if abs(v[1] - u[1]) > STILL_UNITS:
                 moved = True
             elif moved:
-                end = v
+                end = (u[0], v[1])  # (standing still from u's scene on, at v's place)
                 break
-        if end is not None:
-            out.append((n, (end - xs[0]) * d))
+        if end is None:
+            continue
+        nxt = run.stances[k + 1]["t"] if k + 1 < len(run.stances) else None
+        gone = (end[1] - seg[0][1]) * d
+        if (nxt is None or nxt >= end[0]) and gone > 0:
+            out.append((n, gone))
     return out
 
 
