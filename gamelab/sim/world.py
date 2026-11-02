@@ -331,13 +331,13 @@ KNOCK_FALL_MS = 500
 # flat ground; the push sideways added to the speed she has, not past 270 (KNOCK_ADDS: the port's "each axis adds to the
 # speed without going past the push"), so walking at the monster at 150 she flies off at 120; and landing with her speed
 # along the ground at most her walk's (KNOCK_LANDS_WALKING), braked from there as ever: from standing ~73 units in the
-# air and a ~14 slide, ~87 in all. R1-R3's lossless 15 fps frames agree (the replay kit's
-# dumps of master 40ba190's perception on them: D:/MapleHelper-scratch/recfix/sim-fix/knock_fit.py, knock_fit.txt; the
-# 9 touches that hurt her standing and landed her where she stood): 18 units a frame in the air (270 a second), the
-# flight fitted at 262-270 out and 275-280 up (a median rise of 19.1 seen: 270's is 18.2), landing a median 73.3 away;
-# then 11-19.5 more (a median 15.1, the 5 with no key after them) at 8, 4 and 2 units a frame, as her walk braked at 800
-# slides (14, at 8.2, 4.5 and 2.7), where 270 braked by the engine (1600 down to her walk, then 800) slides 30; 84-93 in
-# all; the 12 hurting touches with her walking at the monster at 122-157 a second over the 2 frames before flew her off
+# air and a ~14 slide, ~87 in all. R1-R3's lossless 15 fps frames agree (the replay kit's dumps of master 40ba190's
+# perception on them: D:/MapleHelper-scratch/recfix/sim-fix/knock_fit.py, knock_fit.txt; the 9 touches that hurt her
+# standing and landed her where she stood): 18 units a frame in the air (270 a second), 7 of the flights fitted at
+# 262-270 out (the others 200 and 250), all 9 at 274-280 up (a median rise of 19.1 seen: 270's is 18.2), landing a
+# median 73.4 away; then 11-19.5 more (a median 15.1, 5 of 7: one slid 6, one walked back) at 8, 4 and 2 units a frame,
+# as her walk braked at 800 slides (14, at 8.2, 4.5 and 2.7), where 270 braked by the engine (1600 down to her walk,
+# then 800) slides 30; 84-93 in all; the 12 hurting touches with her walking at the monster at 122-157 a second over the 2 frames before flew her off
 # at 24-188 (a median 93; knock_moving.py, knock_moving.txt), the 26 standing at 196-274 (24 at 249-274). Until then
 # the planner's 180 and 220 set outright (KNOCK_PLANNER: `--world planner-knock`), ~40 in the air (0.22 s) and a ~19
 # slide, ~58 in all, fitted to hits.jsonl's pushes on her own level (quartiles 21 / 58 / 87, from the looks, not
