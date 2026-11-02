@@ -270,6 +270,9 @@ class Mob:
     pose: str = ""             # what it's doing: "stand", "move" (walking) or "hit1" (flinching); "": not known
     frame: str = ""            # the frame of its animation that matched ("move/2"), if known
     template: str = ""         # the picture that matched (its file's name: "pig_move2", "pig_1")
+    fading: float | None = None  # its opacity, found fading in at its spawn point (perception.spawns: the spawn
+                                 # watch's; it turns solid (1 - fading) / spawns.FADE_PER_S s on); None: drawn solid
+                                 # as far as the search knows (the whole screen's)
 
     @property
     def foot_x(self) -> float:

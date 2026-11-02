@@ -15,7 +15,8 @@ it, its plain C took 3.4-3.7 times OpenCV's time over the frame loop's masked ma
 The monster search's step 1 is a DLL of its own (search.c, `search_lib`: the band's shrink, its colour tests, the
 silhouettes' scores where the cover test keeps a window, the peaks and the places, in a few calls a band), built the
 same way, loaded only where the CPU has AVX2 (its intrinsics); without it the search's step 1 is numpy's and OpenCV's
-as before (perception.mobs).
+as before (perception.mobs). So are her cues' (locate.c, `locate_lib`) and the spawn watch's (spawns.c, `spawns_lib`:
+the blend fit's integer sums of the monsters fading in at their spawn points, perception.spawns).
 
 The DLLs are built from their sources (native.c's with gpumatch.c and gpumatch.hlsl in it) with MSVC 2022 (the Build
 Tools) the first time they're needed, into build/ next to this file (git-ignored), each named for its sources' hash: an
@@ -277,6 +278,46 @@ def locate_lib() -> ctypes.CDLL | None:
             locate_why = str(e).splitlines()[0] if str(e) else type(e).__name__
         _locate_tried = True
     return _locate
+
+
+SPAWNS_SOURCE = Path(__file__).with_name("spawns.c")  # the spawn watch's blend sums (`spawns_lib`)
+SPAWNS_SIGNATURES = {  # spawns.c's functions: (return type, argument types)
+    "sp_ready": (_I, []),
+    "sp_empty": (_I, [_P, _L, _I, _P, _L, _I, _I, _I]),
+    "sp_sums": (_I, [_P, _L, _I, _P, _L, _P, _I, _I, _I, _P, _I, _P, _P, _P, _P]),
+}
+_spawns: ctypes.CDLL | None = None
+_spawns_tried = False
+spawns_why = ""  # why the spawn watch's DLL isn't in use, if it isn't
+
+
+def spawns_lib() -> ctypes.CDLL | None:
+    """The spawn watch's DLL (spawns.c: the empty test and the blend fit's integer sums), built and loaded on first use;
+    None if it can't be (`spawns_why` says why), on a CPU without AVX2 (sp_ready), or with USE off: then
+    perception.spawns works them out in numpy, the same integers (too slow for the frame loop: the step leaves the watch
+    out without it, worldstate.SPAWNS)."""
+    global _spawns, _spawns_tried, spawns_why
+    if not USE:
+        spawns_why = "turned off (native.USE)"
+        return None
+    if _spawns_tried:
+        return _spawns
+    with _lock:
+        if _spawns_tried:
+            return _spawns
+        try:
+            dll = ctypes.CDLL(str(build(SPAWNS_SOURCE)))
+            for name, (restype, argtypes) in SPAWNS_SIGNATURES.items():
+                f = getattr(dll, name)
+                f.restype, f.argtypes = restype, argtypes
+            if dll.sp_ready():
+                _spawns, spawns_why = dll, ""
+            else:
+                spawns_why = "no AVX2 on this CPU"
+        except (OSError, RuntimeError, subprocess.SubprocessError, AttributeError) as e:
+            spawns_why = str(e).splitlines()[0] if str(e) else type(e).__name__
+        _spawns_tried = True
+    return _spawns
 
 
 class SrUnit(ctypes.Structure):
@@ -691,11 +732,13 @@ def main() -> int:
         print(f"built: {build()}")
         print(f"built: {build(SEARCH_SOURCE)}")
         print(f"built: {build(LOCATE_SOURCE)}")
+        print(f"built: {build(SPAWNS_SOURCE)}")
     except RuntimeError as e:
         print(f"couldn't build gamelab's native pieces: {e}")
         return 1
     print(f"gamelab's C pieces: {state()}; the monster search's step 1: {search_state()}; her plate's and her body's "
-          f"cues: {'in use' if locate_lib() is not None else f'off ({locate_why}): numpy instead'}")
+          f"cues: {'in use' if locate_lib() is not None else f'off ({locate_why}): numpy instead'}; the spawn watch: "
+          f"{'in use' if spawns_lib() is not None else f'off ({spawns_why}): left out of the frame step'}")
     return 0
 
 

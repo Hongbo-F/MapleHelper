@@ -1,0 +1,1276 @@
+{
+ "about": "The spawn watch's test fixtures (perception.spawns; tests/test_spawns.py): crops of lossless frames of Tree Dungeon, Forest Up North II (10002073) at 1366x768 around a spawn point (`point`: its index in the map's spawns; its x +-50 map units, more the way a sequence's newborn walks; its feet -72 to +12: the onset's window), from the golden clip of the user's own play (2026-10-30 08:26-08:31) and the Lie Detector's alarm clips, each with its frame's view (the map point at its top-left, the camera registration's), `box` (the crop's screen box), `label` (the measure stage's of the point there), her feet (`her`, map units: the service's scene records) and the feet of the monsters the whole screen found the frame before (`others`), and what the watch finds there with the crop pasted into the map's art at that view (`found`). Positives at the alphas the watch first found Tree Dungeon's newborns at, the follow of the golden clip's newborn at point 22 (frames 42-51), her standing on point 14 for 6.6 s and the newborn there 7 frames after she left (2618-2725), and the nearest negatives to the rule of every labelled point-frame, by label. Made by D:/MapleHelper-scratch/spawn-fade/integ/fixtures.py on 2026-11-01.",
+ "single": [
+  {
+   "file": "horny_a04.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 42,
+   "t": 2.832,
+   "view": [
+    -658,
+    -1216
+   ],
+   "box": [
+    528,
+    97,
+    628,
+    181
+   ],
+   "point": 22,
+   "label": "spawn_fade",
+   "her": [
+    101.6,
+    -781.5
+   ],
+   "others": [
+    [
+     -168.0,
+     -1043.0
+    ]
+   ],
+   "name": "horny_a04",
+   "what": "a Horny Mushroom's first visible frame (move/0, alpha 0.039)",
+   "found": [
+    {
+     "point": 22,
+     "a": 0.0393,
+     "x": -80.0,
+     "y": -1046.77,
+     "picture": "move/0",
+     "right": true,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "green_a06.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 901,
+   "t": 60.075,
+   "view": [
+    -658,
+    -560
+   ],
+   "box": [
+    472,
+    444,
+    572,
+    528
+   ],
+   "point": 11,
+   "label": "spawn_fade",
+   "her": [
+    2.3,
+    -2.5
+   ],
+   "others": [],
+   "name": "green_a06",
+   "what": "a Green Mushroom's first frame found (move/0, facing left, alpha 0.063)",
+   "found": [
+    {
+     "point": 11,
+     "a": 0.0626,
+     "x": -136.0,
+     "y": -44.11,
+     "picture": "move/0",
+     "right": false,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "horny_a11.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 365,
+   "t": 24.343,
+   "view": [
+    -658,
+    -1966
+   ],
+   "box": [
+    499,
+    418,
+    599,
+    502
+   ],
+   "point": 4,
+   "label": "spawn_fade",
+   "her": [
+    -218.4,
+    -1341.5
+   ],
+   "others": [],
+   "name": "horny_a11",
+   "what": "a Horny Mushroom's second frame (stand/0, alpha 0.106)",
+   "found": [
+    {
+     "point": 4,
+     "a": 0.1059,
+     "x": -109.0,
+     "y": -1476.21,
+     "picture": "stand/0",
+     "right": true,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "slime_a06.png",
+   "clip": "20261030-211817-lie-detector-countdown",
+   "frame": 283,
+   "t": 18.91,
+   "view": [
+    -658,
+    -439
+   ],
+   "box": [
+    875,
+    589,
+    975,
+    673
+   ],
+   "point": 29,
+   "label": "spawn_fade",
+   "her": [
+    145.5,
+    51.0
+   ],
+   "others": [],
+   "name": "slime_a06",
+   "what": "a Slime's (alpha 0.059)",
+   "found": [
+    {
+     "point": 29,
+     "a": 0.0589,
+     "x": 267.0,
+     "y": 222.45,
+     "picture": "move/0",
+     "right": true,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "green_a34.png",
+   "clip": "20261029-170011-lie-detector-mini-game-notice",
+   "frame": 52,
+   "t": 3.468,
+   "view": [
+    -658,
+    -372
+   ],
+   "box": [
+    672,
+    296,
+    772,
+    380
+   ],
+   "point": 10,
+   "label": "spawn_fade",
+   "her": [
+    85.6,
+    173.0
+   ],
+   "others": [],
+   "name": "green_a34",
+   "what": "a Green Mushroom first found at alpha 0.337, its start hidden",
+   "found": [
+    {
+     "point": 10,
+     "a": 0.3371,
+     "x": 64.0,
+     "y": -4.41,
+     "picture": "move/0",
+     "right": false,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "horny_a53.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 370,
+   "t": 24.692,
+   "view": [
+    -658,
+    -1846
+   ],
+   "box": [
+    560,
+    593,
+    660,
+    677
+   ],
+   "point": 8,
+   "label": "spawn_fade",
+   "her": [
+    -218.4,
+    -1182.2
+   ],
+   "others": [],
+   "name": "horny_a53",
+   "what": "a Horny Mushroom standing on its point at alpha 0.53 (stand/0)",
+   "found": [
+    {
+     "point": 8,
+     "a": 0.5295,
+     "x": -48.0,
+     "y": -1179.53,
+     "picture": "stand/0",
+     "right": true,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "horny_a81.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 159,
+   "t": 10.604,
+   "view": [
+    -658,
+    -1562
+   ],
+   "box": [
+    413,
+    449,
+    513,
+    533
+   ],
+   "point": 3,
+   "label": "spawn_fade",
+   "her": [
+    -11.7,
+    -1110.9
+   ],
+   "others": [
+    [
+     -195.0,
+     -1041.0
+    ]
+   ],
+   "name": "horny_a81",
+   "what": "a Horny Mushroom standing on its point at alpha 0.81 (stand/0)",
+   "found": [
+    {
+     "point": 3,
+     "a": 0.8076,
+     "x": -195.0,
+     "y": -1040.59,
+     "picture": "stand/0",
+     "right": true,
+     "onset": true
+    }
+   ]
+  },
+  {
+   "file": "near_monster.png",
+   "clip": "20261030-211817-lie-detector-countdown",
+   "frame": 337,
+   "t": 22.51,
+   "view": [
+    -658,
+    -439
+   ],
+   "box": [
+    875,
+    589,
+    975,
+    673
+   ],
+   "point": 29,
+   "label": "monster",
+   "her": [
+    145.5,
+    51.0
+   ],
+   "others": [
+    [
+     261.0,
+     223.0
+    ]
+   ],
+   "name": "near_monster",
+   "what": "the nearest negative to the rule: a solid Slime partly covered (stand/0 at a 0.937, 1 - R2 0.040, residual 17.7)",
+   "found": []
+  },
+  {
+   "file": "near_monster2.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 1194,
+   "t": 79.599,
+   "view": [
+    -658,
+    -318
+   ],
+   "box": [
+    508,
+    485,
+    608,
+    569
+   ],
+   "point": 28,
+   "label": "monster",
+   "her": [
+    95.3,
+    169.5
+   ],
+   "others": [
+    [
+     -104.0,
+     239.0
+    ],
+    [
+     2.0,
+     234.0
+    ],
+    [
+     -39.0,
+     126.0
+    ]
+   ],
+   "name": "near_monster2",
+   "what": "a solid monster on the Slimes' point (a 0.931, 1 - R2 0.043, residual 18.8)",
+   "found": []
+  },
+  {
+   "file": "her_passing.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 4440,
+   "t": 295.997,
+   "view": [
+    -658,
+    -1106
+   ],
+   "box": [
+    593,
+    588,
+    693,
+    672
+   ],
+   "point": 20,
+   "label": "her",
+   "her": [
+    -43.7,
+    -511.6
+   ],
+   "others": [],
+   "name": "her_passing",
+   "what": "her passing over the point (masked: a 0.145, 1 - R2 0.115, residual 6.1)",
+   "found": []
+  },
+  {
+   "file": "dying.png",
+   "clip": "20261029-212150-lie-detector-mini-game-notice",
+   "frame": 172,
+   "t": 11.465,
+   "view": [
+    -658,
+    -1582
+   ],
+   "box": [
+    413,
+    469,
+    513,
+    553
+   ],
+   "point": 3,
+   "label": "dying",
+   "her": [
+    -112.7,
+    -1044.8
+   ],
+   "others": [
+    [
+     -195.0,
+     -1041.0
+    ]
+   ],
+   "name": "dying",
+   "what": "a monster dying at the point (a 0.892, 1 - R2 0.052, residual 22.8)",
+   "found": []
+  },
+  {
+   "file": "undetected_monster.png",
+   "clip": "20261030-024957-lie-detector-mini-game-notice",
+   "frame": 804,
+   "t": 53.64,
+   "view": [
+    -658,
+    -947
+   ],
+   "box": [
+    870,
+    233,
+    970,
+    317
+   ],
+   "point": 15,
+   "label": "undetected_monster",
+   "her": [
+    126.3,
+    -457.4
+   ],
+   "others": [
+    [
+     122.0,
+     -583.0
+    ],
+    [
+     263.0,
+     -642.0
+    ]
+   ],
+   "name": "undetected_monster",
+   "what": "a solid monster the whole screen missed (a 0.936, 1 - R2 0.082, residual 30.4)",
+   "found": []
+  },
+  {
+   "file": "damage.png",
+   "clip": "20261026-002608-lie-detector-countdown",
+   "frame": 2,
+   "t": 0.16,
+   "view": [
+    -658,
+    -1005
+   ],
+   "box": [
+    437,
+    311,
+    537,
+    395
+   ],
+   "point": 2,
+   "label": "damage_or_effect",
+   "her": [
+    -89.7,
+    -510.0
+   ],
+   "others": [
+    [
+     -155.0,
+     -510.0
+    ]
+   ],
+   "name": "damage",
+   "what": "damage numbers or an effect over the point (a 0.943, 1 - R2 0.110, residual 36.9)",
+   "found": []
+  },
+  {
+   "file": "lie_detector.png",
+   "clip": "20261026-231600-lie-detector-countdown",
+   "frame": 466,
+   "t": 31.047,
+   "view": [
+    -658,
+    -883
+   ],
+   "box": [
+    870,
+    169,
+    970,
+    253
+   ],
+   "point": 15,
+   "label": "lie_detector",
+   "her": [
+    88.3,
+    -337.8
+   ],
+   "others": [],
+   "name": "lie_detector",
+   "what": "the Lie Detector's window over the point",
+   "found": []
+  },
+  {
+   "file": "player.png",
+   "clip": "20261030-024957-lie-detector-mini-game-notice",
+   "frame": 619,
+   "t": 41.296,
+   "view": [
+    -658,
+    -885
+   ],
+   "box": [
+    593,
+    367,
+    693,
+    451
+   ],
+   "point": 20,
+   "label": "player",
+   "her": [
+    101.3,
+    -339.6
+   ],
+   "others": [
+    [
+     -164.0,
+     -510.0
+    ],
+    [
+     -17.0,
+     -446.0
+    ]
+   ],
+   "name": "player",
+   "what": "another player at the point",
+   "found": []
+  },
+  {
+   "file": "pet.png",
+   "clip": "20261030-bugbaby-human-play",
+   "frame": 3938,
+   "t": 262.548,
+   "view": [
+    -658,
+    -1603
+   ],
+   "box": [
+    528,
+    484,
+    628,
+    568
+   ],
+   "point": 22,
+   "label": "near_her",
+   "her": [
+    -165.7,
+    -1042.3
+   ],
+   "others": [],
+   "name": "pet",
+   "what": "her pet by the point",
+   "found": []
+  }
+ ],
+ "sequences": [
+  {
+   "name": "follow22",
+   "what": "the golden clip's newborn at point 22, fading in and walking left",
+   "frames": [
+    {
+     "file": "follow22_00042.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 42,
+     "t": 2.832,
+     "view": [
+      -658,
+      -1216
+     ],
+     "box": [
+      453,
+      97,
+      628,
+      181
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -781.5
+     ],
+     "others": [
+      [
+       -168.0,
+       -1043.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.0393,
+       "x": -80.0,
+       "y": -1046.77,
+       "picture": "move/0",
+       "right": true,
+       "onset": true
+      }
+     ]
+    },
+    {
+     "file": "follow22_00043.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 43,
+     "t": 2.882,
+     "view": [
+      -658,
+      -1222
+     ],
+     "box": [
+      453,
+      103,
+      628,
+      187
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -797.5
+     ],
+     "others": [
+      [
+       -175.0,
+       -1044.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.102,
+       "x": -80.0,
+       "y": -1046.77,
+       "picture": "move/0",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00044.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 44,
+     "t": 2.949,
+     "view": [
+      -658,
+      -1230
+     ],
+     "box": [
+      453,
+      111,
+      628,
+      195
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -797.5
+     ],
+     "others": [
+      [
+       -180.0,
+       -1043.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.1844,
+       "x": -85.0,
+       "y": -1046.6,
+       "picture": "move/0",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00045.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 45,
+     "t": 3.032,
+     "view": [
+      -658,
+      -1239
+     ],
+     "box": [
+      453,
+      120,
+      628,
+      204
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -813.5
+     ],
+     "others": [
+      [
+       -187.0,
+       -1042.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.2824,
+       "x": -93.0,
+       "y": -1047.33,
+       "picture": "move/1",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00046.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 46,
+     "t": 3.083,
+     "view": [
+      -658,
+      -1245
+     ],
+     "box": [
+      453,
+      126,
+      628,
+      210
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -829.5
+     ],
+     "others": [],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.345,
+       "x": -99.0,
+       "y": -1047.13,
+       "picture": "move/1",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00047.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 47,
+     "t": 3.133,
+     "view": [
+      -658,
+      -1250
+     ],
+     "box": [
+      453,
+      131,
+      628,
+      215
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -829.5
+     ],
+     "others": [
+      [
+       -200.0,
+       -1039.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.4079,
+       "x": -104.0,
+       "y": -1045.87,
+       "picture": "move/2",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00048.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 48,
+     "t": 3.216,
+     "view": [
+      -658,
+      -1260
+     ],
+     "box": [
+      453,
+      141,
+      628,
+      225
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -845.5
+     ],
+     "others": [
+      [
+       -205.0,
+       -1039.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.5058,
+       "x": -112.0,
+       "y": -1044.85,
+       "picture": "move/2",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00049.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 49,
+     "t": 3.266,
+     "view": [
+      -658,
+      -1265
+     ],
+     "box": [
+      453,
+      146,
+      628,
+      230
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -845.5
+     ],
+     "others": [
+      [
+       -213.0,
+       -1037.0
+      ],
+      [
+       37.0,
+       -1109.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.5646,
+       "x": -117.0,
+       "y": -1044.21,
+       "picture": "move/2",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00050.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 50,
+     "t": 3.366,
+     "view": [
+      -658,
+      -1277
+     ],
+     "box": [
+      453,
+      158,
+      628,
+      242
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -861.5
+     ],
+     "others": [
+      [
+       -214.0,
+       -1037.0
+      ],
+      [
+       32.0,
+       -1110.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.6902,
+       "x": -127.0,
+       "y": -1042.94,
+       "picture": "move/3",
+       "right": false,
+       "onset": false
+      }
+     ]
+    },
+    {
+     "file": "follow22_00051.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 51,
+     "t": 3.416,
+     "view": [
+      -658,
+      -1283
+     ],
+     "box": [
+      453,
+      164,
+      628,
+      248
+     ],
+     "point": 22,
+     "label": "spawn_fade",
+     "her": [
+      101.6,
+      -861.5
+     ],
+     "others": [
+      [
+       -214.0,
+       -1037.0
+      ],
+      [
+       22.0,
+       -1110.0
+      ]
+     ],
+     "found": [
+      {
+       "point": 22,
+       "a": 0.749,
+       "x": -132.0,
+       "y": -1042.3,
+       "picture": "move/3",
+       "right": false,
+       "onset": false
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "her14",
+   "what": "her standing on point 14 for 6.6 s, then the newborn there (2723 alpha 0.02, 2724 0.098)",
+   "frames": [
+    {
+     "file": "her14_02618.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2618,
+     "t": 174.557,
+     "view": [
+      -658,
+      -1177
+     ],
+     "box": [
+      630,
+      537,
+      760,
+      621
+     ],
+     "point": 14,
+     "label": "her_tag",
+     "her": [
+      105,
+      -645.0
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02630.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2630,
+     "t": 175.358,
+     "view": [
+      -658,
+      -1145
+     ],
+     "box": [
+      630,
+      505,
+      760,
+      589
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      -8,
+      -569.0
+     ],
+     "others": [
+      [
+       169.0,
+       -649.0
+      ]
+     ],
+     "found": []
+    },
+    {
+     "file": "her14_02642.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2642,
+     "t": 176.159,
+     "view": [
+      -658,
+      -1092
+     ],
+     "box": [
+      630,
+      452,
+      760,
+      536
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      -43.7,
+      -511.6
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02654.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2654,
+     "t": 176.942,
+     "view": [
+      -658,
+      -1079
+     ],
+     "box": [
+      630,
+      439,
+      760,
+      523
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      25.3,
+      -568.2
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02666.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2666,
+     "t": 177.742,
+     "view": [
+      -658,
+      -1096
+     ],
+     "box": [
+      630,
+      456,
+      760,
+      540
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      37.6,
+      -621.5
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02678.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2678,
+     "t": 178.542,
+     "view": [
+      -658,
+      -1097
+     ],
+     "box": [
+      630,
+      457,
+      760,
+      541
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      37.6,
+      -621.5
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02690.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2690,
+     "t": 179.343,
+     "view": [
+      -658,
+      -1107
+     ],
+     "box": [
+      630,
+      467,
+      760,
+      551
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      41.3,
+      -568.3
+     ],
+     "others": [
+      [
+       196.0,
+       -647.0
+      ]
+     ],
+     "found": []
+    },
+    {
+     "file": "her14_02702.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2702,
+     "t": 180.127,
+     "view": [
+      -658,
+      -1114
+     ],
+     "box": [
+      630,
+      474,
+      760,
+      558
+     ],
+     "point": 14,
+     "label": "her",
+     "her": [
+      41.3,
+      -568.3
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02716.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2716,
+     "t": 181.06,
+     "view": [
+      -658,
+      -1114
+     ],
+     "box": [
+      630,
+      474,
+      760,
+      558
+     ],
+     "point": 14,
+     "label": "her_tag",
+     "her": [
+      109.3,
+      -579.4
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02723.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2723,
+     "t": 181.527,
+     "view": [
+      -658,
+      -1122
+     ],
+     "box": [
+      630,
+      482,
+      760,
+      566
+     ],
+     "point": 14,
+     "label": "spawn_fade",
+     "her": [
+      181.3,
+      -649.2
+     ],
+     "others": [],
+     "found": []
+    },
+    {
+     "file": "her14_02724.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2724,
+     "t": 181.594,
+     "view": [
+      -658,
+      -1123
+     ],
+     "box": [
+      630,
+      483,
+      760,
+      567
+     ],
+     "point": 14,
+     "label": "spawn_fade",
+     "her": [
+      196.3,
+      -646.5
+     ],
+     "others": [],
+     "found": [
+      {
+       "point": 14,
+       "a": 0.0979,
+       "x": 28.0,
+       "y": -568.18,
+       "picture": "move/0",
+       "right": true,
+       "onset": true
+      }
+     ]
+    },
+    {
+     "file": "her14_02725.png",
+     "clip": "20261030-bugbaby-human-play",
+     "frame": 2725,
+     "t": 181.662,
+     "view": [
+      -658,
+      -1124
+     ],
+     "box": [
+      630,
+      484,
+      760,
+      568
+     ],
+     "point": 14,
+     "label": "spawn_fade",
+     "her": [
+      210.3,
+      -643.9
+     ],
+     "others": [],
+     "found": [
+      {
+       "point": 14,
+       "a": 0.1797,
+       "x": 33.0,
+       "y": -568.07,
+       "picture": "move/1",
+       "right": true,
+       "onset": false
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
