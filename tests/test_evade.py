@@ -412,7 +412,9 @@ def test_touched_on_a_rope_she_looks_at_its_top_first_and_goes_down_again_if_a_m
     # _climb_on after a touch on the rope at 700: with the feed's newest track on D by its top and her up there only
     # after her invulnerability is over, down the rope (to its bottom) instead of up into it; with none there, or up
     # within the window with STAND_PAST_S to spare (the touch left her one: up through it, the next pass gets her clear),
-    # up as before.
+    # up as before. (Without ROPE_HANG: with it, a top taken has her down to HANG_UNDER only and hang there,
+    # tests/test_rope_hang.py.)
+    monkeypatch.setattr(nv, "ROPE_HANG", False)
     rope = model.ropes[0]
     d = by_y(model, 300, 700)
     nav = _navigator(model)

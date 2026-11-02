@@ -1542,7 +1542,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=4, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -1563,7 +1563,10 @@ def loop_tree_attack_misses(sim):
     the old respawn clock too.) (Seed 2 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 1
     not the key bindings' check; of seeds 1-13 all but 1 show all of this.) (Seed 4 since the stack's monsters turn
     where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 not the key
-    bindings' check; of seeds 1-13 4-11 and 13 show all of this.)"""
+    bindings' check; of seeds 1-13 4-11 and 13 show all of this.) (Seed 5 since the rope hang beside the world's touches
+    and knock as live (work/rec-all, the integration of 2026-11-02; D:/MapleHelper-scratch/recfix/integrate/diag/
+    scan1.txt): on seed 4 she was paged; of seeds 1-16, 2, 3, 5-7, 9, 11, 12 and 14-16 show all of this. On 5 the doubt
+    at 14.0 s.)"""
     return key_check_run(2)(sim)
 
 
@@ -1589,7 +1592,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1682,7 +1685,10 @@ def loop_tree_attack_no_darts(sim):
     client's (2026-11-02: 270 out and up, its push sideways added to the speed she has, landing at her walk's speed at
     most, world.KNOCK_VX, KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
     D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on 3 her stars' test never said MAYBE OUT; of seeds 1-16 6, 8 and
-    14 meet all of this. On 6: the doubt at 110.2 s, a Green Mushroom at 47%.)"""
+    14 meet all of this. On 6: the doubt at 110.2 s, a Green Mushroom at 47%.) (Seed 11 since the rope hang beside the
+    world's touches and knock as live (work/rec-all, the integration of 2026-11-02; D:/MapleHelper-scratch/recfix/
+    integrate/diag/scan1.txt): on 6 her stars' test never said MAYBE OUT; of seeds 1-16, 11 and 14 meet all of this. On
+    11 the doubt at 129.4 s, a Green Mushroom at 84-90%.)"""
     return key_check_run(4)(sim)
 
 
@@ -1956,7 +1962,8 @@ def nav_tree_rope_top_15(sim):
 
 
 @tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=1, limit=120, **_LIVE,
-      expects=(ends("arrived"), logs("touched on the rope"), sends("climb_on"),
+      expects=(ends("arrived"), logs("hanging on the rope"), sends("hang_up"),
+               check("touched once at most", lambda tr: tr["world"]["touches"] <= 1),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_hit(sim):
     """From 19 up to 16 by the rope at x 111 (19 -> 18), a Green Mushroom walking on 18 by its top (as at 22:58:05
@@ -1969,8 +1976,36 @@ def nav_tree_rope_hit(sim):
     work/replan's loot work on master 072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as
     first built, her drops' life by the live evidence: eval/seeds/rope.txt): on seed 2 the Green Mushroom never touched
     her on the rope; of seeds 1-24, 1, 3, 5-7, 9-11, 13 and 15-23 meet all of this and tests/test_touches.py's MISS on
-    the trip.)"""
+    the trip.)
+    (From 2026-11-02, navigator.ROPE_HANG: the Green Mushroom by the top makes her stop on the rope 88 under it and
+    hang there; it stays within reach of the top the whole HANG_S, so she goes up regardless after 2.1 s, touched on the
+    rope then (a MISS, no knock), and her invulnerability after it takes her past it (the touch is the cut's: POST_HIT),
+    on 16 at 7.1 s with 1 touch where 5.1 s with 1 (climbed on after a touch 55 under the top). Her climb on after a
+    touch, CLIMB_ON, isn't shown here any more: tests/test_rope_top.py, test_evade.py and test_touches.py (without
+    ROPE_HANG).)"""
     return _nav(16, fight=True)(sim)
+
+
+# Hanging under a rope's top until the way up clears (navigator.ROPE_HANG, from 2026-11-02): live that hour (RiceBaby
+# grinding, three recordings and the hour's telemetry) 19-23 of the 170 touches came at the top of the rope at x -80 from
+# 11 to 10, the camp's only way in, by a Horny Mushroom on 10 beside it (10's Horny point is at -109), 16-48 under the
+# top or standing up there.
+
+@tree((11, -150.0), monsters=[("Horny Mushroom", 10, -60.0)], seed=8, limit=60,
+      **_LIVE, expects=(ends("arrived"), logs("hanging on the rope"), logs("the way up clear"),
+                        no_log("touched on the rope"), check("not touched", lambda tr: tr["world"]["touches"] == 0),
+                        check("on 10 by the end", lambda tr: tr["world"]["platform"] == 10)))
+def nav_tree_rope_top_10(sim):
+    """From 11 at x -150 up the rope at x -80 onto 10 (the grind's way back into the camp), a Horny Mushroom walking 10
+    by the rope's top: the climb stops on the rope 80-90 under the top while the way up isn't clear (navigator.ROPE_HANG:
+    "hanging on the rope"), out of its reach, and goes on up once it is (or after HANG_S), never touched on the rope. A
+    trip in transit, as the grind's (only what's in her way is shot), to anywhere on 10: it ends at the rope's top. On
+    seed 8 she hangs 0.5 s 83 under the top and goes up untouched, on 10 0.5 s later than without the hang (touched on
+    the rope 50 under its top then, damage 118, and up again). On seeds 1-12 (D:/MapleHelper-scratch/recfix/rope/
+    seeds_hang.py): touched on 2 of the 12 trips (1 on the rope) where without the hang on 5 (4 on the rope); 4 hangs, 2
+    of them up regardless after HANG_S (one of those touched); the 12 trips 54.2 s in all against 48.7."""
+    from ..control.navigator import TRANSIT
+    return sim.navigator(sim.hunter(), fight=True).go(10, mode=TRANSIT)
 
 
 @tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=8, limit=60, **_LIVE,

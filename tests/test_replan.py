@@ -15,7 +15,7 @@ from gamelab.motion.flow import Body, Leg, Span
 from gamelab.motion.physics import JUMP_LAG, STOP_S
 from gamelab.motion.route import Move
 from gamelab.sim import harness, scenarios
-from gamelab.sim.world import HER_HALF, HER_HEIGHT, Realism
+from gamelab.sim.world import Realism
 
 REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE), reason="needs Tree Dungeon's game data")
 
@@ -388,14 +388,19 @@ def test_a_monster_whose_replan_was_dropped_late_with_no_room_to_stop_is_asked_a
     the log said the next state asks again. Now a late one isn't taken as handled: said so, the next state asks about it
     again (here in time: spliced), and nothing cut."""
     asks: list = []
-    # (her body for touches as when this was written, 15 either side: with the client's line, world.HER_TOUCH, a touch
-    # it took on the trip's way up no longer comes, and a later chain is cut for another monster coming)
-    trace, sim, state = _spawn_run(_late_once(asks, room=False), realism=Realism(her_box=(HER_HALF, HER_HEIGHT)))
+    # (her body for touches the world's, the client's line, world.HER_TOUCH: work/rec-sim alone ran this on the old 15
+    # either side, where the client's line took a touch on the trip's way up away and a later chain was cut for another
+    # monster coming; with the rope hang beside it, at 146 at 6.7 s (work/rec-all, 2026-11-02), the trip goes as written
+    # on the client's line, and on the old body a chain at 15.7 s is cut so)
+    trace, sim, state = _spawn_run(_late_once(asks, room=False))
     i = next(i for i, (_, late) in enumerate(asks) if late)
     assert len(asks) > i + 1 and asks[i + 1][0] - asks[i][0] <= 0.15 + 2 * nv.STATE_S + 1e-6, asks
     said = [line for line in trace["log"] if "replanned too late" in line]
     assert len(said) == 1 and nv.COMING in said[0] and said[0].endswith("dropped, the next state asks again"), said
-    assert any(sp[0] >= asks[i + 1][0] - 1e-6 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
+    # (the trace's splice times are rounded to the ms, Trace.at: a splice at the ask itself can read up to 0.5 ms before
+    # it. Here the ask came at 1.1972 s and its splice read 1.197; before, a later splice met the test, and with
+    # navigator.ROPE_HANG's hang at the top of the rope at 146 at 6.8 s, HANG_S 2 s, none comes later)
+    assert any(sp[0] >= asks[i + 1][0] - 5e-4 - 1e-9 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
     assert not any("plan cut short" in line and nv.COMING in line for line in trace["log"])
 
 

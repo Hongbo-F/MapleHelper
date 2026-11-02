@@ -509,12 +509,15 @@ def test_the_harness_counts_her_misses_and_the_touches_the_stack_was_told_of():
 def test_a_miss_on_a_trip_cuts_it_as_a_hit_does_and_she_replans_and_climbs_on(monkeypatch):
     # nav_tree_rope_hit's trip (from 19 up to 16 by the rope at x 111, a Green Mushroom walking 18 by its top) with
     # every touch a MISS: the MISS cuts the chain on the rope (nothing else would: her HP stays as it was), up goes down
-    # again (climb_on), and she gets to 16; the hunter has it as her last touch, no knock.
+    # again (climb_on), and she gets to 16; the hunter has it as her last touch, no knock. (Without the hang under the
+    # rope's top, navigator.ROPE_HANG: with it she stops on the rope out of the mushroom's reach, not touched there.)
+    from gamelab.control import navigator
     from gamelab.sim import scenarios
     from gamelab.sim import world as world_mod
     if not scenarios.available(scenarios.TREE):
         pytest.skip("Tree Dungeon's game data isn't on this computer")
     monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None, mob_level=None: 1.0)
+    monkeypatch.setattr(navigator, "ROPE_HANG", False)
     seen = {}
 
     def fn(sim):

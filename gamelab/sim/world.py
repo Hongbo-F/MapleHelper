@@ -2119,6 +2119,14 @@ class World:
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
                                                         # respawn (from its spawn point)
+        # ... and where each was: (t, her mode then: ground, air or rope, her x, her feet's y), one for each of
+        # touch_log's; her climbs up a rope onto the platform at its top (climb_log: t, the rope's x, the platform);
+        # and her grabs of a rope (grab_log: t, the rope's x, her feet's height under its top then). The live hour of
+        # 2026-11-02 had 19-23 of its 170 touches at the top of the rope at x -80 over 68 climbs up it (sim.harness:
+        # `rope_tops`).
+        self.touch_place: list[tuple[float, str, float, float]] = []
+        self.climb_log: list[tuple[float, float, int]] = []
+        self.grab_log: list[tuple[float, float, float]] = []
         # Her knocks off a platform (a touch's flight landing her on another one more than KNOCK_FALL_DY lower than the
         # one she was knocked from, or out of the map): (t of the touch, from, onto (None: out of the map), how far
         # down). Live on 2026-10-25 three knocks off Tree Dungeon's 23 dropped her 389 units to 29, 43 s of the hunt
@@ -2973,6 +2981,7 @@ class World:
         self.mode, self.rope, self.plat, self.flight, self.group = "rope", r, None, None, body.ROPE_GROUP
         self.knocked = False
         self.x, self.y, self.vx, self.vy = r.x, min(max(self.y, r.top), r.bottom), 0.0, 0.0
+        self.grab_log.append((round(self.t, 3), r.x, round(self.y - r.top, 1)))
         self.note(f"grabs the rope at x {r.x:.0f}")
 
     def _leave_rope(self) -> None:
@@ -2993,6 +3002,7 @@ class World:
                     self.x = min(max(r.x, top.left), top.right)
                     self.y, self.vx, self.glide = top.y_at(self.x), 0.0, 0.0
                     self.still_ms = self.ms + int(round(CLIMB_OVER * 1000))
+                    self.climb_log.append((round(self.t, 3), r.x, top.id))
                     self.note(f"climbs onto platform {top.id}")
         elif "down" in self.held and "up" not in self.held:
             self.y += CLIMB_DOWN * dt
@@ -3047,6 +3057,7 @@ class World:
         evaded = self.chance("evade") < evade_chance(m.info, self.character, self._mob_levels.get(m.kind))
         damage = 0.0 if evaded else touch_damage(m.info, self.chance("damage"), self.character)
         self.touch_log.append((self.t, damage))
+        self.touch_place.append((self.t, self.mode, round(self.x, 1), round(self.y, 1)))
         if m.born is not None and self.t - m.born < FRESH_S:
             self.fresh_log.append((self.t, damage))
         if evaded:

@@ -957,3 +957,31 @@ def test_the_maps_pass_fills_only_points_with_no_monster_within_100_units(model)
     assert not w.monsters[0].alive
     w.advance(8.1)
     assert w.monsters[0].alive
+
+
+def test_rope_tops_counts_her_climbs_and_the_touches_on_a_rope_or_at_its_top_just_after_one():
+    """sim.harness `rope_tops` (World.climb_log, grab_log, touch_place): a touch on a rope is one, standing within
+    ROPE_TOP_DX of a rope she climbed over ROPE_TOP_S or less before is one, one further off or later isn't; a MISS
+    counts, not as hurt; a grab from a rope's top (a climb down) isn't a climb set off on."""
+    from types import SimpleNamespace
+    w = SimpleNamespace(climb_log=[(10.0, -80.0, 10), (50.0, 111.0, 18)],
+                        grab_log=[(8.6, -80.0, 158.0), (48.0, 111.0, 175.0), (55.0, 111.0, 1.0), (65.0, -8.0, 76.0)],
+                        touch_place=[(9.5, "rope", -80.0, -1430.0),      # on the rope (before it climbed over)
+                                     (11.0, "ground", -70.0, -1469.0),   # at the top 1 s on
+                                     (11.5, "ground", -150.0, -1480.0),  # on 10, but off the rope's top
+                                     (13.0, "ground", -80.0, -1469.0),   # 3 s on
+                                     (51.0, "air", 120.0, -900.0),       # knocked off the top of rope 4 (a MISS)
+                                     (70.0, "rope", 111.0, -850.0)],     # past `end`
+                        touch_log=[(9.5, 0.12), (11.0, 0.13), (11.5, 0.1), (13.0, 0.1), (51.0, 0.0), (70.0, 0.1)])
+    assert harness._rope_tops(w, 60.0) == {"climbs": 2, "grabs": 2, "touched": 3, "on_rope": 1, "hurt": 2}
+    assert harness._rope_tops(w, 30.0) == {"climbs": 1, "grabs": 1, "touched": 2, "on_rope": 1, "hurt": 2}
+
+
+def test_rope_tops_counts_her_hangs_under_a_rope_s_top_from_their_events():
+    """sim.harness rope_tops' hangs (control.navigator.ROPE_HANG's 'rope_hang' events): one at each hang's start, the
+    seconds from their ends, those up regardless after HANG_S."""
+    events = [{"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "clear", "s": 1.24},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "regardless", "s": 4.02},
+              {"kind": "climb_on"}]
+    assert harness._hangs(events) == {"hangs": 2, "hang_s": 5.3, "hang_regardless": 1}
+    assert harness._hangs([]) == {"hangs": 0, "hang_s": 0.0, "hang_regardless": 0}

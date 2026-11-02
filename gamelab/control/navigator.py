@@ -50,8 +50,8 @@ from typing import ClassVar, NamedTuple, Protocol
 from .. import directions, telemetry
 from ..localization.mapdata import MapModel, Platform, Rope
 from ..localization.memory import EDGE, MATCH_SLACK, MATCH_SPEED, MATCH_WALK_S, SURE
-from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, Monster, MonsterTrack, Tracker, touch_box,
-                                     tracks_record)
+from ..localization.monsters import (DEFAULT_SPEED, MONSTER_HEIGHT, WALK_EDGE, Monster, MonsterTrack, Tracker,
+                                     touch_box, tracks_record)
 from ..localization.pose import ROPE_TOP_X
 from ..localization.scene import Scene
 from ..localization.rate import HZ
@@ -61,8 +61,10 @@ from ..localization.unseen import hidden
 from ..localization.worldstate import to_scene
 from ..motion import bodies as her_body
 from ..motion import route
-from ..motion.flow import END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow, Leg, Span, chain_record, ms
-from ..motion.physics import DROP_LAG, GRAVITY, JUMP_LAG, KNOCK_VY, STOP_S, WALK_SPEED
+from ..motion.bodies import Climb
+from ..motion.flow import (CLIMB_OVER, END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow, Leg, Span, chain_record,
+                           ms)
+from ..motion.physics import CLIMB_SPEED, DROP_LAG, GRAVITY, JUMP_LAG, KNOCK_VY, STOP_S, WALK_SPEED
 from ..perception.framecheck import LookLost
 from ..perception.kinds import kind_of
 from ..perception.touches import INVULNERABLE_S, MISS
@@ -519,6 +521,80 @@ TOUCHER_NEAR = 40.0
 QUEUE_CHECK = True
 QUEUE_SEEN_S = 1.0
 CLIMB_LOOK = True
+# ROPE_HANG (from the three recordings of RiceBaby grinding on Tree Dungeon on 2026-11-02, the roadmap's item 9, P08:
+# D:/MapleHelper-scratch/rec-analysis/plans): while she climbs a rope up to the platform at its top, a chain's climb or
+# the mover's lone climb move, her glances check the way up from the newest state: where the rest of the climb, the
+# climb-over and STAND_PAST_S standing at the top would meet a monster (_way_up: flow.danger, her box all the way,
+# against every monster the state has whose touch counts, on any platform, each walking as followed, her invulnerability
+# counted), she stops on the rope HANG_UNDER under its top (the cut lets go of every key; the game keeps her where she
+# is on a rope) and hangs there (_hang), where no monster's body reaches her, looking at every state; once the way up is
+# clear she climbs the rest, as her climb on after a touch holds it (_climb_on), and after HANG_S she goes up regardless
+# (a backstop event, as a pass regardless). A touch on the rope with the top taken (CLIMB_LOOK) hangs too, down to
+# HANG_UNDER first, where it went down the whole rope. Live that hour 19-23 of the 170 touches were at the top of the
+# rope at x -80 from 11 to 10 (11 of them on the rope, 16-48 under its top: R2 #8, #24, R3 #34 on their frames, a Horny
+# Mushroom on 10 beside the rope's top each time), over 68 climbs up it, 24 of them past a Horny regardless (NO_WAIT)
+# and about 13 the mover's lone climb move, which nothing watched for the top; she can't cast on a rope ("That cannot be
+# used while you're on a rope or ladder.", the game's line for any skill), so nothing else is to be done there. False:
+# as before.
+# What it does in the simulator's thief world (the standard grind, HANG_S below; the review of 2026-11-02,
+# D:/MapleHelper-scratch/recfix/review-rope: hangs.py, anal.py; counted again after its fixes on seeds 1-96,
+# D:/MapleHelper-scratch/recfix/rope-fix): the way up seldom clears. Of 476 hangs 434 went up regardless after HANG_S,
+# and 434 were followed by a touch at that rope (on it, or standing within 40 of it after the climb) within 3 s of the
+# hang's end; none was touched in a hang. A Horny at its point on 10 (x -109, 29 from the rope at -80) or a Green at its
+# point on 18 (x 39, 47 from the rope at -8) is within the 50 of her box and its (22 and 28) of the rope's top: standing
+# there it blocks the top for good (at 7dd45bf, at the ends of the regardless hangs of seeds 1-24 a monster's middle was
+# within 50 of the rope on the top platform in 94 of 115, 60 of them chasing her: the walkers world's aggro). Much of
+# what the hang saves (touches -6.6%, that hurt -8.2%, at a rope's top -19%) comes from what follows it: the rest of the
+# climb goes up in one push, unwatched (hang_up), and a touch in it is the cut's (POST_HIT: no fight while her
+# invulnerability lasts), so the base's runs of 3-5 touches at one rope's top within 6 s (0.71 a run, about 2.7 touches)
+# are nearly gone (0.04 a run, at 7dd45bf); hanging only where _climb_on did gave the base back. The wait does the rest:
+# without it (HANG_S 0) touches +5.6% (t +2.65) on seeds 1-96.
+ROPE_HANG = True
+# Her feet this far under the rope's top at least where she hangs: she's 65 tall (bodies.HER_TALL, the client's box), so
+# a monster standing on a flat top can't reach her body, with 15 more for her dot's error (to about 11 units).
+# HANG_FLOOR: past this (her feet nearer the top) there's no hanging, the climb goes on as before. Both are for a top
+# that doesn't dip under the rope's top within a monster's reach of it; where it does she hangs that much deeper
+# (_hang_drop: the review of 2026-11-02 found 18 sloping down to -883.3 at x 61, 9.7 under the top of the rope at 111,
+# where a Green Mushroom on 18 reaches her down to 75 under, inside the band's 70: there the band is 80-98 under; 4.8
+# deeper under 146's top, 1.5 under -192's, none under -80's and -8's). The cut leaves her between HANG_FLOOR and
+# HANG_UNDER and a frame's climb (8.7) under the top. On Tree Dungeon's long ropes (190 long: -80 from 11 to 10, 111
+# and -8 up to 18) she grabs them 163-176 under the top, on the short ones (115-116: 146 from 32, -192 from 31, -8 from
+# 30 up to 27) 104-116 under (route.grab_height), all under the band, and -8 from 29 81 under, in it: so she hangs on
+# the short ones too (the review's harness runs at -192 and 146, test_replan's late replan at 146).
+HANG_UNDER = 80.0
+HANG_FLOOR = 70.0
+# The cut is decided at the glance before the one that would be too late: from her dot's height (on the rope above where
+# she grabbed it, and not in the air by the glance's state: in the jump at it no cut), less what she climbs in the
+# glance's frame age and the game's lag in letting go of up (motion.body.Lags.off, 68 ms), at flow.ROPE_SPEED (130; live
+# 117-120, so she stops a little lower).
+HANG_LAG_S = 0.068
+# HANG_S: the most she hangs. The roadmap's 4 s (about a touch's price, attack.stance.MEET_PRICE_S 2.86 s, and the climb
+# down it saves), 2 s and 0 (the stop under the top, then up the rest at once, unwatched, a touch the cut's), on the
+# harness's standard thief grind (loop-grind, Tree, crowd, choice, measured, zero-walls, near-misses, walkers, 5 minutes)
+# against master 40ba190's cached seeds 1-48 (D:/MapleHelper-scratch/recfix: rope, review-rope, rope-fix): 4 s (at
+# 7dd45bf) EXP a minute -4.2% (t -2.21), touches -9.3% (t -3.31), that hurt -12.3% (t -3.90), 18.3 s of hanging a run,
+# a trip's arrival +23%; 2 s EXP -0.3% (t -0.14), touches -6.6% (t -2.38), that hurt -8.2% (t -2.53), at a rope's top
+# -19% (seeds 1-24), 9.8 s of hanging, a trip's arrival +10%; 0 EXP +3.3% (t +1.89), touches -3.8% (t -1.29). 0 against
+# 2 s, paired on seeds 1-96: EXP +1.8% (t +1.21), touches +5.6% (t +2.65), that hurt +5.3% (t +2.28), a trip's arrival
+# -13% (on 1-48 EXP +3.6%, t +1.83, the review's +3.5% at 7dd45bf; 49-96 took it back). 2 s: the touches its wait saves
+# are there at 96 seeds, the EXP 0 would earn isn't (the user's rule: EXP and loot over fewer touches; theirs to change,
+# one constant). On the live hour 8 of the 11 hangs that hindsight says would have cleared within 4 s cleared within 2
+# (the oracle below).
+HANG_S = 2.0
+# The monsters as the hang judges the way up: each walking as followed (TURN_SLACK and 20 units a second of spread, as
+# every chain plans them), but one standing may set off either way for HANG_UNSURE_S at the most, not the chains'
+# STAND_UNSURE_S (1 s): a Horny standing anywhere on 10's left part (-163 to -32, its Horny point at -109) is within
+# 50 + 100 of the rope's top at -80, so at 1 s hardly a hang there ended before HANG_S (a first rope-top scenario, two
+# Horny Mushrooms by the top, seeds 1-12: 18 of 19 hangs up regardless after 4 s; 12 of 19 at 0.3 s). On the hour's 35
+# climbs that perception saw 100 or less under the top, the top was free for the 1.3 s of the rest of the climb, the
+# climb-over and STAND_PAST_S at once on 20 (1 touched), and on the other 15 (all 15 touched) the monsters as they
+# really went freed it within 1 s on 5, 2 s on 8, 4 s on 11 (D:/MapleHelper-scratch/recfix/rope/oracle.py, oracle.txt):
+# the hang is worth what it judges free soon, so standing ones are taken as they stand but for about a state and a
+# key's lag of setting off. Taken as standing (0) the harness's standard grind did no better (24 seeds, HANG_S 2 s:
+# EXP a minute -2.0%, touches at a rope's top -22.1%, against -0.6% and -21.3% at 0.3; 4.7 of its 5.2 hangs a run up
+# regardless where 4.8 of 5.3: what blocks the way up there is mostly one at the top or walking by it).
+HANG_UNSURE_S = 0.3
+HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _carry_out_chain, _carry_out_move)
 # After the evade work's review (2026-10-29: D:/MapleHelper-scratch/evade/review; the fixes' runs and numbers in
 # D:/MapleHelper-scratch/evade/fix). ARRIVE_STAND: for a trip whose x is what it's for (go's arrive_waits: her
 # retreat's place, TripState.hold_x), the walk on arrival to where she's sent (WATCH_MOVES' _arrival_clear) is refused
@@ -2140,9 +2216,11 @@ class Navigator:
                 and after.where.platform.id == last.src:
             after = self._after_drop(st)
         # Cut short by a touch, she replans from where it knocked her, and while her invulnerability after it lasts no
-        # fight starts on the way nor is `until` asked (POST_HIT): she moves on from there first.
-        st.stopped = cut.startswith(COMING)
-        if cut.startswith(TOUCHED):
+        # fight starts on the way nor is `until` asked (POST_HIT): she moves on from there first. Stopped short for a
+        # monster (one coming into the chain's way, or a hang under a rope's top, ROPE_HANG, after which she climbed on
+        # up: the chain's moves past the climb not made), it's no miss.
+        st.stopped = cut.startswith((COMING, HUNG))
+        if cut.startswith(TOUCHED) or cut.startswith(HUNG) and self._touch_since(s.t) is not None:  # (told late)
             self._touched(st)
         st.came, self._came = (self._came if st.stopped else None), None
         return [leg.move for leg in legs], legs[-1].end.platform, after
@@ -2170,13 +2248,18 @@ class Navigator:
         try:
             after = self.mover.do(move, s)
         except MoveCut as cut:  # cut short as a chain is: she replans from where she is
+            if str(cut).startswith(HUNG) and getattr(self, "_hang_at", None) is not None:  # (ROPE_HANG: the hang, up)
+                text, self._hang_at = self._hang(*self._hang_at), None
+                touch = self._hang_touch  # (a touch in it, or in the climb after, is the cut's: POST_HIT)
+                cut = MoveCut(f"{HUNG}: {text}" if touch is None
+                              else f"{_touch_text(touch, s.hp, s.hp)} ({HUNG}: {text})")
             st.trip.time["move"] += time.monotonic() - t2
             st.moved_at = time.monotonic()
             after = self.recover()
             self.log(f"    {cut}: the move cut short; on {platform_text(after.where.platform)} at x "
                      f"{after.where.x:.0f} after {time.monotonic() - t2:.2f} s: replanning from there")
             telemetry.emit("event", kind="move_cut", text=f"{move.kind} -> {move.dst}: {cut}")
-            if str(cut).startswith(TOUCHED):
+            if str(cut).startswith(TOUCHED) or str(cut).startswith(HUNG) and self._touch_since(s.t) is not None:
                 self._touched(st)
             return [move], self.model.platform(move.dst), after
         except MoveRefused as e:  # a back-off into a monster: another way, as for a monster in the way
@@ -2219,9 +2302,16 @@ class Navigator:
         """What watches a move of the mover's from look `s` (WATCH_MOVES: Mover.watch, between its key plan's glances):
         a glance, and why to cut it short, or None: a touch told after the look (TOUCH_CUTS, a MISS too) or her HP
         lower than it had it (HIT), as a chain's; or her standing MOVE_OFF_S on a platform the move neither leaves nor
-        goes to (a knock, a fall past it)."""
+        goes to (a knock, a fall past it); or, a climb up a rope to the platform at its top (ROPE_HANG), the way up from
+        her height on it not clear (_hang_due: `_hang_at` says where she hangs, the caller hangs her there)."""
         since, hp0, by = s.t, s.hp, {move.src, move.dst}
         stood = [None]
+        self._hang_at = None
+        rope = None
+        if ROPE_HANG and move.kind == "climb":
+            rope = next((r for r in self.model.ropes
+                         if (r.x, r.top, r.bottom) == (move.rope_x, move.rope_top, move.rope_bottom)), None)
+        grab = route.grab_height(self.model.platform(move.src).y_at(move.rope_x), rope) if rope is not None else None
 
         def watch() -> str | None:
             self.senses.wait_frame(GLANCE_S)
@@ -2235,6 +2325,9 @@ class Navigator:
                 on = self.model.platform_under(mx, my - 6, reach=16)
                 if on is not None and on.id not in by:
                     return f"off the move (on {on.id}, planned {move.dst})"
+            if rope is not None and (due := self._hang_due(rope, grab, dot, self.senses.glanced_at)) is not None:
+                self._hang_at = due
+                return HUNG
             return None
         return watch
 
@@ -2659,6 +2752,9 @@ class Navigator:
                 if off_since is not None and seen_at - off_since >= (OFF_LEG_S if off_leg else OFF_PATH_S):
                     where = f"still at x {behind:.0f}" if behind is not None else f"on {on.id if on else 'nothing'}"
                     cut = f"off the path ({where}, planned {want or leg.end.platform.id})"
+            hang = None
+            if not cut and ROPE_HANG and (hang := self._hang_check(current, dot, seen_at)) is not None:
+                cut = HUNG  # (said once the hang is over, below)
             switched = None
             if not cut and REACT and (coming := self._coming(current, room=not replan)) is not None:
                 mo, t, tid = coming
@@ -2714,6 +2810,10 @@ class Navigator:
                 self._ended(current.plan_id, cut=True)
                 if queued:
                     sent = sent[:len(sent) - len(queued.legs)]
+                if hang is not None:  # (ROPE_HANG: a touch in it, or in the climb after, is the cut's: POST_HIT)
+                    text = self._hang(*hang)
+                    touch = self._hang_touch
+                    cut = f"{HUNG}: {text}" if touch is None else f"{_touch_text(touch, hp, now_hp)} ({HUNG}: {text})"
                 if climbing is not None:
                     self._climb_on(*climbing)
                 elif cut.startswith(TOUCHED) and REPLAN and KNOCK_REPLAN:  # (the next pass plans from where it lands her)
@@ -3111,12 +3211,26 @@ class Navigator:
         below its top (see CLIMB_ON); up again, to the top and onto the platform there, held as a chain's climb holds it
         (the climb from her height at flow.ROPE_SPEED, the step onto the platform in it, and UP_EXTRA: 0.75 s from 52
         under, where mover.climb_ms's 0.945 s had the same mushroom touch her again on the platform 9 ms before it ended
-        in loop_tree_walls), waited for, so the next pass looks once she's there."""
+        in loop_tree_walls), waited for, so the next pass looks once she's there. With the top taken (CLIMB_LOOK) and
+        ROPE_HANG, down to HANG_UNDER under it (and the rope's _hang_drop; where she's higher) and a hang there till the
+        way up is clear (_hang), where the hang place is clear of every monster (_hang_safe); else down the rope to its
+        bottom, as before."""
         k = self.actions.keys.up.name
         hold = ms(max(0.0, y - top) / ROPE_SPEED + UP_EXTRA)
         if CLIMB_LOOK and x is not None and (why := self._top_taken(x, top, hold / 1000)) is not None:
             rope = min(self.model.ropes, key=lambda r: abs(r.x - x) + abs(r.top - top))
             down = self.actions.keys.down.name
+            at = max(y, rope.top + HANG_UNDER + self._hang_drop(rope))
+            if ROPE_HANG and at <= rope.bottom and route.hung_from(self.model, rope) is not None \
+                    and self._hang_safe(rope, at):
+                self.log(f"    touched on the rope {y - top:.0f} under its top, {why}: "
+                         + (f"down to {at - rope.top:.0f} under it to hang there" if at > y else "hanging there"))
+                telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top, {why}: "
+                                                              f"hanging {at - rope.top:.0f} under it")
+                if at > y + 1:
+                    self.actions.play([[0, down, "down"], [ms((at - y) / CLIMB_SPEED), down, "up"]], "hang_down")
+                self._hang(rope, at, why)
+                return
             hold = ms(max(0.0, rope.bottom - y) / ROPE_SPEED + UP_EXTRA)
             self.log(f"    touched on the rope {y - top:.0f} under its top, {why}: down again ({hold} ms)")
             telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top, {why}: "
@@ -3126,6 +3240,158 @@ class Navigator:
         self.log(f"    touched on the rope {y - top:.0f} under its top: up again ({hold} ms)")
         telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top: up again")
         self.actions.play([[0, k, "down"], [hold, k, "up"]], "climb_on")
+
+    # --- hanging under a rope's top (ROPE_HANG) ------------------------------------------------------------------
+
+    def _hang_check(self, running: _Running, dot, seen_at: float | None) -> tuple[Rope, float, str] | None:
+        """ROPE_HANG: whether the running chain's climb (the plan's Climb whose time is now: from half a second before
+        the grab, since she may grab sooner than planned, to UP_EXTRA past the top) stops on the rope now, by her last
+        glance (`dot`, its frame shown at `seen_at`): _hang_due, from where the plan has her grab it. None if not."""
+        if dot is None or seen_at is None:
+            return None
+        t = time.monotonic() - running.start
+        for leg in running.legs:
+            for c in leg.rope:
+                if c.t0 - 0.5 <= t <= c.t1 + UP_EXTRA:
+                    rope = next((r for r in self.model.ropes if abs(r.x - c.x) <= 1 and abs(r.top - c.y1) <= 1), None)
+                    return None if rope is None else self._hang_due(rope, c.y0, dot, seen_at)
+        return None
+
+    def _hang_due(self, rope: Rope, grab: float, dot, seen_at: float | None) -> tuple[Rope, float, str] | None:
+        """ROPE_HANG: whether she stops climbing `rope` now, by her dot `dot` (its frame shown at `seen_at`), having
+        grabbed it with her feet at about map y `grab`: on it (within CLIMB_ON_X of it, above where she grabs it, and
+        not in the air by the glance's state: in the jump at it she isn't yet, and the jump's top is 5 over the grab),
+        where the cut would stop her (her dot's height less what she climbs in the frame's age and HANG_LAG_S, at
+        flow.ROPE_SPEED) is HANG_UNDER or less under its top by the next frame, but HANG_FLOOR or more now (both deeper
+        by the rope's _hang_drop); the way up from where she is isn't clear (_way_up) and where she'd stop is
+        (_hang_safe). The rope, where she'd stop (map y) and why; None if not."""
+        if dot is None or seen_at is None or route.hung_from(self.model, rope) is None:
+            return None
+        mx, my = self.senses.localizer.to_map(dot)
+        if abs(mx - rope.x) > CLIMB_ON_X or not rope.top <= my <= grab + 5:
+            return None
+        if getattr(getattr(self.senses, "glanced", None), "mode", None) == "air":  # (the scene's: the jump at it)
+            return None
+        stop, drop = my - ROPE_SPEED * (max(0.0, time.monotonic() - seen_at) + HANG_LAG_S), self._hang_drop(rope)
+        if stop - ROPE_SPEED / HZ > rope.top + HANG_UNDER + drop or stop < rope.top + HANG_FLOOR + drop:
+            return None  # (the next frame decides, or too late: on up, as before)
+        why = self._way_up(rope, my)
+        if why is None or not self._hang_safe(rope, stop):
+            return None
+        return rope, stop, why
+
+    def _hang_drop(self, rope: Rope) -> float:
+        """ROPE_HANG: how much deeper than HANG_UNDER and HANG_FLOOR she hangs under `rope`'s top: how far the surface
+        of the platform at its top (route.hung_from) dips under the rope's top where a monster standing on it reaches
+        her box (its middle inside the platform's walk edges, monsters.WALK_EDGE, and within HER_HALF and the widest
+        touch box of the map's monsters of the rope: 50 on Tree Dungeon); 0 where it doesn't dip (HANG_UNDER is for a
+        flat top). Tree Dungeon: 9.7 under the top of 111 (18 slopes down to -883.3 at x 61), 4.8 under 146's (30), 1.5
+        under -192's (29), none under the others' (-80's, -8's). Kept for each rope."""
+        drops = self.__dict__.setdefault("_drops", {})
+        if (key := (rope.x, rope.top)) not in drops:
+            q, drop = route.hung_from(self.model, rope), 0.0
+            if q is not None:
+                half = max((touch_box(kind_of(name), body)[0] for name, body in self.model.mob_bodies.items()),
+                           default=touch_box("")[0])
+                lo = max(rope.x - her_body.HER_HALF - half, q.left + WALK_EDGE)
+                hi = min(rope.x + her_body.HER_HALF + half, q.right - WALK_EDGE)
+                if lo <= hi:  # (the surface is straight between its footholds' ends)
+                    xs = [lo, hi] + [x for seg in q.segments for x in (seg.x1, seg.x2) if lo < x < hi]
+                    drop = max(0.0, *(q.y_at(x) - rope.top for x in xs))
+            drops[key] = drop
+        return drops[key]
+
+    def _newest_tracks(self) -> list[MonsterTrack]:
+        """The monsters of the newest state (the last glance's: Senses.glanced), as the move planner sees them from now
+        (_track_of), one standing setting off either way HANG_UNSURE_S at the most: live, or out of sight QUEUE_SEEN_S at
+        most, on a platform; with an escort those whose touch counts (as _queued_meets has them)."""
+        state = getattr(self.senses, "glanced", None)
+        if state is None:
+            return []
+        now = time.monotonic()
+        tracks = [self._track_of(tr, now) for tr in state.tracks
+                  if tr.platform is not None and (tr.state == LIVE or tr.state == HIDDEN
+                                                  and state.t - tr.last_seen <= QUEUE_SEEN_S)
+                  and (not self.fight or self.escort.threat(tr.kind))]
+        return [replace(mo, unsure=HANG_UNSURE_S) if mo.unsure is not None else mo for mo in tracks]
+
+    def _way_up(self, rope: Rope, y: float) -> str | None:
+        """ROPE_HANG: why the rest of a climb up `rope` from her feet at map y isn't clear now (a monster and its
+        platform), or None: the climb at physics.CLIMB_SPEED (live 117-120 units/s: the longer, the surer), her
+        climb-over (flow.CLIMB_OVER) and STAND_PAST_S standing on the platform at its top, her box all the way
+        (flow.danger) against every monster of the newest state (_newest_tracks: on any platform, so a walker on 9 by
+        its end over the top of the rope at -80 too), each walking as followed; her invulnerability counted."""
+        q, tracks = route.hung_from(self.model, rope), self._newest_tracks()
+        if q is None or not tracks:
+            return None
+        self._immunity(time.monotonic())
+        up = max(0.0, y - rope.top) / CLIMB_SPEED
+        leg = Leg(Move("climb", q.id, q.id, rope.x, rope.x, rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom),
+                  Body(0.0, rope.x, q), Body(up + CLIMB_OVER, rope.x, q), rope=[Climb(0.0, up, rope.x, y, rope.top)],
+                  stands=[Span(q.id, up, up + CLIMB_OVER, rope.x, rope.x)])
+        hit = self.flow.danger(leg, tracks, linger=STAND_PAST_S)
+        return None if hit is None else f"a {hit[0].kind or 'monster'} on {hit[0].platform} by its top"
+
+    def _hang_safe(self, rope: Rope, y: float) -> bool:
+        """ROPE_HANG: whether hanging on `rope` with her feet at map y for HANG_S keeps her box clear of every monster
+        of the newest state (_newest_tracks, on any platform: one at the rope's foot too; flow.danger)."""
+        q, tracks = route.hung_from(self.model, rope), self._newest_tracks()
+        if q is None or not tracks:
+            return True
+        self._immunity(time.monotonic())
+        leg = Leg(Move("climb", q.id, q.id, rope.x, rope.x, rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom),
+                  Body(0.0, rope.x, q), Body(HANG_S, rope.x, q), rope=[Climb(0.0, HANG_S, rope.x, y, y)])
+        return self.flow.danger(leg, tracks) is None
+
+    def _hang(self, rope: Rope, y: float, why: str) -> str:
+        """ROPE_HANG: she hangs on `rope` (every key let go: the game keeps her there), her feet at about map y, until
+        the way up from there is clear (_way_up, at every glance, her height her dot's while it's by the rope), a touch
+        is told (her invulnerability then takes her past it), or HANG_S is over (a backstop event: up regardless, as a
+        pass regardless goes); then up the rest, held as _climb_on holds it, waited for. The Lie Detector seen at a
+        glance stops it there (LieDetectorAlarm, as _pass's check: no key goes out, and the hunt stops then, not up to
+        HANG_S later), but on a retreat's own trip. Each hang is a telemetry event 'rope_hang' at its start (step
+        'hang') and its end ('clear', 'touched' or 'regardless': how long, what blocked the way). How it ended, for the
+        cut's reason; `_hang_touch` the touch told from its start to the end of the climb
+        after it (None: none), which the caller takes as the cut's (POST_HIT: no fight while her invulnerability after
+        it lasts, so the next chain passes the monster in it, as after a touch on the rope; taken as no touch,
+        nav_tree_rope_hit, from 19 up to 16, fought the Green Mushroom by the top after the hang, was knocked back down
+        to 19 and climbed again, 105 s and 37 touches with HANG_S 4 s, where 7.1 s and 1 so). A touch told only after it
+        (the popup's lag) is taken so by the caller too (_carry_out_chain, _carry_out_move)."""
+        start, under = time.monotonic(), y - rope.top
+        since = getattr(self.senses, "glanced_at", None)
+        self.log(f"    {why}: hanging on the rope at x {rope.x:.0f}, {under:.0f} under its top")
+        telemetry.emit("event", kind="rope_hang", step="hang", text=f"{why}: hanging {under:.0f} under the top of "
+                                                                    f"the rope at x {rope.x:.0f}",
+                       x=rope.x, under=round(under, 1))
+        how, block = "regardless", why
+        while time.monotonic() - start < HANG_S:
+            self.senses.wait_frame(GLANCE_S)
+            dot, _ = self.senses.glance()
+            if getattr(self.actions, "kind", None) is None:  # (the Lie Detector seen: the hunt stops now, as _pass)
+                client.check_alarm()
+            if dot is not None:
+                mx, my = self.senses.localizer.to_map(dot)
+                if abs(mx - rope.x) <= CLIMB_ON_X and rope.top <= my <= rope.bottom + CLIMB_ON_X:
+                    y = my
+            if self._touch_since(since) is not None:
+                how = "touched"
+                break
+            if (block := self._way_up(rope, y)) is None:
+                how = "clear"
+                break
+        held = time.monotonic() - start
+        text = {"clear": f"the way up clear after {held:.1f} s", "touched": f"touched after {held:.1f} s",
+                "regardless": f"up regardless after {held:.1f} s ({block})"}[how]
+        if how == "regardless":
+            telemetry.emit("event", kind="backstop", text=f"HANG_S: up the rope at x {rope.x:.0f} regardless: {block}")
+        hold = ms(max(0.0, y - rope.top) / ROPE_SPEED + UP_EXTRA)
+        self.log(f"    hung {held:.1f} s, {text}: up the rest ({hold} ms)")
+        telemetry.emit("event", kind="rope_hang", step=how, text=text, x=rope.x, under=round(y - rope.top, 1),
+                       s=round(held, 2))
+        k = self.actions.keys.up.name
+        self.actions.play([[0, k, "down"], [hold, k, "up"]], "hang_up")
+        self._hang_touch = self._touch_since(since)
+        return text
 
     def _ended(self, plan_id: str | None, cut: bool = False) -> None:
         """A chain's plan is over, its result read: its last key went its run on past it before now (send's), or now,
