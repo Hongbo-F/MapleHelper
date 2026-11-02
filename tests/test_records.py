@@ -129,7 +129,8 @@ def test_the_loops_promise_against_what_it_gave():
 
 def test_the_session_says_her_physics_as_planned():
     rec = physics.record()  # (FIXED_STATS: the thief's)
-    assert rec["character"] == "thief" and rec["speed"] == 119.2 and rec["walk"] == pytest.approx(149.0)
+    assert rec["character"] == "thief" and rec["speed"] == 99.2 and rec["walk"] == pytest.approx(149.0)
+    assert rec["bonus"] == 20.0  # (the client's hidden Speed: 125 x (99.2 + 20)/100)
     assert rec["climb"] == physics.CLIMB_SPEED and json.dumps(rec)
 
 

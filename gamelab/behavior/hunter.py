@@ -694,11 +694,11 @@ class Hunter:
         HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
         (statcheck.borne); her level if nothing has read it; her max MP her casts are reckoned at (config.toml's until
         now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED and JUMP said
-        where config.toml's, which plan her moves, differ. Her reserve made again (_reserve_check: what changed said
-        with it)."""
+        where her profile's, which plan her moves, differ, with the walk and jump each gives (statcheck.moves_notes).
+        Her reserve made again (_reserve_check: what changed said with it)."""
         from ..motion import physics
         from .bootstrap import HerStats as Stats
-        from .statcheck import MP_SPAN, borne, disagreement
+        from .statcheck import MP_SPAN, borne, disagreement, moves_notes
         st, notes = self.stats, []
         level, most = reading.level, reading.max_hp
         scene = getattr(self.stat_check, "scene", None)
@@ -729,12 +729,7 @@ class Hunter:
             else:
                 notes.append(f"her stat window's max MP {mp} not taken ({why}): her casts reckoned at "
                              f"{self.max_mp:g} as before")
-        c = physics.CHARACTER
-        for name, mine in (("speed", c.speed), ("jump", c.jump)):
-            v = reading.get(name)
-            if v is not None and abs(float(v) - float(mine)) >= 1.0:
-                notes.append(f"her {name.upper()} {v}% by her stat window, config.toml [character] {name} {mine:g}: "
-                             "her moves planned by config.toml's")
+        notes.extend(moves_notes(reading, physics.CHARACTER))
         if reading.wdef is not None:
             session = self.stat_check._session() if self.stat_check is not None else None
             note = st.see_window(reading.wdef, rows=self.touches.rows, level=level if level is not None else st.level,

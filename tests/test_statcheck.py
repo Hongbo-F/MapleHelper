@@ -286,12 +286,14 @@ def _read_into(values, hud_max_hp=None, bars=(800 / 840, 100 / 679)):
 @REAL
 def test_what_the_read_gives_her_stats():
     """Her max HP from the window while her HUD's number hasn't read, her HP bar bearing it out; her max MP her casts
-    are reckoned at (config.toml's 623 until then: said); SPEED and JUMP said where they differ from config.toml's."""
+    are reckoned at (config.toml's 623 until then: said); SPEED and JUMP said where they differ from her profile's, with
+    the walk each gives (statcheck.moves_notes)."""
     h, said = _read_into({"wdef": 111, "level": 25, "hp": (800, 840), "mp": (100, 679), "speed": 130, "jump": 100})
     assert h.max_hp == 840.0 and h.max_mp == 679.0 and h.attacks.max_mp == 679.0
     assert "her max HP 840 by her stat window" in said
     assert "her max MP 679 by her stat window (was 623, config.toml [character] mp): her casts reckoned at it" in said
-    assert "her SPEED 130% by her stat window, config.toml [character] speed 119.2" in said
+    assert ("her SPEED 130% by her stat window walks her at 187.5 units/s; her moves are planned at 149 (her class's "
+            "fixed stats (GAMELAB_FIXED_STATS) speed 99.2)") in said
     assert h.stats.defence.low == 111.0 and h.stats.defence.source == "stat window" and h.level == 25
 
 

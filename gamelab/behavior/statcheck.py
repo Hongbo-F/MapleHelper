@@ -49,12 +49,13 @@ her max HP if her HUD's number hasn't read, where her HUD's as her stats file la
 (`borne`); her level where nothing has read it; her max MP her casts are reckoned at (Hunter.max_mp, Attacks.max_mp:
 config.toml [character] mp until then, said), where her MP bar bears it out or it's within MP_SPAN of theirs; ATTACK,
 ACCURACY, EVASION, MAGIC, MAGIC DEF., her four stats, SPEED and JUMP kept in her stats file (not modelled from yet:
-said where SPEED and JUMP differ from config.toml's, which plan her moves)."""
+said where SPEED and JUMP differ from her profile's, which plan her moves, with the walk and jump each gives:
+`moves_notes`)."""
 
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 import numpy as np
 
@@ -223,6 +224,31 @@ def borne(pair, share: float | None, kept: float | None = None, span: float | No
     known = ("" if kept is None else f"not {kept:g} as known" if span is None
              else f"not within x{span:g} of {kept:g} as known")
     return ", ".join(x for x in (known, bar) if x) + ": not borne out"
+
+
+def moves_notes(reading: sw.StatReading, stats=None, where: Callable[[str], str] | None = None) -> list[str]:
+    """What to say where her stat window's SPEED or JUMP isn't the one her moves are planned by (`stats`: physics'
+    CHARACTER; `where(stat)`: what they're from, gamelab.character.stats_from), a point or more apart: each with the walk
+    or jump it gives and the one planned. physics is loaded once, so neither is taken: a profile to change, or gear or
+    Haste since it was set. Before 2026-11-02 the planned walk was 125 x SPEED/100 and the thief's 119.2 (her walk fitted:
+    149 units/s) said "her SPEED 101% by her stat window, config.toml [character] speed 119.2" at every read; with the
+    client's +20 (motion.body.SPEED_BONUS) her window's SPEED gives her walk, and the magician's 100 says nothing. The
+    thief's 99.2 (149, kept for the simulator's goldens) against her window's 101 (151.25) says so, as it should."""
+    from .. import character
+    from ..motion import physics
+    stats = physics.CHARACTER if stats is None else stats
+    where = character.stats_from if where is None else where
+    out = []
+    for name, mine in (("speed", stats.speed), ("jump", stats.jump)):
+        v = reading.get(name)
+        if v is None or abs(float(v) - float(mine)) < 1.0:
+            continue
+        theirs, planned = (physics.shoe_of(replace(stats, **{name: float(v)})), physics.shoe_of(stats))
+        what, gives, plan = (("walks her at", theirs.vmax, planned.vmax) if name == "speed" else
+                             ("jumps her at", theirs.vjump, planned.vjump))
+        out.append(f"her {name.upper()} {v}% by her stat window {what} {gives:g} units/s; her moves are planned at "
+                   f"{plan:g} ({where(name)} {name} {mine:g})")
+    return out
 
 
 def session_of(h) -> str | None:
