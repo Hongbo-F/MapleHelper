@@ -490,7 +490,7 @@ class _Handler(BaseHTTPRequestHandler):
             with feed.lock:
                 now, rate = feed.clock()
             self._send(200, _json({"now": now, "rate": rate}), "application/json")
-        elif review.handle(self, url.path):  # overlaid recordings, frame by frame (ui.review)
+        elif review.handle(self, url.path, query=query):  # overlaid recordings, frame by frame (ui.review)
             pass
         else:
             self._send(404, b"not found", "text/plain")
