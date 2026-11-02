@@ -124,7 +124,13 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    ('refused'), moves her dot never moved on ('rope_top': control.navigator._rope_top) and her climbs
                    on after a touch ('climb_on': navigator.CLIMB_ON), telemetry events of those kinds; refused, her
                    attacks the world refused on a rope
-  backstops        how often each backstop cap fired (telemetry events kind 'backstop')
+  rope_tops        her climbs up a rope onto the platform at its top ('climbs': World.climb_log), her grabs of a
+                   rope from below ('grabs': World.grab_log, GRAB_UNDER or more under its top: the climbs she set off
+                   on), and her touches (a MISS too) at a rope's top: on a rope ('on_rope'), or standing within
+                   ROPE_TOP_DX of the rope she climbed over ROPE_TOP_S or less before; 'touched' both, 'hurt' those of
+                   them that took HP (World.touch_place). Live on 2026-11-02, 19-23 of the hour's 170 touches over 68
+                   climbs up the rope at x -80 (11 to 10): about 0.3 a climb
+  backstops       how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
                    cuts for a hit, those for a touch (cut_touch: a MISS too, from 2026-10-28) and for a MISS (cut_miss);
@@ -724,6 +730,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "ropes": sum(1 for r in events if r.get("kind") == "rope"),
         # (a rope's top: the game refusing her presses, a move her dot never moved on, her climb on after a touch)
         "rope_top": {k: sum(1 for r in events if r.get("kind") == k) for k in ("refused", "rope_top", "climb_on")},
+        "rope_tops": _rope_tops(world, end),
         "refused": getattr(world, "refused", 0),  # her attacks refused on a rope (world.ROPE_REFUSAL)
         # (up close: from 2026-10-27, clearance and slopes)
         "claw_s": round(getattr(world, "claw_ms", 0) / 1000, 1),
@@ -931,6 +938,32 @@ def _retouches(world, end: float) -> int:
     the one before (live in walk B, 53 of 148, 34 of them 1.43-1.6 s on, as her invulnerability ended)."""
     ts = [t for t, _ in world.touch_log if t <= end]
     return sum(1 for a, b in zip(ts, ts[1:]) if b - a <= RETOUCH_S)
+
+
+ROPE_TOP_S = 2.0    # (rope_tops) s after she climbs over a rope's top that a touch standing there is the climb's ...
+ROPE_TOP_DX = 40.0  # ... within this of the rope's x
+GRAB_UNDER = 20.0   # (rope_tops' grabs) a grab of a rope this far under its top or more: from below, to climb it
+
+
+def _rope_tops(world, end: float) -> dict:
+    """rope_tops (see the top): her climbs up a rope onto the platform at its top up to `end` (World.climb_log), her
+    grabs of a rope from below (`grabs`: GRAB_UNDER or more under its top, World.grab_log: the climbs she set off on, a
+    climb down from a rope's top not one), and her touches at a rope's top (World.touch_place, a MISS too): on a rope
+    (`on_rope`), or on the platform at its top within ROPE_TOP_DX of the rope she climbed over ROPE_TOP_S or less before
+    (`touched` is both; `hurt` those of them that took HP). The live hour of 2026-11-02 (RiceBaby, Tree Dungeon, 35
+    minutes) had 19-23 of its 170 touches at the top of the rope at x -80 from 11 to 10, 11 of them on the rope, over 68
+    climbs up it: about 0.3 a climb."""
+    climbs = [c for c in getattr(world, "climb_log", ()) if c[0] <= end]
+    grabs = sum(1 for t, _, under in getattr(world, "grab_log", ()) if t <= end and under >= GRAB_UNDER)
+    on_rope = top = hurt = 0
+    for (t, mode, x, _), (_, hp) in zip(getattr(world, "touch_place", ()), world.touch_log):
+        if t > end:
+            continue
+        at = mode == "rope" or any(0.0 <= t - tc <= ROPE_TOP_S and abs(x - rx) <= ROPE_TOP_DX for tc, rx, _ in climbs)
+        on_rope += mode == "rope"
+        top += at and mode != "rope"
+        hurt += at and hp > 0
+    return {"climbs": len(climbs), "grabs": grabs, "touched": on_rope + top, "on_rope": on_rope, "hurt": hurt}
 
 
 def _trips(world, records: list[dict], end: float) -> dict:
