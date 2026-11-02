@@ -869,6 +869,9 @@ DEAD_NEAR = 40.0     # ... this near it (map units, the same kind on the same pl
                      # units from where its kill was placed)
 
 
+SKILL_KEYS = ("lucky_seven", "magic_claw")  # her skill's key in her 'attack' records: the thief's, the magician's
+
+
 def _at_dead(world, records: list[dict]) -> dict:
     """at_dead and casts_at_dead (see the top): her attacks whose target as the stack chose it (its 'attack' record:
     behavior.attacks, the kind, platform and x it was seen at) had died DEAD_BEFORE_S or less before the choice, within
@@ -884,7 +887,7 @@ def _at_dead(world, records: list[dict]) -> dict:
         if any(t - DEAD_BEFORE_S <= dt <= t and kind == r.get("kind") and plat == r.get("platform")
                and abs(x - r["x"]) <= DEAD_NEAR for dt, kind, plat, x in deaths):
             n += 1
-            casts += r.get("key") == "lucky_seven"
+            casts += r.get("key") in SKILL_KEYS
     return {"at_dead": n, "casts_at_dead": casts}
 
 
@@ -897,7 +900,7 @@ def _at_dead_ids(world) -> dict:
     log = getattr(world, "aim_log", [])
     dead = [a for a in log if a[3] in ("her", "rival")]
     return {"at_dead_hers": sum(a[3] == "her" for a in log), "at_dead_others": sum(a[3] == "rival" for a in log),
-            "casts_at_dead_id": sum(a[1] == "lucky_seven" for a in dead), "aims": len(log),
+            "casts_at_dead_id": sum(a[1] in SKILL_KEYS for a in dead), "aims": len(log),
             "live_taken": len(getattr(world, "live_taken", []))}
 
 

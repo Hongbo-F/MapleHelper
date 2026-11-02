@@ -133,6 +133,8 @@ from .. import directions
 from ..attack import reach
 from ..attack.danger import touch_taken
 from ..behavior import pet as pet_care
+from ..character import Search
+from ..classes.magician import SEARCH as CLAW_SEARCH
 from ..control.actions import DAMAGE_SHOWS_MS, STAR_DELAY_MS
 from ..localization import monsters as monster_data
 from ..localization.mapdata import PORTAL_BOX, PORTAL_EXIT, MapModel, Platform, Rope
@@ -407,6 +409,83 @@ PET_MP = 0.05
 # the key, and her reckoning took a cast off a frame shown under 0.21 s after its key that showed it already, one cast
 # low (behavior.attacks; right live): 2.4 regular throws a run for 'MP' with a cast's MP hers.
 MP_SHOWS_MS = DAMAGE_SHOWS_MS
+# The magician's Magic Claw (Her.magic, SimMagic; from 2026-11-02, the roadmap of the day's three recordings, its item 8:
+# D:/MapleHelper-scratch/rec-analysis/plans/ROADMAP.md, plan-simulator.md S5, critique-simulator.md), as the game casts
+# it, not as her stack believes it (classes.magician's placeholders, attack.magic's swaps of attack.reach), so the
+# world shows where her stack's belief is off. RiceBaby at level 32 on Tree Dungeon, master 40ba190's grinds of
+# 2026-11-02 00:09-00:53 (R1-R3, D:/MapleHelper-scratch/golden-clips/ricebaby-grind-20261102-*: lossless frames at 15 fps
+# and the hour's telemetry):
+# - its pick: the client's search for an aimed spell (classes.magician.SEARCH: from 50 ahead of her to 300 in bands 20
+#   wide, band k's window 28 -/+ (50 + 20 k) // 4 over her feet, the first band any body overlaps, one in it drawn),
+#   through walls and floors alike (no line: the user, 2026-10-27, settled), from the ground only (a press in the air
+#   does nothing: no MP, no lock; the user, settled), never behind her nor within its first 50, no swipe up close;
+# - CLAW_HIT: a hit's damage before the monster's defence, a whole number from 157 to 181, two a cast on the one
+#   monster (attackCount 2): fitted by most likelihood to the hour's 261 first bars of a Horny Mushroom (403 HP, its
+#   MDDamage 0) under full within 1.5 s of her cast at one (D:/MapleHelper-scratch/recfix/sim-mage/scripts/claw_fit.py:
+#   p10 322, median 334, p90 359 a cast; within 2 log-likelihood 156-157 to 180-182), as her own damage book has it
+#   (lab/characters/magician/damage.json's fit at 00:51: 157-183). So a Horny always takes 2 casts (at most 362 a cast)
+#   and a Green Mushroom (233 HP, MDDamage 30) 1 (at least 314 x 100 / 130 = 241): R1-R3's kills, 2 casts a Horny and
+#   1 a Green. Against MDDamage as against PDDamage (x 100 / (MDD + 100)), the stack's own prior (attack.choice.need):
+#   not measured (only the Green has any, and one cast kills it whatever the form);
+# - CLAW_LOCK_S: the next cast taken 0.80 s after the key (the port's, RustMS: 800 ms of swingO1-O3 frames). The hour's
+#   783 casts came back to back at 0.846-0.854 s (219) or 0.92-0.96 s (199), one frame apart at 15 fps, none under 0.80
+#   (plans/work/simulator/mage_facts.txt): a bound, the lock at most about 0.85 s less the key's jitter;
+# - CLAW_SHOWS_S: her hit shows on the monster (its flinch and push, its numbers, its death drawn: Realism.dies_late)
+#   0.53 s after the key, the same wherever it is (no flight): R2's frames, a kill's monster seen alive 8 frames after
+#   the key at the median (4-10) and dying from the next (rec-analysis/r23-verify-monsters/out/castgap2.txt);
+# - CLAW_HIDDEN: a monster her cast hurt is lost under her hit's effect (83 x 94, 570 ms [data]) 0.4-1.0 s after it shows
+#   (Noise.hit_hidden's for her, where the presets have the star's 1-3 s): R2's castgap, re-found 0.8-1.6 s after the key,
+#   a median about 1.2;
+# - her MP: 20 a cast (Magic Claw's mpCon at its level 20 [data]; Her.cast_mp), and with less the game refuses it with
+#   MP_REFUSAL on the message bar (no cast, no lock), as live. Her pet's MP potion 187 MP (Her.mp_potion: R2's frames,
+#   her HUD's number 60 -> 247, 71 -> 258 and 83 -> 270, D:/MapleHelper-scratch/recfix/sim-mage/mp_drinks2.png), drunk
+#   under 6% of her 1549 MP (MAGE_PET_MP: the three at 60-83, none seen at 94; her bar reads 0.0 under 74 MP). Her MP's
+#   own rise (Her.mp_regen, MAGE_MP_REGEN): her HUD's number ticks 18 MP every 10.0 s (R2's frames: 30 on that grid in
+#   300 s; 1.8 MP/s, as the hour's stretches with no cast by her bar, 1.82: scripts/mp_regen.py, mp_ticks.py), and the
+#   hour's balance asks 2.4 (783 casts x 20 = 15,660 MP, less the bar's net fall of 655 and a level's refill of 968, less
+#   48 drinks of 187 = 8,976: 5,061 MP in 2,112 s; the rest of it +9 MP steps seen twice on R2's numbers, not explained):
+#   the balance's, so her MP potions a minute come out as live;
+# - her regular attack (a wand's swing up close) does nothing here: its damage isn't known and her stack never keys it
+#   (Attacks.no_regular); counted (World.swings).
+MP_REFUSAL = "You don't have enough MP to use this skill."
+CLAW_HIT = (157, 181)
+CLAW_LOCK_S = 0.80
+CLAW_SHOWS_S = 0.53
+CLAW_HIDDEN = (0.4, 1.0)
+MAGE_MP_REGEN = 2.4
+MAGE_PET_MP = 0.06
+MAGE_MP_POTION = 187.0
+
+
+@dataclass(frozen=True)
+class SimMagic:
+    """Magic Claw as the world casts it (Her.magic; the comment above CLAW_HIT has each from where): its search, its
+    hits a cast and a hit's damage before the monster's defence (MDDamage), its lock, when its hit shows on the monster,
+    how long that monster is lost under it, and its misses (none measured: her damage book judged 4 casts, 2 of them
+    misses, too few to fit; 0)."""
+    search: Search = CLAW_SEARCH
+    hits: int = 2
+    hit: tuple[int, int] = CLAW_HIT
+    lock_s: float = CLAW_LOCK_S
+    shows_s: float = CLAW_SHOWS_S
+    hidden: tuple[float, float] = CLAW_HIDDEN
+    miss: float = 0.0
+
+
+def magic_band(s: Search, near: float, far: float, bottom: float, top: float) -> int | None:
+    """The first band of search `s` (character.Search: Magic Claw's, SimMagic.search) a body overlaps, from `near` to
+    `far` ahead of her and from `bottom` to `top` above her feet (reach.body_box), or None: as reach.search_band runs the
+    thief's star search, by the search's own numbers (never attack.reach's, which attack.magic sets to her stack's
+    belief), the overlap strict as the client's (RustMS ShotPath.h:335-339)."""
+    if far <= s.start or near >= s.range or far <= near:
+        return None
+    first = max(0, int((near - s.start) // s.step))
+    last = min(s.bands - 1, math.ceil((far - s.start) / s.step) - 1)
+    for k in range(first, last + 1):
+        floor, roof = s.window(k)
+        if bottom < roof and top > floor:
+            return k
+    return None
 # A touch by a monster within this many s of its respawn came from its spawn point, onto her or beside her (World.
 # fresh_log): what a waiting place by a spawn point costs.
 FRESH_S = 1.5
@@ -1087,6 +1166,10 @@ class Her:
                                  # (physics.SHOE), as the world had it for everyone until 2026-11-02. Apart from the
                                  # planner's, a wrong speed in her profile shows in the world (her steps overshoot, her
                                  # jumps after a run carry farther than planned), as it did live (MAGE_32)
+    mp_regen: float = MP_REGEN   # MP a second she regains all the while (Her.mp kept)
+    magic: SimMagic | None = None  # her skill key's attack Magic Claw as the game casts it (SimMagic: the magician's,
+                                 # MAGE_32), her MP its ammunition (`cast_mp` a cast, nothing with less, MP_REFUSAL
+                                 # said); None: the thief's attacks as above
 
 
 def her_shoe(her: Her) -> body.Shoe:
@@ -1136,6 +1219,26 @@ LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=60
 # potions as above.
 LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=623.0, pet_mp=PET_MP, potion=HP_POTION,
                star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0, claw=(15, 24), avoid=LEVEL_25_AVOID)
+# The magician, RiceBaby, as she grinds Tree Dungeon from 2026-11-02 (ROADMAP item 8; the user, that morning: today's
+# measurements are the simulator's truth for her), from R1-R3 and the hour's telemetry (00:17:48-00:53:06; the comment
+# above CLAW_HIT has her Magic Claw and her MP):
+# - level 32, HP 858, MP 1549, W.DEF 75, AVOID 16: her stat window, read 40 times that night (lab/characters/magician/
+#   her_stats.json; INT 143, MAGIC 126). At AVOID 16 every touch hurts (game_hit_chance: 0 MISS in the hour's 170
+#   touches, the formula's 8% and less on Tree's kinds), at DEF 75 a Horny Mushroom's 110-130 and a Green's 50-58, as
+#   live (attack.danger.touch_taken, meowdb's formula);
+# - her walk 148.2 units/s (walk_speed: the median of the hour's 81 steady walks, P01), where her profile plans 125
+#   (SPEED 100): the world walks her at hers, the planner at its own;
+# - her pet drinks Meat, 160 HP (MEAT_HP: on R2's frames her HUD's number 606 -> 766, 601 -> 761, 639 -> 799 and
+#   562 -> 722, the frame after a touch; D:/MapleHelper-scratch/recfix/sim-mage/hp_seq.png, hp_seq2.png; the hour's 92
+#   rises all 160; the game data's spec hp 160, where the user remembered 150), under 75% of her HP (MAGE_PET_HP: the
+#   hour's 55 drops drunk at, all at 0.748 or under, none at 0.752 or over, held 1.5-30 s: critique-simulator-work/
+#   pet_threshold.py; her live profile still has 0.55); her one pet, a Snail, taking nothing (her pets' pick-ups aren't
+#   known: Realism.pets 0);
+# - her HP's own regeneration isn't kept (the thief's isn't either): live it covered about a tenth of her touches' HP.
+MAGE_PET_HP = 0.75
+MAGE_32 = Her(max_hp=858.0, level=32, exp=0, defence=75.0, avoid=16.0, pet=MAGE_PET_HP, potion=MEAT_HP, mp=1549.0,
+              cast_mp=20.0, mp_regen=MAGE_MP_REGEN, pet_mp=MAGE_PET_MP, mp_potion=MAGE_MP_POTION, walk_speed=148.2,
+              magic=SimMagic())
 
 
 # --- monsters ----------------------------------------------------------------------------------------
@@ -1958,6 +2061,9 @@ class World:
         self.casts_nothing = 0          # ... and of her casts, those whose stars hit nothing (none picked, a dead one,
                                         # or stopped by terrain): MP thrown at nothing
         self.attacks = 0                # attacks her keys made, either key
+        self.attack_locked = 0          # attack keys pressed inside the last attack's lock (ignored by the game)
+        self.air_presses = 0            # (Her.magic) her attack keys pressed in the air: nothing (cast from the ground
+        self.swings = 0                 # only), and her regular attack's swings (her wand: no damage kept)
         # Every attack the game took, as it came out (_attack): (when its key went out, s of the run; the name of the
         # key plan that pressed it, as the stack's player was sent it; "ground" or "air" when it started; how far she
         # was above the platform she last stood on then; the kind of the monster it picked, or None; what came of it:
@@ -2068,6 +2174,8 @@ class World:
         self.invulnerable_ms = -10_000
         # The game data's level of each kind on the map (MapModel.mob_level, by kind): her hit check's (evade_chance)
         self._mob_levels = {kind_of(name): level for name, level in getattr(model, "mob_level", {}).items()}
+        # ... and each kind's defence against magic (MapModel.mob_mdd, MDDamage): her Magic Claw's (Her.magic)
+        self._mob_mdd = {kind_of(name): mdd for name, mdd in getattr(model, "mob_mdd", {}).items()}
         self.inventory_full = inventory_full
         # Her inventory's tabs (Realism.full_tabs, fills_after; `inventory_full`: every item tab): those full, when each
         # filled (s), and the items picked into each
@@ -2182,7 +2290,9 @@ class World:
         info = None if mob_id is None else mob_info(int(mob_id))
         half, height = _body_of(kind, bodies.get(kind), info)
         hits = float(hits_of(kind, info))
-        if self.character.spread and info is not None and info.hp > 0:  # in average stars, not whole ones
+        if self.character.magic is not None and info is not None and info.hp > 0:  # (her Magic Claw: its damage
+            hits = info.hp * (self._mob_mdd.get(kind, 0.0) + 100) / 100 / STAR_MEAN  # before MDDamage, in STAR_MEANs)
+        elif self.character.spread and info is not None and info.hp > 0:  # in average stars, not whole ones
             hits = info.hp * (info.pdd + 100) / 100 / STAR_MEAN
         hops = self.model.mob_hops
         jumps = JUMPERS and bool(hops[name] if name in hops else any(v for k, v in hops.items() if kind_of(k) == kind))
@@ -2287,7 +2397,7 @@ class World:
         self._touch()
         self._closeness()
         if self.character.mp > 0 and self.mp < 1.0:
-            self.mp = min(1.0, self.mp + MP_REGEN * dt / self.character.mp)
+            self.mp = min(1.0, self.mp + self.character.mp_regen * dt / self.character.mp)
         self.ms += TICK_MS
         if self.ms % PATH_EVERY_MS == 0:
             self.path_log.append((self.t, self.plat.id if self.mode == "ground" and self.plat is not None else None,
@@ -2561,6 +2671,10 @@ class World:
                 self.chat = (self.t, ROPE_REFUSAL)
                 return
             if self.ms < self.attack_lock_ms:
+                self.attack_locked += 1  # (inside the last attack's lock: the game ignores it)
+                return
+            if self.character.magic is not None:
+                self._press_magic(action, at)
                 return
             skill = action == "skill" and self.character.skill is not None
             if skill and self.darts_left is not None and self.darts_left < SKILL_STARS:
@@ -3111,6 +3225,110 @@ class World:
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
                                   body=(self.top(m), m.half))
 
+    def _press_magic(self, action: str, at: float) -> None:
+        """Her attack key (`action` 'attack', her wand's swing, or 'skill', Magic Claw) pressed outside the lock, as the
+        game takes it for the magician (Her.magic): in the air nothing at all (no MP, no lock, no attack: her casts are
+        from the ground only); a cast with too little MP refused (_cast: MP_REFUSAL on the message bar, no lock); else
+        the attack locks her for its lock (SimMagic.lock_s; a swing the thief's ATTACK_LOCK) and starts JUMP_LAG after
+        its key (_aim_magic)."""
+        magic = self.character.magic
+        what = "Magic Claw" if action == "skill" else "her swing"
+        if self.mode != "ground":
+            self.air_presses += 1
+            self.note(f"{what} pressed in the air: nothing")
+            return
+        skill = action == "skill"
+        if skill and not self._cast():
+            return  # too little MP: refused, said (MP_REFUSAL), no lock
+        self.attack_lock_ms = self.ms + int(round((magic.lock_s if skill else ATTACK_LOCK) * 1000))
+        self.attack_key_at = at
+        self.attacks += 1
+        step = self._acts(at, self._lag(action, LAGS.on, LAGS.sd_on))
+        self._push(self.ms_of(at + JUMP_LAG), "aim", (self.ms, skill, self._key_tag, step))
+
+    def magic_pick(self, facing: str) -> SimMonster | None:
+        """The live monster Magic Claw's search from her feet now picks on her `facing` side (SimMagic.search: the
+        client's for an aimed spell, by the bodies as the star's search takes them, World.top; whatever the terrain,
+        nothing stops it): of those whose body overlaps one of its bands (magic_band), the first band's; of those, one
+        drawn at random (seeded, per attack), as search_pick."""
+        s = self.character.magic.search
+        t, d, band, first = self.t, directions.sign(facing), None, []
+        for m in self.monsters:
+            if not m.alive:
+                continue
+            mx = m.at(t)
+            k = magic_band(s, *reach.body_box((mx - self.x) * d, m.y(mx) - self.y, self.top(m), m.half))
+            if k is None:
+                continue
+            if band is None or k < band:
+                band, first = k, [m]
+            elif k == band:
+                first.append(m)
+        if len(first) > 1:
+            return first[int(self.chance("band") * len(first))]
+        return first[0] if first else None
+
+    def _aim_magic(self, key_ms: int, skill: bool, tag: str) -> None:
+        """Her attack keyed at `key_ms` starts (Her.magic): Magic Claw picks by its search from where she is now
+        (magic_pick), her wand's swing nothing (its damage not kept); its damage the server's DAMAGE_SHOWS_MS after the
+        key (_attack_magic), on that monster wherever it gets to."""
+        magic = self.character.magic
+        self.attack_ms = (self.ms, key_ms + int(round((magic.lock_s if skill else ATTACK_LOCK) * 1000)))
+        facing = self.facing
+        due = [way for when, way in self.meant if when <= self.attack_key_at + 1e-6]
+        meant = due[-1] if due else facing
+        if due:
+            self.meant = [(when, way) for when, way in self.meant if when > self.attack_key_at + 1e-6]
+            self.attacks_meant += 1
+            if facing != due[-1]:
+                self.wrong_way += 1
+                self.note(f"attack meant {due[-1]} goes {facing}")
+        target = self.magic_pick(facing) if skill else None
+        if not skill:
+            self.swings += 1
+        up = None if target is None else self.y - target.y(target.at(self.t))
+        near = self._nearest_ahead(meant)
+        pick = (False, None, None if near is None else round(near[0], 1), None if near is None else round(near[1], 1),
+                near is not None and near[2] is target, skill)
+        how = (key_ms / 1000, tag.rsplit("_", 1)[0], self.mode, 0.0, None if target is None else target.kind,
+               None if up is None else round(up, 1), pick)
+        damage = DAMAGE_SHOWS_MS if self.realism.damage_ms is None else self.realism.damage_ms
+        self._push(key_ms + damage, "star", (facing, target, False, None, skill, how, key_ms))
+
+    def _attack_magic(self, facing: str, m: SimMonster | None, skill: bool, how: tuple | None,
+                      key_ms: int | None) -> None:
+        """Magic Claw's damage (Her.magic), the server's DAMAGE_SHOWS_MS after its key, on the monster it picked when
+        it started: SimMagic.hits hits each drawn from SimMagic.hit before the monster's MDDamage (its HP is kept in
+        damage before that defence: _monster), or a miss (SimMagic.miss); its death then, or its flinch, push and
+        hiding as her hit shows on it (SimMagic.shows_s after the key, no flight: _struck)."""
+        magic = self.character.magic
+        what = "Magic Claw" if skill else "her swing"
+        if m is None or not m.alive:
+            self.note(f"{what} {facing}: no hit")
+            self._logged(how, "nothing")
+            self.casts_nothing += skill
+            return
+        mx = m.at(self.t)
+        dx = mx - self.x
+        shows = self.ms if key_ms is None else max(self.ms, key_ms + int(round(magic.shows_s * 1000)))
+        if magic.miss and self.chance("miss") < magic.miss:
+            self.note(f"Magic Claw misses {m.kind} #{m.idx} at {dx:+.0f}")
+            self._logged(how, "miss")
+            feet = m.platform.y_at(m.platform.clamp(mx))
+            self.misses = [p for p in self.misses if p[0] > self.t - 5.0] + [(shows / 1000, mx, feet, m.height)]
+            return
+        lo, hi = magic.hit
+        damage = sum(lo + int(self.chance(f"damage:{k}") * (hi - lo + 1)) for k in range(magic.hits)) / STAR_MEAN
+        before = m.hp
+        m.hp = round(m.hp - damage, 6)
+        self._logged(how, "hit" if m.hp > 1e-9 else "kill")
+        if m.hp > 1e-9:
+            self.note(f"Magic Claw hits {m.kind} #{m.idx} at {dx:+.0f} ({m.hp * STAR_MEAN:.0f} of "
+                      f"{m.hp_max * STAR_MEAN:.0f} left before its defence)")
+            self._push(shows, "struck", (m, False, "Magic Claw"))
+            return
+        self._kill(m, mx, "Magic Claw", key_ms, min(1.0, max(0.0, before / m.hp_max)))
+
     def _aim(self, key_ms: int, skill: bool = False, tag: str = "", step: int | None = None) -> None:
         """The attack keyed at `key_ms` starts: it picks its target from where she is now, and its damage
         is the server's DAMAGE_SHOWS_MS after the key (_attack). On the ground it takes one of the claw's stances (drawn,
@@ -3120,7 +3338,11 @@ class World:
         alone ('area'), or as on the ground from where she is then ('v83'). Each picks by the bodies
         alone; then, as the client does, the line to a star's pick alone is checked (sight_stop): stopped, the
         attack hits nothing, and no other monster takes it. In the air an arrow acted on at its key's `step` turned
-        her too late for it (AIR_TURN_SAME_STEP): it goes the way she faced before."""
+        her too late for it (AIR_TURN_SAME_STEP): it goes the way she faced before. The magician's (Her.magic):
+        _aim_magic."""
+        if self.character.magic is not None:
+            self._aim_magic(key_ms, skill, tag)
+            return
         self.attack_ms = (self.ms, key_ms + int(ATTACK_LOCK * 1000))  # its animation plays until the lock ends
         facing = self.facing
         if (AIR_TURN_SAME_STEP and step is not None and self._air_turn is not None and self._air_turn[0] == step
@@ -3183,7 +3405,11 @@ class World:
         started (_aim), a claw swipe or a star; none if what stops a star stopped it (`stop`: the monster picked, and
         the foothold). Its HP (and bar), or its death and her EXP, then; its flinch, its push and its damage numbers (it
         hides under them: Noise.hit_hidden) as the star lands, STAR_DELAY after the key (_struck). `skill`: Lucky
-        Seven's (Her.skill), its stars' damage on a swipe's pick too. `how`: what _aim knew of it, for attack_log."""
+        Seven's (Her.skill), its stars' damage on a swipe's pick too. `how`: what _aim knew of it, for attack_log.
+        The magician's (Her.magic): _attack_magic."""
+        if self.character.magic is not None:
+            self._attack_magic(facing, m, skill, how, key_ms)
+            return
         if stop is not None:
             picked, f = stop
             where = f"the wall at x {f.x1:.0f}" if f.x1 == f.x2 else f"the floor at y {f.y1:.0f}"
@@ -3282,7 +3508,10 @@ class World:
         her = self.character
         if self.mp * her.mp < her.cast_mp - 1e-9:
             self.no_mp += 1
-            self.note(f"Lucky Seven with {self.mp * her.mp:.0f} MP: not enough, nothing thrown")
+            if her.magic is not None:  # (the magician's: the game says so on the message bar)
+                self.chat = (self.t, MP_REFUSAL)
+            self.note(f"{'Magic Claw' if her.magic is not None else 'Lucky Seven'} with {self.mp * her.mp:.0f} MP: not "
+                      f"enough, nothing {'cast' if her.magic is not None else 'thrown'}")
             return False
         before = self.mp
         self.mp -= her.cast_mp / her.mp
@@ -3301,9 +3530,16 @@ class World:
         return min(1.0, max(0.0, self.mp - sum(d for _, d in self._mp_unshown)))
 
     def _pushes(self, m: SimMonster, swipe: bool) -> bool:
-        """Whether this hit pushes monster `m` back (PUSH_BY_DAMAGE: drawn by push_chance, seeded by the tick)."""
+        """Whether this hit pushes monster `m` back (PUSH_BY_DAMAGE: drawn by push_chance, seeded by the tick); her
+        Magic Claw's (Her.magic) by its hit's damage (SimMagic.hit) after the monster's MDDamage: on Tree Dungeon every
+        one of hers (157 and up, against a Horny Mushroom's `pushed` 40 and a Green's 25 after its 30)."""
         if not PUSH_BY_DAMAGE or m.info is None or m.info.pushed <= 1:
             return True
+        if (magic := self.character.magic) is not None:
+            lo, hi = magic.hit
+            mdd = self._mob_mdd.get(m.kind, 0.0)
+            p = sum(1 for d in range(lo, hi + 1) if d * 100 / (mdd + 100) >= m.info.pushed) / (hi - lo + 1)
+            return p >= 1.0 or (p > 0.0 and self.chance(f"push:{m.idx}") < p)
         p = push_chance(m.info.pushed, m.info.pdd, swipe)
         return p >= 1.0 or (p > 0.0 and self.chance(f"push:{m.idx}") < p)
 
@@ -3311,7 +3547,8 @@ class World:
         t = self.t
         m.alive, m.died_at, m.died_x, m.killed_by = False, t, mx, "her"
         if self.realism.dies_late and key_ms is not None:  # drawn alive, walking on, until her star lands
-            lands = key_ms / 1000 + DIE_LANDS_S + abs(mx - self.x) / DIE_FLIGHT
+            lands = key_ms / 1000 + (DIE_LANDS_S + abs(mx - self.x) / DIE_FLIGHT if self.character.magic is None
+                                     else self.character.magic.shows_s)  # (her Magic Claw: no flight)
             if lands > t:  # (where it gets to on a copy: its own segments go on as its frames are drawn)
                 m.drawn_alive, m.bar_drawn = lands, bar
                 m.died_at, m.died_x = lands, m.ghost().at(lands)
@@ -3699,6 +3936,8 @@ class World:
                 **({"left_map_at": round(self.left_map_at, 3)} if self.left_map_at is not None else {}),
                 **({"pet_potions": self.pet_potions} if self.pet_potions else {}),
                 **({"casts": self.casts, "mp_potions": self.mp_potions} if self.casts else {}),
+                **({"no_mp": self.no_mp, "air_presses": self.air_presses, "swings": self.swings,
+                    "attack_locked": self.attack_locked} if self.character.magic is not None else {}),
                 **({"darts": self.darts_left, "no_darts": self.no_darts} if self.darts_left is not None else {}),
                 **({"refused": self.refused} if self.refused else {}),
                 **({"key_windows": self.key_windows, "keys_in_window": self.keys_in_window,
@@ -3724,8 +3963,8 @@ def _body_of(kind: str, b, info: MobInfo | None) -> tuple[float, float]:
 
 
 ACTIONS = (("left", "left"), ("right", "right"), ("up", "up"), ("down", "down"), ("jump", "jump"),
-           ("attack", "attack"), ("lucky_seven", "skill"), ("pick_up", "pick"), ("hp_potion", "potion"),
-           ("pet_food", "pet_food"))
+           ("attack", "attack"), ("lucky_seven", "skill"), ("magic_claw", "skill"), ("pick_up", "pick"),
+           ("hp_potion", "potion"), ("pet_food", "pet_food"))
 
 
 def _actions(keys: GameKeys, game: tuple = ()) -> dict[str, str]:
