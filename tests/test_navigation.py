@@ -1640,6 +1640,8 @@ def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(m
     the rope's top as she gets there, so waiting can't clear the way."""
     from dataclasses import replace
 
+    from gamelab import telemetry
+    from gamelab.control import navigator as nv
     from gamelab.control.navigator import WAIT_LOOKS, _key
     from gamelab.motion import flow
     # (the hop timed for one standing, as first built: this look's sighting is as old as the clock, and walking at her
@@ -1662,10 +1664,19 @@ def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(m
     regardless = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)  # then on regardless
     assert [leg.move.kind for leg in regardless[0]] == ["climb"] and st.waited == 0
     walking = [replace(monsters[0], vx=100.0)]  # seen walking on D: no waiting
-    assert [leg.move.kind for leg in nav._meet(st, s, path, walking, legs, why, 0.0, 0.0)[0]] == ["climb"]
+    with telemetry.captured() as records:
+        assert [leg.move.kind for leg in nav._meet(st, s, path, walking, legs, why, 0.0, 0.0)[0]] == ["climb"]
     assert st.waited == 0
+    (rec,) = [r for r in records if r.get("kind") == "backstop"]  # (its record: safe to stand, not worth waiting)
+    assert rec["why_not"]["safe"] is True and rec["why_not"]["worth"] is False
     standing = [replace(monsters[0], vx=0.0)]  # seen standing: it walks off sooner or later, so she waits
     assert nav._meet(st, s, path, standing, legs, why, 0.0, 0.0) is True and st.waited == 1
+    monkeypatch.setattr(nav, "_safe_to_stand", lambda *a, **k: False)  # nowhere safe to stand: worth it isn't asked
+    monkeypatch.setattr(nv, "EVADE", False)
+    with telemetry.captured() as records:
+        assert nav._meet(st, s, path, standing, legs, why, 0.0, 0.0)[0]
+    (rec,) = [r for r in records if r.get("kind") == "backstop"]
+    assert rec["why_not"]["safe"] is False and rec["why_not"]["worth"] is None
 
 
 def test_past_meet_s_without_a_move_that_arrives_she_goes_on_regardless(model, monkeypatch):

@@ -1572,7 +1572,7 @@ class Navigator:
         safe = worth = None  # (why she didn't wait, as far as it was asked: the backstop's record says)
         if st.waited < WAIT_LOOKS:
             safe = self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
-            worth = safe and self._worth_waiting(move, start, monsters, linger, mo)
+            worth = self._worth_waiting(move, start, monsters, linger, mo) if safe else None  # (None: not asked)
             if worth:
                 st.waited += 1
                 st.trip.waits += 1

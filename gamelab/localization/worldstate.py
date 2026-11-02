@@ -652,7 +652,9 @@ class WorldStep:
             reading = exp_number.read(s.exp_box) if s.exp_box is not None else None
             if changed or (reading is not None and reading.exp is not None):
                 data = reading_data(reading)
-                if changed and self.meter.at is not None:  # (what it said before, for a client that never read it)
+                # (what it said before, for a client that never read it: only where that's the number just before
+                # this change, no change since unread, `run`, nor a jump waiting for a second reading, `held`)
+                if changed and self.meter.at is not None and not self.meter.run and self.meter.held is None:
                     data["before"] = list(self.meter.at)
                 out.append(Event("exp_gain" if changed else "exp_read", t, data=data))
             self.counts["exp gains"] += changed
