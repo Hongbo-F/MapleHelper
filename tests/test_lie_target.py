@@ -1,6 +1,7 @@
 """The Lie Detector target tracker (perception.lie_target): the outline score with off-board points typical, the white
-target's template, and a drawn round (a spinning star white through the countdown, then only its embossed rim, turning
-back near the left edge, among look-alikes printed on the board) followed from a recorded clip's frames."""
+target's template, the board's scroll from the optical flow, and a drawn round (a spinning star white through the
+countdown, then only its embossed rim, turning back near the left edge, among look-alikes printed on the board)
+followed from a recorded clip's frames."""
 import json
 
 import cv2
@@ -73,6 +74,17 @@ def test_an_off_board_point_counts_as_a_typical_point_neither_hit_nor_miss():
     seen = ok.mean()
     assert 0.3 < seen < 0.7
     assert lt.score(resp, pts, nrm, half, 0.0, 0.4)[0] == pytest.approx(seen + (1 - seen) * 0.4)
+
+
+def test_the_boards_scroll_is_its_optical_flows_median_over_the_boards_own_pixels():
+    board = texture()
+    moved = cv2.warpAffine(board, np.float32([[1, 0, 3.4], [0, 1, -2.2]]), (750, 500), borderMode=cv2.BORDER_REFLECT)
+    moved[200:300, 300:420] = (60, 255, 60)  # a green patch (the cursor's colour): foreign, left out
+    grey = [cv2.cvtColor(b, cv2.COLOR_BGR2GRAY) for b in (board, moved)]
+    flow = cv2.DISOpticalFlow_create(2).calc(grey[0], grey[1], None)
+    clean = (lt.foreign_mask(board) == 0) & (lt.foreign_mask(moved) == 0)
+    assert not clean[250, 360]
+    assert lt.flow_shift(flow, clean) == pytest.approx([3.4, -2.2], abs=0.3)
 
 
 def test_the_white_target_gives_its_template_the_rim_outside_its_fill():

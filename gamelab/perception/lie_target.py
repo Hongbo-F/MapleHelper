@@ -19,6 +19,7 @@ How:
   - d, the decoy check: the same outline at the same angle where the board's scroll puts the pose BACK_S earlier
     (a printed decoy rides the board; the target moves on its own); off-board points typical there too;
   - flow: the optical flow off the board's scroll (the cursor masked: its own motion isn't the target's) along the rim;
+    the board's scroll itself is that flow's median over the board's own pixels (`flow_shift`);
   - must move: a particle moving with the board loses weight (the target almost never does);
   - turns: each frame TURN of the particles (TURN_EDGE within EDGE_PX of an edge) take a new direction at the
     target's usual speed, pointing away from a near edge, so a turn is followed in a frame or two.
@@ -184,41 +185,23 @@ def foreign_mask(board: np.ndarray) -> np.ndarray:
     return cv2.dilate(bad, np.ones((11, 11), np.uint8)) * 255
 
 
-def _phase_shift(ga, gb, ma):
-    fa, fb = ga.astype(np.float32), gb.astype(np.float32)
-    fa[ma == 0] = fa[ma > 0].mean()
-    win = cv2.createHanningWindow((ga.shape[1], ga.shape[0]), cv2.CV_32F)
-    (dx, dy), _ = cv2.phaseCorrelate(fa, fb, win)
-    return np.array([dx, dy])
+def flow_shift(flow: np.ndarray, clean: np.ndarray) -> np.ndarray:
+    """How far the board's texture moved between two frames (px): the median of their optical flow over the board's
+    own pixels (`clean`: neither frame's pixel foreign), every 4th pixel each way. On the 11 clips' frames it is
+    0.1-0.2 px from phase correlation refined by ECC (0.5 at most), which it replaced (2026-11-02): the flow is the
+    residual flow's anyway, and ECC took 23 ms a frame. (The board's path is a fixed ellipse in time since START,
+    1 rad/s, 147 x 97 px/s, but the frames' times are their captures': a frame stamped 139 ms after the one before
+    can show 18 ms of it, so the board is measured, not predicted.)"""
+    f, ok = flow[::4, ::4], clean[::4, ::4]
+    if ok.sum() < 100:
+        return np.zeros(2)
+    return np.array([np.median(f[..., 0][ok]), np.median(f[..., 1][ok])], np.float64)
 
 
-def _ecc_shift(ga, gb, ma, init):
-    """Translation s with board point x in A at x + s in B (ECC on grey levels, masked), or None."""
-    warp = np.array([[1, 0, -init[0]], [0, 1, -init[1]]], np.float32)
-    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 80, 1e-4)
-    try:
-        _, warp = cv2.findTransformECC(gb, ga, warp, cv2.MOTION_TRANSLATION, crit, ma, 5)
-    except cv2.error:
-        return None
-    return -warp[:, 2].copy()
-
-
-def board_shift(prev: np.ndarray, cur: np.ndarray) -> np.ndarray:
-    """How far the board's texture moved from prev to cur (px): phase correlation, refined by ECC, foreign pixels
-    masked."""
-    ga, gb = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY), cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
-    ma, mb = ((foreign_mask(b) == 0).astype(np.uint8) * 255 for b in (prev, cur))
-    p = _phase_shift(ga, gb, ma)
-    e = _ecc_shift(ga, gb, mb, p)
-    return np.asarray(e if e is not None else p, np.float64)
-
-
-def residual_flow(prev, cur, shift, dis, cap: float = 10.0) -> np.ndarray:
-    """Per pixel, how far the frame moved off the board's scroll since the last (DIS flow minus the scroll), capped and
-    scaled to [0, 1]; the cursor (green crosshair, either frame) masked."""
-    a, b = (cv2.cvtColor(x, cv2.COLOR_BGR2GRAY) for x in (prev, cur))
-    f = dis.calc(a, b, None)
-    r = np.hypot(f[..., 0] - shift[0], f[..., 1] - shift[1])
+def residual_flow(flow, shift, prev, cur, cap: float = 10.0) -> np.ndarray:
+    """Per pixel, how far the frame moved off the board's scroll since the last (the optical flow minus the scroll),
+    capped and scaled to [0, 1]; the cursor (green crosshair, either frame) masked."""
+    r = np.hypot(flow[..., 0] - shift[0], flow[..., 1] - shift[1])
     green = (cv2.inRange(cv2.cvtColor(cur, cv2.COLOR_BGR2HSV), GREEN_LO, GREEN_HI)
              | cv2.inRange(cv2.cvtColor(prev, cv2.COLOR_BGR2HSV), GREEN_LO, GREEN_HI))
     r[cv2.dilate(green, np.ones((25, 25), np.uint8)) > 0] = 0
@@ -240,7 +223,7 @@ class TargetTracker:
         self.kb = max(1, round(BACK_S * fps))
         self.start_t = start_t
         self.seed, self.n = seed, n
-        self.history = []  # (t, board, features, shift from the frame before) for the last kb + 1 frames
+        self.history = []  # (t, board, features, shift from the frame before, grey, clean) for the last kb + 1
         self.template = None  # (rim points, normals, t0, blob area)
         self.dis = cv2.DISOpticalFlow_create(2)
 
@@ -257,9 +240,12 @@ class TargetTracker:
         """One frame (a 750 x 500 board crop, BGR) at time t (s): {"x", "y", "angle" (rad), "score", "white"} or None
         before the target has been seen white."""
         prev = self.history[-1] if self.history else None
-        shift = board_shift(prev[1], board) if prev is not None else np.zeros(2)
+        grey = cv2.cvtColor(board, cv2.COLOR_BGR2GRAY)
+        clean = foreign_mask(board) == 0
+        flow = self.dis.calc(prev[4], grey, None) if prev is not None else None
+        shift = flow_shift(flow, prev[5] & clean) if prev is not None else np.zeros(2)
         resp = features(board)
-        self.history.append((t, board, resp, shift))
+        self.history.append((t, board, resp, shift, grey, clean))
         del self.history[:-(self.kb + 1)]
         if self.start_t is None or t < self.start_t:
             blob = target_blob(board)
@@ -269,9 +255,9 @@ class TargetTracker:
                         "white": True}
         if self.template is None:
             return None
-        return self._filter(board, t, resp, shift, prev)
+        return self._filter(board, t, resp, shift, prev, flow)
 
-    def _filter(self, board, t, resp, shift, prev):
+    def _filter(self, board, t, resp, shift, prev, flow):
         pts, nrm, t0, _ = self.template
         n, rng, P = self.n, self.rng, self.P
         dt = max(1e-3, t - self.prev_t)
@@ -300,7 +286,7 @@ class TargetTracker:
         if back is not None:
             S = sum(h[3] for h in self.history[1:])  # the board's scroll since the look-back frame
             p0b = typical(back[2], pts, nrm, th)
-        rflow = residual_flow(prev[1], board, shift, self.dis) if MU and prev is not None else None
+        rflow = residual_flow(flow, shift, prev[1], board) if MU and prev is not None else None
         s, d, mo = np.zeros(n), np.zeros(n), np.zeros(n)
         keys = np.rint(np.degrees(P[:, 4]) / 2.0).astype(int)
         for k in np.unique(keys):
