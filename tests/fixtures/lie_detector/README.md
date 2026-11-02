@@ -53,3 +53,10 @@ scores the board 0.89 of its threshold (the board is told by its own, 1.25).
 The game's own pictures of all three Lie Detector games (the Violettas, the mouse mini-game and a third, read aloud,
 not seen yet) can be extracted with `python -m gamedata pictures UI/UI_000.wz AntiMacro.img LieDetector.img`
 (see gamedata's README). The image quiz's box isn't among these.
+
+`references/<clip>.json` (2026-11-02): the mouse mini-game's target, frame by frame, on the 11 recorded alarm clips
+(gamelab/lab/alarm_clips, not in git), as the user approved it on review: `centre` (board px, the 750 x 500 board) for
+each frame from START to the frame before the SUCCESS banner, the clip's folder, its rate, its board's first frame and
+START, and the frames fixed by hand (`fixed_by_hand`, clip frame numbers: 10-30 20:31's 441-450, its review frames
+136-145, were a straight line at constant speed between review frames 135 and 146, the outline faint there).
+`python -m gamelab lie-target` scores the tracker against them.

@@ -1270,6 +1270,25 @@ To check in game (none of this has been played):
 | `hud.py` | HP and MP from the bar colours; her EXP number, which only changes when she gains EXP (read only then); a monster's HP bar (its frame matched above the monster, its green rows read: Monster HP bars, below; 0.5 ms at 1366x768, 0.8 at half size of 1920x1080); the purple MISS or damage numbers when a monster touches her. |
 | `minimap.py`, `terrain.py` | Her yellow minimap dot, and other players' (see Other players); the ground under her; ropes and ladders on screen. Ropes are looked for only where the map's ropes can show: Senses hands perception the columns, 52 px either side of where her dot puts each (`ROPE_PAD`: all a rope can be off and still place her). 4.2 ms a look, against 31.4 for the whole screen with the rope colour test in numpy as before (in OpenCV now: the same pixels, checked on every colour; the whole screen 19) and 8.4 before each column was copied out of the screen for its colour test (OpenCV split a column viewed in place 8 times slower) and the shapes were made only in the box around the rope colour's pixels (58% of a column) and connected only around what was left of them (9%): the same ropes on all 31 saved 1920×1080 screenshots, over the whole screen and in random columns, and on 3,000 made-up strips. On 17 saved frames the ropes seen were 0-20 px from where her dot put them, and the same as on the whole screen. |
 | `lie_detector.py` | The Lie Detector's six forms (see above). A check of the screen takes 64.5 ms (the player's, 4 times a second, about 3 until 2026-10-24: The Lie Detector's recordings; 73.6 before its capture was turned into a picture of its own and the title's yellow tested in OpenCV, with the same scores). Most of it is matching the title's letters (about 35 ms) and the two half-size forms (about 19). The notice and the quiz's two forms (2026-10-25) add about 9 ms each, whatever a template's size: on a 1366x768 frame with the PC busy, 99-103 ms a check against 75-78 without them, about 0.4 of a core at 4 a second. Since 2026-10-26 the watchdog's looks match each form only around where it has always shown, 7 looks in 8, on a frame of the game's own size with its picture where it belongs (`near`, 11 ms; CPU). |
+| `lie_target.py` | The Lie Detector mini-game's fading target followed by its outline, no YOLO (2026-11-02; see The Lie Detector's target, below). It suggests where the target is; it moves nothing. |
+
+**The Lie Detector's target** (`lie_target.py`, from 2026-11-02). The mouse mini-game ("use the mouse to follow the
+fading figure") shows a figure white at the board's centre through the countdown; from START (4.6 s after the board's
+first frame) it fades in ~2 s to an embossed rim like the decoys printed on the board (the same kinds of shapes), moves at
+a steady ~95 px/s on screen, turning now and then anywhere (no wall rule: it turned 22-61 px in from an edge, or in
+mid-board, and went half past the bottom edge), and spins at a constant 2 rad/s, while the board's texture scrolls
+(~125 px/s) and warps. The tracker takes its template from the white target (its outline grown 8 px: the rim), then runs
+a particle filter on each board frame: the outline's score at the known angle (an off-board point counts as a typical
+point, the frame's median), less 0.3 x the same outline where the board's scroll puts the pose 0.2 s earlier (a printed
+decoy rides the board), plus the optical flow off the scroll along the rim, a particle moving with the board penalised,
+and 10% of the particles a frame (30% within 70 px of an edge) given a new direction at the target's speed, so turns are
+followed in a frame or two. It was worked out on the 11 alarm clips of 2026-10-26 to 30 (D:/MapleHelper-scratch/ld-contour,
+FINDINGS.md: the bounce check, the look-back, the benchmark) and checked by the user against reference tracks they
+approved (`tests/fixtures/lie_detector/references`: one hand-fixed stretch, 10-30 20:31 review frames 136-145): 3.5 px off on
+average, 97.2% of the rounds' frames within 10 px, none lost; the one real miss is that faint stretch, where a same-shaped
+decoy sits 60 px away. The user's crosshair isn't the truth (it lags ~0.4 s). `python -m gamelab lie-target [clip ...]`
+runs it on the recorded clips and scores it against the references. Not live yet: 83 ms a frame against the 66 of 15 a
+second.
 
 **Monster HP bars** (`hud.hp_bar`, from 2026-10-25). The bar a monster shows once it's hurt, as the game draws it at
 1366x768 (game px; the saved frames and the rolling recorder's clips of 2026-10-24 and 25): a white frame 50 x 8 between

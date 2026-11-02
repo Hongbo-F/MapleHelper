@@ -673,6 +673,35 @@ def cmd_spot(args) -> int:
     return 0
 
 
+def cmd_lie_target(args) -> int:
+    """The Lie Detector target tracker (perception.lie_target) on recorded alarm clips, scored against the reference
+    tracks the user approved (tests/fixtures/lie_detector/references, not their crosshair: 2026-11-02). Sends no keys."""
+    import json as _json
+    from .perception import lie_target
+    refs = sorted((REPO / "tests" / "fixtures" / "lie_detector" / "references").glob("*.json"))
+    if args.clips:
+        refs = [r for r in refs if any(r.stem.startswith(c) or c.startswith(r.stem) for c in args.clips)]
+    total = []
+    for path in refs:
+        ref = _json.loads(path.read_text(encoding="utf-8"))
+        clip = paths.ALARM_CLIPS / ref["clip"]
+        if not (clip / "index.jsonl").is_file():
+            print(f"{path.stem}: its clip isn't here ({clip})")
+            continue
+        answers = lie_target.track_clip(clip, ref["first"], ref["end"] - 1, fps=ref["fps"], seed=args.seed)
+        r = lie_target.against_reference(answers, ref)
+        total.append(r)
+        print(f"{path.stem} ({ref['fps']} fps): {r['mean']:.1f} px off the reference on average, within 10 px "
+              f"{r['within10']:.0%}, within 20 px {r['within20']:.0%}, worst {r['worst']:.0f} px ({r['frames']} frames)",
+              flush=True)
+    if len(total) > 1:
+        n = sum(r["frames"] for r in total)
+        print(f"all: {sum(r['mean'] * r['frames'] for r in total) / n:.1f} px off on average, within 10 px "
+              f"{sum(r['within10'] * r['frames'] for r in total) / n:.1%}, within 20 px "
+              f"{sum(r['within20'] * r['frames'] for r in total) / n:.1%} ({n} frames)")
+    return 0
+
+
 # --- calibrating, exploring, recording -------------------------------------------------------------------
 
 def cmd_calibrate(args) -> int:
@@ -2909,6 +2938,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("spot", help="check the game (or an image) for the Lie Detector; sends no keys")
     s.add_argument("--image", help="check this screenshot instead of the game")
     s.set_defaults(func=cmd_spot)
+
+    s = sub.add_parser("lie-target", help="the Lie Detector target tracker on recorded alarm clips, scored against the "
+                       "approved reference tracks (perception.lie_target); sends no keys")
+    s.add_argument("clips", nargs="*", help="clip keys (YYYYmmdd-HHMMSS); default: every clip with a reference")
+    s.add_argument("--seed", type=int, default=0)
+    s.set_defaults(func=cmd_lie_target)
 
     s = sub.add_parser("calibrate", help="find her on screen and save her name tag template")
     s.add_argument("--tag", help="name tag centre X,Y in client pixels, if it isn't found automatically")
