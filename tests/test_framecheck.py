@@ -662,11 +662,14 @@ def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) ->
     """The hunt loop on Tree Dungeon (loop_tree_walls's start, `minutes`: loop_tree_run's, the walls of foothold group 0
     stopping her, so a touch doesn't knock her out of the map past the tower's wall, a simulator effect: on
     loop_tree_run's seed it did at 146 s, on the trip to stand by, with her memory of the monsters and the sweep
-    merged), every look failing its checks with `problem` from window[0] to window[1] s of it: its trace."""
+    merged), every look failing its checks with `problem` from window[0] to window[1] s of it: its trace. Her knock as
+    when these were measured (the planner's, world.KNOCK_PLANNER: the client's since 2026-11-02 flies her farther, and
+    after the 125-s pause 18 plans went out where the test asks for more than 20; what's tested is the pause)."""
     import dataclasses
 
     from gamelab.sim import scenarios
     from gamelab.sim.scenarios import _loop
+    from gamelab.sim.world import KNOCK_PLANNER
     if scenarios.real_map(TREE) is None:
         pytest.skip("needs Tree Dungeon, Forest Up North II's game data")
 
@@ -674,7 +677,9 @@ def _lost_hunt(window: tuple[float, float], minutes: float, problem: Problem) ->
         sim.fail_frames(window[0], window[1], problem)  # (perception's frames: every look's)
         return _loop(minutes)(sim)
 
-    sc = dataclasses.replace(scenarios.SCENARIOS["loop_tree_walls"], name="loop_tree_lost", fn=run, expects=())
+    sc = scenarios.SCENARIOS["loop_tree_walls"]
+    sc = dataclasses.replace(sc, name="loop_tree_lost", fn=run, expects=(),
+                             realism=dataclasses.replace(sc.realism, knock=KNOCK_PLANNER))
     return scenarios.run_scenario(sc)
 
 

@@ -873,6 +873,20 @@ def test_a_knock_flies_her_as_the_client_and_lands_her_at_her_walk(model, monkey
     assert w.vx == 0 and rest[0] <= 400 - w.x <= rest[1]
 
 
+@pytest.mark.parametrize("knock, flies", [(None, 270.0 - 149.0),                   # the client's: 270 less her 149
+                                           (world_mod.KNOCK_PLANNER, 180.0)])      # the planner's, set outright
+def test_a_knocks_push_adds_to_the_speed_she_has(model, monkeypatch, knock, flies):
+    # world.KNOCK_ADDS (the client's "each axis adds to the speed without going past the push"; R1-R3's frames: walking
+    # at the monster at 122-157 she flew off at a median 93, standing at 270): she walks right at a pig standing there
+    monkeypatch.setattr(world_mod, "EVADE", 0.0)
+    c = plat(model, 500, 400)
+    w = still(world(model, c.id, 300.0, monsters=[("Pig", c.id, 420.0)], facing="right",
+                    realism=world_mod.Realism(knock=knock)))
+    w.key(0.0, "right", True)
+    w.advance(0.75)  # (touched at 0.70 s, at full speed)
+    assert w.touches == 1 and w.mode == "air" and w.vx == pytest.approx(-flies, abs=1.0)
+
+
 def test_the_arrow_she_holds_doesnt_steer_a_knocks_flight(model, monkeypatch):
     # The logged pushes (~58 units) were all taken with no key pressed; what an arrow does to the flight
     # isn't measured, so it does nothing until she lands (world.KNOCK_STEERS); by the engine's air steering
