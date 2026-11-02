@@ -191,20 +191,45 @@ def over(hwnd: int, area: dict) -> int | None:
     overlay: WindowFromPoint skips it) passes it. The game's own windows are left out (its picture), and those of
     GAME_FAMILY's programs (its launcher's overlay). 39 windows above the game, none shown over it: 0.1 ms (median of
     50; 0.66 ms in the review's run), 2026-10-24."""
+    return next((above for above, _ in _walk(hwnd, area)), None)
+
+
+def overs(hwnd: int, area: dict) -> list[tuple[int, tuple[int, int, int, int]]]:
+    """Every window of another program over window `hwnd`'s client area `area`, as `over` finds the first: (its hwnd,
+    its box as drawn: left, top, right, bottom, screen px), the nearest above the game first. The rolling recording
+    notes them with a frame rather than dropping it (control.rolling.GameWindow)."""
+    return list(_walk(hwnd, area))
+
+
+def client_boxes(area: dict, boxes) -> list[tuple[int, int, int, int]]:
+    """Screen boxes (left, top, right, bottom), as `overs` gives them, as boxes of the client area `area` (its own px:
+    x0, y0, x1, y1), cut to the area; those that miss it left out. What the rolling recording notes a frame was covered
+    by (control.rolling: Item.over)."""
+    w, h = area["width"], area["height"]
+    out = []
+    for left, top, right, bottom in boxes:
+        x0, y0 = max(0, left - area["left"]), max(0, top - area["top"])
+        x1, y1 = min(w, right - area["left"]), min(h, bottom - area["top"])
+        if x1 > x0 and y1 > y0:
+            out.append((x0, y0, x1, y1))
+    return out
+
+
+def _walk(hwnd: int, area: dict):
+    """`over`'s and `overs`' walk up the z-order: each window of another program shown over `area`, with its box."""
     x0, y0 = area["left"], area["top"]
     x1, y1 = x0 + area["width"], y0 + area["height"]
     game = _process(hwnd)
     above = user32.GetWindow(hwnd, GW_HWNDPREV)
     for _ in range(OVER_MAX):
         if not above:
-            return None
+            return
         if user32.IsWindowVisible(above) and not user32.IsIconic(above) and not _cloaked(above) \
                 and (pid := _process(above)) != game and not _family(pid):
             left, top, right, bottom = _drawn(above)
             if left < x1 and right > x0 and top < y1 and bottom > y0 and right > left and bottom > top:
-                return above
+                yield above, (left, top, right, bottom)
         above = user32.GetWindow(above, GW_HWNDPREV)
-    return None
 
 
 def describe(hwnd: int) -> str:

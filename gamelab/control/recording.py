@@ -165,22 +165,32 @@ class Recording:
             return
         self._tokens -= 1.0
         t = self.clock() - (now - frame.t)  # (the moment it was shown, on the recorder's clock: time.time's)
+        full, covered = frame.full, 0.0
+        if frame.over:
+            # Another program's window over part of the game: the frame kept as it is, the boxes it covered noted
+            # (since 2026-11-01); over all of it, or over it where the boxes aren't known (the walk failed), a gap
+            # (nothing of its picture kept, nor held), as every such frame was until then.
+            size = (int(full.shape[1]), int(full.shape[0]))
+            covered = rolling.share(size, frame.over_boxes) if frame.over_boxes else 1.0
+            if covered >= 1.0:
+                full = None
         with self._cond:
             if len(self._q) >= QUEUE:
                 self.dropped += 1
                 return
-            if frame.over:  # (nothing of its picture kept, nor held)
-                self._q.append((t, None, None, None, frame.over))
+            if full is None:
+                self._q.append((t, None, None, None, frame.over, 0.0, ()))
             else:
-                self._q.append((t, frame.full, st.seq, run, ""))
+                self._q.append((t, full, st.seq, run, frame.over or "", covered, frame.over_boxes if covered else ()))
             self._cond.notify_all()
 
     # --- the encoder ------------------------------------------------------------------------------------------------
 
-    def encode(self, t: float, full, seq: int | None, run: int | None, over: str = "") -> Item | None:
+    def encode(self, t: float, full, seq: int | None, run: int | None, over: str = "",
+               covered: float = 0.0, boxes: tuple = ()) -> Item | None:
         """One frame into the ring: as its difference from the one before (a whole frame every KEY_EVERY_S, or where
         the chain broke), or, `full` None, a gap (COVERED: `over` says by what); None if a moment of the recorder's own
-        came after its time (late)."""
+        came after its time (late). `covered`, `boxes`: what of it other programs' windows were over (Item.over)."""
         rec = self.recorder
         began, cpu = time.perf_counter(), time.thread_time()
         newest = rec.ring.newest()
@@ -199,11 +209,13 @@ class Recording:
         chained = (before is not None and before.shape == full.shape and last is not None and newest is last
                    and t - self._key_t < KEY_EVERY_S - 1e-6)
         item = Item(t, rolling.pack_diff(full, before) if chained else rolling.pack_whole(full), size=size,
-                    key=not chained, rgb=True, seq=seq, run=run)
-        if not rec.add(item, after=last if chained else None, cost=time.perf_counter() - began):
+                    key=not chained, rgb=True, seq=seq, run=run, covered=covered, over=tuple(boxes))
+        detail = over if covered else ""  # (the window over part of it, for the log)
+        if not rec.add(item, after=last if chained else None, cost=time.perf_counter() - began, detail=detail):
             chained = False  # (a moment of the recorder's own came between: a whole frame instead)
-            item = Item(t, rolling.pack_whole(full), size=size, rgb=True, seq=seq, run=run)
-            rec.add(item, cost=time.perf_counter() - began)
+            item = Item(t, rolling.pack_whole(full), size=size, rgb=True, seq=seq, run=run, covered=covered,
+                        over=tuple(boxes))
+            rec.add(item, cost=time.perf_counter() - began, detail=detail)
         if not chained:
             self._key_t = t
         self._before, self._last = full, item
@@ -217,9 +229,9 @@ class Recording:
                 self._cond.wait_for(lambda: self._q or self._closing)
                 if self._closing:
                     return
-                t, full, seq, run, over = self._q.popleft()
+                t, full, seq, run, over, covered, boxes = self._q.popleft()
             try:
-                self.encode(t, full, seq, run, over)
+                self.encode(t, full, seq, run, over, covered, boxes)
             except Exception as e:  # (nothing that goes wrong in a frame stops the recording)
                 self.recorder._say(f"recorder: a frame wasn't kept ({type(e).__name__}: {e})")
             finally:
@@ -306,9 +318,9 @@ class Recording:
             pass
         kw = dict(self._kw)
         kw.setdefault("ring", rolling.Ring(max_items=int(2 * rolling.SECONDS * self.fps)))
-        from ..perception import frames  # (its walk up the z-order with Python's lock kept: frames._over)
+        from ..perception import frames  # (its walk up the z-order with Python's lock kept: frames._overs)
         self.recorder = rolling.Recorder(
-            self._game or rolling.GameWindow(self.title, over=frames._over), self._grab or rolling.ScreenGrab(),
+            self._game or rolling.GameWindow(self.title, overs=frames._overs), self._grab or rolling.ScreenGrab(),
             fps=self.fps,
             log=self.log, encoders=self.writers, cpu=lambda: self._cpu, source=SOURCE, extra=self.counts,
             writer_priority=WRITER_PRIORITY, apart=self.apart, **kw)

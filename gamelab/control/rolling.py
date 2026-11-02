@@ -16,8 +16,10 @@ has no frame of the game to give. One recorder at a time, whichever (MUTEX). Wha
     recording's folder as `before/`
     (control.lie_recorder), so the whole cycle is kept with what led up to it; as one is written, the Lie Detector's
     recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age; and, on its
-    own whatever becomes of those, the alarm's clip, from 10 s before it to 60 s after, to
-    paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_AFTER_S), lossless (PNG);
+    own whatever becomes of those, the alarm's clip, from 10 s before it to 10 s after the cycle's last sight (the
+    cycle's only video since 2026-11-01; 3 minutes after the alarm at most), to
+    paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_TAIL_S, CLIP_MAX_S), lossless (PNG);
+    both written as soon as the cycle is over (Recorder.cycle_end);
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
     asked through a file inbox (paths.RECORDER: inbox/<id>.json, taken as <id>.taken, answered in outbox/<id>.json).
 
@@ -35,11 +37,11 @@ A saved part (`write_part`), one folder:
                  `fps`, the `format` ("jpeg" or "png"), `jpeg_quality` (a JPEG part's), the `window`'s size (the
                  last frame's) and the frames' `sources` (how many were the perception service's, how many grabbed).
 
-A frame is kept only when the screen shows the game: its window there and not minimized, wholly on the monitors, in
-front, and no other program's window over any of it (window.shows at perception.framecheck's COVER_GRID, then
-window.over: every window above it in the z-order, as a window between the grid's points or one clicks pass through
-isn't seen at them), asked before the grab and again after it, the window where it was. Otherwise the moment is a gap:
-nothing of another window is ever kept. It reads the screen only: no keys, no clicks, and it never brings the game
+A frame is kept when the screen shows the game: its window there and not minimized, wholly on the monitors, the
+window where it was. Another program's window over part of it (window.overs: every window above it in the z-order,
+asked before the grab and again after it) leaves the frame as it was grabbed, and what it covered is noted with it
+(Item.over: the boxes of the client it covered; Item.covered: its share); a game wholly under such windows is a gap
+("covered"). Until 2026-11-01 any window over any of it, or the game not in front, made the moment a gap. It reads the screen only: no keys, no clicks, and it never brings the game
 forward.
 
 Captured with mss, not DXGI desktop duplication: duplications of a monitor are limited (on 2026-10-24, with `watch` and
@@ -47,7 +49,7 @@ Captured with mss, not DXGI desktop duplication: duplications of a monitor are l
 held all the time would leave a hunt's looks and its feed one fewer, and one that failed to open falls back to mss for
 capture.RETRY_S (17 ms looks). mss takes none; its grab costs 2-3 ms more CPU (README: The rolling recording).
 
-Imports: numpy, OpenCV, the shared modules, perception.framecheck (COVER_GRID), and control.alarm and
+Imports: numpy, OpenCV, the shared modules, and control.alarm and
 control.lie_recorder (the JPEG settings, the Lie Detector's folders, and pruning a folder of recordings: `recent/`, and
 the Lie Detector's when a part goes into one, `_prune_lie`); zstd from the standard library (Python 3.14's
 compression.zstd; zlib before it).
@@ -72,7 +74,6 @@ import cv2
 import numpy as np
 
 from .. import capture, paths, window
-from ..perception import framecheck
 from . import alarm, lie_recorder
 
 try:
@@ -98,7 +99,16 @@ SECONDS = 300.0    # the last 5 minutes are kept (3,000 moments at FPS)
 # the same frames, 33 dB PSNR. A part is encoded as it's written: JPEG (`before/` and `save-recent`'s, as before) or
 # PNG (the alarm's clip: lossless on disk too).
 ZSTD_LEVEL = 1
-JPEG_PARAMS = lie_recorder.JPEG_PARAMS  # the Lie Detector recordings' settings: a frame of either reads alike
+# A part's JPEG (`before/`, `save-recent`): quality 75, full-resolution colour (4:4:4), as the player's Lie Detector
+# recordings were saved until 2026-11-01. Measured on the three real 1366x768 frames in tests/fixtures/native and the
+# six Lie Detector screens in tests/fixtures/lie_detector shrunk to 1366x768 (D:/MapleHelper-scratch/ld/
+# jpeg_measure2.py): 297 KB a game frame (197 KB a Lie Detector screen), 4.9 ms to encode. With the usual
+# half-resolution colour (4:2:0) the countdown's thin yellow title lost its colour: the spotter scored it 0.36-0.41 of
+# its threshold on the decoded frame at every quality from 60 to 90; at 4:4:4 it keeps 1.11 (1.22 on the PNG). Quality
+# 85 is 434 KB a frame for 2.4 dB more; 65 was as legible at 238 KB, but its ringing showed round the letters.
+JPEG_QUALITY = 75
+JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
+               cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444]
 # (813 KB and 55 ms a frame on the six, on ENCODERS threads as it's written.) Without PNG's row filters: on 80 frames
 # of the two alarm clips of 2026-10-26, 31.0 ms of CPU a frame against 54.6, 581 KB against 538, the same pixels read
 # back: a clip's 700 frames 17 s of CPU less, in the burst after an alarm (D:/MapleHelper-scratch/cpu/apply/
@@ -125,18 +135,33 @@ LOG_EVERY_S = 600.0   # a line in its log this often: what it keeps, its rate an
 FOLDER_WAIT_S = 20.0
 FOLDER_SLACK_S = 2.0  # ... a recording counts as the alarm's if its folder is named for no more than this before it
 # Each alarm also gets a clip of its own, whatever becomes of the player's recording and the part before it (the user,
-# 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the alarm to CLIP_AFTER_S after, 10 a second, in
-# paths.ALARM_CLIPS, written once its last moment is past (or, cut short, when the recorder stops). Its moments are
+# 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the alarm to the cycle's end, in paths.ALARM_CLIPS,
+# written once its last moment is past (or, cut short, when the recorder stops). Its moments are
 # held by the clip itself as they come, so a ring that loses them first (its cap) loses none of the clip's. Written as
 # PNG, lossless: 70 s at 1366x768 is about 560 MB (813 KB a frame on the six frames of PNG_PARAMS' note), in about 14 s
 # on ENCODERS threads; the oldest go past CLIPS_KEEP_BYTES, about 55 of them (D: had 27 GB free on 2026-10-25; the
 # user is making room).
 CLIP_BEFORE_S = 10.0
-CLIP_AFTER_S = 60.0
+# Since 2026-11-01 the clip is the Lie Detector's only video (the user: "stop keeping the 4fps recording and only use
+# the unified recorder's 15fps video saving": the player's recording keeps its looks' scores and summary, no frames).
+# It runs while the player's recording of the cycle does (its summary not written: the Lie Detector still up, or gone
+# for less than lie_recorder.END_S, 10 s), to CLIP_TAIL_S after the cycle's last sight, and it and the part before are
+# written then, at that 10 s mark (the user: "no more 60s, save all recordings you need at the 10s mark"; until then a
+# clip ran 60 s after the alarm, and the part before was written then). With no recording of the player's, until the
+# alarm is cleared. At most CLIP_MAX_S after the alarm (a cycle sent to the Truth Booth runs minutes, a minimized game
+# keeps a cycle going: its moments are held meanwhile, about 5 MB a second of the service's frames, 0.9 GB at the most).
+CLIP_TAIL_S = 10.0
+CLIP_MAX_S = 180.0
+# Another program's window over part of the game (window.overs: a notification, this app's window over a corner, the
+# remote desktop's toolbar) leaves the frame kept as grabbed, with the boxes it covered noted (the user, 2026-11-01:
+# "keep the frame if it's only partially covered ... save metadata on what part was covered"; on 2026-10-29 seven Lie
+# Detectors' clips, 00:29 to 09:30, kept no frame at all, "covered" 50-70 s each, while the player's 4 a second grabbed
+# them). Only a game wholly under such windows is a gap ("covered").
+PART_COVERED = "part covered"  # the log's state for frames kept with another window over part of the game: not a gap
 CLIPS_KEEP_BYTES = 30 * 1024 ** 3  # (5 GB until the user asked for 30, 2026-10-25)
-# The part before the Lie Detector ends this long after the alarm: the player's own frames begin about 1.5 s after it
-# (it pages first). It's written with the clip, once CLIP_AFTER_S are past: until 2026-10-25 it was written at once, as
-# the player's recording began, and its 3,000 frames' encoding ran beside the grabs while the Lie Detector was up.
+# The part before the Lie Detector ends this long after the alarm (the player pages first, about 1.2 s). It's written
+# with the clip, once the cycle is over: until 2026-10-25 it was written at once, as the player's recording began, and
+# its 3,000 frames' encoding ran beside the grabs while the Lie Detector was up.
 BEFORE_TAIL_S = 5.0
 SAVES_WAITING = 4     # saves waiting to be written at most; a request past it is answered "busy"
 ASK_TAKEN_S = 3.0     # save-recent: the recorder takes a request within this (it looks every tick), or isn't running
@@ -162,6 +187,8 @@ class Item:
     rgb: bool = False            # its pixels are RGB (the perception service's frames), not BGR (a grab's)
     seq: int | None = None       # the perception service's frame number (its state's `seq`) ...
     run: int | None = None       # ... in its run (`epoch`)
+    covered: float = 0.0         # the share of a frame other programs' windows were over (`over`'s boxes, overlaps once)
+    over: tuple = ()             # ... those boxes, of the client (its own px: x0, y0, x1, y1), as grabbed
 
     def raw(self) -> np.ndarray:
         """What's packed, as it was: a whole frame's pixels (BGR, or RGB if `rgb`), or a difference's."""
@@ -213,15 +240,27 @@ def chains(items: list[Item]) -> list[list[Item]]:
     return out
 
 
+def share(size: tuple[int, int], boxes) -> float:
+    """The share of a frame of `size` (width, height) the boxes (its own px) cover, overlaps counted once."""
+    if not boxes:
+        return 0.0
+    w, h = size
+    covered = np.zeros((h, w), bool)
+    for x0, y0, x1, y1 in boxes:
+        covered[y0:y1, x0:x1] = True
+    return float(covered.mean())
+
+
 @dataclass(slots=True)
 class Clip:
     """An alarm's saves being gathered: the alarm (ALARM.json's), when it was seen (time.time's clock), its clip's
     moments held so far, from CLIP_BEFORE_S before it (Recorder.check_alarm, then each tick's), and what the ring held
-    as the alarm was seen, for the part before it."""
+    as the alarm was seen, for the part before it; and the player's recording of its cycle, once found (`cycle_end`)."""
     info: dict
     seen: float
     items: list[Item]
     before: list[Item]
+    folder: Path | None = None
 
 
 class Ring:
@@ -315,15 +354,20 @@ def from_key(items: list[Item], i: int) -> list[Item]:
 
 class GameWindow:
     """The game window as the recorder asks after it (`check`): its client area (screen px, an mss box) when the screen
-    shows all of it, else None and why not, in a few words. `detail` names the window over it, when one was. `over`:
-    what looks for a window over it (window.over by default; the perception service's recording passes
-    perception.frames' walk, which keeps Python's lock through its calls: its frame loop runs beside it)."""
+    shows it, else None and why not, in a few words; `over`, the boxes of that area (its own px) other programs'
+    windows are over (none: []), noted with the frame grabbed; all of it under them is "covered". In front or not
+    doesn't matter (until 2026-11-01 a frame with any window over any of the game, or the game not in front, was a
+    gap). `detail` names a window over it, when one was. `overs`: what lists the windows over it (window.overs by
+    default; the perception service's recording passes perception.frames' walk, which keeps Python's lock through its
+    calls: its frame loop runs beside it)."""
 
-    def __init__(self, title: str, over: Callable[[int, dict], int | None] | None = None):
-        self.title, self._over = title, over
-        self.covering: int | None = None  # the other program's window over the game at the last check (window.over)
+    def __init__(self, title: str, overs: Callable[[int, dict], list] | None = None):
+        self.title, self._overs = title, overs
+        self.covering: int | None = None  # another program's window over the game at the last check (window.overs)
+        self.over: list[tuple[int, int, int, int]] = []
 
     def check(self) -> tuple[dict | None, str]:
+        self.covering, self.over = None, []
         try:
             hwnd = window.find_game(self.title)
         except RuntimeError:
@@ -335,14 +379,13 @@ class GameWindow:
             return None, "no client area"
         if not window.on_screen(area):
             return None, "off the screen"
-        if window.foreground_title() != self.title:
-            return None, "not in front"
-        self.covering = None
-        if not window.shows(hwnd, area, grid=framecheck.COVER_GRID):
-            return None, "covered"
-        self.covering = (self._over or window.over)(hwnd, area)
-        if self.covering is not None:
-            return None, "covered"
+        found = list((self._overs or window.overs)(hwnd, area))
+        if found:
+            self.covering = found[0][0]
+            self.over = window.client_boxes(area, [box for _, box in found])
+            if share((area["width"], area["height"]), self.over) >= 1.0:
+                self.over = []
+                return None, "covered"
         return area, ""
 
     def detail(self) -> str:
@@ -453,6 +496,7 @@ class Recorder:
         self.started = self.clock()
         self.state: str | None = None  # the last moment's gap reason ("": a frame), as the log last said it
         self.counts: Counter = Counter()  # moments by what: "frame", or a gap's why
+        self.part_covered = 0  # frames kept with another program's window over part of the game (Item.over)
         self.failures = 0
         self.saves, self.last_save = 0, None
         self.alarm_handled = (alarm.alarm_info() or {}).get("time")  # an alarm up as it starts isn't saved
@@ -477,6 +521,7 @@ class Recorder:
         it, the window where it was; else a gap and why."""
         started = time.perf_counter()
         area, why = self.game.check()
+        boxes = list(getattr(self.game, "over", None) or [])  # other programs' windows over it, before the grab ...
         frame = None
         if area is not None:
             try:
@@ -488,14 +533,20 @@ class Recorder:
                     self._say(f"recorder: a grab failed ({type(e).__name__}: {e}; {self.failures} so far)")
             else:
                 after, why = self.game.check()
+                boxes += [b for b in getattr(self.game, "over", None) or [] if b not in boxes]  # ... and after it
                 if not why and after != area:
                     why = "moved"
         t = self.clock()
         item, cost = Item(t, None, why), None
         if not why:
             try:
-                item = Item(t, self.pack(frame), size=(int(frame.shape[1]), int(frame.shape[0])))
-                cost = time.perf_counter() - started
+                size = (int(frame.shape[1]), int(frame.shape[0]))
+                covered = share(size, boxes)
+                if covered >= 1.0:
+                    item = Item(t, None, "covered")
+                else:
+                    item = Item(t, self.pack(frame), size=size, covered=covered, over=tuple(boxes))
+                    cost = time.perf_counter() - started
             except Exception as e:
                 item = Item(t, None, "not encoded")
                 self._say(f"recorder: a frame wasn't encoded ({type(e).__name__}: {e})")
@@ -513,22 +564,26 @@ class Recorder:
             for clip in self.pending_clips:  # (held there too: the ring may lose them, its cap, before the clip's end)
                 clip.items.append(item)
             self.counts[item.why or "frame"] += 1
+            if item.covered:
+                self.part_covered += 1
             if cost is not None:
                 self._costs.append(cost)
-            self._said(item.why, detail)
+            self._said(item.why or (PART_COVERED if item.covered else ""), detail)
         return True
 
     def _said(self, why: str, detail: str = "") -> None:
-        """The log says when the game starts or stops showing (a moment of the window moving or a grab failing
-        changes nothing: those come and go)."""
+        """The log says when the game starts or stops showing, and when another window comes over part of it (a moment
+        of the window moving or a grab failing changes nothing: those come and go)."""
         if why in ("moved", "capture failed", "not encoded") or why == self.state:
             return
         self.state = why
         if not detail:
-            detail = self.game.detail() if why == "covered" and hasattr(self.game, "detail") else ""
+            detail = self.game.detail() if why in ("covered", PART_COVERED) and hasattr(self.game, "detail") else ""
         elif not detail.startswith("by "):
             detail = "by " + detail
         self._say("recorder: the game is on screen: recording" if not why else
+                  "recorder: recording, another window over part of the game"
+                  + (f" ({detail})" if detail else "") if why == PART_COVERED else
                   f"recorder: not recording: {why}" + (f" ({detail})" if detail else ""))
 
     # --- between moments ---
@@ -603,20 +658,57 @@ class Recorder:
         seen_as = f", {info['form']}" if info.get("form") else ""
         self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
                   f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it, and its own clip "
-                  f"from {CLIP_BEFORE_S:g} s before it to {CLIP_AFTER_S:g} s after in {self.clips}, once those "
-                  f"{CLIP_AFTER_S:g} s are past")
+                  f"from {CLIP_BEFORE_S:g} s before it to {CLIP_TAIL_S:g} s after its cycle's last sight in "
+                  f"{self.clips}, once the cycle is over")
 
     def check_clips(self, now: float, cut_short: bool = False) -> None:
-        """Each alarm whose clip's last moment is past (`cut_short`: all, as the recorder stops): its clip, the moments
-        up to CLIP_AFTER_S after the alarm, then its part before, queued to be written."""
+        """Each alarm whose cycle is over (`cycle_end`; `cut_short`: all, as the recorder stops): its clip, the moments
+        up to the cycle's end, then its part before, queued to be written."""
+        due = []
         with self._lock:
-            due = [c for c in self.pending_clips if cut_short or now >= c.seen + CLIP_AFTER_S]
-            for clip in due:
-                self.pending_clips.remove(clip)
-        for clip in due:
-            items = [it for it in clip.items if it.t <= clip.seen + CLIP_AFTER_S]
-            self.jobs.put(lambda clip=clip, items=items: self._save_clip(clip, items, cut_short))
+            for clip in list(self.pending_clips):
+                end = now if cut_short else self.cycle_end(clip, now)
+                if end is not None and now >= end:
+                    self.pending_clips.remove(clip)
+                    due.append((clip, end))
+        for clip, end in due:
+            items = [it for it in clip.items if it.t <= end]
+            self.jobs.put(lambda clip=clip, items=items, end=end: self._save_clip(clip, items, cut_short, end))
             self.jobs.put(lambda clip=clip: self._save_before(clip))
+
+    def cycle_end(self, clip: Clip, now: float) -> float | None:
+        """When an alarm's clip ends (time.time's clock), or None while that can't be told yet: once the player's
+        recording of the cycle is summed up (the Lie Detector gone for lie_recorder.END_S), CLIP_TAIL_S after its last
+        sight of it; while it's going, not yet. With no recording of the player's for it within `folder_wait` (the
+        player not running, `watch --lie-detector` raised the alarm), when the alarm is cleared. CLIP_MAX_S after the
+        alarm at the most."""
+        most = clip.seen + CLIP_MAX_S
+        if now >= most:
+            return most
+        if clip.folder is None and now <= clip.seen + self.folder_wait + 1.0:  # (looked for while it can come)
+            clip.folder = self.cycle_folder(clip.seen)
+        if clip.folder is None:
+            if now < clip.seen + self.folder_wait:
+                return None
+            info = alarm.alarm_info()
+            return now if info is None or info.get("time") != clip.info.get("time") else None
+        try:
+            done = json.loads((clip.folder / lie_recorder.SUMMARY).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None  # (the cycle still going: its summary comes as it ends)
+        first, last = stamp_time(clip.folder.name), done.get("last_seen")
+        if first is None or not isinstance(last, (int, float)):
+            return now
+        return min(first + last + CLIP_TAIL_S, most)
+
+    def cycle_folder(self, seen: float) -> Path | None:
+        """The player's recording of the Lie Detector seen at `seen`, without waiting (`lie_folder` waits): the oldest
+        folder in lie_root named from FOLDER_SLACK_S before it to `folder_wait` after it; None if there's none."""
+        for folder in lie_recorder.recordings(self.lie_root):
+            made = stamp_time(folder.name)
+            if made is not None and seen - FOLDER_SLACK_S <= made <= seen + self.folder_wait:
+                return folder
+        return None
 
     def read_inbox(self) -> None:
         """Take each request in the inbox (renamed <id>.taken) and queue its save: the last `seconds` as the ring holds
@@ -694,6 +786,7 @@ class Recorder:
 
     def _save_before(self, clip: Clip) -> None:
         info, seen, snapshot = clip.info, clip.seen, clip.before
+        clip.before = []  # (not held on while the clip runs on: the ring's 5 minutes)
         folder = self.lie_folder(seen)
         since = snapshot[-1].t if snapshot else seen - self.ring.seconds
         items = snapshot + [it for it in clip.items if since < it.t <= seen + BEFORE_TAIL_S]
@@ -712,16 +805,18 @@ class Recorder:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
                       f"(the player not running?): the part before it is in {dest}")
 
-    def _save_clip(self, clip: Clip, items: list[Item], cut_short: bool) -> None:
+    def _save_clip(self, clip: Clip, items: list[Item], cut_short: bool, end: float | None = None) -> None:
         gone = lie_recorder.prune(self.clips, self.clips_keep)
         if gone:
             self._say(f"recorder: deleted the {len(gone)} oldest alarm clips to keep the rest under "
                       f"{self.clips_keep / 1024 ** 3:g} GB")
         dest = new_folder(self.clips, safe_name(f"lie-detector {clip.info.get('form') or ''}".strip()))
+        after = None if end is None else round(end - clip.seen, 3)
         summary = self._write(dest, items, {
             "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
             "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
-            "asked": [-CLIP_BEFORE_S, CLIP_AFTER_S], "cut_short": cut_short}, png=True)
+            "asked": [-CLIP_BEFORE_S, after], "cut_short": cut_short,
+            "player_recording": None if clip.folder is None else str(clip.folder)}, png=True)
         self._saved(dest, summary)
 
     def _prune_lie(self, spare: Path) -> None:
@@ -876,7 +971,7 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, pn
     lines, gaps, run = [], Counter(), None
     names: dict[int, str] = {}  # a frame's file, by id(item)
     sources = Counter()
-    shape = None
+    shape, covered = None, 0
     for it in items:
         t = round(it.t - t0, 3)
         if it.data is None or id(it) in lost:
@@ -893,6 +988,10 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, pn
         line = {"i": len(names) - 1, "file": name, "t": t, "at": clock_time(it.t)}
         if it.seq is not None:
             line.update(seq=it.seq, run=it.run)
+        if it.covered:  # other programs' windows over part of the game: their boxes, and the share they covered
+            line["covered"] = round(it.covered, 3)
+            line["over"] = [list(box) for box in it.over]
+            covered += 1
         lines.append(line)
         sources["perception service" if it.rgb else "grabbed"] += 1
         shape = it.size
@@ -913,8 +1012,9 @@ def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, pn
     (folder / INDEX).write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
     summary = {**info, "from": day_time(t0) if items else None, "to": day_time(items[-1].t) if items else None,
                "seconds": round(items[-1].t - t0 + 1 / fps, 1) if items else 0.0, "ticks": len(items),
-               "frames": len(names), "bytes": size, "gaps": {why: round(n / fps, 1) for why, n in gaps.items()},
-               "fps": fps, "format": "png" if png else "jpeg", "jpeg_quality": None if png else lie_recorder.JPEG_QUALITY,
+               "frames": len(names), "part_covered_frames": covered, "bytes": size,
+               "gaps": {why: round(n / fps, 1) for why, n in gaps.items()},
+               "fps": fps, "format": "png" if png else "jpeg", "jpeg_quality": None if png else JPEG_QUALITY,
                "window": None if shape is None else list(shape), "sources": dict(sources)}
     (folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary
@@ -955,7 +1055,8 @@ def write_part_apart(folder: Path, items: list[Item], info: dict, fps: float = F
         pickle.dump({"folder": str(folder), "info": info, "fps": fps, "png": png, "encoders": encoders,
                      "n": len(items)}, proc.stdin, protocol=5)
         for it in items:  # (a frame's bytes go down the pipe as they are: pickle writes a big one straight out)
-            pickle.dump((it.t, it.data, it.why, it.size, it.key, it.rgb, it.seq, it.run), proc.stdin, protocol=5)
+            pickle.dump((it.t, it.data, it.why, it.size, it.key, it.rgb, it.seq, it.run, it.covered, it.over),
+                        proc.stdin, protocol=5)
         proc.stdin.close()
         out, _ = proc.communicate(timeout=max(1.0, APART_TIMEOUT_S - (time.monotonic() - began)))
         answer = json.loads(out.decode("utf-8").strip().splitlines()[-1])

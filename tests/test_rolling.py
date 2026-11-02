@@ -20,7 +20,8 @@ from gamelab.control.rolling import BEFORE, INDEX, SUMMARY, Item, Recorder, Ring
 from gamelab.perception import framecheck
 
 AREA = {"left": 100, "top": 50, "width": 64, "height": 48}
-REAL_OVER, REAL_SHOWS, REAL_DESCRIBE = window.over, window.shows, window.describe  # (before conftest refuses them)
+REAL_OVER, REAL_OVERS, REAL_SHOWS, REAL_DESCRIBE = (window.over, window.overs, window.shows,
+                                                   window.describe)  # (before conftest refuses them)
 
 
 class Clock:
@@ -192,32 +193,70 @@ def test_a_grab_that_fails_is_a_gap_and_the_recording_goes_on(tmp_path):
     rec.close()
 
 
-def test_the_game_window_is_asked_as_the_eyes_ask_it_wholly_shown_in_front_with_nothing_over_it(monkeypatch):
-    state = {"minimized": False, "on_screen": True, "front": "MapleStory", "shows": True}
-    grids = []
+def test_the_game_window_is_asked_what_is_over_it_to_note_a_gap_only_when_all_of_it_is(monkeypatch):
+    """Since 2026-11-01 another program's window over part of the game leaves the frame kept, the boxes of the client
+    it covers noted (`over`); in front or not isn't asked. A game wholly under such windows is a gap ("covered")."""
+    state = {"minimized": False, "on_screen": True, "overs": []}
     monkeypatch.setattr(window, "find_game", lambda title: 7)
     monkeypatch.setattr(window, "minimized", lambda hwnd: state["minimized"])
     monkeypatch.setattr(window, "client_rect", lambda hwnd: dict(AREA))
     monkeypatch.setattr(window, "on_screen", lambda area: state["on_screen"])
-    monkeypatch.setattr(window, "foreground_title", lambda: state["front"])
-    monkeypatch.setattr(window, "shows", lambda hwnd, area, grid=None: grids.append(grid) or state["shows"])
-    monkeypatch.setattr(window, "over", lambda hwnd, area: state["over"])
+    monkeypatch.setattr(window, "overs", lambda hwnd, area: list(state["overs"]))
     monkeypatch.setattr(window, "describe", lambda hwnd: f"a window of class 'Toast' ({hwnd})")
-    state["over"] = None
     game = rolling.GameWindow("MapleStory")
-    assert game.check() == (AREA, "") and grids == [framecheck.COVER_GRID] and game.detail() == ""
-    state["over"] = 9  # between the grid's points: window.over sees it
-    assert game.check() == (None, "covered") and game.detail() == "by a window of class 'Toast' (9)"
-    state["over"] = None
-    for key, value, why in (("shows", False, "covered"), ("front", "Claude", "not in front"),
-                            ("on_screen", False, "off the screen"), ("minimized", True, "minimized")):
+    assert game.check() == (AREA, "") and game.over == [] and game.detail() == ""
+    # A 30x20 box over the client's top-left corner (AREA: 64x48 at 100,50), cut to the client.
+    state["overs"] = [(9, (90, 40, 120, 60))]
+    assert game.check() == (AREA, "") and game.over == [(0, 0, 20, 10)]
+    assert game.detail() == "by a window of class 'Toast' (9)"
+    # Two, the nearest named; nearly all of it under them still a frame.
+    state["overs"] = [(9, (90, 40, 120, 60)), (11, (100, 55, 300, 300))]
+    assert game.check() == (AREA, "") and game.over == [(0, 0, 20, 10), (0, 5, 64, 48)]
+    # All of it under them: a gap.
+    state["overs"] = [(9, (90, 40, 170, 100))]
+    assert game.check() == (None, "covered") and game.over == [] and game.detail() == "by a window of class 'Toast' (9)"
+    state["overs"] = []
+    for key, value, why in (("on_screen", False, "off the screen"), ("minimized", True, "minimized")):
         state[key] = value
-        assert game.check() == (None, why) and game.detail() == ""
+        assert game.check() == (None, why) and game.over == []
 
     def gone(title):
         raise RuntimeError("no window titled 'MapleStory'")
     monkeypatch.setattr(window, "find_game", gone)
     assert game.check() == (None, "no window")
+
+
+def test_another_window_over_part_of_the_game_leaves_the_frame_as_grabbed_with_what_it_covered_noted(tmp_path):
+    """The user, 2026-11-01: "keep the frame if it's only partially covered ... save metadata on what part was covered
+    by other window" (seven Lie Detectors' clips of 2026-10-29 kept no frame: a window over a corner of the game made
+    every frame "covered"). The boxes over it, asked before the grab and after it, go with the frame (Item.over, its
+    share: Item.covered) into the index; the summary counts such frames."""
+    game, grab = Game(), Grab()
+    rec = recorder(tmp_path, game=game, grab=grab)
+    game.over = [(0, 0, 16, 12)]
+    item = rec.tick()
+    assert item.why == "" and item.covered == pytest.approx(16 * 12 / (64 * 48)) and item.over == ((0, 0, 16, 12),)
+    assert np.array_equal(item.pixels(), bgra(1)[..., :3])  # the frame as grabbed
+    assert rec.part_covered == 1 and rec.said[-1].endswith("recorder: recording, another window over part of the game")
+    # A window that came during the grab (the look after it) is noted too.
+    game.over = []
+    grab.during = lambda: setattr(game, "over", [(48, 36, 64, 48)])
+    rec.clock.step()
+    item = rec.tick()
+    assert item.over == ((48, 36, 64, 48),) and np.array_equal(item.pixels(), bgra(2)[..., :3])
+    # All of it under such windows: a gap.
+    grab.during, game.over = None, [(0, 0, 64, 48)]
+    rec.clock.step()
+    assert rec.tick() == Item(rec.clock(), None, "covered")
+    game.over = []
+    rec.clock.step()
+    assert rec.tick().covered == 0.0 and rec.said[-1].endswith("recorder: the game is on screen: recording")
+    s = rolling.write_part(tmp_path / "part", list(rec.ring.items), {"kind": "x"})
+    index = lines(tmp_path / "part")
+    assert [r.get("covered") for r in index] == [0.062, 0.062, None, None]
+    assert index[0]["over"] == [[0, 0, 16, 12]] and index[1]["over"] == [[48, 36, 64, 48]] and "over" not in index[3]
+    assert s["part_covered_frames"] == 2 and s["frames"] == 3 and s["gaps"] == {"covered": 0.1}
+    rec.close()
 
 
 class Desktop:
@@ -315,17 +354,23 @@ def test_a_window_between_the_cover_grid_s_points_is_seen_in_the_z_order_above_t
     assert REAL_OVER(1, area) is None
     desk.w[63]["no_dwm"] = True  # no box as drawn: GetWindowRect's, its borders over the client
     assert REAL_OVER(1, area) == 63
-    # The recorder's look at the game, and its log naming the window over it.
+    # Every one of them, the nearest above the game first (what the recorder blacks out).
+    desktop({"hwnd": 50, "box": covers["300x100 notification"]}, {"hwnd": 51, "box": covers["left 8 px"]},
+            {"hwnd": 52, "box": game_box, "visible": False}, the_game)
+    assert REAL_OVERS(1, area) == [(51, covers["left 8 px"]), (50, covers["300x100 notification"])]
+    # The recorder's look at the game: the frame kept as grabbed, the notification's box noted, and its log naming
+    # the window over it.
     desktop({"hwnd": 50, "box": covers["300x100 notification"], "cls": "Windows.UI.Core.CoreWindow"}, the_game)
-    for name, fn in (("over", REAL_OVER), ("shows", REAL_SHOWS), ("describe", REAL_DESCRIBE),
+    for name, fn in (("over", REAL_OVER), ("overs", REAL_OVERS), ("describe", REAL_DESCRIBE),
                      ("find_game", lambda title: 1), ("minimized", lambda hwnd: False),
-                     ("client_rect", lambda hwnd: dict(area)), ("on_screen", lambda area: True),
-                     ("foreground_title", lambda: "MapleStory")):
+                     ("client_rect", lambda hwnd: dict(area)), ("on_screen", lambda area: True)):
         monkeypatch.setattr(window, name, fn)
-    grab = Grab()
+    grab = lambda box: np.full((box["height"], box["width"], 4), 200, np.uint8)  # noqa: E731
     rec = recorder(tmp_path, game=rolling.GameWindow("MapleStory"), grab=grab)
-    assert rec.tick().why == "covered" and grab.n == 0
-    assert rec.said[-1].endswith("recorder: not recording: covered (by a window of class "
+    item = rec.tick()
+    assert item.why == "" and item.over == ((1000, 654, 1300, 754),)
+    assert item.covered == pytest.approx(300 * 100 / (1366 * 768)) and (item.pixels() == 200).all()
+    assert rec.said[-1].endswith("recorder: recording, another window over part of the game (by a window of class "
                                  f"'Windows.UI.Core.CoreWindow' at {l + 1000},{t + 654} 300x100)")
     rec.close()
 
@@ -359,7 +404,7 @@ def test_save_recent_asks_the_running_recorder_through_its_inbox_and_gets_the_fo
                                                     "at": rolling.clock_time(rec.ring.items[-1].t)}
     s = summary(folder)
     assert s["kind"] == "save-recent" and s["name"] == "pop-up" and s["ticks"] == 50 and s["fps"] == 10.0
-    assert s["jpeg_quality"] == lie_recorder.JPEG_QUALITY
+    assert s["jpeg_quality"] == rolling.JPEG_QUALITY
     assert not list((tmp_path / "recorder" / "inbox").iterdir())  # taken, answered and cleaned up
     assert not list((tmp_path / "recorder" / "outbox").iterdir())
     back = cv2.imread(str(folder / "00034.jpg"))  # the 120th grab (none while the game wasn't in front)
@@ -394,9 +439,10 @@ def test_a_lie_detector_alarm_saves_the_5_minutes_before_it_into_the_player_s_re
     run_ticks(rec, 15)  # the player pages, then starts its recording
     player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
     player.mkdir(parents=True)
-    run_ticks(rec, 580, poll=True)
-    assert rec.flush(60) and not (player / BEFORE).exists()
-    run_ticks(rec, 10, poll=True)  # ... until the alarm's clip's 60 s are past
+    run_ticks(rec, 100, poll=True)
+    assert rec.flush(60) and not (player / BEFORE).exists()  # ... while the cycle goes on
+    _cycle_over(player, 4.0)  # last seen 4 s after its first sight: over 10 s after that, 15 s after the alarm at most
+    run_ticks(rec, 40, poll=True)
     assert rec.flush(60)  # (3,000 frames written as JPEG: 10 s, more with the PC busy)
     before = player / BEFORE
     s = summary(before)
@@ -409,7 +455,7 @@ def test_a_lie_detector_alarm_saves_the_5_minutes_before_it_into_the_player_s_re
     assert any("saved" in m and "before the Lie Detector" in m for m in rec.said)
     # The same alarm isn't saved again; the player's own folder is left as it was, but for the part.
     run_ticks(rec, 20, poll=True)
-    assert rec.flush(10) and sorted(p.name for p in player.iterdir()) == [BEFORE]
+    assert rec.flush(10) and sorted(p.name for p in player.iterdir()) == [BEFORE, SUMMARY]
     rec.close()
 
 
@@ -430,7 +476,9 @@ def test_an_alarm_save_keeps_the_lie_detector_s_recordings_to_their_budget_whate
     player = root / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
     player.mkdir()
     (player / "00000.jpg").write_bytes(b"p" * 50_000)  # the recording under way: spared, and not in the sum
-    run_ticks(rec, 605, poll=True)  # (written once the alarm's clip's 60 s are past)
+    run_ticks(rec, 50, poll=True)
+    _cycle_over(player, 1.0)
+    run_ticks(rec, 120, poll=True)  # (written once the cycle is over)
     assert rec.flush(10)
     assert sorted(p.name for p in root.iterdir()) == ["20261021-100000", "20261022-100000", player.name]
     assert (player / BEFORE / SUMMARY).exists() and (player / "00000.jpg").exists()
@@ -444,7 +492,10 @@ def test_an_alarm_with_no_recording_of_the_player_s_goes_to_the_recent_folder(tm
     alarm_file.write_text(json.dumps({"reason": "lie_detector (seen by watch)", "time": "2026-10-24 21:51:00"}),
                           encoding="utf-8")
     os.utime(alarm_file, (rec.clock(), rec.clock()))
-    run_ticks(rec, 605, poll=True)
+    run_ticks(rec, 20, poll=True)
+    assert rec.flush(10) and not (tmp_path / "recent").exists()  # the alarm up: the cycle going
+    alarm_file.unlink()  # cleared: with no recording of the player's, its cycle's end
+    run_ticks(rec, 5, poll=True)
     assert rec.flush(10)
     (folder,) = (tmp_path / "recent").iterdir()
     assert folder.name.endswith("-lie-detector") and summary(folder)["player_recording"] is None
@@ -461,7 +512,9 @@ def test_an_alarm_for_the_image_quiz_or_the_mini_game_s_notice_is_saved_by_itsel
     run_ticks(rec, 50, poll=True)
     alarm.raise_alarm(None, form="quiz warning")
     os.utime(alarm_file, (rec.clock(), rec.clock()))  # (the fake clock's now)
-    run_ticks(rec, 605, poll=True)
+    run_ticks(rec, 20, poll=True)
+    alarm_file.unlink()
+    run_ticks(rec, 5, poll=True)
     assert rec.flush(10)
     (folder,) = (tmp_path / "recent").iterdir()
     assert folder.name.endswith("-lie-detector-quiz-warning")
@@ -478,22 +531,32 @@ def _alarm_at(rec, alarm_file, form="mini-game notice"):
     return seen
 
 
-def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_60_s_after(tmp_path, alarm_file):
+def _cycle_over(player, last_seen):
+    """The player's recording of the cycle summed up: the Lie Detector last seen `last_seen` s after its first sight
+    (the folder's name)."""
+    (player / SUMMARY).write_text(json.dumps({"last_seen": last_seen}), encoding="utf-8")
+
+
+def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_its_cycle_s_end(tmp_path, alarm_file):
     """The user, 2026-10-25: "For an alarmed lie detector save, save T-10s to T+1min automatically, regardless of
-    [the] lie detector's own save or not. I need this as a 2nd line of defense"."""
+    [the] lie detector's own save or not. I need this as a 2nd line of defense"; since 2026-11-01 to the cycle's end,
+    written then (the user: "no more 60s, save all recordings you need at the 10s mark"). With no recording of the
+    player's, the cycle ends when the alarm is cleared."""
     rec = recorder(tmp_path, folder_wait=0.3)
     run_ticks(rec, 400, poll=True)
     seen = _alarm_at(rec, alarm_file)
-    run_ticks(rec, 595, poll=True)  # 59.5 s on: not yet, and nor is the part before it
+    run_ticks(rec, 300, poll=True)  # 30 s on, the alarm still up: not yet, and nor is the part before it
     assert rec.flush(10) and not (tmp_path / "alarm_clips").exists() and not (tmp_path / "recent").exists()
-    run_ticks(rec, 10, poll=True)
+    alarm_file.unlink()
+    run_ticks(rec, 1, poll=True)
     assert rec.flush(10)
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = summary(clip)
     assert clip.name.endswith("-lie-detector-mini-game-notice") and s["kind"] == "the alarm's clip"
-    assert s["alarm"]["form"] == "mini-game notice" and s["asked"] == [-10.0, 60.0] and s["cut_short"] is False
-    assert s["alarm_t"] == pytest.approx(10.0, abs=0.15) and 699 <= s["ticks"] <= 701 and s["frames"] == s["ticks"]
-    assert lines(clip)[-1]["t"] == pytest.approx(70.0, abs=0.15)
+    assert s["alarm"]["form"] == "mini-game notice" and s["asked"] == [-10.0, pytest.approx(30.0, abs=0.15)]
+    assert s["cut_short"] is False and s["player_recording"] is None
+    assert s["alarm_t"] == pytest.approx(10.0, abs=0.15) and 399 <= s["ticks"] <= 402 and s["frames"] == s["ticks"]
+    assert lines(clip)[-1]["t"] == pytest.approx(40.0, abs=0.15)
     # Lossless: PNG, each frame exactly the grab it was.
     assert s["format"] == "png" and s["jpeg_quality"] is None and lines(clip)[0]["file"] == "00000.png"
     shot = cv2.imread(str(clip / "00000.png"))
@@ -503,22 +566,66 @@ def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_60_s_after(tmp_p
     (before,) = (tmp_path / "recent").iterdir()
     assert summary(before)["kind"] == "before the Lie Detector" and summary(before)["format"] == "jpeg"
     assert summary(before)["alarm_t"] == pytest.approx(40.0, abs=0.6)  # all the ring held: 40 s
-    assert any("its own clip from 10 s before it to 60 s after" in m for m in rec.said)
+    assert any("its own clip from 10 s before it to 10 s after its cycle's last sight" in m for m in rec.said)
     rec.close()
     assert len(list((tmp_path / "alarm_clips").iterdir())) == 1  # written once
     assert lines(clip)[0]["at"] == rolling.clock_time(seen - 9.9)  # its first moment, 10 s before the alarm's
+
+
+def test_an_alarm_s_clip_and_part_before_are_written_10_s_after_the_cycle_s_last_sight(tmp_path, alarm_file):
+    """Since 2026-11-01 the clip is the Lie Detector's only video (the player's recording keeps no frames): it runs
+    while the player's recording of the cycle does (its folder there, no summary yet), and it and the part before are
+    written once the cycle is summed up, ending CLIP_TAIL_S after its last sight (the user: "no more 60s, save all
+    recordings you need at the 10s mark")."""
+    rec = recorder(tmp_path)
+    run_ticks(rec, 100, poll=True)
+    seen = _alarm_at(rec, alarm_file)
+    player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
+    player.mkdir(parents=True)
+    run_ticks(rec, 300, poll=True)  # 30 s on, the cycle still going: nothing written
+    assert rec.flush(30) and not (tmp_path / "alarm_clips").exists() and not (player / BEFORE).exists()
+    _cycle_over(player, 24.0)  # the cycle over: last seen 24 s after its first sight
+    run_ticks(rec, 30, poll=True)
+    assert rec.flush(30) and not (tmp_path / "alarm_clips").exists()  # (33 s on: the last sight's 10 s not past)
+    run_ticks(rec, 30, poll=True)
+    assert rec.flush(30) and (player / BEFORE / SUMMARY).exists()
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    s = summary(clip)
+    end = rolling.stamp_time(player.name) + 24.0 + rolling.CLIP_TAIL_S  # (the folder's name: its first sight)
+    assert s["asked"][0] == -10.0 and s["asked"][1] == pytest.approx(end - seen, abs=1e-3) and 34 < s["asked"][1] <= 35
+    assert s["player_recording"] == str(player) and s["cut_short"] is False
+    assert lines(clip)[-1]["at"] == rolling.clock_time(max(it.t for it in rec.ring.items if it.t <= end))
+    assert abs(s["ticks"] - 10 * (10 + s["asked"][1])) <= 2
+    rec.close()
+
+
+def test_an_alarm_s_clip_ends_3_minutes_after_it_however_long_the_cycle_runs(tmp_path, alarm_file):
+    rec = recorder(tmp_path)
+    run_ticks(rec, 100, poll=True)
+    seen = _alarm_at(rec, alarm_file)
+    player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
+    player.mkdir(parents=True)  # (never summed up: a cycle sent to the Truth Booth, the player stopped)
+    run_ticks(rec, 1795, poll=True)
+    assert rec.flush(30) and not (tmp_path / "alarm_clips").exists()
+    run_ticks(rec, 10, poll=True)
+    assert rec.flush(30)
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    assert summary(clip)["asked"] == [-10.0, rolling.CLIP_MAX_S] and abs(summary(clip)["ticks"] - 1900) <= 2
+    rec.close()
 
 
 def test_an_alarm_s_clip_keeps_its_moments_however_little_the_ring_keeps(tmp_path, alarm_file):
     rec = recorder(tmp_path, folder_wait=0.3, ring=Ring(seconds=20.0))  # the ring holds 20 s; the clip needs 70
     run_ticks(rec, 300, poll=True)
     _alarm_at(rec, alarm_file, form="quiz warning")
-    run_ticks(rec, 605, poll=True)
+    run_ticks(rec, 600, poll=True)
+    alarm_file.unlink()
+    run_ticks(rec, 1, poll=True)
     assert rec.flush(10)
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = summary(clip)
     assert clip.name.endswith("-lie-detector-quiz-warning")
-    assert 699 <= s["ticks"] <= 701 and s["alarm_t"] == pytest.approx(10.0, abs=0.15)
+    assert 699 <= s["ticks"] <= 702 and s["alarm_t"] == pytest.approx(10.0, abs=0.15)
     rec.close()
 
 
@@ -540,7 +647,9 @@ def test_an_alarm_s_clips_are_kept_to_their_budget(tmp_path, alarm_file):
     rec = recorder(tmp_path, folder_wait=0.3, clips_keep=6000)  # the newer old one fits beside the next, not both
     run_ticks(rec, 50, poll=True)
     _alarm_at(rec, alarm_file)
-    run_ticks(rec, 605, poll=True)
+    run_ticks(rec, 20, poll=True)
+    alarm_file.unlink()
+    run_ticks(rec, 5, poll=True)
     assert rec.flush(10)
     names = sorted(p.name for p in root.iterdir())
     assert names[0] == "20261021-100000-lie-detector" and len(names) == 2
@@ -558,7 +667,9 @@ def test_an_alarm_up_as_it_starts_is_not_saved_but_the_next_one_is(tmp_path, ala
     assert rec.jobs.unfinished_tasks == 0
     alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 21:00:00"}), encoding="utf-8")
     os.utime(alarm_file, (rec.clock(), rec.clock()))
-    run_ticks(rec, 605, poll=True)
+    run_ticks(rec, 20, poll=True)
+    alarm_file.unlink()
+    run_ticks(rec, 5, poll=True)
     assert rec.flush(5) and len(list((tmp_path / "recent").iterdir())) == 1
     rec.close()
 

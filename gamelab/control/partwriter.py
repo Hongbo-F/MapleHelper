@@ -31,8 +31,9 @@ def main() -> int:
         head = pickle.load(stdin)
         items = []
         for _ in range(int(head["n"])):
-            t, data, why, size, key, rgb, seq, run = pickle.load(stdin)
-            items.append(Item(t, data, why, None if size is None else tuple(size), key, rgb, seq, run))
+            t, data, why, size, key, rgb, seq, run, covered, over = pickle.load(stdin)
+            items.append(Item(t, data, why, None if size is None else tuple(size), key, rgb, seq, run, covered,
+                              tuple(tuple(b) for b in over)))
         summary = write_part(Path(head["folder"]), items, head["info"], head["fps"], head["png"], head["encoders"],
                              priority=LOWEST)
     except Exception as e:  # (said to the service, which writes the part itself then)

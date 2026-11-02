@@ -205,7 +205,7 @@ def cmd_clear_alarm(args) -> int:
     elif folders := lie_recorder.recordings():
         summary = lie_recorder.summary_of(folders[-1])
         print(f"the last recording: {folders[-1]} " + (
-            f"({summary['outcome']}: {summary['frames']} frames over {summary['duration_s']:.0f} s, ended: "
+            f"({summary['outcome']}: {summary.get('grabs', '?')} looks over {summary['duration_s']:.0f} s, ended: "
             f"{summary['end']})" if summary else "(unfinished: the player stopped while it was written)"))
     if info is not None:
         print(f"a running player stops now (or, if the Lie Detector is still up, once it has been off the screen "

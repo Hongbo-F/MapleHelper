@@ -209,10 +209,10 @@ def test_only_frames_of_the_game_are_kept(tmp_path):
     rec.close()
 
 
-def test_a_frame_with_another_window_over_the_game_is_a_gap_and_breaks_the_chain(tmp_path):
-    """window.over's catch, which the grid's points miss (a notification between them, a window clicks pass through):
-    nothing of the frame kept, nor held, a gap ("covered") instead, as the recorder's own check makes it, said with
-    the window in the log; the next frame whole."""
+def test_a_frame_with_another_window_over_the_game_where_its_box_isn_t_known_is_a_gap_and_breaks_the_chain(tmp_path):
+    """window.over's catch, which the grid's points miss (a notification between them, a window clicks pass through),
+    where what it covered isn't known (`Frame.over_boxes` empty: the walk failed): nothing of the frame kept, nor held, a gap
+    ("covered") instead, said with the window in the log; the next frame whole."""
     rec = made(tmp_path)
     assert rec.take()
     t0, items = time.monotonic(), []
@@ -227,6 +227,29 @@ def test_a_frame_with_another_window_over_the_game_is_a_gap_and_breaks_the_chain
     assert any("not recording: covered (by a window of class 'Toast'" in m for m in rec.said)
     got = [px for _, px in rolling.decode(list(rec.recorder.ring.items))]
     assert len(got) == 4 and all(np.array_equal(a, bgr(n)) for a, n in zip(got, (0, 1, 4, 5)))
+    rec.close()
+
+
+def test_a_frame_with_another_window_over_part_of_the_game_is_kept_as_it_is_with_what_it_covered_noted(tmp_path):
+    """Since 2026-11-01 (the user: "keep the frame if it's only partially covered ... save metadata on what part was
+    covered"): the frame kept as shown, chained as any, the boxes it covered (Frame.over_boxes) noted with it; all of
+    the game under such windows, a gap."""
+    rec = made(tmp_path)
+    assert rec.take()
+    t0, items = time.monotonic(), []
+    for k in range(6):
+        f = shown(k, t0 + k / 15, over="a window of class 'Toast' at 900,600 300x80" if k in (2, 3, 4) else "")
+        f.over_boxes = ((0, 0, 8, 6),) if k in (2, 3) else ((0, 0, W, H),) if k == 4 else ()
+        rec.saw(_st(k + 1), f, 1)
+        while rec._q:
+            items.append(rec.encode(*rec._q.popleft()))
+    assert [it.why if it.data is None else "frame" for it in items] == ["frame"] * 4 + [recording.COVERED, "frame"]
+    assert [round(it.covered, 4) for it in items[:4]] == [0, 0, round(48 / (W * H), 4), round(48 / (W * H), 4)]
+    assert [it.over for it in items[:4]] == [(), (), ((0, 0, 8, 6),), ((0, 0, 8, 6),)]
+    got = [px for _, px in rolling.decode(list(rec.recorder.ring.items))]
+    assert len(got) == 5 and all(np.array_equal(a, bgr(n)) for a, n in zip(got, (0, 1, 2, 3, 5)))  # as shown
+    assert rec.recorder.part_covered == 2 and rec.covered == 1
+    assert any("recording, another window over part of the game (by a window of class 'Toast'" in m for m in rec.said)
     rec.close()
 
 
@@ -302,13 +325,16 @@ def test_an_alarm_saves_the_minutes_before_it_into_before_and_its_own_clip(tmp_p
     alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-26 01:01:45", "form": "countdown"}),
                           encoding="utf-8")
     os.utime(alarm_file, (seen, seen))
-    feed(rec, range(601, 601 + 920), poll=True)  # 61.3 s on: the clip's last moment past
+    feed(rec, range(601, 601 + 450), poll=True)  # 30 s on, the alarm up: the cycle going
+    assert rec.recorder.flush(60) and not (tmp_path / "alarm_clips").exists()
+    alarm_file.unlink()  # cleared (no recording of the player's: the cycle's end)
+    feed(rec, range(1051, 1051 + 470), poll=True)  # (the clip ends at the clearing; then written)
     assert rec.recorder.flush(60)
     assert rec.recorder.apart and not any("written apart failed" in m for m in rec.said)  # (in a process of its own)
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = json.loads((clip / SUMMARY).read_text(encoding="utf-8"))
     assert s["kind"] == "the alarm's clip" and s["format"] == "png" and s["fps"] == 15.0
-    assert s["frames"] == s["ticks"] and 1045 <= s["frames"] <= 1070  # 70 s at 15 a second, from a whole frame
+    assert s["frames"] == s["ticks"] and 595 <= s["frames"] <= 620  # 40 s at 15 a second, from a whole frame
     assert s["alarm_t"] == pytest.approx(10.0, abs=1.1) and s["sources"] == {"perception service": s["frames"]}
     index = [json.loads(x) for x in (clip / INDEX).read_text(encoding="utf-8").splitlines()]
     for r in index[:3] + index[-3:]:  # lossless, each the frame its number says

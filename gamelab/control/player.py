@@ -703,8 +703,8 @@ class Watchdog(threading.Thread):
         except Exception as e:  # (no folder: the cycle goes on unrecorded)
             self._trouble("starting the Lie Detector recording failed", e)
             return
-        self._say(f"recording the Lie Detector, 4 frames a second until it's been off the screen {self.end_s:g} s: "
-                  f"{self.recording.folder}")
+        self._say(f"recording the Lie Detector's looks (its video: the rolling recorder's clip), until it's been off "
+                  f"the screen {self.end_s:g} s: {self.recording.folder}")
 
     def _end_recording(self, end: str) -> None:
         rec, self.recording = self.recording, None

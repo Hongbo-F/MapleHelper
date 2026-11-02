@@ -103,28 +103,32 @@ def test_a_frame_the_capture_holds_from_long_before_the_look_keeps_its_own_time_
 
 def test_with_the_cover_check_a_frame_says_whether_another_window_was_over_the_game_before_or_after_its_shot(
         screen, monkeypatch):
-    """window.over, asked just before the shot and again just after it (the perception service's, for its recording):
-    a notification between the grid's points, which window.shows misses, named; the frame still visible to perception.
+    """window.overs, asked just before the shot and again just after it (the perception service's, for its recording):
+    a notification between the grid's points, which window.shows misses, named, and every such window's box as the
+    client's (Frame.over_boxes: the recording notes them with the frame, since 2026-11-01); the frame still visible to
+    perception.
     Without the check (no recording), not asked at all."""
     over = {"calls": 0, "at": set()}
+    box = (500, 400, 700, 460)  # (screen px)
 
-    def window_over(hwnd, area):
+    def window_overs(hwnd, area):
         over["calls"] += 1
-        return 99 if over["calls"] in over["at"] else None
-    monkeypatch.setattr(frames_module, "_over", window_over)  # (window.over's test, its walk with the lock kept)
+        return [(99, box)] if over["calls"] in over["at"] else []
+    monkeypatch.setattr(frames_module, "_overs", window_overs)  # (window.overs' walk with the lock kept)
     monkeypatch.setattr(window, "describe", lambda hwnd: f"a window of class 'Toast' ({hwnd})")
     frames = ScreenFrames("MapleStory", grabber=screen, log=lambda m: None)
     f = frames.next(time.monotonic())
-    assert f.visible and f.over is None and over["calls"] == 0  # (not asked)
+    assert f.visible and f.over is None and f.over_boxes == () and over["calls"] == 0  # (not asked)
     frames.cover_check = True
     f = frames.next(time.monotonic())
-    assert f.visible and f.over == "" and over["calls"] == 2  # before and after the shot: nothing over it
+    assert f.visible and f.over == "" and f.over_boxes == () and over["calls"] == 2  # before and after: nothing
     over["at"] = {4}  # a window come during the shot: seen after it
     f = frames.next(time.monotonic())
     assert f.visible and f.over == "a window of class 'Toast' (99)" and over["calls"] == 4
-    over["at"] = {5}  # one there before it: not asked again
+    assert f.over_boxes == tuple(window.client_boxes(frames.area, [box])) == ((500, 400, 700, 460),)
+    over["at"] = {5}  # one there before it (asked after too: a window come meanwhile is noted as well)
     f = frames.next(time.monotonic())
-    assert f.visible and f.over.startswith("a window of class") and over["calls"] == 5
+    assert f.visible and f.over.startswith("a window of class") and over["calls"] == 6 and f.over_boxes
 
 
 def test_frames_held_50_to_500_ms_are_stamped_as_now_and_counted(screen, monkeypatch):

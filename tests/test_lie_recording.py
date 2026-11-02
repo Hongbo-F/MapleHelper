@@ -1,5 +1,6 @@
-"""The Lie Detector's whole cycle recorded (control.lie_recorder): every frame the watchdog grabs from the first sight
-until it has been gone a while, with an index and a summary, under a disk cap. All in temp folders, with made-up
+"""The Lie Detector's whole cycle recorded (control.lie_recorder): every look the watchdog takes from the first sight
+until it has been gone a while, in an index and a summary (no pictures since 2026-11-01: the rolling recorder's clip
+is the video), under a disk cap. All in temp folders, with made-up
 frames and scores; nothing touches the game."""
 
 import contextlib
@@ -9,7 +10,6 @@ import os
 import threading
 import time
 
-import cv2
 import numpy as np
 import pytest
 
@@ -24,7 +24,7 @@ BOOTH = {**GONE, "truth booth": 1.17}
 
 def frame(value=90, w=64, h=48):
     out = np.full((h, w, 3), value, np.uint8)
-    out[:, : w // 2, 0] = 250  # some colour: what's written is RGB turned to the JPEG's BGR and back
+    out[:, : w // 2, 0] = 250  # some colour
     return out
 
 
@@ -38,31 +38,38 @@ def finished(rec, end="gone"):
     return json.loads((rec.folder / SUMMARY).read_text(encoding="utf-8"))
 
 
-def test_a_cycle_seen_then_gone_saves_every_frame_an_index_and_a_summary(tmp_path):
+def test_a_cycle_seen_then_gone_saves_every_look_in_an_index_and_a_summary_and_no_pictures(tmp_path):
     said = []
     rec = Recording(tmp_path, {"screenshot": "lab/lie_detector_101500.png"}, log=said.append, end_s=1.0)
     plan = [COUNTDOWN] * 4 + [GONE] + [MINI_GAME] * 3 + [GONE] * 5  # a moment between the two windows
     for n, scores in enumerate(plan):
-        rec.add(n * 0.25, frame(n * 10), scores)
+        assert rec.add(n * 0.25, frame(n * 10), scores) == n  # numbered, for the YOLO shadow's checks
     summary = finished(rec)
     assert rec.folder.parent == tmp_path and len(rec.folder.name) == len("20261024-101500")
-    assert sorted(p.name for p in rec.folder.glob("*.jpg")) == [f"{i:05d}.jpg" for i in range(13)]
+    assert sorted(p.name for p in rec.folder.iterdir()) == [INDEX, SUMMARY]  # no pictures: the rolling clip's
     index = lines(rec.folder)
     assert [r["t"] for r in index] == [n * 0.25 for n in range(13)]
     assert [r["seen"] for r in index] == [s is not GONE for s in plan]
-    assert index[0] == {"t": 0.0, "i": 0, "seen": True, "scores": COUNTDOWN, "file": "00000.jpg"}
-    # The pictures are the frames as grabbed (RGB), JPEG'd.
-    back = cv2.cvtColor(cv2.imread(str(rec.folder / "00005.jpg")), cv2.COLOR_BGR2RGB)
-    assert back.shape == (48, 64, 3) and np.abs(back.astype(int) - frame(50)).mean() < 2
+    assert index[0] == {"t": 0.0, "i": 0, "seen": True, "scores": COUNTDOWN}
     assert summary["first_seen"] == 0.0 and summary["last_seen"] == 1.75 and summary["seen_s"] == 1.75
-    assert summary["duration_s"] == 3.0 and summary["frames"] == 13 and summary["grabs"] == 13
+    assert summary["duration_s"] == 3.0 and summary["grabs"] == 13 and "frames" not in summary
     assert summary["forms"] == {"countdown": {"first": 0.0, "last": 0.75, "frames": 4},
                                 "mini-game": {"first": 1.25, "last": 1.75, "frames": 3}}
     assert summary["truth_booth"] is False and summary["outcome"] == "answered" and summary["end"] == "gone"
     assert summary["alarm_screenshot"] == "lab/lie_detector_101500.png" and summary["window"] == [64, 48]
-    assert summary["write_errors"] == 0 and summary["dropped"] == 0 and summary["not_showing"] == {}
-    assert summary["jpeg_quality"] == lie_recorder.JPEG_QUALITY and summary["end_stretch_s"] == 1.0
-    assert said[-1].startswith("Lie Detector recording ended (gone): 13 frames over 3 s") and "answered" in said[-1]
+    assert summary["dropped"] == 0 and summary["not_showing"] == {} and summary["end_stretch_s"] == 1.0
+    assert said[-1].startswith("Lie Detector recording ended (gone): 13 looks over 3 s") and "answered" in said[-1]
+
+
+def test_the_yolo_shadow_s_check_of_a_look_is_a_line_of_its_own_with_the_look_s_number(tmp_path):
+    rec = Recording(tmp_path, log=lambda m: None, end_s=1.0)
+    assert rec.add(0.0, frame(), COUNTDOWN) == 0 and rec.add(0.25, frame(), GONE) == 1
+    assert rec.add(0.5, None, None, "minimized") is None
+    assert rec.add_shadow(0.25, 1, "yolo patterns", 1.25, [], 0.1)
+    s = finished(rec)
+    assert s["grabs"] == 3 and s["forms"]["yolo patterns"]["frames"] == 1 and s["last_seen"] == 0.25
+    index = lines(rec.folder)
+    assert [r.get("i") for r in index] == [0, 1, None, 1] and index[3]["shadow"] == 1.25
 
 
 def test_the_truth_booth_is_the_outcome_when_it_shows(tmp_path):
@@ -88,42 +95,38 @@ def test_a_game_window_gone_or_minimized_is_recorded_as_such_with_no_frame(tmp_p
     rec.add(0.75, frame(), COUNTDOWN)
     summary = finished(rec)
     assert lines(rec.folder)[1:3] == [{"t": 0.25, "game": "minimized"}, {"t": 0.5, "game": "no window"}]
-    assert summary["frames"] == 2 and summary["grabs"] == 4
+    assert [r.get("i") for r in lines(rec.folder)] == [0, None, None, 1] and summary["grabs"] == 4
     assert summary["not_showing"] == {"minimized": 1, "no window": 1}
-    assert len(list(rec.folder.glob("*.jpg"))) == 2
 
 
-def test_a_frame_that_cant_be_written_is_logged_once_and_the_recording_goes_on(tmp_path, monkeypatch):
+def test_an_index_that_cant_be_written_is_logged_once_and_the_recording_goes_on(tmp_path, monkeypatch):
     said = []
-    real = cv2.imencode
-    fail = {2, 3}
+    real = open
+    fail = {"left": 2}
 
-    def imencode(ext, img, params):
-        if int(img[0, -1, 0]) in fail:  # (the frame's own value: frames 2 and 3)
+    def failing_open(path, *a, **k):
+        if str(path).endswith(INDEX) and fail["left"]:
+            fail["left"] -= 1
             raise OSError(28, "No space left on device")
-        return real(ext, img, params)
+        return real(path, *a, **k)
 
-    monkeypatch.setattr(lie_recorder.cv2, "imencode", imencode)
+    monkeypatch.setattr("builtins.open", failing_open)
     rec = Recording(tmp_path, log=said.append)
-    for n in range(6):
+    for n in range(4):
         rec.add(n * 0.25, frame(n), COUNTDOWN)
     summary = finished(rec)
-    assert summary["write_errors"] == 2 and summary["frames"] == 4
-    assert sorted(p.name for p in rec.folder.glob("*.jpg")) == ["00000.jpg", "00001.jpg", "00004.jpg", "00005.jpg"]
-    index = lines(rec.folder)
-    assert len(index) == 6 and "No space left" in index[2]["error"] and "file" not in index[2]
-    assert sum("couldn't write frame" in m for m in said) == 1  # once, not 4 times a second
-    assert "2 frames not written" in said[-1]
+    assert summary["grabs"] == 4 and len(lines(rec.folder)) == 2  # the first two lines lost, the rest written
+    assert sum("couldn't write its index" in m for m in said) == 1  # once, not 4 times a second
 
 
-def test_adding_never_waits_for_the_disk_a_full_queue_drops_frames_and_says_how_many(tmp_path, monkeypatch):
+def test_adding_never_waits_for_the_disk_a_full_queue_drops_looks_and_says_how_many(tmp_path, monkeypatch):
     taken, stuck, said = threading.Event(), threading.Event(), []
     real = Recording._write_one
 
-    def slow(self, record, frame):
+    def slow(self, record):
         taken.set()
         stuck.wait(10)
-        real(self, record, frame)
+        real(self, record)
 
     monkeypatch.setattr(Recording, "_write_one", slow)
     rec = Recording(tmp_path, log=said.append)
@@ -141,7 +144,7 @@ def test_adding_never_waits_for_the_disk_a_full_queue_drops_frames_and_says_how_
     rec.add(99.0, frame(), COUNTDOWN)
     summary = finished(rec)
     # The writer had taken one when it stuck; the queue held QUEUE_ITEMS; the rest went.
-    assert summary["dropped"] == 5 and summary["frames"] == lie_recorder.QUEUE_ITEMS + 2
+    assert summary["dropped"] == 5 and len(lines(rec.folder)) == lie_recorder.QUEUE_ITEMS + 2
     assert lines(rec.folder)[-1]["dropped_before"] == 5
     assert sum("disk is behind" in m for m in said) == 1
 
@@ -177,7 +180,7 @@ def test_a_grab_added_as_the_writer_finds_the_queue_empty_is_still_written(tmp_p
     go_on.set()
     assert rec.join(timeout=10)
     summary = lie_recorder.summary_of(rec.folder)
-    assert summary["grabs"] == 2 and summary["frames"] == 2 and len(lines(rec.folder)) == 2
+    assert summary["grabs"] == 2 and len(lines(rec.folder)) == 2
 
 
 def test_a_recording_that_cant_make_its_folder_raises_for_the_watchdog_to_log(tmp_path):
@@ -256,7 +259,7 @@ def test_whether_a_recording_is_still_being_written(tmp_path):
     assert lie_recorder.going(tmp_path, now=time.time() + lie_recorder.LIVE_S + 1) is None  # the player stopped
     finished(rec)
     assert lie_recorder.going(tmp_path) is None
-    assert lie_recorder.summary_of(rec.folder)["frames"] == 1 and lie_recorder.summary_of(tmp_path) is None
+    assert lie_recorder.summary_of(rec.folder)["grabs"] == 1 and lie_recorder.summary_of(tmp_path) is None
     # Two in one second (they can't be: END_S apart at least) still get folders of their own.
     other = lie_recorder._new_folder(tmp_path)
     again = lie_recorder._new_folder(tmp_path)
@@ -349,7 +352,7 @@ def test_a_cycle_seen_for_a_while_then_gone_is_recorded_from_its_first_sight_to_
     play(dog, screen, [0, 0], t)        # 1.0 s: over
     assert dog.recording is None and dog.cycle_t0 is None
     [(folder, summary, index)] = written(dog)
-    assert len(index) == 15 and summary["frames"] == 15  # 10 seen, then 5 gone (the last at the end stretch)
+    assert len(index) == 15 and summary["grabs"] == 15  # 10 seen, then 5 gone (the last at the end stretch)
     assert index[0]["t"] == 0.0 and index[-1]["t"] == 3.5 and [r["seen"] for r in index] == [True] * 10 + [False] * 5
     assert summary["first_seen"] == 0.0 and summary["last_seen"] == 2.25 and summary["duration_s"] == 3.5
     assert summary["forms"] == {"countdown": {"first": 0.0, "last": 1.25, "frames": 6},
@@ -358,7 +361,7 @@ def test_a_cycle_seen_for_a_while_then_gone_is_recorded_from_its_first_sight_to_
     assert summary["alarm_screenshot"] == "shot.png" and summary["window"] == [64, 48]
     assert flag.is_set()  # still locked: the alarm is lifted elsewhere (the player's rule)
     assert any(m.startswith("recording the Lie Detector") and str(folder) in m for m in said)
-    assert any(m.startswith("Lie Detector recording ended (gone): 15 frames") for m in said)
+    assert any(m.startswith("Lie Detector recording ended (gone): 15 looks") for m in said)
     first = [i for i, m in enumerate(said) if m.startswith("LIE DETECTOR seen (countdown): input stopped")]
     assert first and first[0] < [i for i, m in enumerate(said) if m.startswith("recording the")][0]
 
@@ -391,7 +394,7 @@ def test_the_recording_stops_at_the_cap_and_the_cycle_goes_on_unrecorded(tmp_pat
     t = play(dog, screen, [1, 1, 0, 0, 0, 0, 0], t)  # still the same cycle: no new recording, no second alarm
     assert alarms == [True] and dog.cycle_t0 is None
     [(folder, summary, index)] = written(dog)
-    assert summary["end"] == "cap" and summary["frames"] == 9 and index[-1]["t"] == 2.0  # 0 to 2 s
+    assert summary["end"] == "cap" and summary["grabs"] == 9 and index[-1]["t"] == 2.0  # 0 to 2 s
     assert summary["outcome"].startswith("unknown")
     assert len(list((tmp_path / "lie_detector").iterdir())) == 1
 
@@ -405,16 +408,17 @@ def test_a_game_window_gone_or_minimized_mid_cycle_is_recorded_as_such_not_as_th
     assert dog.recording is not None  # 0.75 s since then
     play(dog, screen, [0], t)
     [(folder, summary, index)] = written(dog)
-    assert summary["not_showing"] == {"minimized": 9, "no window": 4} and summary["frames"] == 9
+    assert summary["not_showing"] == {"minimized": 9, "no window": 4} and summary["grabs"] == 22
     assert index[2] == {"t": 0.5, "game": "minimized"} and index[10] == {"t": 2.5, "game": "no window"}
     assert summary["end"] == "gone" and summary["outcome"] == "answered"
 
 
-def test_a_game_with_another_window_over_it_is_checked_not_saved_and_counted_as_the_lie_detector_gone(tmp_path):
+def test_a_game_with_another_window_over_it_is_checked_and_counted_as_the_lie_detector_gone(tmp_path):
     """The user, 2026-10-29: "count seconds when game window is covered" (this app's window over a corner of the game
     kept the player locked after the answer): a look with another window over some of the game is checked as the
-    screen is, its frame not saved, and with none seen it counts toward the stretch without the Lie Detector, so a
-    cycle ends under cover too; gone or minimized still doesn't count (the test above)."""
+    screen is, numbered as no frame of the game (the YOLO shadow doesn't check it), and with none seen it counts toward
+    the stretch without the Lie Detector, so a cycle ends under cover too; gone or minimized still doesn't count (the
+    test above)."""
     screen = Screen()
     dog, flag, said, alarms = make_dog(tmp_path, screen)
     covered = ("covered", 0)
@@ -427,34 +431,14 @@ def test_a_game_with_another_window_over_it_is_checked_not_saved_and_counted_as_
     play(dog, screen, [covered], t)  # 1 s, its last quarter covered: over
     assert dog.recording is None and dog.cycle_t0 is None
     [(folder, summary, index)] = written(dog)
-    assert summary["not_showing"] == {"covered": 7} and summary["frames"] == 4 and summary["grabs"] == 11
-    assert len(list(folder.glob("*.jpg"))) == 4  # only the game's own pictures
+    assert summary["not_showing"] == {"covered": 7} and summary["grabs"] == 11
     assert index[0] == {"t": 0.0, "game": "covered", "seen": True, "scores": COUNTDOWN}
     assert index[2] == {"t": 0.5, "game": "covered", "seen": False, "scores": GONE}
-    assert index[1]["file"] == "00000.jpg" and index[6]["file"] == "00001.jpg"
+    assert index[1]["i"] == 0 and index[6]["i"] == 1 and "i" not in index[2]
     assert summary["first_seen"] == 0.0 and summary["last_seen"] == 1.25 and summary["end"] == "gone"
     assert summary["forms"] == {"countdown": {"first": 0.0, "last": 0.25, "frames": 2},
                                 "mini-game": {"first": 1.25, "last": 1.25, "frames": 1}}
     assert summary["end"] == "gone" and summary["window"] == [64, 48]
-
-
-def test_a_frame_that_cant_be_written_doesnt_stop_the_recording_or_the_watchdog(tmp_path, monkeypatch):
-    real = cv2.imencode
-
-    def imencode(ext, img, params):  # the mini-game's frames can't be written
-        if img[1, 1, 1] == 2:
-            raise PermissionError(13, "Permission denied")
-        return real(ext, img, params)
-
-    monkeypatch.setattr(lie_recorder.cv2, "imencode", imencode)
-    screen = Screen()
-    dog, flag, said, alarms = make_dog(tmp_path, screen)
-    t = play(dog, screen, [1, 1, 2, 2, 2, 1, 0, 0, 0, 0, 0])
-    [(folder, summary, index)] = written(dog)
-    assert summary["write_errors"] == 3 and summary["frames"] == 8 and len(index) == 11
-    assert sum("couldn't write frame 2" in m for m in said) == 1
-    play(dog, screen, [1], t)  # and the watchdog still sees the next one
-    assert dog.recording is not None and len(alarms) == 2
 
 
 def test_the_alarm_is_set_and_raised_before_anything_of_the_recording_is_written(tmp_path):
@@ -951,7 +935,7 @@ def test_clear_alarm_waits_for_the_lie_detector_s_recording_to_end(tmp_path, mon
     assert main(["clear-alarm"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("cleared the Lie Detector alarm from ") and not alarm_file.exists()
-    assert f"the last recording: {rec.folder} (answered: 2 frames over 0 s, ended: gone)" in out
+    assert f"the last recording: {rec.folder} (answered: 2 looks over 0 s, ended: gone)" in out
     assert "a running player stops now" in out and "python -m gamelab player --elevate" in out
     assert main(["clear-alarm"]) == 0
     assert capsys.readouterr().out.startswith("no Lie Detector alarm is set")

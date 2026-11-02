@@ -70,6 +70,9 @@ class Frame:
     # Another program's window over any of the game at its shot (ScreenFrames.cover_check: window.over, before and
     # after it): "" none, else that window in a few words; None not asked (the rolling recording keeps no such frame).
     over: str | None = None
+    # ... and the boxes of the client area (its own px, window.client_boxes) such windows are over, before the shot
+    # and after it: the rolling recording keeps the frame as it is with them noted (rolling.Item.over).
+    over_boxes: tuple = ()
 
     @staticmethod
     def unfit(t: float, problem: Problem) -> "Frame":
@@ -150,7 +153,7 @@ class ScreenFrames:
             return Frame.unfit(now, Problem("gone", f"the game isn't running ({e})"))
         if wrong is not None:
             return Frame.unfit(now, wrong)
-        over = covering(hwnd, area) if self.cover_check else None  # (before the shot ...)
+        over, boxes = cover(hwnd, area) if self.cover_check else (None, [])  # (before the shot ...)
         try:
             shot = self.grabber.shot(area, after=after)
             full = shot.crop(0, 0, area["width"], area["height"], self.pictures.convert)
@@ -164,8 +167,10 @@ class ScreenFrames:
         if bad := moved or framecheck.stale_problem(shot.t, time.monotonic()) or framecheck.drawn_problem(
                 full, self.geo, lambda: window.inset(hwnd, area)):
             return Frame.unfit(time.monotonic(), bad)
-        if over == "":
-            over = covering(hwnd, area)  # (... and after it: a window that came meanwhile)
+        if self.cover_check:  # (... and after it: a window that came meanwhile)
+            later, more = cover(hwnd, area)
+            over, boxes = over or later, boxes + [b for b in more if b not in boxes]
+        over_boxes = tuple(window.client_boxes(area, boxes))
         if self.area is not None and area != self.area:
             text = f"the game window moved: ({self.area['left']}, {self.area['top']}) -> ({area['left']}, {area['top']})"
             self.log(f"  {text}")
@@ -181,7 +186,8 @@ class ScreenFrames:
             if after - shown >= HELD_COUNT_S:
                 self._holds[0] += 1
                 self._holds[1] = max(self._holds[1], after - shown)
-            return Frame(full, shown if shown >= after else time.monotonic(), True, new, over=over)
+            return Frame(full, shown if shown >= after else time.monotonic(), True, new, over=over,
+                         over_boxes=over_boxes)
         self.held += 1
         if not self._holding:
             self._holding = True
@@ -189,7 +195,7 @@ class ScreenFrames:
                     f"time until a new one comes")
             self.log(f"  {text}")
             telemetry.emit("event", kind="held", text=text)
-        return Frame(full, shown, True, new, over=over)
+        return Frame(full, shown, True, new, over=over, over_boxes=over_boxes)
 
     def holds(self) -> tuple[int, float]:
         """Frames stamped as now though the capture held them from HELD_COUNT_S (short of HELD_S) before they were
@@ -223,8 +229,15 @@ if _held is not None:
 
 def _over(hwnd: int, area: dict) -> int | None:
     """window.over, its walk with Python's lock kept (above): another program's window shown over any of `area`."""
+    return next((above for above, _ in _overs(hwnd, area)), None)
+
+
+def _overs(hwnd: int, area: dict):
+    """window.overs, its walk with Python's lock kept (above): every window of another program shown over any of
+    `area`, (its hwnd, its box as drawn), the nearest above the game first."""
     if _held is None:
-        return window.over(hwnd, area)
+        yield from window.overs(hwnd, area)
+        return
     x0, y0 = area["left"], area["top"]
     x1, y1 = x0 + area["width"], y0 + area["height"]
     pid = wintypes.DWORD(0)
@@ -233,15 +246,30 @@ def _over(hwnd: int, area: dict) -> int | None:
     above = _held.GetWindow(hwnd, window.GW_HWNDPREV)
     for _ in range(window.OVER_MAX):
         if not above:
-            return None
+            return
         if _held.IsWindowVisible(above) and not _held.IsIconic(above):
             _held.GetWindowThreadProcessId(above, ctypes.byref(pid))
             if pid.value != game and not window._cloaked(above) and not window._family(pid.value):
                 left, top, right, bottom = window._drawn(above)
                 if left < x1 and right > x0 and top < y1 and bottom > y0 and right > left and bottom > top:
-                    return above
+                    yield above, (left, top, right, bottom)
         above = _held.GetWindow(above, window.GW_HWNDPREV)
-    return None
+
+
+def cover(hwnd: int, area: dict) -> tuple[str, list]:
+    """Other programs' windows over the game's client area `area`: the nearest in a few words, as `covering` names
+    it ("" if none), and every one's box as drawn (screen px; window.client_boxes makes them the client's)."""
+    try:
+        found = list(_overs(hwnd, area))
+    except Exception as e:  # (the window gone meanwhile: nothing of the frame is kept either)
+        return f"not known ({type(e).__name__})", []
+    if not found:
+        return "", []
+    try:
+        what = window.describe(found[0][0])
+    except Exception:  # (gone meanwhile)
+        what = "another window"
+    return what, [box for _, box in found]
 
 
 def covering(hwnd: int, area: dict) -> str:

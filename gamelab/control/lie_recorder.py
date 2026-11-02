@@ -1,31 +1,33 @@
 """Recording the Lie Detector's whole cycle, for whoever answers it: from the moment the player's watchdog first sees
-it until it has been off the screen for END_S, every picture the watchdog grabs (4 a second) is saved, with an index
-and, at the end, a summary. The user asked for it on 2026-10-24: the player used to shut down at the alarm, so
-nothing it saved showed them answering the Lie Detector.
+it until it has been off the screen for END_S, every look the watchdog takes (4 a second) goes into an index and, at
+the end, a summary. The user asked for it on 2026-10-24: the player used to shut down at the alarm, so nothing it
+saved showed them answering the Lie Detector. Its pictures (JPEG, 4 a second) were saved too until 2026-11-01 (the
+user: "stop keeping the 4fps recording and only use the unified recorder's 15fps video saving"): the cycle's video is
+the rolling recorder's alarm clip, 15 a second, lossless, written once this recording's summary says the cycle is over
+(control.rolling: Recorder.cycle_end).
 
 One folder a cycle, paths.LIE_RECORDINGS/<YYYYmmdd-HHMMSS> (when it was first seen):
-  00000.jpg ...  every frame grabbed: the game's client area as the watchdog grabbed it, as JPEG (JPEG_PARAMS);
-  index.jsonl    a line a grab: `t` (s since the first sight) and either the frame's number `i`, its `file`, the
-                 spotter's per-form `scores` (match / threshold, 1 = seen) and whether the Lie Detector was `seen`,
-                 or `game`: why there is no frame ("no window", "minimized"; or "covered": another window over the
-                 game, with the `scores` and `seen` of what was on top, its picture not saved); and, when the YOLO
-                 shadow's check of a frame comes back (late: it checks on a thread of its own), a line of its own
-                 with the frame's `t` and `i`, its `shadow` score, `seen`, `suggestions` and `late` (`add_shadow`);
+  index.jsonl    a line a look: `t` (s since the first sight) and either the look's frame number `i` (a frame of the
+                 game itself: the YOLO shadow's check of it comes back with it), the spotter's per-form `scores`
+                 (match / threshold, 1 = seen) and whether the Lie Detector was `seen`, or `game`: why there was no
+                 frame of the game ("no window", "minimized"; or "covered": another window over the game, with the
+                 `scores` and `seen` of what was on top); and, when the YOLO shadow's check of a frame comes back
+                 (late: it checks on a thread of its own), a line of its own with the frame's `t` and `i`, its `shadow`
+                 score, `seen`, `suggestions` and `late` (`add_shadow`);
   summary.json   at the end (`Recording.summary`): when it was first and last seen, how long the recording ran, its
-                 frames, the forms seen and when each first and last showed, whether the Truth Booth did (the
+                 looks, the forms seen and when each first and last showed, whether the Truth Booth did (the
                  outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size, the
                  shadow's checks (how many, their suggestions, the latest one came back, those lost);
-  before/        written by the rolling recorder when it runs (control.rolling): the game 10 times a second for the 5
+  before/        written by the rolling recorder when it runs (control.rolling): the game 15 times a second for the 5
                  minutes before the alarm and on into this recording's first seconds, frames, index and summary of
                  its own.
 
-It writes only pictures of the game's window that the watchdog grabbed anyway: nothing of the mouse or the keyboard.
-It never touches the game, and nothing here can answer the Lie Detector.
+Nothing of the mouse or the keyboard is recorded. It never touches the game, and nothing here can answer the Lie
+Detector.
 
-The writing is done on a thread of its own, behind a queue: a slow or full disk never holds up the watchdog, and a
-frame that can't be written is logged, counted and left out while the recording goes on. When a recording starts,
-the oldest others are deleted until they take at most KEEP_BYTES (`prune`, on a thread of its own; never the one
-being written).
+The writing is done on a thread of its own, behind a queue: a slow or full disk never holds up the watchdog. When a
+recording starts, the oldest others are deleted until they take at most KEEP_BYTES (`prune`, on a thread of its own;
+never the one being written).
 
 The elevated key player loads this module: it imports nothing else of gamelab but paths.
 """
@@ -39,7 +41,6 @@ import time
 from collections import Counter
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from ..paths import LIE_RECORDINGS
@@ -62,36 +63,15 @@ END_S = 10.0
 # it has been seen, is a test left unanswered (its windows run a minute or two) and the Truth Booth it sends her to
 # (4:44 left on its timer in the screenshot taken as she arrived, 2026-10-18), then END_S: about 8 minutes. Ten
 # leave two to spare; a cycle that runs on (a window the spotter takes for the Lie Detector, the game minimized
-# for good) stops recording there, at 2,400 frames (about 700 MB at 1366x768, 1.0 GB at 1920x1080), and the player
-# stays up, locked, as before.
+# for good) stops recording there, at 2,400 looks, and the player stays up, locked, as before.
 CAP_S = 10 * 60.0
-# JPEG at quality 75 with full-resolution colour (4:4:4). Measured on the three real 1366x768 frames in
-# tests/fixtures/native and the six Lie Detector screens in tests/fixtures/lie_detector shrunk to 1366x768
-# (D:/MapleHelper-scratch/ld/jpeg_measure2.py): 297 KB a game frame (197 KB a Lie Detector screen), 4.9 ms to
-# encode. With the usual half-resolution colour (4:2:0) the countdown's thin yellow title lost its colour: the
-# spotter scored it 0.36-0.41 of its threshold on the decoded frame at every quality from 60 to 90; at 4:4:4 it
-# keeps 1.11 (1.22 on the PNG); every other form scored as on the PNG. The mini-game notice's small text read as
-# well as on the PNG, the HUD's 1366x768 text too (30.5 dB PSNR in the notice's box). Quality 85 is 434 KB a frame
-# for 2.4 dB more; 65 was as legible at 238 KB, but its ringing showed round the letters. A PNG is 1,307 KB. At
-# 1920x1080, the other size the player may set (window.CLIENT_SIZES: the game's 1366x768 view stretched to it), a
-# frame is half as big again: 447 KB a game frame (the three stretched, bilinear) and 335 KB a Lie Detector screen
-# (126-431, the six as saved; D:/MapleHelper-scratch/ld/finish/scripts/jpeg_sizes.py). The sizes below are 1366x768's.
-JPEG_QUALITY = 75
-JPEG_PARAMS = [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY,
-               cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444]
 # What's kept: the newest recordings, 10 GB of them at most besides the one being written (the oldest deleted first
-# when a recording starts). Telemetry keeps 2 GB, 4 days of `watch`; these are kept longer, being what the user
-# asked for. A cycle answered in about 2.5 minutes (the test's windows, then the minute's tail) is some 600 frames,
-# about 175 MB at 290 KB a frame, so 10 GB holds about 58 of those; 18 that went to the Truth Booth (8 minutes,
-# 560 MB), 14 at the cap. The Lie Detector came about an hour apart at the most often (00:47, 01:58 and 02:54 on
-# 2026-10-19: tests/fixtures/lie_detector), so 58 cycles are two days of play without a break, weeks of evenings.
-# D: had 98 GB free on 2026-10-24. At 1920x1080, about 260 MB a cycle answered and 39 of them in the 10 GB. Since
-# 2026-10-24 the rolling recording's 5 minutes before the alarm go into a cycle's folder too (`before/`, about 650 MB
-# at 1366x768: control.rolling) and count: about 0.8 GB a cycle answered, 12 of them in the 10 GB (32 GB free on D:
-# that evening).
+# when a recording starts). A recording's own index is small (about 0.2 MB a cycle since its frames went, 2026-11-01);
+# what counts is the rolling recording's 5 minutes before each alarm in it (`before/`, about 650 MB at 1366x768:
+# control.rolling), so about 15 cycles in the 10 GB. The Lie Detector came about an hour apart at the most often (00:47,
+# 01:58 and 02:54 on 2026-10-19: tests/fixtures/lie_detector).
 KEEP_BYTES = 10 * 1024 ** 3
-QUEUE_ITEMS = 16  # grabs waiting to be written (4 s of them, 3 MB a 1366x768 frame, 6 at 1920x1080); past it one is
-                  # dropped
+QUEUE_ITEMS = 16  # looks waiting to be written to the index (4 s of them); past it one is dropped
 LIVE_S = 5.0      # a recording whose index was written this recently, and not summed up, is still being written
 STAMP = "%Y%m%d-%H%M%S"
 INDEX, SUMMARY = "index.jsonl", "summary.json"
@@ -99,8 +79,8 @@ TRUTH_BOOTH = "truth booth"  # the spotter's name for the Truth Booth's form (pe
 
 
 class Recording:
-    """One cycle's recording. The watchdog adds every grab (`add`) and ends it (`finish`); a thread of its own writes
-    the frames and the index as they come and the summary at the end. Making one makes its folder (OSError if it
+    """One cycle's recording. The watchdog adds every look (`add`) and ends it (`finish`); a thread of its own writes
+    the index as it comes and the summary at the end. Making one makes its folder (OSError if it
     can't) and deletes the oldest recordings past `keep_bytes`."""
 
     def __init__(self, root: Path | None = None, alarm_info: dict | None = None, log=print,
@@ -122,7 +102,7 @@ class Recording:
         self.window = None
         self.end = None
         # The writer's side.
-        self.frames = self.bytes = self.errors = self.index_errors = 0
+        self.index_errors = 0
         self.ended = threading.Event()
         self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_ITEMS)
         self._writer = threading.Thread(target=self._write, name="lie-detector-recording", daemon=True)
@@ -131,10 +111,10 @@ class Recording:
 
     def add(self, t: float, frame: np.ndarray | None, scores: dict[str, float] | None = None,
             why: str | None = None) -> int | None:
-        """One grab, `t` s after the first sight: a frame (RGB) with the spotter's scores of it, or None and why
-        there is none (the game window gone or minimized; or covered by another window, with the scores of what was
-        on top, which aren't saved as a picture). Returns the frame's number (None: no frame), which the YOLO shadow's
-        check of it comes back with (`add_shadow`). Never blocks: with the queue full the frame is dropped (counted,
+        """One look, `t` s after the first sight: a frame of the game (RGB: only its size is kept) with the spotter's
+        scores of it, or None and why there is none (the game window gone or minimized; or covered by another window,
+        with the scores of what was on top). Returns the frame's number (None: no frame), which the YOLO shadow's check
+        of it comes back with (`add_shadow`). Never blocks: with the queue full the look's line is dropped (counted,
         and the next line in the index says how many went before it)."""
         record: dict = {"t": round(t, 3)}
         if frame is None:
@@ -161,13 +141,13 @@ class Recording:
         if self._dropped_since:
             record["dropped_before"] = self._dropped_since
         try:
-            self._queue.put_nowait((record, frame))
+            self._queue.put_nowait(record)
             self._dropped_since = 0
-        except queue.Full:  # the disk is behind: this grab goes, the watchdog doesn't wait
+        except queue.Full:  # the disk is behind: this look's line goes, the watchdog doesn't wait
             self.dropped += 1
             self._dropped_since += 1
             if self.dropped == 1:
-                self._say(f"Lie Detector recording: the disk is behind, a frame dropped at {t:.1f} s (counted)")
+                self._say(f"Lie Detector recording: the disk is behind, a look dropped at {t:.1f} s (counted)")
         return record.get("i")
 
     def add_shadow(self, t: float, i: int | None, form: str, score: float, suggestions: list[dict],
@@ -184,7 +164,7 @@ class Recording:
         record = {"t": round(t, 3), "i": i, "shadow": round(float(score), 3), "seen": score >= 1,
                   "suggestions": suggestions, "late": round(late, 3)}
         try:
-            self._queue.put_nowait((record, None))
+            self._queue.put_nowait(record)
         except queue.Full:
             self.shadow_lost += 1
             return False
@@ -224,13 +204,12 @@ class Recording:
         seen_s = None if self.first_seen is None else round(self.last_seen - self.first_seen, 3)
         return {"folder": str(self.folder), "started": self.started, "first_seen": self.first_seen,
                 "last_seen": self.last_seen, "seen_s": seen_s, "duration_s": round(self.last_t, 3),
-                "frames": self.frames, "frame_bytes": self.bytes, "grabs": self.grabs,
-                "not_showing": dict(self.missing), "dropped": self.dropped, "write_errors": self.errors,
+                "grabs": self.grabs, "not_showing": dict(self.missing), "dropped": self.dropped,
                 "forms": self.forms, "truth_booth": booth, "outcome": outcome, "end": self.end,
                 "shadow": {"checks": self.shadow_checks, "suggestions": self.shadow_suggestions,
                            "late_max_s": round(self.shadow_late, 3), "lost": self.shadow_lost},
                 "end_stretch_s": self.end_s, "cap_s": self.cap_s, "alarm_screenshot": self.screenshot,
-                "window": self.window, "jpeg_quality": JPEG_QUALITY}
+                "window": self.window}
 
     # --- the writer's thread ---
 
@@ -241,44 +220,23 @@ class Recording:
             # Read first, an end seen means every grab is in the queue already.
             done = self.ended.is_set()
             try:
-                record, frame = self._queue.get(timeout=0.05)
+                record = self._queue.get(timeout=0.05)
             except queue.Empty:
                 if done:  # nothing is added once it's ended: all of it is written
                     break
                 continue
-            self._write_one(record, frame)
+            self._write_one(record)
         summary = self.summary()
         try:
             (self.folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
         except OSError as e:
             self._say(f"Lie Detector recording: couldn't write its summary ({e})")
         forms = ", ".join(self.forms) or "none"
-        self._say(f"Lie Detector recording ended ({self.end}): {self.frames} frames over {self.last_t:.0f} s, seen "
+        self._say(f"Lie Detector recording ended ({self.end}): {self.grabs} looks over {self.last_t:.0f} s, seen "
                   f"{summary['seen_s'] or 0:.0f} s ({forms}), {summary['outcome']}"
-                  + (f", {self.errors} frames not written" if self.errors else "")
                   + (f", {self.dropped} dropped" if self.dropped else "") + f": {self.folder}")
 
-    def _write_one(self, record: dict, frame: np.ndarray | None) -> None:
-        if frame is not None:
-            path = self.folder / f"{record['i']:05d}.jpg"
-            try:
-                ok, buf = cv2.imencode(".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), JPEG_PARAMS)
-                if not ok:
-                    raise ValueError("the JPEG encoder refused it")
-                path.write_bytes(buf.tobytes())
-                record["file"] = path.name
-                self.frames += 1
-                self.bytes += len(buf)
-            except Exception as e:  # disk full, no permission, ...: logged once, counted, and on to the next
-                self.errors += 1
-                record["error"] = f"{type(e).__name__}: {e}"
-                if self.errors == 1:
-                    self._say(f"Lie Detector recording: couldn't write frame {record['i']} ({record['error']}); "
-                              "going on (the summary counts them)")
-                try:
-                    path.unlink(missing_ok=True)  # no half-written picture
-                except OSError:
-                    pass
+    def _write_one(self, record: dict) -> None:
         try:
             with open(self.folder / INDEX, "a", encoding="utf-8") as f:  # closed each time: its last write shows
                 f.write(json.dumps(record) + "\n")

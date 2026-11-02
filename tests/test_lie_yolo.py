@@ -171,7 +171,7 @@ def test_the_shadow_keeps_a_cycle_going_and_each_check_is_recorded_with_its_fram
     assert dog.recording is None and dog.cycle_t0 is None
     [rec] = dog.ended
     index, summary = written(rec)
-    shots = [r for r in index if "file" in r]
+    shots = [r for r in index if "i" in r and "shadow" not in r]  # (the looks at the game's frames)
     checks = [r for r in index if "shadow" in r]
     assert len(shots) == 6 and all(set(r["scores"]) == {"countdown", "truth booth"} for r in shots)
     assert [r["seen"] for r in shots] == [True] + [False] * 5  # the spotter's: the notice at its first frame only
@@ -212,7 +212,7 @@ def test_a_shadow_failure_does_not_disable_template_alarms_or_frame_recording(tm
     rec = dog.recording
     rec.finish("stopped")
     index, summary = written(rec)
-    assert [r.get("file") for r in index] == ["00000.jpg", "00001.jpg"] and summary["shadow"]["checks"] == 0
+    assert [r.get("i") for r in index] == [0, 1] and summary["shadow"]["checks"] == 0
 
 
 def test_a_slow_shadow_never_holds_up_the_recording_4_frames_a_second_through_its_check(tmp_path):
@@ -234,7 +234,7 @@ def test_a_slow_shadow_never_holds_up_the_recording_4_frames_a_second_through_it
     assert not dog.is_alive() and shadow.calls == 1
     [rec] = dog.ended
     index, summary = written(rec)
-    times = [r["t"] for r in index if "file" in r]
+    times = [r["t"] for r in index if "i" in r and "shadow" not in r]
     assert 11 <= len(times) <= 14 and summary["end"] == "stopped" and summary["shadow"]["checks"] == 0
     assert np.median(np.diff(times)) == pytest.approx(0.25, abs=0.02) and max(np.diff(times)) < 0.4
 
@@ -274,7 +274,7 @@ def test_the_shadow_s_checks_come_back_late_and_the_cycle_still_ends_and_reads_r
         let_go(dog, shadow)
     [rec] = dog.ended
     index, summary = written(rec)
-    number = {r["t"]: r["i"] for r in index if "file" in r}
+    number = {r["t"]: r["i"] for r in index if "i" in r and "shadow" not in r}
     checks = [r for r in index if "shadow" in r]
     assert all(number[r["t"]] == r["i"] for r in checks)
     assert [(r["t"], r["seen"], r["late"]) for r in checks[:4]] == [(0.0, True, 0.75), (0.5, True, 1.0),
