@@ -154,8 +154,8 @@ class KillCredit:
     behavior.ledger, grind, localization.memory). The thief has none: his stars' nearest-ahead box and timings
     (tracking's constants)."""
     search: Search          # the search her attack picks by: each candidate's first band from where she was at the pick
-    tie: int                # the bands past the first in which the monster she aimed at still comes first (0: only in
-                            # the first band itself)
+    tie: int                # the bands past the first taken as the first (the tracker's x error), the oldest track
+                            # first across them (0: the first band alone)
     lands_s: float          # s after the key her hit shows on the monster: it walks on till then, then dies where it is
 
 

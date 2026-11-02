@@ -19,6 +19,9 @@ known (tracker.throws_known). OpenCV on one thread and Windows' timers at 1 ms (
 Each frame is handed over at its own time in the recording (paced: the real clock waits for it, 15 a second as the
 service looked), the next one read from disk in the slack after the pass, never during one; `--unpaced` runs them back
 to back (the same dump where nothing in the step reads the real clock: the parent's `check` says whether it is). The
+eyes' recoveries after a frame that failed its checks (Eyes.recover: the minimap, her name tag and the locator lose
+what they held) come RECOVER_EVERY_S apart at most on the recording's own clock, not the real one as feed.Runner's
+(whose clock is the frames' on live), so pacing can't move them (on R1-R3 none ran: no frame failed). The
 step's clock is the live service's (time.monotonic's of that night): the feed's `t0` is frame 0's time on it, so every
 time the step makes (her gains, her touches' popups, the tracks' times) reads against the live telemetry's own. What
 the service took from its clients goes in from the feed (gamelab.sim.replay.feed: the hunt's records): her throws
@@ -42,8 +45,9 @@ frame, then an end line with the step's, tracker's and spawn watch's counts. A f
   loot          the drops asked for, where asked: [[x, y, platform, mesos]]
   say           what the eyes, senses or step logged on this frame, if anything
 The pass's times (the real clock's) go in the side file instead (`--side`, JSON: per frame [i, late ms, pass ms, look
-ms, whole screen ms, spawn watch ms], the lab files the run opened, the wall time it took), never in the dump: timings
-are compared only between runs made side by side (`replay bench`), never against a cached one."""
+ms, whole screen ms, spawn watch ms], the lab files and the game data's files the run opened, each by its content, the
+wall time it took), never in the dump: timings are compared only between runs made side by side (`replay bench`),
+never against a cached one."""
 
 import argparse
 import gzip
@@ -128,18 +132,28 @@ def main(argv=None) -> int:
     sys.dont_write_bytecode = True
     lab = os.path.normcase(str(root / "gamelab" / "lab")) + os.sep
     opened: set[str] = set()
+    data_dirs: list[str] = []      # (the game data's folder, as named and as its junction resolves: set below)
+    data_opened: set[str] = set()
 
-    def audit(event, args):  # (the lab files the run opens: the parent keys a cached dump by them)
+    def audit(event, args):  # (the lab files and game data the run opens: the parent keys a cached dump by them)
         if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
             full = os.path.normcase(os.path.abspath(os.fsdecode(args[0])))
             if full.startswith(lab):
                 opened.add(full[len(lab):].replace(os.sep, "/"))
+            else:
+                for d in data_dirs:
+                    if full.startswith(d):
+                        data_opened.add(full[len(d):].replace(os.sep, "/"))
+                        break
     sys.addaudithook(audit)
 
     import gamedata.paths as gpaths  # (first: the modules after it take its paths as they import)
     if a.data:
         d = Path(a.data)
         gpaths.DATA, gpaths.COPY, gpaths.OUT, gpaths.TABLES = d, d / "copy", d / "out", d / "out" / "tables"
+    data_root = Path(gpaths.DATA)
+    data_dirs[:] = sorted({os.path.normcase(os.path.abspath(str(data_root))) + os.sep,
+                           os.path.normcase(str(data_root.resolve())) + os.sep}, key=len, reverse=True)
     import ctypes
 
     import cv2
@@ -180,6 +194,8 @@ def main(argv=None) -> int:
     step.tracker.throws_known = True                                # (... that tells her throws)
     runner = feed.Runner(None, eyes, step)
     watch = getattr(step, "spawns", None)
+    recover_every = getattr(feed, "RECOVER_EVERY_S", 0.2)
+    recovered = -1e18  # (the eyes' last recovery, on the recording's clock: see the top)
 
     sights: list = []
     wide: list = []
@@ -255,8 +271,9 @@ def main(argv=None) -> int:
         wide.clear()
         said.clear()
         st = step.step(runner.look(Frame(full, t, True, over="")), t, True, use)
-        if st.bad is not None:
-            runner.recover(st.bad)
+        if st.bad is not None and t - recovered >= recover_every and hasattr(eyes, "recover"):
+            recovered = t
+            eyes.recover(st.bad)
         rec = {"i": r["i"], "t": r["t"],
                "her": None if st.where is None else [_r1(st.where[0]), _r1(st.where[1]), st.where[2], st.how,
                                                       st.mode],
@@ -296,9 +313,12 @@ def main(argv=None) -> int:
         lab_dir = root / "gamelab" / "lab"
         reads = {rel: (hashlib.sha256((lab_dir / rel).read_bytes()).hexdigest()[:16]
                        if (lab_dir / rel).is_file() else None) for rel in sorted(opened)}
+        data_reads = {rel: (hashlib.sha256((data_root / rel).read_bytes()).hexdigest()[:16]
+                            if (data_root / rel).is_file() else None) for rel in sorted(data_opened)}
         Path(a.side).write_text(json.dumps({
             "root": str(root), "frames": str(frames), "pid": os.getpid(), "began": round(began_wall, 3),
             "seconds": round(time.time() - began_wall, 1), "paced": not a.unpaced, "lab_read": reads,
+            "data": str(data_root), "data_read": data_reads,
             "times": ["i", "late ms", "pass ms", "look ms", "wide ms", "spawns ms"], "rows": side_rows},
             separators=(",", ":")), encoding="utf-8")
     print(f"replay_run: {len(rows)} frames, {told} throws told, {time.time() - began_wall:.0f} s", flush=True)

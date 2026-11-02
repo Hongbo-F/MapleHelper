@@ -4,15 +4,16 @@ lossless recordings of RiceBaby grinding Tree Dungeon on master 40ba190 (R1-R3, 
 2026-11-02 by the user's word) instead of by hand-built scripts each time.
 
     python -m gamelab.sim.replay run [CLIPS] [--root DIR | --commit REF] [--out DIR] [--range A:B] [--unpaced]
-                                          [--jobs N]
-    python -m gamelab.sim.replay cached [CLIPS] [--commit master] [--range A:B] [--jobs N] [--where]
-    python -m gamelab.sim.replay score [CLIPS] [--dumps DIR] [--base master] [--json FILE]
+                                          [--jobs 2]
+    python -m gamelab.sim.replay cached [CLIPS] [--commit master] [--range A:B] [--jobs 2] [--where]
+    python -m gamelab.sim.replay score [CLIPS] [--dumps DIR] [--base REF] [--labels v3] [--json FILE]
     python -m gamelab.sim.replay check A B          two dumps the same to the byte, or where they part
     python -m gamelab.sim.replay bench [CLIPS] --base REF [--root DIR] [--range A:B] [--rounds 1]
     python -m gamelab.sim.replay feed CLIP          what the hunt's records tell the step (throws, asks, clock)
 
 CLIPS: R1, R2, R3 (by default all three), or their folder names (CLIPS below). Every job that runs frames goes through
-the CPU rules' wrapper (heavy.sh / bg_quiet.cmd), as any harness job: a run takes a core and a half while it lasts.
+the CPU rules' wrapper (heavy.sh / bg_quiet.cmd), as any harness job: a run takes a core and a half while it lasts, and
+`--jobs` (2 by default, the rules' workers while the user plays) runs that many recordings at once.
 
 **run**: a code tree's frame step over a recording, exactly as the perception service ran it that night with the
 grind attached (gamelab/sim/replay_run.py, a child process per recording that imports the tree's own gamelab:
@@ -25,20 +26,24 @@ is replay_run's docstring) and a side file with the pass's times. The tree: this
 **cached**: a commit's dumps (master's by default) made once and read after, as the harness's baselines are
 (gamelab.sim.baseline): kept under <GAMELAB_REPLAYS, else the baselines' root's recordings/>/<code>/<key>/, `code`
 the commit's code_id (its tree under gamelab/, gamedata/, maplehelper/, config.toml, Markdown aside), `key` a hash of
-everything else a dump depends on: the runner's own source (replay_run.py), the feed, the lab inputs (LAB_INPUTS, by
-content), the GAMELAB_* environment as resolved, Python's and the packages' versions, the recording's frames (stamp)
-and the range. A dump is kept only if every lab file it opened is one LAB_INPUTS covers. So a branch is compared
-against master without running master again; the labels aren't in the key (a score is made from a dump in seconds,
-and `score --base` says which labels' version it read).
+everything else a dump depends on: the runner's own source (replay_run.py: an edit of it makes every commit's dumps
+again), the feed, the lab inputs (LAB_INPUTS, by content), the child's GAMELAB_* environment as the harness's keys
+resolve it (baseline.gamelab_env: GAMELAB_FIXED_STATS and any other one set, but REPLAYS_NOT_KEYED's and NOT_KEYED's,
+which say where things are), Python's and the packages' versions, the recording's frames (stamp) and the range. A dump
+is kept only if every lab file it opened is one LAB_INPUTS covers, and with the game data's files it read, by content
+(its key.json's `data_read`: gamedata/data isn't in git, so not in the code): one whose data changed since is stale,
+and made again. So a branch is compared against its base without running the base again; the labels aren't in the key
+(a score is made from a dump in seconds, and says which labels' version it read).
 
-**score**: a dump against the recording's labels (tests/fixtures/recordings/<clip>/labels-v2.json: small, versioned,
+**score**: a dump against the recording's labels (tests/fixtures/recordings/<clip>/labels-v3.json: small, versioned,
 in git, where no cleanup of the scratch drive can lose them; the frames stay in golden-clips, by path). Per class a
 score: the spawn watch's newborns (the onsets of record reproduced, every labelled birth found, false onsets, which
 must stay 0, re-onsets, frames to the first sighting), the births it missed (found now?), touches (found by popup or
 HP bar, timing), monsters under her body (seen in the state?), her kills (which monster each gain was: the replay's
 first and last binding against the label, the first on the victim's level), her casts at her dead (left out by the
-state she chose on?), other players (ids, the rival under her dot). `--base master` puts master's cached dumps' scores
-beside, from the same labels.
+state she chose on?), other players (ids, the rival under her dot). `--base REF` puts REF's cached dumps' scores
+beside, from the same labels (REF: the branch's base, `git merge-base HEAD master`); it never makes them, but says the
+`cached` command that would (a job for the CPU rules' wrapper). `--labels v1` scores against an older version.
 
 **bench**: pass times, only from runs made side by side: the base and the tree alternated (base, tree, tree, base by
 default) on the same frames, paced, one at a time; never against a cached dump's times (the machine changes between
@@ -75,7 +80,9 @@ REPO = Path(__file__).resolve().parents[2]
 RUNNER = Path(__file__).with_name("replay_run.py")
 GOLDEN = Path(os.environ.get("GAMELAB_GOLDEN_CLIPS", "D:/MapleHelper-scratch/golden-clips"))
 LABELS = REPO / "tests" / "fixtures" / "recordings"
-LABELS_VERSION = "v2"  # (v1: as the kit was built; v2 from the kill-credit work: README)
+LABELS_VERSION = "v3"  # (v1: as the kit was built; v2 from the kill-credit work; v3 after its review: README)
+REPLAYS_NOT_KEYED = ("GAMELAB_REPLAYS", "GAMELAB_GOLDEN_CLIPS")  # where the dumps and the recordings are, not what a
+                                                                 # run does (as baseline.NOT_KEYED's)
 MAIN_DATA = Path("D:/MapleHelper/gamedata/data")  # the game data, where a commit's export has none of its own
 LOCAL = datetime.timezone(datetime.timedelta(hours=-8))  # the recordings' local time (Pacific, standard)
 # The lab files the frame step reads, which git doesn't see (each checkout's copy): her calibration and name tags at
@@ -108,7 +115,10 @@ class Clip:
 
     @property
     def labels(self) -> Path:
-        return LABELS / self.folder / f"labels-{LABELS_VERSION}.json"
+        return self.labels_of(LABELS_VERSION)
+
+    def labels_of(self, version: str) -> Path:
+        return LABELS / self.folder / f"labels-{version}.json"
 
     def rows(self) -> list[dict]:
         return [json.loads(line) for line in open(self.frames / "index.jsonl", encoding="utf-8")]
@@ -211,7 +221,8 @@ def feed(clip: Clip) -> dict:
             side = r.get("side") if r.get("side") in ("left", "right") else None  # (told from 2026-11-02)
             if side is not None:
                 how["side told"] = how.get("side told", 0) + 1
-            if side is None and stance is not None and r["t"] - stance["t"] <= STANCE_S                     and stance.get("act") == "throw":
+            if side is None and stance is not None and r["t"] - stance["t"] <= STANCE_S \
+                    and stance.get("act") == "throw":
                 m = re.search(r"\b(left|right)\b", stance.get("text", "").split("(")[0])
                 side = m[1] if m else None
                 how["side by stance"] += side is not None
@@ -317,6 +328,18 @@ def _range(text: str) -> tuple[int, int]:
     return start, (int(b) - start if b else 0)
 
 
+def child_env(clip: Clip) -> dict:
+    """The environment replay_run runs in for `clip`: this one's, with its character and ENV."""
+    return dict(os.environ, GAMELAB_CHARACTER=clip.character, **ENV)
+
+
+def data_of(root: Path) -> Path:
+    """The game data a tree runs on: its own (a checkout's gamedata/data), else the main checkout's (MAIN_DATA: a
+    commit's export has none, git ignoring it)."""
+    own = root / "gamedata" / "data"
+    return own if (own / "out").exists() else MAIN_DATA
+
+
 def run_one(clip: Clip, root: Path, out: Path, start: int = 0, limit: int = 0, paced: bool = True,
             the_feed: dict | None = None) -> subprocess.Popen:
     """replay_run.py on `clip` with tree `root`, writing out/<folder>.jsonl.gz and .side.json (started: the process)."""
@@ -324,12 +347,12 @@ def run_one(clip: Clip, root: Path, out: Path, start: int = 0, limit: int = 0, p
     the_feed = feed(clip) if the_feed is None else the_feed
     feed_path = out / f"{clip.folder}.feed.json"
     feed_path.write_text(json.dumps(the_feed, separators=(",", ":")), encoding="utf-8")
-    data = [] if (root / "gamedata" / "data" / "out").exists() else ["--data", str(MAIN_DATA)]
+    data = [] if data_of(root) != MAIN_DATA else ["--data", str(MAIN_DATA)]
     cmd = [sys.executable, "-B", str(RUNNER), "--root", str(root), "--frames", str(clip.frames), "--feed",
            str(feed_path), "--out", str(out / f"{clip.folder}.jsonl.gz"), "--side",
            str(out / f"{clip.folder}.side.json"), "--start", str(start), "--limit", str(limit), *data] \
         + ([] if paced else ["--unpaced"])
-    env = dict(os.environ, GAMELAB_CHARACTER=clip.character, **ENV)
+    env = child_env(clip)
     log = open(out / f"{clip.folder}.log", "w", encoding="utf-8")
     return subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env)
 
@@ -355,11 +378,28 @@ def run_all(clips: list[Clip], root: Path, out: Path, start: int, limit: int, pa
 
 
 def key_of(clip: Clip, code: str, lab: dict, start: int, limit: int, the_feed: dict) -> dict:
-    """What a cached dump is of, beside its code (cached)."""
-    return {"format": 1, "code": code, "runner": hashlib.sha256(RUNNER.read_bytes()).hexdigest()[:16],
-            "feed": _hash(the_feed)[:16], "lab": _hash(lab)[:16], "env": dict(ENV, GAMELAB_CHARACTER=clip.character),
+    """What a cached dump is of, beside its code (cached): the child's GAMELAB_* environment (child_env) as the
+    harness's keys have it (baseline.gamelab_env), REPLAYS_NOT_KEYED aside."""
+    env = {k: v for k, v in child_env(clip).items() if k not in REPLAYS_NOT_KEYED}
+    return {"format": 2, "code": code, "runner": hashlib.sha256(RUNNER.read_bytes()).hexdigest()[:16],
+            "feed": _hash(the_feed)[:16], "lab": _hash(lab)[:16], "env": baseline.gamelab_env(env),
             "python": sys.version.split()[0], "packages": baseline.packages(), "frames": frames_stamp(clip),
             "range": [start, limit]}
+
+
+def data_stale(where: Path, data: Path = MAIN_DATA) -> list[str]:
+    """Of the game data's files a kept dump read (its key.json's `data_read`), those not as they were then; all of them
+    (["key.json"]) where it says none."""
+    try:
+        read = json.loads((where / "key.json").read_text(encoding="utf-8"))["data_read"]
+    except (OSError, ValueError, KeyError):
+        return ["key.json"]
+    out = []
+    for rel, digest in read.items():
+        p = data / rel
+        if (hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.is_file() else None) != digest:
+            out.append(rel)
+    return out
 
 
 def covered(read: dict) -> list[str]:
@@ -380,9 +420,12 @@ def cached(clips: list[Clip], ref: str, start: int, limit: int, jobs: int, make:
         k = key_of(c, code, lab, start, limit, f)
         where = cache_root() / code[:12] / _hash(k)[:16]
         dump = where / f"{c.folder}.jsonl.gz"
-        if dump.exists():
+        if dump.exists() and not (stale := data_stale(where)):
             out[c.folder] = dump
         else:
+            if dump.exists():
+                print(f"replay: {c.name}'s kept dump is stale: the game data it read changed ({', '.join(stale[:3])}"
+                      f"{' ...' if len(stale) > 3 else ''})")
             todo.append((c, where, k))
     if todo and make:
         root, _, _ = tree(ref)
@@ -421,8 +464,8 @@ def _keep(c: Clip, where: Path, k: dict, tmp: Path, sha: str) -> Path | None:
     for p in tmp.iterdir():
         os.replace(p, where / p.name)
     tmp.rmdir()
-    (where / "key.json").write_text(json.dumps(dict(k, commit=sha, made=time.strftime("%Y-%m-%d %H:%M")), indent=1),
-                                    encoding="utf-8")
+    (where / "key.json").write_text(json.dumps(dict(k, commit=sha, made=time.strftime("%Y-%m-%d %H:%M"),
+                                                    data_read=side.get("data_read", {})), indent=1), encoding="utf-8")
     return where / f"{c.folder}.jsonl.gz"
 
 
@@ -506,17 +549,18 @@ def main(argv=None) -> int:
     r.add_argument("--out", type=Path)
     r.add_argument("--range", default="")
     r.add_argument("--unpaced", action="store_true")
-    r.add_argument("--jobs", type=int, default=3)
+    r.add_argument("--jobs", type=int, default=2)
     c = sub.add_parser("cached", help="a commit's dumps, made once and read after")
     c.add_argument("clips", nargs="*")
     c.add_argument("--commit", default="master")
     c.add_argument("--range", default="")
-    c.add_argument("--jobs", type=int, default=3)
+    c.add_argument("--jobs", type=int, default=2)
     c.add_argument("--where", action="store_true", help="only say where they are; make none")
     s = sub.add_parser("score", help="dumps against the recordings' labels")
     s.add_argument("clips", nargs="*")
     s.add_argument("--dumps", type=Path, help="a run's folder (default: --base's cached dumps alone)")
-    s.add_argument("--base", default="", help="a commit whose cached dumps are scored beside (made if missing)")
+    s.add_argument("--base", default="", help="a commit whose cached dumps are scored beside (never made here)")
+    s.add_argument("--labels", default=LABELS_VERSION, help="the labels' version (default: the latest)")
     s.add_argument("--json", type=Path)
     k = sub.add_parser("check", help="two dumps the same to the byte?")
     k.add_argument("a", type=Path)

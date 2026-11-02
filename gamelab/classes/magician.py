@@ -111,11 +111,13 @@ WAND = AttackSpec("wand", "attack", "the regular attack", "swinging", None, leve
                   geometry=Geometry("melee", box=WAND_BOX, air=None, line=None, order="nearest"), **_TIMES)
 
 # Her kill's monster (localization.tracking's band order, from 2026-11-02): the client's search from where she was as
-# the cast picked, the monster her attack choice aimed it at first in the first band only (tie 0, fitted on the
-# recordings R1+R2: a tie of 1 bound the same and let one more go, 2 bound 4 fewer right), her hit landing lands_ms after
-# the key (no flight: her victims stopped walking a median 0.49-0.50 s after the key on the 130 labelled kills whose
-# walk shows, D:/MapleHelper-scratch/recfix/credit/scripts/timings.py; 0.85 let 2 more go). README: Her kill's monster
-# by Magic Claw's search.
+# the cast picked, in its first band the oldest track first (the client takes the one that entered the map first), the
+# first band alone (tie 0: fitted on the recordings R1+R2 with her aim first in the band, the order before the review,
+# where a tie of 1 bound the same and let one more go and 2 bound 4 fewer right; not tried with the oldest first), her
+# hit landing lands_ms after the key (no flight: her victims stopped walking a median 0.49-0.50 s after the key on the
+# 130 labelled kills whose walk shows, D:/MapleHelper-scratch/recfix/credit/scripts/timings.py; 0.85 let 2 more go).
+# The monster her attack choice aimed the cast at decides nothing (it changed none of R1-R3's 164 first bindings when
+# it came first in the band: tracking.AIM_DX). README: Her kill's monster by Magic Claw's search.
 KILL = KillCredit(search=SEARCH, tie=0, lands_s=MAGIC_CLAW.lands_ms / 1000)
 
 # Her Shape (what localization takes of her attacks), from the search's outer bound with the thief's slack: a monster's

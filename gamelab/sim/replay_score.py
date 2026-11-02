@@ -317,22 +317,28 @@ def total(scores: list[dict]) -> dict:
 
 
 def main(a, clips) -> int:
-    """`replay score`: the dumps in --dumps (a run's folder), and --base's cached ones beside if asked; a table per
-    recording and the total, as JSON too (--json)."""
-    from .replay import cached
+    """`replay score`: the dumps in --dumps (a run's folder), and --base's cached ones beside if asked (never made
+    here: `cached` makes them, a job for the CPU rules' wrapper); a table per recording and the total, against the
+    labels of --labels' version, as JSON too (--json)."""
+    from .replay import LABELS_VERSION, cached
+    version = getattr(a, "labels", None) or LABELS_VERSION
     sides: dict[str, dict[str, Path]] = {}
     if a.dumps:
         sides["dumps"] = {c.folder: a.dumps / f"{c.folder}.jsonl.gz" for c in clips
                           if (a.dumps / f"{c.folder}.jsonl.gz").exists()}
     if a.base or not a.dumps:
-        sides[a.base or "master"] = cached(clips, a.base or "master", 0, 0, getattr(a, "jobs", 3))
+        base = a.base or "master"
+        sides[base] = cached(clips, base, 0, 0, 1, make=False)
+        if len(sides[base]) < len(clips):
+            print(f"replay: {base}'s dumps aren't all kept; to make them (paced, about 5 min, through the CPU rules' "
+                  f"wrapper): python -m gamelab.sim.replay cached --commit {base}")
     result: dict = {}
     for side, dumps in sides.items():
         result[side] = {}
         for c in clips:
-            if c.folder not in dumps or not c.labels.exists():
+            if c.folder not in dumps or not c.labels_of(version).exists():
                 continue
-            labels = json.loads(c.labels.read_text(encoding="utf-8"))
+            labels = json.loads(c.labels_of(version).read_text(encoding="utf-8"))
             result[side][c.name] = score(dumps[c.folder], labels)
         result[side]["total"] = total([v for k, v in result[side].items() if k != "total"])
     names = list(result)

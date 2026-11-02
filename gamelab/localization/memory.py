@@ -111,6 +111,8 @@ class Remembered:
     state: str = "seen"   # "seen" (remembered), "killed" (by her: the ledger), "gone" (forgotten)
     ended: float | None = None  # when it was killed or forgotten
     died_x: float | None = None  # where the ledger placed its kill (killed)
+    moved_from: tuple | None = None  # her kill moved onto it (Memory._take_moves): where it was put first (platform,
+                                     # kind, x) and when (event 'moved')
 
     @property
     def live(self) -> bool:
@@ -367,24 +369,33 @@ class Memory:
     def _take_moves(self, t: float, dead) -> None:
         """Her kills the tracker put on another monster since (`moved`: behavior.ledger.Ledger.moved, the magician's,
         whose kills go by her search): the monster it was on, killed here by it (its track's), alive again where its
-        track isn't dead now (the tracker let it go: seen alive), back as it was (its kill was the ledger's guess, not
-        its going: no event, as a kill isn't undone in what patrol.Belief learnt); the one it's on now (its track's),
-        killed. Until 2026-11-02 each kill was taken once, as first placed: on that night's recordings master's tracker
-        first put 28 of her 149 labelled kills on another monster (the replay kit's labels-v2), the real one remembered
-        alive while the live one was killed here (a target no more, a pile's guard a ghost: P14, P34)."""
+        track isn't dead now (the tracker let it go: seen alive), back as it was; the one it's on now (its track's),
+        killed. Where one was alive again, that's the one kill moved, not another: event 'moved', not 'killed'
+        (patrol.Belief empties the new one's point for it at the kill's time, in place of the old one's, and keeps its
+        kill time once); else (none was killed here by it) 'killed'. Until 2026-11-02 each kill was taken once, as
+        first placed: on that night's recordings master's tracker first put 28 of her 149 labelled kills on another
+        monster (the replay kit's labels-v2), the real one remembered alive while the live one was killed here (a
+        target no more, a pile's guard a ghost: P14, P34)."""
         if self.moved is None:
             return
         moved = self.moved()
         new, self._moved_seen = moved[self._moved_seen:], len(moved)
         for _, k, old, _, _ in new:
+            was = None
             for e in self.entries:
                 if e.state == "killed" and old is not None and getattr(e.monster, "track", None) == old \
                         and old not in dead:
+                    was = was or (e.platform, e.kind, e.x if e.died_x is None else e.died_x, e.ended)
                     e.state, e.ended, e.died_x = "seen", None, None
             track = getattr(k, "track", None)
             if track:
                 for e in [e for e in self.entries if e.live and getattr(e.monster, "track", None) == track][:1]:
-                    self._killed(e, t, k.x)
+                    if was is None:
+                        self._killed(e, t, k.x)
+                        continue
+                    e.state, e.ended, e.died_x, e.moved_from = "killed", t, k.x, was
+                    self.events.append(("moved", t, e))
+                    self.counts["moved"] = self.counts.get("moved", 0) + 1
 
     def _killed(self, e: Remembered, t: float, x: float | None) -> None:
         e.state, e.ended, e.died_x = "killed", t, x

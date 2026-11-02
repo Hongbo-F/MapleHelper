@@ -29,7 +29,7 @@ def test_the_labels_are_the_analyses(name, onsets, births, found, touches, kills
     path = replay.CLIPS[name].labels
     assert path.stat().st_size < 100_000
     lab = labels(name)
-    assert lab["version"] == replay.LABELS_VERSION == "v2" and lab["clip"] == replay.CLIPS[name].folder
+    assert lab["version"] == replay.LABELS_VERSION == "v3" and lab["clip"] == replay.CLIPS[name].folder
     cl = lab["classes"]
     assert set(cl) == {"onsets", "births", "touches", "under_her", "kills", "players"}
     assert len(cl["onsets"]["items"]) == onsets
@@ -39,6 +39,15 @@ def test_the_labels_are_the_analyses(name, onsets, births, found, touches, kills
     assert {k["how"] for k in cl["kills"]["items"]} <= {"die1", "frames", "eye", "binding", "unsure"}
     if name == "R1":
         assert sum(o.get("given", False) for o in cl["onsets"]["items"]) == 30
+    # v3: the kills the by-eye checks didn't decide kept as master's binding (v1's), not left out; the players' slivers
+    v1 = json.loads(replay.CLIPS[name].labels_of("v1").read_text(encoding="utf-8"))["classes"]
+    eyed = {k["frame"] for k in cl["kills"]["items"] if k["how"] == "eye"} - \
+        {k["frame"] for k in v1["kills"]["items"] if k["how"] == "eye"}
+    assert {k["frame"] for k in cl["kills"]["items"] if k["how"] == "unsure"} == \
+        {k["frame"] for k in v1["kills"]["items"] if k["how"] == "unsure"}
+    assert len(eyed) == {"R1": 1, "R2": 5, "R3": 1}[name]
+    assert sum(by for _, _, by in cl["players"]["items"]) - sum(by for _, _, by in v1["players"]["items"]) == \
+        {"R1": 1, "R2": 1, "R3": 12}[name]
     # every onset is on a birth, and a birth's first onset isn't a re-find
     ids = {b["id"] for b in cl["births"]["items"]}
     assert all(o["birth"] in ids for o in cl["onsets"]["items"])
@@ -105,6 +114,27 @@ def test_kills_scored_first_and_last_binding():
     assert got["unsure"] == 1 and got["let_go"] == 1
 
 
+def test_her_casts_at_her_dead_scored_by_what_the_state_had_killed():
+    """A cast chosen 0.5 s after a labelled kill's gain at its victim's track (the one last at its place), the state
+    at the frame before having it dead: at her dead, left out; one at it with the state still holding it alive: at
+    her dead, still; one at another track the state had killed: counted apart; one after CAST_DEAD_S: none of these."""
+    t0 = 100.0
+    frames = [frame(i, i / 15) for i in range(60)]
+    alive = [7, "live", "H", -60.0, -1047.0, 15, None, "s", None, None, None]
+    dead = [7, "dead", "H", -60.0, -1047.0, 15, None, "s", None, 0.2, "hers"]
+    other = [9, "dead", "G", 200.0, -1047.0, 15, None, "s", None, 0.9, "hers"]
+    for i in range(60):
+        frames[i]["tr"] = [alive if i < 10 else dead, other]
+    items = [{"gain": 0.2, "frame": 3, "kind": "H", "victim": [-62.0, -1047.0], "how": "die1"}]
+    throws = [{"told": t0 + 0.6, "kind": "horny-mushroom", "x": -58.0, "platform": 15},   # (f8 shown: alive)
+              {"told": t0 + 0.9, "kind": "horny-mushroom", "x": -58.0, "platform": 15},   # (f13: dead)
+              {"told": t0 + 1.0, "kind": "green-mushroom", "x": 205.0, "platform": 15},  # (another it had killed)
+              {"told": t0 + 3.0, "kind": "horny-mushroom", "x": -58.0, "platform": 15},  # (past CAST_DEAD_S)
+              {"told": t0 + 1.1, "kind": "horny-mushroom", "x": None}]                    # (no target)
+    got = replay_score.score_casts(frames, t0, items, throws)
+    assert got == {"at_her_dead": 2, "left_out": 1, "still": 1, "other_left_out": 2}
+
+
 def test_under_her_and_players():
     frames = [frame(0, 0.0, m=[["H", 12.0, 5.0, 10, 3, None, 1, None, 0, 0, 56, 51, 0.9, "move/0"]],
                     pl=[[1, "stranger", 30.0, 0.0, 10], [2, "stranger", 400.0, -300.0, None]]),
@@ -164,6 +194,54 @@ def test_lab_files_the_key_doesnt_cover_are_named(tmp_path):
     got = replay.lab_inputs(tmp_path)
     assert got["character.json"] is None and "characters/magician/calibration_1366x768.json" in got
     assert "characters/magician/hits.jsonl" not in got
+
+
+def test_the_key_has_the_child_s_gamelab_environment_as_the_harness_keys_it(monkeypatch):
+    """A dump made from a shell with GAMELAB_FIXED_STATS (or any other GAMELAB_* that bears on a run) set has another
+    key than one made without; where the dumps or the recordings are (REPLAYS_NOT_KEYED) doesn't change it."""
+    monkeypatch.setattr(replay, "frames_stamp", lambda clip: "frames")
+    c = replay.CLIPS["R1"]
+    for k in [k for k in replay.os.environ if k.startswith("GAMELAB_")]:
+        monkeypatch.delenv(k)
+
+    def key():
+        return replay._hash(replay.key_of(c, "code", {}, 0, 0, {"t0": 1.0}))
+    plain = key()
+    monkeypatch.setenv("GAMELAB_REPLAYS", "D:/elsewhere")
+    monkeypatch.setenv("GAMELAB_GOLDEN_CLIPS", "D:/elsewhere/clips")
+    assert key() == plain
+    monkeypatch.setenv("GAMELAB_FIXED_STATS", "1")
+    fixed = key()
+    assert fixed != plain and replay.key_of(c, "code", {}, 0, 0, {})["env"]["fixed_stats"] is True
+    monkeypatch.delenv("GAMELAB_FIXED_STATS")
+    monkeypatch.setenv("GAMELAB_SOMETHING", "x")
+    assert key() not in (plain, fixed)
+
+
+def test_a_kept_dump_whose_game_data_changed_is_stale(tmp_path):
+    """A kept dump's key.json names the game data's files it read, by content: all as they were, fresh; one changed or
+    gone, or none named (made before), stale."""
+    data, where = tmp_path / "data", tmp_path / "kept"
+    (data / "out").mkdir(parents=True)
+    where.mkdir()
+    (data / "out" / "map.json").write_text("{}")
+    digest = replay.hashlib.sha256(b"{}").hexdigest()[:16]
+    (where / "key.json").write_text(json.dumps({"data_read": {"out/map.json": digest}}))
+    assert replay.data_stale(where, data) == []
+    (data / "out" / "map.json").write_text('{"changed": 1}')
+    assert replay.data_stale(where, data) == ["out/map.json"]
+    (where / "key.json").write_text(json.dumps({"format": 1}))
+    assert replay.data_stale(where, data) == ["key.json"]
+
+
+def test_score_never_makes_the_base_s_dumps(monkeypatch, tmp_path, capsys):
+    """`score --base REF` reads REF's kept dumps and says the `cached` command for the rest; it never runs one."""
+    import argparse
+    asked = []
+    monkeypatch.setattr(replay, "cached", lambda clips, ref, start, limit, jobs, make=True: asked.append(make) or {})
+    a = argparse.Namespace(dumps=tmp_path, base="40ba190", labels="v1", json=None)
+    assert replay_score.main(a, list(replay.CLIPS.values())) == 0
+    assert asked == [False] and "replay cached --commit 40ba190" in capsys.readouterr().out
 
 
 def test_the_runner_imports_none_of_this_package_at_the_top():

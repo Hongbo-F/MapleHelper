@@ -62,9 +62,11 @@ player by it, then the least HP left, then the nearest her: `dead`, cause "hers"
 seen is `dying`, and the likeliest of all, if out of sight already, `owed` (localization.unseen doesn't take it for a
 monster about). Where her attack picks by the client's own search and no star flies (her Shape's `kill`: the
 magician's Magic Claw, from 2026-11-02), a gain is the kill of the first in the search's bands from where she was as
-the cast picked, the monster her attack choice aimed it at first in that band (`throw`'s aim), out-of-search ones
-after them all (`_band_picks`); its monster walks on only until her hit shows, her KillCredit's lands_s after the key;
-let go, it goes first on one in her search whose death was seen since (BAND_LET_GO_DEAD). A share of a kill (a gain
+the cast picked, in that band the oldest track first (the client takes the one that entered the map first),
+out-of-search ones after them all (`_band_picks`); its monster walks on only until her hit shows, her KillCredit's
+lands_s after the key; let go, it goes first on one in her search whose death was seen since (BAND_LET_GO_DEAD). The
+monster her attack choice aimed it at (`throw`'s aim) isn't in that order, only counted against the binding ('aim
+bound', 'aim elsewhere': AIM_DX). A share of a kill (a gain
 no kill explains: another player's kill of a monster her stars hurt) can go on the monster hurt that her throws went
 at (`share`, SHARES: off), dying and dead as a kill of hers is, its cause "other". A monster's HP bar going down is
 a `bar_hit`, by her when a throw of hers went its way ("other" otherwise; None with her throws unknown).
@@ -150,7 +152,12 @@ UNKNOWN_HURT_FIRST = True
 # Her kill's monster where her attack picks by the client's own search (her Shape's `kill`: the magician's Magic Claw,
 # from 2026-11-02; `_band_picks`): see BAND_* below and the README (Her kill's monster by Magic Claw's search).
 AIM_DX = 60.0         # units: a throw's aim told by place (no track: a replay's) is the track of its kind there nearest
-                      # where she saw it, this near (a monster walks 20-25 units between her choice and the key)
+                      # where she saw it, this near (a monster walks 20-25 units between her choice and the key).
+# Her aim decides no binding (`_band_picks`: her first band's oldest first, as the client takes them). With it first in
+# the band (the kill-credit work's first order) it changed none of the 164 first bindings of R1-R3 (the review of
+# 2026-11-02: the dumps the same to the byte with it off), and the oldest first bound one more right (R2 f417). Counted
+# against the binding instead ('aim bound', 'aim elsewhere'), for the next live recording, whose aims carry the
+# service's own tracks: not measured with those.
 # Her kill let go (`_let_go`) goes first on one in her search whose death was seen since, booked another's then (the
 # critique of 2026-11-02: R3 00:49:59.9's victim, its death seen and booked 'other' as it lay outside VICTIM_DOWN). On
 # R1-R3 with the band order it never fired (that victim is among her picks now, and `_deaths_seen` moves the gain onto
@@ -423,10 +430,10 @@ class MonsterTracker:
     def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
         """She threw toward `side` at t (Actions.throw_listeners), with `attack` (its id, if told) and `aim`, the
         monster her attack choice aimed it at, if told ((track, kind, x, platform): its track's id, None where not
-        known, and where it was seen when she chose it; `_aim_of`): the monsters a star could meet from where she was in
-        the last frame. One told again at its key (RETOLD_S) another way is that throw the way she faced
-        (behavior.hunter's look after it): its way and path put right, and its kill bound again at the next frame
-        (`_retold`)."""
+        known, and where it was seen when she chose it; `_aim_of`; counted against her kill's binding, not in its order:
+        AIM_DX): the monsters a star could meet from where she was in the last frame. One told again at its key
+        (RETOLD_S) another way is that throw the way she faced (behavior.hunter's look after it): its way and path put
+        right, and its kill bound again at the next frame (`_retold`)."""
         for th in self.throws:
             if abs(th.t - t) <= RETOLD_S:
                 if th.side != side:
@@ -440,15 +447,16 @@ class MonsterTracker:
 
     def _aim_of(self, aim: tuple | None, t: float) -> int | None:
         """The track a throw keyed at t was aimed at (`throw`'s `aim`): its own, where it's one of the tracks alive of
-        that kind; else the one of that kind on that platform nearest where she saw it (by where each should be at t),
-        within AIM_DX (a replay's aim, from the hunt's records, has no track of this tracker's: sim.replay.feed); None:
-        none told or found."""
+        that kind (one told that's dead or of another kind: None, as she aimed at none of these); else, its track not
+        told (a replay's aim, from the hunt's records, has no track of this tracker's: sim.replay.feed) or not kept any
+        more (P16's id churn), the one of that kind on that platform nearest where she saw it (by where each should be
+        at t), within AIM_DX; None: none told or found."""
         if aim is None:
             return None
         track, kind, x, platform = (tuple(aim) + (None,) * 4)[:4]
-        tr = self.tracks.get(track) if track is not None else None
-        if tr is not None and tr.state != DEAD and (kind is None or tr.kind == kind):
-            return tr.id
+        if track is not None and track in self.tracks:  # (that one, or none: never another by place)
+            tr = self.tracks[track]
+            return tr.id if tr.state != DEAD and (kind is None or tr.kind == kind) else None
         if x is None:
             return None
         near = [(abs(self.predicted(tr, t) - x), tr.id) for tr in self.tracks.values()
@@ -764,6 +772,8 @@ class MonsterTracker:
         self.picked[g] = [tr.id for tr in picks]
         her = self._her_at(th.t + self.shape.pick_s) or th.her
         self.keyed[g] = (th.t, her[0], kind)
+        if self.shape.kill is not None and th.aim is not None:  # (her aim against the client's order: AIM_DX)
+            self._count("aim bound" if picks[0].id == th.aim else "aim elsewhere")
         self._victim(picks[0], g, t, events)
         return True
 
@@ -839,18 +849,21 @@ class MonsterTracker:
         """`_picks` where her attack picks by the client's own search (her Shape's `kill`: Magic Claw's), the likeliest
         first: each track where it was at the pick (`_at`, PICK_S after the key: no star flies), its body (the map's
         game data: monsters.bodies) in the first band its search's windows reach from where she was then
-        (character.Search.band); those in a band first, by band, the monster her attack choice aimed it at
-        (`_Throw.aim`) first among the first band and the next `tie` (the tracker's x error), then those seen within
-        FRESH_S of the gain, the nearest; after them the rest the old box holds (VICTIM_BEHIND behind her middle to her
-        Shape's `ahead`, its `up` and `down`: a track the tracker has off where the client saw it), the aimed first, the
-        nearest. In order: the first band any is in and the next `tie`, the aimed one first, then by band, seen, hurt
-        (a gain of no kind), nearest; the bands after, by band, the aimed first; the rest. With `dead` (a death seen
-        another's, `_retold`, `_let_go`), only those in a band.
+        (character.Search.band); those in a band first: in the first band any is in (and the next `tie`: the tracker's
+        x error), the oldest track first (the lowest id: the client takes the one that entered the map first,
+        attack.reach.take_chances, and tracks are made in the order she first sees them; one re-found under a new id,
+        P16, comes late); then the bands after, by band, those seen within FRESH_S of the gain first, then the hurt (a
+        gain of no kind), the nearest; after them all the rest the old box holds (VICTIM_BEHIND behind her middle to
+        her Shape's `ahead`, its `up` and `down`: a track the tracker has off where the client saw it), the hurt first,
+        the nearest. With `dead` (a death seen another's, `_retold`, `_let_go`), only those in a band. The monster her
+        attack choice aimed it at isn't in the order (AIM_DX says why).
 
-        Against master's nearest-ahead box on the recordings of 2026-11-02 (R1-R3, her 149 labelled kills, labels-v2:
-        the replay kit's, gamelab.sim.replay): the first binding right on 143 against 121, of the strong labels 66 of 71
-        against 51 (fitted on R1+R2: tie 0, her lands_s; R3 held out: 13 of 15 against 12). README: Her kill's monster
-        by Magic Claw's search."""
+        Against master's nearest-ahead box on the recordings of 2026-11-02 (R1-R3: the replay kit's, gamelab.sim.replay;
+        README: Her kill's monster by Magic Claw's search), the first binding right: on labels-v1 (as they were before
+        any of this ran on them) 61 of 64 strong labels against 50, 138 of 151 in all against 129; on labels-v3 (the
+        kills master's and this order's disputed decided by eye after this ran, the two not decided kept as master's
+        binding) 67 of 73 against 53, 144 of 151 against 123. Fitted on R1+R2 (tie 0, her lands_s); R3, labelled before
+        it ran but its disputes decided after, is no held-out check: 40 of 44 each on v1."""
         kc, s = self.shape.kill, self.shape
         rows = []
         for tr in tracks:
@@ -858,16 +871,16 @@ class MonsterTracker:
             if k is None and (dead or not (-VICTIM_BEHIND <= ahead <= s.ahead and -s.up <= dy <= s.down)):
                 continue
             hurt = kind is not None or not UNKNOWN_HURT_FIRST or tr.bar is not None
-            rows.append((k, tr.id == th.aim, g - tr.last_seen <= FRESH_S, hurt, abs(ahead), tr))
+            rows.append((k, g - tr.last_seen <= FRESH_S, hurt, abs(ahead), tr))
         first = min((r[0] for r in rows if r[0] is not None), default=None)
 
         def order(r):
-            k, aimed, fresh, hurt, near, tr = r
+            k, fresh, hurt, near, tr = r
             if k is None:
-                return (2, not aimed, 0, not hurt, near, tr.id)
+                return (2, not hurt, near, tr.id)
             if k <= first + kc.tie:
-                return (0, not aimed, k, not fresh, not hurt, near, tr.id)
-            return (1, k, not aimed, not fresh, not hurt, near, tr.id)
+                return (0, tr.id)
+            return (1, k, not fresh, not hurt, near, tr.id)
         return [r[-1] for r in sorted(rows, key=order)]
 
     def _band_of(self, th: _Throw, tr: Track, her: tuple[float, float], sign: int) -> tuple[int | None, float, float]:

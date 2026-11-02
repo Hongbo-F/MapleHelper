@@ -51,32 +51,50 @@ def test_one_straight_above_her_is_never_her_search_s():
 
 
 @pytest.mark.parametrize("aim", [None, "track", "place"])
-def test_in_her_first_band_the_monster_she_aimed_at_comes_first(aim):
-    """Two pigs both in her search's first band holding any (105 and 120 ahead: band 1, the client's order inside a
-    band unknown): the one her attack choice aimed the cast at (told by its track, or by where she saw it: a replay's
-    aim) is her kill; told none, the nearer."""
-    seen = [sighting(1105, pose="stand"), sighting(1120, pose="stand")]
+def test_in_her_first_band_the_oldest_comes_first_whatever_she_aimed_at(aim):
+    """Two pigs both in her search's first band holding any (120 and 105 ahead: band 1): the older track (the client
+    takes the one that entered the map first) is her kill, though the other is nearer and her attack choice aimed the
+    cast at it (told by its track, or by where she saw it: a replay's aim). The aim is found all the same, and counted
+    against the binding."""
+    seen = [sighting(1120, pose="stand"), sighting(1105, pose="stand")]
     tracker = MonsterTracker(shape=MAGE)
     _seen(tracker, seen)
-    told = {None: None, "track": (2, "pig", 1120.0, 1), "place": (None, "pig", 1124.0, 1)}[aim]
+    told = {None: None, "track": (2, "pig", 1105.0, 1), "place": (None, "pig", 1109.0, 1)}[aim]
     tracker.throw(100.4, "right", "magic_claw", told)
     assert tracker.throws[-1].aim == (None if aim is None else 2)
     tracker.gain(100.6, "pig")
     events, _ = run(tracker, [(seen, view())], start=100.6)
-    assert _victims(events) == ([1] if aim is None else [2])
+    assert _victims(events) == [1]
+    assert tracker.counts.get("aim elsewhere", 0) == (0 if aim is None else 1)
+    assert "aim bound" not in tracker.counts
 
 
-def test_the_aim_doesnt_jump_her_search_s_first_band():
-    """Aimed at a pig two bands past another (band 1 against 3), the client's search still picks the first band's
-    (tie 0): the aim is the tie-break inside it, not over it. With a tie of 2 bands, the aimed one."""
-    seen = [sighting(1105, pose="stand"), sighting(1150, pose="stand")]
-    for tie, want in ((0, [1]), (2, [2])):
+def test_her_first_band_beats_an_older_one_farther_on_but_in_the_tie_s_bands():
+    """An older pig two bands past a newer one (band 3 against 1): the client's search picks the first band's (tie 0).
+    With a tie of 2 bands (the tracker's x error), the two are one band's: the older one."""
+    seen = [sighting(1150, pose="stand"), sighting(1105, pose="stand")]
+    for tie, want in ((0, [2]), (2, [1])):
         tracker = MonsterTracker(shape=replace(MAGE, kill=replace(MAGE.kill, tie=tie)))
         _seen(tracker, seen)
-        tracker.throw(100.4, "right", "magic_claw", (2, "pig", 1150.0, 1))
+        tracker.throw(100.4, "right", "magic_claw", (2, "pig", 1105.0, 1))
         tracker.gain(100.6, "pig")
         events, _ = run(tracker, [(seen, view())], start=100.6)
         assert _victims(events) == want, tie
+        assert tracker.counts.get("aim bound" if want == [2] else "aim elsewhere") == 1, tie
+
+
+def test_an_aim_told_by_a_track_that_s_dead_or_another_kind_is_none_not_one_by_place():
+    """Her cast aimed at a track the tracker has dead (her own dead: 18 such casts in about 14 minutes of R1-R3) or of
+    another kind: aimed at none, not at the nearest of that kind by place; a track no longer kept (P16's id churn) or
+    none told: by place."""
+    tracker = MonsterTracker(shape=MAGE)
+    _seen(tracker, [sighting(1120, pose="stand"), sighting(1150, pose="stand")])
+    tracker.tracks[1].state = DEAD
+    assert tracker._aim_of((1, "pig", 1120.0, 1), 100.4) is None
+    assert tracker._aim_of((2, "snail", 1150.0, 1), 100.4) is None
+    assert tracker._aim_of((99, "pig", 1140.0, 1), 100.4) == 2
+    assert tracker._aim_of((None, "pig", 1125.0, 1), 100.4) == 2
+    assert tracker._aim_of((None, "pig", 1125.0 + tracking.AIM_DX + 30, 1), 100.4) is None
 
 
 def test_the_thief_s_stars_ignore_the_aim():
@@ -88,6 +106,33 @@ def test_the_thief_s_stars_ignore_the_aim():
     tracker.gain(100.6, "pig")
     events, _ = run(tracker, [(seen, view())], start=100.6)
     assert _victims(events) == [1]
+    assert not any(k.startswith("aim ") for k in tracker.counts)  # (his counts as before)
+
+
+def test_the_hunt_s_throw_message_with_an_aim_reads_as_before_to_an_older_service():
+    """The hunt tells a throw with her attack's id and her aim, the message's fifth item: a service from before
+    (40ba190's Service._take, which reads msg[1..3]) takes the throw as ever, the aim aside; this one passes it on; a
+    throw told with neither is the three items it was."""
+    from gamelab.localization.service import Service, ServiceClient
+    hunt = ServiceClient("tour", acts=True, throws=True, map_id=2, start=False, ensure=None)
+    sent = []
+    hunt._send = lambda *msg: sent.append(msg)
+    hunt.throw(100.4, "right", "magic_claw", (7, "horny-mushroom", -60.0, 15))
+    hunt.throw(101.4, "left")
+    hunt.throw(102.4, "left", None, (None, "slime", 30.0, 9))
+    assert [len(m) for m in sent] == [5, 3, 5]
+    old, new = [], []
+
+    def read_before(msg):  # (40ba190's line, as it was)
+        old.append((msg[1], msg[2], msg[3] if len(msg) > 3 else None))
+    svc = Service.__new__(Service)
+    svc.runner = SimpleNamespace(step=SimpleNamespace(throw=lambda *a: new.append(a)))
+    for msg in sent:
+        read_before(msg)
+        svc._take(None, msg, None)
+    assert old == [(100.4, "right", "magic_claw"), (101.4, "left", None), (102.4, "left", None)]
+    assert new == [(100.4, "right", "magic_claw", (7, "horny-mushroom", -60.0, 15)), (101.4, "left", None, None),
+                   (102.4, "left", None, (None, "slime", 30.0, 9))]
 
 
 def test_her_hidden_victim_in_an_earlier_band_beats_a_fresh_bystander_farther_on():
@@ -208,13 +253,18 @@ def test_a_kill_put_on_another_monster_is_kept_in_moved_for_her_alone():
 
 def test_her_memory_and_the_grind_s_credit_follow_a_moved_kill():
     """Her memory: the monster the kill was first put on, alive again (its track not dead now), the one it's on now
-    killed; the grind's credit by platform: the kill (and its EXP) moved to the platform it's on now."""
+    killed, told as the one kill moved ('moved', not a second 'killed'); patrol.Belief: the kill's time once, the new
+    one's point emptied at it, the old one's not; the grind's credit by platform: the kill (and its EXP) moved to the
+    platform it's on now."""
+    from gamelab.behavior import patrol
     from gamelab.behavior.grind import Grind
     from gamelab.localization.memory import Memory
     from test_memory import mon, three_floors, band, A, B
 
     kills, moved, dead = [], [], {}
-    m = Memory(three_floors(), kills=lambda: kills, dead=lambda: dead, moved=lambda: moved)
+    model = three_floors()
+    m = Memory(model, kills=lambda: kills, dead=lambda: dead, moved=lambda: moved)
+    belief = patrol.Belief(model, [patrol.Point(0, A, 1300.0, "pig", 10.0), patrol.Point(1, B, 1100.0, "pig", 10.0)])
     first, real = replace(mon(1300, A), track=5), replace(mon(1100, B), track=6)
     m.update(0.0, [first, real], band(0.0))
     k = SimpleNamespace(t=0.5, kind="pig", platform=A, x=1300.0, track=5)
@@ -222,12 +272,18 @@ def test_her_memory_and_the_grind_s_credit_follow_a_moved_kill():
     dead[5] = 0.5
     m.update(0.5, [first, real], band(0.5))
     assert {e.monster.track: e.state for e in m.entries} == {5: "killed", 6: "seen"}
+    belief._take_events(0.5, m)
+    assert belief.kills == [0.5] and belief.killed == {0: 0.5} and belief.empty_since == {0: 0.5}
     moved.append((1.6, k, 5, A, 1300.0))
     k.track, k.platform, k.x = 6, B, 1100.0
     del dead[5]
     dead[6] = 1.6
     m.update(1.6, [first], band(1.6))
     assert {e.monster.track: e.state for e in m.entries} == {5: "seen", 6: "killed"}
+    assert m.counts["killed"] == 1 and m.counts["moved"] == 1
+    assert [(what, e.monster.track) for what, _, e in m.events if what != "new"] == [("killed", 5), ("moved", 6)]
+    belief._take_events(1.6, m)
+    assert belief.kills == [0.5] and belief.killed == {1: 0.5} and belief.empty_since == {1: 0.5}
 
     g = Grind.__new__(Grind)  # (its bookkeeping alone: the hunt loop's own is Hunt._book's, left out)
     g.h, g.credit, g._credited, g._moves_seen, g._kills_seen = (
