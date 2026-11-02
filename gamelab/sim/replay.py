@@ -1,7 +1,8 @@
 """Replaying the recordings: her own frames through any commit's perception, scored against labels (ROADMAP item 5,
-2026-11-02). The simulator can't play the magician (P41), so a perception change for her is checked on the three
-lossless recordings of RiceBaby grinding Tree Dungeon on master 40ba190 (R1-R3, 6.6 GB, kept as fixtures from
-2026-11-02 by the user's word) instead of by hand-built scripts each time.
+2026-11-02). The simulator's eyes give it no frames (and until work/rec-sim it didn't play the magician: P41), so a
+perception change for her is checked on the three lossless recordings of RiceBaby grinding Tree Dungeon on master
+40ba190 (R1-R3, 6.6 GB, kept as fixtures from 2026-11-02 by the user's word) instead of by hand-built scripts each
+time.
 
     python -m gamelab.sim.replay run [CLIPS] [--root DIR | --commit REF] [--out DIR] [--range A:B] [--unpaced]
                                           [--jobs 2]

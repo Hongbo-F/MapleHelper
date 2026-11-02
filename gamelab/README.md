@@ -1204,7 +1204,7 @@ Proof (the two standard commands below; `D:/MapleHelper-scratch/fastchecks/harne
 
 ## Replaying the recordings: her own frames through any commit's perception, scored against labels (from 2026-11-02)
 
-The simulator can't play the magician (P41 of the 2026-11-02 analyses: D:/MapleHelper-scratch/rec-analysis/plans), so a perception change for her is checked on her own frames: the three lossless recordings of RiceBaby grinding Tree Dungeon on master 40ba190 that night (R1 00:10:57-00:14:57, 3,601 frames; R2 00:37:01-00:42:02, 4,515; R3 00:46:40-00:51:41, 4,512; 1366x768 PNG at 15 a second, 6.6 GB in D:/MapleHelper-scratch/golden-clips, kept as fixtures by the user's word), with the run's telemetry and logs beside them. Until now each analysis rebuilt the replay by hand (spawn-fade's `replay_rec.py`, the lenses' `replay.py`s, none of them telling her throws). The kit (ROADMAP item 5) is `gamelab/sim/replay.py`, `replay_run.py` and `replay_score.py`, in the simulator's layer beside the harness and its baselines (the analysis layer may import neither localization nor sim: tests/test_architecture.py):
+The simulator's eyes give it no frames, and until work/rec-sim it didn't play the magician either (P41 of the 2026-11-02 analyses: D:/MapleHelper-scratch/rec-analysis/plans), so a perception change for her is checked on her own frames: the three lossless recordings of RiceBaby grinding Tree Dungeon on master 40ba190 that night (R1 00:10:57-00:14:57, 3,601 frames; R2 00:37:01-00:42:02, 4,515; R3 00:46:40-00:51:41, 4,512; 1366x768 PNG at 15 a second, 6.6 GB in D:/MapleHelper-scratch/golden-clips, kept as fixtures by the user's word), with the run's telemetry and logs beside them. Until now each analysis rebuilt the replay by hand (spawn-fade's `replay_rec.py`, the lenses' `replay.py`s, none of them telling her throws). The kit (ROADMAP item 5) is `gamelab/sim/replay.py`, `replay_run.py` and `replay_score.py`, in the simulator's layer beside the harness and its baselines (the analysis layer may import neither localization nor sim: tests/test_architecture.py):
 
 ```
 python -m gamelab.sim.replay run [R1 R2 R3] [--root DIR | --commit REF] [--out DIR] [--range A:B] [--unpaced] [--jobs 2]
@@ -4048,8 +4048,8 @@ then what only the four together needed.
 
 Not measured at the integration (the whole is, once, after the user's next changes): the goldens (re-recorded on the
 merged code, never copied from a worktree: each branch's own are in its worktree's git-ignored lab/golden), the
-harness's tables for either character, the `--slow` suite and its scenarios. The fast suite at work/rec-all's tip is in
-its last commit.
+harness's tables for either character, the `--slow` suite and its scenarios. The fast suite at the integration's last
+code: 3,037 passed, none failed (72 skipped, 2 xfailed).
 
 ## Records to measure by: the run summary, the trips, the passes, the loop's promise, and walkfit (from 2026-11-02)
 
