@@ -134,6 +134,11 @@ class Report:
     touches: int = 0           # times a monster touched her (her popups: Hunter._touched) ...
     misses: int = 0            # ... of them, her evasion's MISS (no HP lost)
     stop: str = ""
+    # Her potions as her HP number shows them (her pet drinks them for her: `potions` counts only her own key's), a rise
+    # of POTION_RISE_HP or more between two reads of it (Hunter._hp_number); and her lowest HP as the number read (None:
+    # never read). From 2026-11-02 (the run summary: behavior.hunt.HuntReport).
+    drinks: int = 0
+    lowest_hp: float | None = None
 
     def __str__(self):
         return (f"kills: {kills_text(self.kills)} (EXP gains: {self.exp_kills}, targets lost: {self.lost}); "
@@ -156,6 +161,13 @@ class Report:
         self.damage_taken += other.damage_taken
         self.touches += other.touches
         self.misses += other.misses
+        self.drinks += other.drinks
+        self.see_hp(other.lowest_hp)
+
+    def see_hp(self, hp: float | None) -> None:
+        """Her HP as a look read it (None: not read): the lowest kept."""
+        if hp is not None and (self.lowest_hp is None or hp < self.lowest_hp):
+            self.lowest_hp = hp
 
 
 @dataclass

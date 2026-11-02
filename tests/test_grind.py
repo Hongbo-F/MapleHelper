@@ -985,8 +985,10 @@ def test_a_pause_moves_grindings_clocks_on():
     g._progress, g.obj, g.stack, g._idle_since, g._hanging, g._rope_rest = now, None, [], None, None, 0.0
     g.visit = Visit(23, Spot(23, 8.0, 1.0, False), arrived=now - 5.0)
     g._start, g._alt, g._hp = now - 60.0, (now, None, 3, {}), (now, 0.9, 23)
+    g._loop_at, g._promised_at = now - 20.0, now
     g._paused(30.0)
     assert g._start == pytest.approx(now - 30.0) and g._alt is None and g._hp is None
+    assert g._loop_at == pytest.approx(now + 10.0) and g._promised_at is None  # (the loop's promise: no pause in it)
     assert g.visit.arrived == pytest.approx(now + 25.0) and g._progress == pytest.approx(now + 30.0)
 
 

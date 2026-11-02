@@ -638,7 +638,9 @@ class WorldStep:
 
     def _vitals(self, s: Scene, t: float) -> list[Event]:
         """Her EXP number changed since the last frame (`exp_gain`, with the number as read: the kills its size was go
-        to the tracker, which puts each on a monster), or was read unchanged (`exp_read`: to start from, or to confirm a
+        to the tracker, which puts each on a monster; and from 2026-11-02 `before`, the level and EXP its last reading
+        said, which a hunt attaching after the service read it starts from: behavior.hunter, HuntReport), or was read
+        unchanged (`exp_read`: to start from, or to confirm a
         jump: ExpMeter.wants_reading); she was touched (`touch`: her popup, MISS or damage, or an HP drop no popup of
         hers was told for: _touched; `touch_fix`: a MISS told that took HP after all, FIX_MISS); her HP dropped
         (`hp_drop`); her HP number changed and read (`hp_read`: her HP and max HP, and the HP it said at the change
@@ -649,7 +651,10 @@ class WorldStep:
         if changed or self.meter.wants_reading(t):
             reading = exp_number.read(s.exp_box) if s.exp_box is not None else None
             if changed or (reading is not None and reading.exp is not None):
-                out.append(Event("exp_gain" if changed else "exp_read", t, data=reading_data(reading)))
+                data = reading_data(reading)
+                if changed and self.meter.at is not None:  # (what it said before, for a client that never read it)
+                    data["before"] = list(self.meter.at)
+                out.append(Event("exp_gain" if changed else "exp_read", t, data=data))
             self.counts["exp gains"] += changed
             self.counts["exp read"] += reading is not None and reading.exp is not None
             self._told(self.meter.update(t, reading, changed))

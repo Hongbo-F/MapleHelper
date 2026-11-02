@@ -53,6 +53,7 @@ from ..localization.worldstate import HP_GAP_S, TOUCH_SAME_S, reading_of, to_sce
 from ..motion import physics
 from ..perception import drops, exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes
+from ..perception.exp_number import ExpReading
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from ..perception.touches import DAMAGE, HP, MISS, POPUP
@@ -84,6 +85,12 @@ HIT_EXACT_S = 1.0     # s: a touch's text has her HP number's drop if it read on
 HP_NUMBER_WAIT_S = 10.0  # s of looks with her HP number never read: said once (the safety stop on her bar then, under
                          # bootstrap.UNREAD_SHARE of it: the perception service not restarted since 2026-10-28, a client
                          # it can't read at, such as the stretched 1920x1080, where it reads none)
+# HP: her HP number rising this much or more from one read to the next is a potion drunk (Report.drinks; her pet drinks
+# them for her). Her potions heal 150-160 (Meat 160 by the game data, Orange Potions 150), her regen between two reads a
+# few HP, a touch takes HP away: on 2026-11-02 rises of 100 or more counted 15 potions in R1's 5.35 minutes and 92 in the
+# hour, as the HP her pets' potions gave and the Meat carried (D:/MapleHelper-scratch/rec-analysis/plans/scripts/
+# numbers.py). A Red Potion's 50 wouldn't be counted.
+POTION_RISE_HP = 100
 PLAN_DEF_STEP = 5.0  # her DEF for the positioning model (attack.danger) to this (her fit's middle moves a little with
                      # every touch: the places she stands by made again only when it moves this much)
 # The safety stop raised at the look or glance it's due at, whoever took it (Senses.checks and glance_checks:
@@ -152,6 +159,20 @@ def kinds_of(gains: list[Gain]) -> frozenset | None:
     if not gains or any(g.odd or None in g.kinds for g in gains):
         return None
     return frozenset(k for g in gains for k in g.kinds)
+
+
+def feed_reads(events, meter: ExpMeter) -> list[tuple]:
+    """Her EXP number's readings in a feed's `events` (worldstate's 'exp_gain' and 'exp_read'), as `meter` takes them:
+    (t, reading, changed) each. A meter that has never read the number (a hunt attaching to the perception service
+    after it read it: it then hears only its changes) starts from what the first change says the number was before it
+    (worldstate's `before`), so that change's gain counts: until 2026-11-02 the first reading came with her first kill,
+    and its EXP was lost (R1 of 2026-11-02: 26, behavior.hunt.HuntReport)."""
+    reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in events if e.kind in ("exp_gain", "exp_read")]
+    first = next((e for e in events if e.kind == "exp_gain" and e.data.get("before")), None)
+    if meter.at is None and first is not None and not any(r[0] < first.t for r in reads):
+        level, exp = first.data["before"]
+        reads.insert(0, (first.t, ExpReading(exp, None, () if level is None else (level,)), False))
+    return reads
 
 
 class Hunter:
@@ -1166,8 +1187,7 @@ class Hunter:
             touched = [{"kind": DAMAGE, "text": "", "at": s.t, "how": HP}] if lost > 0 and self._last_hp is not None \
                 else []
         else:
-            reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in s.events
-                     if e.kind in ("exp_gain", "exp_read")]
+            reads = feed_reads(s.events, self.meter)
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
             touched = [e.data for e in s.events if e.kind == "touch"]
             touched += self._untold(s, touched)
@@ -1221,6 +1241,9 @@ class Hunter:
             self._max_hp_seen(most)
             if before is not None and cur < before:
                 self._touched(t, before, cur, most)
+            if before is not None and cur - before >= POTION_RISE_HP:  # (a potion: her pet's, or hers)
+                self.report.drinks += 1
+            self.report.see_hp(cur)
         if exact is not None:
             self._max_hp_seen(exact[1])
         return exact

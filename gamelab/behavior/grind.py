@@ -147,6 +147,12 @@ class Grind(Hunt):
         self._start = time.monotonic()
         self._hp: tuple | None = None  # the last look's (time, HP or touches told, platform), for learn_hp
         self._stated = time.monotonic()
+        # The loop's promise against what it delivered (the 'grind' records 'state' and 'end': `_promise`): when the loop
+        # she's on was taken up and her EXP then; and the loop's rate (Plan.rate, the bar her stays and pulls are held to)
+        # over her looks' time, and that time (the last look's, None after a pause)
+        self._loop_at, self._loop_exp = time.monotonic(), 0.0
+        self._promised = self._promised_s = 0.0
+        self._promised_at: float | None = None
 
     def run(self, minutes: float):
         report = super().run(minutes)
@@ -161,7 +167,9 @@ class Grind(Hunt):
         are the game's clocks, which ran on, and aren't moved."""
         super()._paused(seconds)
         self._start += seconds
-        self._alt = self._hp = None
+        if getattr(self, "_loop_at", None) is not None:  # (and the loop's clock: its promise against what it gave)
+            self._loop_at += seconds
+        self._alt = self._hp = self._promised_at = None
 
     # --- what she knows ------------------------------------------------------------------------------------
 
@@ -171,6 +179,11 @@ class Grind(Hunt):
             self.patrol.belief.update(s.t, self.h.memory, s.players if s.dot is not None else None)
         self._learn_hp(s)
         self._price_hp()
+        now, plan = time.monotonic(), self.patrol.plan
+        if self._promised_at is not None and plan is not None:  # (the loop's rate over the time since the last look)
+            self._promised += plan.rate * (now - self._promised_at)
+            self._promised_s += now - self._promised_at
+        self._promised_at = now
         return s
 
     def _price_hp(self) -> None:
@@ -241,9 +254,8 @@ class Grind(Hunt):
         new = self.h.ledger.kills[self._kills_seen:]
         super()._book(s)
         avg = self._avg_exp()
-        for k in new:
-            kind = k.kind or k.named
-            exp = self.tour.exp.get(kind, avg) if kind is not None else avg
+        for k in new:  # (the stand-by trip's after time-up aren't: the report has them, `credit` is where she hunted)
+            _, exp = self._kill_exp(k, avg)
             c = self.credit.setdefault(k.platform if k.placed else k.ground, [0, 0.0])
             c[0] += 1
             c[1] += exp
@@ -398,6 +410,17 @@ class Grind(Hunt):
         stop = self.patrol.stops[j]
         return stop.platform, stop.x
 
+    def _sweep_to(self, dest: tuple[int, float] | None) -> dict | None:
+        """Why the sweep's way goes on to `dest`: where she'd go next as last peeked (`_instead`: Patrol.choose's why,
+        the stop, its travel, the EXP expected and seen there, its gain, the stops skipped: `peek`), when that's the
+        place; else the hunt loop's (the objective, the spot)."""
+        a = getattr(self, "_alt", None)
+        if dest is not None and a is not None and a[2] is not None:
+            stop = self.patrol.stops[a[2]]
+            if (stop.platform, stop.x) == dest:
+                return {"peek": {k: v for k, v in a[3].items() if k != "x"}, "heading": a[1]}
+        return super()._sweep_to(dest)
+
     def _sweep_terms(self, s: Scene, dest: tuple[int, float] | None) -> tuple[float | None, float]:
         """The sweep's terms: its piles' allowances alone (Hunt._allow), no budget, no floor (no lulls: she doesn't wait
         for respawns at a stop). Until 2026-11-01 her time's worth (`_time_worth`: what staying at the stop gives on a
@@ -491,6 +514,7 @@ class Grind(Hunt):
         p.learn_kills(self.report.throws, self.report.exp)
         why = p.replan(now)
         if why is not None:
+            self._loop_at, self._loop_exp = now, self.report.exp
             camp = p.camping(now)
             self.log(f"  loop: {p.plan.text(p.platform_of)} ({why}; camping at {p.platform_of(camp.stops[0])} would "
                      f"give {camp.rate * 60:.0f})")
@@ -555,7 +579,23 @@ class Grind(Hunt):
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
                        if p.hp_time[pid] >= HP_LOG_S},
-                "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}}
+                "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}, **self._promise()}
+
+    def _promise(self) -> dict:
+        """The loop's promise against what it delivered so far (the 'grind' records 'state' and 'end', from 2026-11-02:
+        P30 of the recordings' analysis, where the bar in use, 556 EXP a minute over the hour, was 1.27 times the 437
+        delivered, and nothing recorded either): the EXP a minute delivered since the loop she's on was taken up
+        (`loop_exp`, over `loop_s`) against its rate (`loop_rate`), and over the run (`delivered`, her kills' EXP
+        by their kinds) against the loop's rate over her looks' time (`promised`, the bar her stays and pulls are held
+        to, time-weighted); the s by hunt rule (`rule_s`: Hunt._note)."""
+        now, plan = time.monotonic(), self.patrol.plan
+        a_min = (lambda e, s: None if s < 1.0 else round(e * 60.0 / s, 1))
+        loop_s = now - self._loop_at
+        return {"loop_s": round(loop_s, 1), "loop_exp": round(self.report.exp - self._loop_exp, 1),
+                "loop_rate": None if plan is None else round(plan.rate * 60.0, 1),
+                "promised": a_min(self._promised, self._promised_s),
+                "delivered": a_min(self.report.exp, now - self._start),
+                "rule_s": {k: round(v, 1) for k, v in sorted(self.report.rule_s.items())}}
 
     def _log_grind(self) -> None:
         """What the grinding did: loops, stops and stays, pulls and skips, what she learned, and her kills by the

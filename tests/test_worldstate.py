@@ -145,6 +145,18 @@ def test_her_exp_gains_and_hits_come_as_events_at_their_frames(step):
     assert states[40].events[1].data["how"] == "hp" and states[-1].touch["kind"] == "damage"
 
 
+def test_a_change_of_her_exp_number_tells_what_it_said_before(step):
+    """Each change tells the number its last reading said (`before`, from 2026-11-02), which a hunt attaching later
+    starts from (behavior.hunter.feed_reads): before any reading, none."""
+    def each(k):
+        step.eyes.exp = 0 if k < 20 else 10 if k < 30 else 20
+        if k == 25:
+            step.meter.at = (31, 106302)  # (as a reading would have it)
+    states = frames(step, 40, each=each)
+    gains = [e for s in states for e in s.events if e.kind == "exp_gain"]
+    assert len(gains) == 2 and "before" not in gains[0].data and gains[1].data["before"] == [31, 106302]
+
+
 def test_a_scene_from_a_state_is_the_look_it_stands_for(step):
     above = pig(1200, 300)  # on the platform 200 above: out of her band (100 up)
     step.eyes.mobs = [pig(1100), above]
