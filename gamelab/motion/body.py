@@ -50,7 +50,8 @@ MASS = 100.0     # the client's mass for a character (decompile)
 # The game's stat limits: SPEED counts from 80% to 140% (the v83 decompile, RustMS Player.cpp get_walkspeed, "clamps
 # SPEED to 80-140": FUN_007a4dec; meowdb's cap is 140 too), JUMP from 80% to 120% (meowdb: "Jump works the old way,
 # but its cap dropped from 123 to 120"; the decompile's 123 was v83's). The lower ends are the decompile's: this
-# client's under 100 isn't known.
+# client's under 100 isn't known (meowdb's calculator clamps SPEED to 100-140, its guide says nothing under 100; the
+# thief's profile SPEED 99.2, which walks her 149.0 here, it would take as 100: 150).
 SPEED_RANGE = (80.0, 140.0)
 JUMP_RANGE = (80.0, 120.0)
 # The Speed this client adds to a character's stat window behind the scenes, after the cap: she walks walkSpeed x

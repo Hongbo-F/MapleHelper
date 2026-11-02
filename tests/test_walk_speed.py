@@ -24,7 +24,8 @@ from gamelab.classes import magician, thief
 from gamelab.motion import body, physics
 
 WALKS = json.loads((Path(__file__).parent / "fixtures" / "walks_tree_2026.json").read_text(encoding="utf-8"))
-HER_RAW = 148.2         # the magician's raw steady walk, 81 walks of the hour (se 0.4): the analysis', walkfit's
+HER_RAW = 148.2         # the magician's raw steady walk, 81 walks of the hour (se 0.4): the analysis', walkfit's,
+                        # quoted (the hour's records aren't in the repo; the fixture's walks are checked below)
 THIEF_BAND = (148.0, 151.5)  # the thief's measured walks: 148-151 at 1920x1080 (config.Character's old comment), 151.2
                              # on Tree Dungeon at 1366x768 (the fixture's 243)
 
@@ -34,9 +35,10 @@ def _limits(who: str) -> list[float]:
 
 
 def test_her_planned_walk_is_her_measured_one():
-    """The magician's profile (her stat window's SPEED 100) plans her at 150 units/s, 1.2% over her raw 148.2 and 0.4%
-    over her 149.4 with the braking tails and slopes out; v83's formula planned 125, 16% under (her takeoffs came late
-    by 0.19 x the walk before them, 15 of the hour's 210 'arrived' trips walked off their platform's end)."""
+    """The magician's profile (her stat window's SPEED 100) plans her at 150 units/s, 1.2% over her raw 148.2 (HER_RAW,
+    quoted) and 0.4% over the fixture's 149.4 with the braking tails and slopes out; v83's formula planned 125, 16% under
+    (her takeoffs came late by 0.19 x the walk before them, 15 of the hour's 210 'arrived' trips walked off their
+    platform's end)."""
     planned = physics.shoe_of(magician.FIXED_STATS).vmax
     assert magician.FIXED_STATS.speed == 100.0 and planned == 150.0
     assert planned == pytest.approx(HER_RAW, rel=0.015)
@@ -102,3 +104,5 @@ def test_where_her_stats_come_from(tmp_path):
     with character.using(character.load("magician", cfg, {})):
         assert character.stats_from("speed", cfg, {}) == "her profile (gamelab/classes/magician.py FIXED_STATS)"
         assert character.stats_from("jump", cfg, {}) == "config.toml [characters.magician.stats]"
+        cfg.write_text("[characters.magician", encoding="utf-8")  # (made unreadable mid-run: said, not raised)
+        assert character.stats_from("jump", cfg, {}) == "her profile"

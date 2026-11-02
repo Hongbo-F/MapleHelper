@@ -347,13 +347,18 @@ def stats(path=CONFIG, environ=os.environ) -> config.Character:
 def stats_from(stat: str, path=CONFIG, environ=os.environ) -> str:
     """Where the stats this process plays with (`stats`) take `stat` ("speed", "jump", ...) from, in words (the hunter's
     note when her stat window disagrees, 2026-11-02): under FIXED_STATS her class's fixed copy; the thief's config.toml
-    [character]; another's [characters.<id>.stats] if it gives `stat`, else her class's profile."""
+    [character]; another's [characters.<id>.stats] if it gives `stat`, else her class's profile. (It reads config.toml
+    from inside a hunt, Hunter._stats_read: a file made unreadable since the process started says "her profile", the
+    stats being what was read then, rather than raise there.)"""
     if environ.get(FIXED_STATS):
         return f"her class's fixed stats ({FIXED_STATS})"
-    which = _ACTIVE[0].id if _ACTIVE else active_id(environ, path)  # (who plays as resolved, physics' stats hers)
-    if which == DEFAULT:
-        return "config.toml [character]"
-    table = config.characters(path)[1].get(which)
+    try:
+        which = _ACTIVE[0].id if _ACTIVE else active_id(environ, path)  # (who plays as resolved, physics' stats hers)
+        if which == DEFAULT:
+            return "config.toml [character]"
+        table = config.characters(path)[1].get(which)
+    except config.ConfigError:
+        return "her profile"
     if table is not None and not table.broken and stat in table.stats:
         return f"config.toml [characters.{which}.stats]"
     klass = table.klass if table is not None else which
