@@ -1495,9 +1495,12 @@ class Hunter:
     def _publish(self, s: Scene) -> None:
         """The look and the drops she remembers, for the mini-map (telemetry); with a feed, the deaths it saw that
         weren't hers ('died', as `watch` publishes them: analysis.respawn reads them as others' kills, a platform
-        emptied by someone else; hers are the 'kill' events already)."""
+        emptied by someone else; hers are the 'kill' events already). From 2026-11-02 the scene says how old its frame
+        was as the hunt got it (`age`, ms: the time since the screen showed it), with the feed's frame number (`seq`),
+        so a decision can be matched to the frame it was made on (P28 of the recordings' analysis)."""
         if telemetry.recording():
             record = s.record()
+            record["age"] = round((time.monotonic() - s.t) * 1000)
             if record["her"] is not None:  # which way she faces as best known (keys or frame: facing_by), by her keys
                 a = self.actions             # alone, and by the frame alone (and whether strongly: only a strong
                 # frame takes a throw's tap away, Actions.faces)

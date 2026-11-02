@@ -153,6 +153,7 @@ def test_a_scene_from_a_state_is_the_look_it_stands_for(step):
     model = step.model
     band = to_scene(s, model, (100, 100))
     assert [m.x for m in band.monsters] == [pytest.approx(1100, abs=2)] and band.searched and not band.wide
+    assert band.seq == s.seq and band.record()["seq"] == s.seq  # (its frame number: a recording's frames by it)
     whole = to_scene(s, model, (100, 100), wide=True)
     assert sorted(round(m.y) for m in whole.monsters) == [300, 500] and whole.wide
     assert band.where.platform.id == model.platform_under(1000, 500).id and band.where.x == pytest.approx(1000, abs=12)

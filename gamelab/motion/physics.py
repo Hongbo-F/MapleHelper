@@ -42,6 +42,16 @@ LAGS = body.Lags()
 
 WALK_SPEED = SHOE.vmax   # map units/s: 125 x SPEED/100, 149 at her 119.2 (measured 148-151: 209 screen px/s)
 CLIMB_SPEED = 117.0      # map units/s: measured 0.165 screen px/ms
+
+
+def record() -> dict:
+    """Her physics as this process plans her moves, for the telemetry 'session' record (from 2026-11-02, so a run's
+    records say what walk its timed holds were planned at: analysis.walkfit measures her walk against it): who plays
+    (`character`, `class`), her stats' SPEED and JUMP (% of Physics.img's walk and jump) and the walk and climb they
+    give (units/s)."""
+    c = character.resolved() or character.active()
+    return {"character": c.id, "class": c.klass, "speed": CHARACTER.speed, "jump": CHARACTER.jump,
+            "walk": round(WALK_SPEED, 2), "climb": CLIMB_SPEED}
 JUMP_SPEED = SHOE.vjump  # physics: jumpSpeed x JUMP/100 (555)
 GRAVITY = SHOE.gravity   # physics: gravityAcc (2000)
 FALL_SPEED = SHOE.fall   # physics: fallSpeed (670, terminal)
