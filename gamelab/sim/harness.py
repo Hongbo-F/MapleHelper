@@ -132,7 +132,7 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    climbs up the rope at x -80 (11 to 10): about 0.3 a climb. And her hangs under a rope's top
                    (control.navigator.ROPE_HANG: 'hangs', 'hang_s' the seconds they took, 'hang_regardless' those up
                    regardless after HANG_S: telemetry events 'rope_hang')
-  backstops       how often each backstop cap fired (telemetry events kind 'backstop')
+  backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
                    cuts for a hit, those for a touch (cut_touch: a MISS too, from 2026-10-28) and for a MISS (cut_miss);
