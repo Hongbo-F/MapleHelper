@@ -3867,7 +3867,8 @@ the hour 00:17:48-00:53:06 with R2 and R3 inside it; D:/MapleHelper-scratch/rec-
 rebuild every measure from hand-made scripts hard-wired to that day's files and to the 125 units/s her walk was
 planned at, and found the run's own summary wrong. One telemetry pass so the next recorded run can be measured from its
 records alone, and `walkfit`, the walk check every motion fix needs. Nothing she does changes: the records only read
-what's there (the Tree goldens' plans, logs and worlds are byte-identical; 9 results' report lines changed, below).
+what's there (the Tree goldens' plans and worlds are byte-identical, their logs too but for loop_tree_grind's last line;
+9 results' report lines changed, below).
 
 **The run summary** (`behavior.hunt.HuntReport`, the 'hunt done' line and a telemetry 'summary' record). R1's said 52
 kills, +1,731 off her EXP number and 80 throws, where the run had 53, +1,798 and 85
@@ -3882,7 +3883,11 @@ kills, +1,731 off her EXP number and 80 throws, where the run had 53, +1,798 and
   unchanged).
 - At time-up (00:14:44.0) the hunt stopped counting, and its trip to stand by shot one more Horny (cast 00:14:44.3, its
   41 EXP at 00:14:44.8). The stand-by's seconds and kills are the run's now (`standby_s`, `standby_kills`); the grind's
-  per-platform credit stays where she hunted.
+  per-platform credit stays where she hunted. A kill booked after the trip whose EXP showed before the hunt loop was
+  over (its gain's frame time, `Kill.gained`) is the hunt's own, counted and credited as its looks would have (from the
+  review of 2026-11-02, `Hunt._book_after`): the loop's last pass can end on a kill its looks hadn't had yet
+  (loop_tree_grind's Green, its EXP seen by the glance before a throw's key at 180.3 s, had been '1 on her way to stand
+  by' and no platform's credit).
 
 It also says her touches a minute (MISS too), her potions as her HP number's rises of `hunter.POTION_RISE_HP` (100) or
 more tell (her pet drinks them; the analysis counted 15 in R1 and 92 in the hour so), and her lowest HP as the number
@@ -3890,7 +3895,11 @@ read. R1's, as the summary now writes it: `301 s and 13 s to stand by; grounds [
 horny-mushroom (EXP gains 53, EXP 1798; off her EXP number +1798, 343.6 a minute; 1 on her way to stand by); throws 85
 (5 clearing her way); piles 65; touches 29 (5.5 a minute), 0 MISS; potions 15 (2.9 a minute), lowest HP 527 of 842`
 (tests/test_records.py; the figures the analysis counted off R1's records). The hour's own summary can't be checked:
-that run was killed at 00:53:06 before writing one.
+that run was killed at 00:53:06 before writing one. Its 'a minute' figures are over the run's minutes, the stand-by's
+seconds with them as its kills are (`HuntReport.minutes`), where summaries before 2026-11-02 went over the hunt's seconds
+alone: the same run reads lower by the stand-by's share of its time (loop_tree_grind_drops, 19 s of 199: 169.6 EXP a
+minute off her number before, 153.6 now, the same +510). Rates quoted from older summaries (the bot's 283 EXP a minute
+against the user's 484, for one) are by the hunt's seconds.
 
 **The records** (telemetry topics as before; the new fields only, each left out where it has nothing to say):
 
@@ -3899,12 +3908,12 @@ that run was killed at 00:53:06 before writing one.
 | `session` (a recording command's) | `physics`: character, class, SPEED and JUMP (%), `bonus` (the client's +20, `body.SPEED_BONUS`), walk and climb (units/s) | the walk the run planned her moves at (`motion.physics.record`): walkfit's yardstick |
 | `scene` (the hunt's looks) | `seq` (the perception service's frame number; its own scenes too), `age` (ms since the frame showed) | a decision matched to its frame: a recording's index.jsonl has the same `seq` |
 | `trip` | `on`, `x` (her last look's place as it ended; the arrival walk's own look), `walk` ([units asked, hold ms] each walk on to x) | an 'arrived' trip off its platform's end shows (P02) |
-| `event` backstop of a pass regardless | `move` [kind, src, dst, x], `blocker` {kind, platform, x, rel: same/above/below}, `waited` (looks), `blocked_s`, `shots`, `why_not` {safe, worth, last_shot}, `episode`, `nth` | why each pass happened; passes of one move within `navigator.PASS_EPISODE_S` (3.5 s) are one episode, so touches are counted once an episode (P04) |
+| `event` backstop of a pass regardless | `move` [kind, src, dst, x], `blocker` {kind, platform, x, rel: same/above/below}, `waited` (looks), `blocked_s`, `shots`, `why_not` {safe, worth, last_shot: worth None where not safe, not asked}, `episode`, `nth` | why each pass happened; passes of one move within `navigator.PASS_EPISODE_S` (3.5 s) are one episode, so touches are counted once an episode (P04) |
 | `no_cast` | one for every cast her MP refuses (why 'MP', `mp` as reckoned, `cost`); the log still says the 1st, 10th and 100th | how often her reckoned MP refused a cast (P27) |
 | `sweep` | `to`: the next stop's peeked choice (`peek`: why, stop, travel, expected, seen, gain, skipped; `heading`), else the objective it's the place of, else her spot (`home`) | why a sweep headed where it did (P32: the 00:48:04 descent) |
 | `grind` 'state' and 'end' | `loop_s`, `loop_exp`, `loop_rate` (since the loop was taken up), `promised` (the loop's rate over her looks' time), `delivered` (EXP a minute, her kills' kinds), `rule_s` (s by hunt rule) | the loop's promise against what it gave (P30: 556 against 437 over the hour) |
 | `summary` (new) | the run's figures (`HuntReport.record`): kills, EXP both ways, throws and casts, touches, potions, lowest HP, a minute each, rules and their seconds | one record a run, for its README and its comparisons |
-| the service's `exp_gain` event | `before` [level, EXP] | what the hunt's meter starts from |
+| the service's `exp_gain` event | `before` [level, EXP]: its meter's last reading, only where that's the number just before the change (none with a change since unread or a jump held for a second reading) | what the hunt's meter starts from |
 
 Not here: each cast's target monster and side (work/rec-replay adds it), a perception record every frame while a hunt
 is attached (35 MB an hour more; the service's scenes stay every other frame), and the 10 s line's plate share split
@@ -3914,7 +3923,8 @@ Their size: the hour's tour.jsonl was 12,588,941 bytes. At the new fields' sizes
 (19.6 bytes a scene, 17.8 a trip, 80.8 a sweep, 185 a backstop, 221 a grind state) and the hour's own counts (5,410
 scenes, 708 trips, 561 sweeps, 155 backstops, 25 states), about 12.79 MB: +1.6%, half of it the scenes' `seq` and `age`
 (D:/MapleHelper-scratch/recfix/records/scripts/sizes.py; estimated, the hour can't be run again). The service's
-perceive.jsonl grows by `before` on each EXP change (about 25 bytes, 400 an hour).
+perceive.jsonl grows by its scenes' `seq` (about 13 bytes each: its 19,203 scenes of 00:07:38-00:53:06 make about 250 KB,
+0.9% of its 27.2 MB) and by `before` on each EXP change (about 25 bytes, 400 an hour).
 
 **walkfit** (`python -m gamelab.analysis.walkfit RUN [RUN ...] [--planned UNITS] [--character ID] [--frames] [--json]`;
 `analysis/walkfit.py`). A RUN is a telemetry folder (a golden clip's `telemetry/` too) or files: the hunt's and the
@@ -3923,47 +3933,60 @@ profile of `--character` as the code has it now, said as assumed) and gives, per
 (median, quartiles, se, n: tag-placed stretches of the service's scenes on one platform, 0.8 s or more, a line fitted
 past her run-up), against the planned and as the SPEED (%) that would plan it; her takeoffs on walk-then-jump first
 legs against the plan's (median, after walks of 100 or more, and against the engine at her measured walk); her steps'
-ratio, gone over asked; and her 'arrived' trips on another platform, with and without a touch 3 s before. `--frames`
-cuts each recording's folder to its frames' span. On R1-R3 (`--planned 125`: her profile then planned 125; `--character magician` now gives her profile's 150, Her walk speed):
+ratio, gone over asked, over the steps she walked (no stance record before she stood still, gone the way asked); and
+her 'arrived' trips on another platform, with and without a touch 3 s before. `--frames` cuts each recording's folder
+to its frames' span. On R1-R3 (`--planned 125`: her profile then planned 125; `--character magician` now gives her
+profile's 150, Her walk speed):
 
 | run | min | walk: median (IQR) se, n | x planned | late, after 100+ (n) | vs engine at her walk | steps (n) | arrived: off / clean |
 |---|---|---|---|---|---|---|---|
 | R1's grind (tour 00:09:36) | 5.2 | 147.7 (146.5-149.1) 1.5, 13 | 1.182 | +11.3, +32.7 (21) | +3.8, +9.6 | 1.19 (5) | 30: 2 / 2 |
-| the hour (tour 00:17:48) | 35.2 | 148.2 (146.3-150.2) 0.4, 81 | 1.186 | +7.5, +24.9 (108) | +0.1, +3.0 | 1.19 (68) | 210: 18 / 15 |
-| Tree Dungeon, both | 40.4 | 148.2 (146.3-150.2) 0.4, 94 | 1.185 | +8.0, +25.3 (129) | +0.3, +3.9 | 1.19 (73) | 240: 20 / 17 |
+| the hour (tour 00:17:48) | 35.2 | 148.2 (146.3-150.2) 0.4, 81 | 1.186 | +7.5, +24.9 (108) | +0.1, +3.0 | 1.19 (52) | 210: 18 / 15 |
+| Tree Dungeon, both | 40.4 | 148.2 (146.3-150.2) 0.4, 94 | 1.185 | +8.0, +25.3 (129) | +0.3, +3.9 | 1.19 (57) | 240: 20 / 17 |
 | `--frames`: R1 | 4.0 | 147.9 (145.9-149.0) 2.0, 10 | 1.184 | +14.2, +32.7 (16) | +4.4, +9.4 | 1.19 (5) | 27: 2 / 2 |
-| R2 | 5.0 | 147.5 (146.3-150.2) 0.9, 14 | 1.180 | +7.9, +21.5 (15) | +1.1, +3.7 | 1.21 (14) | 30: 2 / 2 |
-| R3 | 5.0 | 149.4 (145.8-150.6) 1.4, 12 | 1.195 | +6.9, +16.0 (21) | -2.9, -6.2 | 1.13 (11) | 23: 4 / 4 |
+| R2 | 5.0 | 147.5 (146.3-150.2) 0.9, 14 | 1.180 | +7.9, +21.5 (15) | +1.1, +3.7 | 1.20 (12) | 30: 2 / 2 |
+| R3 | 5.0 | 149.4 (145.8-150.6) 1.4, 12 | 1.195 | +6.9, +16.0 (21) | -2.9, -6.2 | 1.15 (7) | 23: 4 / 4 |
 
-The hour's row is the analysis' to the digit: 148.2 over 81 walks, se 0.4 (profile_checks.py); +7.5 / +24.9 over 108
-legs, +0.1 / +3.0 at 148.2 (engine_fit.py); 18 of 210 'arrived' trips elsewhere, 15 with no touch (arrived_wrong.py);
-steps 1.19, quartiles 1.14-1.22 over 68 (steps.py's "71 steps" counted the 3 asked under 30 units too, its ratio was over
-the same 68). Two differences, both of population: the slope of lateness on walk is 0.219 here over the 108 untouched
-legs of 20 units or more, 0.164 in takeoff_check.py over 133 legs with touched ones and walks of 5-20 among them; and the
-touches it leaves steps out for go by each touch's own moment (the service's 'touch' events' time less `late`, as the
-analysts' touch list had them): by the events' time alone 67 steps, not 68. The R3 quartile 0.18 is a step cut short
-where she stood. Tests: tests/test_walkfit.py on two stretches cut from the hour (tests/fixtures/records/hour-cut, 92 KB:
-the jumps 8->7 of 00:37:57.8 and 00:38:06.6 that ended on 9, the arrival walk off 10 at 00:41:10.99).
+The hour's row is the analysis' to the digit but for the steps: 148.2 over 81 walks, se 0.4 (profile_checks.py);
++7.5 / +24.9 over 108 legs, +0.1 / +3.0 at 148.2 (engine_fit.py); 18 of 210 'arrived' trips elsewhere, 15 with no
+touch (arrived_wrong.py). The slope of lateness on walk is 0.219 here over the 108 untouched legs of 20 units or more, 0.164
+in takeoff_check.py over 133 legs with touched ones and walks of 5-20 among them; the touches it leaves takeoffs and steps
+out for go by each touch's own moment (the service's 'touch' events' time less `late`, as the analysts' touch list had
+them). The steps are the ones she walked (from the review of 2026-11-02): 1.19, quartiles 1.16-1.23, over 52 of the
+hour's (57 with R1's). steps.py and walkfit at first took every 'stepping away' record for a step, 68 of 30 units or
+more (1.19, quartiles 1.14-1.22; its "71 steps" the 3 shorter too). But the hunt loop walks a step as it decides it and
+looks again once the hold is over, and the stance says a step a knock holds back again look after look
+(`fight.knocked_move`): 15 of the 68 had their next stance record 0.31-1.18 s before she stood still (bursts like
+00:50:13.8-14.0's 'left 120' three times, held back, then 'right 67' twice, the second walked; what she then walked was
+counted as each), where every walked one's came 0.08 s or more after; and 00:22:52.97's 'left 135' left her 9 units
+right. The median holds (1.191 with them, 1.194 without); R2 1.20 over 12 (was 1.21 over 14), R3 1.15, quartiles
+1.12-1.18, over 7 (was 1.13, 0.18-1.18, over 11: its 0.18 quartile three copies of one held-back step, -80 against 120).
+Tests: tests/test_walkfit.py on two stretches cut from the hour (tests/fixtures/records/hour-cut, 95 KB, every stance
+record in them: the jumps 8->7 of 00:37:57.8 and 00:38:06.6 that ended on 9, the arrival walk off 10 at 00:41:10.99), and
+on a made-up run with a step said again while held back, two walked within STEP_S of each other, and one undone.
 
-**The goldens** that changed, their results' report line alone (plans, logs and worlds identical; 34 of 43 unchanged):
+**The goldens** that changed, their results' report line alone (plans, logs and worlds identical; 34 of 43 unchanged;
+loop_tree_grind's result credit and its grind's 'kills by platform' log line too, from the review of 2026-11-02):
 
 | golden | what changed |
 |---|---|
 | loop_tree_23 | 1 s to stand by in its rate; touches, potions, lowest HP said |
 | loop_tree_23_near_misses | 57 throws (1 clearing her way), was 56; 1 s to stand by |
 | loop_tree_crowd | 129 throws (14 clearing her way), was 115; 10 s to stand by |
-| loop_tree_grind | 16 kills (+1 Green on her way to stand by), +551 off her number, was 15 and +525; 144 throws (3), was 141; 7 s to stand by |
+| loop_tree_grind | 16 kills, +551 off her number, was 15 and +525 (the 16th a Green whose EXP showed at 180.3 s as the loop ended: the hunt's, its credit on 14 in the grind's result and its 'kills by platform' log line, from the review of 2026-11-02; '+1 on her way to stand by' before); 144 throws (3), was 141; 7 s to stand by |
 | loop_tree_grind_drops | 170 throws (4), was 166; 19 s to stand by |
 | loop_tree_mp_runs_out | 1 s to stand by; touches 0 |
 | loop_tree_run | 34 kills (+2 Greens on her way to stand by), +936, was 32 and +884; 215 throws (9), was 206; 16 s to stand by |
 | loop_tree_wait | 189 throws (24), was 165; 3 s to stand by |
 | loop_tree_walls | 210 throws (15), was 195; 2 s to stand by |
 
-**Open.** The potions are rises of her HP number of 100 or more: a Red Potion's 50 isn't counted, and a potion and a
-touch between two reads hide each other. walkfit compares a trip's `dst` with her platform as the records name them: a
-twin platform (MapModel.twins) would read as elsewhere. Old runs have no physics record: their planned walk is assumed
-from the profile now (a run before a speed change needs `--planned`: R1-R3 and every run before 2026-11-02's walk fix, `--planned 125` for the magician, 149 for the thief). Her walk checked online, per map (ROADMAP item
-25), is not built: walkfit is its offline half.
+**Open.** The potions are rises of her HP number of 100 or more: a Red Potion's 50 isn't counted, a potion and a
+touch between two reads hide each other, and a rise to a max HP the read before didn't say isn't counted (a level's
+refill: from the review of 2026-11-02; a potion with it too). walkfit compares a trip's `dst` with her platform as
+the records name them: a twin platform (MapModel.twins) would read as elsewhere. Old runs have no physics record: their
+planned walk is assumed from the profile now (a run before a speed change needs `--planned`: R1-R3 and every run before
+2026-11-02's walk fix, `--planned 125` for the magician, 149 for the thief). Her walk checked online, per map (ROADMAP
+item 25), is not built: walkfit is its offline half.
 
 ## Her walk speed: 125 x (SPEED + 20)/100, the client's (from 2026-11-02)
 
@@ -3995,8 +4018,11 @@ this limit: the game's 30 ms step clamps her speed at it (both decompiles; `body
   no walk formula. No public decode of this client's walk was found (the executable is protected and wasn't touched).
   The v83 port RustMS (Player.cpp get_walkspeed: SPEED clamped 80-140, /100; climbing 3 px every 30 ms whatever the
   speed) and a v40 IDA reading (ComputeMaxVelocity: speedFactor x walkStat x 125.0) show the old formula, which this
-  client departs from. mscw-guidebook.com's "Speed 100 means 125 pixels a second" multiplies Physics.img by stat/100
-  and measures nothing; both characters' walks refute it.
+  client departs from. HaRepacker-Resurrected's Classic World datamine (docs/maplestory-classic-world-pastecode_io.md,
+  a Themida-protected build v1.1.0.0 of 2026-04-06; checked in the review of 2026-11-02) has no walk formula, and its
+  MapSimulator's PhysicsConstants.cs models another client (walkSpeed 1250, "Speed 100 = 100 px/s").
+  mscw-guidebook.com's "Speed 100 means 125 pixels a second" multiplies Physics.img by stat/100 and measures nothing;
+  both characters' walks refute it.
 - *Her walks* (by perception at 15 fps, 1 unit = 1 game px at 1366x768; `tests/fixtures/walks_tree_2026.json`, made by
   walk-research/tools/walk_fixture.py: each walk's braking tail left out, the last 0.15 s, and Tree's slopes taken out by
   v83's slope rule, uphill at L along the foothold, downhill at (1 + s²) L, x speed that times cos): the magician
@@ -4009,7 +4035,8 @@ this limit: the game's 30 ms step clamps her speed at it (both decompiles; `body
   -0.4%, 1-2 se. Not the map-unit scale (her climb and the monsters' walks would be 18.6% off too), not the step
   overshooting (it clamps), not the map (no fs, force or drag).
 - Measured, not decoded: +20 and x 1.2 differ only above SPEED 100 (200 against 210 at the cap), and meowdb's cap row
-  says 200. The lower clamp under 100 isn't known.
+  says 200. The lower clamp under 100 isn't known (meowdb's calculator clamps SPEED to 100-140; the code keeps the
+  decompile's 80, which only the thief's 99.2 below meets: meowdb would walk her 150, not 149).
 
 **What changed.**
 - `motion/body.py`: `SPEED_BONUS` 20, added to the clamped SPEED for a character; `JUMP_RANGE` (80, 120), meowdb's cap
@@ -4052,8 +4079,8 @@ the residual is the estimate. Over R1's grind and the hour (40.4 minutes):
 | ... after walks of 100 or more (23) | +25.3 | +2.6 |
 | ... more than the routes' 12-unit slop off, either way (`physics.LANDING_SLOP`) | 48 of 129 | 7 |
 | ... of those after walks of 100 or more | 22 of 23 | 1 |
-| steps, gone / asked (73 'stepping away' of 30+, touch-free) | 1.19 | 0.98 |
-| ... over by 10 units or more | 42 | 0 |
+| steps, gone / asked (57 of 30+ she walked, touch-free: walkfit's steps) | 1.19 | 0.99 |
+| ... over by 10 units or more | 40 | 0 |
 | 'arrived' on another platform, no touch (17 of 20) | 17 | 4 |
 
 Of the 17 untouched false 'arrived' trips, 13 (R1's 1, the hour's 12) are the arrival walk's overshoot: the hold timed
@@ -4062,8 +4089,10 @@ target, targets 9-48 from the end). At 150 each stops 9.8-52 units inside the en
 pile 9 from 8's end). The other 4 (asked 8.5-84.5 with 25-363 to the end) aren't the walk's length, and stay. Per
 recording (walkfit's `--frames` spans): R1 1 of its 2, R2 2 of 2, R3 4 of 4 are the overshoot, all 0 at 150 (R3's
 00:48:03.85 and 00:48:58.37 by the engine 0.2 and 6 short of the end at 125, within its spread). Her raw walk is
-taken (148.2), so the estimate leans short: at her 149.4 the steps come to 0.99. Not estimated: the jumps after those
-takeoffs (where they land), and EXP.
+taken (148.2); at her 149.4 the steps come to 0.99 too (0.985 against 0.987). The step rows are over the steps she
+walked, from the review of 2026-11-02 (walkfit's `steps`; the same script re-run: D:/MapleHelper-scratch/recfix/
+fix-records/estimate.json); over every 'stepping away' record, as first estimated, they were 73, 0.98, and 42 over by
+10 or more. Not estimated: the jumps after those takeoffs (where they land), and EXP.
 
 **Checks.** tests/test_walk_speed.py (her planned walk 150 within 1.5% of the raw 148.2 and 0.5% of the fixture's
 149.44, v83's 125 more than 15% under; the thief's 149.0 within her 148-151.5 and her stat window's 151.25 within 0.5%
@@ -4098,8 +4127,9 @@ doesn't play the magician (P41).
   everywhere, but a map's fs, a foothold's force or drag, or swimming can change a walk (none of the 10 cached maps has
   fs). Her walk checked online, per map (ROADMAP item 25), stays worth having: gear or Haste changes SPEED, and the 20
   is meowdb's measurement, not a decode.
-- `analysis.physics_check` and its `NOW` model take the walk of the character the process plays: from a checkout whose
-  lab plays the magician, it replays the thief's recordings at 150, not her 149 (`GAMELAB_CHARACTER=thief`).
+- `analysis.physics_check` and its `NOW` model took the walk of the character the process plays: from a checkout whose
+  lab plays the magician, it replayed the thief's recordings at 150, not her 149. From the review of 2026-11-02 they
+  take the thief's (`physics_check.SHOE`, her profile's), whoever plays: for the thief physics' own, to the float.
 
 ## Localization
 
