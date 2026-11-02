@@ -53,13 +53,13 @@ def test_yolo_returns_original_pixel_pattern_centres_and_never_needs_an_input_ap
     assert call["imgsz"] == 640 and call["conf"] == 0.5 and call["device"] == 0
 
 
-def test_full_frames_use_the_native_size_board_crop_and_restore_frame_coordinates():
+def test_full_frames_use_the_playable_board_crop_and_restore_frame_coordinates():
     model = FakeModel([[10, 20, 30, 50]])
     shadow = YoloPatternShadow(model=model)
     _, suggestions = shadow.check(np.zeros((768, 1366, 3), np.uint8))
     assert model.calls[0]["source"].shape == (500, 750, 3)
-    assert suggestions[0]["box"] == [318.0, 154.0, 338.0, 184.0]
-    assert suggestions[0]["center"] == [328.0, 169.0]
+    assert suggestions[0]["box"] == [318.0, 200.0, 338.0, 230.0]
+    assert suggestions[0]["center"] == [328.0, 215.0]
 
 
 def test_fewer_than_four_detections_do_not_mark_an_active_pattern_board():

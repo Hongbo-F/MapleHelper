@@ -19,7 +19,7 @@ CONFIDENCE = 0.5
 MIN_PATTERNS = 4  # active boards have about 13-17; one stray detection isn't the mini-game
 IMAGE_SIZE = 640
 NATIVE_FRAME = (1366, 768)
-BOARD_AT_NATIVE = (750, 500)  # the annotation videos' mini-game ROI, centred in a full game frame
+BOARD_AT_NATIVE = (308, 180, 750, 500)  # xywh: the playable board, excluding the blue header
 FULL_FRAME_WIDTH = 1000  # smaller inputs are already board crops, as in the training/validation set
 
 
@@ -65,11 +65,12 @@ class YoloPatternShadow:
         x0 = y0 = 0
         board = frame
         if w >= FULL_FRAME_WIDTH:
-            # Whole-screen inference shrank the board and missed most patterns. Use its native-size ROI instead;
-            # scale that ROI with the game window and translate detections back to original frame pixels below.
-            bw = min(w, round(w * BOARD_AT_NATIVE[0] / NATIVE_FRAME[0]))
-            bh = min(h, round(h * BOARD_AT_NATIVE[1] / NATIVE_FRAME[1]))
-            x0, y0 = (w - bw) // 2, (h - bh) // 2
+            # Use the playable board only: the old centred crop included 46 px of blue header and lost 46 px
+            # at the bottom. Scale its native position with the game window and restore frame coordinates below.
+            bx, by, rw, rh = BOARD_AT_NATIVE
+            x0, y0 = round(w * bx / NATIVE_FRAME[0]), round(h * by / NATIVE_FRAME[1])
+            bw = min(w - x0, round(w * rw / NATIVE_FRAME[0]))
+            bh = min(h - y0, round(h * rh / NATIVE_FRAME[1]))
             board = frame[y0:y0 + bh, x0:x0 + bw]
         # Ultralytics treats ndarray sources as BGR, while the watchdog captures RGB.
         bgr = cv2.cvtColor(np.ascontiguousarray(board), cv2.COLOR_RGB2BGR)
