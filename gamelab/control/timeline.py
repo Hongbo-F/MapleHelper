@@ -24,6 +24,9 @@ SIM_KEYS = GameKeys(left=parse_key("left"), right=parse_key("right"), jump=parse
 # no potion keys (her pet drinks them), pet food u. The simulator plays her with these there (sim.scenarios.HER).
 SIM_KEYS_PET = dataclasses.replace(SIM_KEYS, attack=parse_key("ctrl"), lucky_seven=parse_key("shift"), hp_potion=None,
                                    mp_potion=None, pet_food=parse_key("u"))
+# ... and the magician's as the simulator plays her (from 2026-11-02: sim.scenarios.HERS): the thief's from 2026-10-23 but
+# Magic Claw on Shift where his Lucky Seven was (her profile's preset 2: classes.magician.KEYS), no Lucky Seven.
+SIM_KEYS_MAGE = dataclasses.replace(SIM_KEYS_PET, lucky_seven=None, magic_claw=parse_key("shift"))
 
 
 def sim_setup() -> tuple[GameKeys, Timing]:

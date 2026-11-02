@@ -524,15 +524,20 @@ def test_a_choice_by_file_alone_plays_the_thief_in_the_game_but_for_the_service_
     assert cli._unnamed(parser.parse_args(["pet", "--every", "1"])) is None and not character.named()
 
 
-def test_the_simulator_plays_the_thief_only(monkeypatch, capsys):
+def test_the_goldens_play_the_thief_only_and_the_harness_the_magician_too(monkeypatch, capsys):
     """The review's: golden and the harness restart themselves with the environment, GAMELAB_CHARACTER and all, so
-    `golden record` would have written the magician's placeholder physics over the thief's traces."""
+    `golden record` would have written the magician's placeholder physics over the thief's traces. The goldens are still
+    the thief's alone; from 2026-11-02 the harness plays the magician too (`--character magician`, or GAMELAB_CHARACTER's:
+    her world, sim.scenarios.HERS; tests/test_sim_magic.py), and refuses any other."""
     from gamelab.sim import golden, harness
     monkeypatch.setenv(character.ENV, "magician")
-    assert golden.main(["record"]) == 2 and harness.main(["run", "loop"]) == 2
-    assert capsys.readouterr().out.count("the simulator's scenarios are the thief's") == 2
+    assert golden.main(["record"]) == 2
+    assert capsys.readouterr().out.count("the simulator's scenarios are the thief's") == 1
+    assert harness._who(["run", "loop"]) == ("magician", "")
+    monkeypatch.setenv(character.ENV, "warrior")
+    assert harness.main(["run", "loop"]) == 2 and "not warrior" in capsys.readouterr().out
     monkeypatch.setenv(character.ENV, "thief")
-    assert golden._thief_only() is None and harness._thief_only() is None
+    assert golden._thief_only() is None and harness._who(["run", "loop"]) == ("thief", "")
 
 
 def test_who_plays_is_resolved_once():

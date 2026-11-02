@@ -329,6 +329,16 @@ def test_the_bar_needs_more_exp_on_most_seeds_and_nothing_worse():
     assert not harness.compare(base, [_result(k, 60.0, died=100.0 if k == 5 else None) for k in range(1, 11)])[0]
 
 
+def test_the_bar_refuses_runs_of_two_characters():
+    # As runs on two maps: the review's (2026-11-02), a thief's run against a magician's was judged by the bar
+    base = [_result(k, 50.0) for k in range(1, 11)]
+    hers = [dict(_result(k, 60.0), character="magician") for k in range(1, 11)]
+    ok, lines = harness.compare(base, hers)
+    assert not ok and lines[0] == "the runs play different characters (['thief'] and ['magician'])"
+    assert harness.compare([dict(r, character="magician") for r in base], hers)[0]
+    assert harness.compare([dict(r, character="thief") for r in base], [_result(k, 60.0) for k in range(1, 11)])[0]
+
+
 def test_outcomes_are_read_from_the_world(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right"))
@@ -600,7 +610,7 @@ def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model, monkeypa
     KNOCK_FALL_DY lower; one that leaves her on hers isn't one. (Her touches all take HP here: a MISS knocks nothing.)"""
     monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None, mob_level=None: 0.0)
     b = plat(model, 360, 300)
-    w = world(model, b.id, 385.0, monsters=[("Snail", b.id, 360.0)])
+    w = world(model, b.id, 375.0, monsters=[("Snail", b.id, 360.0)])
     w.monsters[0].speed = 0.0
     w.advance(2.0)
     assert w.touches >= 1 and w.plat is not None and w.plat.id != b.id
@@ -608,7 +618,7 @@ def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model, monkeypa
     out = harness.outcomes(w, [], 60.0)
     assert out["knock_falls"] == 1 and out["knock_fall_dy"] == w.knock_log[0][3]
     c = plat(model, 500, 400)
-    w = world(model, c.id, 385.0, monsters=[("Snail", c.id, 360.0)])
+    w = world(model, c.id, 375.0, monsters=[("Snail", c.id, 360.0)])
     w.monsters[0].speed = 0.0
     w.advance(2.0)
     assert w.touches >= 1 and w.knock_log == []  # knocked along the floor
@@ -711,13 +721,14 @@ def test_her_trips_touches_again_and_by_what_she_was_doing_are_counted(model):
 
 def test_her_box_can_be_the_clients_in_the_simulated_world(model):
     # Realism.her_box (`--world client-body`): 22 either side of her feet and 65 tall (motion.bodies), not the
-    # simulator's 15 and 55: a slime walking on B, 140 above C's floor, never reaches her there; one on a platform 60
-    # over her does with the client's box only (her head 65 up).
+    # simulator's touch test (world.HER_TOUCH, the client's: a line 50 tall): a slime walking on B, 140 above C's
+    # floor, never reaches her there; one on a platform 60 over her does with the planner's box only (her head 65 up).
     from gamelab.motion import bodies
     assert world_mod.HER_BOX_CLIENT == (bodies.HER_HALF, bodies.HER_TALL) == (22.0, 65.0)
     assert harness.WORLDS["client-body"] == {"her_box": world_mod.HER_BOX_CLIENT}
     sc = harness.scenario("loop", 1, "game", 1.0, world=("client-body",))
     assert sc.realism.her_box == (22.0, 65.0) and Realism().her_box is None
+    assert harness.WORLDS["wide-body"] == {"her_box": (15.0, 55.0)}  # (as the world had it until 2026-11-02)
     t = tree()
     t["foothold"]["1"]["9"] = {"30": {"x1": 300, "y1": 440, "x2": 500, "y2": 440, "prev": 0, "next": 0}}
     m = mapdata.parse(1, t, "Test Map", {}, {"7": "Slime"}, {"7": 3})

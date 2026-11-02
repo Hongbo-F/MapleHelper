@@ -491,7 +491,7 @@ def test_the_harness_counts_her_misses_and_the_touches_the_stack_was_told_of():
     from gamelab.sim.world import World
     model = mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail"}, {"2": 2})
     c = plat(model, 500, 400)
-    w = World(model, KEYS, (c.id, 385.0), monsters=[("Snail", c.id, 360.0)])
+    w = World(model, KEYS, (c.id, 375.0), monsters=[("Snail", c.id, 360.0)])  # (in its box: 19 either side)
     w.monsters[0].speed = 0.0
     w.advance(6.0)
     events = [{"topic": "event", "kind": "touch", "touch": MISS}, {"topic": "event", "kind": "touch", "touch": DAMAGE},

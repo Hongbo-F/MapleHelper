@@ -15,7 +15,7 @@ from gamelab.motion.flow import Body, Leg, Span
 from gamelab.motion.physics import JUMP_LAG, STOP_S
 from gamelab.motion.route import Move
 from gamelab.sim import harness, scenarios
-from gamelab.sim.world import Realism
+from gamelab.sim.world import HER_HALF, HER_HEIGHT, Realism
 
 REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE), reason="needs Tree Dungeon's game data")
 
@@ -388,7 +388,9 @@ def test_a_monster_whose_replan_was_dropped_late_with_no_room_to_stop_is_asked_a
     the log said the next state asks again. Now a late one isn't taken as handled: said so, the next state asks about it
     again (here in time: spliced), and nothing cut."""
     asks: list = []
-    trace, sim, state = _spawn_run(_late_once(asks, room=False))
+    # (her body for touches as when this was written, 15 either side: with the client's line, world.HER_TOUCH, a touch
+    # it took on the trip's way up no longer comes, and a later chain is cut for another monster coming)
+    trace, sim, state = _spawn_run(_late_once(asks, room=False), realism=Realism(her_box=(HER_HALF, HER_HEIGHT)))
     i = next(i for i, (_, late) in enumerate(asks) if late)
     assert len(asks) > i + 1 and asks[i + 1][0] - asks[i][0] <= 0.15 + 2 * nv.STATE_S + 1e-6, asks
     said = [line for line in trace["log"] if "replanned too late" in line]
