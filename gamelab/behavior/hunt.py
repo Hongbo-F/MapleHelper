@@ -425,7 +425,10 @@ class HuntReport:
     Hunter._vitals starts from), so that kill's 26 were lost; the navigator's shots clearing her way (behavior.fight's
     escort: 4 casts) count in the hunter's report, not the hunt's `throws`; and the stand-by trip's own shot, kill and
     41 EXP came after the count stopped. `throws` stays the hunt's own throws (what behavior.grind learns its kill
-    times from); `casts` is every throw of hers over the run, the navigator's too."""
+    times from); `casts` is every throw of hers over the run, the navigator's too. Its 'a minute' figures are over the
+    run's minutes, the stand-by trip's too (`minutes`), since its kills are counted; summaries before 2026-11-02 went
+    over the hunt's seconds alone, so the same run reads lower by the stand-by's share of its time (the simulator's
+    loop_tree_grind_drops, 19 s of 199: 169.6 EXP a minute off her number then, 153.6 now)."""
     seconds: float = 0.0
     grounds: list[int] = field(default_factory=list)  # visited, in order
     kills: dict[str, int] = field(default_factory=dict)
@@ -623,6 +626,7 @@ class Hunt:
             self.h.senses.regains = regains
             if raises is not None:
                 self.h.doubts_raise = raises
+        self._over_at = time.monotonic()  # (her kills whose EXP showed by now are the hunt's: _book_after)
         self.report.seconds = time.monotonic() - start
         if (last := getattr(self, "_noted", None)) is not None:  # (the last pass's rule had her to time-up)
             self.report.rule_s[last[0]] += time.monotonic() - last[1]
@@ -661,16 +665,26 @@ class Hunt:
             self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
 
     def _book_after(self) -> list:
-        """After time-up: her kills on her trip to stand by (the navigator's shots clearing its way), counted in the
-        report as on her way. Returns them."""
+        """After her trip to stand by: the kills booked since the hunt loop's last look. Those whose EXP showed before
+        the loop was over (`_over_at`; Kill.gained, its frame's time) are the hunt's own, booked as its looks book
+        them, from her last look (_book_kills: a visit's or on her way, a grind's credit by platform): the loop's last
+        pass can end on one its looks hadn't had yet (a throw dropped for a kill its last glance saw come in:
+        loop_tree_grind's Green at 180.3 s, until the review of 2026-11-02 '1 on her way to stand by' and no
+        platform's credit). The rest she made on her trip to stand by (the navigator's shots clearing its way),
+        counted in the report as on her way. Returns those."""
         kills = self.h.ledger.kills[self._kills_seen:]
         self._kills_seen = len(self.h.ledger.kills)
+        over, s = getattr(self, "_over_at", None), getattr(self, "_s", None)
+        own = [k for k in kills if over is not None and s is not None and k.gained is not None and k.gained <= over]
+        if own:
+            self._book_kills(s, own)
+        after = [k for k in kills if not any(k is o for o in own)]
         avg = self._avg_exp()
-        for k in kills:
+        for k in after:
             self._count_kill(*self._kill_exp(k, avg))
             self.report.on_the_way += 1
-        self.report.standby_kills = len(kills)
-        return kills
+        self.report.standby_kills = len(after)
+        return after
 
     def _paused(self, seconds: float) -> None:
         """She stood still `seconds` (LookLost: Senses.regain): her clocks move on by as much, so the pause isn't time
@@ -852,10 +866,28 @@ class Hunt:
         return wide
 
     def _book(self, s: Scene) -> None:
-        """New kills in the ledger: the visit's EXP and kill times, the report, and progress. A kill's EXP is its
-        kind's, placed or named by its gain's size (localization.gains), else the average kind's worth hunting."""
+        """New kills in the ledger (_book_kills), and progress."""
         kills = self.h.ledger.kills[self._kills_seen:]
         self._kills_seen = len(self.h.ledger.kills)
+        self._book_kills(s, kills)
+        # A pick-up is progress once a look sees the pile she went for gone (standing on one proves
+        # nothing: someone else's, or a full inventory). Counted so, the stuck guard can fire.
+        gone = self.h.drops.gone_tried
+        if gone > self._gone:
+            self._gone, self._progress = gone, time.monotonic()
+        key = (s.platform.id, id(self.obj))
+        if key != self._fs_key:  # a new place or objective: what she was throwing at there is forgotten, but not the
+            # kills dying there and her throws' paths (a kill's pile becomes the objective while its monster is still
+            # drawn, and that was shot at whole, then its "hidden" ghost: 16 of the 29 throws at the dead live on
+            # 2026-10-25 that came after she had the kill, analysis-1025/jumps-perception-skeptic/wasted2.py)
+            old = self.fs
+            self.fs = FightState(exp_counted=self.h.report.exp_kills, dying=old.dying, keyed=old.keyed)
+            self._fs_key = key
+
+    def _book_kills(self, s: Scene, kills: list) -> None:
+        """Kills of the hunt's, her look `s`'s: the visit's EXP and kill times, the report, and progress. A kill's EXP
+        is its kind's, placed or named by its gain's size (localization.gains), else the average kind's worth
+        hunting."""
         avg = self._avg_exp()
         for k in kills:
             kind, exp = self._kill_exp(k, avg)
@@ -872,19 +904,6 @@ class Hunt:
             else:
                 self.report.on_the_way += 1
             self._progress = time.monotonic()
-        # A pick-up is progress once a look sees the pile she went for gone (standing on one proves
-        # nothing: someone else's, or a full inventory). Counted so, the stuck guard can fire.
-        gone = self.h.drops.gone_tried
-        if gone > self._gone:
-            self._gone, self._progress = gone, time.monotonic()
-        key = (s.platform.id, id(self.obj))
-        if key != self._fs_key:  # a new place or objective: what she was throwing at there is forgotten, but not the
-            # kills dying there and her throws' paths (a kill's pile becomes the objective while its monster is still
-            # drawn, and that was shot at whole, then its "hidden" ghost: 16 of the 29 throws at the dead live on
-            # 2026-10-25 that came after she had the kill, analysis-1025/jumps-perception-skeptic/wasted2.py)
-            old = self.fs
-            self.fs = FightState(exp_counted=self.h.report.exp_kills, dying=old.dying, keyed=old.keyed)
-            self._fs_key = key
 
     def _log_memory(self) -> None:
         """What her memory of the monsters did over the hunt (the end of the run's log)."""

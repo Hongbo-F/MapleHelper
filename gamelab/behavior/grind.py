@@ -249,12 +249,11 @@ class Grind(Hunt):
             return d.taken(best[1])
         return max((d.taken(k) for k in d.threats), default=0.0)
 
-    def _book(self, s: Scene) -> None:
-        """The hunt loop's bookkeeping, and each new kill credited to the platform it died on (`credit`)."""
-        new = self.h.ledger.kills[self._kills_seen:]
-        super()._book(s)
+    def _book_kills(self, s: Scene, kills: list) -> None:
+        """The hunt loop's bookkeeping, and each kill of the hunt's credited to the platform it died on (`credit`)."""
+        super()._book_kills(s, kills)
         avg = self._avg_exp()
-        for k in new:  # (the stand-by trip's after time-up aren't: the report has them, `credit` is where she hunted)
+        for k in kills:  # (the stand-by trip's aren't: the report has them, `credit` is where she hunted)
             _, exp = self._kill_exp(k, avg)
             c = self.credit.setdefault(k.platform if k.placed else k.ground, [0, 0.0])
             c[0] += 1

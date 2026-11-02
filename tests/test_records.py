@@ -15,7 +15,7 @@ from gamelab import telemetry
 from gamelab.behavior.fight import Report
 from gamelab.behavior.grind import Grind
 from gamelab.behavior.hunt import Hunt, HuntReport
-from gamelab.behavior.hunter import feed_reads
+from gamelab.behavior.hunter import Hunter, feed_reads
 from gamelab.control.navigator import TripState, _trip_end
 from gamelab.localization.gains import ExpMeter
 from gamelab.localization.tracking import Event
@@ -78,7 +78,8 @@ def test_the_run_summary_says_every_throw_the_stand_by_and_her_touches_potions_a
 
 
 def test_the_hunt_counts_the_stand_by_trips_kills_and_takes_the_hunters_figures():
-    kills = [SimpleNamespace(kind="green-mushroom", named=None)] * 52         + [SimpleNamespace(kind=None, named="horny-mushroom")]  # (the 53rd on her way to stand by: named by its gain)
+    kills = [SimpleNamespace(kind="green-mushroom", named=None)] * 52 \
+        + [SimpleNamespace(kind=None, named="horny-mushroom")]  # (the 53rd on her way to stand by: named by its gain)
     h = SimpleNamespace(report=Report(throws=85, touches=29, misses=0, drinks=15, lowest_hp=527.0), max_hp=842,
                         ledger=SimpleNamespace(kills=kills))
     hunt = object.__new__(Hunt)
@@ -94,6 +95,24 @@ def test_the_hunt_counts_the_stand_by_trips_kills_and_takes_the_hunters_figures(
     assert [x["topic"] for x in records] == ["summary"] and records[0]["casts"] == 85
 
 
+def test_a_kill_whose_exp_showed_before_time_up_is_the_hunts_not_the_stand_bys():
+    """The kills booked after her trip to stand by: those whose EXP showed before the hunt loop was over are the hunt's
+    own (counted, a grind's credit by the platform it died on), only the rest the stand-by trip's. The loop's last pass
+    can end on one its looks hadn't had: loop_tree_grind's Green, its EXP seen come in by the glance before a throw's
+    key at 180.3 s, the ledger's at the stand-by trip's first look (the review of 2026-11-02)."""
+    green = SimpleNamespace(kind="green-mushroom", named=None, placed=True, platform=7, ground=7, t=181.2, gained=180.2)
+    horny = SimpleNamespace(kind="horny-mushroom", named=None, placed=True, platform=9, ground=9, t=184.0, gained=183.9)
+    h = SimpleNamespace(ledger=SimpleNamespace(kills=[green, horny]))
+    g = object.__new__(Grind)
+    g.h, g.report, g._kills_seen, g.credit = h, HuntReport(exp_gains=15, exp=400.0), 0, {}
+    g.tour, g._avg_exp = SimpleNamespace(exp={"green-mushroom": 26.0, "horny-mushroom": 41.0}), lambda: 30.0
+    g.visit = g.obj = None
+    g._over_at, g._s = 180.4, SimpleNamespace(platform=SimpleNamespace(id=7))  # (the loop over, her last look)
+    assert g._book_after() == [horny] and g._kills_seen == 2
+    r = g.report
+    assert (r.exp_gains, r.exp, r.standby_kills, r.on_the_way) == (17, 467.0, 1, 2) and g.credit == {7: [1, 26.0]}
+
+
 def test_her_potions_and_lowest_hp_are_her_hp_numbers():
     rep = Report()
     for hp in (700, 527, 800):
@@ -102,6 +121,19 @@ def test_her_potions_and_lowest_hp_are_her_hp_numbers():
     other = Report(drinks=2, lowest_hp=510.0)
     rep.add(other)
     assert rep.lowest_hp == 510.0 and rep.drinks == 2
+
+
+def test_a_level_ups_refill_isnt_a_potion():
+    """Her HP number rising POTION_RISE_HP or more from one read to the next is a potion, but not a rise to a max HP
+    other than the read before's: a level's refill (the review of 2026-11-02; R1's 15 rises were +160 each)."""
+    h = object.__new__(Hunter)
+    h.report, h._read_max = Report(), None
+    h._max_hp_seen, h._touched = (lambda most: None), (lambda *a: None)
+    reads = [(1.0, 600, 842, None), (2.0, 760, 842, 600), (3.0, 700, 842, 760), (4.0, 870, 870, 700),
+             (5.0, 700, 870, 870), (6.0, 860, 870, 700)]
+    h._hp_number(SimpleNamespace(events=[Event("hp_read", t, data={"cur": c, "max": m, "before": b})
+                                         for t, c, m, b in reads], hp_of=None, hp_box=None))
+    assert h.report.drinks == 2 and h.report.lowest_hp == 600  # (+160 twice; the level's +170 to 870 isn't one)
 
 
 def test_a_trip_record_says_where_she_was_and_its_arrival_walk():

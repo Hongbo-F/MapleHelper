@@ -89,7 +89,8 @@ HP_NUMBER_WAIT_S = 10.0  # s of looks with her HP number never read: said once (
 # them for her). Her potions heal 150-160 (Meat 160 by the game data, Orange Potions 150), her regen between two reads a
 # few HP, a touch takes HP away: on 2026-11-02 rises of 100 or more counted 15 potions in R1's 5.35 minutes and 92 in the
 # hour, as the HP her pets' potions gave and the Meat carried (D:/MapleHelper-scratch/rec-analysis/plans/scripts/
-# numbers.py). A Red Potion's 50 wouldn't be counted.
+# numbers.py). A Red Potion's 50 wouldn't be counted, nor, from the review of 2026-11-02, a rise to a max HP other than
+# the read before's: a level's refill (R1 had none: its 15 rises were +160 each).
 POTION_RISE_HP = 100
 PLAN_DEF_STEP = 5.0  # her DEF for the positioning model (attack.danger) to this (her fit's middle moves a little with
                      # every touch: the places she stands by made again only when it moves this much)
@@ -217,6 +218,7 @@ class Hunter:
         self.hp_follow = hp_number.Follow()  # her HP number off her own looks (without a feed: the feed's step reads it)
         self.lv_follow = lv_number.Follow()  # ... and her level's digits
         self._hp_box_t: float | None = None  # ... the last look it was seen on
+        self._read_max: int | None = None    # ... and the max HP its last read said (a level's refill isn't a potion)
         self._last_touch: tuple[float, int, int] | None = None  # her HP number's last touch: when, HP before, after
         self._first_look: float | None = None  # her first look's time, and whether her HP number not read since ...
         self._unread_said = False              # ... HP_NUMBER_WAIT_S has been said
@@ -1236,8 +1238,9 @@ class Hunter:
             self._max_hp_seen(most)
             if before is not None and cur < before:
                 self._touched(t, before, cur, most)
-            if before is not None and cur - before >= POTION_RISE_HP:  # (a potion: her pet's, or hers)
-                self.report.drinks += 1
+            last_max, self._read_max = getattr(self, "_read_max", None), most
+            if before is not None and cur - before >= POTION_RISE_HP and last_max in (None, most):
+                self.report.drinks += 1  # (a potion: her pet's, or hers; not a level's refill to a new max)
             self.report.see_hp(cur)
         if exact is not None:
             self._max_hp_seen(exact[1])
