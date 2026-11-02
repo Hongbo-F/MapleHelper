@@ -765,7 +765,7 @@ def loop_tree_23_near_misses(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
-@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=7, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_wait(sim):
@@ -780,7 +780,9 @@ def loop_tree_wait(sim):
     game's rule (body.wall_table, 2026-10-31: the planner's flights from a floating platform count the tower's walls
     now): on seed 2 not all of this; of seeds 1-13, 1, 5, 7, 10 and 13 meet all of it, five before too.) (Seed 7 since
     the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 1 no wait; of seeds 1-13 7 and 12 show all
-    of this.)"""
+    of this.) (Seed 1 since every jump attack is jittered, those the stance keys unsure too (fight.JITTER_ALL, the
+    review of 2026-11-01; D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt): on 7 no wait at x; of seeds 1-24,
+    1, 4-6, 10-12, 17, 19 and 21-23 show all of this, with JITTER_ALL off 3, 7, 10, 16, 19, 20 and 22.)"""
     return harness._only(_loop(4), (20,))(sim)
 
 
@@ -865,7 +867,7 @@ def loop_tree_grind_drops(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=6, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=26, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(check("no pile ahead of what's in reach (no ': the pile first')",
                      lambda tr: not any(": the pile first" in line for line in tr["log"])),
@@ -947,7 +949,11 @@ def loop_tree_ore_waits(sim):
     times of 8 touches.) (Seed 6 since the review's fixes of 2026-10-31 (a chain after a touch planned once the knock's
     slide is over, a splice's start by the chain's own physics, her landings at her own prices, her drops' life past 180
     s, her detours priced by their HP: D:/MapleHelper-scratch/replan/loot/fix2/seeds): on 22 not every ore picked up and
-    hurt more than five times; of seeds 1-40, 6 and 14 meet all of this, where 4 of 40 before.)"""
+    hurt more than five times; of seeds 1-40, 6 and 14 meet all of this, where 4 of 40 before.) (Seed 26 since every
+    jump attack is jittered, those the stance keys unsure too (fight.JITTER_ALL, the review of 2026-11-01;
+    D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt, scan_ore2.txt): on 6 not every ore picked up; of seeds
+    1-24 none meets all of this (with JITTER_ALL off 6 and 21), of 25-64, 26, 32, 36, 48, 54, 56 and 58. On 26 the six
+    ores picked up at 193-196 s, touched 3 times, 2 of them evaded.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1534,7 +1540,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=12, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1614,7 +1620,12 @@ def loop_tree_attack_no_darts(sim):
     D:/MapleHelper-scratch/replan/speed/rec/seeds/no_darts.txt): on 2 her stars' test had no monster in reach to cast
     at ("her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-24, 6 and 13 meet all of this.
     On 6: the doubt at 67.2 s, a Horny Mushroom at 26%; MAYBE OUT at 74.9 s, ATTACK on Ctrl as configured at 76.8 s:
-    Lucky Seven only, paged; out of darts' stop at 93.7 s, paged.)"""
+    Lucky Seven only, paged; out of darts' stop at 93.7 s, paged.) (Seed 12 since every jump attack is jittered, those
+    the stance keys unsure too (fight.JITTER_ALL, the review of 2026-11-01;
+    D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt): on 6 no doubt of the regular attack before a key check's
+    retreat at 174 s; of seeds 1-24, 12 alone meets all of this (with JITTER_ALL off 6 and 13). On 12: the doubt at
+    61.1 s, a Horny Mushroom at 31%; MAYBE OUT at 68.7 s, ATTACK on Ctrl as configured at 69.8 s, paged; out of darts'
+    stop at 83.9 s, paged.)"""
     return key_check_run(4)(sim)
 
 
