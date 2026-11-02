@@ -11,7 +11,17 @@ speed x the time since + 25 units (knockback): 43.7 units a frame on at 15, agai
 on the user's own play. Greedy, nearest first (a walking track met by a detection facing the other way, away from its
 platform's ends, FACING_COST farther: two of a kind passing within the gate, 2.1% of that clip's frames, keep their ids).
 One no track explains is new: `entered` at the screen's edge (the camera moved, or it walked in), `spawned` near a spawn
-point of its kind, else `appeared`. Which detection each track was this frame is left in `matched`.
+point of its kind (or found fading in at one: perception.spawns, its alpha in the event), else `appeared`. Which
+detection each track was this frame is left in `matched`.
+
+A monster found fading in at its spawn point (the frame step's spawn watch, perception.spawns: Mob.fading its alpha,
+until the whole screen finds it, a median 7 frames on) is a track like any other from its first sighting, its alpha in
+it (`fading`) and when it turns solid (`solid_at`: alpha FADE_PER_S a second), carried on that line once the whole
+screen has it (it finds them at alpha 0.6-0.8): a newborn can be hit while it fades, and didn't touch her until it was
+solid (perception.spawns). Such a sighting is the track of a monster first seen since its fade began (or seen fading
+itself) only, never an older one's (FADE_SLACK_S); and its track isn't dropped as a flicker (MIN_SEEN_S): the watch's
+sightings are a monster's (none false on the labelled clips), lost now and then for a frame or two under cover before
+the whole screen finds them (68 of 390).
 
 A track's place is its last detection's feet; its velocity is no measure of its own (the user, 2026-10-30: "Perception
 should only give mob heading, speed should come from data-mined game files"): its kind's speed from the game data the
@@ -68,6 +78,7 @@ from maplehelper.engine import RIGHT
 from ..character import THIEF_SHAPE, Shape
 from ..perception.kinds import kind_of
 from ..perception.mobs import Mob
+from ..perception.spawns import FADE_PER_S
 from .mapdata import MapModel
 from .monsters import (DEFAULT_SPEED, GAIN_AFTER_KEY, MONSTER_HALF, MONSTER_HEIGHT, Monster, speeds, walk_edges,
                        walk_vx)
@@ -96,6 +107,8 @@ EDGE_PX = 24        # half-size px (1920x1080; View.edge at the look's geometry)
                     # monster this close came in from off screen
 SPAWN_NEAR = 60.0   # units: a new monster this close to a spawn point of its kind (on its platform), away from the
                     # screen's edges, spawned there
+FADE_SLACK_S = 0.1  # s: a sighting fading in at alpha a is a track first seen no sooner than a / FADE_PER_S before it,
+                    # this much give (its alpha off the line by up to 0.08 a frame: perception.spawns.DROP_A)
 STAR_WINDOW = 2.5   # s after a throw's key that a kill or a hit can be its star's (behavior.ledger.STAR_WINDOW)
 HIT_AFTER_S = 1.2   # s after a throw's key that its star may hit at the latest (it leaves 0.52 s after the key and
                     # flies up to 0.7 s): a monster hidden under her damage numbers stays hidden HIDE_S from then. In
@@ -265,6 +278,11 @@ class Track:
     lands: float | None = None  # ... and when her star lands on it (STAR_LANDS_S: it walks on till then, `_stray`)
     seen_x: float | None = None  # where its last sighting put it (map x, unfiltered: perception.deaths looks there)
     died_seen: float | None = None  # when its death was seen (perception.deaths: its die1 frames where it was)
+    fading: float | None = None   # its alpha as of its last sighting, fading in at its spawn point: the spawn watch's
+                                  # (Mob.fading), or on its fade's line from the last of those (FADE_PER_S); None: solid
+                                  # (or never seen fading)
+    solid_at: float | None = None  # when it turns solid by its fade (the watch's last sighting of it: alpha a at t,
+                                   # solid at t + (1 - a) / FADE_PER_S); None: never seen fading in
 
     def record(self) -> dict:
         """As telemetry data ('tracks'): its `vx` the game data's speed the way it heads (since 2026-10-30, no measure:
@@ -274,7 +292,15 @@ class Track:
                 "bar": None if self.bar is None else round(self.bar, 2), "hits": self.hits, "seen": self.seen,
                 **({"cause": self.cause} if self.cause else {}),
                 **({"gain": round(self.gain, 3)} if self.gain is not None else {}),
-                **({"share": True} if self.share else {})}
+                **({"share": True} if self.share else {}),
+                **({"fading": round(self.fading, 3)} if self.fading is not None else {})}
+
+    def opacity(self, t: float) -> float | None:
+        """Its alpha at t by its fade (FADE_PER_S from the spawn watch's last sighting of it), 1.0 once solid; None:
+        never seen fading in."""
+        if self.solid_at is None:
+            return None
+        return max(0.0, min(1.0, 1.0 - (self.solid_at - t) * FADE_PER_S))
 
     @property
     def killed(self) -> bool:
@@ -423,7 +449,9 @@ class MonsterTracker:
                 m = read(m, tr)
             if tr is None:
                 tr = self._new(t, m, view)
-                events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform}))
+                fading = {} if m.mob.fading is None else {"fading": m.mob.fading}
+                events.append(Event(tr.how, t, tr.id, {"kind": m.kind, "x": round(m.x), "platform": m.platform,
+                                                       **fading}))
             else:
                 if tr.state == OFFSCREEN:
                     events.append(Event("back", t, tr.id, {"kind": m.kind, "after": round(t - tr.last_seen, 2)}))
@@ -495,6 +523,9 @@ class MonsterTracker:
                     continue
                 if t > tr.last_seen and self._stray(tr, m, t):
                     continue  # (her kill's monster, lost where her star landed on it)
+                if m.mob.fading is not None and tr.solid_at is None \
+                        and tr.first_seen < t - m.mob.fading / FADE_PER_S - FADE_SLACK_S:
+                    continue  # (a newborn isn't a monster seen before its fade began)
                 x = self.predicted(tr, t)
                 gap = abs(m.x - x)
                 speed = self.walking.get(tr.kind, DEFAULT_SPEED)
@@ -540,7 +571,8 @@ class MonsterTracker:
         return abs(m.x - tr.x) > MATCH_BASE + MATCH_KNOCKBACK + MATCH_SPEED * walk
 
     def _new(self, t: float, m: Monster, view: View) -> Track:
-        how = "entered" if view.at_edge(m.mob) else "spawned" if self._near_spawn(m) else "appeared"
+        how = "spawned" if m.mob.fading is not None else "entered" if view.at_edge(m.mob) else \
+            "spawned" if self._near_spawn(m) else "appeared"
         for o in self.tracks.values():  # a hidden one where this one is was likely lost to a mix-up
             if o.state == HIDDEN and o.kind == m.kind and abs(o.x - m.x) <= 2 * (MATCH_BASE + MATCH_KNOCKBACK):
                 o.crowded = True
@@ -548,6 +580,7 @@ class MonsterTracker:
         tr = Track(self.next_id, m.kind, m.platform, m.x, m.y, m.mob, t, t, vx=0.0 if vx is None else vx,
                    facing=m.facing, pose=m.pose, bar=m.bar, bar_at=t if m.bar is not None else None, how=how,
                    seen_x=m.x)
+        self._faded(tr, m, t)
         self.next_id += 1
         self.counts["tracks"] += 1
         self.tracks[tr.id] = tr
@@ -579,11 +612,22 @@ class MonsterTracker:
             tr.still_x, tr.still_since = m.x, t
         if tr.state in (HIDDEN, OFFSCREEN):
             tr.state = LIVE
+        self._faded(tr, m, t)
         if m.bar is not None:
             if m.bar <= (tr.bar if tr.bar is not None else 1.0) - BAR_STEP:
                 tr.hits += 1
                 events.append(Event("bar_hit", t, tr.id, {"bar": round(m.bar, 2), "by": self._by(tr, t)}))
             tr.bar, tr.bar_at = m.bar, t
+
+    @staticmethod
+    def _faded(tr: Track, m: Monster, t: float) -> None:
+        """Track `tr`'s fade as sighting `m` at t says: the spawn watch's alpha and when it turns solid by it, or (the
+        whole screen's) the alpha on its fade's line until then."""
+        if m.mob.fading is not None:
+            tr.fading, tr.solid_at = m.mob.fading, t + (1.0 - m.mob.fading) / FADE_PER_S
+        else:
+            a = tr.opacity(t)
+            tr.fading = None if a is None or a >= 1.0 else round(a, 3)
 
     def _by(self, tr: Track, t: float) -> str | None:
         """Who hit it, as far as her throws tell."""
@@ -610,9 +654,9 @@ class MonsterTracker:
                 del self.tracks[tr.id]
             return
         if dt >= MISSING_S and tr.state == LIVE:
-            if tr.seen < max(2, round(MIN_SEEN_S * HZ)):  # seen in a frame or two: a match on scenery, not a monster
-                self.counts["flickers"] += 1
-                del self.tracks[tr.id]
+            if tr.seen < max(2, round(MIN_SEEN_S * HZ)) and tr.solid_at is None:
+                self.counts["flickers"] += 1  # seen in a frame or two: a match on scenery, not a monster (one seen
+                del self.tracks[tr.id]        # fading in at its spawn point is one: perception.spawns)
                 return
             tr.state = HIDDEN
             tr.crowded = tr.crowded or any(

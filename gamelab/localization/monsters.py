@@ -113,6 +113,12 @@ class Monster:
     def kind(self) -> str:
         return self.mob.kind
 
+    @property
+    def fading(self) -> float | None:
+        """Its alpha, found fading in at its spawn point (perception.spawns: Mob.fading); None: drawn solid as far as
+        the detection knows."""
+        return self.mob.fading
+
 
 def bodies(model: MapModel | None = None) -> dict[str, MobBody]:
     """Each kind's body (by kind): read from the game data with the map for the monsters it has

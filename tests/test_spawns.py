@@ -4,7 +4,9 @@ what's drawn over a point that isn't a newborn left alone. On made-up pictures o
 Tree Dungeon's lossless frames (tests/fixtures/spawns: the golden clip of the user's own play and the Lie Detector's
 alarm clips; index.json says what each is and what the watch finds there) pasted into the map's art at their view:
 newborns at the alphas the prototype found them at (D:/MapleHelper-scratch/spawn-fade/proto), the nearest negatives to
-the rule of every labelled point-frame, and her standing on a spawn point for 6.6 s before the newborn there."""
+the rule of every labelled point-frame, and her standing on a spawn point for 6.6 s before the newborn there. Then the
+frame step's and the tracker's side: the newborns among the frame's detections until the whole screen has them, one
+track each from their first sighting, their alpha and when they turn solid in it."""
 
 import json
 from dataclasses import replace
@@ -332,3 +334,126 @@ def test_her_standing_on_a_spawn_point_for_seconds_doesnt_fool_it(tree):
     frame, view = _frame(tree, e)
     assert _looked(bare, e, frame, view) == e["found"]   # (the same with nothing before it)
     assert all(np.array_equal(a, o.plate) for a, o in zip(plates, [o for o in w._onsets if o.hyps is not None]))
+
+
+# --- the frame step and the tracker ---------------------------------------------------------------------------------
+
+def _mob(x, fading=None, kind="blob"):
+    return Mob(kind, int(x), 160, 44, 40, 0.99 if fading is not None else 0.9, float(x), 180.0, 1, "move", "move/0", "",
+               fading)
+
+
+def test_the_frame_step_adds_the_newborns_the_whole_screen_hasnt_found():
+    """WorldStep._handed: this frame's newborns as detections beside the whole screen's, those it found too (its monster
+    within HANDOVER_DX across and HANDOVER_DY down) left to it, the watch following them no more; the count of
+    newborns first found."""
+    from gamelab.localization.worldstate import WorldStep
+    w = watch()
+    a = w.look(draw(draw(scene(), frames()[1], -60.0, -20.0, 0.2), frames()[1], 70.0, -20.0, 0.2), VIEW, 0.0)
+    assert [s.point for s in a] == [0, 1]
+    step = SimpleNamespace(spawns=w, counts={"newborns": 0})
+    s = SimpleNamespace(view=VIEW, map_x=lambda x: x + VIEW[0], map_y=lambda y: y + VIEW[1])
+    work = {}
+    whole = [_mob(70 - VIEW[0] + 4)]   # (the whole screen's monster 4 units from the newborn at 70)
+    got = WorldStep._handed(step, s, a, whole, work)
+    assert [m.foot_x + VIEW[0] for m in got] == [-60.0] and got[0].fading == pytest.approx(0.2, abs=0.005)
+    assert work == {"newborns": 1, "newborns found": 1} and step.counts["newborns"] == 1
+    assert [nb.point for nb in w.newborns] == [0]
+
+
+def test_the_frame_step_looks_only_where_the_view_is_registered_and_her_placed():
+    from gamelab.localization.worldstate import WorldStep
+    w = watch()
+    assert w.look(draw(scene(), frames()[1], -60.0, -20.0, 0.1), VIEW, 0.0)
+    tracker = SimpleNamespace(matched={})
+    step = SimpleNamespace(spawns=w, tracker=tracker)
+    frame = draw(scene(), frames()[1], -60.0, -20.0, 0.18)
+    unsure = SimpleNamespace(bad=None, view_sure=False, view=VIEW, frame=frame, where=SimpleNamespace(x=0.0, y=0.0))
+    assert WorldStep._newborns(step, unsure, 1 / 15, True, {}) == [] and w.newborns[0].misses == 1
+    sure = SimpleNamespace(bad=None, view_sure=True, view=VIEW, frame=frame, where=SimpleNamespace(x=200.0, y=-20.0))
+    work = {}
+    got = WorldStep._newborns(step, sure, 2 / 15, True, work)
+    assert len(got) == 1 and not got[0].onset and "spawns s" in work
+    assert WorldStep._newborns(SimpleNamespace(spawns=None), sure, 3 / 15, True, {}) == []
+
+
+def test_the_watch_is_made_only_where_it_can_run():
+    """At the game's own 1366x768 with the scene's locator (its registration has the map's art) and the C; never on
+    the simulator's eyes or at 1920x1080."""
+    from gamelab.localization.worldstate import WorldStep
+    from gamelab.screen import NATIVE, STRETCHED
+    model = SimpleNamespace(spawns=())
+    no_locator = SimpleNamespace(eyes=SimpleNamespace(geo=NATIVE), senses=SimpleNamespace(locator=None), model=model)
+    assert WorldStep._spawn_watch(no_locator) is None
+    stretched = SimpleNamespace(eyes=SimpleNamespace(geo=STRETCHED), model=model,
+                                senses=SimpleNamespace(locator=SimpleNamespace(reg=SimpleNamespace(size=(1366, 768)))))
+    assert WorldStep._spawn_watch(stretched) is None
+
+
+def test_a_newborn_is_one_track_from_its_first_sighting_its_fade_in_it():
+    """A fading sighting is a new track 'spawned' (its alpha in the event), its `fading` and `solid_at`; the whole
+    screen's sighting of it later the same track, its alpha on its fade's line until then; lost a frame after its
+    first sighting, it isn't dropped as a flicker (it's a monster, not scenery); and a fading sighting never takes the
+    track of a monster seen before its fade began."""
+    from gamelab.localization.monsters import Monster
+    from gamelab.localization.tracking import HIDDEN, MonsterTracker, View
+    view = View(-200.0, 200.0, -300.0, 100.0, 400, 300)
+    tr = MonsterTracker()
+    ev = tr.update(0.0, [Monster(_mob(140, 0.1), -60.0, -20.0, 1)], view, None)
+    assert [(e.kind, e.data.get("fading")) for e in ev] == [("spawned", 0.1)]
+    (t1,) = tr.tracks.values()
+    assert t1.fading == 0.1 and t1.solid_at == pytest.approx((1 - 0.1) / spawns.FADE_PER_S)
+    assert t1.record()["fading"] == 0.1 and t1.opacity(0.0) == pytest.approx(0.1)
+    tr.update(1 / 15, [Monster(_mob(141, 0.18), -59.0, -20.0, 1)], view, None)
+    tr.update(2 / 15, [Monster(_mob(147), -53.0, -20.0, 1)], view, None)   # (the whole screen's: solid as it knows)
+    assert list(tr.tracks) == [t1.id] and t1.fading == pytest.approx(0.18 + spawns.FADE_PER_S / 15, abs=0.002)
+    tr.update(1.0, [Monster(_mob(150), -50.0, -20.0, 1)], view, None)
+    assert t1.fading is None and t1.opacity(1.0) == 1.0
+    lone = MonsterTracker()
+    lone.update(0.0, [Monster(_mob(140, 0.1), -60.0, -20.0, 1)], view, None)
+    for k in range(1, 8):
+        lone.update(k / 15, [], view, None)
+    assert lone.counts["flickers"] == 0 and [t.state for t in lone.tracks.values()] == [HIDDEN]
+    old = MonsterTracker()
+    for k in range(4):   # (a monster standing there for 0.2 s)
+        old.update(k / 15, [Monster(replace(_mob(140), pose="stand"), -60.0, -20.0, 1)], view, None)
+    old.update(1.0, [Monster(_mob(141, 0.1), -59.0, -20.0, 1)], view, None)   # (a newborn where it stood)
+    assert old.counts["tracks"] == 2 and [t.how for t in old.tracks.values()] == ["appeared", "spawned"]
+
+
+def test_a_monsters_fade_is_in_its_record():
+    from gamelab.localization.monsters import Monster
+    from gamelab.localization.scene import _monster_record
+    m = Monster(_mob(140, 0.25), -60.0, -20.0, 1)
+    assert m.fading == 0.25 and _monster_record(m)["fading"] == 0.25
+    assert "fading" not in _monster_record(Monster(_mob(140), -60.0, -20.0, 1))
+
+
+def test_the_services_line_says_the_spawn_watchs_time():
+    """service.Perf: the spawn watch's time a frame where it ran ('spawns s': median, p90, the most) and the newborns
+    it found a minute ('newborns found'), on the 10 s line after the strips of drops; nothing of it where it didn't
+    run."""
+    from gamelab.localization import service
+    from gamelab.localization.worldstate import WorldState
+    perf = service.Perf(100.0)
+    for k in range(150):
+        t = 100 + k / 15
+        perf.state(WorldState(k, t, True, work={"s": 0.012, "look s": 0.008, "wide s": 0.007, "detections": 3,
+                                                "spawns s": 0.004 if k % 5 == 0 else 0.001, "newborns": 1,
+                                                "newborns found": 1 if k % 15 == 0 else 0}), t + 0.013)
+    r = perf.record(110.0, {"tracks": 0, "flickers": 0}, fps=15.0)
+    assert r["spawns_ms"] == [1.0, 4.0, 4.0] and r["newborns_a_min"] == 60.0
+    assert "0.0 strips of drops; the spawn watch 1.0 ms (p90 4.0, max 4.0), 60 newborns found a minute; a state" \
+        in service.perf_line(r)
+    empty = perf.record(120.0, {"tracks": 0, "flickers": 0})
+    assert "spawns_ms" not in empty and "spawn watch" not in service.perf_line(empty)
+
+
+def test_the_frame_steps_spawn_points_are_the_trackers(tree):
+    """worldstate.spawn_points: the map's spawns on the platforms under them, as the tracker has them (its `spawned`)."""
+    from gamelab.localization.tracking import MonsterTracker
+    from gamelab.localization.worldstate import spawn_points
+    pts = spawn_points(tree.model)
+    assert [(p.kind, p.x, p.platform) for p in pts] == [
+        (kind, x, plat.id) for kind, plat, x in MonsterTracker(tree.model).spawns if plat is not None]
+    assert [(p.kind, p.x, p.platform) for p in pts] == [(p.kind, p.x, p.platform) for p in tree.make().points]

@@ -10,11 +10,14 @@ pass (`WorldStep.step`):
    Python's lock);
 2. her place, her EXP gains and HP drops (events, each at the frame it showed: a gain with her EXP number as read then,
    perception.exp_number, the kills its size was going to the tracker by kind, localization.gains) and her touches;
-3. the search's detections placed on the map and matched to the tracks (localization.tracking: each one's id, place,
+3. every spawn point in view looked at for a monster fading in there (SPAWNS: perception.spawns, the map's art behind
+   it; while the whole screen's search finishes on its thread), its newborns added to the search's detections until the
+   search finds each (Mob.fading: their alpha);
+4. the detections placed on the map and matched to the tracks (localization.tracking: each one's id, place,
    heading and its kind's speed from the game data, predicted between frames along its platform), each detection with
    its track's id in the state (Monster.track), their HP bars read where due (`_bar_due`), and those lost lately or found
    weakly looked at for their death (DEATHS: perception.deaths, the game data's die1 frames where each was);
-4. the drops: the strips asked for (a look's: her platform's, or every platform's in view) on the frame asked for, then
+5. the drops: the strips asked for (a look's: her platform's, or every platform's in view) on the frame asked for, then
    a strip in view by rotation now and then (DROPS_STRIPS, DROPS_EVERY_S; `drops`: every strip in view with when it
    was last searched and what it had).
 A consumer asks for drops on the next frame (`Asks`); her band and the whole screen, which a look asked for until
@@ -45,11 +48,13 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from ..character import THIEF_SHAPE
-from ..perception import deaths, exp_number, hp_number, lv_number, touches
+from .. import native
+from ..perception import deaths, exp_number, hp_number, lv_number, spawns, touches
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
 from ..perception.hud import exp_changed
+from ..perception.kinds import kind_of
 from ..perception.minimap import minimap_box
 from ..perception.mobs import Mob, MobDetector, _one_opencv_thread
 from ..screen import STRETCHED, Geometry
@@ -133,6 +138,21 @@ CROWD_DY = 60.0
 # (`deaths`, sim.fakes.FakeDeaths), or none. 0.72 ms a frame on one thread, replayed on the 23:10 recording
 # (perception.deaths).
 DEATHS = True
+# Whether the frame step looks at every spawn point in view for a monster fading in there, on every frame whose view was
+# registered on it (perception.spawns.SpawnWatch: the map's art behind it, a blend fit with no false positive on the
+# 153,474 labelled point-frames of Tree Dungeon's lossless clips; the user, 2026-11-01: "Should probably always check
+# instead of only checking when it's due", and of a looser search anywhere on screen, "Do you mean false positives? I'd
+# like to avoid that."), and adds the newborns it finds to the whole screen's detections, their alpha in each
+# (Mob.fading), until the whole screen finds each (spawns.SpawnWatch.handed: the same track on, its sighting the
+# search's): 229 of the 233 newborns whose start showed found at their first visible frame (the median; p90 the next),
+# where the whole screen found them a median 7 frames, 467 ms, later (README, Spawns seen as they fade in). Begun after
+# her look, while the whole screen's search finishes on its thread (HALVES). Only with the real detector at the game's
+# own 1366x768, the scene's locator (its camera registration on the map's art: localization.locate) and the watch's C
+# (native.spawns_lib; in numpy 13.6 ms a frame at the median, 132 at p99): 1.0-1.1 ms a frame at the median replayed on
+# the clips (p99 3.7-4.0, the most 7.1), 1.7-1.8 ms more per newborn followed; in the service's frame loop on the user's
+# own play the pass 1.0-1.4 ms longer at the median (12.7 against 11.7 ms on the crowd), 15 frames a second either way.
+# The simulator's eyes have none: its newborns are seen as its noise says (sim.world.Noise.spawn_found).
+SPAWNS = True
 # The drops searched without being asked: DROPS_STRIPS strips in view (scene.drop_strips: one over each stretch of level
 # ground of every platform) at most every DROPS_EVERY_S, by rotation (the one searched longest ago first, her platform's
 # taken as DROPS_HER times as old), each strip's last search kept with when it was (`WorldState.drops`): at 12 strips in
@@ -305,6 +325,7 @@ class WorldStep:
         self._watch_of: tuple[float, deaths.DeathWatch | None] | None = None  # (its look frame's scale, the watch)
         if real and DEATHS and (geo := getattr(self.eyes, "geo", None)) is not None:
             self._watch_of = (geo.frame_scale, self._death_watch(geo.frame_scale))  # (made now: 0.5 s, not mid-hunt)
+        self.spawns = self._spawn_watch() if real and SPAWNS else None  # (made now: 0.4 s; None where it can't be)
         self.schedule = schedule
         self.seq = 0
         self.owed: Asks | None = None    # drops asked for and not searched yet (no frame shown at their time yet)
@@ -331,7 +352,7 @@ class WorldStep:
             self._touch_of = (geo.frame_scale, self._new_touch_watch(geo.frame_scale))  # (made now, not mid-hunt)
         self.counts = {"frames": 0, "not visible": 0, "placed": 0, "wide": 0, "detections": 0, "matched": 0,
                        "bars": 0, "loot": 0, "loot wide": 0, "strips": 0, "exp gains": 0, "exp read": 0, "hits": 0,
-                       "touches": 0, "misses": 0, "touches by HP": 0}
+                       "touches": 0, "misses": 0, "touches by HP": 0, "newborns": 0}
 
     def throw(self, t: float, side: str, attack: str | None = None) -> None:
         """She threw toward `side` at t (with `attack`: its id, if told)."""
@@ -364,7 +385,10 @@ class WorldStep:
         if s.bad is not None:
             self.hp_number.see(None)  # (her HP number's isn't known across it: HP_GAP_S)
         placed = s.tag is not None and s.where is not None
+        born = self._newborns(s, t, placed, work)  # (while the whole screen's search finishes on its thread)
         mobs = self._wide(s, ahead, placed, work)
+        if born:
+            mobs = mobs + self._handed(s, born, mobs, work)
         view = self._view(s) if placed else None
         found = [s.place(m, self.model, None) for m in mobs]
         her = (s.where.x, s.where.y) if placed else None
@@ -442,6 +466,55 @@ class WorldStep:
             return []
         self.counts["wide"] += 1
         return mobs
+
+    def _newborns(self, s: Scene, t: float, placed: bool, work: dict) -> list[spawns.Sighting]:
+        """The monsters fading in at their spawn points in look `s`'s frame (shown at t), by the spawn watch (SPAWNS):
+        on a frame of the game as expected, her placed, its view registered on it; her box and those of the monsters
+        the frame before found (the tracker's `matched`, not the watch's own newborns) left out of the fits. Else the
+        newborns it follows missed a frame. `work` gets its time ('spawns s')."""
+        watch = self.spawns
+        if watch is None:
+            return []
+        frame = s.frame
+        if not placed or s.bad is not None or not s.view_sure or s.view is None or frame is None \
+                or (frame.shape[1], frame.shape[0]) != watch.size:
+            watch.missed()
+            return []
+        began = time.perf_counter()
+        others = [(m.x, m.y) for m in self.tracker.matched.values() if m.mob.fading is None]
+        got = watch.look(frame, (int(s.view[0]), int(s.view[1])), t, (s.where.x, s.where.y), others)
+        work["spawns s"] = time.perf_counter() - began
+        return got
+
+    def _handed(self, s: Scene, born: list[spawns.Sighting], mobs: list[Mob], work: dict) -> list[Mob]:
+        """This frame's newborns (`born`) as detections beside the whole screen's (`mobs`): those it found too handed
+        over to it (spawns.SpawnWatch.handed: its sighting the frame's, the watch following them no more). `work` gets
+        how many it added ('newborns') and, of them, first found in this frame ('newborns found')."""
+        kept = self.spawns.handed(born, [(s.map_x(m.foot_x), s.map_y(m.feet_y)) for m in mobs])
+        self.counts["newborns"] += sum(b.onset for b in kept)  # (the rest the watch's own: SpawnWatch.counts)
+        work["newborns"], work["newborns found"] = len(kept), sum(b.onset for b in kept)
+        return [b.mob(s.view) for b in kept]
+
+    def _spawn_watch(self) -> "spawns.SpawnWatch | None":
+        """The spawn watch for this map (perception.spawns.SpawnWatch.of: its spawn points on their platforms, its
+        kinds' pictures from the game data, the map's art its locator's camera registration holds), where the look
+        frame is the game's own 1366x768 and the watch's C is built; None elsewhere (or without the game data)."""
+        geo = getattr(self.eyes, "geo", None)
+        reg = getattr(getattr(self.senses, "locator", None), "reg", None)
+        if geo is None or reg is None or geo.look_scale != 1 or tuple(geo.client) != tuple(reg.size) \
+                or native.spawns_lib() is None:
+            return None
+        points = spawn_points(self.model)
+        ids = {kind_of(sp.name): sp.mob_id for sp in getattr(self.model, "spawns", ()) if sp.name}
+        if not points:
+            return None
+        from .camreg import EXCLUDE, HUD_TOP
+        art = reg.art
+        try:
+            return spawns.SpawnWatch.of(points, ids, spawns.Art(art.rgb, (art.x0, art.y0), art.static),
+                                        exclude=EXCLUDE, bottom=HUD_TOP, size=tuple(reg.size))
+        except (ImportError, FileNotFoundError, OSError, KeyError):  # (no game data here)
+            return None
 
     def _reader(self, s: Scene, t: float, unread: set[int], work: dict) -> Callable[[Monster, Track | None], Monster]:
         """How the tracker takes a detection of look `s` (its `read`): with its HP bar read if that's due for the track
@@ -715,6 +788,17 @@ def _firm(s: Scene) -> bool:
     (`view_sure`), or by her offset with her standing on the ground (`grounded`); in the air by her offset everything is
     off by her height above the platform under her (DROPS_STRIPS' note)."""
     return bool(getattr(s, "view_sure", False)) or s.grounded
+
+
+def spawn_points(model: MapModel) -> list[spawns.Point]:
+    """The map's spawn points as the spawn watch takes them (perception.spawns.Point): each one's kind and x, on the
+    platform under it (60 units, as the tracker's: tracking.MonsterTracker.spawns)."""
+    out = []
+    for sp in getattr(model, "spawns", ()):
+        p = model.platform_under(sp.x, sp.y, reach=60) if sp.name else None
+        if p is not None:
+            out.append(spawns.Point(kind_of(sp.name), sp.x, p, p.id))
+    return out
 
 
 def to_scene(st: WorldState, model: MapModel, band: tuple[float, float], mobs: bool = True, wide: bool = False,

@@ -196,7 +196,8 @@ class Scene(Observation):
 def _monster_record(m: Monster) -> dict:
     return {"kind": m.kind, "x": round(m.x, 1), "y": round(m.y, 1), "platform": m.platform,
             "bar": None if m.bar is None else round(m.bar, 2),
-            **({"facing": m.facing} if m.facing else {})}  # left out when not known
+            **({"facing": m.facing} if m.facing else {}),  # left out when not known
+            **({"fading": m.fading} if m.fading is not None else {})}  # (found fading in: perception.spawns)
 
 
 @dataclass(frozen=True)
