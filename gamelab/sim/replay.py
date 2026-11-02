@@ -31,13 +31,14 @@ and the range. A dump is kept only if every lab file it opened is one LAB_INPUTS
 against master without running master again; the labels aren't in the key (a score is made from a dump in seconds,
 and `score --base` says which labels' version it read).
 
-**score**: a dump against the recording's labels (tests/fixtures/recordings/<clip>/labels-v1.json: small, versioned,
+**score**: a dump against the recording's labels (tests/fixtures/recordings/<clip>/labels-v2.json: small, versioned,
 in git, where no cleanup of the scratch drive can lose them; the frames stay in golden-clips, by path). Per class a
 score: the spawn watch's newborns (the onsets of record reproduced, every labelled birth found, false onsets, which
 must stay 0, re-onsets, frames to the first sighting), the births it missed (found now?), touches (found by popup or
 HP bar, timing), monsters under her body (seen in the state?), her kills (which monster each gain was: the replay's
-first and last binding against the label), other players (ids, the rival under her dot). `--base master` puts
-master's cached dumps' scores beside, from the same labels.
+first and last binding against the label, the first on the victim's level), her casts at her dead (left out by the
+state she chose on?), other players (ids, the rival under her dot). `--base master` puts master's cached dumps' scores
+beside, from the same labels.
 
 **bench**: pass times, only from runs made side by side: the base and the tree alternated (base, tree, tree, base by
 default) on the same frames, paced, one at a time; never against a cached dump's times (the machine changes between
@@ -74,7 +75,7 @@ REPO = Path(__file__).resolve().parents[2]
 RUNNER = Path(__file__).with_name("replay_run.py")
 GOLDEN = Path(os.environ.get("GAMELAB_GOLDEN_CLIPS", "D:/MapleHelper-scratch/golden-clips"))
 LABELS = REPO / "tests" / "fixtures" / "recordings"
-LABELS_VERSION = "v1"
+LABELS_VERSION = "v2"  # (v1: as the kit was built; v2 from the kill-credit work: README)
 MAIN_DATA = Path("D:/MapleHelper/gamedata/data")  # the game data, where a commit's export has none of its own
 LOCAL = datetime.timezone(datetime.timedelta(hours=-8))  # the recordings' local time (Pacific, standard)
 # The lab files the frame step reads, which git doesn't see (each checkout's copy): her calibration and name tags at
@@ -176,8 +177,10 @@ def clock(clip: Clip) -> dict:
 
 def feed(clip: Clip) -> dict:
     """What the perception service took from outside while the grind ran, from the run's own records: frame 0's time
-    on the service's clock (`t0`, by `clock`), her throws (the tour's `attack` records: each one key; its side from the
-    fight's `stance` just before it, else her target's side of her by the last scene; its key TURN_S later where her
+    on the service's clock (`t0`, by `clock`), her throws (the tour's `attack` records: each one key, with the monster
+    her attack choice aimed it at, its kind, x and platform, and its track where the record says (from 2026-11-02; the
+    runner tells the aim by place: replay_run); its side as the record says, else from the fight's `stance` just before
+    it, else her target's side of her by the last scene; its key TURN_S later where her
     keys didn't have her facing that way, as Actions.throw taps the arrow first; `told` when the record went, which is
     when the service heard of it) and the drops the hunt asked for (each tour `scene` that looked at drops: an ask on
     the last frame shown 12 ms before it, its platform's or every one in view as the look was wide, mesos alone if her
@@ -205,8 +208,10 @@ def feed(clip: Clip) -> dict:
                 facing = (keys, r["t"])
         elif topic == "attack":
             how["attacks"] += 1
-            side = None
-            if stance is not None and r["t"] - stance["t"] <= STANCE_S and stance.get("act") == "throw":
+            side = r.get("side") if r.get("side") in ("left", "right") else None  # (told from 2026-11-02)
+            if side is not None:
+                how["side told"] = how.get("side told", 0) + 1
+            if side is None and stance is not None and r["t"] - stance["t"] <= STANCE_S                     and stance.get("act") == "throw":
                 m = re.search(r"\b(left|right)\b", stance.get("text", "").split("(")[0])
                 side = m[1] if m else None
                 how["side by stance"] += side is not None
@@ -223,7 +228,8 @@ def feed(clip: Clip) -> dict:
             how["turned"] += turn > 0
             told = r["t"] - off
             throws.append({"t": round(told + turn, 4), "side": side, "told": round(told, 4),
-                           "kind": r.get("kind"), "x": r.get("x"), "platform": r.get("platform"), "key": r.get("key")})
+                           "kind": r.get("kind"), "x": r.get("x"), "platform": r.get("platform"), "key": r.get("key"),
+                           **({"track": r["track"]} if r.get("track") is not None else {})})
             facing = (side, r["t"])
     ep = [e0 + r["t"] for r in rows]
     asks = {}

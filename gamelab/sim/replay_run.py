@@ -48,6 +48,7 @@ are compared only between runs made side by side (`replay bench`), never against
 import argparse
 import gzip
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -203,6 +204,10 @@ def main(argv=None) -> int:
     first_t = t0 + rows[0]["t"] if rows else t0
     throws = deque(th for th in sorted(the_feed.get("throws", []), key=lambda th: (th["told"], th["t"]))
                    if th["told"] >= first_t - 1e-9)
+    # A throw's aim (the monster her attack choice aimed it at: the hunt's attack record's kind, x and platform), told
+    # where the tree's step takes one (from 2026-11-02: tracking.MonsterTracker.throw), by place alone: the live track
+    # ids are another tracker's
+    aims = "aim" in inspect.signature(step.throw).parameters
     asks = {int(k): v for k, v in the_feed.get("asks", {}).items()}
 
     def read(r):
@@ -232,7 +237,10 @@ def main(argv=None) -> int:
             late = time.monotonic() - due
         while throws and throws[0]["told"] <= t + 1e-9:
             th = throws.popleft()
-            step.throw(th["t"], th["side"])
+            if aims and th.get("x") is not None:
+                step.throw(th["t"], th["side"], None, (None, th.get("kind"), th["x"], th.get("platform")))
+            else:
+                step.throw(th["t"], th["side"])
             told += 1
         if full is None:  # (a gap: the step told the game wasn't on screen, as feed.run does)
             st = step.step(None, t, False, why=r.get("gap", "not in the recording"))

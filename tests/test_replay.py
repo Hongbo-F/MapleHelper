@@ -29,7 +29,7 @@ def test_the_labels_are_the_analyses(name, onsets, births, found, touches, kills
     path = replay.CLIPS[name].labels
     assert path.stat().st_size < 100_000
     lab = labels(name)
-    assert lab["version"] == replay.LABELS_VERSION == "v1" and lab["clip"] == replay.CLIPS[name].folder
+    assert lab["version"] == replay.LABELS_VERSION == "v2" and lab["clip"] == replay.CLIPS[name].folder
     cl = lab["classes"]
     assert set(cl) == {"onsets", "births", "touches", "under_her", "kills", "players"}
     assert len(cl["onsets"]["items"]) == onsets
@@ -100,7 +100,8 @@ def test_kills_scored_first_and_last_binding():
     items = [{"gain": 0.2, "frame": 3, "victim": [-67.0, -1047.0], "how": "frames"},
              {"gain": 1.9, "frame": 28, "victim": None, "how": "unsure"}]
     got = replay_score.score_kills(frames, t0, items)
-    assert got["strong"] == {"labelled": 1, "first_right": 0, "final_right": 1, "unbound": 0}
+    assert got["strong"] == {"labelled": 1, "first_right": 0, "final_right": 1, "unbound": 0, "first_level": 1,
+                             "let_go_right": 0}
     assert got["unsure"] == 1 and got["let_go"] == 1
 
 
