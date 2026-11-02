@@ -403,6 +403,7 @@ class Attacks:
         self._target: Monster | None = None
         self._regular = False
         self._asked = False
+        self.thrown: tuple[float, Monster | None] | None = None  # the last throw's key time and what `key` aimed it at
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -886,7 +887,7 @@ class Attacks:
                 self._turned(side)
         self.counts[attack.key] += 1
         self.counts[why] += 1
-        self._say(attack, why, target, left, alive, hp)
+        self._say(attack, why, target, left, alive, hp, side)
         return getattr(self.keys, attack.key).name
 
     def on_throw(self, at: float, side: str) -> None:
@@ -895,6 +896,7 @@ class Attacks:
         LANDS_S count from it), and the look the next is decided on waits for its kill to show (`shown_by`); a cast
         `key` chose takes its MP off now (looks shown before it could show still read it: on_look). Its regular
         attack's press, or its cast at a target, told to the doubt's watch (`watch`)."""
+        self.thrown = (at, self._target if self._asked else None)  # (its aim, told to the feed: Hunter._tell_feed)
         if self.watch is not None:
             if not self._asked:  # (the regular attack alone: her Actions keyed it, its target as a throw that way takes)
                 self._watch_regular(at, self.target(side))
@@ -1176,7 +1178,7 @@ class Attacks:
         return next((mk for mk in self.marks if mk.m is m or seen_again(mk.m, [m]) is m), None)
 
     def _say(self, attack: Attack, why: str, target: Monster | None, left: Left | None, alive: Left | None,
-             hp: float) -> None:
+             hp: float, side: str | None = None) -> None:
         mp = None if self.mp is None else max(0.0, choice.mp_points(self.mp, self.max_mp))
         if target is None:
             what = "nothing seen in its way"
@@ -1198,7 +1200,10 @@ class Attacks:
                            dead=None if left is None else round(left.dead, 3), hp=hp,
                            mp=None if mp is None else round(mp),
                            platform=None if target is None else target.platform,
-                           x=None if target is None else round(target.x, 1))
+                           x=None if target is None else round(target.x, 1),
+                           # (which monster it went at, and which way: the perception service's track of it, as
+                           # the kill it brings is put on the monster aimed at first, localization.tracking)
+                           track=None if target is None else getattr(target, "track", None), side=side)
 
 
 def _believable(bar: float | None) -> bool:
