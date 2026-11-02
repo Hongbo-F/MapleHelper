@@ -174,8 +174,8 @@ ROPE_JUMP = ((SHOE.rope_vx * SHOE.vmax, SHOE.rope_vy * SHOE.vjump) if ROPE_JUMP_
 # the perception service's tracks; D:/MapleHelper-scratch/recfix/sim/live_boxtest.py), with the nearest seen monster of
 # her platform 0-25 units off her (middle to middle) 1.40 s after a touch the next touch came by 1.75 s 81% of the time
 # (n 78), 25-35 off 33% (n 27), 35-45 off 46% (n 24), 45-60 off 15% (n 34); in the world with 15 either side of her
-# 100%, 100%, 89% and 59% (12 runs of the standard grind, world truth: sim_boxtest.py), with this line 98%, 74%, 60% and
-# 52% (what's left there is her chasers walking in). Until then 15 either side and 55 tall (HER_HALF, HER_HEIGHT: the
+# 100%, 100%, 89% and 59% (12 runs of the standard grind, world truth: sim_boxtest.py), with this line 98%, 75%, 56% and
+# 53% (what's left there is her chasers walking in). Until then 15 either side and 55 tall (HER_HALF, HER_HEIGHT: the
 # harness's `--world wide-body`; the stack's hop was timed in game with the 15, flow.HOP_HALF), or the planner's
 # (`--world client-body`): 22 either side, 65 tall (motion.bodies, which the stack plans by: her trips,
 # attack.danger), the safe side for keeping clear.

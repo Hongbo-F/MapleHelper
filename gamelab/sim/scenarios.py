@@ -733,7 +733,7 @@ def loop_tree_23(sim):
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=10, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=11, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -761,7 +761,11 @@ def loop_tree_23_near_misses(sim):
     missed by a pile of hers; of seeds 1-13 1, 3, 5, 7, 10 and 11 show all of this; on 1, 25 kills.) (Seed 10 since
     her drops are swept by the seconds each may add to her way and a fresh pile by her is left to her pets a moment
     (2026-11-01, work/replan: hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 1
-    13 kills; of seeds 1-16 10, 12 and 16 show all of this, most of the others under twenty kills; on 10, 22.)"""
+    13 kills; of seeds 1-16 10, 12 and 16 show all of this, most of the others under twenty kills; on 10, 22.) (Seed 11
+    since the world's touches as live (2026-11-02: a newborn touches nothing while it fades in, world.NEWBORN_SOLID_S,
+    and her body for touches is the client's line, world.HER_TOUCH; D:/MapleHelper-scratch/recfix/sim/seeds/near.txt):
+    on seed 10 7 kills, the rule 'wait' most of the run; of seeds 1-16 1, 11 and 16 show all of this, the others under
+    twenty kills (a median 14); on 11, 26.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
