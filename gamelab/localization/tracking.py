@@ -860,10 +860,10 @@ class MonsterTracker:
 
         Against master's nearest-ahead box on the recordings of 2026-11-02 (R1-R3: the replay kit's, gamelab.sim.replay;
         README: Her kill's monster by Magic Claw's search), the first binding right: on labels-v1 (as they were before
-        any of this ran on them) 61 of 64 strong labels against 50, 138 of 151 in all against 129; on labels-v3 (the
-        kills master's and this order's disputed decided by eye after this ran, the two not decided kept as master's
-        binding) 67 of 73 against 53, 144 of 151 against 123. Fitted on R1+R2 (tie 0, her lands_s); R3, labelled before
-        it ran but its disputes decided after, is no held-out check: 40 of 44 each on v1."""
+        any of this ran on them) 60 of 64 strong labels against 50, 138 of 151 in all against 129; on labels-v3 (the
+        kills master's and the band order's bindings disputed decided by eye after it ran, the two not decided kept as
+        master's binding) 67 of 71 against 51, 144 of 151 against 123. Fitted on R1+R2 (tie 0, her lands_s); R3,
+        labelled before it ran but its disputes decided after, is no held-out check: 40 of 44 each on v1."""
         kc, s = self.shape.kill, self.shape
         rows = []
         for tr in tracks:
