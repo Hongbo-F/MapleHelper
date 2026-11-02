@@ -26,7 +26,8 @@ def test_walkfit_on_the_hours_two_stretches():
     assert f["planned"] == 125.0 and f["planned_from"] == "--planned" and f["by"] == "perception"
     w = f["walk"]
     assert w["n"] == 5 and w["median"] == pytest.approx(146.4, abs=0.05) and 146.0 < w["q3"] < 151.0
-    assert w["ratio"] == pytest.approx(146.4 / 125, abs=0.002) and w["speed"] == pytest.approx(117.1, abs=0.1)
+    assert w["ratio"] == pytest.approx(146.4 / 125, abs=0.002)
+    assert w["speed"] == pytest.approx(97.1, abs=0.1)  # (the SPEED that plans 146.4: 146.4 / 1.25 - 20, the client's)
     t = f["takeoff"]
     assert t["n"] == 4 and t["long_n"] == 2 and t["long"] == pytest.approx(20.2, abs=0.05)
     assert t["engine_long"] == pytest.approx(1.5, abs=0.05)
@@ -45,13 +46,13 @@ def test_walkfit_reads_the_planned_walk_off_the_runs_session_and_each_file_once(
     lines = tour.read_text(encoding="utf-8").splitlines()
     session = json.loads(lines[0])
     assert session["topic"] == "session"
-    session["physics"] = {"character": "magician", "class": "magician", "speed": 119.2, "jump": 100.0, "walk": 149.0,
-                          "climb": 117.0}
+    session["physics"] = {"character": "magician", "class": "magician", "speed": 100.0, "jump": 100.0, "bonus": 20.0,
+                          "walk": 150.0, "climb": 117.0}
     tour.write_text("\n".join([json.dumps(session, separators=(",", ":"))] + lines[1:]) + "\n", encoding="utf-8")
     (b / tour.name).write_text(lines[0] + "\n" + lines[1] + "\n", encoding="utf-8")  # (a shorter copy: not read)
     (f,) = walkfit.fit_runs([b, a])
-    assert f["planned"] == 149.0 and f["planned_from"].startswith("the run's records (magician)")
-    assert f["walk"]["ratio"] == pytest.approx(146.4 / 149.0, abs=0.002) and f["arrived"]["n"] == 7
+    assert f["planned"] == 150.0 and f["planned_from"].startswith("the run's records (magician)")
+    assert f["walk"]["ratio"] == pytest.approx(146.4 / 150.0, abs=0.002) and f["arrived"]["n"] == 7
 
 
 def test_walkfit_cuts_a_recordings_folder_to_its_frames(tmp_path):

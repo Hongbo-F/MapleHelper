@@ -2,8 +2,9 @@
 records, read only (ROADMAP item 2 of the recordings of 2026-11-02, motion's M5a).
 
 Every timed hold she makes runs open loop on the planned walk (motion.physics.WALK_SPEED: Physics.img's walkSpeed 125
-x her SPEED/100), so a planned walk that isn't hers sends every timed walk too far or too short. On 2026-11-02 RiceBaby
-was planned at 125 units/s (her stat window's SPEED 100) and walked 148: her takeoffs came late by about a sixth of the
+x (her SPEED + 20)/100 from 2026-11-02, motion.body.SPEED_BONUS; 125 x SPEED/100 before), so a planned walk that isn't
+hers sends every timed walk too far or too short. On 2026-11-02 RiceBaby was planned at 125 units/s (her stat window's
+SPEED 100 by the v83 formula) and walked 148: her takeoffs came late by about a sixth of the
 walk before them, her steps went 1.19 times what was asked, and 15 of the hour's 210 'arrived' trips had her off the end
 of the platform the trip was going to (P01, P02: D:/MapleHelper-scratch/rec-analysis/plans). It went unnoticed from
 10-29 to 11-02, and the analysis' scripts that found it were hard-wired to that day's files and to 125. This reads the
@@ -15,7 +16,8 @@ and per map:
   of the perception service's scenes (every other frame, about 7.5 a second; the run's own looks if there are none,
   sparser) placing her by her name tag on one platform, moving one way at WALK_BAND units/s between scenes, for
   STEADY_S or more, their first SETTLE_S (her run-up) left out, a line fitted to the rest with no point FIT_UNITS off it.
-  Against the planned: the ratio, and the profile's SPEED (%) that would plan it (walk / 1.25).
+  Against the planned: the ratio, and the profile's SPEED (%) that would plan it (walk / 1.25 - 20: the client's
+  formula, motion.body.SPEED_BONUS).
 - takeoff: where she left the ground on a chain whose first leg was a walk then a jump (the tour's 'chain' records: one
   span of TAKEOFF_LEAST or more), against where the plan had her take off (+: past it, the way she walked), for chains
   with no touch before the takeoff (the perception service's 'touch' events, at the touch's own moment: their time less
@@ -29,7 +31,10 @@ and per map:
   than the trip's (`on`, from 2026-11-02; before, the run's last 'scene' record before the trip's), with and without a
   touch in the TOUCH_BEFORE_S before.
 
-On R1-R3 of 2026-11-02 (`--character magician`: they have no physics record, and her profile then planned 125) it
+The walk `--planned` or `--character` gives must be the one the run's keys were timed at: the engine's columns take it
+as the plan (`--character magician` on a run keyed at 125 says only how her walk compares with today's 150; what a plan
+at 150 would have made of its keys: D:/MapleHelper-scratch/recfix/walk/scripts/estimate.py, README "Her walk speed").
+On R1-R3 of 2026-11-02 (`--planned 125`: they have no physics record, and her profile then planned 125) it
 reproduces the analysis to the digit: the hour's steady walk 148.2 over 81 walks (quartiles 146.3-150.2, se 0.4), its
 'arrived' trips 18 of 210 on another platform, 15 with no touch, its takeoffs +7.5 units late at the median and +24.9
 after walks of 100 or more over 108 legs, +0.1 and +3.0 against the engine at 148.2, its steps 1.19 (quartiles
@@ -53,6 +58,7 @@ import statistics
 import sys
 from bisect import bisect_left
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -64,7 +70,7 @@ from ..motion import body
 # service's, about 7.5 a second; the run's own looks, 2-4 a second, at GAP_LOOKS_S) ...
 GAP_S = 0.2
 GAP_LOOKS_S = 0.6
-WALK_BAND = (90.0, 220.0)  # ... moving one way at this many units/s from scene to scene (any walk of SPEED 72-176%)
+WALK_BAND = (90.0, 220.0)  # ... moving one way at this many units/s from scene to scene (any SPEED's walk: 125-200)
 STEADY_S = 0.8             # ... for this long at least, over MIN_SCENES scenes
 MIN_SCENES = 6
 SETTLE_S = 0.25            # her run-up (full speed 0.106 s after the game sees the arrow, motion.body), left out
@@ -281,8 +287,8 @@ def takeoffs(run: Run) -> list[tuple[float, float, int]]:
 
 
 def _shoe(walk: float, jump: float = 100.0) -> body.Shoe:
-    """The engine's shoe that walks `walk` units/s (Physics.img's walkSpeed 125 at SPEED 100%)."""
-    return body.Shoe.from_physics(body.PHYSICS_IMG, walk / body.PHYSICS_IMG["walkSpeed"] * 100.0, jump)
+    """The engine's shoe that walks `walk` units/s, whatever SPEED gives it (Physics.img's otherwise)."""
+    return replace(body.Shoe.from_physics(body.PHYSICS_IMG, 100.0, jump), vmax=float(walk))
 
 
 def engine_residuals(rows: list[tuple], planned: float, measured: float, jump: float = 100.0) -> list[float]:
@@ -353,8 +359,8 @@ def planned_walk(run: Run, planned: float | None = None, character: str | None =
     from .. import character as profiles
     which = character or profiles.active_id()
     stats = profiles.load(which).stats
-    return (_shoe(body.PHYSICS_IMG["walkSpeed"] * stats.speed / 100.0, stats.jump).vmax, stats.jump,
-            f"assumed: {which}'s profile in the code now (SPEED {stats.speed:g})")
+    walk = body.Shoe.from_physics(body.PHYSICS_IMG, stats.speed, stats.jump, bonus=body.SPEED_BONUS).vmax
+    return walk, stats.jump, f"assumed: {which}'s profile in the code now (SPEED {stats.speed:g}: {walk:g})"
 
 
 def _quartiles(v: list[float]) -> tuple[float, float]:
@@ -378,7 +384,7 @@ def fit(runs: list[Run], planned: float | None = None, character: str | None = N
         w.update(median=round(med, 1), q1=round(q1, 1), q3=round(q3, 1),
                  se=round(statistics.stdev(walks) / len(walks) ** 0.5, 2) if len(walks) > 1 else None,
                  ratio=None if walk_p is None else round(med / walk_p, 3),
-                 speed=round(med / body.PHYSICS_IMG["walkSpeed"] * 100.0, 1))
+                 speed=round(med / body.PHYSICS_IMG["walkSpeed"] * 100.0 - body.SPEED_BONUS, 1))
     out["walk"] = w
     legs = [(takeoffs(r), p) for r, p in zip(runs, plans)]
     rows = [x for got, _ in legs for x in got]
