@@ -964,3 +964,13 @@ def test_rope_tops_counts_her_climbs_and_the_touches_on_a_rope_or_at_its_top_jus
                         touch_log=[(9.5, 0.12), (11.0, 0.13), (11.5, 0.1), (13.0, 0.1), (51.0, 0.0), (70.0, 0.1)])
     assert harness._rope_tops(w, 60.0) == {"climbs": 2, "grabs": 2, "touched": 3, "on_rope": 1, "hurt": 2}
     assert harness._rope_tops(w, 30.0) == {"climbs": 1, "grabs": 1, "touched": 2, "on_rope": 1, "hurt": 2}
+
+
+def test_rope_tops_counts_her_hangs_under_a_rope_s_top_from_their_events():
+    """sim.harness rope_tops' hangs (control.navigator.ROPE_HANG's 'rope_hang' events): one at each hang's start, the
+    seconds from their ends, those up regardless after HANG_S."""
+    events = [{"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "clear", "s": 1.24},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "regardless", "s": 4.02},
+              {"kind": "climb_on"}]
+    assert harness._hangs(events) == {"hangs": 2, "hang_s": 5.3, "hang_regardless": 1}
+    assert harness._hangs([]) == {"hangs": 0, "hang_s": 0.0, "hang_regardless": 0}

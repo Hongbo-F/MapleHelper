@@ -129,7 +129,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    on), and her touches (a MISS too) at a rope's top: on a rope ('on_rope'), or standing within
                    ROPE_TOP_DX of the rope she climbed over ROPE_TOP_S or less before; 'touched' both, 'hurt' those of
                    them that took HP (World.touch_place). Live on 2026-11-02, 19-23 of the hour's 170 touches over 68
-                   climbs up the rope at x -80 (11 to 10): about 0.3 a climb
+                   climbs up the rope at x -80 (11 to 10): about 0.3 a climb. And her hangs under a rope's top
+                   (control.navigator.ROPE_HANG: 'hangs', 'hang_s' the seconds they took, 'hang_regardless' those up
+                   regardless after HANG_S: telemetry events 'rope_hang')
   backstops       how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
@@ -730,7 +732,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "ropes": sum(1 for r in events if r.get("kind") == "rope"),
         # (a rope's top: the game refusing her presses, a move her dot never moved on, her climb on after a touch)
         "rope_top": {k: sum(1 for r in events if r.get("kind") == k) for k in ("refused", "rope_top", "climb_on")},
-        "rope_tops": _rope_tops(world, end),
+        "rope_tops": {**_rope_tops(world, end), **_hangs(events)},
         "refused": getattr(world, "refused", 0),  # her attacks refused on a rope (world.ROPE_REFUSAL)
         # (up close: from 2026-10-27, clearance and slopes)
         "claw_s": round(getattr(world, "claw_ms", 0) / 1000, 1),
@@ -964,6 +966,16 @@ def _rope_tops(world, end: float) -> dict:
         top += at and mode != "rope"
         hurt += at and hp > 0
     return {"climbs": len(climbs), "grabs": grabs, "touched": on_rope + top, "on_rope": on_rope, "hurt": hurt}
+
+
+def _hangs(events: list[dict]) -> dict:
+    """rope_tops' hangs (see the top): her hangs under a rope's top (control.navigator.ROPE_HANG: telemetry events
+    'rope_hang', step 'hang' at a hang's start), the seconds they took (`hang_s`, from their ends' `s`), and those that
+    went up regardless after HANG_S (`hang_regardless`)."""
+    hangs = [r for r in events if r.get("kind") == "rope_hang"]
+    return {"hangs": sum(1 for r in hangs if r.get("step") == "hang"),
+            "hang_s": round(sum(r.get("s", 0.0) for r in hangs if r.get("step") != "hang"), 1),
+            "hang_regardless": sum(1 for r in hangs if r.get("step") == "regardless")}
 
 
 def _trips(world, records: list[dict], end: float) -> dict:
