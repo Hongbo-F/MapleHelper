@@ -35,12 +35,12 @@ def cast(w, t, key="shift"):
 
 
 def test_her_profile_is_the_recordings():
-    # Her stat window (level 32: HP 858, MP 1549, W.DEF 75, AVOID 16), her walk (148.2), her pet's Meat (160) under 75%,
-    # its MP potion (187) under 6%, her MP's rise (2.4 a second), Magic Claw's 20 MP: world.MAGE_32's comment says where
+    # Her stat window (level 32: HP 858, MP 1549, W.DEF 75, AVOID 16), her walk (the client's 150), her pet's Meat (160)
+    # under 75%, its MP potion (187) under 6%, her MP's rise (2.4 a second), Magic Claw's 20 MP: world.MAGE_32's comment
     h = MAGE_32
     assert (h.max_hp, h.level, h.mp, h.defence, h.avoid) == (858.0, 32, 1549.0, 75.0, 16.0)
     assert (h.walk_speed, h.potion, h.pet, h.mp_potion, h.pet_mp, h.mp_regen, h.cast_mp) == \
-        (148.2, MEAT_HP, 0.75, 187.0, 0.06, 2.4, 20.0)
+        (150.0, MEAT_HP, 0.75, 187.0, 0.06, 2.4, 20.0)
     assert MEAT_HP == 160.0 and h.magic.hit == CLAW_HIT and h.magic.hits == 2 and h.magic.lock_s <= 0.80
     assert h.magic.search.start == 50 and h.magic.search.range == 300 and h.magic.search.bands == 13
 
@@ -314,10 +314,13 @@ def test_a_simulated_grind_of_hers_casts_from_the_ground_inside_her_lock_never()
 
 
 def test_her_walk_as_planned_is_a_world_of_its_own():
-    # `--world walk-planned`: her world's walk the planner's (her profile's 125), what the planner's error costs her
+    # `--world walk-planned`: her world's walk the planner's (physics.SHOE), what a planner's error costs her; from the
+    # integration of 2026-11-02 her world's own is the client's 150 (MAGE_WALK), what her profile's SPEED 100 plans
     import dataclasses
-    from gamelab.motion import physics
+    from gamelab.motion import body, physics
     from gamelab.sim import harness
     assert harness.WORLDS["walk-planned"] == {"walk_speed": None} and "walk_speed" in harness.HER_FIELDS
     assert world_mod.her_shoe(dataclasses.replace(MAGE_32, walk_speed=None)) is physics.SHOE
-    assert world_mod.her_shoe(MAGE_32).vmax == pytest.approx(148.2)
+    assert world_mod.her_shoe(MAGE_32).vmax == world_mod.MAGE_WALK == 150.0
+    her_planner = body.Shoe.from_physics(body.PHYSICS_IMG, 100.0, physics.CHARACTER.jump, bonus=body.SPEED_BONUS)
+    assert world_mod.her_shoe(MAGE_32) == her_planner  # (the shoe her profile's SPEED 100 plans her with: the same)

@@ -1252,8 +1252,8 @@ LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=62
 #   her_stats.json; INT 143, MAGIC 126). At AVOID 16 every touch hurts (game_hit_chance: 0 MISS in the hour's 170
 #   touches, the formula's 8% and less on Tree's kinds), at DEF 75 a Horny Mushroom's 110-130 and a Green's 50-58, as
 #   live (attack.danger.touch_taken, meowdb's formula);
-# - her walk 148.2 units/s (walk_speed: the median of the hour's 81 steady walks, P01), where her profile plans 125
-#   (SPEED 100): the world walks her at hers, the planner at its own;
+# - her walk the client's, 150 units/s (walk_speed: MAGE_WALK, below), as her planner plans it from item 1 (her
+#   profile's SPEED 100): the world walks her at its own all the same (Her.walk_speed), so a planner's error shows;
 # - her pet drinks Meat, 160 HP (MEAT_HP: on R2's frames her HUD's number 606 -> 766, 601 -> 761, 639 -> 799 and
 #   562 -> 722, the frame after a touch; D:/MapleHelper-scratch/recfix/sim-mage/hp_seq.png, hp_seq2.png; the hour's 92
 #   rises all 160; the game data's spec hp 160, where the user remembered 150), under 75% of her HP (MAGE_PET_HP: the
@@ -1262,8 +1262,15 @@ LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=62
 #   known: Realism.pets 0);
 # - her HP's own regeneration isn't kept (the thief's isn't either): live it covered about a tenth of her touches' HP.
 MAGE_PET_HP = 0.75
+# Her walk in the world: the client's, 125 x (SPEED + 20)/100 at her stat window's SPEED 100 (motion.body.SPEED_BONUS,
+# meowdb's measured formula; README "Her walk speed"): 150 units/s. Her steady limit with each walk's braking tail and
+# Tree's slopes taken out is 149.4-149.7 (the hour's 66 walks: median 149.44, 90% 149.1-150.0; mean 149.67): the world
+# brakes her by itself, and walks her slopes at flat ground's speed (it has no slope rule, as the planner hasn't). From
+# the integration of 2026-11-02 (work/rec-all); before, the world walked her at 148.2, the hour's raw median of 81
+# steady walks with both in it (P01), while her planner planned v83's 125.
+MAGE_WALK = body.Shoe.from_physics(body.PHYSICS_IMG, 100.0, 100.0, bonus=body.SPEED_BONUS).vmax  # 150.0
 MAGE_32 = Her(max_hp=858.0, level=32, exp=0, defence=75.0, avoid=16.0, pet=MAGE_PET_HP, potion=MEAT_HP, mp=1549.0,
-              cast_mp=20.0, mp_regen=MAGE_MP_REGEN, pet_mp=MAGE_PET_MP, mp_potion=MAGE_MP_POTION, walk_speed=148.2,
+              cast_mp=20.0, mp_regen=MAGE_MP_REGEN, pet_mp=MAGE_PET_MP, mp_potion=MAGE_MP_POTION, walk_speed=MAGE_WALK,
               magic=SimMagic())
 
 

@@ -133,9 +133,9 @@ def test_walking_is_the_engines(model):
 
 
 def test_her_walk_in_the_world_can_differ_from_the_planners(model):
-    # Her.walk_speed: the world walks her at her own speed (the magician's 148.2 units/s, where her profile plans 125),
-    # the game data's shoe at that SPEED (accelerating, braking and in the air as anyone's), her JUMP the planner's; by
-    # default the planner's own shoe, to the bit.
+    # Her.walk_speed: the world walks her at her own speed (148.2 units/s here, the magician's raw median of 2026-11-02,
+    # against the planner's 149 under FIXED_STATS), the game data's shoe at that SPEED (accelerating, braking and in the
+    # air as anyone's), her JUMP the planner's; by default the planner's own shoe, to the bit.
     c = plat(model, 500, 400)
     assert world(model, c.id, 100.0).shoe is physics.SHOE
     her = world_mod.Her(walk_speed=148.2)

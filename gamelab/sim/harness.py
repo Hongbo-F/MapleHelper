@@ -16,7 +16,7 @@ POLICY: tour, loop, loop-grind (the hunting commands), or walk (movement only, a
 `--character magician` (from 2026-11-02; the thief by default, or GAMELAB_CHARACTER's) plays the magician: the run
 restarts itself with GAMELAB_CHARACTER=magician (her stack: her profile's stats, keys and Magic Claw, attack.magic's
 search for every decision, her Shape), the world her as the recordings of 2026-11-02 measured her (sim.scenarios.HERS:
-world.MAGE_32, Magic Claw as the game casts it, her walk 148.2 where her profile plans 125) on Tree Dungeon alone, her
+world.MAGE_32, Magic Claw as the game casts it, her walk the client's 150, her planner's too) on Tree Dungeon alone, her
 damage book as her stack had it then (sim.scenarios.HER_BOOK), `--attack` her profile's (Magic Claw whenever her MP pays,
 whatever is asked: ATTACK_HER is the thief's); her runs' results say `character`, and their baselines are cached under
 her own key (sim.baseline: the GAMELAB_* environment as resolved). README: The simulator's magician.
@@ -351,8 +351,9 @@ WORLDS["pet-loot"] = {"pets": 2}
 # Mushroom's 41 after her first claw: the rule's 32.8-36.5; plans/problems.md P43), where the other worlds give nothing.
 WORLDS["shared-exp"] = {"shared_exp": True}
 # ... and her walk in the world as her planner has it (`walk-planned`: world.Her.walk_speed None, physics.SHOE), where her own
-# world walks her at her measured speed (the magician's 148.2 against her profile's 125: world.MAGE_32): what the
-# planner's speed error costs her (the roadmap's item 1, P01). The thief's world is the planner's already.
+# world walks her at its own (world.MAGE_32's, MAGE_WALK): what a planner's speed error costs her. Built to price the
+# roadmap's item 1 (P01: her planner's 125 against the world's 148.2, then); from the integration of 2026-11-02 both
+# are the client's 150, so for her the two worlds walk alike. The thief's world is the planner's already.
 WORLDS["walk-planned"] = {"walk_speed": None}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
