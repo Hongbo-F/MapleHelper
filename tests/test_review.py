@@ -1,6 +1,7 @@
 """The web UI's overlaid recordings (ui.review): the sets, a set's viewer and meta, its frames and files, a video's byte
 ranges, and nothing outside a set."""
 import json
+import os
 import threading
 import urllib.error
 import urllib.request
@@ -50,6 +51,7 @@ def test_the_sets_a_viewer_its_meta_frames_and_a_videos_byte_ranges(served):
     assert b'href="/review/overlay-a/"' in get(served + "/review")[2] and b"no-frames" not in get(served + "/review")[2]
     assert b"overlay-a" in get(served + "/review/overlay-a/")[2]
     meta = json.loads(get(served + "/review/overlay-a/meta.json")[2])
+    assert int(meta.pop("version"), 16) > 0
     assert meta == {"name": "overlay-a", "frames": 3, "last": 2, "problems": [{"frames": [1, 2], "what": "a miss"}],
                     "files": ["overlay.mp4"], "fps": 15.0}  # (no video in that overlay.mp4: the default)
     status, headers, body = get(served + "/review/overlay-a/frames/00001.jpg")
@@ -101,6 +103,18 @@ def test_a_sets_frame_rate_is_its_videos_else_its_names_else_15_and_the_viewer_p
     assert json.loads(get(served + "/review/group-a/clip-1/meta.json")[2])["fps"] == 15.0
     page = get(served + "/review/real/")[2].decode()
     assert 'value="5" selected' not in page and "rate.value = fps" in page and '" (recorded)"' in page
+
+
+def test_a_sets_version_changes_when_a_frame_is_drawn_again_and_the_viewer_puts_it_in_each_frames_link(served, tmp_path):
+    """The user, 2026-11-02, saw a redrawn set's old frames: the browser keeps frames for a day."""
+    before = json.loads(get(served + "/review/overlay-a/meta.json")[2])["version"]
+    f = tmp_path / "golden" / "overlay-a" / "frames" / "00001.jpg"
+    f.write_bytes(b"jpg1 again")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    assert json.loads(get(served + "/review/overlay-a/meta.json")[2])["version"] != before
+    assert get(served + "/review/overlay-a/frames/00001.jpg?v=" + before)[2] == b"jpg1 again"  # (v: ignored)
+    assert '"v=" + M.version' in get(served + "/review/overlay-a/")[2].decode()
 
 
 def test_a_group_lists_its_sets_and_serves_each_as_a_set_one_level_down(served):

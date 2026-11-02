@@ -79,7 +79,21 @@ def meta(folder: Path) -> dict:
     except (OSError, ValueError):
         problems = []
     return {"name": folder.name, "frames": len(frames), "last": int(frames[-1][:5]) if frames else -1,
-            "problems": problems, "files": [f for f in FILES if (folder / f).is_file()], "fps": fps(folder)}
+            "problems": problems, "files": [f for f in FILES if (folder / f).is_file()], "fps": fps(folder),
+            "version": version(folder, frames)}
+
+
+def version(folder: Path, frames: list[str]) -> str:
+    """The frames' version: their newest change (ms, hex). The viewer puts it in each frame's link, so a set drawn
+    again is fetched again instead of read from the browser's day-long cache (the user, 2026-11-02, saw a redrawn set's
+    old frames)."""
+    newest = 0
+    for name in frames:
+        try:
+            newest = max(newest, (folder / "frames" / name).stat().st_mtime_ns)
+        except OSError:
+            pass
+    return format(newest // 1_000_000, "x")
 
 
 def fps(folder: Path) -> float:
@@ -294,7 +308,7 @@ function sized() {  // the frames' query for the picture's width now
   const w = Math.min(4096, Math.ceil($("imgbox").clientWidth * Math.min(window.devicePixelRatio || 1, 1.5) / 60) * 60);
   suffix = !saver || native() ? "" : "?w=" + w + "&q=60";
 }
-const src = n => base + "frames/" + pad(n) + ".jpg" + suffix;
+const src = n => base + "frames/" + pad(n) + ".jpg" + suffix + (M.version ? (suffix ? "&" : "?") + "v=" + M.version : "");
 // Preloading (the user, 2026-11-02: "can ui preload the clip in browser, not wait until play button"): from the page's
 // opening, the frames nearest ahead of the one shown, then just behind it, PARALLEL at a time, up to AHEAD frames ahead
 // and BEHIND behind (a whole Lie Detector clip; the longest sets in windows that follow the frame shown).
