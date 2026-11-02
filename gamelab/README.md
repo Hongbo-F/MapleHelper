@@ -4016,6 +4016,41 @@ faint first sighting heading the wrong way: of record). The thresholds were chos
 false positive; out of sample, the review's 124 stills alone. The JPEG recordings can't test the watch (no newborn
 found there): live frames are lossless.
 
+## The integration of 2026-11-02's roadmap items (work/rec-all, from 2026-11-02)
+
+The roadmap of 2026-11-02's items 1 and 2 (work/rec-records: Records to measure by, Her walk speed), 5 and 6
+(work/rec-replay: Replaying the recordings; Her kill's monster by Magic Claw's search), 7 and 8 (work/rec-sim: The
+simulator's touches against live; The simulator's magician) and 9 (work/rec-rope: Hanging under a rope's top), each
+built and reviewed on its own branch off master 40ba190, merged into work/rec-all in that order, a merge commit each;
+then what only the four together needed.
+
+- **The merges.** One conflict in code, behavior/grind.py's bookkeeping: rec-records' `Hunt._book_kills` (the kills of a
+  look, and the loop's last ones booked after the stand-by trip) and rec-replay's credit moved with a kill the tracker
+  put on another platform, now `Grind._book_kills` following the ledger's `moved` at every look. One in this README
+  (three sections at one place: all kept). Three tests whose runs the rope hang and rec-sim's world changed together:
+  test_replan's late replan runs the world's own touch line (rec-sim had it on the old body), loop_tree_attack_misses
+  seed 4 -> 5, loop_tree_attack_no_darts 6 -> 11 (their docstrings).
+- **Her simulated world's walk** the client's 150 (`world.MAGE_WALK`), her planner's too: The simulator's magician.
+- **The place filter's cap** (`locate.WALK_MAX`) 140 -> 200, the client's walk at its SPEED cap (Physics.img's walkSpeed
+  125 x (140 + 20)/100), over both characters' walks and Tree's steepest downhill (174 at her 150). On R1-R3 through the
+  replay kit (the merged tree, unpaced; trees with 140, 174 and 200 side by side, the place filter traced:
+  D:/MapleHelper-scratch/recfix/integrate/kit, analyse.txt): the prediction lagged her measured place while she walked
+  (2,232 frames) a median 0.61 units at 140 (mean 0.95, p90 4.2), 0.07 at 200 (0.51, 3.6); her place after each
+  measurement, the dumps' and the hunt's, the same within 0.02 (p99 0.46 off at 140, 0.46 at 200); the 23 carried
+  frames 5.15 off at the median either way (7 moved, 5 nearer, 2 farther); the dumps differ in her place alone (287-338
+  frames a recording at 200), every score of the kit the same (against labels-v3: onsets, births, touches, under her, kills,
+  casts, players). 174 is within 0.04 of 200 on each.
+- **test_choice's boundary** (the frame KILL_SHOWN_S after a throw's key): its sum was a float an ulp under the key's on
+  any machine 18-36 hours up (time.monotonic between 2**16 and 2**17 s), failing on master 40ba190 and every branch.
+- **A cast's target in one schema**, the `attack` record's and the `no_cast` record's (`attacks._target_fields`:
+  kind, platform, x, track): Records to measure by's table; walkfit and the replay kit's feed read the merged records
+  (a simulated run's: D:/MapleHelper-scratch/recfix/integrate/records).
+
+Not measured at the integration (the whole is, once, after the user's next changes): the goldens (re-recorded on the
+merged code, never copied from a worktree: each branch's own are in its worktree's git-ignored lab/golden), the
+harness's tables for either character, the `--slow` suite and its scenarios. The fast suite at work/rec-all's tip is in
+its last commit.
+
 ## Records to measure by: the run summary, the trips, the passes, the loop's promise, and walkfit (from 2026-11-02)
 
 The analysis of the three recordings of 2026-11-02 (RiceBaby grinding Tree Dungeon on master 40ba190: R1 00:09:36-00:14:57,
@@ -4278,8 +4313,9 @@ planner and her world at 150 are for the measuring of the integration's whole).
 - Her climb: meowdb's SPEED + 20 (120) and her 119.9 against `physics.CLIMB_SPEED`'s shared 117 (the thief at
   1920x1080, 3% under the 121 the formula gives her) and the magician profile's placeholder 117. `CLIMB_EXTRA_MS` covers
   it; not changed here.
-- `localization/locate.py` `WALK_MAX` 140 caps the place filter's carried walk under both characters' (150, 151): about
-  half a unit of lag (the critique's estimate); a perception change, for item 5's replay kit to check.
+- `localization/locate.py` `WALK_MAX` 140 capped the place filter's carried walk under both characters' (150, 151):
+  done at the integration (below: The integration of 2026-11-02's roadmap items), 200, the client's walk at its SPEED
+  cap, checked on R1-R3 by item 5's replay kit.
 - Slopes: the planner's closed forms are flat ground. Uphill-heavy walks on Tree run about 144 raw (-4%), so a long
   uphill walk still ends a few units short; v83's slope rule explains it, the engine doesn't model it.
 - Tree Dungeon only, at 1366x768. Physics.img is every map's and the 20 is the character's, so the formula holds
@@ -4438,12 +4474,13 @@ at x -80, N under its top" and "hung N s, the way up clear ...", and the 'rope_h
 a touch at that rope follows within 3 s of its end (the simulator: 91%) and how often the way up clears within HANG_S
 (the simulator: 42 of 476; the live hour's hindsight: 8 of its 15 blocked climbs within 2 s); the touches at the top of
 -80 a climb (0.3 live on 2026-11-02, about 19-23 in 35 minutes over 68 climbs) and the hangs' seconds. The harness's
-thief world is the measure until her own simulator world is merged (the roadmap's item 8, work/rec-sim).
+thief world is the measure until her own simulator world is merged (the roadmap's item 8, work/rec-sim: merged on
+work/rec-all, the hang not measured in her world yet).
 
 **Not done**: what a hang waits for is judged by the planner's reach (a walker's turn, a stander setting off), and in the
 thief's world the top seldom clears (above): when what blocks is a monster at its point or one chasing her, the lever
-is killing it (Magic Claw from below, to be measured in the magician's world once rec-sim's simulator and this are
-merged; the thief's Lucky Seven doesn't reach 10 from 11) or another way up, not a smarter wait; the queued chain's climb (QUEUE_CHECK) is still withdrawn rather than hung on; `_meet` still waits on
+is killing it (Magic Claw from below, to be measured in the magician's world now that rec-sim's simulator and this are
+merged, on work/rec-all; the thief's Lucky Seven doesn't reach 10 from 11) or another way up, not a smarter wait; the queued chain's climb (QUEUE_CHECK) is still withdrawn rather than hung on; `_meet` still waits on
 the floor below (WAIT_LOOKS) before a climb goes up and hangs; the air check is the glance's state's mode (the
 localizer's live: not checked live on a rope's jump).
 

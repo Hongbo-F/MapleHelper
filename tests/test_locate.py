@@ -93,6 +93,17 @@ def dot_of(loc: Locator, mx: float, my: float) -> tuple[float, float]:
     return loc.dots_reader.to_dot(mx + DOT_OFF[0], my + DOT_OFF[1])
 
 
+def test_the_filters_walk_cap_is_the_clients_most():
+    """locate.WALK_MAX: the client's walk at its SPEED cap (motion.body's formula: localization can't import motion),
+    over both characters' walks, so it trims no walk of theirs on the ground (the prototype's 140 trimmed her 150)."""
+    from gamelab import character
+    from gamelab.motion import body, physics
+    most = body.Shoe.from_physics(body.PHYSICS_IMG, body.SPEED_RANGE[1] + 60.0, 100.0, bonus=body.SPEED_BONUS)
+    assert locate.WALK_MAX == most.vmax == 200.0
+    for cid in ("thief", "magician"):
+        assert physics.shoe_of(character.fixed_stats(cid)).vmax < locate.WALK_MAX
+
+
 def test_her_tag_places_her_and_the_view_is_the_maps(art, model, plate):
     loc = locator(art, model, plate)
     frame, (fx, fy), centre, p = scene(art, model, plate, 43.5)

@@ -113,7 +113,16 @@ DOT_TO_N = 3               # ... carried this many frames far from it: put where
                            # RiceBaby's clips, carried on 3 frames of 6,279, the same; v2/maperr.py, cmp_rice.py)
 ACC_SD_GROUND, ACC_SD_AIR, VY_SD_ROPE = 900.0, 150.0, 200.0
 GRAVITY, FALL_SPEED, JUMP_SPEED = 2000.0, 670.0, 555.0
-WALK_MAX = 140.0           # her walking speed's most (map units a second)
+# Her walking speed's most (map units a second: the filter's speed on the ground trimmed to it, `_predict`): the
+# client's walk at its SPEED cap, Physics.img's walkSpeed 125 x (140 + 20)/100 = 200 (motion.body's formula, SPEED_RANGE
+# and SPEED_BONUS: tests/test_locate.py holds it to them), over any character's walk (the magician's 150, the thief's
+# 149-151) and Tree's steepest downhill (v83's rule, x 1.16 at its 0.58: 174 at 150). The prototype's 140 trimmed her
+# walk at 150 at every prediction: on R1-R3 through the replay kit (the integration of 2026-11-02, unpaced:
+# D:/MapleHelper-scratch/recfix/integrate/kit) the prediction lagged her measured place while she walked a median 0.61
+# units (mean 0.95, p90 4.2), at 200 0.07 (0.51, 3.6); her place after each measurement the same within 0.02 (p99 0.46
+# off either way), the 23 carried frames a median 5.15 off either way (7 of them moved, 5 nearer), every score of the
+# kit's the same; 174 within 0.04 of 200 on each.
+WALK_MAX = 125.0 * (140.0 + 20.0) / 100
 TAKEOFF, LAND_SNAP = 2.5, 3.0
 # Her body alone (the body cue) takes her off her platform only BODY_OFF_LINE px or more off its line (a jump's first
 # frame rises 17 px at 30 a second, 32 at 15), unless it's surely in a pose she has in the air (seen on a platform's
