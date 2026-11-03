@@ -1732,7 +1732,8 @@ def test_a_fighting_trip_plans_by_the_whole_states_monsters_with_no_second_searc
         monsters=lambda *a, **k: asked.append(a) or [], bar=lambda s, m: None))
     above = replace(walker(650, 1, kind="horny-mushroom", platform=d.id), track=7)  # on D, 200 above: off her band
     s.wide, s.swept = False, [above]
-    s.tracks = [SimpleNamespace(id=7, vx=-speed, kind="horny-mushroom", state="live", platform=d.id)]
+    s.tracks = [SimpleNamespace(id=7, vx=-speed, kind="horny-mushroom", state="live", platform=d.id,
+                                last_seen=s.t)]  # (seen in the look's frame: not one it missed, unseen.UNSEEN_LIVE)
     assert nav.trip_monsters(s) == s.monsters + [above] and not asked
     monsters, tail = nav._chain_monsters(st, s, path)
     assert [(m.platform, m.x) for m in monsters] == [(c.id, 450.0), (d.id, 650.0)] and not asked
