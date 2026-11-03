@@ -365,7 +365,7 @@ def _follow() -> None:
     global ROPE_SPEED, KNOCK_REACH
     ROPE_SPEED = flow.ROPE_SPEED
     KEY_LEAD["walk_off"] = physics.STOP_S
-    KNOCK_REACH = KNOCK_VX * 2 * KNOCK_VY / GRAVITY + physics.LAND_SLIDE
+    KNOCK_REACH = KNOCK_PUSH * 2 * KNOCK_PUSH / GRAVITY + physics.LAND_SLIDE
 
 
 BETTER_EVERY_S = 5 * STATE_S  # s between looks for a better way (a guess: 3 a second)
@@ -638,30 +638,36 @@ HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _
 # more than about a second past HANG_S seldom holds: at 4 s 84 of the thief's 106 longer hangs were put back for a
 # turn or a stop (52 of 69 at 3 s; hers 43 of 69 and 26 of 45), and the longer wait was lost time. Of her 92 longer
 # hangs over seeds 1-48 (both rules) 1 ended at its own end ('waited'), 11 with the way judged clear.
-# Off from the final review of 2026-11-02 (with HANG_TAKE): measured on the merged world (her walk and climb by her stat
-# window's SPEED, 150 and 120 up and down, where she climbed up at 130 when the rules were chosen; D:/MapleHelper-
-# scratch/recfix/measure, her standard world, seeds 1-48 paired) both rules against the 2 s hang alone (the harness's
-# `hang-2s`, now the default): her EXP a minute -3.3% (t -2.07), kills -3.5% (t -2.27), touches at a rope's top
-# +35.8% (t +2.49), potions +7.1%; no longer wait ran to its own end (0 'waited' of 284 hangs). So the 2 s hang alone
-# until the rules are tuned again on this world (`--world hang-rules`: both on, to measure them). Only on a navigator
-# with a price (a hunter's), never a retreat's: its trip's plan has no time for a longer wait (behavior.retreat's
-# RETREAT_S).
-HANG_LONGER = False
+# On, the user's rule (2026-11-02 ~21:40, shown it measured worse for her than the 2 s hang on the merged world: "keep
+# the rope rule on"; off from the final review until then). The harness's `--world hang-2s` prices it (both rules off,
+# the 2 s hang alone), `no-hang` the hang itself. Why it turned from better (work/rec-rope2, on 560bd57's world) to
+# worse on the merged world, and what was fixed (D:/MapleHelper-scratch/recfix/rope-on: hangs3.py's knobs, her
+# standard world, seeds 1-48 paired): the climb turns it, her climb up 130 in the world and planned up at 130 (flow's)
+# and 117 (physics') as at 560bd57 against the client's 120 both ways (the knob C560): both rules against the 2 s hang
+# EXP +3.1% (t +2.12) there, -4.1% (t -2.55) here; here the loss is in the knocks off 10 by the top of -80 (10 -> 13,
+# 300 units down, a climb of ~9 s back) after hangs with a Horny chasing her by the top (hit by her: the user's monster
+# rule), 47 over the 48 runs with the 2 s hang alone, 84 with both rules. Of the longer waits for a walker that was chasing
+# her 63 of 72 were put back for its turn (none cleared): a monster she hurt follows her, so a walk of it is no walk
+# off (`_walks_off`: none longer for one, its HP bar seen). Only on a navigator with a price (a hunter's), never a
+# retreat's: its trip's plan has no time for a longer wait (behavior.retreat's RETREAT_S).
+HANG_LONGER = True
 HANG_HORIZON_S = 3.0
 HANG_MARGIN_S = 0.3
 WALK_OFF_STEP = 0.1    # s between the set-offs `_walks_off` tries (a resolution)
 OFF_WALK_EDGE = 25.0   # units: a monster this near its walk edge (or predicted so) turning or stopping is at its end
 # HANG_TAKE: at the hang's start and at every look, she climbs on at once (step 'took') where the rest of the wait
 # costs her more than the touch it waits out: its s at what her time is worth up there (TopPrice.rate: the hunter's,
-# Hunter.top_price, the hunt's EXP a second; with behavior.hunter.TOP_RATE_ABOVE, or what the grind expects on the
-# platform at the rope's top from the monsters there, their EXP and her kill time, if more) against the touch: a touch
-# of the kind blocking in potions at the user's
-# prices (HP_PER_MESO 2 HP a meso at MESO_EXP: behavior.fight.landing_prices, as her landings are priced) times the share
-# of her touches that hurt, and the s a knock there would lose her at that rate (`_knock_cost`: none on the rope, where
-# the game keeps her; standing at the top the knock's flight, and where it lands her off the platform the planner's way
-# back up). Never where her HP is under the safety stop's reserve and that touch (TopPrice.hp_ok), nor without a price
-# (a navigator a hunter didn't make: a retreat's). The Lie Detector and the safety stop are raised at the hang's
-# glances, whatever it chose. A touch taken so, in the climb after, is the cut's (POST_HIT), as after any hang. A touch
+# Hunter.top_price: with behavior.hunter.TOP_RATE_ABOVE, on from 2026-11-02, what the grind expects on the platform at
+# the rope's top from the monsters there, their EXP and her kill time, the user's "a lot EXP to earn by killing off
+# mobs above", none where it has no stop there; off, the hunt's EXP a second) against the touch: a touch of the kind
+# blocking in potions at the user's prices (HP_PER_MESO 2 HP a meso at MESO_EXP: behavior.fight.landing_prices, as
+# her landings are priced) times the share of her touches that hurt, and the s a knock there would lose her at that
+# rate (`_knock_cost`: none on the rope, where the game keeps her; standing at the top the knock's flight, and where it
+# lands her off the platform the planner's way back up). Never where her HP as last read is under the safety stop's
+# reserve and every touch it's priced as (TopPrice.margin: each touch's HP by its kind, the second at the top's too, and
+# after a touch on the rope that one, `_take_now`), nor without a price (a navigator a hunter didn't make: a
+# retreat's). The Lie Detector and the safety stop are raised at the hang's glances, whatever it chose. A touch taken
+# so, in the climb after, is the cut's (POST_HIT), as after any hang. A touch
 # on the rope with the top taken (_climb_on, CLIMB_LOOK) is up again at once so, where it went down to hang. False: as
 # before. By the harness (as HANG_LONGER's): the touch taken at 34% of the thief's hangs and 28% of hers over seeds
 # 1-48 (on 1-24, 68 of their 77 a Green Mushroom's: hers 11.4 EXP against her 2 s at 8.5 EXP a second, his 8.8 at 7.2).
@@ -671,11 +677,28 @@ OFF_WALK_EDGE = 25.0   # units: a monster this near its walk edge (or predicted 
 # (-1.83); his -2.1% (-0.82), -2.9% (-1.14), -21.6% (-2.73). With the grind's rate on the platform at the top
 # (TOP_RATE_ABOVE, 24 seeds, the margin then from every look) the touch was taken at 39% and 67% of the hangs, at 8.8
 # and 13 EXP a second on average, and both did worse than at the hunt's rate: EXP -2.5% and -2.4% (t -0.64, -1.51),
-# her touches +7.4% (+1.85). Off from the final review of 2026-11-02, with HANG_LONGER (its note): the user's words were
-# "if there are a lot EXP to earn by killing off mobs above", and at the hunt's rate she takes a touch whatever is above.
-HANG_TAKE = False
-KNOCK_REACH = KNOCK_VX * 2 * KNOCK_VY / GRAVITY + LAND_SLIDE  # units a touch knocks her standing (the planner's: 53.9 at
-                                                              # the thief's walk, 53.7 at hers; _follow's)
+# her touches +7.4% (+1.85). On, the user's rule, with HANG_LONGER (its note). Its price after the merged world's
+# measures (D:/MapleHelper-scratch/recfix/rope-on): the touch taken costs what follows it at the top too, a second touch
+# where it or another monster meets her standing where she climbs over once her invulnerability after the first is over
+# (`_touched_again`: to TAKE_AGAIN_S past it, the next pass's reaction: on the merged world the second touches at the
+# top came 1.45-1.9 s after the first), with its knock; the knock's reach the client's (KNOCK_REACH), where the
+# planner's 53.7 put her on 10 after a knock left from the top of -80 (83 from 10's end) that took her off it; and a
+# touch on the rope with the top taken (_climb_on) is the touch at the top she'd climb into, standing, where it was
+# priced as one on the rope (no knock).
+# Its HP check (the review of 2026-11-03, D:/MapleHelper-scratch/recfix/rope-on-review and rope-fix): it had her HP over
+# the reserve and one touch of the kind in the way, where the take is priced as two touches when a monster stays at the
+# top (the second by any kind), so from her HP between the reserve and one touch and two she'd take both and end under
+# the reserve (her reserve 2 touches of 132-150: from 400-450 HP a two-touch take ends one touch from 0, the monster that
+# made it two still at the top); the thief took 1 of his 2 so. And `_climb_on`'s take came right after the touch on the
+# rope, which her HP as read may not have yet (her bar settles HP_SETTLE_S after the popup: perception.hp_number).
+HANG_TAKE = True
+TAKE_AGAIN_S = 1.0     # s past her invulnerability's end she's taken to stand where she climbed over (_touched_again)
+HP_SETTLE_S = 0.37     # s after a touch's popup her HP as read has it (the bar within a px by then: perception.hp_number)
+# A touch's knock standing, as the client throws her (sim.world.KNOCK_VX: away and up at 270 units/s, R1-R3's 15 fps
+# frames: a median 73.4 units through the air, then her slide from her walk's speed at most): ~87 units at hers (the
+# frames' 84-93), where the planner's KNOCK_VX and KNOCK_VY (its knock's flight's time, KNOCK_AIR_S) give 53.7.
+KNOCK_PUSH = 270.0
+KNOCK_REACH = KNOCK_PUSH * 2 * KNOCK_PUSH / GRAVITY + LAND_SLIDE  # (_follow's: its slide hers)
 KNOCK_LOST_S = 30.0    # s a knock off the top costs where the planner has no way back (a bound)
 # After the evade work's review (2026-10-29: D:/MapleHelper-scratch/evade/review; the fixes' runs and numbers in
 # D:/MapleHelper-scratch/evade/fix). ARRIVE_STAND: for a trip whose x is what it's for (go's arrive_waits: her
@@ -779,12 +802,16 @@ class Escort(Protocol):
 class TopPrice:
     """What her time up a rope is worth and what a touch at its top costs her (HANG_TAKE: Navigator's `price`, the
     hunter's Hunter.top_price): `rate` EXP a second, `touch` EXP a touch of the kind takes (its HP in potions at the
-    user's prices, times the share of her touches that hurt), `hp_ok` whether her HP is over the safety stop's reserve
-    and that touch's HP; `words` where the rate comes from."""
+    user's prices, times the share of her touches that hurt), `margin` her HP as last read over the safety stop's
+    reserve (HP; None: not read) and `read` when (its frame's time), `hp` the HP a touch of the kind takes, `largest` the
+    largest touch's of the map's (a touch whose kind isn't told); `words` where the rate comes from."""
     rate: float
     touch: float
-    hp_ok: bool
+    margin: float | None
     words: str = ""
+    hp: float = 0.0
+    largest: float = 0.0
+    read: float | None = None
 
 
 @dataclass
@@ -2939,7 +2966,7 @@ class Navigator:
                     touch = self._hang_touch
                     cut = f"{HUNG}: {text}" if touch is None else f"{_touch_text(touch, hp, now_hp)} ({HUNG}: {text})"
                 if climbing is not None:
-                    self._climb_on(*climbing)
+                    self._climb_on(*climbing, touch=touch)
                 elif cut.startswith(TOUCHED) and REPLAN and KNOCK_REPLAN:  # (the next pass plans from where it lands her)
                     self._landed = self._knock_landing(touch)
                 break
@@ -3334,26 +3361,28 @@ class Navigator:
                 return tr
         return None
 
-    def _climb_on(self, top: float, y: float, x: float | None = None) -> None:
-        """A touch while she climbs a rope (_climbing: a MISS too): the cut let go of every key, up too, and the game
-        keeps her on the rope when she's touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang
-        below its top (see CLIMB_ON); up again, to the top and onto the platform there, held as a chain's climb holds it
-        (the climb from her height at flow.ROPE_SPEED, the step onto the platform in it, and UP_EXTRA: 0.75 s from 52
-        under, where mover.climb_ms's 0.945 s had the same mushroom touch her again on the platform 9 ms before it ended
-        in loop_tree_walls), waited for, so the next pass looks once she's there. With the top taken (CLIMB_LOOK) and
-        ROPE_HANG, down to HANG_UNDER under it (and the rope's _hang_drop; where she's higher) and a hang there till the
-        way up is clear (_hang), where the hang place is clear of every monster (_hang_safe); else down the rope to its
-        bottom, as before. Where the touch is worth taking (HANG_TAKE: the wait's HANG_S against the touch, `_take_now`)
-        up again at once instead, a 'rope_hang' event of no hang ('took', 0 s)."""
+    def _climb_on(self, top: float, y: float, x: float | None = None, touch: dict | None = None) -> None:
+        """A touch while she climbs a rope (_climbing: a MISS too; `touch` the one told, Senses.touched_since's, None for
+        her HP dropping alone): the cut let go of every key, up too, and the game keeps her on the rope when she's
+        touched there (live on 2026-10-26, 11 of 11 hits on a rope), where she'd hang below its top (see CLIMB_ON); up
+        again, to the top and onto the platform there, held as a chain's climb holds it (the climb from her height at
+        flow.ROPE_SPEED, the step onto the platform in it, and UP_EXTRA: 0.75 s from 52 under, where mover.climb_ms's
+        0.945 s had the same mushroom touch her again on the platform 9 ms before it ended in loop_tree_walls), waited
+        for, so the next pass looks once she's there. With the top taken (CLIMB_LOOK) and ROPE_HANG, down to HANG_UNDER
+        under it (and the rope's _hang_drop; where she's higher) and a hang there till the way up is clear (_hang), where
+        the hang place is clear of every monster (_hang_safe); else down the rope to its bottom, as before. Where the
+        touch is worth taking (HANG_TAKE: the wait's HANG_S against the touch, `_take_now`, her HP as read less `touch`
+        where it may not have it yet) up again at once instead, a 'rope_hang' event of no hang ('took', 0 s)."""
         k = self.actions.keys.up.name
         hold = ms(max(0.0, y - top) / ROPE_SPEED + UP_EXTRA)
         if CLIMB_LOOK and x is not None and (why := self._top_taken(x, top, hold / 1000)) is not None:
             rope = min(self.model.ropes, key=lambda r: abs(r.x - x) + abs(r.top - top))
             down = self.actions.keys.down.name
             at = max(y, rope.top + HANG_UNDER + self._hang_drop(rope))
-            if ROPE_HANG and HANG_TAKE and route.hung_from(self.model, rope) is not None \
+            shown = math.inf if touch is None else touch.get("at", math.inf)  # (none told: her HP dropping alone)
+            if ROPE_HANG and HANG_TAKE and (q := route.hung_from(self.model, rope)) is not None \
                     and (taker := self._top_taker(x, top, hold / 1000)) is not None \
-                    and (took := self._take_now(rope, y, HANG_S, (self._track_of(taker, time.monotonic()), None))):
+                    and (took := self._take_now(rope, y, HANG_S, self._top_touch(rope, q, y, taker), touched=shown)):
                 self.log(f"    touched on the rope {y - top:.0f} under its top, {why}: {took}: up again ({hold} ms)")
                 telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top, {why}: "
                                                               f"up again, the touch taken")
@@ -3382,6 +3411,18 @@ class Navigator:
         self.log(f"    touched on the rope {y - top:.0f} under its top: up again ({hold} ms)")
         telemetry.emit("event", kind="climb_on", text=f"touched on the rope {y - top:.0f} under its top: up again")
         self.actions.play([[0, k, "down"], [hold, k, "up"]], "climb_on")
+
+    def _top_touch(self, rope: Rope, q: Platform, y: float, taker) -> tuple[MonsterTrack, float]:
+        """HANG_TAKE after a touch on the rope with the top taken (_climb_on): the touch she'd climb into, by `taker`
+        (the feed's track _top_taker found) on her way up `rope` from her feet at map y onto platform `q`, and when
+        (plan time from now): its first meeting with her once the invulnerability the touch on the rope left her is
+        over (flow.danger, STAND_PAST_S standing at the top), at the climb-over's end where the planner's reach has none;
+        standing at the top, so its knock counts (_knock_cost), where it was priced as a touch on the rope."""
+        mo, now = self._track_of(taker, time.monotonic()), time.monotonic()
+        self._immunity(now)
+        leg = self._up_leg(rope, q, y)
+        meet = self.flow.danger(leg, [mo], linger=STAND_PAST_S)
+        return mo, (leg.end.t if meet is None else meet[1])
 
     # --- hanging under a rope's top (ROPE_HANG) ------------------------------------------------------------------
 
@@ -3498,7 +3539,8 @@ class Navigator:
 
     def _hang(self, rope: Rope, y: float, why: str) -> str:
         """ROPE_HANG: she hangs on `rope` (every key let go: the game keeps her there), her feet at about map y, until
-        the way up from there is clear (_way_up, at every glance, her height her dot's while it's by the rope), a touch
+        the way up from there is clear (_way_up, at every glance with a state, her height her dot's while it's by the
+        rope; one without a state tells nothing, where the review of 2026-11-03 had it end the hang as clear), a touch
         is told (her invulnerability then takes her past it), or her wait is over: HANG_S (a backstop event: up
         regardless, as a pass regardless goes), or longer where the monsters in the way are predicted to walk off
         (HANG_LONGER: up as predicted clear); or at once, at its start or at any look, where the rest of the wait costs
@@ -3534,6 +3576,8 @@ class Navigator:
             if self._touch_since(since) is not None:
                 how = "touched"
                 break
+            if getattr(self.senses, "glanced", True) is None:  # (no state: no news, not the way up clear; LookLost
+                continue                                       # once there's been none GLANCE_LOST_S: Senses.glance)
             if (hit := self._way_up_hit(rope, y)) is None:
                 how = "clear"
                 break
@@ -3612,8 +3656,8 @@ class Navigator:
         the first set-off whose climb, climb-over and STAND_PAST_S at the top (_up_leg) meets none of the newest state's
         monsters where each likeliest is by then (MonsterTrack.at: the way it's followed walking, at its kind's speed
         from the game data, turning at its walk edges; one standing where it stands), her invulnerability counted; 0 and
-        none with none in the way now. None if one in the way now stands (or may set off either way), or none is clear
-        within `within`."""
+        none with none in the way now. None if one in the way now stands (or may set off either way) or chases her
+        (`_chasing`: one she's hurt), or none is clear within `within`."""
         q, now = route.hung_from(self.model, rope), time.monotonic()
         tracks = self._newest_tracks(now)
         if q is None or not tracks or within < 0:
@@ -3623,7 +3667,7 @@ class Navigator:
         way = [self.flow.danger(leg, [mo], linger=STAND_PAST_S) is not None for mo in tracks]  # (in the way now)
         if not any(way):
             return 0.0, []
-        if any(w and not mo.vx for w, mo in zip(way, tracks)):
+        if any(w and (not mo.vx or self._chasing(mo)) for w, mo in zip(way, tracks)):
             return None
         tracks = [replace(mo, vx=math.copysign(mo.speed, mo.vx)) if mo.vx else mo for mo in tracks]
         path = self.flow.path(leg, STAND_PAST_S)
@@ -3642,6 +3686,18 @@ class Navigator:
                 return d, [(mo.track, mo, now) for w, mo in zip(way, tracks) if w]
             d += WALK_OFF_STEP
         return None
+
+    def _chasing(self, mo: MonsterTrack) -> bool:
+        """HANG_LONGER: whether monster `mo` (one of the newest state's) chases her, so a walk of it is no walk off: one
+        she's hurt (the feed's track of it has its HP bar seen: tracking.Track.bar), as the user's monster rule has it
+        (a hit draws a chase, 3-4 minutes, each hit anew: it walks at her, turning back past her, wherever she is above
+        or below it). On the merged world 63 of the 72 longer waits for one chasing her were put back for its turn, and
+        none of them cleared (D:/MapleHelper-scratch/recfix/rope-on)."""
+        state = getattr(self.senses, "glanced", None)
+        if state is None or mo.track is None:
+            return False
+        tr = next((tr for tr in state.tracks if getattr(tr, "id", None) == mo.track), None)
+        return tr is not None and getattr(tr, "bar", None) is not None
 
     def _off_walk(self, wait: _Wait, now: float) -> str | None:
         """HANG_LONGER: why a monster the longer wait is for is off its predicted walk at the newest state (the feed's
@@ -3667,28 +3723,63 @@ class Navigator:
                 return f"the {tr.kind or 'monster'} on {tr.platform} turned"
         return None
 
-    def _take_now(self, rope: Rope, y: float, left: float, hit: tuple[MonsterTrack, float | None]) -> str | None:
+    def _take_now(self, rope: Rope, y: float, left: float, hit: tuple[MonsterTrack, float | None],
+                  touched: float | None = None) -> str | None:
         """HANG_TAKE: why she takes the touch of `hit`'s monster on the way up `rope` from her feet at map y (and when,
         plan time from now: _way_up_hit's; None: on the rope) rather than hang `left` s more, or None: the wait's s at
-        what her time is worth up there (TopPrice.rate, `price`'s) more than the touch's EXP and its knock's s at that
-        rate (`_knock_cost`), her HP over the safety stop's reserve and the touch (TopPrice.hp_ok). The numbers in
-        `_took` (the 'rope_hang' event's)."""
+        what her time is worth up there (TopPrice.rate, `price`'s) more than the touches' EXP (the second at the top's
+        by its kind: `_touched_again`) and their knocks' s at that rate (`_knock_cost`), her HP as last read over the
+        safety stop's reserve by every touch it's priced as (TopPrice.margin: each one's HP by its kind) and, after a
+        touch on the rope (`touched`: its popup's frame time, math.inf for her HP dropping alone; _climb_on's), that one
+        too unless her HP was read HP_SETTLE_S or more after it (the map's largest touch: its kind isn't told). The
+        numbers in `_took` (the 'rope_hang' event's)."""
         q, price = route.hung_from(self.model, rope), getattr(self, "price", None)
         if not HANG_TAKE or price is None or q is None or left <= 0:
             return None
         mo, t = hit
         got = price(q.id, mo.kind)
-        if got is None or not got.hp_ok:
+        if got is None or got.margin is None:
             return None
         knock = self._knock_cost(rope, q, y, mo, t)
-        wait, cost = left * got.rate, got.touch + knock * got.rate
+        again = self._touched_again(rope, q, y, mo, t)  # (a second touch at the top once her invulnerability is over)
+        second = None if again is None else got if again[0].kind == mo.kind else price(q.id, again[0].kind)
+        if again is not None:
+            knock += self._knock_cost(rope, q, y, *again)
+        touches = 1 if again is None else 2
+        need = got.hp + (0.0 if second is None else second.hp)
+        if touched is not None and (got.read is None or got.read < touched + HP_SETTLE_S):
+            need += got.largest  # (the touch on the rope just now, not in her HP as read yet)
+        if second is None and again is not None or got.margin < need:
+            return None
+        exp = got.touch + (0.0 if second is None else second.touch)
+        wait, cost = left * got.rate, exp + knock * got.rate
         if wait <= cost:
             return None
         self._took = {"left": round(left, 2), "rate": round(got.rate, 2), "wait_exp": round(wait, 1),
-                      "touch_exp": round(got.touch, 1), "knock_s": round(knock, 2)}
+                      "touch_exp": round(exp, 1), "knock_s": round(knock, 2), "touches": touches,
+                      "margin": round(got.margin), "need": round(need)}
         return (f"the touch taken: {left:.1f} s more of the wait at {got.rate:.1f} EXP a second ({got.words}), "
-                f"{wait:.0f} EXP, over a {mo.kind or 'monster'}'s touch, {got.touch:.0f} EXP"
-                + (f" and its knock's {knock:.1f} s" if knock else ""))
+                f"{wait:.0f} EXP, over a {mo.kind or 'monster'}'s touch" + (" and a second at the top" if again else "")
+                + f", {exp:.0f} EXP" + (f" and its knock's {knock:.1f} s" if knock else "")
+                + f"; her HP {got.margin:.0f} over the reserve, {need:.0f} the touches'")
+
+    def _touched_again(self, rope: Rope, q: Platform, y: float, mo: MonsterTrack,
+                       t: float | None) -> tuple[MonsterTrack, float] | None:
+        """HANG_TAKE: the monster that touches her again after the touch by `mo` taken at plan time t (None: on the
+        rope now) on her way up `rope` from her feet at map y, and when (plan time from now): `mo` or any of the newest
+        state's (_newest_tracks: the others at the top too), from her invulnerability's end after it (INVULNERABLE_S less
+        IMMUNE_MARGIN_S) on, over the rest of the climb, the climb-over onto platform `q` and standing there to
+        TAKE_AGAIN_S past that end (flow.danger, the planner's reach of each); None where none does. (Of the touches
+        taken on her world with `mo` alone checked, 9 of 21 had a Horny chasing her at the top as the hang began.)"""
+        inv = (0.0 if t is None else t) + INVULNERABLE_S - IMMUNE_MARGIN_S
+        leg = self._up_leg(rope, q, y)
+        kept = self.flow.immune
+        self.flow.immune = max(kept, inv)
+        try:
+            return self.flow.danger(leg, [mo] + self._newest_tracks(),
+                                    linger=max(STAND_PAST_S, inv + TAKE_AGAIN_S - leg.end.t))
+        finally:
+            self.flow.immune = kept
 
     def _knock_cost(self, rope: Rope, q: Platform, y: float, mo: MonsterTrack, t: float | None) -> float:
         """HANG_TAKE: s a touch by `mo` at plan time t of the way up `rope` from her feet at map y (None: on the rope)

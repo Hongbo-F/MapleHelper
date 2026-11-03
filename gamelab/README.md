@@ -4167,7 +4167,7 @@ borderline: every row below at 48; D:/MapleHelper-scratch/recfix/measure/pair_ma
   against no hang: EXP -2.0% (t -1.13), a rope's top -32.6% (t -3.40), knock falls -15.9% (t -3.32), touches -5.8%
   (t -1.73). work/rec-rope2 measured the rule in 560bd57's world, where she climbed up at the planner's 130 and the
   world's 130 (here 120 both, the formula's), and found her EXP +3.5% (t +2.32) against the 2 s hang: most likely the
-  merge's climb turns it (assumed: no run varies the climb alone). Per run here: 5.9 hangs, 2.5 of them longer at some look, 1.4 touches taken (hang_took), 4.0
+  merge's climb turns it (assumed here; measured since: Hanging under a rope's top, On, the user's call). Per run here: 5.9 hangs, 2.5 of them longer at some look, 1.4 touches taken (hang_took), 4.0
   up regardless, 0.4 clear, none waited out. Live, the hour's rope top at -80 had 19-23 touches over 68 climbs (about
   0.3 a climb; one rope's top, where the simulator's figure is every rope's): the simulator's 0.7-1.0 is 2-3 times it,
   as its touches are (rec-sim's re-touch excess). Switched off after the final review (both rules; the 2 s hang alone:
@@ -4224,7 +4224,8 @@ The rope rule's loss is in her world alone; the thief's world was measured only 
 Two reviews of work/rec-all fee1905 for the supervised RiceBaby grind (D:/MapleHelper-scratch/recfix/final-live and
 final-claims); what each found and what's done (D:/MapleHelper-scratch/recfix/final-fix: scripts, runs, pairs):
 
-- **The rope rule off** (major, both reviews): `navigator.HANG_LONGER` and `HANG_TAKE` are off by default, the 2 s hang
+- **The rope rule off** (major, both reviews; on again the same night, the user's call, its price fixed: Hanging
+  under a rope's top, On, the user's call): `navigator.HANG_LONGER` and `HANG_TAKE` are off by default, the 2 s hang
   alone (`HANG_S`, as at 560bd57), since on the merged world they measured worse for her than it (The whole measured,
   (ii)) and the touch taken was priced at the hunt's rate, not at "a lot EXP ... above" (TOP_RATE_ABOVE, off and
   measured worse too). Both stay built: `--world hang-rules` prices them. And the longer wait only on a navigator with
@@ -4246,7 +4247,8 @@ final-claims); what each found and what's done (D:/MapleHelper-scratch/recfix/fi
 - **The throw message between versions** (note): a test that the service takes the 3-, 4- and 5-item forms and a
   client sends the shortest that says what it knows (tests/test_service.py).
 - **Words** (minor, notes): `planner-v83` is master's walk and down-climb, not its climb up (130); the rope rule's turn
-  on the merged world is most likely the climb's, not measured alone; "a rope's top, a climb" is a mean of each seed's
+  on the merged world is most likely the climb's, not measured alone (measured since, the climb's: Hanging under a
+  rope's top, On, the user's call); "a rope's top, a climb" is a mean of each seed's
   ratio (the totals' ratio beside it); labels-v3's kills are checked against master's binding; the formula's source
   credited as NiaDB asks (meowdb.com/reuse), "measured frame by frame from COT2 video footage"; the buff a kept SPEED
   can carry; test_walk_speed's fixture a cross-check of motion.steady's, kept apart; test_records asserts its passes
@@ -4862,15 +4864,21 @@ every look of it (`_hang_judge`):
   potions at the user's prices (HP 2 a meso, MESO_EXP) times the share of her touches that hurt, and the s its knock
   would lose her at that rate (none on the rope, where the game keeps her; standing at the top the knock's flight; a
   knock off the top platform, the planner's way back up). Never with her HP under the safety stop's reserve and that
-  touch, nor in a navigator a hunter didn't make (a retreat's). After a touch on the rope with the top taken
+  touch (from 2026-11-03 every touch it's priced as: The review's fixes, below), nor in a navigator a hunter didn't
+  make (a retreat's). After a touch on the rope with the top taken
   (`_climb_on`) she goes up again at once so, where she went down to hang. The Lie Detector and the safety stop are
   raised at the hang's glances whatever it chose. What the grind expects on the platform at the top (its stop there: the
   monsters seen and the belief's, their EXP, her share and kill time: `Grind._ground_rate`) as her time's worth there
-  where more (`behavior.hunter.TOP_RATE_ABOVE`) is off: measured worse (below).
+  where more (`behavior.hunter.TOP_RATE_ABOVE`) was off: measured worse (below). From 2026-11-02, late (On, the user's
+  call, below): the touch's price counts a second touch at the top after her invulnerability (`_touched_again`, by any
+  monster there) and the client's knock (KNOCK_REACH ~87), `_climb_on`'s touch is priced standing at the top
+  (`_top_touch`), and her time's worth is the EXP above alone (TOP_RATE_ABOVE on: 0 where the grind has no stop there).
 - *Its records*: 'rope_hang' events `longer` (when it first goes past HANG_S: the predicted clear, the walkers, the
   wait), `back` (why), and the ends `waited` (up at the longer wait's end, no backstop event) and `took` (`left`, `rate`,
-  `wait_exp`, `touch_exp`, `knock_s`); the harness's `rope_tops` counts each end (`hang_clear`, `hang_waited`,
-  `hang_took`, `hang_touched`, beside `hang_regardless`) and `hang_longer`.
+  `wait_exp`, `touch_exp`, `knock_s`, from 2026-11-02 late `touches`: 1, or 2 with the second at the top, and from
+  2026-11-03 `margin` and `need`: her HP over the reserve as read, and the touches' HP it's weighed against); the
+  harness's `rope_tops` counts each end (`hang_clear`, `hang_waited`, `hang_took`, `hang_touched`, beside
+  `hang_regardless`) and `hang_longer`.
 
 **Chosen on the harness** (D:/MapleHelper-scratch/recfix/rope2: hangs2.py runs each variant by its switches, compare2.py
 pairs seeds, perhang.py the hangs; the base work/rec-all 560bd57's 2 s hang, cached for both worlds,
@@ -4941,20 +4949,158 @@ and "...: back to HANG_S" (a turn or a stop), "hung N s, up after N s, the touch
 back), and per `took` whether one touch came or more (her re-touches within 2 s after it); her HP never under the
 safety stop's reserve and a touch after a `took`.
 
+**On, the user's call, and what was wrong with it** (2026-11-02, late; D:/MapleHelper-scratch/recfix/rope-on: hangs3.py
+runs the harness's standard runs by knobs and keeps each hang, its blockers and what followed it; anal3.py, loops.py,
+kof.py, split.py read them). Shown that both rules measured worse for her than the 2 s hang alone on the merged world
+(The whole measured, (ii)), the user: "keep the rope rule on". So HANG_LONGER, HANG_TAKE and TOP_RATE_ABOVE are on by
+default; `--world hang-2s` (both off: the 2 s hang alone) and `no-hang` (ROPE_HANG off) keep them measurable,
+`hang-rules` is the default.
+
+*Why it turned.* Between work/rec-rope2 (chosen on 560bd57's world, where she measured +3.5% EXP) and the merged tip the
+one change in her motion is her climb: up at 130 in the world and planned up at 130 (flow.ROPE_SPEED) and 117
+(physics.CLIMB_SPEED: the hang's `_up_leg`, `_knock_cost`), down at 117, against the client's SPEED + 20, 120, both
+ways, world and planner (her walk was 150 in both; KNOCK_REACH's follower, the stall fix, the retreat's cap and the
+second frame of SPEED touch nothing here). Her climb as at 560bd57 on the merged code (the knob `C560`: the world's
+climb up 130 and down 117, her planner's set so after her hunter's start), both rules (as built) against the 2 s hang,
+her standard world, seeds 1-48 paired:
+
+| her climb | EXP a minute | kills | touches | at a rope's top | climbs | knocks off 10 to 13 after a hang |
+|---|---|---|---|---|---|---|
+| 560bd57's (130 up, 117 down) | +3.1% (t +2.12) | +3.0% (+2.14) | -2.0% (-0.65) | +4.1% (+0.45) | +0.9% | 76 -> 73 |
+| the client's 120 (merged) | **-4.1% (-2.55)** | -4.5% (-2.93) | +4.3% (+1.23) | **+35.1% (+2.43)** | +14.0% (+2.31) | 47 -> 84 |
+
+So the climb turns it (measured, not assumed as the final review's words had it). Where the merged world's loss is: the
+knocks off 10 by the top of -80 (from 10 down to 13, 300 units, about 9 s back up), after a hang up regardless with a
+Horny chasing her at the top (one she hit: the user's monster rule), 47 over the 48 runs with the 2 s hang, 84 with
+both rules; the hangs with a monster chasing her at the top 66 -> 114. Seeds 10, 19 and 32 lost 26-35% of their EXP
+in loops of 7-10 such knocks: up regardless, touched on the rope, touched again on 10 by the same Horny 1.45-1.9 s
+later (her invulnerability's end), knocked off 10's left end (83 from the rope), back up and the same again. With
+560bd57's climb the 2 s hang alone had those loops as often (76) and the rules didn't add to them. HANG_LONGER alone (24 seeds)
+EXP -1.0% (t -0.60), HANG_TAKE alone -3.4% (-1.32): the loss mostly HANG_TAKE's.
+
+*What was wrong with the rules, and what's done* (control.navigator; tests/test_rope_hang.py):
+- *The touch taken was priced as one touch.* A monster that stays at the top (one standing there, or chasing her)
+  touches her again once her invulnerability after the first is over, standing where she climbed over, and knocks her:
+  `_touched_again` prices that second touch and its knock, by the monster in the way or any other of the newest state
+  (`_newest_tracks`), from INVULNERABLE_S less IMMUNE_MARGIN_S after the first touch to TAKE_AGAIN_S (1 s) past it (the
+  next pass's reaction: on the merged world the second touches at the top came 1.45-1.9 s after the first). With the
+  first monster alone checked (the first fix, f8abbeb), 9 of her 21 touches taken (seeds 1-24) had a Horny chasing her
+  at the top as the hang began, and 2.1 touches came within 6 s of each, as many as after a hang up regardless.
+- *Its knock was the planner's*, 53.7 units, which put her on 10 after a knock left from the top of -80 that took her
+  off it: KNOCK_REACH is the client's push (KNOCK_PUSH 270 out and up, as sim.world's and R1-R3's frames have it: ~87
+  with her slide, the frames' 84-93), so a knock off the top platform is priced with the planner's way back up.
+- *A touch on the rope with the top taken* (`_climb_on`) priced the touch she'd climb into as one on the rope (no
+  knock), where `_top_taker` finds only a monster that meets her at the top after the invulnerability the first touch
+  left her: `_top_touch` prices it there, standing.
+- *A longer wait for a walker that chases her*: of the longer waits for one, 63 of 72 were put back for its turn and
+  none cleared: a monster she hurt follows her, so its walk is no walk off (`_chasing`: the feed's track has its HP bar
+  seen). No longer wait for one.
+- *The price of her time up there* (`Hunter.top_price`, TOP_RATE_ABOVE): the user's words, "a lot EXP to earn by
+  killing off mobs above": what the grind expects a second on the platform at the rope's top (`Grind._ground_rate`:
+  its stop there, the monsters and the belief's, their EXP, her share and kill time), 0 where the grind has no stop
+  there (nothing to earn above, no touch worth taking), the hunt's where no grind runs; it was the hunt's, or the
+  platform's where more. With the touch priced as what follows it, at the hunt's rate she never took one (24 seeds:
+  HANG_TAKE dormant, the rule HANG_LONGER's alone); at the EXP above 0.9 a run (Horny Mushrooms walking past, 15.2 EXP
+  a second above against her hunt's 8.8), EXP -0.7% (t -0.74) against the hunt's rate: level, so the user's words
+  decide. Why the platform's rate measured worse at work/rec-rope2: priced as one touch, it took touches the monsters at
+  the top made two of and more (above), and the platform's rate took more of them.
+
+The steps on her world, seeds 1-24 against the 2 s hang: as built EXP -4.1% (t -1.73), knocks off 10 to 13 48 against
+24; the price fixed, the hunt's rate -1.4% (-0.82), 33; at the EXP above -2.0% (-1.26), 35 (both with the first
+monster alone checked).
+
+**Measured** (the harness, seeds 1-48 paired, 5 minutes, 3b59ca3, cached: baselines/harness/e79b45753b6c...,
+99338909e27c92ee hers, 429c9e4a7b1f27f6 his; the 2 s hang the same code path, measured on 7052951: f_mage_tip and
+f_thief_tip in this lab's harness folder, both rules off here equal to them to the digit on seeds 3 and 9 of each):
+both rules on against the 2 s hang alone,
+
+| | her standard world | the thief's standard grind |
+|---|---|---|
+| EXP a minute | 426.1 -> 422.2, -0.9% (t -0.82) | 299.6 -> 301.0, +0.5% (t +0.41) |
+| kills | -1.2% (t -1.14) | +0.7% (t +0.69) |
+| touches | +2.0% (t +0.97) | -0.0% (t -0.03) |
+| potions | +3.4% (t +1.33) | -0.2% (t -0.12) |
+| knock falls | +3.5% (t +1.38) | +0.2% (t +0.08) |
+| touches at a rope's top | +10.4% (t +1.35) | -0.5% (t -0.10) |
+| ... a climb (ratio of totals) | 0.736 -> 0.785 | 1.165 -> 1.139 |
+| hangs a run | 4.85 -> 5.31 (+9.4%, t +1.96) | 6.10 -> 6.04 (-1.0%, t -0.33) |
+| hanging s a run | 9.3 -> 9.8 | 12.1 -> 12.0 |
+| of the hangs: longer / put back / waited out / took | 0.98 / 0.42 (seeds 1-24) / 0.10 / 0.27 a run | 0.75 / 0.29 (seeds 1-24) / 0.06 / 0.06 a run |
+| up regardless / the way clear | 4.15 -> 4.21 / 0.69 -> 0.65 | 5.73 -> 5.46 / 0.33 -> 0.44 |
+
+The rule acts on about half the runs: 27 of her 48 seeds and 31 of his are the same to the digit with it as with the
+2 s hang alone, so the differences rest on the other 21 and 17 (the review of 2026-11-03).
+Nothing told from nothing at 48 seeds (the most) in her world: the rule as fixed is level with the 2 s hang there,
+where as built it cost her 4.1% (t -2.55); on 1-24 EXP -1.6%, on 25-48 -0.2%. The thief's is level too (EXP +0.5%,
+touches -0.0%, a rope's top -0.5%; the touch taken 3 times in 48 runs). No death, fall out of the map, stop or stuck
+run in any. Against f8abbeb (the second touch by the first monster alone), her touches -3.6% (t -2.16),
+EXP +0.6%.
+
+What it still does: a hang up regardless after HANG_S where the top stays taken (a Horny chasing her by -80's top: the
+loops above) is as it was with the 2 s hang alone, the user's "otherwise 2s is what we wait"; the lever there (another
+way up, killing it from below, or stepping off on arrival within her invulnerability) isn't built. Assumed, not
+measured: that a hurt monster's HP bar means it chases her (the simulator's bars show every hurt one; live, a bar shows
+only for a while after a hit and a monster another player hurt chases that player); TAKE_AGAIN_S's 1 s; the planner's
+way back up as the knock-off's price (about 3 s planned from 13 to 10 at -80, where the loops took about 9).
+
+Goldens (Tree's 44, recorded with --jobs 2 into the lab; D:/MapleHelper-scratch/recfix/rope-on: golden_on2,
+golden_why2.txt; `golden check --jobs 2` after: 44 of 44): against the 2 s hang's traces (92b09c3) 39 the same, 5
+apart from a longer wait for a walker (loop_tree_grind_drops at 37.8 s: 15 -> 10 kills, 525 -> 350 EXP; loop_tree_grind_rope_top at
+30.5 s: 20 -> 12 kills, 790 -> 447 EXP in 95 -> 83 s; loop_tree_walls at 100.2 s: 15 -> 18 kills, 495 -> 633 EXP, 47 ->
+63 touches; loop_tree_grind_lucky_seven_key and loop_tree_stat_window in their log lines alone); no touch is taken in
+any (the first fix's loop_tree_grind_jump_key and loop_tree_stat_window took one, the Hornies at the top besides the one
+in the way left out of its price); all meet what they're there for but nav_tree_landing_shot_first and
+nav_tree_landing_no_shot, as on 560bd57.
+
+**The review's fixes** (2026-11-03: the review of 286853b for the supervised RiceBaby grind,
+D:/MapleHelper-scratch/recfix/rope-on-review; the fixes' runs in D:/MapleHelper-scratch/recfix/rope-fix, its
+README-1103.txt):
+- *The touch taken only where her HP covers every touch it's priced as* (major). The HP check had her HP over the
+  safety stop's reserve and one touch of the kind in the way, where the take is priced as two touches when a monster
+  stays at the top (the second by any kind): from her HP between the reserve and one touch and two she'd take both and
+  end under the reserve (hers 2 touches of 132-150: from 400-450 HP a two-touch take ends one touch from 0, the monster
+  that made it two still at the top). Now `Hunter.top_price` hands the navigator her HP's margin over the reserve as
+  last read and when (`TopPrice.margin`, `read`), the kind's touch HP (`hp`) and the map's largest (`largest`), and
+  `_take_now` takes it only where the margin covers the first touch and the second by its own kind (its EXP by its
+  kind too), and after a touch on the rope (`_climb_on`'s take, right after it) that touch as well, the largest (its
+  kind isn't told), unless her HP was read `HP_SETTLE_S` (0.37 s: the bar settles within a px by then,
+  perception.hp_number) or more after its popup; with her HP dropping alone (none told) it counts. The `took` event
+  says `margin` and `need`.
+- *A glance with no state ends no hang as clear* (minor): it's no news (the hang goes on; Senses' LookLost after
+  GLANCE_LOST_S, 0.3 s, of none, as anywhere), where it ended the hang as 'clear' and she climbed into what blocked her.
+  None of the 114,845 glances the review counted in the two 48-seed runs had no state; live not counted.
+- *Words* (notes): telemetry's records note has `took`'s `touches`, `margin`, `need`; the rule acts on about half the
+  runs (27 of her 48 seeds and 31 of his the same to the digit with it as with the 2 s hang alone: the level result
+  rests on the other 21 and 17).
+- *Open*: the take's price misses knock-offs its prediction doesn't see (minor). Of her 7 takes on seeds 1-24
+  (rope-on/runs/m_asis2_1-24.json), 2 were followed by a knock off 10 to 13, both priced as one touch on the rope at
+  0.2-0.25 s, no knock, no second touch predicted: seed 17 touched on the rope at 0.37 s and knocked off at 1.82 s
+  (her invulnerability's end, inside TAKE_AGAIN_S's window), seed 6 not touched on the rope, touched on 10 at 1.77 s
+  (inside the window) and knocked off at 3.48 s (past it); the Hornies at the top as each hang began were all unhurt
+  (wandering, the user's monster rule: the v83 AI's random stops and turns), and the planner's reach had none at the
+  top in the window. So the knock-off priced at the loops' ~9 s changes neither (with no second touch predicted no
+  knock-off enters the price; and the loops' 9 s is a way back with a hang and touches in it), and a longer
+  TAKE_AGAIN_S would reach seed 6's only where the planner's reach puts a monster at the top by 3.48 s, which it had
+  nowhere in the window (inferred, not run). Not changed (it measured level as it is, EXP -0.9%, t -0.82). The
+  repeated knock-offs at -80 after a hang up regardless are as before (the lever isn't built, the user's call).
+
+Measured (the harness, seeds 1-48 paired, 5 minutes, 8612c46, cached: baselines/harness/a9853ac2c7df...,
+99338909e27c92ee hers, 429c9e4a7b1f27f6 his): every field of every run the same as 3b59ca3's (r_mage_on2,
+r_thief_on2), hers and the thief's: so none of their takes (13 and 3) came at a margin under what it's now priced
+as, and no hang met a glance with no state (inferred from the runs being the same). So the table against the 2 s hang (Measured, above) stands to the digit (her EXP -0.9%, t
+-0.82; his +0.5%, t +0.41). Goldens: `golden check --jobs 2` 44 of 44 (no golden takes a touch).
+
 **Not done**: what a hang waits for is judged by the planner's reach (a walker's turn, a stander setting off), and in the
 thief's world the top seldom clears (above): when what blocks is a monster at its point or one chasing her, the lever
 is killing it (Magic Claw from below, to be measured in the magician's world now that rec-sim's simulator and this are
 merged, on work/rec-all; the thief's Lucky Seven doesn't reach 10 from 11) or another way up, not a smarter wait; the queued chain's climb (QUEUE_CHECK) is still withdrawn rather than hung on; `_meet` still waits on
 the floor below (WAIT_LOOKS) before a climb goes up and hangs; the air check is the glance's state's mode (the
-localizer's live: not checked live on a rope's jump). The touch taken prices one touch: the re-touches that may follow it
-at the top (the thief's +11.6% within 2 s) aren't in its price, and it's taken more often by the thief, whose evasion
-and the Green Mushroom's small touch make it cheap, than his EXP pays for (above); a price of what follows a touch at a
-rope's top, or a stricter one for him, is the next lever there. On the merged world (her climb the formula's 120 up and
-down, where this was chosen at 560bd57's 130 up) the rule measures worse for her than the 2 s hang alone (EXP -3.3%, t
--2.07; a rope's top +35.8%, t +2.49; 48 seeds: The whole measured), so from the final review of 2026-11-02 both are
-off (the 2 s hang alone, as at 560bd57; The final review's fixes) till they're tuned again on this world; HANG_LONGER
-only ever on a hunter's navigator (one with a price), never a retreat's. `--world hang-rules` (both on), `hang-2s`
-(both off) and `no-hang` (ROPE_HANG off) price them on any tip.
+localizer's live: not checked live on a rope's jump). The touch taken prices one more touch at the top at most (the
+second, after her invulnerability), not a run of them. Up regardless after HANG_S into a monster that stays at the top
+(a Horny chasing her by -80's: knocked off 10 to 13 and back up, again and again) is as it was with the 2 s hang alone:
+the lever there isn't built (On, the user's call). HANG_LONGER only ever on a hunter's navigator (one with a price),
+never a retreat's. `--world hang-2s` (both off), `no-hang` (ROPE_HANG off) and `hang-rules` (both on: the default since
+the user's call) price them on any tip.
 
 ## Localization
 
