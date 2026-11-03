@@ -4354,7 +4354,9 @@ while the glance's state has her in the air (the jump at the rope, whose top is 
 would let go of up before she holds the rope); and only where the hang itself is clear of every monster for HANG_S
 (`_hang_safe`). Then she hangs (`_hang`), looking at every state: once the way up is clear she climbs the rest, held as
 her climb on after a touch holds it; after HANG_S (2 s) she goes up regardless (a backstop event `HANG_S`, as a pass
-regardless goes), and a touch while she hangs ends it too (her invulnerability takes her past). A touch in the hang or in
+regardless goes), longer where the monsters in the way are predicted to walk off, and at once where the wait costs her
+more than the touch (How long she hangs, below); a touch while she hangs ends it too (her invulnerability takes her
+past). A touch in the hang or in
 the climb after it, told then or later (the popup's lag), is the cut's (POST_HIT: no fight while her invulnerability
 lasts, so the next chain passes the monster in it, as after a touch on the rope). The Lie Detector seen at a glance in
 the hang stops it there, as a pass's check does: no key goes out (the climb up the rest isn't sent) and the hunt stops
@@ -4366,7 +4368,8 @@ rope above where she grabs it), the mover's lone climb move (`_move_watch`: the 
 hangs her), and a touch on the rope with the top taken (`_climb_on`, CLIMB_LOOK: down to HANG_UNDER only and the hang
 there, where it went down the whole rope; down the whole rope still where the hang place isn't clear). A cut for a hang
 isn't a miss (`st.stopped`). Each hang is a telemetry event `rope_hang` at its start (step `hang`: x, how far under) and
-its end (`clear`, `touched` or `regardless`: s, what blocked the way), for the records of the next live run.
+its end (`clear`, `touched`, `regardless`, `waited` or `took`: s, what blocked the way, the longer wait's s, the touch's
+numbers), and in it `longer` and `back` (below), for the records of the next live run.
 
 **What the hang does, by the numbers** (the simulator's thief world, the standard grind below; the review of
 2026-11-02, D:/MapleHelper-scratch/recfix/review-rope: hangs.py, anal.py; counted again after its fixes on seeds 1-96,
@@ -4469,20 +4472,114 @@ the same EXP; the 48 seeds say EXP level (-0.3%, t -0.14), the cost they show is
 s with 1 touch where 5.1 s with 1); her climb on after a touch (CLIMB_ON) is shown by tests/test_rope_top.py,
 test_evade.py and test_touches.py, without ROPE_HANG.
 
+**How long she hangs, and the touch taken** (work/rec-rope2, from 2026-11-02, on work/rec-all 560bd57). The user,
+asked whether she hangs 2 s or 4 s: "If the mob is moving and has an expectation to clear the area soon, then we may
+wait a bit longer, but otherwise 2s is what we wait. And sometimes it may make sense to just take the damage if there
+are a lot EXP to earn by killing off mobs above." So HANG_S stays 2 s, and the wait is judged at the hang's start and at
+every look of it (`_hang_judge`):
+- *Longer for walkers* (`HANG_LONGER`, `_walks_off`, `_off_walk`). Where every monster in the way up (the planner's
+  reach, as `_way_up` has it) walks, the state's monsters are walked on as each is followed (its heading, its kind's
+  speed from the game data, turning at its platform's walk edges, as the simulator's v83 AI walks one through a
+  decision) and the first set-off d s from now whose climb, climb-over and STAND_PAST_S at the top meets none of them is
+  the predicted clear: she hangs till it and `HANG_MARGIN_S` (0.3 s), where that's past HANG_S, `HANG_HORIZON_S` (3 s)
+  or less from the hang's start, and her hang place clear that long. Re-judged at every look (the margin from the look
+  that first has the way clear already); a look with no clear in time has HANG_S (up at once if that's past); a walker
+  turning or stopping off its predicted walk (away from its walk edges, where it turns as predicted) puts it back to
+  HANG_S for the rest of the hang. One standing in the way gets no longer wait.
+- *The touch taken* (`HANG_TAKE`, `_take_now`, `_knock_cost`; `Hunter.top_price`). She climbs at once where the rest of
+  the wait at her EXP a second (the hunt's: the grind's loop's rate, as her landings are priced,
+  behavior.fight.landing_prices) costs more than the touch: the blocking kind's touch (Danger.taken of her max HP) in
+  potions at the user's prices (HP 2 a meso, MESO_EXP) times the share of her touches that hurt, and the s its knock
+  would lose her at that rate (none on the rope, where the game keeps her; standing at the top the knock's flight; a
+  knock off the top platform, the planner's way back up). Never with her HP under the safety stop's reserve and that
+  touch, nor in a navigator a hunter didn't make (a retreat's). After a touch on the rope with the top taken
+  (`_climb_on`) she goes up again at once so, where she went down to hang. The Lie Detector and the safety stop are
+  raised at the hang's glances whatever it chose. What the grind expects on the platform at the top (its stop there: the
+  monsters seen and the belief's, their EXP, her share and kill time: `Grind._ground_rate`) as her time's worth there
+  where more (`behavior.hunter.TOP_RATE_ABOVE`) is off: measured worse (below).
+- *Its records*: 'rope_hang' events `longer` (when it first goes past HANG_S: the predicted clear, the walkers, the
+  wait), `back` (why), and the ends `waited` (up at the longer wait's end, no backstop event) and `took` (`left`, `rate`,
+  `wait_exp`, `touch_exp`, `knock_s`); the harness's `rope_tops` counts each end (`hang_clear`, `hang_waited`,
+  `hang_took`, `hang_touched`, beside `hang_regardless`) and `hang_longer`.
+
+**Chosen on the harness** (D:/MapleHelper-scratch/recfix/rope2: hangs2.py runs each variant by its switches, compare2.py
+pairs seeds, perhang.py the hangs; the base work/rec-all 560bd57's 2 s hang, cached for both worlds,
+which the switches off reproduce to the digit on 4 seeds of each): the thief's standard grind and her standard world
+(The simulator's magician). HANG_LONGER alone, seeds 1-24, against the 2 s hang (EXP a minute, touches at a rope's top;
+t in brackets):
+
+| horizon, margin | the thief | she |
+|---|---|---|
+| **3 s, 0.3 s** | +2.3% (+1.30), -11.2% (-1.94) | +0.1% (+0.12), -9.0% (-1.49) |
+| 4 s, 0.3 s | -0.2% (-0.05), -9.9% (-1.18) | +1.0% (+0.65), -18.0% (-1.83) |
+| 3 s, 0 | -1.8% (-0.62), -6.4% (-0.85) | +1.8% (+1.15), -17.2% (-2.56) |
+| 3 s, 0.6 s | +2.5% (+1.27), -9.4% (-1.67) | +0.1% (+0.34), -4.9% (-1.00) |
+| 2.5 s, 0.3 s | +1.5% (+1.31), -3.0% | one seed of 24 changed |
+
+3 s and 0.3 s is the one setting better on both measures in both worlds; none is told from nothing at 24 seeds. Why not
+longer: a walker's decision lasts 1-3 s in the v83 AI, a third of the next ones standing and a third turning, so a walk
+predicted more than about a second past HANG_S seldom holds: at 4 s 84 of the thief's 106 longer hangs were put back for
+a turn or a stop (52 of 69 at 3 s; hers 43 of 69 and 26 of 45). The touch taken, priced at the hunt's rate or at the
+platform's (TOP_RATE_ABOVE, both rules at 3 s, 24 seeds, the margin then counted from every look): at the platform's
+she took the touch at 67% of her hangs and the thief at 39% (the platform's rate a mean 13 and 8.8 EXP a second, the
+hunts' 8.6 and 7.3), and both made less EXP than at the hunt's (-2.4%, t -1.51; -2.5%, -0.64), she with more touches
+(+7.4%, +1.85): the monsters up there don't leave while she waits, so the wait costs what her time is worth anywhere
+(the grind's own bar, behavior.patrol), not what she makes once she's up.
+
+**As committed** (3 s, 0.3 s, the hunt's rate), seeds 1-48, against the 2 s hang (560bd57), no hang (ROPE_HANG off, on
+the same code) and, for the thief, master 40ba190's cached seeds (its world before rec-sim's: the client's knock, the
+newborns untouchable; the cache reproduced to the digit on seeds 3 and 9 on today's game data):
+
+| | EXP a minute | touches | that hurt | potions | at a rope's top a climb | hanging s a run | took / longer, of the hangs |
+|---|---|---|---|---|---|---|---|
+| she, against the 2 s hang | **+3.5% (+2.32)** | -3.9% (-1.25) | (all hurt) | -4.0% (-1.15) | -2.0% (-0.33) | 10.6 -> 8.1 | 76 / 93 of 276 |
+| she, against no hang | -2.3% (-1.27) | **-8.4% (-2.34)** | | -9.7% (-2.29) | **-19.7% (-2.78)** | 0 -> 8.1 | |
+| the thief, against the 2 s hang | +0.9% (+0.38) | **+7.6% (+2.42)** | +5.8% (+1.65) | +3.8% (+0.99) | +3.2% (+0.70) | 12.8 -> 8.5 | 102 / 129 of 299 |
+| the thief, against no hang | -2.1% (-0.82) | -2.9% (-1.14) | -2.7% (-0.88) | -2.9% (-0.88) | **-12.0% (-2.15)** | 0 -> 8.5 | |
+| the thief, against master 40ba190 | -3.2% (-1.36) | -17.2% (-5.24) | -17.7% (-4.67) | -18.1% (-3.91) | | 0 -> 8.5 | |
+
+The 2 s hang against no hang on the same code: her EXP 5.6% under (t -3.20), her touches at a rope's top 20% under
+(t -2.01); the thief's EXP 3.0% under (-1.10), his touches 9.8% under (-3.55), at a rope's top 22.5% under (-3.24). So in her world (the character played live) the two rules take
+back about 60% of the EXP the 2 s hang cost her and keep its touches at the top down (-19.7% a climb against none) with
+fewer touches than either; in the thief's they take back a little of the EXP, keep the touches at the top down as much
+as the 2 s hang, and add touches elsewhere (+7.6%, those that hurt +5.8%; re-touches within 2 s +11.6%, t +2.14): his
+touches are cheap by the pricing (a Green Mushroom's 8.8 EXP at his evasion, under his 2 s at 7.2 EXP a second), and
+he takes them at 34% of his hangs. On seeds 1-24 his EXP was +5.3% and his touches +2.9%; 25-48 took it back. No death,
+fall out of the map or stop in any run. Of her 92 longer hangs that ended in the runs, 1 ended at its own end
+('waited'), 11 with the way judged clear, 19 with the touch taken; of the 61 up regardless, 43 had been put back for a
+turn or a stop.
+
+Goldens (recorded into D:/MapleHelper-scratch/recfix/rope2/golden_cand2 as a check, beside 560bd57's in golden_base:
+golden_why2.txt): 27 the same, 17 apart from their first hang on (a touch taken, or a longer wait), loop_tree_attack_no_darts
+re-seeded 11 -> 14 (of 1-16, 8 and 14 meet all of it); the 16 others 359 -> 367 touches, 10,930 -> 11,299 EXP in 2,620
+-> 2,547 s. All meet what they're there for but nav_tree_landing_shot_first and nav_tree_landing_no_shot, which don't on
+560bd57 either. Not recorded for good here (the next stage records them).
+
+Assumed, not measured: the walk prediction's worth live (the v83 AI is the simulator's; the live hour's hindsight had
+8 of 15 blocked climbs clear within 2 s); the touch's price (its HP in potions at the user's prices, her hurt share, the
+planner's 53.5-unit knock, not the client's 87, for where a knock at the top lands her); that she can climb on at once
+after the cut of a touch taken (as after any hang).
+
 **To check in game** (a supervised grind as RiceBaby): the log's "a horny-mushroom on 10 by its top: hanging on the rope
 at x -80, N under its top" and "hung N s, the way up clear ...", and the 'rope_hang' telemetry events: per event, whether
 a touch at that rope follows within 3 s of its end (the simulator: 91%) and how often the way up clears within HANG_S
 (the simulator: 42 of 476; the live hour's hindsight: 8 of its 15 blocked climbs within 2 s); the touches at the top of
--80 a climb (0.3 live on 2026-11-02, about 19-23 in 35 minutes over 68 climbs) and the hangs' seconds. The harness's
-thief world is the measure until her own simulator world is merged (the roadmap's item 8, work/rec-sim: merged on
-work/rec-all, the hang not measured in her world yet).
+-80 a climb (0.3 live on 2026-11-02, about 19-23 in 35 minutes over 68 climbs) and the hangs' seconds. And how long
+she hangs, the touch taken (above): "..., walking off (...): the way up predicted clear N s into the hang, hanging M s"
+and "...: back to HANG_S" (a turn or a stop), "hung N s, up after N s, the touch taken: ..."; per 'rope_hang' event
+`longer`, whether the walkers did walk off by its `clear` (the simulator: of her 92 longer hangs 1 waited out, 43 put
+back), and per `took` whether one touch came or more (her re-touches within 2 s after it); her HP never under the
+safety stop's reserve and a touch after a `took`.
 
 **Not done**: what a hang waits for is judged by the planner's reach (a walker's turn, a stander setting off), and in the
 thief's world the top seldom clears (above): when what blocks is a monster at its point or one chasing her, the lever
 is killing it (Magic Claw from below, to be measured in the magician's world now that rec-sim's simulator and this are
 merged, on work/rec-all; the thief's Lucky Seven doesn't reach 10 from 11) or another way up, not a smarter wait; the queued chain's climb (QUEUE_CHECK) is still withdrawn rather than hung on; `_meet` still waits on
 the floor below (WAIT_LOOKS) before a climb goes up and hangs; the air check is the glance's state's mode (the
-localizer's live: not checked live on a rope's jump).
+localizer's live: not checked live on a rope's jump). The touch taken prices one touch: the re-touches that may follow it
+at the top (the thief's +11.6% within 2 s) aren't in its price, and it's taken more often by the thief, whose evasion
+and the Green Mushroom's small touch make it cheap, than his EXP pays for (above); a price of what follows a touch at a
+rope's top, or a stricter one for him, is the next lever there.
 
 ## Localization
 
