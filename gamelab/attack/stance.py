@@ -875,12 +875,12 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
         slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
         if limits is not None:
             slo, shi = max(platform.left, limits[0]), min(platform.right, limits[1])
-        act = _close_quarters(x, close, mine, facing, slo, shi, can_jump, tops or MONSTER_TOP, halves,
-                              (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
-                              else None, danger, platform, body, up, y, pace, moves, seen=around, castable=castable,
-                              clawed=clawed)
-        if clawed and CLAWED_CLOSE and CLAWED_AIR and POINT_BLANK and act[0] == "jump_throw" \
-                and not getattr(plan_of(act), "sure", False):  # (an unsure jump in place: past the one on her instead)
+        act, unsure = _close_quarters_here(x, close, mine, facing, slo, shi, can_jump, tops or MONSTER_TOP, halves,
+                                           (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END)
+                                           if SNAIL_FAR_END else None, danger, platform, body, up, y, pace, moves,
+                                           seen=around, castable=castable, clawed=clawed)
+        if clawed and CLAWED_CLOSE and CLAWED_AIR and POINT_BLANK and act[0] == "jump_throw" and unsure:
+            # (an unsure jump in place, a tap first or not: past the one on her instead)
             past = [t for t in reachable if not any(t is c for c in close)]
             air = _from_air(x, y, act[1], past, facing, can_jump, tops, halves, platform, pace) if past else None
             if air is not None:
@@ -1097,14 +1097,19 @@ def close_to(t: Monster, x: float, halves: dict[str, float] | None = None) -> bo
     return abs(t.x - x) < reach.ground_sure(half_of(t.kind, halves))[0]
 
 
-def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing: str | None, lo: float,
-                    hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float],
-                    halves: dict[str, float] | None = None, ends: tuple[float, float] | None = None,
-                    danger: Danger | None = None, platform: Platform | None = None,
-                    around: list[Monster] | None = None, up: Callable[[float], Platform | None] | None = None,
-                    y: float | None = None, pace: Pace = NO_PACE, moves: int = 0,
-                    seen: list[Monster] | None = None, castable: Callable[[Monster], bool] | None = None,
-                    clawed: bool = False) -> tuple:
+def _close_quarters(*args, **kw) -> tuple:
+    """_close_quarters_here's act alone."""
+    return _close_quarters_here(*args, **kw)[0]
+
+
+def _close_quarters_here(x: float, close: list[Monster], mine: list[Monster], facing: str | None, lo: float,
+                         hi: float, can_jump: Callable[[float, float], bool], tops: dict[str, float],
+                         halves: dict[str, float] | None = None, ends: tuple[float, float] | None = None,
+                         danger: Danger | None = None, platform: Platform | None = None,
+                         around: list[Monster] | None = None, up: Callable[[float], Platform | None] | None = None,
+                         y: float | None = None, pace: Pace = NO_PACE, moves: int = 0,
+                         seen: list[Monster] | None = None, castable: Callable[[Monster], bool] | None = None,
+                         clawed: bool = False) -> tuple[tuple, bool]:
     """A monster on her platform too close for a throw from the ground (`close`, as it will be when her next attack
     starts: too_close; `mine`: all on her platform), the nearest one then deciding (on the side she faces, if any will
     be there: one walking at her stops where it meets her, on its side, Pace's PACE_STOP; with FIRST_TO_REACH, the
@@ -1130,7 +1135,9 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     surely picks it with (_from_here), and with none, `castable` saying no to it, or her search not picking it then,
     no throw at it: a step, a jump back (the jump away alone) or ('wait',), never the claw's swipe nor a jump in place
     (which went out as a cast from the ground that picked nothing). `clawed` (stance's): no throw from the ground at it
-    is sure (CLAWED_AIR: the claw takes it)."""
+    is sure (CLAWED_AIR: the claw takes it). Returns the act and whether it's the throw from where she stands whose
+    attack surely takes nothing (_from_here's `sure` False: an unsure jump in place, a tap first or not, for stance's
+    CLAWED_CLOSE; JumpPlan.sure is its jitter room's, not its target's: the review of 2026-11-03)."""
     at = pace.lead + GROUND_PICK_S  # where each will be when a throw from the ground would start (its side, how near)
     where = {id(t): pace.at(t, x, at, walks_on(t, platform)) for t in close}
 
@@ -1186,32 +1193,34 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     if danger is not None and platform is not None and (danger.keep_off(nearest.kind) > near_ground or touched):
         act = _escape(x, side, room, can_jump, danger, platform, others, here, halves, up, stepping, spawns,
                       stay=CLEAR_STAY if touched else 0.0)
-        return alt.act if alt is not None and act is here.act else act
+        if alt is not None and act is here.act:
+            return alt.act, False
+        return act, act is here.act and not here.sure
     if here.sure:
-        return here.act
+        return here.act, False
     jumpable = jump_reach(top, half) < near_ground
     if JUMP_THROW_SNAILS and not jumpable and jump_reach(top, half) < 2 * near_ground and can_jump(x, x):
         # (cornered or not, a kind the jump's attack picks at all near her: a snail from 143, not one 5 tall)
         return (("jump_throw", side) if facing == side
-                else ("jump_throw", side, JumpPlan(physics.JUMP_ATTACK_MS, 0, False, "tap first")))
+                else ("jump_throw", side, JumpPlan(physics.JUMP_ATTACK_MS, 0, False, "tap first"))), True
     far = room
     if ends is not None and not jumpable:
         far = max(room, (ends[1] - x) if away == RIGHT else (x - ends[0]))
     step = (_clear_step(x, y, nearest, away, far, top, half, platform, others, halves, pace, can_jump, spawns, danger)
             if stepping else None)  # (no endless backing off: her decisions are made again at each look)
     if step is not None and not behind:
-        return ("back", away, step, AWAY)
+        return ("back", away, step, AWAY), False
     if room >= JUMP_BACK_ROOM and not behind and can_jump(x, x + back * JUMP_BACK_SPAN) and jumpable \
             and not _on_spawn(x + back * JUMP_BACK_SPAN, spawns):
-        return ("jump_back", side)
+        return ("jump_back", side), False
     if stepping and not can_jump(x, x) and room >= STEP_ROOM and not behind \
             and not _on_spawn(x + back * min(STEP_AWAY, room), spawns):
         # A platform just overhead: a jump lands her on it (on 20, five jump-throws at a snail put her up on 19 five
         # times). Step away, else throw from the ground.
-        return ("back", away, min(STEP_AWAY, room), AWAY)
+        return ("back", away, min(STEP_AWAY, room), AWAY), False
     if not jumpable:
-        return ("throw", side) if POINT_BLANK else here.act  # (her: no claw to swipe it with)
-    return here.act if alt is None else alt.act
+        return (("throw", side), False) if POINT_BLANK else (here.act, not here.sure)  # (her: no claw to swipe it with)
+    return (here.act, not here.sure) if alt is None else (alt.act, False)
 
 
 def _contact_s(t: Monster, x: float, pace: Pace, platform: Platform | None, halves: dict[str, float] | None,

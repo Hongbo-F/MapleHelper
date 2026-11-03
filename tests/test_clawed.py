@@ -202,6 +202,21 @@ def test_up_close_an_unsure_jump_in_place_becomes_a_sure_one_past_the_monster_on
     assert stance(10, [on_her, past], clawed=True) == before
 
 
+def test_up_close_facing_away_the_unsure_tap_first_jump_becomes_a_sure_one_past_the_monster_on_her(monkeypatch):
+    """Facing away from the one on her, the last resort is the jump in place tapped round first, as unsure of its
+    target (_from_here's `sure` False) though its plan says 'tap first' (JumpPlan.sure is its jitter room's, checked or
+    not: the review of 2026-11-03 found CLAWED_CLOSE taking that for a sure jump and keeping it): clawed, the sure jump
+    throw past it goes instead, tapped round too."""
+    on_her, past = mon(50), mon(160)
+    before = stance(10, [on_her, past], facing=LEFT)
+    assert before[:2] == ("jump_throw", RIGHT) and st.plan_of(before).why == "tap first"
+    act = stance(10, [on_her, past], facing=LEFT, clawed=True)
+    assert act[:2] == ("jump_throw", RIGHT) and touched(act) and st.plan_of(act).target is past
+    assert st.plan_of(act).why == "touched, tap first" and not st.plan_of(act).air_turn
+    monkeypatch.setattr(st, "CLAWED_CLOSE", False)
+    assert stance(10, [on_her, past], facing=LEFT, clawed=True) == before
+
+
 def test_up_close_the_other_ways_throw_is_weighed_as_a_clawed_decision_throws(monkeypatch):
     # The three cornered fixes together (work/cornered-all): with FIRST_TO_REACH her close quarters weigh the nearest on
     # each side, and with `clawed` neither throw is from the ground (a monster the looks miss is on her: the claw would
