@@ -454,7 +454,8 @@ def test_a_move_that_never_moved_her_dot_by_a_rope_s_top_is_the_rope_only_more_t
 def test_her_climb_on_after_a_touch_only_under_the_rope_s_top():
     """The review's: up again went at -2 and -12 under the top, her off the rope already, and its hold kept her by the
     mushroom on the platform: under the top by CLIMB_ON_UNDER at least, by her dot or (none) the plan's height; and
-    held as a chain's climb holds it (52 under: 0.75 s, where climb_ms had 0.945 s)."""
+    held as a chain's climb holds it (52 under at flow.ROPE_SPEED, her climb, and UP_EXTRA: 0.78 s at the thief's 121,
+    0.75 s at the 130 of before 2026-11-02, where climb_ms had 0.945 s)."""
     import time
     from gamelab.control.navigator import CLIMB_ON_UNDER, _Running
     from gamelab.motion.bodies import Climb
@@ -476,5 +477,5 @@ def test_her_climb_on_after_a_touch_only_under_the_rope_s_top():
     nav.actions = SimpleNamespace(keys=SimpleNamespace(up=SimpleNamespace(name="up")),
                                   play=lambda events, name: played.append((events, name)))
     nav._climb_on(top, top + 52)
-    assert played == [([[0, "up", "down"], [750, "up", "up"]], "climb_on")]
-    assert nav.logged[-1] == "    touched on the rope 52 under its top: up again (750 ms)"
+    assert played == [([[0, "up", "down"], [780, "up", "up"]], "climb_on")]
+    assert nav.logged[-1] == "    touched on the rope 52 under its top: up again (780 ms)"

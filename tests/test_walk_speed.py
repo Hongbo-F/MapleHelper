@@ -47,16 +47,15 @@ def test_her_planned_walk_is_her_measured_one():
     assert v83 == 125.0 and HER_RAW / v83 > 1.15
 
 
-def test_the_thiefs_planned_walk_is_unchanged_and_within_hers_measured():
-    """The thief's profile walks her at 149.0 as before the formula (99.2 + 20 = 119.2 exactly: her goldens and the
-    harness's baselines unchanged), inside her measured 148-151.5 and 1.5% under her 151.2 on Tree Dungeon, which her
-    stat window's 101 gives (151.25: the move to it is for the simulator's next re-baselining)."""
+def test_the_thiefs_walk_is_his_stat_windows_and_within_his_measured():
+    """The thief's profile's SPEED is his stat window's 101 from 2026-11-02 (his walk until a hunt reads his stat
+    window's: motion.physics.set_speed), 151.25, inside his measured 148-151.5 and within 0.5% of his 151.2 on Tree
+    Dungeon; until then 99.2, 149.0 (119.2's under the old formula), kept for the simulator's goldens."""
     planned = physics.shoe_of(thief.FIXED_STATS).vmax
-    assert thief.FIXED_STATS == config.Character() and planned == 149.0 == physics.WALK_SPEED  # (the tests play her)
+    assert thief.FIXED_STATS == config.Character() and planned == 151.25 == physics.WALK_SPEED  # (the tests play her)
     assert THIEF_BAND[0] <= planned <= THIEF_BAND[1]
-    assert planned == pytest.approx(statistics.median(_limits("thief")), rel=0.015)
-    window = physics.shoe_of(config.Character(speed=WALKS["characters"]["thief"]["stat_window_speed"])).vmax
-    assert window == 151.25 and window == pytest.approx(statistics.median(_limits("thief")), rel=0.005)
+    assert thief.FIXED_STATS.speed == WALKS["characters"]["thief"]["stat_window_speed"]
+    assert planned == pytest.approx(statistics.median(_limits("thief")), rel=0.005)
 
 
 @pytest.mark.parametrize("who", ["magician", "thief"])
@@ -76,18 +75,15 @@ def test_the_recorded_walks_are_the_clients_formula_not_v83s(who):
     assert statistics.median(row[5] for row in c["walks"]) == pytest.approx(client, rel=0.01)
 
 
-def test_her_stat_window_said_only_where_it_isnt_her_walk():
-    """The hunter's note on her stat window's SPEED and JUMP (statcheck.moves_notes): before 2026-11-02 it compared the
-    window's SPEED with config.toml's fitted 119.2 and said so at every read for the thief. Now like for like: the
-    magician's 100 against her profile's 100 says nothing; the thief's 101 against her profile's 99.2 says the walk
-    each gives; a JUMP apart too."""
+def test_her_stat_window_said_only_where_it_isnt_her_jump():
+    """The hunter's note on her stat window's JUMP (statcheck.moves_notes): before 2026-11-02 it compared the window's
+    SPEED with config.toml's fitted 119.2 and said so at every read for the thief. Her SPEED isn't said there from
+    2026-11-02: her walk and climb are its own by the client's formula (Hunter._speed_read, motion.physics.set_speed:
+    tests/test_panel_speed.py). A JUMP apart is."""
     reading = lambda **v: SimpleNamespace(get=v.get)
     where = lambda stat: "her profile"
     assert statcheck.moves_notes(reading(speed=100, jump=100), magician.FIXED_STATS, where) == []
-    assert statcheck.moves_notes(reading(speed=99, jump=100), thief.FIXED_STATS, where) == []  # (under a point)
-    assert statcheck.moves_notes(reading(speed=101, jump=100), thief.FIXED_STATS, where) == [
-        "her SPEED 101% by her stat window walks her at 151.25 units/s; her moves are planned at 149 (her profile "
-        "speed 99.2)"]
+    assert statcheck.moves_notes(reading(speed=130, jump=100), thief.FIXED_STATS, where) == []  # (her walk's own)
     assert statcheck.moves_notes(reading(speed=None, jump=110), magician.FIXED_STATS, where) == [
         "her JUMP 110% by her stat window jumps her at 610.5 units/s; her moves are planned at 555 (her profile jump "
         "100)"]

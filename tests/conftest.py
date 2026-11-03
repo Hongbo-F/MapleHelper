@@ -119,3 +119,12 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(damage, "THREADED", False)
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
+
+
+@pytest.fixture(autouse=True)
+def her_profile_speed():
+    """Her planner's walk and climb her profile's SPEED's after every test (motion.physics.reset): a test that sets
+    another (physics.set_speed, a hunter that took her stat window's) leaves the next its own."""
+    yield
+    from gamelab.motion import physics
+    physics.reset()

@@ -9,7 +9,9 @@ import bisect
 import itertools
 import math
 import os
+import sys
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from maplehelper import config
@@ -42,23 +44,64 @@ def shoe_of(stats: config.Character) -> body.Shoe:
     return body.Shoe.from_physics(body.PHYSICS_IMG, stats.speed, stats.jump, bonus=body.SPEED_BONUS)
 
 
+def walk_of(speed: float) -> float:
+    """The walk (units/s) a stat window's SPEED (%) gives by the client's formula: 125 x (SPEED + 20)/100, SPEED
+    within body.SPEED_RANGE first (150 at 100, 151.25 at 101)."""
+    s = min(max(float(speed), body.SPEED_RANGE[0]), body.SPEED_RANGE[1])
+    return body.PHYSICS_IMG["walkSpeed"] * (s + body.SPEED_BONUS) / 100.0
+
+
+def climb_of(speed: float) -> float:
+    """The climb (units/s, up or down a rope or a ladder) a stat window's SPEED (%) gives by the client's formula:
+    SPEED + 20 (meowdb's guide and its calculator, `a + 20`; v83 climbed a fixed 100 whatever her SPEED, RustMS
+    PlayerStates.cpp's 3 px every 30 ms), SPEED within body.SPEED_RANGE: 120 at 100, 121 at 101. Her recordings of
+    2026-11-02 at SPEED 100: 119.9 up, 119.6 down (README "Her walk and climb from her stat window's SPEED")."""
+    s = min(max(float(speed), body.SPEED_RANGE[0]), body.SPEED_RANGE[1])
+    return CLIMB_BASE * (s + body.SPEED_BONUS) / 100.0
+
+
+CLIMB_BASE = 100.0  # units/s a character climbs at SPEED + bonus 100 (v83's every-speed 100, scaled as the walk is)
+
+
+def speed_of_walk(walk: float) -> float:
+    """The SPEED (%) a stat window would show for a measured walk by the client's formula (walk_of's inverse, no
+    clamp): walk / 1.25 - 20 (her 149.4 is 99.5; analysis.walkfit's check of the formula)."""
+    return float(walk) / (body.PHYSICS_IMG["walkSpeed"] / 100.0) - body.SPEED_BONUS
+
+
+def speed_of_climb(climb: float) -> float:
+    """... and for a measured climb (climb_of's inverse): climb - 20."""
+    return float(climb) / (CLIMB_BASE / 100.0) - body.SPEED_BONUS
+
+
 def record() -> dict:
     """Her physics as this process plans her moves, for the telemetry 'session' record (from 2026-11-02, so a run's
     records say what walk its timed holds were planned at: analysis.walkfit measures her walk against it): who plays
-    (`character`, `class`), her stats' SPEED and JUMP (%), the Speed the client adds to hers (`bonus`: body.SPEED_BONUS,
-    from 2026-11-02's walk fix) and the walk and climb they give (units/s)."""
+    (`character`, `class`), the SPEED her walk and climb are planned at and her JUMP (%), the Speed the client adds to
+    hers (`bonus`: body.SPEED_BONUS, from 2026-11-02's walk fix) and the walk and climb they give (units/s), as planned
+    when it's written (her profile's SPEED until a hunter sets her stat window's: set_speed; a change later in the run
+    is a 'motion' record of its own, behavior.hunter)."""
     c = character.resolved() or character.active()
-    return {"character": c.id, "class": c.klass, "speed": CHARACTER.speed, "jump": CHARACTER.jump,
-            "bonus": body.SPEED_BONUS, "walk": round(WALK_SPEED, 2), "climb": CLIMB_SPEED}
+    return {"character": c.id, "class": c.klass, "speed": SPEED, "jump": CHARACTER.jump, "bonus": body.SPEED_BONUS,
+            "walk": round(WALK_SPEED, 2), "climb": round(CLIMB_SPEED, 2)}
 
 
 CHARACTER = character.active().stats  # (who plays, resolved once: stats() as the process has it, her profile's)
-SHOE = shoe_of(CHARACTER)
 LAGS = body.Lags()
+# Her walk and climb by the client's formula at her profile's SPEED (walk_of, climb_of): her planner's until a hunter
+# sets her stat window's SPEED (set_speed below: behavior.hunter, the one her stats file kept from her last read, or
+# her read at a hunt's start or in its hunt loop). The simulator's world moves her at her profile's (sim.world.her_shoe,
+# her_climb: the world's truth), whatever her planner has.
+PROFILE_SHOE = shoe_of(CHARACTER)
+PROFILE_CLIMB = climb_of(CHARACTER.speed)
+SPEED = CHARACTER.speed  # % her walk and climb are planned at: her profile's, or her stat window's once set (set_speed)
+SHOE = PROFILE_SHOE
 
 WALK_SPEED = SHOE.vmax   # map units/s: 125 x (SPEED + 20)/100 (body.SPEED_BONUS): the magician's 150 at her stat
-                         # window's 100 (she walks 149.4), the thief's 149 at her profile's 99.2 (she walks 151.2)
-CLIMB_SPEED = 117.0      # map units/s: measured 0.165 screen px/ms (the thief at 1920x1080; the magician climbs 119.9)
+                         # window's 100 (she walks 149.4), the thief's 151.25 at his 101 (he walks 151.2)
+CLIMB_SPEED = PROFILE_CLIMB  # map units/s: SPEED + 20 (climb_of): the magician's 120 (she climbs 119.9 up, 119.6
+                             # down), the thief's 121 (until 2026-11-02 a shared 117: the thief's 0.165 screen px/ms at
+                             # 1920x1080)
 JUMP_SPEED = SHOE.vjump  # physics: jumpSpeed x JUMP/100 (555)
 GRAVITY = SHOE.gravity   # physics: gravityAcc (2000)
 FALL_SPEED = SHOE.fall   # physics: fallSpeed (670, terminal)
@@ -133,10 +176,16 @@ BLIND_RISK = 0.05  # the most jumps from standing that may leave short
 # arrow or more) but for at most BLIND_RISK of jumps, wherever in that range the lags' gap is: 150. By the
 # median lags 129 (138 for 1%), by the sweeps' best fit 134; at the old 118, 20% leave short by the median lags,
 # 33% by the best fit and up to 50% within its range. No jump from standing is keyed sooner than this after its
-# arrow (sure_jump_ms), but in the kick's window with KICK_JUMPS.
-BLIND_ENDS_MS = max(body.blind_ends_ms(SHOE, replace(LAGS, jump=LAGS.on + gap, sd_on=sd / math.sqrt(2),
-                                                     sd_jump=sd / math.sqrt(2)), BLIND_RISK)
-                    for gap in SWEEP_LAG_GAP for sd in SWEEP_LAG_GAP_SD)
+# arrow (sure_jump_ms), but in the kick's window with KICK_JUMPS. (The same 150 for any walk from 134 to 168: three of
+# the game's steps, 126, short of 0.94 of it, four at full speed.)
+def _blind_ends(shoe: body.Shoe) -> int:
+    """BLIND_ENDS_MS for `shoe`: the latest blind spot's end over the sweeps' range of the lags' gap and spread."""
+    return max(body.blind_ends_ms(shoe, replace(LAGS, jump=LAGS.on + gap, sd_on=sd / math.sqrt(2),
+                                                sd_jump=sd / math.sqrt(2)), BLIND_RISK)
+               for gap in SWEEP_LAG_GAP for sd in SWEEP_LAG_GAP_SD)
+
+
+BLIND_ENDS_MS = _blind_ends(SHOE)
 # Attacks from a jump (control.actions times her key plans with these; attack.reach works out what such an
 # attack can hit). An attack picks its target when it starts, about JUMP_LAG after its key, the same input
 # lag as a jump's lift-off: so when it starts she has been in the air for about as long as the attack key
@@ -508,3 +557,112 @@ def run_ms(units: float) -> int:
     if units <= 0:
         return 0
     return sure_jump_ms(round(units / WALK_UNITS_PER_MS + RUN_LAG_MS))
+
+
+# --- her walk and climb from her stat window's SPEED (behavior.hunter) --------------------------------------------
+# Her planner's walk and climb are the client's formula's at her stat window's SPEED (the user, 2026-11-02, shown that
+# the formula and her measured walks and climbs agree: "Just use panel, no need to measure."): her profile's at import,
+# her stat window's once a hunter sets it (behavior.hunter: at its start the SPEED her stats file kept from her last
+# read, at a read at a hunt's start, or at a read put off into its hunt loop). A change is made only where no chain of
+# hers runs: at once at a hunter's start (set_speed), or proposed in the hunt loop (propose) and made at the next
+# settle (at the start of a navigator's pass, Navigator._follow_walk, and of the hunt loop's, Hunt.run), so a chain
+# already running keeps the timings it was planned with (its keys are the player's already, its legs' times and places
+# worked out). What's made again (set_speed): every name of WALK_NAMES here (her shoe, and each lag, slide and hold made
+# of her walk: the expressions at each name above, made again by _derive), each rebound in every module of gamelab that
+# took it by name (`from .physics import WALK_SPEED`: the old object found there, under its own name, replaced; the
+# simulator's world takes none of them, its walk its own: sim.world.her_shoe), then each module's own made of them
+# (`follows`: motion.route's rope jump and grab lead, motion.flow's grab lead and climb up, control.actions' jump back's
+# lead, control.navigator's key leads), and EPOCH counted on: a navigator seeing it changed makes its route graph again
+# (its running jumps' takeoffs and landings, the moves' costs: route.Planner, 0.1-0.3 s on Tree Dungeon). Not made
+# again, as nothing in them is of her walk: fly's landings (_FLY_CACHE: her flight's air steps take Physics.img's and
+# her JUMP's alone, body.air_step) and the C flight's shoes (_SHOES, by shoe); motion.body's closed forms take the shoe
+# as an argument, its one cache (body.steps_run) keyed by it, so a new shoe never gets an old one's answer.
+WALK_NAMES = ("SHOE", "WALK_SPEED", "CLIMB_SPEED", "RUN_LAG", "TURN_EXTRA", "STOP_RUN", "STOP_S", "LAND_SLIDE",
+              "WALK_UNITS_PER_MS", "WALK_UNITS_FIXED", "RUN_LAG_MS", "BLIND_ENDS_MS", "KICK_SPEED")
+EPOCH = 0  # one more at every change of her walk or climb (set_speed): what a navigator's route graph was made at
+_FOLLOWERS: list[Callable[[], None]] = []
+_PENDING: tuple[float, Callable | None] | None = None  # (SPEED, told once it's made) a change waiting for the next settle
+
+
+def _derive(shoe: body.Shoe, climb: float) -> None:
+    """Every name of WALK_NAMES made again for `shoe` and `climb`, by the expressions at each name above (tests/
+    test_panel_speed.py holds the two to the same answers at her profile's SPEED)."""
+    global SHOE, WALK_SPEED, CLIMB_SPEED, RUN_LAG, TURN_EXTRA, STOP_RUN, STOP_S, LAND_SLIDE, WALK_UNITS_PER_MS
+    global WALK_UNITS_FIXED, RUN_LAG_MS, BLIND_ENDS_MS, KICK_SPEED
+    SHOE, WALK_SPEED, CLIMB_SPEED = shoe, shoe.vmax, float(climb)
+    RUN_LAG = LAGS.on + WALK_SPEED / (2 * SHOE.acc)
+    TURN_EXTRA = body.run_time(100.0, -WALK_SPEED, 1, SHOE) - body.run_time(100.0, 0.0, 1, SHOE)
+    STOP_RUN = body.stop_distance(WALK_SPEED, SHOE, LAGS)
+    STOP_S = body.stop_time(WALK_SPEED, SHOE, LAGS)
+    LAND_SLIDE = body.slide(WALK_SPEED, SHOE)
+    WALK_UNITS_PER_MS = WALK_SPEED / 1000
+    WALK_UNITS_FIXED = body.hold_distance(1000, SHOE, LAGS) - WALK_SPEED
+    RUN_LAG_MS = round((RUN_LAG - JUMP_LAG) * 1000)
+    BLIND_ENDS_MS = _blind_ends(SHOE)
+    KICK_SPEED = SHOE.kick * WALK_SPEED
+
+
+def follows(fn: Callable[[], None]) -> Callable[[], None]:
+    """Decorator: `fn` makes its module's own names of her walk again (its globals), after every change (set_speed), in
+    the order the modules registered (as they were imported: a module's before those importing it)."""
+    _FOLLOWERS.append(fn)
+    return fn
+
+
+def set_speed(speed: float) -> bool:
+    """Her planner's walk and climb those of SPEED `speed` (%) by the client's formula (shoe_of at her profile's JUMP,
+    climb_of), at once, and everything of them made again (see above). Whether her walk or climb changed (a SPEED past
+    the client's range walks as its end does: body.SPEED_RANGE). Only where no chain of hers runs: a hunter's start,
+    settle's, the tests' (and `reset`)."""
+    global EPOCH, SPEED
+    SPEED = float(speed)
+    shoe = PROFILE_SHOE if SPEED == CHARACTER.speed else shoe_of(replace(CHARACTER, speed=SPEED))
+    climb = climb_of(SPEED)
+    if shoe.vmax == WALK_SPEED and climb == CLIMB_SPEED:
+        return False
+    old = {n: globals()[n] for n in WALK_NAMES}
+    _derive(shoe, climb)
+    me = sys.modules[__name__]
+    for mod in list(sys.modules.values()):
+        if mod is me or not getattr(mod, "__name__", "").startswith("gamelab."):
+            continue
+        names = vars(mod)
+        for n, v in old.items():
+            if names.get(n) is v:
+                names[n] = globals()[n]
+    for fn in _FOLLOWERS:
+        fn()
+    EPOCH += 1
+    return True
+
+
+def propose(speed: float, then: Callable[[tuple[float, float, float], tuple[float, float, float]], None] | None = None
+            ) -> None:
+    """Her walk and climb to be SPEED `speed`'s from the next settle (one proposed before replaced), `then(old, new)`
+    told once they've changed ((walk, climb, SPEED) each)."""
+    global _PENDING
+    _PENDING = (float(speed), then)
+
+
+def settle() -> bool:
+    """A change proposed made now (set_speed): where no chain of hers runs (see above). Whether her walk or climb
+    changed."""
+    global _PENDING
+    if _PENDING is None:
+        return False
+    speed, then = _PENDING
+    _PENDING = None
+    old = (WALK_SPEED, CLIMB_SPEED, SPEED)
+    if not set_speed(speed):
+        return False
+    if then is not None:
+        then(old, (WALK_SPEED, CLIMB_SPEED, SPEED))
+    return True
+
+
+def reset() -> bool:
+    """Her walk and climb back to her profile's, nothing proposed (the tests' after each: tests/conftest.py). Whether
+    anything changed."""
+    global _PENDING
+    _PENDING = None
+    return set_speed(CHARACTER.speed)

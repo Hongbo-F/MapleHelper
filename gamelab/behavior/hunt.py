@@ -112,6 +112,7 @@ from ..localization.monsters import (DEFAULT_SPEED, Monster, Tracker, bodies, sp
 from ..localization.players import near_rival
 from ..localization.scene import Scene
 from ..localization.unseen import UNSEEN_S, unseen
+from ..motion import physics
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
@@ -584,6 +585,7 @@ class Hunt:
             self._next_ground(first)
             while time.monotonic() < end:
                 try:
+                    physics.settle()  # (a SPEED her stat window read in the loop made hers: between key plans)
                     if self._pass() == "stop":
                         break
                 except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)

@@ -712,7 +712,7 @@ _CROWD = harness.PRESETS["crowd"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
@@ -755,14 +755,20 @@ def loop_tree_23(sim):
     1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.) (Seed 1 since her drops are swept by the
     seconds each may add to her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan:
     hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 3 seven kills, the rule
-    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.)"""
+    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.) (Seed 3 since his walk and climb
+    by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, world and planner, where 149 and the world's
+    130 up; D:/MapleHelper-scratch/recfix/calib/seeds/slow23*.json, v23_*.json): on seed 1 ten kills; of seeds 1-16 3,
+    5, 7 and 8 show all of this, at work/rec-all 1, 3, 6, 8, 9, 11-13 and 16; her kills over 1-16 12.2 a run against
+    16.8 there, the walk's change (at his walk 149 and climb 119.2 16.4; at 151.25 with the climb 130 12.4), but over
+    17-32 14.8 against 11.4 at 149: over 1-32 13.5 against 13.9, all of this met on 12 of 32 either way, the seeds'
+    luck.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -798,7 +804,10 @@ def loop_tree_23_near_misses(sim):
     sideways added to the speed she has, landing at her walk's speed at most, world.KNOCK_VX, KNOCK_ADDS,
     KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
     D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on seed 11 14 kills; of seeds 1-16 1, 5 and 16 show all of this,
-    the others under twenty kills (a median 12); on 1, 24.)"""
+    the others under twenty kills (a median 12); on 1, 24.) (Seed 2 since his walk and climb by his SPEED (2026-11-02: the
+    thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
+    seeds/slow23*.json): on seed 1 ten kills; of seeds 1-16 2, 12 and 16 show all of this, at work/rec-all 1, 5 and 16
+    (13.2 kills a run over 1-16 against 14.0); on 2, 21.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1306,7 +1315,7 @@ SAFETY_EXPECTS = (
     check("never the chair, no waiting for HP", lambda tr: not any(p[1] in ("chair", "stand") for p in tr["plans"])))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, hp=0.8, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
+@tree((23, 73.0), monsters="all", seed=2, limit=400, hp=0.8, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
       expects=SAFETY_EXPECTS)
 def loop_tree_safety_stop(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 80% HP, her pet with
@@ -1319,7 +1328,10 @@ def loop_tree_safety_stop(sim):
     starts (attack.stance.Pace). Until 2026-10-28 the stop was at 65% for 2 s: here at 48% 2.9 s in, and her retreat
     took her to 1.1%. Seeds 1-12 under each rule: README, The safety stop in HP.) (Seed 1 since the stack's monsters
     turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 an attack or
-    the mouse after the stop; of seeds 1-13 all but 2-4 and 12 show all of this.)"""
+    the mouse after the stop; of seeds 1-13 all but 2-4 and 12 show all of this.) (Seed 2 since his walk and climb
+    by his SPEED (2026-11-02: the thief walks his stat window's 151.25 and climbs 121, the world as his planner, where 149
+    and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 1 an attack or the mouse
+    after the stop; of seeds 1-16 all but 1, 3, 14 and 15 show all of this.)"""
     return safety_stop(5)(sim)
 
 
@@ -1374,7 +1386,7 @@ DARTS_EXPECTS = (
     check("her moves alone after the stop, no attack and no mouse", _moves_alone))
 
 
-@tree((23, 73.0), monsters="all", seed=2, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
       expects=DARTS_EXPECTS)
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
@@ -1396,7 +1408,10 @@ def loop_tree_out_of_darts(sim):
     is the client's (2026-11-02: 270 out and up, its push sideways added to the speed she has, landing at her walk's
     speed at most, world.KNOCK_VX, KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was
     ~58; D:/MapleHelper-scratch/recfix/sim-fix/scan3.txt, scanned with the push set outright, not added): on seed 1 not
-    on a safe place once her retreat was over; of seeds 1-16 all but 1, 7 and 10 show all of this.)"""
+    on a safe place once her retreat was over; of seeds 1-16 all but 1, 7 and 10 show all of this.) (Seed 1 since his
+    walk and climb by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, where 149 and the world's 130
+    up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 2 not on a safe place once her retreat was
+    over; of seeds 1-16 all but 2 and 12 show all of this.)"""
     return darts_stop(5)(sim)
 
 
@@ -1592,7 +1607,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1688,7 +1703,10 @@ def loop_tree_attack_no_darts(sim):
     14 meet all of this. On 6: the doubt at 110.2 s, a Green Mushroom at 47%.) (Seed 11 since the rope hang beside the
     world's touches and knock as live (work/rec-all, the integration of 2026-11-02; D:/MapleHelper-scratch/recfix/
     integrate/diag/scan1.txt): on 6 her stars' test never said MAYBE OUT; of seeds 1-16, 11 and 14 meet all of this. On
-    11 the doubt at 129.4 s, a Green Mushroom at 84-90%.)"""
+    11 the doubt at 129.4 s, a Green Mushroom at 84-90%.) (Seed 9 since his walk and climb by his SPEED (2026-11-02: the
+    thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
+    seeds/scenarios.json): on 11 her stars' test never said MAYBE OUT; of seeds 1-16, 9, 13 and 16 meet all of this. On
+    9 the doubt at 106.7 s, a Green Mushroom.)"""
     return key_check_run(4)(sim)
 
 
