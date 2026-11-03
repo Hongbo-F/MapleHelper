@@ -677,7 +677,7 @@ OFF_WALK_EDGE = 25.0   # units: a monster this near its walk edge (or predicted 
 # and 13 EXP a second on average, and both did worse than at the hunt's rate: EXP -2.5% and -2.4% (t -0.64, -1.51),
 # her touches +7.4% (+1.85). On, the user's rule, with HANG_LONGER (its note). Its price after the merged world's
 # measures (D:/MapleHelper-scratch/recfix/rope-on): the touch taken costs what follows it at the top too, a second touch
-# where the monster still meets her standing where she climbs over once her invulnerability after the first is over
+# where it or another monster meets her standing where she climbs over once her invulnerability after the first is over
 # (`_touched_again`: to TAKE_AGAIN_S past it, the next pass's reaction: on the merged world the second touches at the
 # top came 1.45-1.9 s after the first), with its knock; the knock's reach the client's (KNOCK_REACH), where the
 # planner's 53.7 put her on 10 after a knock left from the top of -80 (83 from 10's end) that took her off it; and a
@@ -3721,7 +3721,7 @@ class Navigator:
         knock = self._knock_cost(rope, q, y, mo, t)
         again = self._touched_again(rope, q, y, mo, t)  # (a second touch at the top once her invulnerability is over)
         if again is not None:
-            knock += self._knock_cost(rope, q, y, mo, again)
+            knock += self._knock_cost(rope, q, y, *again)
         touches = 1 if again is None else 2
         wait, cost = left * got.rate, got.touch * touches + knock * got.rate
         if wait <= cost:
@@ -3732,20 +3732,23 @@ class Navigator:
                 f"{wait:.0f} EXP, over a {mo.kind or 'monster'}'s touch" + (" and a second at the top" if again else "")
                 + f", {got.touch * touches:.0f} EXP" + (f" and its knock's {knock:.1f} s" if knock else ""))
 
-    def _touched_again(self, rope: Rope, q: Platform, y: float, mo: MonsterTrack, t: float | None) -> float | None:
-        """HANG_TAKE: when (plan time from now) `mo` touches her again after the touch taken at plan time t (None: on
-        the rope now) on her way up `rope` from her feet at map y: from her invulnerability's end after it (INVULNERABLE_S
-        less IMMUNE_MARGIN_S) on, over the rest of the climb, the climb-over onto platform `q` and standing there to
-        TAKE_AGAIN_S past that end (flow.danger, the planner's reach of it); None where it doesn't."""
+    def _touched_again(self, rope: Rope, q: Platform, y: float, mo: MonsterTrack,
+                       t: float | None) -> tuple[MonsterTrack, float] | None:
+        """HANG_TAKE: the monster that touches her again after the touch by `mo` taken at plan time t (None: on the
+        rope now) on her way up `rope` from her feet at map y, and when (plan time from now): `mo` or any of the newest
+        state's (_newest_tracks: the others at the top too), from her invulnerability's end after it (INVULNERABLE_S less
+        IMMUNE_MARGIN_S) on, over the rest of the climb, the climb-over onto platform `q` and standing there to
+        TAKE_AGAIN_S past that end (flow.danger, the planner's reach of each); None where none does. (Of the touches
+        taken on her world with `mo` alone checked, 9 of 21 had a Horny chasing her at the top as the hang began.)"""
         inv = (0.0 if t is None else t) + INVULNERABLE_S - IMMUNE_MARGIN_S
         leg = self._up_leg(rope, q, y)
         kept = self.flow.immune
         self.flow.immune = max(kept, inv)
         try:
-            got = self.flow.danger(leg, [mo], linger=max(STAND_PAST_S, inv + TAKE_AGAIN_S - leg.end.t))
+            return self.flow.danger(leg, [mo] + self._newest_tracks(),
+                                    linger=max(STAND_PAST_S, inv + TAKE_AGAIN_S - leg.end.t))
         finally:
             self.flow.immune = kept
-        return None if got is None else got[1]
 
     def _knock_cost(self, rope: Rope, q: Platform, y: float, mo: MonsterTrack, t: float | None) -> float:
         """HANG_TAKE: s a touch by `mo` at plan time t of the way up `rope` from her feet at map y (None: on the rope)

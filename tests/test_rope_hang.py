@@ -569,7 +569,9 @@ def test_a_touch_taken_where_its_monster_stays_at_the_top_costs_a_second_touch_a
     from 10's left end: off 10, the planner's way back up in its price (it was the planner's 53.7, on 10). So it's not
     taken even at 100 EXP a second (200 EXP of the wait against 2 touches of 25 and the way back), where one touch alone
     would be. Standing 10 left of the rope its second touch knocks her right, onto 10: the knock's flight alone, taken
-    at 100 EXP a second. One walking past has no second touch."""
+    at 100 EXP a second. One walking past has no second touch, but another standing by the top touches her next (any
+    of the newest state's: on her world 9 of the 21 touches taken with the first alone checked had a Horny chasing her
+    at the top)."""
     rope = _rope(tree_map)
     q = tree_map.platform(10)
     assert nv.KNOCK_REACH == pytest.approx(nv.KNOCK_PUSH ** 2 * 2 / 2000.0 + nv.LAND_SLIDE) and nv.KNOCK_REACH > 84
@@ -579,19 +581,23 @@ def test_a_touch_taken_where_its_monster_stays_at_the_top_costs_a_second_touch_a
     mo, t = nav._way_up_hit(rope, y)
     assert t < 85 / CLIMB_SPEED and nav._knock_cost(rope, q, y, mo, t) == 0.0  # (on the rope)
     again = nav._touched_again(rope, q, y, mo, t)
-    assert again is not None and again >= t + nv.INVULNERABLE_S - nv.IMMUNE_MARGIN_S - 1e-9
-    assert nav._knock_cost(rope, q, y, mo, again) > nv.KNOCK_AIR_S + 1.0  # (off 10: the way back up)
+    assert again is not None and again[1] >= t + nv.INVULNERABLE_S - nv.IMMUNE_MARGIN_S - 1e-9
+    assert nav._knock_cost(rope, q, y, *again) > nv.KNOCK_AIR_S + 1.0  # (off 10: the way back up)
     nav.price = _price(100.0, 25.0)
     assert nav._take_now(rope, y, HANG_S, (mo, t)) is None
     nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 10, 10)], y=y)
     mo, t = nav._way_up_hit(rope, y)
     again = nav._touched_again(rope, q, y, mo, t)
-    assert again is not None and nav._knock_cost(rope, q, y, mo, again) == nv.KNOCK_AIR_S
+    assert again is not None and nav._knock_cost(rope, q, y, *again) == nv.KNOCK_AIR_S
     nav.price = _price(100.0, 25.0)
     assert nav._take_now(rope, y, HANG_S, (mo, t)).startswith("the touch taken") and nav._took["touches"] == 2
     nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 30, 10, vx=100.0)], y=y)
     mo, t = nav._way_up_hit(rope, y)
     assert nav._touched_again(rope, q, y, mo, t) is None  # (walking past: gone from the top by then)
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 30, 10, vx=100.0), _track(2, rope.x + 40, 10)], y=y)
+    mo, t = nav._way_up_hit(rope, y)
+    again = nav._touched_again(rope, q, y, mo, t)  # (... but another standing by the top: its touch next)
+    assert mo.track == 1 and again is not None and again[0].track == 2
 
 
 def test_no_longer_wait_for_a_walker_she_hurt_it_chases_her(tree_map, monkeypatch, rules):
