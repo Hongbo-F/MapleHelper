@@ -17,6 +17,10 @@ the same review folder? e.g. `/review/ld-movers-kf/xxxx`"); one level only.
                                   this way unless its data saver is off: the user, 2026-11-02, "can the server send
                                   compressed image to reduce the network transfer? ... hurting my mobile bandwidth";
                                   a 750 px frame of 178 KB is about 40 KB at 540 px, a 1696 px one of 377 KB 17 KB)
+    /review/<set>/video.mp4       the set as a video, to download (the viewer's Download video button: the user,
+                                  2026-11-02, "a button to download a review clip as video"): its overlay.mp4 if it has
+                                  one, else its frames made one, H.264 at its frame rate (ui.video), kept in
+                                  ROOT/.videos/ for the next time (made again once its frames change: `version`)
 Names are checked (letters, digits, - and _; frames by number), so nothing outside a set is served."""
 from __future__ import annotations
 
@@ -44,6 +48,9 @@ SMALL_Q = (30, 95)  # the qualities a smaller frame may ask for (outside: clampe
 SMALL_W = (64, 4096)  # and widths (never wider than the frame)
 SMALL_CACHE = 96 << 20  # bytes of smaller frames kept, the least recently sent going first
 _small, _small_bytes, _small_lock = OrderedDict(), 0, threading.Lock()
+VIDEOS = ".videos"  # under ROOT: the sets' videos made from their frames (a folder with no frames/: never listed)
+_video_locks: dict[str, threading.Lock] = {}
+_video_locks_lock = threading.Lock()
 
 
 def sets(root: Path | None = None) -> list[str]:
@@ -164,6 +171,7 @@ def handle(handler, path: str, root: Path | None = None, query: dict | None = No
     if path != "/review" and not path.startswith("/review/"):
         return False
     root = root or ROOT
+    top = root
     parts = [p for p in path.split("/")[2:] if p]
     if not parts:
         _listing(handler, "Recordings", [(f"/review/{g}/", f"{g}/") for g in groups(root)]
@@ -197,13 +205,45 @@ def handle(handler, path: str, root: Path | None = None, query: dict | None = No
             _file(handler, folder / "frames" / rest[1], "image/jpeg", cache=True)
     elif len(rest) == 1 and rest[0] in FILES:
         _file(handler, folder / rest[0], FILES[rest[0]], cache=True)
+    elif rest == ["video.mp4"]:
+        try:
+            video = video_of(folder, top / VIDEOS, label + name)
+        except Exception as e:  # noqa: BLE001 (a set whose frames can't be made a video)
+            handler._send(500, f"no video: {type(e).__name__}: {e}".encode(), "text/plain; charset=utf-8")
+        else:
+            _file(handler, video, "video/mp4", download=(label + name).replace("/", "_") + ".mp4")
     else:
         handler._send(404, b"not found", "text/plain")
     return True
 
 
-def _file(handler, file: Path, kind: str, cache: bool = False) -> None:
-    """A file, whole or the byte range asked for (Range: bytes=a-b, as a phone's video player asks)."""
+def video_of(folder: Path, cache: Path, label: str) -> Path:
+    """The set's video: its overlay.mp4, else one made from its frames at its rate (ui.video.frames_video), kept in
+    `cache` named for the set and its frames' version; one making at a time a set (the others wait for it), older
+    versions deleted."""
+    if (folder / "overlay.mp4").is_file():
+        return folder / "overlay.mp4"
+    frames = sorted(p.name for p in (folder / "frames").iterdir() if FRAME.match(p.name))
+    stem = label.replace("/", "__")
+    out = cache / f"{stem}-{version(folder, frames)}.mp4"
+    with _video_locks_lock:
+        lock = _video_locks.setdefault(stem, threading.Lock())
+    with lock:
+        if not out.is_file():
+            from . import video
+            cache.mkdir(parents=True, exist_ok=True)
+            tmp = out.with_name(out.stem + ".making.mp4")
+            video.frames_video([folder / "frames" / f for f in frames], fps(folder), tmp)
+            tmp.replace(out)
+            for old in cache.glob(f"{stem}-*.mp4"):
+                if old != out and not old.name.endswith(".making.mp4"):
+                    old.unlink(missing_ok=True)
+    return out
+
+
+def _file(handler, file: Path, kind: str, cache: bool = False, download: str | None = None) -> None:
+    """A file, whole or the byte range asked for (Range: bytes=a-b, as a phone's video player asks); `download`: the
+    name to save it as (Content-Disposition: attachment)."""
     try:
         size = file.stat().st_size
     except OSError:
@@ -229,6 +269,8 @@ def _file(handler, file: Path, kind: str, cache: bool = False) -> None:
     handler.send_header("Content-Length", str(end - start + 1))
     handler.send_header("Accept-Ranges", "bytes")
     handler.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
+    if download:
+        handler.send_header("Content-Disposition", f'attachment; filename="{download}"')
     if code == 206:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     handler.end_headers()
@@ -275,6 +317,8 @@ input[type=range] { flex:1; padding:0; }
 .p { display:block; width:100%; text-align:left; padding:9px 10px; margin:5px 0; }
 .p span { color:var(--acc); margin-right:6px; font-variant-numeric:tabular-nums; }
 a { color:var(--acc); } .links { padding:0 8px 16px; color:var(--dim); }
+a.btn { flex:1; min-width:0; text-align:center; text-decoration:none; background:var(--btn); color:var(--fg);
+  border:1px solid #333; border-radius:8px; font:15px system-ui; padding:9px 0; }
 </style></head><body>
 <header>
   <div id="title"><b>__NAME__</b><span id="load"></span><span id="pos">-</span></div>
@@ -291,11 +335,18 @@ a { color:var(--acc); } .links { padding:0 8px 16px; color:var(--dim); }
 </header>
 <div id="imgbox"><img id="img" alt="frame"></div>
 <div class="row" style="padding:0 8px"><button id="zoom">Full size (scroll)</button>
-  <button id="saver">Data saver: on</button></div>
+  <button id="saver">Data saver: on</button>
+  <a id="video" class="btn" href="video.mp4" download>Download video</a></div>
 <div id="problems"></div>
 <div class="links" id="links"></div>
 <script>
 const base = location.pathname.replace(/\/?$/, "/");
+// Download video: the set as an MP4 (made from its frames the first time, which takes a while: said on the button).
+document.getElementById("video").href = base + "video.mp4";
+document.getElementById("video").addEventListener("click", e => {
+  const b = e.currentTarget; b.textContent = "Preparing the video...";
+  setTimeout(() => { b.textContent = "Download video"; }, 30000);
+});
 let M = {frames: 0, last: -1, problems: []}, i = 0, timer = null;
 const $ = id => document.getElementById(id), img = $("img"), cache = {};
 const pad = n => String(n).padStart(5, "0");

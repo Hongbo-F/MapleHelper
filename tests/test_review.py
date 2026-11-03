@@ -2,6 +2,7 @@
 ranges, and nothing outside a set."""
 import json
 import os
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -137,3 +138,57 @@ def test_nothing_outside_a_set_is_served(served, path):
     with pytest.raises(urllib.error.HTTPError) as e:
         get(served + path)
     assert e.value.code == 404
+
+
+def test_a_set_comes_as_a_video_to_download_its_own_overlay_or_one_made_from_its_frames_and_kept(served, tmp_path,
+                                                                                                    monkeypatch):
+    """The user, 2026-11-02: "Can you make the WebUI provide a button to download a review clip as video?"."""
+    from gamelab.ui import video
+    status, headers, body = get(served + "/review/overlay-a/video.mp4")
+    assert body == bytes(range(256)) * 4 and headers["Content-Disposition"] == 'attachment; filename="overlay-a.mp4"'
+    made = []
+    real = video.frames_video
+    monkeypatch.setattr(video, "h264", lambda *a: (False, "no Windows encoder in this test"))  # (mp4v: quick)
+    monkeypatch.setattr(video, "frames_video", lambda *a: (made.append(a), real(*a))[1])
+    status, headers, body = get(served + "/review/real/video.mp4")
+    assert status == 200 and headers["Content-Type"] == "video/mp4" and body[4:8] == b"ftyp"
+    assert headers["Content-Disposition"] == 'attachment; filename="real.mp4"' and len(made) == 1
+    assert get(served + "/review/real/video.mp4")[2] == body and len(made) == 1  # kept: not made again
+    kept = list((tmp_path / "golden" / ".videos").glob("real-*.mp4"))
+    assert len(kept) == 1 and b".videos" not in get(served + "/review")[2]
+    page = get(served + "/review/real/")[2].decode()
+    assert 'id="video"' in page and 'base + "video.mp4"' in page and "Download video" in page
+
+
+def test_faststart_puts_the_index_before_the_media_and_the_video_plays_the_same(tmp_path):
+    from gamelab.ui import video
+    src = tmp_path / "a.mp4"
+    w = cv2.VideoWriter(str(src), cv2.VideoWriter_fourcc(*"mp4v"), 15, (64, 48))
+    for n in range(10):
+        w.write(np.full((48, 64, 3), n * 20, np.uint8))
+    w.release()
+    b = src.read_bytes()
+    assert b.index(b"moov") > b.index(b"mdat")  # (OpenCV writes the index last)
+    assert video.faststart(src, tmp_path / "b.mp4")
+    c = (tmp_path / "b.mp4").read_bytes()
+    assert c.index(b"moov") < c.index(b"mdat") and len(c) == len(b)
+    caps = [cv2.VideoCapture(str(p)) for p in (src, tmp_path / "b.mp4")]
+    a_frames, b_frames = ([cap.read()[1] for _ in range(10)] for cap in caps)
+    assert all(np.array_equal(x, y) for x, y in zip(a_frames, b_frames))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows' own H.264 encoder")
+def test_frames_become_an_h264_video_with_windows_own_encoder(tmp_path):
+    from gamelab.ui import video
+    frames = []
+    for n in range(8):
+        f = tmp_path / f"{n:05d}.jpg"
+        cv2.imwrite(str(f), np.random.default_rng(n).integers(0, 256, (101, 151, 3), np.uint8))  # (odd: padded)
+        frames.append(f)
+    out = tmp_path / "v.mp4"
+    assert video.frames_video(frames, 15, out) == "h264"
+    cap = cv2.VideoCapture(str(out))
+    assert int(cap.get(cv2.CAP_PROP_FOURCC)).to_bytes(4, "little").lower() in (b"h264", b"avc1")
+    assert (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))) == (152, 102)
+    b = out.read_bytes()
+    assert b.index(b"moov") < b.index(b"mdat")
