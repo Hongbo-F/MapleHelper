@@ -829,6 +829,64 @@ def loop_tree_23_near_misses(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
+# The harness's standard thief world (`run loop-grind --map 10002073 --preset crowd --attack choice --world zero-walls
+# --world near-misses --world walkers`: harness.scenario), for a set-piece in it.
+_STANDARD = dict(noise=_NEAR, attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
+                 realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"]))
+_DECISION = re.compile(r"^\s*([\d.]+) {3}(jump-throwing|throwing|jumping back|stepping away|closing in|nothing in reach)"
+                       r"(.*)$")
+_TOUCHED_BY = re.compile(r"^\s*([\d.]+) touched by ")
+_CLAW_HITS = re.compile(r"^\s*([\d.]+) claw swipe hits ")
+CLAW_EDGE = 105.0  # units: a mushroom past this is out of the claw's box (reach.ground_sure(28): its middle's)
+
+
+def far_claws(tr: dict, within: float | None = None) -> list[tuple[float, str]]:
+    """Her presses from the ground at a target past the claw's edge that the world's claw took, within `within` s of a
+    touch of hers (control.navigator.TOUCHER_S by default): each claw swipe the world saw (World.log, 'claw swipe
+    hits'), the decision in force then (her log's last stance line before it) a throw from the ground whose nearest
+    target it names is CLAW_EDGE or more off, a touch of hers (World.log, 'touched by') `within` s before it at most:
+    [(s, the decision's line)]. A press the claw takes on purpose (CLAW_ONLY: one on her) names one nearer."""
+    from ..control.navigator import TOUCHER_S
+    within = TOUCHER_S if within is None else within
+    decided = [(float(m[1]), m[2], m[3]) for line in tr["log"] if (m := _DECISION.match(line))]
+    touched = [float(m[1]) for line in tr["world_log"] if (m := _TOUCHED_BY.match(line))]
+    out = []
+    for line in tr["world_log"]:
+        if (m := _CLAW_HITS.match(line)) is None:
+            continue
+        t = float(m[1])
+        before = [d for d in decided if d[0] <= t]
+        if not before or before[-1][1] != "throwing":
+            continue
+        gaps = [abs(int(v)) for v in re.findall(r" ([+-]\d+)", before[-1][2])]
+        if gaps and min(gaps) >= CLAW_EDGE and any(0 <= t - u <= within for u in touched):
+            out.append((t, f"{before[-1][0]:.3f} throwing{before[-1][2]}"))
+    return out
+
+
+@tree((7, -163.5), monsters=[("Horny Mushroom", 7, -150.0), ("Horny Mushroom", 7, -40.0)], seed=3, limit=30,
+      may_die=True, **_STANDARD,
+      expects=(check("no press from the ground at a target past the claw's edge went to the claw within TOUCHER_S of a "
+                     "touch (far_claws)", lambda tr: not far_claws(tr)),
+               logs("jump (touched", "a jump throw went from the air for a touch with no monster seen by her"),
+               check("a kill", lambda tr: sum(tr["world"]["kills"].values()) >= 1)))
+def loop_tree_touched_unseen(sim):
+    """R1 of the cornered study (the user's clip of 2026-11-02 22:51, "cornered character making bad attack move":
+    D:/MapleHelper-scratch/cornered): the looks are blind at her body, and a press from the ground goes to the claw on a
+    monster there whatever she aimed at. The hunt loop on 7 alone in the harness's standard thief world (near-misses:
+    a monster on her platform within 25 of her never found, 7% within 50, 34% to 100; walkers: one she hits chases her),
+    from x -163.5 between 7's Horny Mushroom points as in episode B (22:49:39-22:49:51), one Horny Mushroom on her at
+    -150, the other 123 off at -40. On 690e103 (seed 3, 10 s) the first touches her at once, and every one of her six
+    presses from the ground, at ones 179 and 125 off as hidden and 183 seen, went to the claw on it 8-80 in front of her
+    (swipes, no star), four of them within 2 s of a touch the looks had no monster for: 10 touches, no kill, as the
+    clip's corner at x -220 (22:49:56-22:49:58). Now a touch with none about her that could have made it (behavior.fight
+    .clawed: the navigator's R7 test, TOUCHER_S, TOUCHER_NEAR) has those go from a jump in place (attack.stance
+    .CLAWED_AIR: 'jump (touched)'), whose star takes the one on her if its body reaches the search's window, else the
+    one aimed at. (Of seeds 1-6 of this set-piece, 10 s each: off, 46 touches, 33 that hurt, 6 kills, 23 swipes; on, 36,
+    31, 11, 2: D:/MapleHelper-scratch/cornered/proto.)"""
+    return harness._only(_loop(1 / 6), (7,))(sim)
+
+
 @tree((20, -60.0), monsters={19, 20, 21, 22}, seed=7, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))

@@ -1510,17 +1510,13 @@ class Navigator:
         where look `s` has none of `tracks` on her platform within TOUCHER_NEAR of her: at her x as of the touch's
         popup, its walking not known (`standing`: standing there, TOUCHER_ALL's), of the map's kind that touches hardest
         (its game data's PADamage); else None."""
-        touch = getattr(self.senses, "touch", None)
+        touch = fresh_touch(self.senses, s)
         w = s.where
-        if not isinstance(touch, dict) or touch.get("crowded") or w is None or w.platform is None \
-                or not 0 <= s.t - touch.get("at", -1e18) <= TOUCHER_S:
+        if touch is None or any(t.platform == w.platform.id and abs(t.x - w.x) <= TOUCHER_NEAR for t in tracks):
             return None
-        if any(t.platform == w.platform.id and abs(t.x - w.x) <= TOUCHER_NEAR for t in tracks):
+        kind = hardest(self.model)
+        if kind is None:
             return None
-        names = {n for ns in self.model.monsters_by_platform.values() for n in ns}
-        if not names:
-            return None
-        kind = kind_of(max(names, key=lambda n: (self.model.mob_damage.get(n, 0.0), n)))
         half, top = touch_box(kind, self.tracker.body.get(kind))
         return MonsterTrack(w.platform.id, w.x, self.tracker.walking.get(kind, DEFAULT_SPEED), 0, half,
                             0.0 if standing else None, touch["at"] - time.monotonic(), MONSTER_HEIGHT.get(kind, top), 0,
@@ -4076,6 +4072,24 @@ def rope_at_top(model: MapModel, where) -> Rope | None:
         return None
     near = [r for r in model.ropes if abs(r.x - where.x) <= ROPE_TOP_X and route.hung_from(model, r) is p]
     return min(near, key=lambda r: abs(r.x - where.x)) if near else None
+
+
+def fresh_touch(senses, s: Scene) -> dict | None:
+    """The touch of hers R7's stand-in goes by (Navigator._toucher; the fights' too, behavior.fight.clawed): `senses`'s
+    newest (Senses.touch), not `crowded`, its popup TOUCHER_S before look `s` at most, her placed on a platform; else
+    None."""
+    touch = getattr(senses, "touch", None)
+    w = s.where
+    if not isinstance(touch, dict) or touch.get("crowded") or w is None or w.platform is None \
+            or not 0 <= s.t - touch.get("at", -1e18) <= TOUCHER_S:
+        return None
+    return touch
+
+
+def hardest(model: MapModel) -> str | None:
+    """The kind of the map's monsters that touches hardest (its game data's PADamage), R7's stand-in's; None with none."""
+    names = {n for ns in model.monsters_by_platform.values() for n in ns}
+    return kind_of(max(names, key=lambda n: (model.mob_damage.get(n, 0.0), n))) if names else None
 
 
 def standing(s: Scene) -> bool:

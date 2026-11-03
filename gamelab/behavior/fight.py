@@ -27,10 +27,11 @@ from .. import character, directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import (AWAY, FLINCH_HOLD_S, HURT_SHARE, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN,
                              JumpPlan, Pace, Prices, act_text,
-                             air_gap, decide, first_attack_s, held_step, jump_hits, jump_room, landing, move_limits,
-                             open_above, pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
+                             air_gap, beside, decide, first_attack_s, held_step, jump_hits, jump_room, landing,
+                             move_limits, open_above, pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
+from ..control.navigator import TOUCHER_NEAR, fresh_touch
 from ..localization.mapdata import MapModel, MobBody
 from ..localization.memory import FADE_S
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster,
@@ -495,6 +496,21 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
     return Pace(lead, walk, walking, body_sizes(model)[1] if model is not None else None, hold, window)
 
 
+
+def clawed(h: "Hunter", s: Scene, around: list[Monster]) -> bool:
+    """Whether a monster the looks miss is on her at look `s` (attack.stance's `clawed`, CLAWED_AIR: a throw from the
+    ground would be the claw's): a touch of hers as the navigator's R7 stand-in goes by (control.navigator.fresh_touch:
+    not `crowded`, its popup TOUCHER_S before the look at most) with no monster of `around` (the look's and those about
+    her it didn't find: hidden, unseen) on her platform, or beside her (stance.beside), within TOUCHER_NEAR of her
+    (Navigator._toucher's test); False where nothing counts as a danger (the first map, as it was)."""
+    d = getattr(h, "danger", None)
+    if d is None or not d.any or s.where is None or s.platform is None:
+        return False
+    if fresh_touch(getattr(h, "senses", None), s) is None:
+        return False
+    x, here = s.where.x, s.platform
+    return not any(abs(m.x - x) <= TOUCHER_NEAR and beside(m, here, x, d) for m in around)
+
 # The navigator's price of a landing (FightOnTheWay.landings) by what the looks don't have now: a track not seen within
 # STALE_S (a death's fade, localization.memory.FADE_S: after it a remembered or hidden one is as likely a ghost) and the
 # spawn points of the platform none of its tracks accounts for (a monster there the looks missed, or a respawn: in the
@@ -593,7 +609,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves, castable=castable, **wounds_of(h, s))
+                 moves=st.moves, castable=castable, clawed=clawed(h, s, around), **wounds_of(h, s))
     act, refused = _cast_or_wait(h, act, s, castable)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
