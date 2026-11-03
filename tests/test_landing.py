@@ -366,13 +366,15 @@ def test_the_worlds_monsters_chase_her_only_once_she_hits_them(model):  # noqa: 
     w.dead = True
     assert w._chase_at(m, w.t) is None
     # Her invulnerability after a touch is the knob's (INVULNERABLE_LIVE in `walkers`; its live median respawn until
-    # the server's became every world's on 2026-10-31), and the harness has the world. Since her popups were read
-    # (2026-10-28) it's the frames' 1.45 s everywhere (perception.touches.INVULNERABLE_S), the default world's too.
+    # the server's became every world's on 2026-10-31), and the harness has the world. From her popups read
+    # (2026-10-28) it was the frames' least gap, 1.45 s, everywhere (perception.touches.INVULNERABLE_S, the stack's
+    # still); from the touch study (2026-11-03) the sources' 1.5, which the frames agree with read by their frame
+    # steps (world.INVULNERABLE_SOURCES), the default world's too.
     assert harness.WORLDS["walkers"] == {"chase": True, "invulnerable": world_mod.INVULNERABLE_LIVE}
     # Every world's monsters chase her once she hits them (from 2026-10-31); `no-aggro` the old walk, hit or not.
     assert world_mod.Realism().chase is True and harness.WORLDS["no-aggro"] == {"chase": False}
-    assert (world_mod.INVULNERABLE_LIVE, world_mod.RESPAWN_LIVE) == (1.45, 17.0)
-    assert world_mod.INVULNERABLE == world_mod.Realism().invulnerable == 1.45
+    assert (world_mod.INVULNERABLE_LIVE, world_mod.RESPAWN_LIVE) == (1.5, 17.0)
+    assert world_mod.INVULNERABLE == world_mod.Realism().invulnerable == 1.5
 
 
 def test_the_harness_counts_her_landings_by_monsters():

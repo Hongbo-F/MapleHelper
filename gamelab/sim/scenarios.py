@@ -43,8 +43,8 @@ from ..behavior.tour import Tour
 from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout,
                     SimViolation, Trace, detector_kinds, patched)
 from . import harness
-from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT,
-                    TREE_DROP_MIX, Her, Noise, Realism, SimDied, World, her_climb, her_shoe)
+from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, NEAR_SPELL, OFF_SEEN, OFF_SPELL,
+                    ROPE_REACH_CLIENT, TREE_DROP_MIX, Her, Noise, Realism, SimDied, World, her_climb, her_shoe)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -775,18 +775,20 @@ def loop_tree_23(sim):
     return harness._only(_loop(4), (23,))(sim)
 
 
-_NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
+_NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN, near_spell=NEAR_SPELL,  # the
+                            off_spell=OFF_SPELL)                                 # detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
                check("every kill counted", _every_kill), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_23_near_misses(sim):
-    """loop_tree_23 as `tour --loop` plays by default (the attack choice), with the detector's misses as live on
-    2026-10-25 (`--world near-misses`: world.NEAR_SEEN on her platform, OFF_SEEN off it): her drops on 23 wait while
-    a Horny Mushroom the looks missed (the feed's hidden tracks, her memory's: localization.unseen) is by them
+    """loop_tree_23 as `tour --loop` plays by default (the attack choice), with the detector's misses as live
+    (`--world near-misses`: world.NEAR_SEEN on her platform, OFF_SEEN off it, each miss in a run, NEAR_SPELL and
+    OFF_SPELL: the perception of 2026-11-02's from 2026-11-03, 2026-10-25's before, NEAR_SEEN_1025): her drops on 23
+    wait while a Horny Mushroom the looks missed (the feed's hidden tracks, her memory's: localization.unseen) is by them
     (hunt.PILE_CLEAR), as one did live (the service's track 130: 6 touches and a fall to 29). (Seed 2 since the evade
     work's review (2026-10-29: her evade step and R7's dodge, the rope fixes; rebased onto master 945f201): on seed 1 no
     'later, a horny-mushroom unseen' line; of seeds 1-13 all but 1 and 11 meet all of this.) (The same at the evade
@@ -817,7 +819,13 @@ def loop_tree_23_near_misses(sim):
     the others under twenty kills (a median 12); on 1, 24.) (Seed 2 since his walk and climb by his SPEED (2026-11-02: the
     thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
     seeds/slow23*.json): on seed 1 ten kills; of seeds 1-16 2, 12 and 16 show all of this, at work/rec-all 1, 5 and 16
-    (13.2 kills a run over 1-16 against 14.0); on 2, 21.)"""
+    (13.2 kills a run over 1-16 against 14.0); on 2, 21.) (Seed 1 since the touch study's two changes became the
+    defaults (2026-11-03, work/sim-defaults: the detector's misses as the perception of 2026-11-02 has them, in runs,
+    world.NEAR_SEEN_1102 and NEAR_SPELL_1102, where 2026-10-25's never found a monster within 25 of her; her
+    invulnerability 1.5 s, world.INVULNERABLE; D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on seed 2, 22 kills
+    but no Horny Mushroom the looks missed by a pile of hers (the new eyes miss fewer near her: the run parts from the
+    old within its first second); of seeds 1-16 1, 3, 7, 8 and 15 show all of this; on 1, 26 kills, a Horny Mushroom
+    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1396,7 +1404,7 @@ DARTS_EXPECTS = (
     check("her moves alone after the stop, no attack and no mouse", _moves_alone))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
+@tree((23, 73.0), monsters="all", seed=3, limit=400, **dict(_LIVE, realism=Realism(zero_walls=True, darts=60)),
       expects=DARTS_EXPECTS)
 def loop_tree_out_of_darts(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 with 60 throwing stars:
@@ -1421,7 +1429,11 @@ def loop_tree_out_of_darts(sim):
     on a safe place once her retreat was over; of seeds 1-16 all but 1, 7 and 10 show all of this.) (Seed 1 since his
     walk and climb by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, where 149 and the world's 130
     up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 2 not on a safe place once her retreat was
-    over; of seeds 1-16 all but 2 and 12 show all of this.)"""
+    over; of seeds 1-16 all but 2 and 12 show all of this.) (Seed 3 since her invulnerability after a touch is the
+    sources' 1.5 s (2026-11-03, work/sim-defaults: world.INVULNERABLE, where 1.45; the run parts from the old at 1.45 s,
+    a Horny Mushroom's touch again now at 1.50; D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on seed 1 her
+    retreat to the rope at x 111 timed out on 17 (not a safe place); of seeds 1-16 all but 1, 2, 13 and 14 show all of
+    this. On 3: out of darts' stop at 137.4 s, her retreat to 25 at x 199 arrived in 7.0 s, paged.)"""
     return darts_stop(5)(sim)
 
 
@@ -1617,7 +1629,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1729,8 +1741,14 @@ def loop_tree_attack_no_darts(sim):
     holding her at a stop no more, grind's _held; D:/MapleHelper-scratch/recfix/final-fix/scan_no_darts.txt): on 4 she
     was never paged twice, on 9 (the 2 s hang's seed of work/rec-panel) her stars' test never said MAYBE OUT; of seeds
     1-16, 13 and 16 meet all of this. On 13: the doubt at 54.8 s, a Horny Mushroom at 81%; MAYBE OUT at 62.4 s, ATTACK
-    on Ctrl as configured at 64.3 s, paged; out of darts' stop at 77.7 s, paged at 80.3 s.) It is re-seeded at most
-    changes of the grind or the world (more than ten times): placing its monsters would make it hold, not a seed.)"""
+    on Ctrl as configured at 64.3 s, paged; out of darts' stop at 77.7 s, paged at 80.3 s.) (Seed 11 since her
+    invulnerability after a touch is the sources' 1.5 s (2026-11-03, work/sim-defaults: world.INVULNERABLE, where 1.45;
+    the run parts from the old at 1.45 s, a Green Mushroom's touch again now at 1.50;
+    D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on 13 her stars' test cast nothing (her retreat to the rope
+    at -80, not on a platform: "her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-16, 11
+    alone meets all of this. On 11: the doubt at 87.4 s, a Horny Mushroom at 41%; MAYBE OUT at 103.7 s, ATTACK on Ctrl as
+    configured at 105.5 s, paged; out of darts' stop at 117.3 s, paged.) It is re-seeded at most changes of the grind or
+    the world (more than ten times): placing its monsters would make it hold, not a seed.)"""
     return key_check_run(13)(sim)
 
 

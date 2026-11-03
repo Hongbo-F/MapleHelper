@@ -7,9 +7,9 @@ pile, the monsters her trips keep clear of (behavior.hunt, control.navigator).
 Why: the detector is nearly blind near her. Live on 2026-10-25 on Tree Dungeon (23:43-23:54, the service's 10 fps
 records, lab/telemetry/20261025-210747-perceive.jsonl; D:/MapleHelper-scratch/analysis-1025/damage-skeptic occl.py):
 of the frames in which the service followed a monster on her platform, 7-12% found it within 50 units of her, 20-34% at
-50-100, 44-55% beyond (sim.world.NEAR_SEEN), and none of the hunter's 1317 searched looks had one within 25 units. 22
-of her 34 touches came from a monster no look had in the 0.6 s before; 26 of 34 had one of its kind seen within 150
-units in the 3 s before. One Horny Mushroom (the service's track 130) caused 6 of them and a fall to 29: the looks
+50-100, 44-55% beyond (sim.world.NEAR_SEEN_1025), and none of the hunter's 1317 searched looks had one within 25
+units. 22 of her 34 touches came from a monster no look had in the 0.6 s before; 26 of 34 had one of its kind seen
+within 150 units in the 3 s before. One Horny Mushroom (the service's track 130) caused 6 of them and a fall to 29: the looks
 missed it at 120-150 units for 1.3 s, her trip's plan dropped her memory of it (23 was in view and searched), she
 jumped onto 23 beside it, and two looks later her pickup walk went through it.
 
