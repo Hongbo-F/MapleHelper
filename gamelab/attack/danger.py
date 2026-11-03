@@ -79,6 +79,27 @@ HOP_CHANCE = 0.25
 # for that kind alone (bc036b9's stance.KEEP_OFF, which this replaced); a Green Mushroom (7.2%) or an Axe Stump
 # (10.8% at 62.5 units/s: 87 units) is let as near as the claw would swipe it, as before.
 KEEP_DANGER = 0.08
+# The spawn guard (`respawn_points`, `respawn_risk`; behavior.hunt's `_respawn_guard`, from 2026-11-03: the cornered
+# clip's R3, D:/MapleHelper-scratch/cornered, REPORT.md): a free spawn point of a kind that counts, by the server's rule
+# (no monster within SPAWN_CLEAR of it across and up or down: OrionAlpha's LifePool box, sim.world.SPAWN_CLEAR, the
+# user's of 2026-10-31), puts its newborn on her if she's within RESPAWN_NEAR of it at the map's pass. Live on BugBaby's
+# hour of 2026-11-02 (22:46-23:46, D:/MapleHelper-scratch/cornered/verify-R3, hour2.txt): of the newborns seen within
+# 70 of her on her platform 11 of 13 touched her within 4 s (85%, NEWBORN_TOUCH), of those at 70-130 7 of 18 (39%), an
+# established Horny Mushroom first seen within 70 of her 7 of 24 (29%, NEWBORN_SEEN; within 8 s 42%): what keeping off
+# the point at the pass saves is the difference, the newborn met once it's in sight as any monster (in HP the hour's
+# couldn't tell them apart: 692 HP over the 13 within 70 in 8 s, 889 over the 18 at 70-130, half the touches MISSes).
+# Each newborn is the pass's (localization.spawnclock: births within 0.1 s of it live) and touches only once solid
+# (sim.world.NEWBORN_SOLID_S, 0.82 s: none of the 72 live touches by a spawn point came sooner); her being there from
+# PASS_BEFORE before the pass (the births' spread and the clock's) to PASS_AFTER after it is what counts: by then a
+# newborn has turned solid and the whole screen has found it (perception.spawns: at alpha 0.6-0.8, a median 0.47 s from
+# its start, where under her the spawn watch can't see it), a monster of the look's as any. A guess built on those, not
+# a fit: the simulator's grind measures it (README, The spawn guard).
+SPAWN_CLEAR = 100.0
+RESPAWN_NEAR = 70.0
+NEWBORN_TOUCH = 0.85
+NEWBORN_SEEN = 0.29
+PASS_BEFORE = 0.15
+PASS_AFTER = 1.0
 
 
 @dataclass(frozen=True)
@@ -311,6 +332,29 @@ class Danger:
                 free.remove(min(free, key=lambda x: abs(x - mx)))
             out += [(x, kind) for x in free]
         return sorted(out)
+
+    def respawn_points(self, pid: int, lo: float, hi: float, around: list[Monster]) -> list[tuple[float, str]]:
+        """The spawn points of platform `pid` (of kinds that count) within RESPAWN_NEAR of the stretch from map x `lo`
+        to `hi` that the map's next pass may fill, as (map x, kind): free by the server's rule, no monster of `around`
+        (every one alive she knows of, of any kind, on any platform) within SPAWN_CLEAR of it across and up or down."""
+        p = None
+        out = []
+        for q, sx, kind in self.points:
+            if q != pid or sx < lo - RESPAWN_NEAR or sx > hi + RESPAWN_NEAR:
+                continue
+            p = p or self.model.platform(pid)
+            sy = p.y_at(p.clamp(sx))
+            if any(abs(m.x - sx) < SPAWN_CLEAR and abs(m.y - sy) < SPAWN_CLEAR for m in around):
+                continue
+            out.append((sx, kind))
+        return out
+
+    def respawn_risk(self, points: list[tuple[float, str]], fill: float, chance: float) -> float:
+        """The share of her HP the newborns of `points` (respawn_points') are expected to take her standing by them at
+        the pass more than once they're in sight: each its pass's chance of filling it (`fill`), NEWBORN_TOUCH less
+        NEWBORN_SEEN, its kind's touch (`share`), times the chance her stand meets the pass (`chance`:
+        localization.spawnclock.SpawnClock.chance over PASS_BEFORE, PASS_AFTER)."""
+        return sum(fill * (NEWBORN_TOUCH - NEWBORN_SEEN) * self.share(kind) for _, kind in points) * chance
 
     def _sources(self, seen: list[Monster] | None):
         """The monsters a place's danger comes from, as (kind, platform, x, weight): the ones `seen` (a look's, of

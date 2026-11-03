@@ -116,6 +116,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    alive
   fresh_hurt       touches that hurt her by a monster within world.FRESH_S of its respawn (from its spawn point),
                    and fresh_hp_lost, the HP they took
+  newborn_hurt     touches that hurt her by a monster within world.NEWBORN_S (4 s) of its respawn, and
+                   newborn_hp_lost, the HP they took; respawn_guards, the hunt loop's trips to a pile held for the map's
+                   pass by the spawn guard (its 'respawn_guard' events, behavior.hunt._respawn_guard: once a point a
+                   pass)
   wait_s           seconds the hunt loop spent waiting for respawns (its rules 'wait' and 'lull loot', from its 'hunt'
                    records), and wait_hp_lost, the HP touches took then
   pile_s           seconds the hunt loop spent on her drops (its loot rules, PILE_RULES, or an objective that's a pile,
@@ -808,6 +812,10 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "alive_s": round(end, 1),
         "fresh_hurt": sum(1 for t, hp in world.fresh_log if hp > 0 and t <= end),
         "fresh_hp_lost": round(sum(hp for t, hp in world.fresh_log if t <= end), 3),
+        "newborn_hurt": sum(1 for t, hp in world.newborn_log if hp > 0 and t <= end),
+        "newborn_hp_lost": round(sum(hp for t, hp in world.newborn_log if t <= end), 3),
+        "respawn_guards": sum(1 for r in events if r.get("kind") == "respawn_guard"
+                              and (start is None or r["t"] - start <= end)),
         "wait_s": round(sum(max(0.0, min(b, end) - a) for a, b in waits), 1),
         "wait_hp_lost": round(sum(hp for t, hp in world.touch_log if t <= end and any(a <= t <= b for a, b in waits)),
                               3),
@@ -1123,7 +1131,8 @@ def _trips(world, records: list[dict], end: float) -> dict:
 # The hunt loop's rules for her drops (behavior.hunt: 6a, 6, 5, 5b, 8, 10), for pile_s: while one of them decides, or
 # her objective is a pile (a trip for one: its 'hunt' record's objective "pile on ..."), she's on her drops.
 PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull loot", "loot elsewhere",
-              "sweep", "sweep: landing", "sweep: clear first")  # (the loot sweep's, behavior.sweep, from 2026-10-30)
+              "sweep", "sweep: landing", "sweep: clear first",  # (the loot sweep's, behavior.sweep, from 2026-10-30)
+              "sweep: the pass", "valuable pile: the pass")  # (the spawn guard's holds: behavior.hunt._go_for)
 
 
 def _full_stands(world, records: list[dict], end: float) -> dict:
