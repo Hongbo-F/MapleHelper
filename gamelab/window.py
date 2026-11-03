@@ -39,6 +39,7 @@ user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BO
 user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
 user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
+user32.SetCursorPos.restype = wintypes.BOOL
 user32.GetCursorPos.argtypes = (ctypes.POINTER(wintypes.POINT),)
 user32.GetCursorPos.restype = wintypes.BOOL
 user32.WindowFromPoint.argtypes = (wintypes.POINT,)
@@ -116,11 +117,9 @@ def move_cursor(x: int, y: int, wait=None):
             got = wait(due)
             if got is not True:
                 return got
-        try:
-            send_mouse_move(round(px), round(py))
-        except OSError:
-            pass
-    user32.SetCursorPos(x, y)
+        send_mouse_move(round(px), round(py))
+    if not user32.SetCursorPos(x, y):
+        raise ctypes.WinError(ctypes.get_last_error())
     return True
 
 

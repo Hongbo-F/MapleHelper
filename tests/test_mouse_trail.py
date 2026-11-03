@@ -55,7 +55,7 @@ def test_move_cursor_replays_each_timed_trail_sample_then_lands_exactly(monkeypa
 
     monkeypatch.setattr(window, "generate_trail", trail)
     monkeypatch.setattr(window.user32, "GetCursorPos", get_cursor)
-    monkeypatch.setattr(window.user32, "SetCursorPos", lambda x, y: exact.append((x, y)))
+    monkeypatch.setattr(window.user32, "SetCursorPos", lambda x, y: exact.append((x, y)) or True)
     monkeypatch.setattr(window, "send_mouse_move", lambda x, y: moves.append((x, y)))
     monkeypatch.setattr(window.time, "perf_counter", lambda: clock[0])
     monkeypatch.setattr(window.time, "sleep", sleep)
@@ -72,8 +72,29 @@ def test_move_cursor_stops_before_another_event_when_the_plan_wait_ends_early(mo
     moves, exact = [], []
     monkeypatch.setattr(window, "generate_trail", lambda *a: np.array([[0.0, 0, 0], [10.0, 10, 10]]))
     monkeypatch.setattr(window.user32, "GetCursorPos", lambda ptr: True)
-    monkeypatch.setattr(window.user32, "SetCursorPos", lambda x, y: exact.append((x, y)))
+    monkeypatch.setattr(window.user32, "SetCursorPos", lambda x, y: exact.append((x, y)) or True)
     monkeypatch.setattr(window, "send_mouse_move", lambda x, y: moves.append((x, y)))
 
     assert _move_cursor(10, 10, wait=lambda due: early) == early
     assert moves == [] and exact == []
+
+
+def test_move_cursor_surfaces_a_send_input_failure(monkeypatch):
+    def denied(x, y):
+        raise OSError(5, "blocked")
+
+    monkeypatch.setattr(window, "generate_trail", lambda *a: np.array([[0.0, 0, 0], [10.0, 10, 10]]))
+    monkeypatch.setattr(window.user32, "GetCursorPos", lambda ptr: True)
+    monkeypatch.setattr(window, "send_mouse_move", denied)
+    with pytest.raises(OSError, match="blocked"):
+        _move_cursor(10, 10, wait=lambda due: True)
+
+
+def test_move_cursor_surfaces_a_final_set_cursor_pos_failure(monkeypatch):
+    monkeypatch.setattr(window, "generate_trail", lambda *a: np.array([[0.0, 0, 0]]))
+    monkeypatch.setattr(window.user32, "GetCursorPos", lambda ptr: True)
+    monkeypatch.setattr(window.user32, "SetCursorPos", lambda x, y: False)
+    monkeypatch.setattr(window.ctypes, "get_last_error", lambda: 5)
+    with pytest.raises(OSError) as caught:
+        _move_cursor(0, 0)
+    assert caught.value.winerror == 5

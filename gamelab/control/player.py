@@ -12,12 +12,13 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
   appears, input stops at once (all that goes out after is letting go of the keys and buttons a plan
   held), the player pages whoever is at the PC, records the Lie Detector's whole cycle
-  (control.lie_recorder) while refusing every plan but two kinds (alarm_refusal: a tap of her pet food key,
+  (control.lie_recorder) while refusing every plan but three kinds (alarm_refusal: a tap of her pet food key,
   a few a minute; her retreat's moves, arrows, jump, up and down, for alarm.RETREAT_WINDOW_S after the
-  sighting; neither with the mouse; those two held to it with the alarm file up too, raised by another program; her
-  keys for them config.toml's, or where the running commands follow them to, paths.ALARM_KEYS: alarm.AlarmKeys), and
+  sighting; neither with the mouse; and the mini-game tracker's mouse moves alone, inside its board, no focus, click,
+  key or recording; all three held to it with the alarm file up too, raised by another program; her keys for the first
+  two config.toml's, or where the running commands follow them to, paths.ALARM_KEYS: alarm.AlarmKeys), and
   stops once a person has run `python -m gamelab clear-alarm` and the Lie Detector has been off the screen for a
-  minute; it won't start again until the alarm is cleared (it never tries to answer it, and never moves her by
+  minute; it won't start again until the alarm is cleared (it never clicks or types an answer, and never moves her by
   itself: her retreat is the running hunt's, behavior.retreat, which knows the map and where she is; with no hunt
   running, nothing moves her),
 - records the game's client area while a plan runs,
@@ -54,8 +55,8 @@ from maplehelper.keys import parse as parse_key
 
 from .. import window
 from ..paths import ALARM, ALARM_KEYS, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_INFO, PLAYER_LOG, STOP
-from .alarm import (ALARM_UNSAFE, LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS, RETREAT, RETREAT_WINDOW_S,
-                    AlarmKeys)
+from .alarm import (ALARM_UNSAFE, LIE_CURSOR, LIE_CURSOR_BOX, LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS,
+                    RETREAT, RETREAT_WINDOW_S, AlarmKeys)
 
 # It used to stop after 3 idle hours; on 2026-10-23 the user asked that it not be exited proactively (starting it
 # again needs their UAC click), and it had stopped by itself overnight: a day, so it outlasts a night without plans.
@@ -140,22 +141,24 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
 def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: list[float], now: float) -> str | None:
     """Why the player won't run `plan` with the Lie Detector alarm up (None: it will), `since` s after the sighting
     (None: when isn't known), the pet food plans it ran with the alarm up having started at `fed` (time.monotonic(), as
-    `now`). Two kinds go (alarm.PLAN_KINDS), and only as their kind says:
+    `now`). Three kinds go (alarm.PLAN_KINDS), and only as their kind says:
     - `pet_food`: one tap of her pet food key (config.toml [keys] pet_food) and nothing else, the whole plan over within
       TAP_MAX_MS of its start (its key down and up, its end: it holds the player no longer); PET_FOOD_PER_MIN in any
       minute at most;
     - `retreat`: her moves alone (her arrows, jump, up and down: walking, jumping, climbing, dropping), every key it
-      presses let go by its end, until RETREAT_WINDOW_S after the sighting.
-    Neither moves the mouse, clicks, resizes the window or records, and either starts within TAP_MAX_MS (its lead);
-    every other plan is refused, as before. `plan` is well-formed already (`validate`)."""
+      presses let go by its end, until RETREAT_WINDOW_S after the sighting;
+    - `lie_cursor`: one immediate mouse move inside the mini-game's board, no focus change, button, key, or wait at its
+      end. The ordinary perception process needs the elevated player for this (Windows blocks its input to the game).
+    None resizes the window or records; the first two neither move the mouse nor click. Every plan starts within
+    TAP_MAX_MS (its lead). `plan` is well-formed already (`validate`)."""
     kind = plan.get("kind")
     if kind not in PLAN_KINDS:
-        return "only her pet's food and her retreat go with the alarm up"
+        return "only her pet's food, her retreat and the mini-game's cursor go with the alarm up"
     events = plan.get("events", [])
     cap = plan.get("capture", {})
     if plan.get("window_client") is not None or cap.get("fps", 0):
         return "no window resize or recording with the alarm up"
-    if any(len(e) != 3 or e[1] in MOUSE_BUTTONS for e in events):
+    if kind != LIE_CURSOR and any(len(e) != 3 or e[1] in MOUSE_BUTTONS for e in events):
         return "no mouse with the alarm up"
     # Its start bounded: `validate` bounds a plan's lead only by the frames it records, and with none a plan let
     # through could wait any time before its first key, holding the player (a retreat's moves, the stop once the alarm
@@ -163,6 +166,16 @@ def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: l
     lead = cap.get("lead_ms", 100)
     if not (isinstance(lead, (int, float)) and 0 <= lead <= TAP_MAX_MS):
         return f"a plan with the alarm up starts within {TAP_MAX_MS} ms (its lead_ms: {lead!r})"
+    if kind == LIE_CURSOR:
+        if plan.get("focus") or cap.get("lead_ms", 100) != 0 or plan.get("end_ms") not in (None, 0):
+            return "the mini-game's cursor moves at once, without focus or a wait at the plan's end"
+        if len(events) != 1 or len(events[0]) != 4 or events[0][:2] != [0, "mouse"]:
+            return "the mini-game's cursor plan is one mouse move at 0 ms and nothing else"
+        _, _, x, y = events[0]
+        x0, y0, x1, y1 = LIE_CURSOR_BOX
+        if not (isinstance(x, int) and isinstance(y, int) and x0 <= x < x1 and y0 <= y < y1):
+            return f"the mini-game's cursor stays inside its board ({x0} <= x < {x1}, {y0} <= y < {y1})"
+        return None
     if kind == PET_FOOD:
         key = keys.pet_food.name if keys is not None and keys.pet_food is not None else None
         if key is None:
@@ -747,7 +760,11 @@ class Player:
                             cur["problems"].append(f"mouse {x},{y} is outside the game; skipped")
                             i += 1
                             continue
-                        moved = window.move_cursor(client_area["left"] + x, client_area["top"] + y, wait=wait)
+                        try:
+                            moved = window.move_cursor(client_area["left"] + x, client_area["top"] + y, wait=wait)
+                        except OSError as e:
+                            cur["problems"].append(f"cursor movement failed ({type(e).__name__}: {e})")
+                            return
                         if moved == "splice":
                             switch()
                             i = 0
@@ -838,8 +855,9 @@ class Player:
 
     def _with_alarm(self, plan: dict, since: float | None, filed: bool = False) -> dict | None:
         """A plan of a kind that goes with the alarm up, `since` s after the sighting (None: when isn't known): its
-        refusal (the Lie Detector error, and why), or None, logged either way (a pet food counted). `filed`: the alarm
-        is the alarm file's, this player not having seen the Lie Detector."""
+        refusal (the Lie Detector error, and why), or None. Refusals are logged; pet food is counted and retreat logged.
+        Cursor trails (about 15 a second) are recorded in the perception service's telemetry, not one log line each.
+        `filed`: the alarm is the alarm file's, this player not having seen the Lie Detector."""
         now = time.monotonic()
         self.fed = [t for t in self.fed if now - t < 60]
         kind, name = plan["kind"], plan.get("id", "?")
@@ -850,7 +868,7 @@ class Player:
         if kind == PET_FOOD:
             self.fed.append(now)
             self.log(f"{up}: her pet's food ({name}), {len(self.fed)} in the last minute")
-        else:
+        elif kind == RETREAT:
             self.log(f"{up}: her retreat's plan {name}, {since:.1f} s after the sighting "
                      f"({sum(1 for e in plan['events'] if e[2] == 'down')} keys; it's cut at {RETREAT_WINDOW_S:g} s)")
         return None
@@ -908,8 +926,9 @@ def _answer(path, result: dict) -> str:
 def serve() -> None:
     """The player: take plans from the inbox in name order and answer each, until STOP, 24 idle hours (not counting
     a Lie Detector's recording, at most lie_recorder.CAP_S) or a Lie Detector dealt with. From a Lie Detector's
-    sight it refuses every plan (Player.run: the alarm Event) but the two kinds alarm_refusal lets through (her pet's
-    food; her retreat's moves, for alarm.RETREAT_WINDOW_S) while the watchdog records it, and it stops once a
+    sight it refuses every plan (Player.run: the alarm Event) but the three kinds alarm_refusal lets through (her pet's
+    food; her retreat's moves, for alarm.RETREAT_WINDOW_S; the mini-game's mouse-only cursor) while the watchdog records
+    it, and it stops once a
     person has cleared the alarm and the screen has been clear since (Watchdog.cleared): plans are taken again only
     by a player started again, which takes the user's UAC click, as when it shut down at the alarm. It won't start
     with the alarm up, takes no plan before the watchdog's first look at the game, and stops if the watchdog does."""
@@ -939,7 +958,7 @@ def serve() -> None:
     pet = now_keys.pet_food.name if now_keys is not None and now_keys.pet_food is not None else None
     _log(f"player started; {len(player.allowed)} keys and the mouse buttons allowed; watching for the Lie Detector "
          f"(with it seen: {f'a tap of {pet!r} for her pet, {PET_FOOD_PER_MIN} a minute, and ' if pet else ''}her "
-         f"retreat's moves for {RETREAT_WINDOW_S:g} s; nothing else; her keys for them "
+         f"retreat's moves for {RETREAT_WINDOW_S:g} s, and the mini-game's mouse-only cursor; her keys for the first two "
          + ("config.toml's" if player.alarm_keys.used is None else f"{ALARM_KEYS.name}'s, as followed") + ", and "
          f"{ALARM_KEYS.name}'s whenever it changes); "
          + ("critical alerts to the phone through Bark" if notify.load_bark() is not None else

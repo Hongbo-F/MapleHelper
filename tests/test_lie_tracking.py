@@ -211,7 +211,8 @@ def test_each_answer_and_the_rounds_begin_and_end_go_into_the_services_telemetry
         assert t.ready.wait(5)
         t.step(0.3, item(1, 0.3, full))
         deadline = time.monotonic() + 5
-        while (not any(r["topic"] == "lie_target" for r in records) or not moves) and time.monotonic() < deadline:
+        while (not any(r["topic"] == "lie_target" for r in records) or not moves
+               or not any(r.get("event") == "move finished" for r in records)) and time.monotonic() < deadline:
             time.sleep(0.01)
         assert moves == [(409, 232)]  # the answer's desktop target really goes to the cursor mover
         t._end("board gone")
@@ -228,13 +229,19 @@ def test_each_answer_and_the_rounds_begin_and_end_go_into_the_services_telemetry
     assert end["round"] == begin["round"] and end["end"] == "board gone"
 
 
-def test_the_default_mover_uses_gamelabs_trail_based_cursor_move(monkeypatch):
-    from gamelab import window
+def test_the_default_mover_uses_the_elevated_players_trail_based_cursor_move(monkeypatch, tmp_path):
+    from gamelab.control import client
     calls = []
-    monkeypatch.setattr(window, "move_cursor", lambda x, y, wait: calls.append((x, y, wait)) or True)
-    wait = lambda due: True
-    assert lt.LieTracking._move_cursor(409, 232, wait) is True
-    assert calls == [(409, 232, wait)]
+
+    def move(x, y, active):
+        calls.append((x, y))
+        assert active() is True
+        return True
+
+    monkeypatch.setattr(client, "move_lie_cursor", move)
+    t, _, _ = tracking(tmp_path)
+    assert t._move_cursor(409, 232, wait=lambda due: True) is True
+    assert calls == [(309, 182)]  # desktop target converted to the player plan's client coordinates
 
 
 def test_the_cursor_thread_takes_only_the_newest_queued_target(tmp_path):
@@ -283,4 +290,28 @@ def test_ending_the_round_interrupts_the_current_cursor_trail(tmp_path):
     t._end("board gone")
     assert done.wait(1) and result == [False]
     assert t.cursor_why_off == ""
+    t.close()
+
+
+def test_a_cursor_failure_is_logged_and_recorded_with_its_target(tmp_path):
+    t, _, _ = tracking(tmp_path)
+    said, error = [], OSError(5, "blocked")
+    t.log = said.append
+
+    def denied(x, y, wait):
+        raise error
+
+    t.mover = denied
+    t._cursor_round = "round"
+    with telemetry.captured() as records:
+        t._queue_cursor((409, 232), seq=7)
+        deadline = time.monotonic() + 5
+        while not t.cursor_why_off and time.monotonic() < deadline:
+            time.sleep(0.01)
+        expected = f"OSError: {error}"
+        assert t.cursor_why_off == expected
+        assert said == [f"the Lie Detector's cursor movement is off: {expected}"]
+        failed = next(r for r in records if r.get("event") == "failed")
+        assert failed["topic"] == "lie_target_cursor" and failed["round"] == "round"
+        assert (failed["x"], failed["y"], failed["seq"], failed["error"]) == (409, 232, 7, expected)
     t.close()

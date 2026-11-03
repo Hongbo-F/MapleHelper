@@ -604,6 +604,28 @@ def test_with_the_alarm_up_a_retreat_is_her_moves_alone_for_its_window_with_ever
     assert alarm_mod.RETREAT_WINDOW_S > alarm_mod.RETREAT_S  # her 10 s retreat fits
 
 
+def test_with_the_alarm_up_the_lie_cursor_is_one_mouse_move_inside_the_mini_game_board():
+    from gamelab.control import alarm as alarm_mod
+    from gamelab.control.player import alarm_refusal
+    keys = _keys()
+
+    def cursor(events=None, **kw):
+        return {"kind": alarm_mod.LIE_CURSOR,
+                "events": [[0, "mouse", 309, 182]] if events is None else events,
+                "focus": False, "capture": {"lead_ms": 0}, **kw}
+
+    assert alarm_refusal(cursor(), keys, None, [], 100.0) is None
+    assert alarm_refusal(cursor([[0, "mouse", 1057, 679]]), keys, None, [], 100.0) is None
+    for x, y in ((307, 180), (1058, 180), (308, 179), (308, 680), (10, 10)):
+        assert "inside its board" in alarm_refusal(cursor([[0, "mouse", x, y]]), keys, None, [], 100.0)
+    for events in ([[0, "lbutton", "down"]], [[0, "mouse", 309, 182], [10, "lbutton", "down"]],
+                   [[10, "mouse", 309, 182]], [[0, "mouse", 309, 182], [0, "mouse", 400, 300]], []):
+        assert "one mouse move" in alarm_refusal(cursor(events), keys, None, [], 100.0), events
+    for plan in (cursor(focus=True), cursor(capture={"lead_ms": 1}), cursor(end_ms=100),
+                 cursor(capture={"lead_ms": 0, "fps": 1}), cursor(window_client=[1366, 768])):
+        assert alarm_refusal(plan, keys, None, [], 100.0) is not None, plan
+
+
 def test_the_alarm_keeps_when_the_lie_detector_was_first_seen():
     from gamelab.control.player import Alarm
     flag = Alarm()
@@ -643,6 +665,31 @@ def _alarmed_player(seen_ago: float = 1.0):
 
 def _plan(pid, events, kind="pet_food"):
     return {"id": pid, "kind": kind, "events": events, "focus": True, "capture": {"lead_ms": 0}}
+
+
+def test_the_elevated_player_runs_the_lie_cursor_trail_and_reports_windows_failures(monkeypatch, tmp_path):
+    from gamelab.control import alarm as alarm_mod
+    from gamelab.control import player as player_mod
+    game = _Game(monkeypatch, tmp_path)
+    p, said = _alarmed_player()
+    moves = []
+    monkeypatch.setattr(player_mod.window, "move_cursor",
+                        lambda x, y, wait: moves.append((x, y, wait(time.perf_counter()))) or True)
+    plan = _plan("cursor", [[0, "mouse", 309, 182]], alarm_mod.LIE_CURSOR)
+    plan["focus"] = False
+    result = p.run(plan)
+    assert "error" not in result and result["sent"][0][1:] == ["mouse", 309, 182]
+    assert moves == [(309, 182, True)] and game.sent == [] and game.fronted == [] and said == []
+
+    def denied(x, y, wait):
+        raise OSError(5, "blocked")
+
+    monkeypatch.setattr(player_mod.window, "move_cursor", denied)
+    plan["id"] = "cursor_denied"
+    result = p.run(plan)
+    assert result["sent"] == []
+    assert result["problems"] == [f"cursor movement failed (OSError: {OSError(5, 'blocked')})"]
+    assert game.sent == [] and game.fronted == []
 
 
 def test_with_the_alarm_up_the_player_feeds_her_pet_and_refuses_the_rest(monkeypatch, tmp_path):
@@ -738,7 +785,44 @@ def test_a_plan_running_when_the_alarm_goes_off_is_stopped_whatever_its_kind(mon
     assert game.sent == [("left", True), ("left", False)]
 
 
-def test_the_client_sends_her_pet_food_and_her_retreat_with_the_alarm_up_and_nothing_else(alarm_file):
+def test_the_client_hands_the_lie_cursor_to_the_player_without_focus_capture_or_input_else(alarm_file, monkeypatch):
+    from gamelab.control import alarm as alarm_mod
+    alarm_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(client, "done", lambda pid: True)
+    monkeypatch.setattr(client, "wait",
+                        lambda pid, timeout: {"sent": [[0, "mouse", 309, 182]], "problems": []})
+    assert client.move_lie_cursor(309, 182, active=lambda: True) is True
+    path = next(client.INBOX.glob("*lie_cursor*.json"))
+    plan = json.loads(path.read_text(encoding="utf-8"))
+    assert plan == {"events": [[0, "mouse", 309, 182]],
+                    "capture": {"fps": 0, "duration_ms": 0, "scale": 1, "lead_ms": 0},
+                    "focus": False, "kind": alarm_mod.LIE_CURSOR}
+    assert client.cancel(path.stem)  # test plan only: no player is running
+
+
+def test_an_inactive_lie_cursor_is_withdrawn_without_waiting_for_a_result(alarm_file, monkeypatch):
+    alarm_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(client, "done", lambda pid: False)
+
+    def no_wait(pid, timeout):
+        raise AssertionError("a plan never picked up has no result to wait for")
+
+    monkeypatch.setattr(client, "wait", no_wait)
+    assert client.move_lie_cursor(309, 182, active=lambda: False) is False
+    assert not list(client.INBOX.glob("*lie_cursor*.json"))
+
+
+def test_an_inactive_lie_cursor_already_running_is_cancelled_and_collected(monkeypatch):
+    calls = []
+    monkeypatch.setattr(client, "send", lambda *a, **kw: "cursor1")
+    monkeypatch.setattr(client, "done", lambda pid: False)
+    monkeypatch.setattr(client, "cancel", lambda pid: calls.append(("cancel", pid)) or False)
+    monkeypatch.setattr(client, "wait", lambda pid, timeout: calls.append(("wait", pid)) or {"problems": ["cancelled"]})
+    assert client.move_lie_cursor(309, 182, active=lambda: False) is False
+    assert calls == [("cancel", "cursor1"), ("wait", "cursor1")]
+
+
+def test_the_client_sends_only_the_named_kinds_with_the_alarm_up(alarm_file):
     alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-10-24 21:02:00",
                                       "at": time.time() - 2.0}), encoding="utf-8")
     with pytest.raises(client.LieDetectorAlarm):

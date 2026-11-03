@@ -2551,7 +2551,7 @@ def cmd_perceive(args) -> int:
             from .control.recording import Recording
             recording = Recording(title, log=lambda m: print(m, flush=True))
         from .control.lie_tracking import LieTracking
-        tracking = LieTracking(log=lambda m: print(m, flush=True), title=title)  # (the mini-game's target, alarm up)
+        tracking = LieTracking(log=_log, title=title)  # (the mini-game's target, alarm up; failures also in telemetry)
         print(f"perceiving the game for every command at {service.HZ:g} frames a second; telemetry: {path} (the "
               f"mini-map follows it); " + ("the rolling recording: not kept (--no-record)" if recording is None else
                                            "the rolling recording kept here") + "; Ctrl+C stops", flush=True)

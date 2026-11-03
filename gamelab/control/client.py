@@ -3,8 +3,9 @@
 recorded beside the answer. Submit a plan and wait for its result, or send it, watch for it to be
 done and cut it short, or (a player that takes them: can_splice) hand it a plan that takes over from the running one at
 a moment of its own, the keys held then kept held (`splice`: the navigator's plans replanned as she goes,
-control.navigator.REPLAN). No plan goes out while the Lie Detector alarm is up (control.alarm), but the two kinds the
-player still takes then (alarm.PLAN_KINDS: her pet's food, her retreat's moves), sent with their `kind`.
+control.navigator.REPLAN). No plan goes out while the Lie Detector alarm is up (control.alarm), but the three kinds the
+player still takes then (alarm.PLAN_KINDS: her pet's food, her retreat's moves, the mini-game's mouse-only cursor),
+sent with their `kind`.
 """
 
 import json
@@ -15,7 +16,7 @@ import uuid
 import numpy as np
 
 from ..paths import ALARM, INBOX, OUTBOX, PLAYER_INFO, PLAYER_LOG
-from .alarm import LIE_DETECTOR_ERROR, PLAN_KINDS
+from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, PLAN_KINDS
 
 POLL_S = 0.01  # how often `wait` looks for the result
 _KINDS: set[str] = set()  # plans sent with a kind, not answered yet: the alarm doesn't withdraw them (`wait`)
@@ -70,8 +71,9 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
          end_ms: int | None = None, window_client=None, kind: str | None = None) -> str:
     """Hand a plan to the running player without waiting; returns its id (for wait / cancel).
     `end_ms`: the plan lasts this long even after its last key (the next plan starts then). `kind`: one of
-    alarm.PLAN_KINDS (her pet's food, her retreat's moves), which goes out with the Lie Detector alarm up too, for the
-    player to take or refuse by what the kind allows (player.alarm_refusal); any other plan is refused here then."""
+    alarm.PLAN_KINDS (her pet's food, her retreat's moves, the mini-game's mouse-only cursor), which goes out with the
+    Lie Detector alarm up too, for the player to take or refuse by what the kind allows (player.alarm_refusal); any
+    other plan is refused here then."""
     if kind is None:
         check_alarm()
     elif kind not in PLAN_KINDS:
@@ -95,6 +97,32 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     tmp.write_text(json.dumps(plan), encoding="utf-8")
     tmp.replace(INBOX / f"{plan_id}.json")
     return plan_id
+
+
+def move_lie_cursor(x: int, y: int, active) -> bool:
+    """Move to client pixel x, y through the elevated player while `active()` says the mini-game's round is still on.
+
+    This is the only mouse plan allowed with the alarm up: no focus, click, key, capture or final wait. The player
+    generates and plays the trail (window.move_cursor). Returns False when the round ends and the plan is cancelled.
+    """
+    plan_id = send([[0, "mouse", x, y]], focus=False, lead_ms=0, name="lie_cursor", kind=LIE_CURSOR)
+    try:
+        while not done(plan_id):
+            if not active():
+                if cancel(plan_id):  # not picked up: withdrawn, and no result will come
+                    return False
+                wait(plan_id, timeout=5)  # already running: collect its result, whether it finished or was cancelled
+                return False
+            time.sleep(POLL_S)
+        result = wait(plan_id, timeout=5)
+    except BaseException:
+        cancel(plan_id)  # also withdraw it if the service is closing or the mover failed
+        raise
+    if result.get("problems") == ["cancelled"]:
+        return False
+    if not result.get("sent"):
+        raise PlayerError(f"the Lie Detector cursor plan sent no movement: {result!r}")
+    return True
 
 
 def _plan_id(name: str) -> str:

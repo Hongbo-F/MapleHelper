@@ -1,6 +1,6 @@
 """The Lie Detector alarm: once the player has seen it, gamelab refuses to run until a person has
 answered it and cleared the alarm (the alarm file, paths.ALARM). Paging whoever is at the PC.
-(Spotting it on screen: perception.lie_detector.) And the two kinds of plan that still go while it's up.
+(Spotting it on screen: perception.lie_detector.) And the kinds of plan that still go while it's up.
 
 The elevated key player loads this module: it imports nothing else of gamelab but paths.
 """
@@ -40,7 +40,11 @@ PAGE = ("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer 
 # within 10s".
 PET_FOOD = "pet_food"  # one tap of her pet food key and nothing else, PET_FOOD_PER_MIN a minute at most
 RETREAT = "retreat"    # her moves to a safe place (behavior.retreat), up to RETREAT_WINDOW_S after the sighting
-PLAN_KINDS = (PET_FOOD, RETREAT)
+LIE_CURSOR = "lie_cursor"  # one mouse move inside the mini-game's board, no button or key (control.lie_tracking)
+PLAN_KINDS = (PET_FOOD, RETREAT, LIE_CURSOR)
+# Client-pixel bounds of the mini-game's board (perception.lie_target.BOARD_AT_NATIVE, which the elevated player's
+# dependencies don't import). A lie_cursor plan may move only here; it can't point at other game controls.
+LIE_CURSOR_BOX = (308, 180, 1058, 680)
 PET_FOOD_PER_MIN = 3   # a food is given at most every 75 s or so (behavior.pet: a point of fullness a TICK_S)
 RETREAT_S = 10.0       # s from the sighting by which she's on a safe place (behavior.retreat plans for it) ...
 RETREAT_WINDOW_S = 12.0  # ... and the player takes her retreat's moves this long after it, then none
