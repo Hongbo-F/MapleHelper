@@ -12,7 +12,9 @@ It comes in more than one form, and each is recognized:
 - the image quiz's warning, 30 s before it: a see-through blue box, "Question in N seconds",
   "Answer within 10 seconds";
 - the image quiz: "Click all matching images", three pictures and a Confirm button, 10 s to answer;
-- the Truth Booth itself (where a failed test sends her), by its "Time Left" timer.
+- the Truth Booth itself (where a failed test sends her), by its "Time Left" clock and the Maple Administrator's
+  name tag under it, both at once: the clock alone is every timed map's (2026-10-31 23:58, the Kerning party quest's
+  first stage scored 1.02 on it and raised the alarm as the Truth Booth).
 The notice and the quiz's warning are matched so that the hunt stops, and she retreats, before the
 test begins. Never try to answer it automatically: a person has to.
 
@@ -74,6 +76,20 @@ PLACES = {
     "truth booth": ((776, 40),),
 }
 NEAR_MARGIN = 48  # TEMPLATE_FRAME px around each place (24 at half size)
+# The Truth Booth is the clock (HALF_SIZE's "truth booth") and the Maple Administrator's yellow name tag in the room
+# below it, both: its score is the lesser of the two. The clock is the game's own for any map with a time limit (the
+# Kerning party quest's stages, 2026-10-31 23:58 and 2026-11-01 00:01, scored 1.02 and 1.01 on it: the alarm raised
+# as the Truth Booth, its push to the phone too), the Administrator may stand elsewhere; together they're the booth.
+# The tag's template, as `scores` sees a 1366x768 frame (stretched, halved, grey), is the median of the 11-03 00:02
+# booth's frames (the alarm clip of 00:03:38, a frame in 20 of 560-1546). The booth's room is smaller than the view, so
+# the tag shows at one place, BOOTH_TAG_AT: the same pixel on 2026-10-18 (1920x1080), 10-29 and 11-03 (1366x768).
+# `near` matches it within NEAR_MARGIN of it, `scores` over the whole frame. On 14,351 saved frames (a frame in 3 of
+# the alarm clips, in 5 of the recordings' before/, in 3 of the rolling saves, in 10 of the golden clips, the lab's
+# screenshots, the fixtures: D:/MapleHelper-scratch/booth-admin/scan.py): the tag scored 1.0 on all 342 booth frames
+# (the 11-03 booth's fade-in too; 0.96 on 10-18's shrunk to 1366x768), and at most 0.52 at its place and 0.59 anywhere
+# on the others, the two party quest stages 0.21-0.26 at its place.
+BOOTH_TAG = (ASSETS / "truth_booth_admin.png", 0.8)
+BOOTH_TAG_AT = (1086, 786)  # its top-left in TEMPLATE_FRAME px
 # The forms whose window lies over the play area, where she is, each at the one of its PLACES where it does: the
 # countdown's window (its yellow title at the first; at the second its box at the right, which comes before it as the
 # mini-game's notice does), the mini-game's board and the quiz. Not the boxes that come before them (the mini-game's
@@ -133,6 +149,8 @@ class LieDetectorSpotter:
         self.template_yellow = cv2.countNonZero(self.template)
         self.half = {name: (cv2.cvtColor(np.asarray(Image.open(png).convert("RGB")), cv2.COLOR_RGB2GRAY), t)
                      for name, (png, t) in HALF_SIZE.items()}
+        png, t = BOOTH_TAG
+        self.booth_tag = (cv2.cvtColor(np.asarray(Image.open(png).convert("RGB")), cv2.COLOR_RGB2GRAY), t)
         self._pictures = threading.local()  # each thread's pictures a look is made in (`_kept`)
 
     def scores(self, frame: np.ndarray) -> dict[str, float]:
@@ -145,6 +163,8 @@ class LieDetectorSpotter:
             if gray.shape[0] >= template.shape[0] and gray.shape[1] >= template.shape[1]:
                 score = float(cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED).max())
                 out[name] = score / threshold
+        if "truth booth" in out:
+            out["truth booth"] = min(out["truth booth"], self._booth_tag(gray))
         return out
 
     def near(self, frame: np.ndarray) -> dict[str, float]:
@@ -168,7 +188,18 @@ class LieDetectorSpotter:
                 rows, cols = _box((x // 2, y // 2), template.shape[::-1], half, NEAR_MARGIN // 2)
                 best = max(best, float(cv2.matchTemplate(gray[rows, cols], template, cv2.TM_CCOEFF_NORMED).max()))
             out[name] = best / threshold
+        x, y = BOOTH_TAG_AT
+        rows, cols = _box((x // 2, y // 2), self.booth_tag[0].shape[::-1], half, NEAR_MARGIN // 2)
+        out["truth booth"] = min(out["truth booth"], self._booth_tag(gray[rows, cols]))
         return out
+
+    def _booth_tag(self, gray: np.ndarray) -> float:
+        """How well the Maple Administrator's name tag (BOOTH_TAG) matches anywhere on a half-size grey picture, as a
+        fraction of its threshold (0 on one smaller than it)."""
+        template, threshold = self.booth_tag
+        if gray.shape[0] < template.shape[0] or gray.shape[1] < template.shape[1]:
+            return 0.0
+        return float(cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED).max()) / threshold
 
     def over_play(self, frame: np.ndarray) -> str | None:
         """The first form whose window over the play area (OVER_PLAY) is seen at its place on this frame of the game's

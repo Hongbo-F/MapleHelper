@@ -5,6 +5,7 @@ import threading
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 from PIL import Image
@@ -56,12 +57,15 @@ def test_spots_the_mouse_mini_game_and_the_truth_booth():
     spotter = LieDetectorSpotter()
     assert spotter.scores(mini_game)["mini-game"] >= 1
     assert spotter.seen(mini_game)
-    assert spotter.scores(img("truth_booth_timer.png"))["truth booth"] >= 1
+    assert spotter.scores(img("lie_detector/2026-10-18_204759_truth_booth.png"))["truth booth"] >= 1
+    # the clock alone is every timed map's: the Truth Booth is the clock and the Maple Administrator under it
+    assert spotter.scores(img("truth_booth_timer.png"))["truth booth"] < 1
 
 
 # <date>_<time>_<form>.png (.jpg: the rolling recorder's frames, as recorded), see its README
 SEEN_IN_GAME = sorted((FIXTURES / "lie_detector").glob("*.png")) + sorted((FIXTURES / "lie_detector").glob("*.jpg"))
 WITHOUT = sorted((FIXTURES / "lie_detector" / "without").glob("*.jpg"))  # the same scenes just before or after
+TIMED = sorted((FIXTURES / "lie_detector" / "timed").glob("*.png"))  # maps with the game's clock, not the Truth Booth
 FORMS = {"countdown": "countdown", "mini_game_notice": "mini-game notice", "mini_game": "mini-game",
          "quiz_warning": "quiz warning", "quiz": "quiz", "truth_booth": "truth booth"}
 
@@ -91,6 +95,24 @@ def test_each_lie_detector_seen_in_game_is_seen_as_its_own_form(png):
     its 0.9): each is told for what it is, as are the quiz's warning and the quiz."""
     scores = LieDetectorSpotter().scores(img(png))
     assert max(scores, key=scores.get) == FORMS[png.stem.split("_", 2)[2]]
+
+
+@pytest.mark.parametrize("png", TIMED, ids=lambda p: p.stem)
+def test_a_timed_map_s_clock_is_not_the_truth_booth(png):
+    """The game's "Time Left" clock shows on every map with a time limit, at the Truth Booth's place (2026-10-31 23:58,
+    the Kerning party quest's first stage: the alarm raised as the Truth Booth, at 1.02 of the clock's threshold). The
+    clock is seen there, at both sizes, and with no Maple Administrator under it the Truth Booth isn't, nor anything."""
+    spotter = LieDetectorSpotter()
+    clock, threshold = spotter.half["truth booth"]
+    for frame in (img(png), native(img(png))):
+        grey = spotter._halved(spotter._stretched(frame))
+        assert cv2.matchTemplate(grey, clock, cv2.TM_CCOEFF_NORMED).max() >= threshold
+        for scores in (spotter.scores(frame), spotter.near(frame)):
+            assert scores["truth booth"] < 0.8 and max(scores.values()) < 0.8, scores
+
+
+def test_the_lie_detectors_timed_maps_are_there():
+    assert len(TIMED) >= 1
 
 
 @pytest.mark.parametrize("frame", [SCENE, NEAR_MISS, np.zeros((540, 960, 3), np.uint8)])
@@ -137,7 +159,7 @@ def native(frame):
     return frame if frame.shape[:2] == (768, 1366) else np.asarray(Image.fromarray(frame).resize((1366, 768), Image.BOX))
 
 
-@pytest.mark.parametrize("png", SEEN_IN_GAME + WITHOUT, ids=lambda p: p.stem)
+@pytest.mark.parametrize("png", SEEN_IN_GAME + WITHOUT + TIMED, ids=lambda p: p.stem)
 def test_the_look_near_the_forms_places_scores_every_lie_detector_seen_in_game_as_the_whole_frame_does(png):
     """The watchdog's look (`near`): each form matched only around where it has always shown, on the pictures the
     whole frame's look matches, scores it as that look does where it's seen, at both sizes, and nothing higher."""
@@ -145,17 +167,17 @@ def test_the_look_near_the_forms_places_scores_every_lie_detector_seen_in_game_a
     for frame in (img(png), native(img(png))):
         whole, near = spotter.scores(frame), spotter.near(frame)
         assert near.keys() == whole.keys() and all(near[f] <= whole[f] + 1e-4 for f in whole)
-        if png.parent.name != "without":
+        if png.parent.name not in ("without", "timed"):
             form = FORMS[png.stem.split("_", 2)[2]]
             assert near[form] == pytest.approx(whole[form], abs=1e-4) and near[form] >= 1
 
 
-@pytest.mark.parametrize("png", SEEN_IN_GAME + WITHOUT, ids=lambda p: p.stem)
+@pytest.mark.parametrize("png", SEEN_IN_GAME + WITHOUT + TIMED, ids=lambda p: p.stem)
 def test_its_windows_over_the_play_area_are_seen_at_their_places_and_nothing_else(png):
     """`over_play` (her place by the scene counted covered under them: localization.locate.Cover): the countdown's
     window, the mini-game's board and the quiz, at both sizes; the boxes that come before them (the mini-game's notice,
     the quiz's warning), the Truth Booth's timer and the scenes without them: none; another size: none."""
-    form = None if png.parent.name == "without" else FORMS[png.stem.split("_", 2)[2]]
+    form = None if png.parent.name in ("without", "timed") else FORMS[png.stem.split("_", 2)[2]]
     want = form if form in lie_detector.OVER_PLAY else None
     spotter = LieDetectorSpotter()
     for frame in (img(png), native(img(png))):

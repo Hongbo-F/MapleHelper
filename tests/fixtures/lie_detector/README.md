@@ -4,7 +4,8 @@ The screenshots gamelab saved when MapleStory's Lie Detector came up (`gamelab/l
 ignores), kept here unchanged, and since 2026-10-25 frames of the rolling recorder's (`.jpg`, as it recorded them: the
 notice and the image quiz, which raised no alarm then). Each file is named `<date>_<time>_<form>.png` (or `.jpg`), the
 form being the one `perception.lie_detector` spots it as; `tests/test_alarm.py` checks every one is still spotted, as
-that form. `without/` has frames of the same scenes just before or after, where nothing may be seen.
+that form. `without/` has frames of the same scenes just before or after, where nothing may be seen; `timed/`
+maps with the game's "Time Left" clock that aren't the Truth Booth, where nothing may be seen either.
 
 | Date | Time | Form | Map | What happened |
 |---|---|---|---|---|
@@ -23,13 +24,15 @@ that form. `without/` has frames of the same scenes just before or after, where 
 | 2026-10-25 | 00:28:33 | quiz | Tree Dungeon, Forest Up North II | The same, both magnifiers picked (green), Confirm lit. |
 | 2026-10-25 | 00:55:01 | mini-game notice | Tree Dungeon, Forest Up North II | The notice, 1 s into its 10; unseen then. |
 | 2026-10-25 | 00:55:10 | mini-game | Tree Dungeon, Forest Up North II | Its board, a square to follow: the alarm. Answered. |
+| 2026-11-03 | 00:02:50 | truth booth | Truth Booth | At 1366x768, 30 s in (3:57 left), from the alarm clip of 00:03:38 (its frame 1000). The mouse mini-game went unanswered; she was sent here. |
+| 2026-10-31 | 23:58:40 | (`timed/`) | Kerning party quest, first stage | RiceBaby with a party, the clock at 29:59. The clock alone was the Truth Booth then: the alarm and its push. Since 2026-11-03 the booth also needs the Maple Administrator's name tag under the clock. |
 
 The `spot` scores (match / threshold, 1 = seen):
 
 | Frame | countdown | mini-game notice | mini-game | quiz warning | quiz | truth booth |
 |---|---|---|---|---|---|---|
 | 2026-10-18 20:47:59 | 0.59 | 0.30 | 0.50 | 0.49 | 0.53 | **1.18** |
-| 2026-10-19 00:47:20 | **1.31** | 0.30 | 0.57 | 0.58 | 0.58 | 0.70 |
+| 2026-10-19 00:47:20 | **1.31** | 0.30 | 0.57 | 0.58 | 0.58 | 0.69 |
 | 2026-10-19 01:58:28 | 0.57 | **1.11** | 1.00 | 0.54 | 0.58 | 0.58 |
 | 2026-10-19 02:54:39 | 0.57 | **1.11** | 1.01 | 0.57 | 0.60 | 0.51 |
 | 2026-10-19 21:46:38 | 0.57 | **1.11** | 1.01 | 0.59 | 0.59 | 0.51 |
@@ -43,7 +46,9 @@ The `spot` scores (match / threshold, 1 = seen):
 | 2026-10-25 00:28:33 | 0.47 | 0.31 | 0.48 | 0.60 | **1.42** | 0.56 |
 | 2026-10-25 00:55:01 | 0.51 | **1.11** | 0.93 | 0.58 | 0.61 | 0.56 |
 | 2026-10-25 00:55:10 | 0.37 | 0.89 | **1.25** | 0.58 | 0.61 | 0.56 |
+| 2026-11-03 00:02:50 | 0.59 | 0.30 | 0.50 | 0.54 | 0.50 | **1.18** |
 | without/ (the four) | 0.41-0.47 | 0.33-0.34 | 0.48 | 0.56-0.62 | 0.61 | 0.56-0.63 |
+| timed/ 2026-10-31 23:58:40 | 0.59 | 0.30 | 0.42 | 0.57 | 0.56 | 0.69 (the clock 1.02, the Administrator 0.69) |
 
 The notice and the board share the Maple Administrator's portrait and the title "The Lie Detector Mini-game". At
 1920x1080 the board's template caught the notices only just (0.80 to 0.81 against its 0.8); at 1366x768 it scored
