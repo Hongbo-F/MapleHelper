@@ -1724,17 +1724,33 @@ class Hunt:
         """Where the spawn guard's wait for the pass is made when look `s` has her within RESPAWN_NEAR of a free spawn
         point of a kind that counts on her platform: a walk along it (the way, how far, to where) to the nearest place
         OFF_MARGIN past every such point's RESPAWN_NEAR, GROUND_MARGIN in from its ends, with no monster that counts in
-        the way (`_in_the_way`) and MIN_MOVE or more off; None: none (she waits where she is)."""
-        d = getattr(self.h, "danger", None)
-        if d is None or s.platform is None or s.where is None:
+        the way (`_in_the_way`) and MIN_MOVE or more off; None: none (she waits where she is, and the guard prices her
+        staying there). The walk is blind (actions.walk), so only one that's safe all the way (the review of 2026-11-03:
+        uncapped, it walked her 116-230 units across the free points it was keeping her from, at the pass): away from
+        every such point by her (none of them on the side she walks to), passing within RESPAWN_NEAR of no other on the
+        way, at most WAIT_STEP (rule 9's step) and done before the pass's window opens (WALK_SPEED, PASS_BEFORE before
+        the clock's next pass); none from a look a touch's knock may still be moving her in (fight.knocked_move's), as
+        rule 9's (`_wait_place`)."""
+        d, clock = getattr(self.h, "danger", None), getattr(self.h, "spawn_clock", None)
+        if d is None or s.platform is None or s.where is None or clock is None or not clock.sure:
+            return None
+        knocked = getattr(self.h, "knocked", None)
+        if knocked is not None and knocked(s):
             return None
         here, x = s.platform, s.where.x
         points = d.respawn_points(here.id, here.left, here.right, self._around(s))
-        if not any(abs(px - x) <= RESPAWN_NEAR for px, _ in points):
+        near = [px for px, _ in points if abs(px - x) <= RESPAWN_NEAR]
+        if not near:
             return None
+        now = time.monotonic()
+        due = clock.next_pass(now - PASS_BEFORE)
+        most = min(WAIT_STEP, WALK_SPEED * (due - PASS_BEFORE - now))  # (there before the window opens)
         best = None
         for g in spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN):
+            lo, hi = min(x, g), max(x, g)
             if any(abs(px - g) <= RESPAWN_NEAR + OFF_MARGIN for px, _ in points) or abs(g - x) < MIN_MOVE \
+                    or abs(g - x) > most or any((px - x) * (g - x) > 0 for px in near) \
+                    or any(lo - RESPAWN_NEAR <= px <= hi + RESPAWN_NEAR for px, _ in points if px not in near) \
                     or self._in_the_way(s, x, g):
                 continue
             if best is None or abs(g - x) < abs(best - x):

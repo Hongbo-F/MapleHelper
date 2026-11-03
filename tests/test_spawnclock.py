@@ -225,9 +225,11 @@ def test_a_stand_done_before_the_pass_goes_and_a_held_point_doesnt_count(monkeyp
 
 
 def test_waiting_for_the_pass_by_a_free_point_she_steps_off_it_where_the_platform_has_room(monkeypatch):
-    """On a platform with room past the points' RESPAWN_NEAR she waits there (the nearest, OFF_MARGIN past it); on 7,
-    214 wide with its two points 113 apart, none at GROUND_MARGIN from its ends: she waits where she is."""
-    h, s, pile = _guarded(monkeypatch, 0.2)
+    """On a platform with room past the points' RESPAWN_NEAR she waits there (the nearest, OFF_MARGIN past it, away
+    from the point) where the walk is done before the pass's window opens; on 7, 214 wide with its two points 113
+    apart, none at GROUND_MARGIN from its ends: she waits where she is. Too near the pass for the walk, knocked, or
+    with no clock sure: where she is."""
+    h, s, pile = _guarded(monkeypatch, 1.0)
     h._in_the_way = lambda s, x, g: False
     assert h._off_points(s) is None  # (7: nowhere 75 off both points)
     from test_danger import HER, build
@@ -238,3 +240,32 @@ def test_waiting_for_the_pass_by_a_free_point_she_steps_off_it_where_the_platfor
                          t=s.t, players=[])
     side, units, goal = h._off_points(s2)
     assert side == "right" and goal >= RESPAWN_NEAR + hunt.OFF_MARGIN and math.isclose(units, goal - 30.0)
+    assert units <= hunt.WAIT_STEP
+    h.h.knocked = lambda look: True
+    assert h._off_points(s2) is None
+    h.h.knocked = lambda look: False
+    clock = SpawnClock()  # (the pass 0.4 s off: 0.25 s before its window, 37 units at her walk, short of the 45)
+    for k in (1, 2, 3):
+        clock.birth(time.monotonic() + 0.4 - k * PERIOD_S, 1.0)
+    h.h.spawn_clock = clock
+    assert h._off_points(s2) is None
+    h.h.spawn_clock = SpawnClock()
+    assert h._off_points(s2) is None
+
+
+@pytest.mark.parametrize("pid, x", [(23, 133.0), (10, 167.0), (13, -10.0), (23, 40.0)])
+def test_off_a_point_she_never_walks_across_another_or_toward_one(monkeypatch, pid, x):
+    """Tree Dungeon (the thief at level 28: 1178 HP, W.DEF 112), no monster in view, the pass 1 s off: on 23 from x 133
+    (by the Horny Mushroom point at 95), on 10 from 167 (by 102) and on 13 from -10 (by -48) the only places 75 off
+    every point are the other way, across the point by her and, on 23 and 10, across the next too (-15, -109): the
+    review of 2026-11-03 had her walk 230, 150 and 120 units so, over the points at the pass. On 23 from 40, between its
+    two points (55 from each), no way is away from both. She waits where she is."""
+    from gamelab.attack.danger import Her
+    from gamelab.localization import mapdata
+    h, s, pile = _guarded(monkeypatch, 1.0)
+    model = mapdata.load(10002073)
+    h.h.danger, h.model = Danger(model, Her(1178.0, 28.0, 112.0)), model
+    p = model.platform(pid)
+    s.platform, s.where = p, SimpleNamespace(x=x, y=p.y_at(x))
+    assert any(abs(px - x) <= RESPAWN_NEAR for px, _ in h.h.danger.respawn_points(pid, p.left, p.right, []))
+    assert h._off_points(s) is None
