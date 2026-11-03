@@ -61,6 +61,61 @@ def test_births_of_one_pass_are_one_and_a_stray_found_solid_doesnt_move_the_phas
     assert abs(nxt - (500.0 + 5 * PERIOD_S)) < 0.06
 
 
+def test_a_phase_that_moves_is_followed_after_three_passes_off_its_grid():
+    """An hour of passes on one phase, then births 3.3 s later (a server restart, a channel change): by weight alone the
+    old phase outvoted the new for 24 passes (the review of 2026-11-03); with three passes in a row found fading off a
+    sure clock's grid (INLIER_S), the passes before them are dropped and the clock is sure of the new phase. Births of
+    one pass count once in the run; one on the grid between ends it; a stray found solid isn't one."""
+    c = SpawnClock()
+    for k in range(500):
+        c.birth(100.0 + k * PERIOD_S, 1.0)
+    assert c.sure
+    start = 100.0 + 500 * PERIOD_S + 3.3
+    c.birth(start, 1.0)
+    c.birth(start + 0.05, 1.0)  # (the same pass's)
+    c.birth(start + PERIOD_S, 1.0)
+    c.birth(start + PERIOD_S + 2.0, SOLID_WEIGHT)  # (solid: no part of the run)
+    assert c.resets == 0 and abs(c.next_pass(start + PERIOD_S + 1.0) - (start + 2 * PERIOD_S - 3.3)) < 0.05
+    c.birth(start + 2 * PERIOD_S, 1.0)
+    assert c.resets == 1 and c.sure and len(c.passes) == 4  # (the run's three, the solid stray among them)
+    assert abs(c.next_pass(start + 2 * PERIOD_S + 1.0) - (start + 3 * PERIOD_S)) < 0.05
+    assert c.chance(start + 3 * PERIOD_S - 0.1, start + 3 * PERIOD_S + 0.1, -0.15, 1.0) > 0.99
+    d = SpawnClock()
+    for k in range(20):
+        d.birth(100.0 + k * PERIOD_S, 1.0)
+    late = 100.0 + 20 * PERIOD_S
+    d.birth(late + 3.3, 1.0)
+    d.birth(late + PERIOD_S, 1.0)  # (on the grid: the run is over)
+    d.birth(late + PERIOD_S + 3.3, 1.0)
+    d.birth(late + 2 * PERIOD_S + 3.3, 1.0)
+    assert d.resets == 0 and len(d.passes) == 24
+
+
+def test_forget_drops_every_pass_and_the_record_says_what_the_clock_knows():
+    c = SpawnClock()
+    for k in range(3):
+        c.birth(100.0 + k * PERIOD_S, 1.0)
+    r = c.record()
+    assert r["sure"] and r["passes"] == 3 and r["births"] == 3 and r["resets"] == 0
+    c.birth(100.0 + 3 * PERIOD_S, 1.0)
+    assert c._dirty and c.record()["passes"] == 4 and c._dirty  # (fitted on a copy: the clock's own fit as it was)
+    c.forget()
+    assert not c.sure and c.next_pass(200.0) is None and c.record()["resets"] == 1
+
+
+def test_looks_lost_past_three_passes_have_the_hunt_forget_the_clock():
+    c = SpawnClock()
+    for k in range(3):
+        c.birth(100.0 + k * PERIOD_S, 1.0)
+    h = object.__new__(hunt.Hunt)
+    said = []
+    h.h, h.log = SimpleNamespace(spawn_clock=c), said.append
+    h._lost_for(hunt.FORGET_LOST_S - 1.0)
+    assert c.sure and not said
+    h._lost_for(hunt.FORGET_LOST_S + 1.0)
+    assert not c.sure and said == ["  the spawn clock forgets its passes (looks lost 22 s)"]
+
+
 def test_the_period_is_fitted_once_the_passes_span_long_enough_within_its_slack():
     """The server's period live 7.1146 s (both hours of 2026-11-02); a run whose passes come 7.115 s apart (the
     simulator's TICK_S) over minutes is fitted to it, one at 7.3 isn't believed past PERIOD_SLACK."""

@@ -24,13 +24,18 @@ SAME_PASS_S of each other one pass's; the passes of the last MEMORY_S kept. The 
 period, the one with the most weight within INLIER_S of it (their weights falling by age, AGE_S), then a least squares
 fit of the inliers to the grid (the period too once they span PERIOD_SPAN_S, kept within PERIOD_SLACK of PERIOD_S: the
 server's period is a fixed one, PERIOD_S a sane default till then). Its spread (the inliers' residuals) and their weight
-give the phase's standard error (`se`); `sure` once SURE_N passes' weight agree.
+give the phase's standard error (`se`); `sure` once SURE_N passes' weight agree. A phase that moves (a server restart,
+a channel change: births ASTRAY_N passes in a row found fading more than INLIER_S off a sure clock's grid) has the
+passes before them forgotten, so the clock follows the new one at once (the review of 2026-11-03: by weight alone an
+hour of the old phase outvoted the new for 24 passes, 171 s, the clock sure of the old meanwhile); `forget` drops all
+(behavior.hunt after a long LookLost: the game may be another server's or channel's when it's back).
 
 What it answers (`chance`): how likely an interval of hers overlaps a window about some pass ([pass + lo, pass + hi]),
 the pass's time drawn from the fit (normal, its se); with no phase yet, as likely as the window's share of a period
 (the phase not known: evenly). `next_pass`: the next pass's time after a moment. Pure: nothing here looks or presses a
 key; times are the looks' and the feed's events' clock (Scene.t, tracking.Event.t)."""
 
+import copy
 import math
 from collections import deque
 from dataclasses import dataclass
@@ -48,6 +53,7 @@ AGE_S = 300.0          # s: a pass's weight in the phase's choice falls by exp(-
 SOLID_WEIGHT = 0.3     # a birth found solid by a spawn point (no alpha) counts this much of one found fading in
 SIGMA_MIN = 0.03       # s: the fit's residual spread no less than this (the frames' own step, 1/15 s, halved)
 SURE_N = 1.5           # the passes' weight agreeing (age-weighed) for the clock to be sure: two births found fading
+ASTRAY_N = 3           # passes in a row with a birth found fading off a sure clock's grid: its phase moved (see the top)
 
 
 @dataclass
@@ -69,6 +75,8 @@ class SpawnClock:
         self.passes: deque[Pass] = deque()
         self._dirty = False
         self.births = 0                   # births taken, in all (the log's)
+        self.resets = 0                   # times its phase was seen to move and the passes before were dropped
+        self._astray: list[float] = []    # the passes in a row with a birth found fading off its grid (their times)
 
     # --- what it learns from -------------------------------------------------------------------------
 
@@ -90,6 +98,8 @@ class SpawnClock:
     def birth(self, t: float, w: float = 1.0) -> None:
         """A birth at time `t` (s) counting `w`: a pass's, or a new one."""
         self.births += 1
+        if w >= 1.0:
+            self._astray_check(t)
         for p in reversed(self.passes):
             if abs(p.t - t) <= SAME_PASS_S:
                 if w > p.w:
@@ -104,6 +114,30 @@ class SpawnClock:
         while self.passes and self.passes[0].t < self.passes[-1].t - MEMORY_S:
             self.passes.popleft()
         self._dirty = True
+
+    def _astray_check(self, t: float) -> None:
+        """A birth found fading at `t` against the phase (see the top): on its grid, the run of passes off it is over;
+        off it (more than INLIER_S) with the clock sure, one more pass of the run (births within SAME_PASS_S one
+        pass's), and at ASTRAY_N the passes before the run are dropped. Against the phase as last fitted (not fitted
+        again here: the fit's cadence stays its askers', so the passes it learns from give the same answers)."""
+        if self.phase is None or self.weight < SURE_N or _off(t, self.phase, self.period) <= INLIER_S:
+            self._astray = []
+            return
+        if not self._astray or abs(t - self._astray[-1]) > SAME_PASS_S:
+            self._astray.append(t)
+        if len(self._astray) >= ASTRAY_N:
+            first = min(self._astray) - SAME_PASS_S
+            self.passes = deque(p for p in self.passes if p.t >= first)
+            self._astray = []
+            self.resets += 1
+            self._fit()
+
+    def forget(self) -> None:
+        """Drop every pass seen (the phase is learned again from the births to come)."""
+        self.passes.clear()
+        self._astray = []
+        self.resets += 1
+        self._fit()
 
     def _fit(self) -> None:
         """The phase (and the period, once spanned) from the passes kept (see the top)."""
@@ -184,11 +218,18 @@ class SpawnClock:
         return max(0.0, min(1.0, total))
 
     def record(self) -> dict:
-        """As telemetry data (the hunt's 'spawn_clock' record): its phase, period, se and weight."""
-        self._now()
-        return {"phase": None if self.phase is None else round(self.phase, 3), "period": round(self.period, 4),
-                "se": None if not math.isfinite(self.se) else round(self.se, 3), "weight": round(self.weight, 2),
-                "passes": len(self.passes), "births": self.births}
+        """As telemetry data (the hunter's 'spawn_clock' record, Hunter._births: once a minute, and the spawn guard's
+        'respawn_guard' event's `clock`): its phase, period, se and weight, whether it's sure, its resets. Fitted on a
+        copy where its passes changed since the last fit, so recording leaves the fit's cadence its askers' (a fit
+        starts from the period the one before found)."""
+        c = self
+        if self._dirty:
+            c = copy.copy(self)
+            c._fit()
+        return {"phase": None if c.phase is None else round(c.phase, 3), "period": round(c.period, 4),
+                "se": None if not math.isfinite(c.se) else round(c.se, 3), "weight": round(c.weight, 2),
+                "sure": c.phase is not None and c.weight >= SURE_N, "passes": len(c.passes),
+                "births": c.births, "resets": c.resets}
 
 
 def _signed(t: float, ref: float, P: float) -> float:

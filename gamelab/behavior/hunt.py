@@ -384,6 +384,7 @@ PASS_SEEN_S = 0.2      # s after a pass by which a look has its newborns (the sp
                        # alpha 0.065 at the median, perception.spawns; and a look's latency)
 WAIT_AHEAD_S = 1.0     # guess: s ahead a place she waits at is held to the pass (a step away takes 0.3-0.7 s, a look)
 OFF_MARGIN = 5.0       # units past RESPAWN_NEAR a trip's wait for the pass is made at, by a free point (`_off_points`)
+FORGET_LOST_S = 21.0   # s of looks lost (three of the map's passes) after which the spawn clock forgets (`_lost_for`)
 # A free point's chance of a newborn at a pass where nothing better is known (the hunt loop: behavior.patrol's prior,
 # REFILL_P, 0.27; the grind's own from what it learned, Grind._fill)
 FILL_PRIOR = 0.27
@@ -624,6 +625,7 @@ class Hunt:
                     paused = time.monotonic()
                     back = self.h.senses.regain(lost, end)
                     self._paused(time.monotonic() - paused)
+                    self._lost_for(time.monotonic() - paused)
                     if back is None:
                         break
                 except KeyDoubt as doubt:  # her keys doubted (her regular attack, her casts, her moves, out of
@@ -634,7 +636,9 @@ class Hunt:
                         if doubt.doubt.kind == "stall" and getattr(out, "what", None) in ("followed", "switched"):
                             self._progress = time.monotonic()  # (her keys put right: the stretch starts again)
                     except LookLost as lost:  # (a look of the check's failed its checks: stand still, as above)
+                        lost_at = time.monotonic()
                         back = self.h.senses.regain(lost, end)
+                        self._lost_for(time.monotonic() - lost_at)
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
@@ -646,7 +650,9 @@ class Hunt:
                         else:
                             self.h.read_stats()
                     except LookLost as lost:  # (a look of the read's failed its checks: stand still, as above)
+                        lost_at = time.monotonic()
                         back = self.h.senses.regain(lost, end)
+                        self._lost_for(time.monotonic() - lost_at)
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
@@ -719,6 +725,15 @@ class Hunt:
             self.report.on_the_way += 1
         self.report.standby_kills = len(after)
         return after
+
+    def _lost_for(self, seconds: float) -> None:
+        """Her looks lost for `seconds` (LookLost: Senses.regain): past FORGET_LOST_S the map's spawn clock forgets the
+        passes it saw (the game back may be another server's or channel's, its pass elsewhere: the review of
+        2026-11-03), the spawn guard off until it's sure again."""
+        clock = getattr(self.h, "spawn_clock", None)
+        if clock is not None and seconds > FORGET_LOST_S and clock.passes:
+            clock.forget()
+            self.log(f"  the spawn clock forgets its passes (looks lost {seconds:.0f} s)")
 
     def _paused(self, seconds: float) -> None:
         """She stood still `seconds` (LookLost: Senses.regain): her clocks move on by as much, so the pause isn't time
@@ -1700,7 +1715,8 @@ class Hunt:
             self._respawn_said = key
             if telemetry.recording():
                 telemetry.emit("event", kind="respawn_guard", what="trip", platform=pid, x=round(x), point_kind=kind,
-                               pass_in=round(due - now, 2), touch=round(touch, 2), wait=round(wait * prices.rate, 2))
+                               pass_in=round(due - now, 2), touch=round(touch, 2), wait=round(wait * prices.rate, 2),
+                               clock=clock.record())
         return (f"a {kind} spawn point at x {x:.0f} on {pid} may fill at the pass in {due - now:.1f} s (its newborn "
                 f"{touch:.1f} EXP more than waiting, the wait {wait * prices.rate:.1f})")
 

@@ -1470,7 +1470,8 @@ def _shot(s: Scene, t: Monster, dx: float, dy: float, model: MapModel | None = N
     on = here if t.platform == here.id else None  # the target's platform, if known
     if on is None and model is not None and t.platform is not None:
         on = model.platform(t.platform)
-    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on, ty=t.y, body=reach.body_of(t.kind)) is None
+    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on, ty=t.y, body=reach.body_of(t.kind),
+                               client=reach.WALLS_BLOCK) is None  # (her casts: the point inside, as before R6)
     now = time.monotonic()
     return {"kind": t.kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": here.id,
             "target": t.platform, "bar": t.bar, "seen": bool(s.tag_seen),

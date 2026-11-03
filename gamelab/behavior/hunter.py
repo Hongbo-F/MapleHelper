@@ -158,6 +158,7 @@ STARS_CHECKED = True
 MISS_SAID_S = 1.5    # her attack's MISS popup said once in this long (a look's and the frame's before her next key)
 STARS_WAIT_S = 15.0  # ... that check put off (no quiet moment: keycheck) this long at the most, then the stop (her Lucky
                      # Seven held meanwhile, the regular attack instead)
+CLOCK_RECORD_S = 60.0  # s between the map's spawn clock's 'spawn_clock' telemetry records (_births; recording only)
 
 
 def _throws_stars() -> bool:
@@ -1039,8 +1040,15 @@ class Hunter:
         self._stop_now(st)
 
     def _births(self, s: Scene) -> None:
-        """The births the feed saw since the last look (its 'spawned' events) to the map's spawn clock."""
+        """The births the feed saw since the last look (its 'spawned' events) to the map's spawn clock; its state as a
+        'spawn_clock' telemetry record once every CLOCK_RECORD_S (and at each of the spawn guard's holds: its
+        'respawn_guard' event's `clock`), for its phase checked against the births (the review of 2026-11-03)."""
         self.spawn_clock.see(s.events)
+        if telemetry.recording():
+            now = time.monotonic()
+            if now - getattr(self, "_clock_said", -math.inf) >= CLOCK_RECORD_S:
+                self._clock_said = now
+                telemetry.emit("spawn_clock", **self.spawn_clock.record())
 
     def _misses(self, s: Scene) -> None:
         """Her attack's MISS popups in look `s`'s frame over the targets of her presses waiting to be judged
