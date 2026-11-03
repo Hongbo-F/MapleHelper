@@ -55,8 +55,8 @@ MASS = 100.0     # the client's mass for a character (decompile)
 SPEED_RANGE = (80.0, 140.0)
 JUMP_RANGE = (80.0, 120.0)
 # The Speed this client adds to a character's stat window behind the scenes, after the cap: she walks walkSpeed x
-# (SPEED + SPEED_BONUS)/100. meowdb (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow, updated 2026-10-27;
-# measured off the client's video frame by frame): "Walking speed is 125 × (Speed + 20) / 100 pixels per second", "at
+# (SPEED + SPEED_BONUS)/100. NiaDB (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow, updated 2026-10-27;
+# measured frame by frame from COT2 video footage, its words; credited as its reuse terms ask): "Walking speed is 125 × (Speed + 20) / 100 pixels per second", "at
 # the base Speed of 100, your character walks 150 pixels per second", "MapleStory Classic World adds 20 Speed behind
 # the scenes", the cap 140 walking 200; its formulas page and calculator the same (125*(a+20)/100). Not in the game
 # data: Physics.img's walkSpeed is v83's 125 (PHYSICS_IMG), and monsters walk 125 x (1 + speed/100) as v83's (Tree

@@ -746,14 +746,18 @@ class Hunter:
     def _speed_read(self, speed) -> list[str]:
         """Her stat window's SPEED `speed` (%; None: not read) to her walk and climb: taken ('panel') unless it's no
         read (statcheck.speed_doubt: outside the client's range, or a jump from what's planned and from her stat
-        window's last read kept larger than gear gives), then said and the SPEED planned kept. Taken, her walk and climb
-        are its own from the next settle (physics.propose: read_stats settles at once at a hunt's start; in the hunt
-        loop, StatsDue, the loop's next pass or a navigator's, where no chain of hers runs). What to say of it."""
+        window's last read kept larger than gear gives; or, other than what's planned, not what a second frame read:
+        StatCheck.speed_again), then said and the SPEED planned kept. Taken, her walk and climb are its own from the
+        next settle (physics.propose: read_stats settles at once at a hunt's start; in the hunt loop, StatsDue, the
+        loop's next pass or a navigator's, where no chain of hers runs). What to say of it."""
         if speed is None:
             return []
         planned = self.speed_plan[0]
         kept = (self.stats.window_read.get("read") or {}).get("speed")
         why = speed_doubt(float(speed), planned, float(kept) if isinstance(kept, (int, float)) else None)
+        again = getattr(getattr(self, "stat_check", None), "speed_again", speed)
+        if why is None and float(speed) != planned and again != speed:
+            why = "a second frame read " + ("none" if again is None else f"{again:g}")
         if why is not None:
             return [f"her stat window's SPEED {speed:g} not taken ({why}; a misread?): her walk and climb as they were, "
                     f"SPEED {planned:g}"]

@@ -64,12 +64,15 @@ def test_set_speed_makes_every_name_of_her_walk_again_wherever_it_was_taken():
     assert route.ROPE_VX == pytest.approx(1.3 * 125.0) and route.ROPE_JUMP_SLIDE == body.slide(route.ROPE_VX,
                                                                                                 physics.SHOE)
     assert actions.JB_RUN_MS == physics.BLIND_ENDS_MS == 60  # (the blind spot of three steps ends sooner at 125)
+    knock = lambda: physics.KNOCK_VX * 2 * physics.KNOCK_VY / physics.GRAVITY + physics.LAND_SLIDE
+    assert navigator.KNOCK_REACH == pytest.approx(knock())  # (its landing slide hers: the final review, 2026-11-02)
     assert physics.RUN_LAG == pytest.approx(physics.LAGS.on + 125.0 / 2800)
     assert world.her_shoe(world.Her()) is physics.PROFILE_SHOE and world.her_climb(world.Her()) == PROFILE[1]
     assert not physics.set_speed(80.0) and physics.EPOCH == epoch + 1  # (the same: nothing made again)
     assert physics.reset() and physics.SPEED == 101.0 and physics.SHOE is physics.PROFILE_SHOE
     assert {n: getattr(physics, n) for n in physics.WALK_NAMES} == AT_IMPORT
     assert flow.ROPE_SPEED == navigator.ROPE_SPEED == PROFILE[1] and actions.JB_RUN_MS == 150
+    assert navigator.KNOCK_REACH == pytest.approx(knock()) == pytest.approx(53.9, abs=0.05)
 
 
 def test_a_change_proposed_waits_for_settle_and_is_told_once_made():
@@ -86,8 +89,8 @@ def test_a_change_proposed_waits_for_settle_and_is_told_once_made():
 
 def test_the_simulators_planner_can_be_held_apart_from_her_stat_windows_speed():
     """physics.set_planned (the simulator's `--world planner-v83`, world.Her.planned): her planner at v83's walk 125 (the
-    client's shoe at SPEED 80, v83's at 100 without the client's Speed, as master planned her) and the old climb 117
-    whatever her SPEED, every name of her walk made again as set_speed makes it, SPEED kept; reset back to the formula's."""
+    client's shoe at SPEED 80, v83's at 100 without the client's Speed, as master planned her walk) and the old climb
+    117 whatever her SPEED (master's down-climb; it planned her climbs up at flow.ROPE_SPEED's 130), every name of her walk made again as set_speed makes it, SPEED kept; reset back to the formula's."""
     from gamelab.motion import flow
     epoch = physics.EPOCH
     assert physics.set_planned(125.0, 117.0) and physics.EPOCH == epoch + 1
@@ -223,6 +226,25 @@ def test_a_read_misread_isnt_taken_and_a_change_two_reads_agree_on_is(tmp_path):
     assert h.said[-1] == ("her walk 151.25 -> 188.75 and climb 121 -> 151 units/s: SPEED 131, her stat window's, by the "
                           "client's formula")
     assert h._speed_read(150)[0].startswith("her stat window's SPEED 150 not taken (outside the client's 80-140")
+
+
+def test_a_speed_other_than_planned_is_taken_only_where_a_second_frame_reads_it_too(tmp_path):
+    """The final review of 2026-11-02: one OCR frame's SPEED would plan her (and, kept, her next hunter's start) till
+    the window is read again. A SPEED other than the one planned is taken where the second frame StatCheck reads then
+    (`speed_again`) reads it too; another or none: said, not taken. The one planned needs no second frame."""
+    from types import SimpleNamespace
+    h = _hunter(tmp_path)
+    h.stat_check = SimpleNamespace(speed_again=108)
+    assert h._speed_read(104) == ["her stat window's SPEED 104 not taken (a second frame read 108; a misread?): her "
+                                  "walk and climb as they were, SPEED 101"]
+    h.stat_check.speed_again = None
+    assert h._speed_read(104)[0].startswith("her stat window's SPEED 104 not taken (a second frame read none;")
+    assert h.speed_plan == (101.0, "profile") and not physics.settle()
+    h.stat_check.speed_again = 101  # (what's planned: no second frame asked, whatever it holds)
+    assert h._speed_read(101) == []
+    h.stat_check.speed_again = 104
+    assert h._speed_read(104) == [] and h.speed_plan == (104.0, "panel") and physics.settle()
+    assert physics.WALK_SPEED == 155.0
 
 
 # --- in the simulator: a read at a hunt's start, and one put off into the hunt loop ------------------------------

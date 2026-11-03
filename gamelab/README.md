@@ -267,7 +267,7 @@ It **may be open** when it isn't seen closed after her stats key and two Escs, o
 - *Her max HP*: only if her HUD's number hasn't read, and only where her HUD's as her stats file last kept it is the same, or her HP bar bears it out (under full, its share within 5 points of the window's cur / max).
 - *Her level*: only where nothing has read it.
 - *Her max MP*: her casts are reckoned at it (`Hunter.max_mp`, `Attacks.max_mp`), where her MP bar bears it out or it's within x1.25 of what they were reckoned at. config.toml's `[character] mp` (623) was used until then; live at level 28 it's 679. Said.
-- *SPEED*: from 2026-11-02 her walk and climb, by the client's formula (`Hunter._speed_read`, `motion.physics.set_speed`: Her walk and climb from her stat window's SPEED, below): at once at a hunt's start, from the hunt loop's next pass for a read put off into it; kept in her stats file as the SPEED taken (`window.speed`), which her next hunter starts from. Not a SPEED outside the client's 80-140 or more than 10 from both what's planned and her last read kept (`statcheck.speed_doubt`: "her stat window's SPEED 131 not taken (+30 from the 101 planned: more than gear gives between two reads; a misread?): her walk and climb as they were, SPEED 101"). *JUMP*: said where it differs by a point or more from her profile's, which plans her jumps, with the jump each gives (`statcheck.moves_notes`). Until 2026-11-02 her SPEED was said there too, against her profile's (the thief's 99.2: "her SPEED 101% by her stat window walks her at 151.25 units/s; her moves are planned at 149"), and before that against config.toml's fitted 119.2 at every read.
+- *SPEED*: from 2026-11-02 her walk and climb, by the client's formula (`Hunter._speed_read`, `motion.physics.set_speed`: Her walk and climb from her stat window's SPEED, below): at once at a hunt's start, from the hunt loop's next pass for a read put off into it; kept in her stats file as the SPEED taken (`window.speed`), which her next hunter starts from. Not a SPEED outside the client's 80-140 or more than 10 from both what's planned and her last read kept (`statcheck.speed_doubt`: "her stat window's SPEED 131 not taken (+30 from the 101 planned: more than gear gives between two reads; a misread?): her walk and climb as they were, SPEED 101"), nor, from the final review of 2026-11-02, one other than what's planned that a second frame of the open window doesn't read too (`StatCheck.speed_again`). *JUMP*: said where it differs by a point or more from her profile's, which plans her jumps, with the jump each gives (`statcheck.moves_notes`). Until 2026-11-02 her SPEED was said there too, against her profile's (the thief's 99.2: "her SPEED 101% by her stat window walks her at 151.25 units/s; her moves are planned at 149"), and before that against config.toml's fitted 119.2 at every read.
 - *ATTACK, ACCURACY, EVASION, MAGIC, MAGIC DEF., STR/DEX/INT/LUK*: kept and shown by `gamelab stats`. Nothing is modelled from them yet. Her MISS chance would need the monsters' EVA and the game's hit formula; the reserve takes every touch as landing, whatever her AVOID.
 
 **Checked before it's taken** (after the review of 2026-10-28, which found a misread taken as read and a stale read kept governing):
@@ -816,7 +816,7 @@ Of the -2.05 touches a minute on the same 12 seeds (this branch's code with the 
 
 The recordings' roadmap of 2026-11-02 (item 8, P41; D:/MapleHelper-scratch/rec-analysis/plans/ROADMAP.md, plan-simulator.md S5 with S1 = plan-motion.md M3, critique-simulator.md): every harness number was the thief's, so none of her fixes could be measured offline. The user, that morning, took the roadmap's decision 4 for the simulator: today's measurements are its truth for her; her live profile's placeholders (her pet's 55%, MP 1007, AVOID 18, SPEED 100) stay as they are, so the harness shows where her stack's belief is off. Built in steps, the thief's world unchanged at each (Tree Dungeon's 43 goldens the same to the byte).
 
-**Her walk, the world's own** (`world.Her.walk_speed`, `her_shoe`, `World.shoe`, `World.rope_jump`). The world walked everyone with the planner's own shoe (`physics.SHOE`), so a wrong speed in her profile couldn't show. Now the world walks her at her own speed, the game data's shoe at the SPEED that walks her so, accelerating, braking, sliding and flying as anyone's, her JUMP the planner's: the client's 150 units/s (`world.MAGE_WALK`: 125 x (SPEED + 20)/100 at her stat window's 100, Her walk speed; her steady limit with the walks' braking tails and Tree's slopes taken out is 149.4-149.7, and the world brakes her by itself). It was built at 148.2, the hour's raw median of 81 steady walks (P01: tails and slopes in it), while her planner planned v83's 125; from the integration of 2026-11-02 (work/rec-all, with item 1) her planner plans the same 150, and the world's walk stays its own (`Her.walk_speed`), so an error in her profile would show. By default (the thief) his truth by his profile's SPEED (`physics.PROFILE_SHOE`: 151.25 at his stat window's 101), to the bit, whatever his planner is set to (until 2026-11-02 the planner's own shoe). `--world walk-planned` puts her world's walk and climb at her profile's, her planner's in the simulator (whose stat window shows her profile's SPEED), to price such an error (for her the same walk and climb). `--world planner-v83` holds her planner at master's 125 and 117 instead (`world.Her.planned`, `physics.set_planned`, after her hunter's start), her world its own: what item 1 is worth to her (The whole measured: +8.7% EXP, t +2.34, on 48 seeds). Her climb is the world's own too from 2026-11-02 (`world.Her.climb_speed`, `her_climb`, `World.climb`: `world.MAGE_CLIMB`, 120, hers; the thief's 121), up and down, where the world climbed everyone up at the planner's `flow.ROPE_SPEED` (130) and down at `physics.CLIMB_SPEED` (117): Her walk and climb from her stat window's SPEED.
+**Her walk, the world's own** (`world.Her.walk_speed`, `her_shoe`, `World.shoe`, `World.rope_jump`). The world walked everyone with the planner's own shoe (`physics.SHOE`), so a wrong speed in her profile couldn't show. Now the world walks her at her own speed, the game data's shoe at the SPEED that walks her so, accelerating, braking, sliding and flying as anyone's, her JUMP the planner's: the client's 150 units/s (`world.MAGE_WALK`: 125 x (SPEED + 20)/100 at her stat window's 100, Her walk speed; her steady limit with the walks' braking tails and Tree's slopes taken out is 149.4-149.7, and the world brakes her by itself). It was built at 148.2, the hour's raw median of 81 steady walks (P01: tails and slopes in it), while her planner planned v83's 125; from the integration of 2026-11-02 (work/rec-all, with item 1) her planner plans the same 150, and the world's walk stays its own (`Her.walk_speed`), so an error in her profile would show. By default (the thief) his truth by his profile's SPEED (`physics.PROFILE_SHOE`: 151.25 at his stat window's 101), to the bit, whatever his planner is set to (until 2026-11-02 the planner's own shoe). `--world walk-planned` puts her world's walk and climb at her profile's, her planner's in the simulator (whose stat window shows her profile's SPEED), to price such an error (for her the same walk and climb). `--world planner-v83` holds her planner at 125 and 117 instead (master's walk and down-climb; master climbed her up at 130) (`world.Her.planned`, `physics.set_planned`, after her hunter's start), her world its own: what item 1 is worth to her (The whole measured: +8.7% EXP, t +2.34, on 48 seeds). Her climb is the world's own too from 2026-11-02 (`world.Her.climb_speed`, `her_climb`, `World.climb`: `world.MAGE_CLIMB`, 120, hers; the thief's 121), up and down, where the world climbed everyone up at the planner's `flow.ROPE_SPEED` (130) and down at `physics.CLIMB_SPEED` (117): Her walk and climb from her stat window's SPEED.
 
 **Magic Claw as the game casts it** (`world.SimMagic`, `Her.magic`; `World._press_magic`, `magic_pick`, `magic_band`, `_aim_magic`, `_attack_magic`; the constants' comment above `CLAW_HIT` says where each comes from):
 - *Its pick*: the client's search for an aimed spell by its own numbers (`classes.magician.SEARCH`: 50..300 ahead in 13 bands 20 wide, band k's window 28 -/+ (50 + 20 k) // 4 over her feet, the first band any body overlaps, one in it drawn), never attack.reach's constants, which `attack.magic` sets to her stack's belief. Nothing stops it (no line: a Green Mushroom 58 under her on platform 10, which 9's floor stops a star at, dies), from the ground only (a press in the air does nothing at all: no MP, no lock), never behind her nor within its first 50, no swipe up close. Her wand's swing does nothing (her stack never keys it).
@@ -4071,8 +4071,10 @@ thief's stat window's 101: 151.25 and 121; the magician's 100: 150 and 120.
   below 3,064 passed and test_lie_yolo's slow-shadow wall-clock gap failed under two analysis jobs' load (14 passed
   alone); `--slow` once on that code: 3,106 passed, none failed (72 skipped, 2 xfailed).
 - **Knobs to price the items on her** (sim.harness WORLDS, cached and spot-checkable by their names): `planner-v83`
-  (world.Her.planned, physics.set_planned: her planner held at 125 and 117 after her hunter's start, as master planned
-  her, the world moving her at its own 150 and 120), `hang-2s` (navigator.HANG_LONGER and HANG_TAKE off: 560bd57's 2 s
+  (world.Her.planned, physics.set_planned: her planner held at 125 and 117 after her hunter's start, master's walk and
+  its down-climb, her climbs up at 117 too where master planned them at flow.ROPE_SPEED's 130, the world moving her at
+  its own 150 and 120; valid only where nothing reads her stat window in the run, as in loop-grind: a read's settle
+  would put the panel's back), `hang-2s` (navigator.HANG_LONGER and HANG_TAKE off: 560bd57's 2 s
   hang alone) and `no-hang` (ROPE_HANG off): the stack's switches, set by run_one around the run (WORLDS' `stack`).
   `spot` of seeds 3 and 9 of this tip's and of `planner-v83`'s: the same to the digit.
 
@@ -4123,12 +4125,13 @@ borderline: every row below at 48; D:/MapleHelper-scratch/recfix/measure/pair_ma
 | touches (all hurt) | 41.3 | 40.1 | 37.8 | 39.6 |
 | touches at a rope's top | 7.31 | 7.08 | 4.77 | 6.48 |
 | her climbs up to a rope's top | 8.79 | 7.40 | 6.60 | 7.48 |
-| ... touched at its top, a climb | 0.81 | 0.97 | 0.69 | 0.81 |
+| ... touched at its top, a climb (each seed's ratio, their mean) | 0.81 | 0.97 | 0.69 | 0.81 |
+| ... the same as ratios of the totals (the final review) | 0.83 | 0.96 | 0.72 | 0.87 |
 | trips landing elsewhere than planned | 1.71 | 0.19 | 0.08 | 0.17 |
 | knock falls | 10.1 | 10.6 | 8.9 | 9.6 |
 
-- *(i) Item 1, her walk and climb by the panel*: this tip against her planner held at master's 125 and 117 in the same
-  world (150 and 120): EXP +8.7% (t +2.34), kills +8.5% (t +2.49), casts +8.8% (t +2.46), trips landing elsewhere 1.71
+- *(i) Item 1, her walk and climb by the panel*: this tip against her planner held at 125 and 117 in the same world
+  (150 and 120; master's walk and down-climb, its climbs up 117 where master's were 130): EXP +8.7% (t +2.34), kills +8.5% (t +2.49), casts +8.8% (t +2.46), trips landing elsewhere 1.71
   -> 0.17 a run (-90%, t -6.24), touches -4.1% (t -1.00, not told). The roadmap's estimate was +3% (1-5%); at 24 seeds
   it read +2.7% within 2 se.
 - *(ii) The rope rule* (HANG_LONGER and HANG_TAKE, work/rec-rope2) **measures worse here than where it was chosen**:
@@ -4136,11 +4139,12 @@ borderline: every row below at 48; D:/MapleHelper-scratch/recfix/measure/pair_ma
   touches +4.9% (t +1.40); against no hang EXP -5.2% (t -2.70), a rope's top -8.5% (t -0.81). The 2 s hang alone
   against no hang: EXP -2.0% (t -1.13), a rope's top -32.6% (t -3.40), knock falls -15.9% (t -3.32), touches -5.8%
   (t -1.73). work/rec-rope2 measured the rule in 560bd57's world, where she climbed up at the planner's 130 and the
-  world's 130 (here 120 both, the formula's), and found her EXP +3.5% (t +2.32) against the 2 s hang: the merge with
-  the panel's climb turns it. Per run here: 5.9 hangs, 2.5 of them longer at some look, 1.4 touches taken (hang_took), 4.0
+  world's 130 (here 120 both, the formula's), and found her EXP +3.5% (t +2.32) against the 2 s hang: most likely the
+  merge's climb turns it (assumed: no run varies the climb alone). Per run here: 5.9 hangs, 2.5 of them longer at some look, 1.4 touches taken (hang_took), 4.0
   up regardless, 0.4 clear, none waited out. Live, the hour's rope top at -80 had 19-23 touches over 68 climbs (about
-  0.3 a climb): the simulator's 0.7-1.0 is 2-3 times it, as its touches are (rec-sim's re-touch excess). Not changed here: the user's call (keep it, switch HANG_LONGER or HANG_TAKE off, or tune it again on
-  this world).
+  0.3 a climb; one rope's top, where the simulator's figure is every rope's): the simulator's 0.7-1.0 is 2-3 times it,
+  as its touches are (rec-sim's re-touch excess). Switched off after the final review (both rules; the 2 s hang alone:
+  The final review's fixes, below); the user's call whether to tune them again on this world.
 - *(iii) Her table against R1-R3 and the hour* (ROADMAP section 1; scripts/scorecard.py; a minute of her hunting, the
   mean and its standard error over 48 seeds): EXP 407 (se 7) against R1 394, R2 525, R3 420, the hour 437 (its
   5-minute windows 346-492); kills 11.4 against 10.2-14.0 (the hour 11.3); casts 19.6 against 18.8-25.7 (22.2); touches
@@ -4157,7 +4161,10 @@ longer hang change nothing of perception. Against master's cached dumps the diff
 (scripts/dumpdiff.py, dumpdiff_split.txt): the integration's dumps at the old cap of 140 differ from master's in the
 monsters' tracks, the state's monsters and the events alone (the kill credit: R1 1,688 frames' tracks, R2 3,078, R3
 3,984), her place never; this tip's differ from those at 140 in her place alone (287, 338 and 310 frames, a median 0.1
-unit, at most 1.2-1.9: the walk cap). The scores (labels-v3, the three together, this tip / master): onsets 244 / 244
+unit, at most 1.2-1.9: the walk cap). The scores (labels-v3, the three together, this tip / master; labels-v3's
+kills were made from master 40ba190's replay and checked by eye only where master's binding and the band order's parted,
+9 kills, 6 put right: so "first binding right" is agreement with master's binding as corrected there, and a kill both
+got wrong isn't checked; a sample of the kills both agree on, labelled by eye, would be the ground truth): onsets 244 / 244
 of 244, 0 false either; births 165 / 165 of 165; touches 71 / 71, 46 by popup each; players the same; kills' first
 binding right 67 / 51 of 71 strong and 144 / 123 of 151, their last 66 / 60 and 144 / 140, let go 10 / 29; her casts at
 her dead left out 16 / 4 (of 18 / 19); monsters under her seen 5 / 4 of 10.
@@ -4184,6 +4191,74 @@ thief seeds are under the game data's old stamp (spot-checked by work/rec-rope2,
 comparisons are this tip's own knobs (no master side exists for her); `planner-v83` holds her planner after her
 hunter's start, so what a hunter makes of her walk while it starts is the formula's (nothing in it reads her walk).
 The rope rule's loss is in her world alone; the thief's world was measured only as the whole against 560bd57 (level).
+
+## The final review's fixes (work/rec-all, 2026-11-02, late)
+
+Two reviews of work/rec-all fee1905 for the supervised RiceBaby grind (D:/MapleHelper-scratch/recfix/final-live and
+final-claims); what each found and what's done (D:/MapleHelper-scratch/recfix/final-fix: scripts, runs, pairs):
+
+- **The rope rule off** (major, both reviews): `navigator.HANG_LONGER` and `HANG_TAKE` are off by default, the 2 s hang
+  alone (`HANG_S`, as at 560bd57), since on the merged world they measured worse for her than it (The whole measured,
+  (ii)) and the touch taken was priced at the hunt's rate, not at "a lot EXP ... above" (TOP_RATE_ABOVE, off and
+  measured worse too). Both stay built: `--world hang-rules` prices them. And the longer wait only on a navigator with
+  a price (a hunter's): a retreat's (the Lie Detector's, the safety stop's) hangs HANG_S at the most, where it could
+  hang to HANG_HORIZON_S (3 s) outside its plan's RETREAT_S.
+- **A stall at a stop** (major, the thief's seed 19 of the standard grind: 123 s at 16, nothing shot, nothing said):
+  a Horny on 15 her memory had alive was held (`Grind._held`) while the fight took it for dead (a kill of hers bound
+  to its track: ledger.dying, fight._targets' dying_seen), so it was no target and no reach step, and its 10 EXP a
+  second held her over the loop's 7.5. Now `_held` leaves out what the fight takes for dead or dying, as the fight
+  does, and STOP_MAX_S (40 s) bounds her waiting on end at a stop with monsters held, neither shot nor stepped to (a
+  backstop event; she'd waited only with nothing held before). Seed 19: EXP a minute 146 -> 289, stuck 78 s -> 0. The
+  kill bound to a live track (the ledger's binding; tracking's for the feed) is left as it was: such a monster is no
+  target for up to 8 of her kills (Ledger.kills[-8:]).
+- **navigator.KNOCK_REACH followed** (minor, both): made again with her walk (`_follow`: its landing slide), where it
+  stayed the import's (53.9) after `set_speed` or `set_planned`; tests/test_panel_speed asserts it. probe.py reads the
+  jump-back times (`actions.JB_*`) at its call, where it took them by name at import (note).
+- **A SPEED from one frame** (minor): one other than the planned is read off a second frame and taken only where the
+  two agree (`StatCheck.speed_again`; Her walk and climb from her stat window's SPEED).
+- **The throw message between versions** (note): a test that the service takes the 3-, 4- and 5-item forms and a
+  client sends the shortest that says what it knows (tests/test_service.py).
+- **Words** (minor, notes): `planner-v83` is master's walk and down-climb, not its climb up (130); the rope rule's turn
+  on the merged world is most likely the climb's, not measured alone; "a rope's top, a climb" is a mean of each seed's
+  ratio (the totals' ratio beside it); labels-v3's kills are checked against master's binding; the formula's source
+  credited as NiaDB asks (meowdb.com/reuse), "measured frame by frame from COT2 video footage"; the buff a kept SPEED
+  can carry; test_walk_speed's fixture a cross-check of motion.steady's, kept apart; test_records asserts its passes
+  aren't empty.
+- *Not defects, or open*: the live test is the merge into master, run from D:/MapleHelper with the service and the
+  pet restarted from it (a hunt from ov-recall writes plans no player reads): the merge's steps, not code.
+  `loop_tree_attack_no_darts` passes by its seed (re-seeded again, 4 -> 13: its docstring); placing its monsters would
+  make it hold. planner-v83 with a stat-window read in the run would lose its hold (none of the harness's grinds reads
+  it): said with the knob, not guarded. The simulator's re-touch excess (below) stays undiagnosed.
+
+**Measured on the fixes** (the harness, 48 seeds paired, not cached: run on the working tree; f_*.json in this lab's
+harness folder):
+
+| a run of 5 minutes, 48 seeds | master 40ba190 | 560bd57 | fee1905 | this | this - master | this - fee1905 |
+|---|---|---|---|---|---|---|
+| the thief: EXP a minute | 317.6 | 304.8 | 302.0 | 299.6 | -5.7% (t -2.02) | -0.8% (t -0.39) |
+| kills | 45.0 | 43.4 | 42.8 | 42.5 | -5.7% (t -2.18) | -0.8% |
+| touches | 82.0 | 63.0 | 62.3 | 62.5 | -23.7% (t -7.12) | +0.4% |
+| ... that hurt | 53.9 | | 41.4 | 40.8 | -24.3% (t -6.24) | |
+| ... again within 2 s | 52.7 | | 33.5 | 34.0 | -35.5% (t -6.67) | |
+| potions | 22.3 | 17.6 | 17.4 | 17.1 | -23.4% (t -5.18) | |
+| stuck (s, a run) | 0 | | 1.6 | 0 | | |
+
+The thief's EXP against master is now beyond 2 se, -5.7%, but master's side is master's world: 560bd57 -> this is
+-1.7% (t -0.59), so it's rec-sim's world (newborns, the touch line, the client's knock: master -> 560bd57 -4.0%), not
+a change of hers told from nothing; 10 of the 48 seeds are the same to the digit as fee1905's. Her standard world
+(this against fee1905, the rope rule on there): EXP a minute 426.1 against 407.0, +4.7% (t +2.58), kills +5.1% (t
++2.93), touches at a rope's top -25.7% (t -2.38), potions -8.8% (t -2.02), touched by a newborn +16.9% (t +2.38);
+against fee1905's `hang-2s` (the 2 s hang there too, so the held fix alone): EXP +1.2% (t +1.34), touches -1.4%,
+not told from nothing. Her table against R1-R3 and the hour (a minute of her hunting): EXP 426 (se 7) against 394,
+525, 420 and 437; kills 12.0 against 10.2-14.0; casts 20.5 against 18.8-25.7; touches 7.45 against 4.8-5.25 (1.55
+times the hour's); HP potions 4.30 against 2.4-3.25; lowest HP 528 against 520-542; a rope's top 0.74 a climb (totals),
+4.9 hangs a run, 4.2 up regardless, 0.7 the way clear.
+
+**Goldens** (`golden check --jobs 4` on the fixes: 25 of 44 the same; recorded again into this lab, `--jobs 4`): 17 are
+work/rec-panel's traces again to the byte (D:/MapleHelper-scratch/recfix/panel/golden-p: the 2 s hang, as before
+work/rec-rope2), `loop_tree_grind_jump_key` parts from rec-panel's at 117.2 s (the held fix: the Horny she had just killed
+on 7 held at her stop no more, her sweep of the piles there another; plans from 117.8 s: 34 -> 36 kills, 1199 -> 1296
+EXP, 45 -> 38 touches), `loop_tree_attack_no_darts` is its new seed 13's.
 
 ## Records to measure by: the run summary, the trips, the passes, the loop's promise, and walkfit (from 2026-11-02)
 
@@ -4338,10 +4413,11 @@ character at walkSpeed 125 x (SPEED + 20)/100, SPEED her stat window's clamped t
 monster has no bonus: 125 x (1 + its speed/100) as in v83 (`sim.world.JumpSpace.shoe`). The steady speed is exactly
 this limit: the game's 30 ms step clamps her speed at it (both decompiles; `body.ground_step`). The sources, best first
 (saved, with their URLs, commits and terms: D:/MapleHelper-scratch/recfix/walk-research, SOURCES.txt):
-- *meowdb* (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow, updated 2026-10-27): "Walking speed is
+- *NiaDB* (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow, updated 2026-10-27; credited as its reuse
+  terms ask, meowdb.com/reuse): "Walking speed is
   125 × (Speed + 20) / 100 pixels per second"; Speed 100 walks 150; Classic World "adds 20 Speed behind the scenes";
   the cap 140 walks 200; climbing is Speed + 20 (120 at the base); the jump works the old way, capped at 120, not v83's
-  123. Measured off the client's video frame by frame, not decoded. Its formulas page ("Atk Spd & Movement") and its
+  123. Measured frame by frame from COT2 video footage (its words), not decoded. Its formulas page ("Atk Spd & Movement") and its
   calculator (`125*(a+20)/100`, climb `a+20`) are the same source.
 - *The client's own data*, read statically: Map.wz's Physics.img is v83's (walkSpeed 125, walkForce 140000, walkDrag
   80000, jumpSpeed 555, gravity 2000, fall 670: `body.PHYSICS_IMG`), so the 20 isn't in the data. Tree Dungeon has no
@@ -4520,8 +4596,14 @@ no read: said ("her stat window's SPEED 131 not taken (+30 from the 101 planned:
 a misread?): her walk and climb as they were, SPEED 101") and the SPEED planned kept (her last good one, else her
 profile's). 10 is a guess from meowdb's speed guide: between two reads her gear plausibly moves her SPEED less (shoes
 +1 to +4, capes +2 and +3, a Speed Potion +8); a thief's Haste (+10 to +30, a second job's skill neither character
-has) is a buff for minutes, which a read shouldn't plan a hunt by. Each read is kept as read, so a real change past 10
-(new gear) is taken at the next read that agrees with it; the file keeps the SPEED taken apart from the read's.
+has) is a buff for minutes, which a read shouldn't plan a hunt by (one read under it, taken, is kept in her stats file
+and plans her next hunter's start too, till the window is read again). Each read is kept as read, so a real change past
+10 (new gear) is taken at the next read that agrees with it; the file keeps the SPEED taken apart from the read's. From
+the final review of 2026-11-02 a SPEED other than the one planned is also read off a second frame of the open window
+(`StatCheck.speed_again`, one more OCR pass, only then) and taken only where the two agree, else said ("her stat
+window's SPEED 104 not taken (a second frame read 108; a misread?): ..."): one frame's misread within 10 (108 for
+100) would have planned her 6.7% fast till the next read (her W.DEF once read 711 for 111; the 49 SPEED reads in the
+telemetry so far are all 100 or 101).
 
 **Said and recorded.** A change of her planned walk and climb is one line in her log and one `motion` record (old and
 new walk and climb, the SPEED, the one before, why: `panel`, `kept` or `profile`): "her walk 151.25 -> 155 and climb
@@ -4838,8 +4920,10 @@ at the top (the thief's +11.6% within 2 s) aren't in its price, and it's taken m
 and the Green Mushroom's small touch make it cheap, than his EXP pays for (above); a price of what follows a touch at a
 rope's top, or a stricter one for him, is the next lever there. On the merged world (her climb the formula's 120 up and
 down, where this was chosen at 560bd57's 130 up) the rule measures worse for her than the 2 s hang alone (EXP -3.3%, t
--2.07; a rope's top +35.8%, t +2.49; 48 seeds: The whole measured); `--world hang-2s` (HANG_LONGER and HANG_TAKE off)
-and `--world no-hang` (ROPE_HANG off) price it on any tip.
+-2.07; a rope's top +35.8%, t +2.49; 48 seeds: The whole measured), so from the final review of 2026-11-02 both are
+off (the 2 s hang alone, as at 560bd57; The final review's fixes) till they're tuned again on this world; HANG_LONGER
+only ever on a hunter's navigator (one with a price), never a retreat's. `--world hang-rules` (both on), `hang-2s`
+(both off) and `no-hang` (ROPE_HANG off) price them on any tip.
 
 ## Localization
 

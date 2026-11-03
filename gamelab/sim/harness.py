@@ -368,10 +368,13 @@ WORLDS["walk-planned"] = {"walk_speed": None, "climb_speed": None}
 WORLDS["planner-v83"] = {"planned": (125.0, 117.0)}
 # ... and the stack's own rules switched off to price them (`stack`: (module, name, value) set around the run by run_one
 # and put back after; not the world's): her hang under a rope's top the 2 s hang alone (`hang-2s`:
-# control.navigator.HANG_LONGER and HANG_TAKE off, as work/rec-all 560bd57 had it), or none (`no-hang`: ROPE_HANG off,
-# her climbs as before 2026-11-02's item 9).
+# control.navigator.HANG_LONGER and HANG_TAKE off, as work/rec-all 560bd57 had it, and the default from the final review
+# of 2026-11-02), with both rules on (`hang-rules`: as work/rec-rope2 built them, to price them), or none (`no-hang`:
+# ROPE_HANG off, her climbs as before 2026-11-02's item 9).
 WORLDS["hang-2s"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", False),
                                ("gamelab.control.navigator", "HANG_TAKE", False))}
+WORLDS["hang-rules"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", True),
+                                  ("gamelab.control.navigator", "HANG_TAKE", True))}
 WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown

@@ -193,4 +193,4 @@ def test_a_simulated_grinds_records_add_up():
     states = [r for r in records if r["topic"] == "grind" and r["what"] in ("state", "end")]
     assert states and all({"loop_rate", "promised", "delivered", "rule_s"} <= set(r) for r in states)
     passes = [r for r in records if r["topic"] == "event" and r.get("kind") == "backstop" and "move" in r]
-    assert all({"episode", "nth", "waited", "shots"} <= set(r) for r in passes)
+    assert passes and all({"episode", "nth", "waited", "shots"} <= set(r) for r in passes)  # (some: the final review)

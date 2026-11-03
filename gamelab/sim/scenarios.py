@@ -1617,7 +1617,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=4, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1724,8 +1724,14 @@ def loop_tree_attack_no_darts(sim):
     the merge of work/rec-panel and work/rec-rope2, 2026-11-02; D:/MapleHelper-scratch/recfix/measure/
     scan_no_darts.txt): on 9 and on 14 her stars' test never said MAYBE OUT; of seeds 1-16, 4, 6, 13 and 16 meet all of
     this. On 4: the doubt at 62.7 s, a Horny Mushroom; MAYBE OUT at 70.6 s, ATTACK on Ctrl as configured at 72.4 s,
-    paged; out of darts' stop at 88.5 s, paged.)"""
-    return key_check_run(4)(sim)
+    paged; out of darts' stop at 88.5 s, paged.) (Seed 13 since the final review of 2026-11-02: her hang under a rope's
+    top the 2 s hang alone again, navigator.HANG_LONGER and HANG_TAKE off, and a monster the fight takes for dead
+    holding her at a stop no more, grind's _held; D:/MapleHelper-scratch/recfix/final-fix/scan_no_darts.txt): on 4 she
+    was never paged twice, on 9 (the 2 s hang's seed of work/rec-panel) her stars' test never said MAYBE OUT; of seeds
+    1-16, 13 and 16 meet all of this. On 13: the doubt at 54.8 s, a Horny Mushroom at 81%; MAYBE OUT at 62.4 s, ATTACK
+    on Ctrl as configured at 64.3 s, paged; out of darts' stop at 77.7 s, paged at 80.3 s.) It is re-seeded at most
+    changes of the grind or the world (more than ten times): placing its monsters would make it hold, not a seed.)"""
+    return key_check_run(13)(sim)
 
 
 # --- her other keys moved in the game: followed (the user, 2026-10-28: "Follow them"; control.keymap) ----------------

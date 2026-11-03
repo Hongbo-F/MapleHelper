@@ -923,6 +923,36 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
     assert 0 < p.wait_gain(g.stop, 30.0) < 0.5 * p.plan.rate
 
 
+def test_a_monster_the_fight_takes_for_dead_holds_her_not_and_waiting_on_end_for_the_held_has_a_backstop(monkeypatch):
+    """The final review of 2026-11-02 (the thief's seed 19 of the standard grind: 123 s at 16, nothing shot, nothing
+    said): a Horny her memory has alive, whose track a kill of hers is bound to (ledger.dying: the fight's dying_seen
+    leaves it out of her targets), isn't held: nothing in reach, she goes on. And held monsters she neither shoots nor
+    steps to (Hunt._wait's idle) keep her STOP_MAX_S at the most (a backstop event), however much they'd give."""
+    from dataclasses import replace
+    model, ids, far, p = _column()
+    p.replan(0.0, force=True)
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    m = replace(_sight(model, HORNY, 250, 0), track=7)
+    g, s = _at_stop(model, p, ids[0], 150.0, [m], 1.0)
+    assert [e.track for e in g._held(s)] == [7]
+    g.h.ledger = SimpleNamespace(kills=[Kill(0.5, HORNY, ids[0], 250.0, 0.0, ids[0], track=7)], die={}, dead={})
+    assert g._held(s) == []
+    g.h.ledger.kills = []
+    held = g._held(s)
+    assert held and g._leaving(s, held) is None  # (its 41 EXP beat the loop: she stays)
+    g._idle_since = clock[0]
+    clock[0] += grind.STOP_MAX_S
+    events = []
+    monkeypatch.setattr(grind.telemetry, "emit", lambda topic, **kw: events.append(kw))
+    g.visit.arrived = clock[0] - grind.STOP_MAX_S - 1.0
+    assert g._leaving(s, held) == (f"{grind.STOP_MAX_S:.0f} s waiting here for a {HORNY} on {ids[0]} at x 250, neither "
+                                   "shot nor stepped to")
+    assert events and events[0]["kind"] == "backstop" and events[0]["text"].startswith("STOP_MAX_S")
+    g._idle_since = clock[0] - 1.0  # (she shot a second ago: held, she stays)
+    assert g._leaving(s, held) is None
+
+
 def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch):
     from gamelab.behavior.hunt import Hunt
     # (refilling at a quarter of the prior's rate: at the prior's, the pile's point shot in passing below has a tenth of

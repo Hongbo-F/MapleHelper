@@ -360,10 +360,12 @@ KEY_LEAD = {"jump": JUMP_LAG, "jump_up": JUMP_LAG, "hop": JUMP_LAG, "climb": JUM
 @physics.follows
 def _follow() -> None:
     """Her walk and climb as set (physics.set_speed, which rebinds the names taken from it): flow's climb up
-    (ROPE_SPEED, flow's own follower's) and a walk-off's lead (KEY_LEAD) made again of them."""
-    global ROPE_SPEED
+    (ROPE_SPEED, flow's own follower's), a walk-off's lead (KEY_LEAD) and a touch's knock standing (KNOCK_REACH: its
+    landing slide is her walk's; the final review of 2026-11-02 found it left at the import's) made again of them."""
+    global ROPE_SPEED, KNOCK_REACH
     ROPE_SPEED = flow.ROPE_SPEED
     KEY_LEAD["walk_off"] = physics.STOP_S
+    KNOCK_REACH = KNOCK_VX * 2 * KNOCK_VY / GRAVITY + physics.LAND_SLIDE
 
 
 BETTER_EVERY_S = 5 * STATE_S  # s between looks for a better way (a guess: 3 a second)
@@ -636,7 +638,15 @@ HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _
 # more than about a second past HANG_S seldom holds: at 4 s 84 of the thief's 106 longer hangs were put back for a
 # turn or a stop (52 of 69 at 3 s; hers 43 of 69 and 26 of 45), and the longer wait was lost time. Of her 92 longer
 # hangs over seeds 1-48 (both rules) 1 ended at its own end ('waited'), 11 with the way judged clear.
-HANG_LONGER = True
+# Off from the final review of 2026-11-02 (with HANG_TAKE): measured on the merged world (her walk and climb by her stat
+# window's SPEED, 150 and 120 up and down, where she climbed up at 130 when the rules were chosen; D:/MapleHelper-
+# scratch/recfix/measure, her standard world, seeds 1-48 paired) both rules against the 2 s hang alone (the harness's
+# `hang-2s`, now the default): her EXP a minute -3.3% (t -2.07), kills -3.5% (t -2.27), touches at a rope's top
+# +35.8% (t +2.49), potions +7.1%; no longer wait ran to its own end (0 'waited' of 284 hangs). So the 2 s hang alone
+# until the rules are tuned again on this world (`--world hang-rules`: both on, to measure them). Only on a navigator
+# with a price (a hunter's), never a retreat's: its trip's plan has no time for a longer wait (behavior.retreat's
+# RETREAT_S).
+HANG_LONGER = False
 HANG_HORIZON_S = 3.0
 HANG_MARGIN_S = 0.3
 WALK_OFF_STEP = 0.1    # s between the set-offs `_walks_off` tries (a resolution)
@@ -661,9 +671,11 @@ OFF_WALK_EDGE = 25.0   # units: a monster this near its walk edge (or predicted 
 # (-1.83); his -2.1% (-0.82), -2.9% (-1.14), -21.6% (-2.73). With the grind's rate on the platform at the top
 # (TOP_RATE_ABOVE, 24 seeds, the margin then from every look) the touch was taken at 39% and 67% of the hangs, at 8.8
 # and 13 EXP a second on average, and both did worse than at the hunt's rate: EXP -2.5% and -2.4% (t -0.64, -1.51),
-# her touches +7.4% (+1.85).
-HANG_TAKE = True
-KNOCK_REACH = KNOCK_VX * 2 * KNOCK_VY / GRAVITY + LAND_SLIDE  # units a touch knocks her standing (the planner's: 53.5)
+# her touches +7.4% (+1.85). Off from the final review of 2026-11-02, with HANG_LONGER (its note): the user's words were
+# "if there are a lot EXP to earn by killing off mobs above", and at the hunt's rate she takes a touch whatever is above.
+HANG_TAKE = False
+KNOCK_REACH = KNOCK_VX * 2 * KNOCK_VY / GRAVITY + LAND_SLIDE  # units a touch knocks her standing (the planner's: 53.9 at
+                                                              # the thief's walk, 53.7 at hers; _follow's)
 KNOCK_LOST_S = 30.0    # s a knock off the top costs where the planner has no way back (a bound)
 # After the evade work's review (2026-10-29: D:/MapleHelper-scratch/evade/review; the fixes' runs and numbers in
 # D:/MapleHelper-scratch/evade/fix). ARRIVE_STAND: for a trip whose x is what it's for (go's arrive_waits: her
@@ -3507,7 +3519,8 @@ class Navigator:
         telemetry.emit("event", kind="rope_hang", step="hang", text=f"{why}: hanging {under:.0f} under the top of "
                                                                     f"the rope at x {rope.x:.0f}",
                        x=rope.x, under=round(under, 1))
-        how, block, wait, judged = "regardless", why, _Wait(HANG_S), HANG_LONGER or HANG_TAKE
+        how, block, wait = "regardless", why, _Wait(HANG_S)
+        judged = (HANG_LONGER or HANG_TAKE) and self.price is not None  # (a retreat's navigator has none: HANG_S)
         took = self._hang_judge(rope, y, start, wait, self._way_up_hit(rope, y)) if judged else None
         while took is None and time.monotonic() - start < wait.s:
             self.senses.wait_frame(GLANCE_S)

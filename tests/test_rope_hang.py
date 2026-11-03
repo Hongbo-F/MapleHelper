@@ -450,13 +450,26 @@ def _price(rate, touch, ok=True):
     return lambda pid, kind: TopPrice(rate, touch, ok, "a test's")
 
 
-def test_a_walker_that_will_walk_off_the_top_has_her_hang_past_hang_s(tree_map, monkeypatch):
+NEVER = _price(0.0, 1e9)  # (a hunter's price at which no touch is worth taking: HANG_LONGER's alone)
+
+
+@pytest.fixture
+def rules(monkeypatch):
+    """HANG_LONGER and HANG_TAKE on, as work/rec-rope2 built them (off by default from the final review of 2026-11-02:
+    measured worse than the 2 s hang alone on the merged world)."""
+    monkeypatch.setattr(nv, "HANG_LONGER", True)
+    monkeypatch.setattr(nv, "HANG_TAKE", True)
+
+
+def test_a_walker_that_will_walk_off_the_top_has_her_hang_past_hang_s(tree_map, monkeypatch, rules):
     """A Horny on 10 at x 0 walking left at 100 (the game data's speed) into the top of the rope at -80: it turns at
     10's left walk edge (-143) and walks back out to the right, so the way up is predicted clear about 2.4 s on, past
     HANG_S (_walks_off): she hangs till then and HANG_MARGIN_S (a 'longer' event), then up, the way judged clear or
-    at the longer wait's end; never past HANG_HORIZON_S. HANG_LONGER off: up regardless at HANG_S."""
+    at the longer wait's end; never past HANG_HORIZON_S. HANG_LONGER off, or on a navigator with no price (a
+    retreat's: the final review of 2026-11-02): up regardless at HANG_S."""
     rope = _rope(tree_map)
     nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0)], y=rope.top + 85)
+    nav.price = NEVER
     _walking(nav)
     d, walks = nav._walks_off(rope, rope.top + 85, nv.HANG_HORIZON_S)
     assert HANG_S < d + nv.HANG_MARGIN_S <= nv.HANG_HORIZON_S and [tid for tid, _, _ in walks] == [1]
@@ -467,19 +480,22 @@ def test_a_walker_that_will_walk_off_the_top_has_her_hang_past_hang_s(tree_map, 
     longer = next(kw for _, kw in nav.events if kw.get("step") == "longer")
     assert longer["wait"] == pytest.approx(longer["clear"] + nv.HANG_MARGIN_S, abs=0.011)
     assert not any(kw.get("kind") == "backstop" for _, kw in nav.events)
-    monkeypatch.setattr(nv, "HANG_LONGER", False)
-    nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0)], y=rope.top + 85)
-    _walking(nav)
-    assert nav._hang(rope, rope.top + 85, "a horny").startswith("up regardless")
-    assert _steps(nav) == ["hang", "regardless"] and HANG_S <= nav.clock.t - NOW < HANG_S + 0.1
+    for price, longer in ((None, True), (NEVER, False)):
+        monkeypatch.setattr(nv, "HANG_LONGER", longer)
+        nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0)], y=rope.top + 85)
+        nav.price = price
+        _walking(nav)
+        assert nav._hang(rope, rope.top + 85, "a horny").startswith("up regardless")
+        assert _steps(nav) == ["hang", "regardless"] and HANG_S <= nav.clock.t - NOW < HANG_S + 0.1
 
 
-def test_the_longer_wait_ends_its_margin_after_the_predicted_clear_not_later(tree_map, monkeypatch):
+def test_the_longer_wait_ends_its_margin_after_the_predicted_clear_not_later(tree_map, monkeypatch, rules):
     """The same walker, the planner's reach (_way_up's, with its spread) never calling the way clear: she goes up at
     the longer wait's end ('waited', no backstop), HANG_MARGIN_S after the look that first has the way up predicted
     clear, the margin not counted again from each look after it (which ran on to HANG_HORIZON_S)."""
     rope = _rope(tree_map)
     nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0)], y=rope.top + 85)
+    nav.price = NEVER
     _walking(nav)
     d, _ = nav._walks_off(rope, rope.top + 85, nv.HANG_HORIZON_S)
     real = nav._way_up_hit
@@ -491,11 +507,12 @@ def test_the_longer_wait_ends_its_margin_after_the_predicted_clear_not_later(tre
     assert not any(kw.get("kind") == "backstop" for _, kw in nav.events)
 
 
-def test_the_longer_wait_goes_back_to_hang_s_once_its_walker_stops(tree_map, monkeypatch):
+def test_the_longer_wait_goes_back_to_hang_s_once_its_walker_stops(tree_map, monkeypatch, rules):
     """The same Horny stops at 1 s, at about x -100 (43 from its walk edge: not its end's turn): the longer wait is
     put back ('back': it stopped) and she goes up regardless at HANG_S from the hang's start."""
     rope = _rope(tree_map)
     nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0)], y=rope.top + 85)
+    nav.price = NEVER
     _walking(nav, stop_at=1.0)
     text = nav._hang(rope, rope.top + 85, "a horny-mushroom on 10 by its top")
     assert text.startswith("up regardless") and HANG_S <= nav.clock.t - NOW < HANG_S + 0.1
@@ -504,11 +521,12 @@ def test_the_longer_wait_goes_back_to_hang_s_once_its_walker_stops(tree_map, mon
     assert "stopped" in back["text"] and 1.0 <= back["at"] < 1.0 + 2 / HZ
 
 
-def test_one_standing_at_the_top_gets_no_longer_wait(tree_map, monkeypatch):
+def test_one_standing_at_the_top_gets_no_longer_wait(tree_map, monkeypatch, rules):
     """No longer wait for one standing at the top (it may stand there for good): HANG_S, up regardless; nor while one
     walking off stands with it."""
     rope = _rope(tree_map)
     nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x + 10, 10)], y=rope.top + 85)
+    nav.price = NEVER
     assert nav._walks_off(rope, rope.top + 85, nv.HANG_HORIZON_S) is None
     assert nav._hang(rope, rope.top + 85, "a horny").startswith("up regardless") and "longer" not in _steps(nav)
     nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0), _track(2, rope.x + 10, 10)],
@@ -516,7 +534,7 @@ def test_one_standing_at_the_top_gets_no_longer_wait(tree_map, monkeypatch):
     assert nav._walks_off(rope, rope.top + 85, nv.HANG_HORIZON_S) is None
 
 
-def test_she_takes_the_touch_at_once_where_the_wait_costs_more_than_it(tree_map, monkeypatch):
+def test_she_takes_the_touch_at_once_where_the_wait_costs_more_than_it(tree_map, monkeypatch, rules):
     """HANG_TAKE: a Horny standing at the top; her time up there worth 20 EXP a second and its touch 25 EXP: the
     wait's 2 s (40 EXP) cost more, so she climbs at once ('took', 0 s, its numbers in the event), as after a hang. At 10
     EXP a second (20 EXP), with her HP under the safety stop's reserve and the touch, with no price (a retreat's
@@ -563,7 +581,7 @@ def test_a_touch_s_knock_costs_nothing_on_the_rope_its_flight_on_the_top_and_the
 
 
 def test_touched_on_the_rope_with_the_top_taken_and_the_touch_worth_taking_she_climbs_on_at_once(tree_map,
-                                                                                                   monkeypatch):
+                                                                                                   monkeypatch, rules):
     """_climb_on (CLIMB_LOOK, ROPE_HANG) touched 30 under the top with a Horny there, the wait worth more than its touch
     (HANG_TAKE): up again at once (as without CLIMB_LOOK), where she went down to hang; a 'rope_hang' event of no hang
     ('took', 0 s). Not worth it: down to HANG_UNDER and the hang, as before."""

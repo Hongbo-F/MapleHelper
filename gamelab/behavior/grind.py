@@ -60,10 +60,13 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
-from .ledger import FOLLOW_S
+from .ledger import FOLLOW_S, dying
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, reaching
 
-STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
+STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go); and from the final
+                       # review of 2026-11-02, s waiting there on end (Hunt._wait, nothing shot, no step) with monsters
+                       # held: on the thief's seed 19 of the standard grind she stood 123 s at 16 for a Horny on 15 the
+                       # fight took for dead (a kill of hers bound to its track) and memory had alive (`_held`)
 # s with nothing left in reach before she leaves a stop: one look's miss isn't enough (a hit monster hides under its
 # damage numbers for 1-3 s: fight's hidden targets keep it a target meanwhile, and HOLD_S keeps it held)
 LEAVE_CONFIRM_S = 0.3  # (a guess; the drops of her last kills there are the sweep's when she leaves: `_leave`)
@@ -392,10 +395,14 @@ class Grind(Hunt):
 
     def _held(self, s: Scene) -> list[Monster]:
         """The wanted monsters her memory has (memory.SURE), seen within HOLD_S, that she can get at from her platform:
-        on it, or in a star's reach from somewhere along it."""
+        on it, or in a star's reach from somewhere along it; not one the fight takes for dead or dying (ledger.dying, as
+        fight._targets' dying_seen: no target, so nothing she'd stay for)."""
         here, out = s.platform, []
+        led, now = getattr(self.h, "ledger", None), time.monotonic()
         for e in self.h.memory.alive(s.t, SURE):
             if (self.kinds is not None and e.kind not in self.kinds) or s.t - e.seen > HOLD_S:
+                continue
+            if led is not None and dying(led.kills, e.monster, now, s.monsters, led.die, led.dead):
                 continue
             if e.platform == here.id or any(True for _ in reaching(here, [e.monster])):
                 out.append(e.monster)
@@ -484,6 +491,12 @@ class Grind(Hunt):
         if now - v.arrived >= STOP_MAX_S and not held:
             telemetry.emit("event", kind="backstop", text=f"STOP_MAX_S: {STOP_MAX_S:.0f} s at stop {v.ground}")
             return f"{STOP_MAX_S:.0f} s here"
+        idle = getattr(self, "_idle_since", None)
+        if held and now - v.arrived >= STOP_MAX_S and idle is not None and now - idle >= STOP_MAX_S:
+            names = ", ".join(f"a {m.kind or 'monster'} on {m.platform} at x {m.x:.0f}" for m in held[:3])
+            telemetry.emit("event", kind="backstop", text=f"STOP_MAX_S: {STOP_MAX_S:.0f} s waiting at stop {v.ground} "
+                                                          f"for {names}")
+            return f"{STOP_MAX_S:.0f} s waiting here for {names}, neither shot nor stepped to"
         stay = self._stay_gain(s, held)
         j, info = self._instead(s)
         plan = self.patrol.plan

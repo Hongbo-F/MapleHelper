@@ -50,7 +50,9 @@ her max HP if her HUD's number hasn't read, where her HUD's as her stats file la
 config.toml [character] mp until then, said), where her MP bar bears it out or it's within MP_SPAN of theirs; her
 SPEED her walk and climb's by the client's formula (Hunter._speed_read: motion.physics.set_speed, from 2026-11-02), but
 not one outside the client's range or SPEED_STEP from both what's planned and her last read kept (`speed_doubt`: a
-misread, said, the SPEED planned kept); ATTACK, ACCURACY, EVASION, MAGIC, MAGIC DEF., her four stats, SPEED and JUMP
+misread, said, the SPEED planned kept), nor one other than what's planned that a second frame's read doesn't agree
+with (`speed_again`: from the final review of 2026-11-02, one OCR frame's 108 for 100 would plan her 6.7% fast till
+the next read); ATTACK, ACCURACY, EVASION, MAGIC, MAGIC DEF., her four stats, SPEED and JUMP
 kept in her stats file (JUMP not modelled from yet: said where it differs from her profile's, which plans her jumps,
 with the jump each gives: `moves_notes`)."""
 
@@ -97,7 +99,8 @@ VALUE_TOP = 30000      # the game's cap on max HP and MP: a number over it is a 
 # ... and its SPEED (`speed_doubt`) within the client's range (motion.body.SPEED_RANGE, 80-140), SPEED_STEP at most from
 # what her walk and climb are planned at or from her last read kept: between two reads her gear plausibly changes it by
 # less (a guess from meowdb's speed guide, 2026-10-27: shoes +1 to +4, capes +2 and +3, a Speed Potion +8; a thief's Haste,
-# +10 to +30, neither character's, is a buff for minutes the read shouldn't plan a hunt by)
+# +10 to +30, neither character's, is a buff for minutes the read shouldn't plan a hunt by; a read made under one, taken,
+# is kept in her stats file and plans her next hunter's start too, till the window is read again)
 SPEED_STEP = 10.0
 
 
@@ -568,6 +571,13 @@ class StatCheck:
                 again = self._read()  # (a second frame: the OCR read no number in W.DEF's cell)
                 if again is not None and again.wdef is not None:
                     reading = again
+            # (a SPEED other than the one planned read off a second frame too: Hunter._speed_read takes it only where
+            # the two agree)
+            speed, plan = None if reading is None else reading.get("speed"), getattr(self.h, "speed_plan", None)
+            self.speed_again = speed
+            if speed is not None and plan is not None and float(speed) != float(plan[0]):
+                again = self._read()
+                self.speed_again = None if again is None else again.get("speed")
             self._keep(self._last_frame)
             if self._close():
                 self.window_state = "closed"

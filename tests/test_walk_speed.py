@@ -1,12 +1,15 @@
 """Her walk as planned against her walk as measured (ROADMAP item 1 of the recordings of 2026-11-02, P01): this client
 walks a character at Physics.img's walkSpeed 125 x (SPEED + 20)/100 (motion.body.SPEED_BONUS), SPEED her stat window's.
-The source: meowdb's guide "Speed, Jump and Movement" (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow,
-updated 2026-10-27, measured off the client's video frame by frame): "Walking speed is 125 × (Speed + 20) / 100 pixels
+The source: NiaDB's guide "Speed, Jump and Movement" (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow,
+updated 2026-10-27, measured frame by frame from COT2 video footage): "Walking speed is 125 × (Speed + 20) / 100 pixels
 per second", "At the base Speed of 100, your character walks 150 pixels per second"; its formulas page and calculator
 the same. The measurements: tests/fixtures/walks_tree_2026.json, both characters' steady walks on Tree Dungeon (1 unit
 1 px at 1366x768), each walk's braking tail left out and Tree's slopes taken out by the v83 slope rule (README "Her walk
 speed"). The magician, planned at 125 until 2026-11-02 (v83's 125 x SPEED/100 on her stat window's 100), walked 148.2
-raw (81 steady walks of the hour 00:17:48-00:53:06: plans/motion-work/profile_checks.py, walkfit).
+raw (81 steady walks of the hour 00:17:48-00:53:06: plans/motion-work/profile_checks.py, walkfit). The fixture's
+limits are the walk research's own estimator's (D:/MapleHelper-scratch/recfix/walk-research/tools/walk_fixture.py, out of
+the repo): a cross-check of motion.steady's, kept apart on purpose (test_steady checks motion.steady on its own fixture,
+tests/fixtures/steady, the same walks: the two agree, 149.44 over 66).
 """
 
 import json
