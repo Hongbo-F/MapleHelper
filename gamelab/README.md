@@ -4245,7 +4245,11 @@ harness folder):
 
 The thief's EXP against master is now beyond 2 se, -5.7%, but master's side is master's world: 560bd57 -> this is
 -1.7% (t -0.59), so it's rec-sim's world (newborns, the touch line, the client's knock: master -> 560bd57 -4.0%), not
-a change of hers told from nothing; 10 of the 48 seeds are the same to the digit as fee1905's. Her standard world
+a change of hers told from nothing; 10 of the 48 seeds are the same to the digit as fee1905's. The rope rule for him
+on this code (`--world hang-rules`, cached: baselines/harness/a2cf7ab0.../d4217071a9ff4ca2), off against on: EXP -1.3%
+(t -0.75), touches -0.7%, a rope's top -2.2%, potions -2.7%: level, nothing told from nothing; the held fix alone for
+him (hang-rules against fee1905's tip, the rule on both): EXP +0.6% (t +0.62). `spot` of seeds 3 and 9 of both
+characters' tables on the commit: the same to the digit. Her standard world
 (this against fee1905, the rope rule on there): EXP a minute 426.1 against 407.0, +4.7% (t +2.58), kills +5.1% (t
 +2.93), touches at a rope's top -25.7% (t -2.38), potions -8.8% (t -2.02), touched by a newborn +16.9% (t +2.38);
 against fee1905's `hang-2s` (the 2 s hang there too, so the held fix alone): EXP +1.2% (t +1.34), touches -1.4%,
