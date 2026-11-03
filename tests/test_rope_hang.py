@@ -7,6 +7,7 @@ after HANG_S. On Tree Dungeon's own geometry (its game data), with the navigator
 state as tracks, her dot as the localizer places it; the Lie Detector in a hang in the simulator too."""
 
 import dataclasses
+import math
 import time
 from types import SimpleNamespace
 
@@ -240,6 +241,35 @@ def test_hanging_past_hang_s_she_goes_up_regardless_a_backstop(tree_map, monkeyp
     assert nav.played[-1][0] == "hang_up"
 
 
+def test_a_glance_with_no_state_is_no_news_not_the_way_up_clear(tree_map, monkeypatch):
+    """A glance with no state (Senses.glance: no dot, `glanced` None; the review of 2026-11-03 had one end the hang as
+    'clear', and she climbed into the Horny standing at the top): the hang goes on, up regardless at HANG_S; and with
+    Senses' LookLost once there's been none GLANCE_LOST_S, that's raised from the hang, no key played."""
+    from gamelab.localization.senses import GLANCE_LOST_S
+    from gamelab.perception.framecheck import LookLost, Problem
+    rope = _rope(tree_map)
+    for lost in (False, True):
+        nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x, 10)], y=rope.top + 85)
+        glance, state = nav.senses.glance, nav.state
+
+        def stateless(_glance=glance, _nav=nav, _state=state, _lost=lost):
+            got = _glance()
+            if _nav.clock.t - NOW < 0.5:
+                return got
+            _nav.senses.glanced = None
+            if _lost and _nav.clock.t - NOW >= 0.5 + GLANCE_LOST_S:
+                raise LookLost(Problem("perception", "no state from perception in time"))
+            return None, 1.0
+        nav.senses.glance = stateless
+        if lost:
+            with pytest.raises(LookLost):
+                nav._hang(rope, rope.top + 85, "a horny-mushroom on 10 by its top")
+            assert nav.played == [] and nav.clock.t - NOW < 0.5 + GLANCE_LOST_S + 2 / HZ
+        else:
+            assert nav._hang(rope, rope.top + 85, "a horny").startswith("up regardless")
+            assert HANG_S <= nav.clock.t - NOW < HANG_S + 0.1 and _steps(nav) == ["hang", "regardless"]
+
+
 def test_the_lie_detector_seen_while_she_hangs_stops_it_at_that_glance(tree_map, monkeypatch):
     """The Lie Detector seen half a second into a hang: LieDetectorAlarm at that glance (as a pass's check), not up to
     HANG_S later, and no key (no climb up the rest); on a retreat's own trip (its plans' kind) the hang goes on."""
@@ -446,8 +476,14 @@ def _steps(nav):
     return [kw["step"] for _, kw in nav.events if kw.get("kind") == "rope_hang"]
 
 
-def _price(rate, touch, ok=True):
-    return lambda pid, kind: TopPrice(rate, touch, ok, "a test's")
+def _price(rate, touch, ok=True, margin=None, hp=130.0, read=None):
+    """A hunter's price (TopPrice) at `rate` EXP a second and `touch` EXP a touch: her HP's margin over the safety
+    stop's reserve 1e6 HP where `ok` (else not read), or `margin`; a touch `hp` HP (a kind -> HP mapping, or
+    one for all: the largest too), her HP read at `read`."""
+    of = hp if isinstance(hp, dict) else {}
+    m = margin if margin is not None else 1e6 if ok else None
+    return lambda pid, kind: TopPrice(rate, touch, m, "a test's", of.get(kind, 0.0) if of else hp,
+                                      max(of.values()) if of else hp, read)
 
 
 NEVER = _price(0.0, 1e9)  # (a hunter's price at which no touch is worth taking: HANG_LONGER's alone)
@@ -600,6 +636,45 @@ def test_a_touch_taken_where_its_monster_stays_at_the_top_costs_a_second_touch_a
     assert mo.track == 1 and again is not None and again[0].track == 2
 
 
+def test_the_touch_is_taken_only_where_her_hp_covers_every_touch_it_s_priced_as(tree_map, monkeypatch, rules):
+    """HANG_TAKE's HP check (the review of 2026-11-03: it had her HP over the reserve and ONE touch, where the take is
+    priced as two when a monster stays at the top, so she could take both and end under the reserve): a Horny standing
+    10 left of the top of -80 touches her on the rope and again at the top (onto 10, the knock's flight), worth it at
+    100 EXP a second; her HP's margin over the reserve 1.5 touches: not taken; 2 touches: taken, the margin and the
+    need in the event. One walking past (one touch) at 1.5 touches: taken. The second touch by another kind is its
+    kind's HP: a Horny walking past and a Green standing 20 left of the top (onto 10), 130 and 60 HP, at a margin of
+    190 (under two Hornies' 260): taken, two touches, 190 the need. Through Hunter.top_price: her HP 3 touches of 130
+    (the reserve) and 1.5 more, not taken; and 2 more, taken."""
+    from gamelab.behavior import hunter as hm
+    from gamelab.behavior.safety import HpWatch, Reserve, Touch
+    rope = _rope(tree_map)
+    y = rope.top + 85
+    for margin, take in ((1.5 * 130, False), (2 * 130, True)):
+        nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 10, 10)], y=y)
+        nav.price = _price(100.0, 25.0, margin=margin)
+        got = nav._take_now(rope, y, HANG_S, nav._way_up_hit(rope, y))
+        assert (got is not None) == take, (margin, got)
+        if take:
+            assert (nav._took["touches"], nav._took["margin"], nav._took["need"]) == (2, 260, 260)
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 30, 10, vx=100.0)], y=y)
+    nav.price = _price(100.0, 25.0, margin=1.5 * 130)
+    assert nav._take_now(rope, y, HANG_S, nav._way_up_hit(rope, y)) is not None and nav._took["touches"] == 1
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 30, 10, vx=100.0),
+                                             _track(2, rope.x - 20, 10, kind="green-mushroom")], y=y)
+    nav.price = _price(100.0, 25.0, margin=190.0, hp={HORNY: 130.0, "green-mushroom": 60.0})
+    assert nav._take_now(rope, y, HANG_S, nav._way_up_hit(rope, y)) is not None
+    assert (nav._took["touches"], nav._took["need"]) == (2, 190)
+    w = HpWatch(reserve=Reserve(hits=3, touches=(Touch(HORNY, 130),)), max_hp=858.0)
+    h = SimpleNamespace(max_hp=858.0, max_mp=1549.0, exp_rate=7.0, report=SimpleNamespace(touches=0, misses=0),
+                        danger=SimpleNamespace(taken=lambda kind: 0.15), hp_watch=w, ground_rate=lambda pid: 100.0)
+    for more, take in ((1.5, False), (2.0, True)):
+        w.hp = 3 * 130 + more * 130
+        nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 10, 10)], y=y)
+        nav.price = lambda pid, kind: hm.Hunter.top_price(h, pid, kind)
+        got = nav._take_now(rope, y, HANG_S, nav._way_up_hit(rope, y))
+        assert (got is not None) == take and (not take or nav._took["touches"] == 2), (more, got)
+
+
 def test_no_longer_wait_for_a_walker_she_hurt_it_chases_her(tree_map, monkeypatch, rules):
     """HANG_LONGER: the walker of the first test, but hurt (its HP bar seen: the feed's Track.bar), chases her by the
     user's monster rule (a hit draws a chase), so it doesn't walk off: no longer wait (_chasing; on the merged world 63
@@ -665,14 +740,38 @@ def test_touched_on_the_rope_with_the_top_taken_and_the_touch_worth_taking_she_c
         assert [name for name, _ in nav.played] == ["hang_down", "hang_up"]
 
 
+def test_after_a_touch_on_the_rope_its_hp_counts_till_her_hp_as_read_has_it(tree_map, monkeypatch, rules):
+    """_climb_on's take (the review of 2026-11-03): it comes right after the touch on the rope, which her HP as read
+    may not have yet (the bar settles HP_SETTLE_S after the popup), so that touch counts too (the map's largest: its
+    kind isn't told), unless her HP was read HP_SETTLE_S or more after its popup. The Horny walking past the top of the
+    test above (one touch, onto 10 at the top), her margin 1.5 touches: read before the touch on the rope, not taken
+    (down to hang); read 0.4 s after its popup, taken; with her HP dropping alone (none told), not taken; margin 2.5
+    touches, taken."""
+    rope = _rope(tree_map)
+    told = {"kind": "damage", "text": "130", "at": NOW - 0.05, "told": NOW}
+    for margin, read, touch, take in ((1.5 * 130, NOW - 0.2, told, False), (1.5 * 130, NOW - 0.05 + 0.4, told, True),
+                                      (1.5 * 130, NOW, None, False), (2.5 * 130, NOW - 0.2, told, True)):
+        nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 60, 10, vx=100.0)], y=rope.top + HANG_UNDER)
+        nav.senses.invulnerable_until = lambda: NOW + 0.55
+        nav.price = _price(20.0, 25.0, margin=margin, read=read)
+        nav._climb_on(rope.top, rope.top + 30, rope.x, touch=touch)
+        names = [name for name, _ in nav.played]
+        assert names == (["climb_on"] if take else ["hang_down", "hang_up"]), (margin, read, touch, names)
+        if take:
+            took = next(kw for _, kw in nav.events if kw.get("step") == "took")
+            assert took["need"] == (130 if read > told["at"] + nv.HP_SETTLE_S else 260)
+
+
 def test_her_price_up_a_rope_is_the_hunt_s_rate_or_the_platform_s_and_the_touch_in_potions(monkeypatch):
     """Hunter.top_price (HANG_TAKE's): her EXP a second with TOP_RATE_ABOVE (on from 2026-11-02) the grind's on the
     platform at the top (`ground_rate`: the user's "a lot EXP to earn by killing off mobs above"), 0 where the grind has
     no stop there, the hunt's without a grind (behavior.fight.landing_prices: the loop's, within its band), and the
     hunt's alone with it off; a touch the kind's
     share of her HP (the positioning model's Danger.taken) in potions at the user's prices (858 HP: 214.5 EXP a bar)
-    times the share that hurt (no touches yet: HURT_SHARE); her HP over the safety stop's reserve (3 touches of 130)
-    and that touch (the reserve's), else not ok; None before her max HP is read."""
+    times the share that hurt (no touches yet: HURT_SHARE); her HP's margin over the safety stop's reserve (3
+    touches of 130) as last read and when, the touch's HP (the reserve's) and the largest's (the navigator weighs every
+    touch a take is priced as against the margin: _take_now), no margin while her HP isn't read; None before her max HP
+    is read."""
     from gamelab.attack.stance import HURT_SHARE
     from gamelab.behavior import hunter as hm
     from gamelab.behavior.safety import HpWatch, Reserve, Touch
@@ -681,13 +780,18 @@ def test_her_price_up_a_rope_is_the_hunt_s_rate_or_the_platform_s_and_the_touch_
     h = SimpleNamespace(max_hp=858.0, max_mp=1549.0, exp_rate=7.0, report=SimpleNamespace(touches=0, misses=0),
                         danger=SimpleNamespace(taken=lambda kind: 0.15), hp_watch=w, ground_rate=None)
     got = hm.Hunter.top_price(h, 10, HORNY)
-    assert got.rate == 7.0 and got.touch == pytest.approx(0.15 * 214.5 * HURT_SHARE) and got.hp_ok
+    assert got.rate == 7.0 and got.touch == pytest.approx(0.15 * 214.5 * HURT_SHARE)
+    assert (got.margin, got.hp, got.largest, got.read) == (858.0 - 390.0, 130.0, 130.0, w.at)
     h.ground_rate = lambda pid: {10: 12.0, 11: 5.0}.get(pid)
     assert hm.Hunter.top_price(h, 10, HORNY).rate == 12.0 and hm.Hunter.top_price(h, 11, HORNY).rate == 5.0
     assert hm.Hunter.top_price(h, 9, HORNY).rate == 0.0  # (no stop up there: nothing to earn above)
     monkeypatch.setattr(hm, "TOP_RATE_ABOVE", False)
     assert hm.Hunter.top_price(h, 10, HORNY).rate == 7.0 == hm.Hunter.top_price(h, 9, HORNY).rate  # (the hunt's)
     w.hp = 3 * 130 + 130 - 1.0
-    assert not hm.Hunter.top_price(h, 10, HORNY).hp_ok
+    assert hm.Hunter.top_price(h, 10, HORNY).margin == 129.0
+    green = hm.Hunter.top_price(h, 10, "green-mushroom")  # (no reserve touch of its kind: Danger.taken's; the largest)
+    assert green.hp == pytest.approx(0.15 * 858.0) and green.largest == 130.0
+    w.hp = None
+    assert hm.Hunter.top_price(h, 10, HORNY).margin is None
     h.max_hp = None
     assert hm.Hunter.top_price(h, 10, HORNY) is None

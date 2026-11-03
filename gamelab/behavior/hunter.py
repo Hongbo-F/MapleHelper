@@ -434,8 +434,10 @@ class Hunter:
         landing_prices): her EXP a second, the grind's on that platform (TOP_RATE_ABOVE: `ground_rate`, set by
         behavior.grind; 0 where it has no stop there), the hunt's without a grind (or TOP_RATE_ABOVE off); the
         touch's HP (attack.danger's Danger.taken of her max HP) in potions at the user's prices, times the share of her
-        touches that hurt; whether her HP as last read (the safety stop's watch) is over its reserve (HpWatch.threshold)
-        and that touch's HP (the reserve's touch of the kind, else Danger.taken's). None until her max HP is read."""
+        touches that hurt; her HP as last read (the safety stop's watch) over its reserve (HpWatch.threshold; None: not
+        read) and when, the touch's HP (the reserve's touch of the kind, else Danger.taken's) and the largest of the
+        map's (the reserve's first; else the kind's), for the navigator to weigh against every touch the take is priced
+        as (control.navigator._take_now). None until her max HP is read."""
         prices = fight.landing_prices(self, self.danger)
         most = self.max_hp
         if prices is None or most is None:
@@ -448,8 +450,9 @@ class Hunter:
         w = self.hp_watch
         mine = next((t for t in w.reserve.touches if t.kind == kind), None)
         touch_hp = float(mine.hp) if mine is not None else self.danger.taken(kind) * most
-        ok = w.hp is not None and w.max_hp is not None and w.hp >= w.threshold(most, self.max_mp) + touch_hp
-        return TopPrice(rate, prices.touch(kind) * prices.hurt, ok, words)
+        largest = max(touch_hp, float(w.reserve.touch.hp)) if w.reserve.touch is not None else touch_hp
+        margin = None if w.hp is None or w.max_hp is None else w.hp - w.threshold(most, self.max_mp)
+        return TopPrice(rate, prices.touch(kind) * prices.hurt, margin, words, touch_hp, largest, w.at)
 
     def knocked(self, s: Scene) -> bool:
         """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it) was told
