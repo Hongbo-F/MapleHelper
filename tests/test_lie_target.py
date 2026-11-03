@@ -70,7 +70,8 @@ def test_an_off_board_point_counts_as_a_typical_point_neither_hit_nor_miss():
     resp = np.ones((lt.NB, 500, 750), np.float32)
     on, half = np.float32([[300, 250]]), np.float32([[0, 250]])
     assert lt.score(resp, pts, nrm, on, 0.0, 0.4)[0] == pytest.approx(1.0)
-    _, ok = lt._lookup(resp, pts, nrm, half, 0.0)
+    rx, ry, bins = lt.turned(pts, nrm, 0.0)
+    _, ok = lt._gather(resp, bins, *lt.placed(half, rx, ry))
     seen = ok.mean()
     assert 0.3 < seen < 0.7
     assert lt.score(resp, pts, nrm, half, 0.0, 0.4)[0] == pytest.approx(seen + (1 - seen) * 0.4)

@@ -27,6 +27,14 @@ How:
 
 The tracker is fed board crops one by one (`TargetTracker.step`), as the game would give them; `track_clip` runs it on
 a recorded alarm clip. It suggests where the target is; it moves nothing and sends no input.
+
+Speed (2026-11-02): 43 ms a frame on the 11 clips (below-normal priority, 6 cores), against the 66 of 15 a second; it
+took 92. The edge features by a table per bin and one grey dilation (30 -> 8 ms), the template turned once per distinct
+particle angle (2 deg steps, ~35 a frame) and its points gathered by flat index, the flow off the scroll as one OpenCV
+map sampled at the score's points, the typical score on a 32 px grid. Against the user's references, 11 clips x 2
+seeds: 3.48 px off on average, 97.2% of frames within 10 px, 99.0% within 20 (before: 3.54, 96.9%, 99.0%). The optical
+flow stays DIS's medium preset (DIS_PRESET, 13-16 ms): fast and ultrafast save 12-14 ms but lose the 10 fps clip
+(10-14 px off on average there; the 15 fps clips as good).
 """
 
 import json
@@ -55,10 +63,12 @@ MU = 1.0  # the residual flow's weight
 GAMMA, SIG_REL = 3.0, 50.0  # must move: weight x e^-GAMMA at the board's velocity, falling off over SIG_REL px/s
 TURN, TURN_EDGE, EDGE_PX = 0.1, 0.3, 70.0  # turns: shares a frame, anywhere / within EDGE_PX of an edge
 TURN_V, TURN_SD = 95.0, 30.0  # px/s: the target's screen speed (median, sd)
+DIS_PRESET = 2  # the optical flow: DIS medium (fast and ultrafast lose the 10 fps clip)
 GREEN_LO, GREEN_HI = (41, 121, 121), (84, 255, 255)  # the green crosshair cursor (HSV)
 
-GY, GX = np.mgrid[8:500:16, 8:750:16]
-GRID = np.stack([GX.ravel(), GY.ravel()], 1).astype(np.float32)  # the board every 16 px, for a frame's typical score
+GRID_PX = 32
+GY, GX = np.mgrid[GRID_PX // 2:500:GRID_PX, GRID_PX // 2:750:GRID_PX]
+GRID = np.stack([GX.ravel(), GY.ravel()], 1).astype(np.float32)  # the board every 32 px, for a frame's typical score
 
 
 def board_of(frame: np.ndarray) -> np.ndarray | None:
@@ -111,74 +121,99 @@ def template_from(mask: np.ndarray, rim: int = 0) -> tuple[np.ndarray, np.ndarra
 
 # --- outline evidence -------------------------------------------------------------------------------------------
 
+DISK = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * SPREAD + 1, 2 * SPREAD + 1))
+# for template bin t, a pixel's value by its own bin b (b = NB: a weak pixel, none): LUT[bin distance] x 255
+BIN_TABLES = [np.array([int(LUT[min(abs(t - b), NB - abs(t - b))] * 255) if b < NB else 0 for b in range(256)],
+                       np.uint8) for t in range(NB)]
+
+
 def features(board: np.ndarray, thr_pct: float = 70) -> np.ndarray:
-    """Per template bin t, a response map in [0, 1]: how well the frame's edge orientations near each pixel (spread over
-    SPREAD px) agree with bin t (LUT by bin distance)."""
+    """Per template bin t, a response map (uint8, x 255): how well the frame's edge orientations near each pixel
+    (spread over SPREAD px) agree with bin t (LUT by bin distance). Each pixel's bin's value for t (BIN_TABLES), then
+    the disk's max: a grey dilation, the same as the max of each bin's dilated mask x its LUT value in a third of the
+    time."""
     g = cv2.GaussianBlur(cv2.cvtColor(board, cv2.COLOR_BGR2GRAY), (0, 0), 1.2)
     gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
     mag, ang = cv2.cartToPolar(gx, gy)
-    thr = np.percentile(mag[::4, ::4], thr_pct)
-    q = (((ang % np.pi) / np.pi) * NB).astype(np.uint8) % NB
-    q[mag <= thr] = NB  # weak: no bin
-    disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * SPREAD + 1, 2 * SPREAD + 1))
-    present = [cv2.dilate((q == k).view(np.uint8), disk) for k in range(NB)]
-    lut = (LUT * 255).astype(np.uint8)
-    resp = np.empty((NB,) + g.shape, np.float32)
+    thr = float(np.percentile(mag[::4, ::4], thr_pct))
+    q = (ang * np.float32(NB / np.pi)).astype(np.uint8)
+    np.bitwise_and(q, NB - 1, out=q)  # the orientation mod 180 deg, in NB bins
+    q = cv2.max(q, cv2.bitwise_and(cv2.compare(mag, thr, cv2.CMP_LE), NB))  # weak: NB, no bin
+    resp = np.empty((NB,) + g.shape, np.uint8)
     for t in range(NB):
-        r = present[t] * lut[0]
-        for d in (1, 2):
-            if lut[d]:
-                r = cv2.max(r, cv2.max(present[(t + d) % NB], present[(t - d) % NB]) * lut[d])
-        resp[t] = r
-    resp *= 1.0 / 255
+        cv2.dilate(cv2.LUT(q, BIN_TABLES[t]), DISK, dst=resp[t])
     return resp
 
 
-def _lookup(resp, pts, nrm, cands, theta):
-    """Each candidate pose's template point responses (N x points) and which points are on the board."""
-    c, s = np.cos(theta), np.sin(theta)
-    rp = pts @ np.array([[c, s], [-s, c]], np.float32)
-    bins = np.minimum((((nrm + theta) % np.pi) / np.pi * NB).astype(np.int32), NB - 1)
-    xs = np.rint(cands[:, None, 0] + rp[None, :, 0]).astype(np.int32)
-    ys = np.rint(cands[:, None, 1] + rp[None, :, 1]).astype(np.int32)
-    H, W = resp.shape[1:]
+def turned(pts, nrm, angles):
+    """The template turned by each angle (K): its points' offsets x and y (K x points) and their normals' bins."""
+    angles = np.atleast_1d(np.asarray(angles, np.float64))
+    c, s = np.cos(angles)[:, None], np.sin(angles)[:, None]
+    rx = (pts[:, 0] * c - pts[:, 1] * s).astype(np.float32)
+    ry = (pts[:, 0] * s + pts[:, 1] * c).astype(np.float32)
+    bins = np.minimum((((nrm + angles[:, None]) % np.pi) / np.pi * NB).astype(np.int32), NB - 1)
+    return rx, ry, bins
+
+
+def placed(cands, rx, ry):
+    """The turned template's points at each candidate centre (N x 2; rx, ry: one row, or a row per candidate): pixel x
+    and y (N x points, not clipped)."""
+    cands = np.asarray(cands, np.float32)
+    return np.rint(cands[:, 0:1] + rx).astype(np.int32), np.rint(cands[:, 1:2] + ry).astype(np.int32)
+
+
+def flat(xs, ys, H=500, W=750):
+    """The points' flat pixel index (clipped onto the board) and whether each is on the board."""
     ok = (xs >= 0) & (xs < W) & (ys >= 0) & (ys < H)
-    v = resp[bins[None, :].repeat(len(cands), 0), np.clip(ys, 0, H - 1), np.clip(xs, 0, W - 1)]
-    return v, ok
+    return np.clip(ys, 0, H - 1) * W + np.clip(xs, 0, W - 1), ok
+
+
+def _gather(resp, bins, xs, ys, at=None):
+    """The responses (as stored: uint8 x 255, or floats) at the points for their bins, and which are on the board
+    (at: the points' `flat`, when at hand)."""
+    H, W = resp.shape[1:]
+    lin, ok = flat(xs, ys, H, W) if at is None else at
+    return resp.reshape(-1)[bins * (H * W) + lin], ok
+
+
+def _scale(resp):
+    return 1.0 / 255 if resp.dtype == np.uint8 else 1.0
+
+
+def score_at(resp, bins, xs, ys, p0, at=None) -> np.ndarray:
+    """Each pose's outline score from its points (`placed`) and bins: their mean response, an off-board point counting
+    as p0 (a typical point)."""
+    v, ok = _gather(resp, bins, xs, ys, at)
+    on = ok.sum(1)
+    total = (v * ok).sum(1, dtype=np.float64) * _scale(resp)
+    return (total + (xs.shape[1] - on) * p0) / xs.shape[1]
 
 
 def typical(resp, pts, nrm, theta) -> float:
     """The frame's typical outline score at this angle: the median over GRID of the on-board points' mean (poses under
     60% on the board left out)."""
-    v, ok = _lookup(resp, pts, nrm, GRID, theta)
+    rx, ry, bins = turned(pts, nrm, theta)
+    v, ok = _gather(resp, bins, *placed(GRID, rx, ry))
     n = ok.sum(1)
-    s = np.where(n > 0.6 * len(pts), (v * ok).sum(1) / np.maximum(n, 1), 0.0)
+    s = np.where(n > 0.6 * len(pts), (v * ok).sum(1, dtype=np.float64) * _scale(resp) / np.maximum(n, 1), 0.0)
     return float(np.median(s))
 
 
 def score(resp, pts, nrm, cands, theta, p0) -> np.ndarray:
     """Each candidate centre's outline score at angle theta: its template points' mean response, an off-board point
     counting as p0 (a typical point: `typical`)."""
-    v, ok = _lookup(resp, pts, nrm, cands, theta)
-    return np.where(ok, v, p0).mean(1)
-
-
-def along(r, pts, cands, theta) -> np.ndarray:
-    """Mean of map r along the template rotated by theta at each candidate centre."""
-    c, s = np.cos(theta), np.sin(theta)
-    rp = pts @ np.array([[c, s], [-s, c]], np.float32)
-    xs = np.clip(np.rint(cands[:, None, 0] + rp[None, :, 0]).astype(np.int32), 0, r.shape[1] - 1)
-    ys = np.clip(np.rint(cands[:, None, 1] + rp[None, :, 1]).astype(np.int32), 0, r.shape[0] - 1)
-    return r[ys, xs].mean(1)
+    rx, ry, bins = turned(pts, nrm, theta)
+    xs, ys = placed(cands, rx, ry)
+    return score_at(resp, np.broadcast_to(bins, xs.shape), xs, ys, p0)
 
 
 # --- the board's scroll and what moves off it ---------------------------------------------------------------------
 
-def foreign_mask(board: np.ndarray) -> np.ndarray:
+def foreign_mask(board: np.ndarray, hsv: np.ndarray | None = None) -> np.ndarray:
     """255 where a pixel isn't the rock board: white (the target while white), the green cursor, the blue countdown and
-    START text."""
-    hsv = cv2.cvtColor(board, cv2.COLOR_BGR2HSV)
+    START text (hsv: the board's, when it's at hand)."""
+    hsv = cv2.cvtColor(board, cv2.COLOR_BGR2HSV) if hsv is None else hsv
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     bad = (((s < 30) & (v > 230)) | ((s > 80) & (h > 40) & (h < 170))).astype(np.uint8)
     bad = cv2.morphologyEx(bad, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -198,14 +233,19 @@ def flow_shift(flow: np.ndarray, clean: np.ndarray) -> np.ndarray:
     return np.array([np.median(f[..., 0][ok]), np.median(f[..., 1][ok])], np.float64)
 
 
-def residual_flow(flow, shift, prev, cur, cap: float = 10.0) -> np.ndarray:
+def off_scroll_map(flow, shift, near_cursor, cap: float = 10.0) -> np.ndarray:
     """Per pixel, how far the frame moved off the board's scroll since the last (the optical flow minus the scroll),
-    capped and scaled to [0, 1]; the cursor (green crosshair, either frame) masked."""
-    r = np.hypot(flow[..., 0] - shift[0], flow[..., 1] - shift[1])
-    green = (cv2.inRange(cv2.cvtColor(cur, cv2.COLOR_BGR2HSV), GREEN_LO, GREEN_HI)
-             | cv2.inRange(cv2.cvtColor(prev, cv2.COLOR_BGR2HSV), GREEN_LO, GREEN_HI))
-    r[cv2.dilate(green, np.ones((25, 25), np.uint8)) > 0] = 0
-    return np.minimum(r, cap) / cap
+    capped at cap px and scaled to [0, 1]; 0 near the cursor (`near_cursor`: its own motion isn't the target's)."""
+    fx, fy = cv2.split(flow)
+    r = cv2.magnitude(cv2.subtract(fx, float(shift[0])), cv2.subtract(fy, float(shift[1])))
+    r = cv2.min(r, cap) * (1.0 / cap)
+    r[near_cursor] = 0
+    return r
+
+
+def off_the_scroll(r, lin) -> np.ndarray:
+    """Each pose's mean of the off-scroll map r (`off_scroll_map`) over its points (their `flat` index)."""
+    return r.reshape(-1)[lin].mean(1)
 
 
 # --- the tracker ------------------------------------------------------------------------------------------------
@@ -223,9 +263,9 @@ class TargetTracker:
         self.kb = max(1, round(BACK_S * fps))
         self.start_t = start_t
         self.seed, self.n = seed, n
-        self.history = []  # (t, board, features, shift from the frame before, grey, clean) for the last kb + 1
+        self.history = []  # (t, board, features, shift from the frame before, grey, clean, cursor): the last kb + 1
         self.template = None  # (rim points, normals, t0, blob area)
-        self.dis = cv2.DISOpticalFlow_create(2)
+        self.dis = cv2.DISOpticalFlow_create(DIS_PRESET)
 
     def _restart(self, blob, t):
         pts, nrm = template_from(blob["mask"], rim=RIM)
@@ -241,11 +281,13 @@ class TargetTracker:
         before the target has been seen white."""
         prev = self.history[-1] if self.history else None
         grey = cv2.cvtColor(board, cv2.COLOR_BGR2GRAY)
-        clean = foreign_mask(board) == 0
+        hsv = cv2.cvtColor(board, cv2.COLOR_BGR2HSV)
+        clean = foreign_mask(board, hsv) == 0
+        cursor = cv2.inRange(hsv, GREEN_LO, GREEN_HI)
         flow = self.dis.calc(prev[4], grey, None) if prev is not None else None
         shift = flow_shift(flow, prev[5] & clean) if prev is not None else np.zeros(2)
         resp = features(board)
-        self.history.append((t, board, resp, shift, grey, clean))
+        self.history.append((t, board, resp, shift, grey, clean, cursor))
         del self.history[:-(self.kb + 1)]
         if self.start_t is None or t < self.start_t:
             blob = target_blob(board)
@@ -286,18 +328,19 @@ class TargetTracker:
         if back is not None:
             S = sum(h[3] for h in self.history[1:])  # the board's scroll since the look-back frame
             p0b = typical(back[2], pts, nrm, th)
-        rflow = residual_flow(flow, shift, prev[1], board) if MU and prev is not None else None
-        s, d, mo = np.zeros(n), np.zeros(n), np.zeros(n)
-        keys = np.rint(np.degrees(P[:, 4]) / 2.0).astype(int)
-        for k in np.unique(keys):
-            idx = np.nonzero(keys == k)[0]
-            ang = th + np.radians(2.0 * k)
-            z = P[idx, 0:2].astype(np.float32)
-            s[idx] = score(resp, pts, nrm, z, ang, p0)
-            if back is not None:
-                d[idx] = score(back[2], pts, nrm, (P[idx, 0:2] - S).astype(np.float32), ang, p0b)
-            if rflow is not None:
-                mo[idx] = along(rflow, pts, z, ang)
+        # the template turned once per distinct particle angle (to 2 deg), each particle given its angle's
+        keys, which = np.unique(np.rint(np.degrees(P[:, 4]) / 2.0), return_inverse=True)
+        rx, ry, bins = turned(pts, nrm, th + np.radians(2.0 * keys))
+        rx, ry, bins = rx[which], ry[which], bins[which]
+        xs, ys = placed(P[:, 0:2], rx, ry)
+        at = flat(xs, ys)
+        s = score_at(resp, bins, xs, ys, p0, at)
+        d = score_at(back[2], bins, *placed(P[:, 0:2] - S, rx, ry), p0b) if back is not None else np.zeros(n)
+        if MU and prev is not None:
+            near_cursor = cv2.dilate(prev[6] | self.history[-1][6], np.ones((25, 25), np.uint8)) > 0
+            mo = off_the_scroll(off_scroll_map(flow, shift, near_cursor), at[0])
+        else:
+            mo = np.zeros(n)
         vrel = np.hypot(*(P[:, 2:4] - vb).T)
         lw = (np.log(self.w + 1e-300) + KAPPA * (s + MU * mo - LAM * d)
               - GAMMA * np.exp(-0.5 * (vrel / SIG_REL) ** 2))

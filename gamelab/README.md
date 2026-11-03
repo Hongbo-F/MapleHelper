@@ -1274,25 +1274,26 @@ To check in game (none of this has been played):
 
 **The Lie Detector's target** (`lie_target.py`, from 2026-11-02). The mouse mini-game ("use the mouse to follow the
 fading figure") shows a figure white at the board's centre through the countdown; from START (4.6 s after the board's
-first frame) it fades in ~2 s to an embossed rim like the decoys printed on the board (the same kinds of shapes), moves at
-a steady ~95 px/s on screen, turning now and then anywhere (no wall rule: it turned 22-61 px in from an edge, or in
+first frame) it fades in ~2 s to an embossed rim like the decoys printed on the board (the same kinds of shapes), moves
+at a steady ~95 px/s on screen, turning now and then anywhere (no wall rule: it turned 22-61 px in from an edge, or in
 mid-board, and went half past the bottom edge), and spins at a constant 2 rad/s, while the board's texture scrolls
-(~125 px/s) and warps. The tracker takes its template from the white target (its outline grown 8 px: the rim), then runs
-a particle filter on each board frame: the outline's score at the known angle (an off-board point counts as a typical
-point, the frame's median), less 0.3 x the same outline where the board's scroll puts the pose 0.2 s earlier (a printed
-decoy rides the board), plus the optical flow off the scroll along the rim, a particle moving with the board penalised,
-and 10% of the particles a frame (30% within 70 px of an edge) given a new direction at the target's speed, so turns are
-followed in a frame or two. The board's scroll each frame is the median of that optical flow over the board's own
-pixels (0.1-0.2 px from phase correlation refined by ECC, which it replaced: ECC took 23 ms a frame). The board's path
-is a fixed ellipse in time since START (turning at 1 rad/s, 147 x 97 px/s, the same phase on every clip within ~3
-deg), but the frames carry their capture times (one stamped 139 ms after the last can show 18 ms of the board's path,
-the next 19 ms and 124), so the board is measured, not predicted. It was worked out on the 11 alarm clips of 2026-10-26 to 30 (D:/MapleHelper-scratch/ld-contour,
-FINDINGS.md: the bounce check, the look-back, the benchmark) and checked by the user against reference tracks they
-approved (`tests/fixtures/lie_detector/references`: one hand-fixed stretch, 10-30 20:31 review frames 136-145): 3.5 px off on
-average, 97.2% of the rounds' frames within 10 px, none lost; the one real miss is that faint stretch, where a same-shaped
-decoy sits 60 px away. The user's crosshair isn't the truth (it lags ~0.4 s). `python -m gamelab lie-target [clip ...]`
-runs it on the recorded clips and scores it against the references. Not live yet: 83 ms a frame against the 66 of 15 a
-second.
+(~125 px/s) and warps. The tracker takes its template from the white target (its outline grown 8 px: the rim), then
+runs a particle filter on each board frame: the outline's score at the known angle (an off-board point counts as a
+typical point, the frame's median), less 0.3 x the same outline where the board's scroll puts the pose 0.2 s earlier (a
+printed decoy rides the board), plus the optical flow off the scroll along the rim, a particle moving with the board
+penalised, and 10% of the particles a frame (30% within 70 px of an edge) given a new direction at the target's speed,
+so turns are followed in a frame or two. The board's scroll each frame is the median of that optical flow over the
+board's own pixels (0.1-0.2 px from phase correlation refined by ECC, which it replaced: ECC took 23 ms a frame). The
+board's path is a fixed ellipse in time since START (turning at 1 rad/s, 147 x 97 px/s, the same phase on every clip
+within ~3 deg), but the frames carry their capture times (one stamped 139 ms after the last can show 18 ms of the
+board's path, the next 19 ms and 124), so the board is measured, not predicted. It was worked out on the 11 alarm clips
+of 2026-10-26 to 30 (D:/MapleHelper-scratch/ld-contour, FINDINGS.md: the bounce check, the look-back, the benchmark)
+and checked by the user against reference tracks they approved (`tests/fixtures/lie_detector/references`: one
+hand-fixed stretch, 10-30 20:31 review frames 136-145): 3.5 px off on average, 97.2% of the rounds' frames within 10
+px, none lost; the one real miss is that faint stretch, where a same-shaped decoy sits 60 px away. The user's crosshair
+isn't the truth (it lags ~0.4 s). `python -m gamelab lie-target [clip ...]` runs it on the recorded clips and scores it
+against the references. Not live yet. It takes 43 ms a frame (92 before the speed work of 2026-11-02, the module's
+docstring) against the 66 of 15 a second, with the same accuracy against the references.
 
 **Monster HP bars** (`hud.hp_bar`, from 2026-10-25). The bar a monster shows once it's hurt, as the game draws it at
 1366x768 (game px; the saved frames and the rolling recorder's clips of 2026-10-24 and 25): a white frame 50 x 8 between
