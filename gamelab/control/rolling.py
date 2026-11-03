@@ -20,6 +20,10 @@ has no frame of the game to give. One recorder at a time, whichever (MUTEX). Wha
     test's last sight (the cycle's only video since 2026-11-01; 3 minutes after the alarm at most), to
     paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_TAIL_S, CLIP_MAX_S), lossless (PNG);
     both written as soon as the cycle is over (Recorder.cycle_end);
+  - on the Truth Booth with no test seen before it (the alarm's `cause`, lie_recorder.UNKNOWN_CAUSE: something sent
+    her there that the player didn't see): the 5 minutes before it at once, lossless (PNG), to
+    paths.BOOTH_UNKNOWN/<YYYYmmdd-HHMMSS>-truth-booth-unknown-cause (UNKNOWN_KEEP_BYTES kept), for analysis (the user,
+    2026-11-03); the cycle's `before/` is that part, not written again; its clip as any;
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
     asked through a file inbox (paths.RECORDER: inbox/<id>.json, taken as <id>.taken, answered in outbox/<id>.json).
 
@@ -167,6 +171,10 @@ CLIP_MAX_S = 180.0
 # them). Only a game wholly under such windows is a gap ("covered").
 PART_COVERED = "part covered"  # the log's state for frames kept with another window over part of the game: not a gap
 CLIPS_KEEP_BYTES = 30 * 1024 ** 3  # (5 GB until the user asked for 30, 2026-10-25)
+# The 5 minutes before each Truth Booth of unknown cause (lie_recorder.UNKNOWN_CAUSE), PNG: about 2.6 GB at 15 frames a
+# second of 1366x768 (581 KB a frame: PNG_PARAMS' note), so about 7 of them; the oldest go past this.
+UNKNOWN_KEEP_BYTES = 20 * 1024 ** 3
+UNKNOWN_NAME = "truth-booth-unknown-cause"
 # The part before the Lie Detector ends this long after the alarm (the player pages first, about 1.2 s). It's written
 # with the clip, once the cycle is over: until 2026-10-25 it was written at once, as the player's recording began, and
 # its 3,000 frames' encoding ran beside the grabs while the Lie Detector was up.
@@ -486,20 +494,21 @@ class Recorder:
     and the status between ticks, `run` does both FPS times a second. Saves are written on a thread of their own, one
     after the other (`flush` waits for them). `game` says whether the screen shows the game (GameWindow), `grab`
     grabs a box of the screen (ScreenGrab); tests pass fakes, and their own folders: `box` (the inbox, the outbox and
-    the status file: paths.RECORDER), `lie_root` (paths.LIE_RECORDINGS), `recent` (paths.RECENT) and `clips`
-    (paths.ALARM_CLIPS). Moments made elsewhere come in through `add` (the perception service's frames: from another
-    thread than the ticks'). `encoders`: threads a save is encoded on (ENCODERS; or what it says at each save);
+    the status file: paths.RECORDER), `lie_root` (paths.LIE_RECORDINGS), `recent` (paths.RECENT), `clips`
+    (paths.ALARM_CLIPS) and `unknown` (paths.BOOTH_UNKNOWN). Moments made elsewhere come in through `add` (the
+    perception service's frames: from another thread than the ticks'). `encoders`: threads a save is encoded on (ENCODERS; or what it says at each save);
     `cpu`: the recording's CPU so far, s (by default the process's: its status's share of a core); `source`: where its
     frames come from, as the status says it; `extra`: more for the status (the service's counts); `apart`: its saves
     written in a process of their own (write_part_apart: the perception service's)."""
 
     def __init__(self, game, grab: Callable[[dict], np.ndarray], ring: Ring | None = None, *,
                  box: Path | None = None, lie_root: Path | None = None, recent: Path | None = None,
-                 clips: Path | None = None, clock: Callable[[], float] = time.time,
+                 clips: Path | None = None, unknown: Path | None = None, clock: Callable[[], float] = time.time,
                  pack_frame: Callable[[np.ndarray], bytes] = pack, fps: float = FPS,
                  log: Callable[[str], None] = print, folder_wait: float = FOLDER_WAIT_S,
                  recent_keep: int = RECENT_KEEP_BYTES, lie_keep: int = lie_recorder.KEEP_BYTES,
-                 clips_keep: int = CLIPS_KEEP_BYTES, encoders: int | Callable[[], int] = ENCODERS,
+                 clips_keep: int = CLIPS_KEEP_BYTES, unknown_keep: int = UNKNOWN_KEEP_BYTES,
+                 encoders: int | Callable[[], int] = ENCODERS,
                  cpu: Callable[[], float] = time.process_time, source: str = "its own grabs (mss)",
                  extra: Callable[[], dict] | None = None, writer_priority: int = WRITER_PRIORITY,
                  apart: bool = False, shows: Callable[[np.ndarray], bool] | None = None):
@@ -509,6 +518,7 @@ class Recorder:
         self.lie_root = Path(lie_root or paths.LIE_RECORDINGS)
         self.recent = Path(recent or paths.RECENT)
         self.clips = Path(clips or paths.ALARM_CLIPS)
+        self.unknown, self.unknown_keep = Path(unknown or paths.BOOTH_UNKNOWN), unknown_keep
         self.clock, self.pack, self.fps, self.log = clock, pack_frame, fps, log
         self.folder_wait, self.recent_keep, self.lie_keep = folder_wait, recent_keep, lie_keep
         self.clips_keep = clips_keep
@@ -662,7 +672,8 @@ class Recorder:
         """A Lie Detector alarm not seen before (by its time): what the ring holds now, and what comes in its first
         BEFORE_TAIL_S, goes to the player's recording of it as `before/`, and its clip to `clips`; both are written once
         the clip's last moment is past (check_clips), so nothing heavy runs beside the grabs while the Lie Detector is
-        up (the user, 2026-10-25)."""
+        up (the user, 2026-10-25). The Truth Booth with no test seen before it (its `cause`: there's no test to answer
+        then) has what the ring holds written at once instead of `before/` (`_save_unknown`)."""
         info = alarm.alarm_info()
         key = None if info is None else info.get("time")
         if key is None or key == self.alarm_handled:  # (none, or one read as it was written: looked at again soon)
@@ -679,8 +690,15 @@ class Recorder:
             snapshot = self.ring.last(self.ring.seconds)
             first = next((i for i, it in enumerate(snapshot) if it.t > seen - CLIP_LOOK_BACK_S - CLIP_BEFORE_S),
                          len(snapshot))
-            self.pending_clips.append(Clip(info, seen, from_key(snapshot, first), snapshot))
+            clip = Clip(info, seen, from_key(snapshot, first), snapshot)
+            self.pending_clips.append(clip)
         seen_as = f", {info['form']}" if info.get("form") else ""
+        if info.get("cause") == lie_recorder.UNKNOWN_CAUSE:
+            self.jobs.put(lambda clip=clip: self._save_unknown(clip))
+            self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}) with no test seen "
+                      f"before it, its cause unknown: saving the {len(snapshot) / self.fps:.0f} s before it now in "
+                      f"{self.unknown}, and its own clip in {self.clips} once it's over")
+            return
         self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
                   f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it, and its own clip "
                   f"from {CLIP_BEFORE_S:g} s before its first frame to {CLIP_TAIL_S:g} s after its test's last sight "
@@ -699,7 +717,8 @@ class Recorder:
         for clip, end in due:
             items = [it for it in clip.items if it.t <= end]
             self.jobs.put(lambda clip=clip, items=items, end=end: self._save_clip(clip, items, cut_short, end))
-            self.jobs.put(lambda clip=clip: self._save_before(clip))
+            if clip.info.get("cause") != lie_recorder.UNKNOWN_CAUSE:  # (its part before written as it came)
+                self.jobs.put(lambda clip=clip: self._save_before(clip))
 
     def cycle_end(self, clip: Clip, now: float) -> float | None:
         """When an alarm's clip ends (time.time's clock), or None while that can't be told yet: once the player's
@@ -833,6 +852,27 @@ class Recorder:
         if folder is None:
             self._say(f"recorder: no recording of the player's began within {self.folder_wait:g} s of the alarm "
                       f"(the player not running?): the part before it is in {dest}")
+
+    def _save_unknown(self, clip: Clip) -> None:
+        """The 5 minutes before a Truth Booth of unknown cause (lie_recorder.UNKNOWN_CAUSE: no test seen before it),
+        as the ring held them at the alarm, written at once, lossless, to `unknown` (the user, 2026-11-03: "immediately
+        save a 5min-clip and mark them unknown reason that led to truth booth for later analysis"), the oldest there
+        going past `unknown_keep`; the player's recording of the cycle named in it (waited for as `lie_folder`)."""
+        snapshot, clip.before = clip.before, []  # (not held on while the cycle runs on)
+        gone = lie_recorder.prune(self.unknown, self.unknown_keep)
+        if gone:
+            self._say(f"recorder: deleted the {len(gone)} oldest saves before a Truth Booth of unknown cause to keep "
+                      f"the rest under {self.unknown_keep / 1024 ** 3:g} GB")
+        folder = self.lie_folder(clip.seen)
+        dest = new_folder(self.unknown, UNKNOWN_NAME)
+        summary = self._write(dest, snapshot, {
+            "kind": "before a Truth Booth of unknown cause", "cause": lie_recorder.UNKNOWN_CAUSE,
+            "why": "the Truth Booth seen with no test seen before it in its cycle, and not in a stay seen before "
+                   "(its clock): a check missed?",
+            "alarm": clip.info, "alarm_at": day_time(clip.seen),
+            "alarm_t": None if not snapshot else round(clip.seen - snapshot[0].t, 3),
+            "player_recording": None if folder is None else str(folder)}, png=True)
+        self._saved(dest, summary)
 
     def _save_clip(self, clip: Clip, items: list[Item], cut_short: bool, end: float | None = None) -> None:
         gone = lie_recorder.prune(self.clips, self.clips_keep)

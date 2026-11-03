@@ -171,14 +171,19 @@ class AlarmKeys:
         return dataclasses.replace(self.base, **{f: None if k is None else parse(k) for f, k in names.items()})
 
 
-def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector", form: str | None = None) -> dict:
+def raise_alarm(frame: np.ndarray | None, reason: str = "lie_detector", form: str | None = None,
+                cause: str | None = None) -> dict:
     """Record the alarm (gamelab refuses to run until it's cleared) and page whoever is at the PC. An alarm that
     can't be written (the disk full) is still paged, and its error raised after that: it had raised before the
     paging, so then nobody was told. `at` is when (time.time(): her retreat counts its 10 s from it); `form` the form
-    seen (perception.lie_detector's name), recorded and paged by name (PAGED)."""
+    seen (perception.lie_detector's name), recorded and paged by name (PAGED); `cause`, recorded: the watchdog's
+    lie_recorder.UNKNOWN_CAUSE for the Truth Booth with no test seen before it (the rolling recorder saves the 5 minutes
+    before it at once)."""
     info = {"reason": reason, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "at": round(time.time(), 3)}
     if form is not None:
         info["form"] = form
+    if cause is not None:
+        info["cause"] = cause
     try:
         ALARM.parent.mkdir(parents=True, exist_ok=True)
         _write(info)  # first: everything else may fail

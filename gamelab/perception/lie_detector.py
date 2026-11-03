@@ -90,6 +90,25 @@ NEAR_MARGIN = 48  # TEMPLATE_FRAME px around each place (24 at half size)
 # on the others, the two party quest stages 0.21-0.26 at its place.
 BOOTH_TAG = (ASSETS / "truth_booth_admin.png", 0.8)
 BOOTH_TAG_AT = (1086, 786)  # its top-left in TEMPLATE_FRAME px
+# The clock's time left, read off its digits (`clock_left`): how long the Truth Booth has left, so a sighting of a stay
+# already seen isn't taken for a new one (control.player.Watchdog; the user, 2026-11-03: "When you enter the truth
+# booth you can see how much count down it has, and block the re-sighting"). Its four digits are drawn in slots of
+# their own (minutes' tens and ones, seconds' tens and ones), CLOCK_SLOTS their left edges and CLOCK_TOP their top in
+# NATIVE_FRAME px, each CLOCK_DIGIT (w, h); a frame of another size is brought to NATIVE_FRAME first. A digit is its
+# cream dots (blue over 100, red over 150: the box behind is dark brown) matched against the ten digits' masks
+# (assets/clock_digits.png, 0 to 9 side by side), cut from the 11-03 00:02 booth's clip (its seconds' ones, frames
+# 534-1546), within CLOCK_PAD px; a slot with fewer than CLOCK_INK dots is blank (the minutes' tens under 10). On that
+# clip's 1,027 booth frames: every frame from the room's 1 s fade-in on read, each the same end within the clock's
+# second (334.3 s into the clip, 0.5 s either way), the digits matching at 0.93 or more, the fade-in's 11 read as
+# nothing; 4:44 on 2026-10-18's (1920x1080, 0.94), 7:04 on 10-29 09:29:52's (her second stay that day, 10 minutes),
+# 29:59 and 27:30 on the Kerning party quest's two (1920x1080, 0.91 or more): D:/MapleHelper-scratch/booth-admin.
+CLOCK_DIGITS = ASSETS / "clock_digits.png"
+CLOCK_SLOTS = (648, 678, 728, 758)
+CLOCK_TOP = 42
+CLOCK_DIGIT = (25, 34)
+CLOCK_PAD = 3
+CLOCK_INK = 20
+CLOCK_MATCH = 0.8
 # The forms whose window lies over the play area, where she is, each at the one of its PLACES where it does: the
 # countdown's window (its yellow title at the first; at the second its box at the right, which comes before it as the
 # mini-game's notice does), the mini-game's board and the quiz. Not the boxes that come before them (the mini-game's
@@ -151,6 +170,9 @@ class LieDetectorSpotter:
                      for name, (png, t) in HALF_SIZE.items()}
         png, t = BOOTH_TAG
         self.booth_tag = (cv2.cvtColor(np.asarray(Image.open(png).convert("RGB")), cv2.COLOR_RGB2GRAY), t)
+        strip = (np.asarray(Image.open(CLOCK_DIGITS).convert("L")) > 127).astype(np.float32)
+        w = CLOCK_DIGIT[0]
+        self.clock_digits = [np.ascontiguousarray(strip[:, d * w:(d + 1) * w]) for d in range(10)]
         self._pictures = threading.local()  # each thread's pictures a look is made in (`_kept`)
 
     def scores(self, frame: np.ndarray) -> dict[str, float]:
@@ -192,6 +214,30 @@ class LieDetectorSpotter:
         rows, cols = _box((x // 2, y // 2), self.booth_tag[0].shape[::-1], half, NEAR_MARGIN // 2)
         out["truth booth"] = min(out["truth booth"], self._booth_tag(gray[rows, cols]))
         return out
+
+    def clock_left(self, frame: np.ndarray) -> int | None:
+        """The seconds left on the game's clock (the Truth Booth's "Time Left", as any timed map's), read off its digits
+        (CLOCK_SLOTS); None where it can't be read: no clock, a digit not legible, seconds' tens over 5."""
+        if (frame.shape[1], frame.shape[0]) != NATIVE_FRAME:
+            frame = cv2.resize(np.ascontiguousarray(to_template(frame)), NATIVE_FRAME, interpolation=cv2.INTER_AREA)
+        (w, h), pad = CLOCK_DIGIT, CLOCK_PAD
+        read = []
+        for x in CLOCK_SLOTS:
+            px = frame[CLOCK_TOP - pad:CLOCK_TOP + h + pad, x - pad:x + w + pad]
+            ink = cv2.bitwise_and(cv2.inRange(px[..., 2], 101, 255), cv2.inRange(px[..., 0], 151, 255))
+            if cv2.countNonZero(ink) < CLOCK_INK:
+                read.append(None)
+                continue
+            ink = (ink > 0).astype(np.float32)
+            scores = [float(cv2.matchTemplate(ink, digit, cv2.TM_CCOEFF_NORMED).max()) for digit in self.clock_digits]
+            best = int(np.argmax(scores))
+            if scores[best] < CLOCK_MATCH:
+                return None
+            read.append(best)
+        tens, ones, s10, s1 = read
+        if ones is None or s10 is None or s1 is None or s10 > 5:
+            return None
+        return ((tens or 0) * 10 + ones) * 60 + s10 * 10 + s1
 
     def _booth_tag(self, gray: np.ndarray) -> float:
         """How well the Maple Administrator's name tag (BOOTH_TAG) matches anywhere on a half-size grey picture, as a

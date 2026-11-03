@@ -275,8 +275,9 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     _make(tmp_path, "player.log", 1, 40, now)
     got = {u.kind: (u.files, u.bytes) for u in disk.usage(tmp_path)}
     assert got == {"recordings": (1, 5000), "Lie Detector recordings": (3, 1020), "recent recordings": (1, 400),
-                   "alarm clips": (1, 600), "screenshots": (1, 3000), "telemetry": (2, 300), "harness runs": (0, 0),
-                   "golden traces": (1, 50), "player inbox, outbox": (1, 0), "other": (1, 40)}
+                   "alarm clips": (1, 600), "Truth Booths of unknown cause": (0, 0), "screenshots": (1, 3000),
+                   "telemetry": (2, 300), "harness runs": (0, 0), "golden traces": (1, 50),
+                   "player inbox, outbox": (1, 0), "other": (1, 40)}
     monkeypatch.setattr(paths, "LAB", tmp_path)
     monkeypatch.setattr(telemetry, "KEEP_BYTES", 250)  # the old one is past the cap (none goes for its age)
     assert main(["lab-usage"]) == 0
@@ -286,6 +287,7 @@ def test_lab_usage_sizes_each_kind_and_deletes_telemetry_past_the_cap_only_when_
     assert "due to go when the next starts: 0" in out
     assert "recent recordings (save-recent's): 1; the newest 20.0 GB are kept besides the next" in out
     assert "alarm clips (the recorder's, 10 s before each alarm to 60 s after): 1; the newest 30.0 GB are kept" in out
+    assert "Truth Booths of unknown cause (the recorder's 5 minutes before each): 0; the newest 20.0 GB are kept" in out
     assert main(["lab-usage", "--prune-telemetry"]) == 0
     assert "deleted 1 telemetry files (100 B)" in capsys.readouterr().out
     assert not old.exists() and new.exists() and (tmp_path / "recordings" / "chain.npz").exists()

@@ -230,12 +230,16 @@ class Pusher:
                 mail(load_mail(mail_path), title, text, log=log)
         return cls(go)
 
-    def seen(self, now: float, form: str | None) -> None:
+    def seen(self, now: float, form: str | None, cause: str | None = None) -> None:
+        """`cause`: the watchdog's lie_recorder.UNKNOWN_CAUSE for a cycle first seen as the Truth Booth with no test
+        seen before it, said in its first push."""
         if self.t0 is None:
             self.t0, self.last, self.missed = now, now, form == MISSED
+            booth = "she's in the Truth Booth" + (" with no test seen before it: its cause unknown (a check missed?), "
+                                                  "the 5 minutes before it saved" if cause else "")
             self.push("Lie Detector up" if form != MISSED else "Lie Detector missed",
                       f"{form or 'the Lie Detector'} seen at {self.clock('%H:%M:%S')}: "
-                      + ("answer it in the game now" if form != MISSED else "she's in the Truth Booth"), "urgent", True)
+                      + ("answer it in the game now" if form != MISSED else booth), "urgent", True)
             return
         if form == MISSED:
             if not self.missed:

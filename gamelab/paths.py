@@ -29,6 +29,8 @@ LIE_TARGETS = LAB / "lie_target"  # each mini-game round's target followed live,
 ALARM_CLIPS = LAB / "alarm_clips"  # each Lie Detector alarm, 10 s before it to 60 s after, the rolling recorder's
                                    # own copy (control.rolling)
 RECORDER = LAB / "recorder"      # the rolling recorder's inbox, outbox and status (control.rolling)
+BOOTH_UNKNOWN = LAB / "booth_unknown"  # the 5 minutes before each Truth Booth no test was seen before (its cause
+                                       # unknown), kept for analysis (control.rolling, control.lie_recorder)
 CALIBRATION = LAB / "calibration.json"
 TAG_TEMPLATE = LAB / "tag_template.npy"
 TAG_FULL = LAB / "tag_template_full.npy"  # her name tag at full resolution (made on first look)

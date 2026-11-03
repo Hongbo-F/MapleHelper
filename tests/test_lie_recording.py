@@ -407,6 +407,104 @@ def test_a_truth_booth_seen_only_after_the_test_s_tail_goes_into_the_summary_at_
     assert lie_recorder.summary_of(folder)["truth_booth_after"] is True
 
 
+def causes_dog(tmp_path, screen, **kw):
+    """make_dog whose alarm records the cycle's cause as raised (as control.alarm.raise_alarm puts it in the alarm)."""
+    causes, dogs = [], []
+
+    def raised(frame):
+        causes.append(dogs[0].cause)
+        return {"cause": dogs[0].cause}
+    dog, flag, said, alarms = make_dog(tmp_path, screen, on_alarm=raised, **kw)
+    dogs.append(dog)
+    return dog, said, causes
+
+
+class Clocked(Spotter):
+    """The fake spotter, reading the Truth Booth's clock as `lefts` say in turn (the last one on), None elsewhere."""
+
+    def __init__(self, *lefts):
+        self.lefts = list(lefts)
+
+    def clock_left(self, frame):
+        if int(frame[0, 0, 1]) != 3:
+            return None
+        return self.lefts.pop(0) if len(self.lefts) > 1 else self.lefts[0]
+
+
+def test_the_truth_booth_with_no_test_seen_before_it_is_of_unknown_cause(tmp_path):
+    """The user, 2026-11-03: "if we entered a truth booth without triggering any of the mini-game/challenge, that
+    probably means we missed some kind of check, we should immediately save a 5min-clip and mark them unknown reason
+    that led to truth booth for later analysis". A cycle first seen as the Truth Booth with no test seen before it, no
+    stay seen before: its alarm raised with the cause (the rolling recorder saves the 5 minutes before it at once),
+    said, in its summary; its clock unread, its stay ends BOOTH_UNREAD_S after its first sight."""
+    screen = Screen()
+    dog, said, causes = causes_dog(tmp_path, screen)
+    assert dog.booth_until is None
+    play(dog, screen, [0, 3, 3, 3] + [0] * 5)  # the Truth Booth out of nowhere, then gone 1 s: the cycle over
+    assert causes == [lie_recorder.UNKNOWN_CAUSE] and dog.cycle_t0 is None and dog.cause is None
+    assert any("the Truth Booth with no test seen before it" in m and "its cause unknown" in m for m in said)
+    [(_, summary, _)] = written(dog)
+    assert summary["cause"] == lie_recorder.UNKNOWN_CAUSE and summary["outcome"] == "sent to the Truth Booth"
+    assert abs(summary["booth_until"] - (time.time() + lie_recorder.BOOTH_UNREAD_S)) < 30
+
+
+def test_a_truth_booth_seen_again_before_its_clock_runs_out_is_the_same_stay(tmp_path):
+    """The user, 2026-11-03: "When you enter the truth booth you can see how much count down it has, and block the
+    re-sighting". A test sends her there (its cycle's: not of unknown cause); the stay's end read off the clock (the
+    median of the cycle's readings: one misread, 29:59, left out); seen again in a cycle of its own before then
+    (2026-10-29 09:29:53, 2 minutes after its cycle of 09:26:37 ended, 7:04 left): that stay's. One seen after the
+    stay's end (BOOTH_SLACK_S on) is of unknown cause."""
+    screen = Screen()
+    dog, said, causes = causes_dog(tmp_path, screen)
+    dog.spotter = Clocked(300, 1799, 299, 299)
+    t = play(dog, screen, [2, 2, 3, 3, 3] + [0] * 5)  # the board, the Truth Booth: over
+    assert causes == [None] and abs(dog.booth_until - (time.time() + 299.5)) < 30
+    t = play(dog, screen, [3, 3] + [0] * 5, t)  # the Truth Booth again, a cycle of its own, in the stay
+    assert causes == [None, None] and dog.booth_until < time.time() + 330
+    dog.spotter = Clocked(240)
+    dog.booth_until = time.time() - lie_recorder.BOOTH_SLACK_S - 1  # the stay over
+    play(dog, screen, [3, 3] + [0] * 5, t)
+    assert causes == [None, None, lie_recorder.UNKNOWN_CAUSE] and abs(dog.booth_until - (time.time() + 240)) < 30
+    summaries = [s for _, s, _ in written(dog)]
+    assert [s["cause"] for s in summaries] == [None, None, lie_recorder.UNKNOWN_CAUSE]
+    assert all(s["booth_until"] is not None for s in summaries)
+    assert sum("no test seen before it" in m for m in said) == 1
+
+
+def test_a_stay_s_end_goes_into_a_recording_ended_at_its_test_s_end(tmp_path):
+    """A recording that ended TEST_TAIL_S after the board (the Truth Booth up, the cycle going on): its stay's end, as
+    the cycle's readings have it by its end, put in its summary then (lie_recorder.cycle_over)."""
+    screen = Screen()
+    dog, said, causes = causes_dog(tmp_path, screen, test_tail_s=0.5)
+    dog.spotter = Clocked(300)
+    t = play(dog, screen, [1, 1, 2, 2, 0, 3, 3])  # the countdown, the board, gone, the Truth Booth: 0.5 s off the test
+    [(folder, summary, _)] = written(dog)
+    assert summary["end"] == "test over" and summary["booth_until"] is not None
+    play(dog, screen, [3] * 8 + [0] * 5, t)
+    assert abs(lie_recorder.summary_of(folder)["booth_until"] - (time.time() + 300)) < 30
+
+
+def test_a_player_started_in_the_truth_booth_takes_its_stay_from_the_recordings(tmp_path):
+    """Started again with her in the Truth Booth (`clear-alarm` stops the player; the user starts it again): the newest
+    recording's summary with a stay's end (lie_recorder.last_booth_until) tells the stay."""
+    root = tmp_path / "lie_detector"
+    until = time.time() + 200
+    summaries = {"20261103-000155": {"booth_until": until},
+                 "20261103-000400": {"booth_until": None, "forms": {}},
+                 "20261103-000500": {"forms": {"countdown": {"last": 3.0}}}}  # (no booth_until: before 11-03)
+    for name, s in summaries.items():
+        (root / name).mkdir(parents=True)
+        (root / name / SUMMARY).write_text(json.dumps(s), encoding="utf-8")
+    (root / "20261103-000600").mkdir()  # (no summary: the player stopped mid-way)
+    assert lie_recorder.last_booth_until(root) == pytest.approx(until)
+    assert lie_recorder.last_booth_until(tmp_path / "none") is None
+    screen = Screen()
+    dog, said, causes = causes_dog(tmp_path, screen)
+    assert dog.booth_until == pytest.approx(until)
+    play(dog, screen, [3, 3] + [0] * 5)
+    assert causes == [None]
+
+
 def test_the_recording_stops_at_the_cap_and_the_cycle_goes_on_unrecorded(tmp_path):
     screen = Screen()
     dog, flag, said, alarms = make_dog(tmp_path, screen, cap_s=2.0)

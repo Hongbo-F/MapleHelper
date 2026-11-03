@@ -90,7 +90,8 @@ def recorder(tmp_path, clock=None, game=None, grab=None, **kw) -> Recorder:
     said = []
     kw.setdefault("log", said.append)
     rec = Recorder(game or Game(), grab or Grab(), box=tmp_path / "recorder", lie_root=tmp_path / "lie_detector",
-                   recent=tmp_path / "recent", clips=tmp_path / "alarm_clips", clock=clock or Clock(), **kw)
+                   recent=tmp_path / "recent", clips=tmp_path / "alarm_clips", unknown=tmp_path / "booth_unknown",
+                   clock=clock or Clock(), **kw)
     rec.said = said
     return rec
 
@@ -535,6 +536,40 @@ def _cycle_over(player, last_seen):
     """The player's recording of the cycle summed up: the Lie Detector last seen `last_seen` s after its first sight
     (the folder's name)."""
     (player / SUMMARY).write_text(json.dumps({"last_seen": last_seen}), encoding="utf-8")
+
+
+def test_the_truth_booth_of_unknown_cause_has_the_5_minutes_before_it_saved_at_once(tmp_path, alarm_file):
+    """The user, 2026-11-03: "if we entered a truth booth without triggering any of the mini-game/challenge, that
+    probably means we missed some kind of check, we should immediately save a 5min-clip and mark them unknown reason
+    that led to truth booth for later analysis". The alarm's `cause` (the watchdog's lie_recorder.UNKNOWN_CAUSE): the 5
+    minutes before it written at once, lossless, to `unknown`, named and summed up as such, the player's recording
+    named; its cycle's clip as any once it's over, and no `before/` then (it's this part)."""
+    rec = recorder(tmp_path)
+    run_ticks(rec, 3500, poll=True)  # nearly 6 minutes
+    seen = rec.clock()
+    alarm_file.write_text(json.dumps({"reason": "lie_detector", "time": "2026-11-03 12:00:00", "form": "truth booth",
+                                      "cause": lie_recorder.UNKNOWN_CAUSE}), encoding="utf-8")
+    os.utime(alarm_file, (seen, seen))
+    player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
+    player.mkdir(parents=True)
+    run_ticks(rec, 5, poll=True)
+    assert rec.flush(60)  # written while the Truth Booth is up
+    (part,) = (tmp_path / "booth_unknown").iterdir()
+    assert part.name.endswith("-" + rolling.UNKNOWN_NAME)
+    s = summary(part)
+    assert s["kind"] == "before a Truth Booth of unknown cause" and s["cause"] == lie_recorder.UNKNOWN_CAUSE
+    assert s["alarm"]["form"] == "truth booth" and s["player_recording"] == str(player) and s["format"] == "png"
+    assert 2995 <= s["ticks"] <= 3001 and s["alarm_t"] == pytest.approx(300.0, abs=0.6)
+    assert s["frames"] == s["ticks"] == len(list(part.glob("*.png")))
+    assert any("no test seen before it" in m for m in rec.said)
+    assert not (tmp_path / "alarm_clips").exists() and not (player / BEFORE).exists() and rec.pending_clips
+    _cycle_over(player, 30.0)
+    run_ticks(rec, 400, poll=True)  # its last sight's 5 s past
+    assert rec.flush(60) and not rec.pending_clips
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    assert summary(clip)["kind"] == "the alarm's clip" and not (player / BEFORE).exists()
+    assert len(list((tmp_path / "booth_unknown").iterdir())) == 1
+    rec.close()
 
 
 def test_an_alarm_gets_a_clip_of_its_own_from_2_s_before_it_to_its_cycle_s_end(tmp_path, alarm_file):

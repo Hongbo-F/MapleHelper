@@ -97,6 +97,22 @@ def test_each_lie_detector_seen_in_game_is_seen_as_its_own_form(png):
     assert max(scores, key=scores.get) == FORMS[png.stem.split("_", 2)[2]]
 
 
+@pytest.mark.parametrize("name, left", [
+    ("lie_detector/2026-10-18_204759_truth_booth.png", 4 * 60 + 44),
+    ("lie_detector/2026-11-03_000250_truth_booth.png", 4 * 60 + 27),
+    ("lie_detector/timed/2026-10-31_235840_kerning_pq_first_stage.png", 29 * 60 + 59),
+    ("lie_detector/2026-10-25_002828_quiz.jpg", None), ("game_scene.png", None)])
+def test_the_clock_s_time_left_is_read_off_its_digits(name, left):
+    """The Truth Booth's stay read off its clock (`clock_left`; the user, 2026-11-03: "When you enter the truth booth
+    you can see how much count down it has"): 4:44 (1920x1080, the game's stretch), 4:27 (1366x768), the party
+    quest's 29:59 (two minutes' digits), at both sizes; none with no clock, nor on a frame smaller than the game's."""
+    spotter = LieDetectorSpotter()
+    frame = img(name)
+    assert spotter.clock_left(frame) == left
+    if frame.shape[:2] == (1080, 1920):
+        assert spotter.clock_left(native(frame)) == left
+
+
 @pytest.mark.parametrize("png", TIMED, ids=lambda p: p.stem)
 def test_a_timed_map_s_clock_is_not_the_truth_booth(png):
     """The game's "Time Left" clock shows on every map with a time limit, at the Truth Booth's place (2026-10-31 23:58,
@@ -428,9 +444,21 @@ def test_the_alarm_without_a_form_is_paged_as_before(alarm_file, monkeypatch):
     monkeypatch.setattr(alarm, "page", lambda title, text: pages.append((title, text)))
     for form in (None, "countdown", "truth booth"):
         info = alarm.raise_alarm(None, form=form)
-        assert info.get("form") == form
+        assert info.get("form") == form and "cause" not in info
     assert pages == [("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer it in the game "
                                                             "yourself.")] * 3
+
+
+def test_the_alarm_records_its_cause(alarm_file, monkeypatch):
+    """The Truth Booth with no test seen before it (the watchdog's lie_recorder.UNKNOWN_CAUSE): in the alarm file from
+    its first write, for the rolling recorder (it saves the 5 minutes before it at once)."""
+    monkeypatch.setattr(alarm, "page", lambda title, text: None)
+    writes = []
+    real = alarm._write
+    monkeypatch.setattr(alarm, "_write", lambda info: (writes.append(dict(info)), real(info)))
+    info = alarm.raise_alarm(None, form="truth booth", cause="unknown")
+    assert info["cause"] == "unknown" and writes[0]["cause"] == "unknown"
+    assert alarm.alarm_info()["cause"] == "unknown" and alarm.alarm_info()["form"] == "truth booth"
 
 
 def test_watchdog_keeps_watching_while_all_is_well(tmp_path):

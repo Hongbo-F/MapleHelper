@@ -14,7 +14,9 @@ One folder a cycle, paths.LIE_RECORDINGS/<YYYYmmdd-HHMMSS> (when it was first se
   summary.json   at the end (`Recording.summary`): when it was first seen (`first_seen_at`, the clock's) and last
                  seen, its test last (`test_last`), how long the recording ran, its looks, the forms seen and when
                  each first and last showed, whether the Truth Booth did (the outcome as far as the picture tells),
-                 how it ended, the alarm's screenshot and the window's size;
+                 its `cause` (UNKNOWN_CAUSE: the Truth Booth with no test seen before it; else None), when the
+                 Truth Booth stay ends by its clock (`booth_until`, the clock's; None: not seen), how it ended, the
+                 alarm's screenshot and the window's size;
   cycle.live     (LIVE) while the cycle goes on after a recording ended at its test's end (the Truth Booth up): the
                  watchdog touches it every look and deletes it at the cycle's end (`going`);
   before/        written by the rolling recorder when it runs (control.rolling): the game 15 times a second for the 5
@@ -82,6 +84,21 @@ LIVE_S = 5.0      # a recording whose index was written this recently, and not s
 STAMP = "%Y%m%d-%H%M%S"
 INDEX, SUMMARY, LIVE = "index.jsonl", "summary.json", "cycle.live"
 TRUTH_BOOTH = "truth booth"  # the spotter's name for the Truth Booth's form (perception.lie_detector.HALF_SIZE)
+# A Truth Booth first seen with no test seen before it in its cycle, and not in a stay seen before (the user,
+# 2026-11-03: "if we entered a truth booth without triggering any of the mini-game/challenge, that probably means we
+# missed some kind of check, we should immediately save a 5min-clip and mark them unknown reason that led to truth booth
+# for later analysis"): its alarm says so (control.alarm's `cause`, UNKNOWN_CAUSE), as does its recording's summary,
+# and the rolling recorder saves the 5 minutes before it at once (control.rolling, paths.BOOTH_UNKNOWN). A test sends
+# her to the Truth Booth at once (0.4 s after the board, 2026-11-03 00:02:19), in its cycle. A stay's end is read off
+# the booth's clock as it's seen (perception.lie_detector's `clock_left`; the user: "When you enter the truth booth you
+# can see how much count down it has, and block the re-sighting"), the watchdog's `booth_until`, in the summary too
+# (`booth_until`, the player started again in the booth: `last_booth_until`): a sighting before it (BOOTH_SLACK_S on)
+# is that stay's (2026-10-29: seen 09:26:37 to 09:27:31 and again from 09:29:53, a cycle of its own after 2 minutes off
+# the screen, 7:04 left then: her second stay that day, 10 minutes; the first stay, 5). A stay whose clock was never
+# read ends BOOTH_UNREAD_S after its first sight, the longest stay seen.
+UNKNOWN_CAUSE = "unknown"
+BOOTH_UNREAD_S = 10 * 60.0
+BOOTH_SLACK_S = 5.0
 
 
 class Recording:
@@ -97,6 +114,8 @@ class Recording:
         self.started = time.strftime("%Y-%m-%d %H:%M:%S")
         self.t0 = time.time() if t0 is None else t0  # the first sight (t 0), the clock's: the alarm clip's end by it
         self.screenshot = (alarm_info or {}).get("screenshot") if isinstance(alarm_info, dict) else None
+        self.cause = alarm_info.get("cause") if isinstance(alarm_info, dict) else None  # UNKNOWN_CAUSE: no test seen
+        self.booth_until: float | None = None  # the Truth Booth stay's end (time.time's clock), set by the watchdog
         self.log, self.end_s, self.cap_s = log, end_s, cap_s
         # The watchdog's side (only it adds), read by the writer once the recording is ended.
         self.grabs = self.numbered = self.dropped = self._dropped_since = 0
@@ -185,7 +204,8 @@ class Recording:
                 "first_seen": self.first_seen, "last_seen": self.last_seen, "test_last": self.test_last,
                 "seen_s": seen_s, "duration_s": round(self.last_t, 3),
                 "grabs": self.grabs, "not_showing": dict(self.missing), "dropped": self.dropped,
-                "forms": self.forms, "truth_booth": booth, "outcome": outcome, "end": self.end,
+                "forms": self.forms, "truth_booth": booth, "outcome": outcome, "cause": self.cause,
+                "booth_until": None if self.booth_until is None else round(self.booth_until, 3), "end": self.end,
                 "end_stretch_s": self.end_s, "cap_s": self.cap_s, "alarm_screenshot": self.screenshot,
                 "window": self.window}
 
@@ -310,6 +330,16 @@ def prune(root: Path | None = None, keep_bytes: int = KEEP_BYTES, spare: Path | 
     return gone
 
 
+def last_booth_until(root: Path | None = None) -> float | None:
+    """When the Truth Booth stay of the newest recording in `root` (LIE_RECORDINGS) whose summary has one ends
+    (`booth_until`, time.time's clock); None if none has."""
+    for folder in reversed(recordings(root)):
+        until = (summary_of(folder) or {}).get("booth_until")
+        if isinstance(until, (int, float)):
+            return float(until)
+    return None
+
+
 def summary_of(folder: Path) -> dict | None:
     """A recording's summary, or None if it has none (still being written, or the player stopped mid-way)."""
     try:
@@ -348,13 +378,17 @@ def cycle_going(folder: Path) -> None:
         pass  # (`going` then says it's over a little early: `clear-alarm` raises it again if it's still up)
 
 
-def cycle_over(folder: Path, truth_booth: bool) -> None:
+def cycle_over(folder: Path, truth_booth: bool, booth_until: float | None = None) -> None:
     """The cycle of a recording ended at its test's end over: its LIVE file gone, and its summary told if the cycle
-    showed the Truth Booth after the recording ended."""
+    showed the Truth Booth after the recording ended, and when its stay ends (`booth_until`, the watchdog's)."""
     folder = Path(folder)
     summary = summary_of(folder)
-    if truth_booth and summary is not None and not summary.get("truth_booth"):
-        summary.update(truth_booth=True, outcome="sent to the Truth Booth", truth_booth_after=True)
+    new_end = booth_until is not None and summary is not None and summary.get("booth_until") != round(booth_until, 3)
+    if truth_booth and summary is not None and (not summary.get("truth_booth") or new_end):
+        if not summary.get("truth_booth"):
+            summary.update(truth_booth=True, outcome="sent to the Truth Booth", truth_booth_after=True)
+        if booth_until is not None:
+            summary["booth_until"] = round(booth_until, 3)
         try:
             (folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
         except OSError:

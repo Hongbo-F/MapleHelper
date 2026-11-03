@@ -343,7 +343,8 @@ class Watchdog(threading.Thread):
         self.grab = grab
         self.interval = interval
         self.form: str | None = None  # the form the cycle in progress was first seen as (the spotter's name)
-        self.on_alarm = on_alarm or (lambda frame: raise_alarm(frame, form=self.form))
+        self.cause: str | None = None  # the cycle's lie_recorder.UNKNOWN_CAUSE: the Truth Booth, no test seen before it
+        self.on_alarm = on_alarm or (lambda frame: raise_alarm(frame, form=self.form, cause=self.cause))
         self.folder = folder or LIE_RECORDINGS
         self.log = log or _log
         self.end_s = lie_recorder.END_S if end_s is None else end_s
@@ -354,6 +355,14 @@ class Watchdog(threading.Thread):
         self.pusher = pusher                  # the phone's pushes of a cycle (control.notify.Pusher; None: none)
         self.auto_resume = AUTO_RESUME if auto_resume is None else auto_resume
         self.truth_booth = lie_recorder.TRUTH_BOOTH
+        self.unknown_cause = lie_recorder.UNKNOWN_CAUSE
+        self.booth_unread_s, self.booth_slack_s = lie_recorder.BOOTH_UNREAD_S, lie_recorder.BOOTH_SLACK_S
+        try:  # when the Truth Booth stay seen last ends (time.time's clock), the recordings' to begin with
+            self.booth_until: float | None = lie_recorder.last_booth_until(self.folder)
+        except Exception:
+            self.booth_until = None
+        self.booth_ends: list[float] = []      # the cycle's stay's end, by each look that read the booth's clock
+        self.booth_first: float | None = None  # the cycle's first sight of the Truth Booth (time.time's clock)
         self.cycle_forms: set[str] = set()    # the forms seen in the cycle in progress (the spotter's names)
         self.resumed = 0                      # answered Lie Detectors whose alarm it cleared (_resume)
         self.stopped = threading.Event()
@@ -405,6 +414,7 @@ class Watchdog(threading.Thread):
                 self._trouble("the Lie Detector check failed", e)
                 frame, why = None, "check failed"
         seen = scores is not None and max(scores.values()) >= 1
+        tested = seen and any(score >= 1 for name, score in scores.items() if name != self.truth_booth)
         shown = frame is not None and why is None  # the game itself, nothing over it: only then is the frame saved
         if seen or frame is None:
             self.gone_since = None  # a game not showing (gone, minimized) may have it up behind; a covered one counts
@@ -414,6 +424,7 @@ class Watchdog(threading.Thread):
             first_seen = time.time()  # (before the alarm's raising, its screenshot and paging)
             self.alarm.set()  # first: keys stop within ~10 ms
             self.form = max(scores, key=scores.get)
+            self.cause = self.unknown_cause if not tested and not self.in_stay(first_seen) else None
             info = self._raise(frame)  # the alarm, its screenshot, paging: before anything of the recording
             self.cycle_t0 = now
             self.alarm_written = alarm_up()
@@ -426,19 +437,25 @@ class Watchdog(threading.Thread):
                          "(it takes plans again only once it's started again)")
                       + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until it's "
                                                        "stopped)"))
+            if self.cause is not None:
+                self._say("the Truth Booth with no test seen before it, and not a stay seen before (its clock): its "
+                          "cause unknown, a check missed? The rolling recorder saves the 5 minutes before it at once, "
+                          "for analysis (lab/booth_unknown)")
             self._start_recording(info, first_seen)
         elif seen and self.alarm_written and not alarm_up():
             self._raise_again(frame)
         if seen:
             self.cycle_forms.update(name for name, score in scores.items() if score >= 1)
-        if seen and any(score >= 1 for name, score in scores.items() if name != self.truth_booth):
+        if tested:
             self.test_seen, self.test_gone_since = True, None
         elif frame is None:
             self.test_gone_since = None  # (as gone_since: the game not showing may have it up behind)
         elif self.test_gone_since is None:
             self.test_gone_since = now
+        if seen and scores.get(self.truth_booth, 0) >= 1:
+            self._booth_seen(frame)
         if seen and self.pusher is not None:  # (after the alarm: the keys have stopped, the PC paged)
-            self._pushed(lambda: self.pusher.seen(now, max(scores, key=scores.get)))
+            self._pushed(lambda: self.pusher.seen(now, max(scores, key=scores.get), cause=self.cause))
         if self.recording is not None:
             self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
             if now - self.cycle_t0 >= self.cap_s:
@@ -450,12 +467,13 @@ class Watchdog(threading.Thread):
             if now - self.cycle_t0 < self.cap_s and not self.gone_for(now):
                 self.cycle_going(self.test_ended)  # (its folder says the cycle goes on: `clear-alarm` waits)
             else:
-                self.cycle_over(self.test_ended, self.truth_booth in self.cycle_forms)
+                self.cycle_over(self.test_ended, self.truth_booth in self.cycle_forms, self.booth_until)
                 self.test_ended = None
         if self.cycle_t0 is not None and self.gone_for(now):
             if self.recording is not None:
                 self._end_recording("gone")
-            self.cycle_t0 = None
+            self.cycle_t0, self.cause = None, None
+            self.booth_ends, self.booth_first = [], None
             self.test_seen, self.test_gone_since = False, None
             if self.pusher is not None:
                 self._pushed(lambda: self.pusher.ended(now))
@@ -473,6 +491,33 @@ class Watchdog(threading.Thread):
                 self._say(f"the Lie Detector alarm was cleared and none has been on screen for {self.end_s:g} s: "
                           "the player stops (it takes plans again once it's started again: `python -m gamelab "
                           "player --elevate`)")
+
+    def in_stay(self, t: float) -> bool:
+        """Whether `t` (time.time's clock) is in the Truth Booth stay seen last (till its clock's end, BOOTH_SLACK_S
+        on): a Truth Booth seen then is that stay's, its cause known or flagged already."""
+        return self.booth_until is not None and t <= self.booth_until + self.booth_slack_s
+
+    def _booth_seen(self, frame) -> None:
+        """The Truth Booth on this look: its stay's end (`booth_until`), the median of the ends the cycle's looks read
+        off its clock (the spotter's `clock_left`); with none read, a stay seen before still running is kept, else it
+        ends BOOTH_UNREAD_S after the cycle's first sight of it. Into the recording's summary as well."""
+        now = time.time()
+        if self.booth_first is None:
+            self.booth_first = now
+        clock, left = getattr(self.spotter, "clock_left", None), None
+        if clock is not None and frame is not None:
+            try:
+                left = clock(frame)
+            except Exception as e:
+                self._trouble("reading the Truth Booth's clock failed", e)
+        if left is not None:
+            self.booth_ends.append(now + left)
+        if self.booth_ends:
+            self.booth_until = sorted(self.booth_ends)[len(self.booth_ends) // 2]
+        elif not self.in_stay(self.booth_first):
+            self.booth_until = self.booth_first + self.booth_unread_s
+        if self.recording is not None:
+            self.recording.booth_until = self.booth_until
 
     def _resume(self) -> None:
         """An answered Lie Detector's cycle over (AUTO_RESUME): its alarm cleared here as `clear-alarm` would (the alarm

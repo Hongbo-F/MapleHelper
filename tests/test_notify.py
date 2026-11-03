@@ -52,6 +52,10 @@ def test_the_truth_booth_is_pushed_once_as_missed_and_not_repeated():
     q.seen(40.0, "truth booth")
     assert sent == [("Lie Detector missed", "urgent", "truth booth seen at 01:35:32: she's in the Truth Booth",
                      "text")]
+    r, sent = pusher()
+    r.seen(0.0, "truth booth", cause="unknown")  # no test seen before it (the watchdog's lie_recorder.UNKNOWN_CAUSE)
+    assert sent == [("Lie Detector missed", "urgent", "truth booth seen at 01:35:32: she's in the Truth Booth with no "
+                     "test seen before it: its cause unknown (a check missed?), the 5 minutes before it saved", "text")]
 
 
 def test_no_file_no_alert_and_barks_file_is_read_at_each_push(tmp_path, monkeypatch):
@@ -166,7 +170,7 @@ def test_a_watchdog_without_a_pusher_pushes_nothing_and_a_pusher_that_raises_is_
     play(dog, screen, [1, 0, 0, 0, 0, 0])
 
     class Broken:
-        def seen(self, now, form):
+        def seen(self, now, form, cause=None):
             raise RuntimeError("no network")
 
         def ended(self, now):

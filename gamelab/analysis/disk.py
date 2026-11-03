@@ -19,10 +19,11 @@ from ..paths import LAB
 # The folders of lab/ and what they hold (anything else is "other": the player's log, learned stats such
 # as shots.jsonl and grounds.json, templates, notes); the *.png at the top are screenshots.
 FOLDERS = {"recordings": "recordings", "lie_detector": "Lie Detector recordings", "recent": "recent recordings",
-           "alarm_clips": "alarm clips", "telemetry": "telemetry", "harness": "harness runs", "golden": "golden traces",
+           "alarm_clips": "alarm clips", "booth_unknown": "Truth Booths of unknown cause", "telemetry": "telemetry",
+           "harness": "harness runs", "golden": "golden traces",
            "inbox": "player inbox, outbox", "outbox": "player inbox, outbox"}
-KINDS = ("recordings", "Lie Detector recordings", "recent recordings", "alarm clips", "screenshots", "telemetry",
-         "harness runs", "golden traces", "player inbox, outbox", "other")
+KINDS = ("recordings", "Lie Detector recordings", "recent recordings", "alarm clips", "Truth Booths of unknown cause",
+         "screenshots", "telemetry", "harness runs", "golden traces", "player inbox, outbox", "other")
 
 
 @dataclass
@@ -86,6 +87,11 @@ def report(lab: Path = LAB, now: float | None = None) -> list[str]:
     due = lie_recorder.prune(lab / "alarm_clips", rolling.CLIPS_KEEP_BYTES, dry_run=True)
     lines.append(f"alarm clips (the recorder's, 10 s before each alarm to 60 s after): {len(clips)}; the newest "
                  f"{size(rolling.CLIPS_KEEP_BYTES)} are kept besides the next; due to go when the next is saved: "
+                 f"{len(due)} ({size(sum(b for _, b in due))})")
+    saves = lie_recorder.recordings(lab / "booth_unknown")
+    due = lie_recorder.prune(lab / "booth_unknown", rolling.UNKNOWN_KEEP_BYTES, dry_run=True)
+    lines.append(f"Truth Booths of unknown cause (the recorder's 5 minutes before each): {len(saves)}; the newest "
+                 f"{size(rolling.UNKNOWN_KEEP_BYTES)} are kept besides the next; due to go when the next is saved: "
                  f"{len(due)} ({size(sum(b for _, b in due))})")
     lines.append("the other recordings and screenshots are never deleted for you")
     return lines
