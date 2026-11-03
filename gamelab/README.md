@@ -30,7 +30,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
 | `perception` | Pixels to what's on screen, in half-size screen px | `Eyes` (the only door to pixels): `look` gives an `Observation` (her name tag, HP/MP, the ground under her, her minimap dot and other players', ropes, her EXP number and the box it's read from); `monsters`, `items`, `bar`, `refind` and `heading` (which way she faces, off her picture: `Heading`) answer questions about a look's frame; `messages` (the pickup log's rows) and `chat_line` (the message bar's game line: `perception.messages`, The top of a rope) read the service's whole frame. `MobDetector`, `LootDetector`, `NameTag`, `LieDetectorSpotter`; `exp_number` (her EXP number read, glyph by glyph); `deaths` (a monster's death seen: the game data's die1 frames where a track's feet are, `DeathWatch`: Her kill's monster); `frames` (the game as the screen shows it, for the continuous feed, never brought to the front) | shared |
 | `localization` | Where things are on the map, in map units | `mapdata` (the map from the game's own data), `pose` (her position from the minimap dot, refined by ropes or her platform's end; the `Camera`), `Scene` (a look placed on the map), `Monster`/`MonsterTrack`/`Tracker` (monsters seen, told apart from look to look, and where they can be next), `Players` (other players, by their minimap dots), `Senses` (every look goes through it; its sweep searches the screen a slice a look), `Memory` (the monsters she has seen anywhere, kept across looks: Her memory of the monsters), `gains` (what each EXP gain was: the kills its size names, by kind; her EXP a minute off the number); the continuous feed: `tracking` (monsters followed frame by frame: ids, deaths and who killed them, her kill bound at her gain to the monster her attack took: Her kill's monster), `worldstate` (the feed's step, a frame at a time, every monster with its track's id), `feed` (its child process, the stack's side of it, and `SyncFeed` for the simulator) | perception |
 | `motion` | Getting from A to B | `body` (how the game moves her: the client's movement step by step, from its own Physics.img), `physics` (jumps, falls and walking, measured), `route` (every move between platforms; Dijkstra; the ways a trip may choose among: Route diversity), `flow` (several moves chained into one key timeline, hopping monsters) | localization |
-| `attack` | Which monster, from where, how | `reach` (where a star hits, and what an attack from a jump can pick), `stance` (throw, jump-throw, jump back, step away, close in), `spots` (where to stand to shoot a platform), `danger` (how badly she can be touched at a place: the monsters seen and the spawn points, by game data) | perception (monster names), localization, motion |
+| `attack` | Which monster, from where, how | `reach` (where a star hits, and what an attack from a jump can pick), `stance` (throw, jump-throw, jump back, step away, close in), `spots` (where to stand to shoot a platform), `danger` (how badly she can be touched at a place: the monsters seen and the spawn points, by game data), `knock` (where a touch's knock leaves her, flown as the simulator's world flies it, and what a knock off her platform costs: Her knock landings) | perception (monster names), localization, motion |
 | `control` | Keys out | `Actions` (her key plans: throws, walking, pick-up, potions), `Mover` (one move, closed loop), `Navigator` (a route: chains, glances, cut-offs, replans), `client` (plans to the key player), `player` (the key player itself), `alarm`, `lie_recorder` (the Lie Detector's cycle recorded), `rolling` (the game's last 5 minutes kept: The rolling recording), `recording` (that recording kept by the perception service, from its own frames) | perception, localization, motion |
 | `behavior` | What to do next | `Hunter` (the agent: senses, actions, a looter, her vitals and health), `fight` (`clear`, `kill`, fighting on the way), `Looter` (sweeps, mop-ups, drops remembered), `Tour`, `probe` (the in-game probes of what a star hits, and their scorer), `PetCare` (her pet fed), `retreat` (on the Lie Detector, away to a safe place within 10 s; and at the safety stop), `safety` (her HP staying low ends the hunt: No resting; under her profile's hits of the map's largest touch, in HP: The safety stop in HP), `darts` (her presses taking no MP and killing nothing for long end it: Out of darts; the game's refusals don't count: The top of a rope) | all of the above |
 | `ui` | The mini-map window | `MapView` (draws a state; pure), `State` (the latest record per topic), sources (live, replay, a planned route), `MapWindow` | localization, motion, attack |
@@ -1128,6 +1128,163 @@ Level for both, a little better for her: nothing near t 2 either way. The holds 
 **Checks.** Tests: test_spawnclock (new: the clock from fading births, one pass's births one, a stray off the grid kept out, the period fitted within its slack; the free points by the server's box and near her stretch, their price; the guard's hold against the wait, a stand done before the pass, held points, the wait off a point where the platform has room), test_drop_worlds (`PILE_RULES` with the two holds); test_hunt, test_sweep, test_danger and test_sim's loop_tree_respawn_pass as they were. Fast suite (`-n 4`, through the job runner): 3,111 passed, 1 failed (test_geometry's px check on perception/lie_target.py: another session's file, failing on master too), 72 skipped, 2 xfailed.
 
 **Not done, open.** Live it's not tried: the clock's 14 s to sure and its 0.055 s are the live hours' replays, not a live run. The fill near her is between 6% and 27% by the two counts above, so the 0.27 prior may overprice her newborns; if it's nearer 6%, the guard holds about a quarter as often. What a touch costs beyond its HP (the knock, the corner after it: the clip's episode A, 4 touches and 14 s for 2 kills) isn't priced, as nowhere in the stack (the landing prices, the rope's top); the guard bites more if it is. Attacks and stands already under way aren't held (above). On a platform with no room off its points (Tree Dungeon's 7, 15) she waits by one; the way off is another platform, not tried. The simulator's newborns touch her within 70 at the pass about half the time (51% his, 48% hers; 50% and 41% at 70-130: probe/analyze.py on seeds 1-12), live 85% and 39%: its newborns are seen sooner by her than live's are (the spawn watch can't see under her body), so the harness prices the guard's gain low.
+
+## Her knock landings: flown, tabled and priced (work/planner-knock, from 2026-11-03)
+
+The arrival study of 2026-11-03 (D:/MapleHelper-scratch/arrival/REPORT.md) found that no decision prices where a touch's
+knock throws her, and that the stack's knock models are wrong; its design starts with this (prerequisite A). The user's
+direction: "Motion planning should consider the current game situation and dynamically calculate the best action to
+perform, not trying to reach some pre-defined 'attack location'": candidate actions priced against each other, no new
+hard rule. This is the knock term they are to be priced with, `gamelab/attack/knock.py`. Nothing decides by it yet (the
+planner's builder wires it in); the one change elsewhere is `physics.flight`'s `cache` switch (default on, as before),
+and the goldens are master 68344b2's to the byte (Checks).
+
+**What it answers** (map units, y down; seconds; EXP):
+- `landing(model, platform, x, phase=GROUND, side=1, vx=0.0, slides=True) -> (Platform | None, x, fall)`: where a touch's
+  knock from her feet at map x on `platform` leaves her at rest: the platform (None: out of the map), her x, how far
+  below her floor at x (negative: higher; Tree's floors slope). `side` the knock's way, away from the monster (+1
+  right, -1 left); `phase` GROUND or her height over her floor in mid-jump; `vx` her speed sideways as it touches her
+  (units/s, signed); `slides` False while an attack plays as she lands (the world stops her there: World._land; 175 of
+  the thief's 574 knocks in mid-jump over his platform on the baseline runs).
+- `flown(...) -> Flown(platform, x, fall, seconds, slid)`: the same, with the seconds from the touch to rest and whether
+  she slid off an end after landing; `fly(...)` the same worked out instead of looked up; `from_state(model, platform,
+  x, y, vx, side, slides=True)` a knock from any state of hers the table doesn't hold (a route's jump, drop or fall past
+  her platform's span, or faster than her walk), `platform` the one she last stood on.
+- `zone(model, platform, end, phase=GROUND, vx=0.0)`: how far in from an end a knock toward it still takes her off.
+- `cost(model, planner, platform, x, landed, rate, touch_exp, *, busy=None, hang_s=HANG_S, top_touch=TOP_TOUCH,
+  touch_rate=0.0, lost_s=KNOCK_LOST_S) -> Price(exp, seconds, touches, back, hang, tops)`, and `busy_tops(model,
+  monsters, reach=TOP_REACH)`, which makes `busy` from the monsters seen.
+- `prepare(model)` tables every platform of a map at once; `pushed(vx, side)` is the launch's speed sideways.
+
+**The flight is the world's** (sim/world.py: `_hit_by` 3147, `_launch` 2917, `_land` 2980, `_ground` 2865, KNOCK_VX 363):
+away from the monster and up at 270 units/s each, the push sideways added to her speed but not past it (KNOCK_ADDS:
+standing or going away she flies off at 270, going at the monster at her walk at ~120); in mid-jump from wherever she
+is (the world sets her upward speed to the push, so only her height matters, rising or falling); flown by body.fly's
+steps (in C, through `physics.flight` with `cache=False`, so the planner's landings stay in its cache) with no arrow (a
+knock isn't steered: KNOCK_STEERS), the game's walls with group 0's (the world's `zero_walls`) and the map's sides (its
+platforms' outer ends: `_sides`); landing at her walk's speed at most (KNOCK_LANDS_WALKING), braked a game step at a
+time to a stop, off an end with no wall (`_wall_at`) and down to what's under it, again. Knocks of the world itself,
+staged on Tree Dungeon's game data at random places, standing and in mid-jump, each way, came to rest on `fly`'s
+platform 336 times of 336, x within 0.04 units (a slide off an end: the world's flight off it starts a tick on;
+D:/MapleHelper-scratch/planner/knock/worldcheck.py); tests/test_knock.py keeps 84 of them.
+
+**The table.** Each platform's answers are worked out the first time they're asked for, for its map and her shoe: every
+5 units from its left end to its right (GRID), each side, on the ground and at AIR's heights (every 10 units to 77, her
+jump's top), standing and at her walk at the monster (TOWARD), a row of ~45 flights at a time; a lookup interpolates
+between the grid points, heights and speeds either side of what's asked where both come to rest on the same platform,
+and takes the nearer where they don't. Against `fly` at random places, heights and speeds on every platform of the
+tower (tablecheck.py, tablecheck.txt; 200 each): the same platform for 99.3% of knocks from the ground standing, 97.0%
+going at the monster, 97.9% in mid-jump and 95.2% in mid-jump going at it; x off by a median 0.1-0.4 units, the 90th
+percentile 0.9-8.9 (inferred: the misses fall between two grid points that rest on different platforms). Cost, measured on this PC: a lookup 3.1 us
+(on the ground), 5.7 (between heights), 3.5-5.6 (going at it), 10.9 (both between); `fly` 30 us, `from_state` 38 us; a
+row 2.5 ms (platform 10's 78 x), a platform's 36 rows 96 ms, Tree's 34 platforms 2.2 s (`prepare`).
+
+**Against the measured.**
+- The places report's knock-off zones (D:/MapleHelper-scratch/arrival/places/zones.txt): 10 L 68, 10 R 89, 18 L 85, 23 L
+  89, 18 R 68, 30 R 76 the same; 25 L 98 against its 97 (its slide was the flat LAND_SLIDE). From 25 in: 11 R onto 14,
+  114 below at rest (the report's 120 at its landing, 14 slopes), 16 R onto 19 372 below, 26 L onto 29 235 below, 10 L
+  onto 13 303 below (end_drop: 236, onto 11).
+- The -80 rope top (the arrival study's harness counts, the arrival windows only: from her right on the ground at
+  -85..-75 0 of 46 off 10, at x -100 or less 113 of 113, in the air at -85..-75 12 of 14). Every knock of the runs
+  (below): hers on the ground at -85..-75 from her right 27, none off 10, the table none; at -100 or less 109, 106
+  flown off 10 and 108 off at rest (two landed on 10 and slid off), the table 107 and 108, each the same knock but one
+  (going at the monster from -108: onto 11 at rest, the table's 13); his 21 and none off, the table none; 61, 60 flown
+  off and 61 at rest, the table the same; in the air at -85..-75 his 15 and 13 off (in place, 44-51 over 10: his jump
+  throws), the table the same 13, the two that stayed one 11 high in place and one 32 high going at the monster.
+- Every knock of the baseline runs (D:/MapleHelper-scratch/planner/knock: probe.py records each knock of the harness's
+  standard runs, her standard world and the thief's standard command, 48 seeds of 5 minutes each at 68344b2, without
+  changing a run: their knock_logs the arrival study's baseline's entry for entry, EXP a minute 459.8 and 337.5;
+  replay.py, replay_magician.txt, replay_thief.txt). The world's knock_log (her knocks onto a platform 30 or more lower):
+  her 415, his 502. From her actual state (`from_state`: her x, y and speed) the flight lands on the knock_log's
+  platform 415 of 415 and 502 of 502. The table, from what a planner would ask (her platform, x, height and speed):
+  346 of 415 (83.4%) and 444 of 502 (88.4%); within its domain (from the ground, or in the air over her platform) 325
+  of 334 (97.3%) and 432 of 448 (96.4%); the table there and `from_state` for the rest (mid-move: 81 of hers, 54 of
+  his, falling through a drop from 7 the most) 406 of 415 (97.8%) and 486 of 502 (96.8%). Of all 1,336 and 1,568
+  knocks (off a platform or not), within the table's domain the platform its flight lands on is the table's for 1,207
+  of 1,221 (98.9%) and 1,477 of 1,500 (98.5%), and where the stack held no key till she came to rest on the table's
+  platform, her x there within a median 0.19 and 0.26 units of the table's (the 90th percentile 1.04 and 0.99; n 1,113
+  and 1,390).
+
+**The three knock models before it** (read from code; computed by reconcile.py, reconcile.txt, at every one of Tree's
+42 platform ends without a wall):
+- The navigator's flat knock (`KNOCK_REACH`, navigator.py:700-701: 270 x 2 x 270 / 2000 + her slide, 87.2 for the
+  thief and 87.0 for her, on any slope; used by `_knock_cost`, navigator.py:3781-3793, for the rope top's take): the
+  flown zones are 68-98 units (median 79). At 24 ends it's 8-19 units too wide (it has a knock off where the flight stays
+  on), at 1 (25 L) 11 too narrow. At the -80 top touched from the right it lands her at -167, off 10's end at -163,
+  where the flight leaves her on 10 at -150 (the harness: 0 of 46 off): the take there is priced as a knock-off it isn't.
+- stance's end_drop (stance.py:749-760: what's under the map x 5 units past an end, END_PAST, stance.py:163; long at
+  LONG_DROP 100): against the flown fall from 25 in, 6 of the 42 ends are classed wrong: 9 R (73 'short', the flight
+  falls 339 onto 12), 11 R (52; 114 onto 14), 16 R (52; 372 onto 19), 17 L (66; 323 onto 20) and 26 L (70; 235 onto
+  29) short where the fall is long, 15 R (171 'long'; 55 onto 16) the other way.
+- The margins kept from the ends: EDGE_MARGIN 25 (reach.py:156: the grind's stops, the spots grid, loot stands), 50 with
+  monsters about (_stand_limits, stance.py:735-739, KNOCKBACK_ROOM 72), DROP_ROOM 100 from a long drop (move_limits and
+  drop_limits, stance.py:161, 564-576, 763-779). Every zone (68-98) is wider than 25 and 50, so a stop or a stand 25-50
+  from an end without a wall is inside a knock-off zone; 100 covers the zones where end_drop calls the drop long, but at
+  the 5 ends it calls short the move limits keep 25 against zones of 68-89.
+- Going at the monster at her walk (KNOCK_ADDS, which none of the three models) the zones are 36-42 units; from 30 up in
+  a jump 99-150 (median 104).
+None of them is changed here: the planner's builder replaces them where it prices with this.
+
+**Live against the world** (open; the simulator's world isn't changed: that re-baselines everything, the user's call).
+From the perception service's scene records of Tree Dungeon (read only: D:/MapleHelper/gamelab/lab/telemetry/
+*-perceive*.jsonl, 79 files; live_knocks.py, live.txt, live_vs_table.py, live_vs_table.txt): 1,657 knocks from the
+ground after a damage touch's popup (the take-off within 0.35 s of it, the landing within 0.9 s); her scenes are logged
+every other frame (7.5 a second at 15 fps), so a landing sample can be up to 0.13 s late.
+- Standing knocks agree. Standing before it (still over the two samples before the take-off), landing on her platform's
+  level: to rest a median 82.1 units (n 258 at 15 fps; p25 70, p75 93), 81.0 at 10 fps (n 71), against the world's
+  ~87 on flat ground; through the air at a median 264 units/s (the world's 270), rising 18.0 (18.2). Each against the
+  table from her own take-off x and side: where both keep her on her platform, the rest x a median 0.2 units short of
+  the table's (p25 -4.3, p75 +1.4; n 350); with the flight's speed over 200 (n 230) +0.1 (p25 -3.3, p75 +2.2), and the
+  platform she came to rest on the table's for 389 of 424 (92%) (534 of 643 standing, 83%).
+- stance's 53-79 (stance.py:152-159, from 2026-10-25's 10 fps records: D:/MapleHelper-scratch/analysis-1025/
+  damage-skeptic/knock.py) were measured over the 0.8 s from the look before her HP bar dropped, which lags the touch
+  (inferred, from the script: the bar settles ~0.4 s after the popup, perception.hp_number); the same 10 fps records
+  give 51 to the landing sample and 81 to rest here.
+- Knocks going at the monster fly shorter than the world's. Where she was walking at it (her speed over the two samples
+  before the take-off over 60 units/s against the knock; 428): through the air a median 98 units/s (the world's 270
+  less her walk, ~120), to rest a median 28 units against the table's 41 (n 281; rest x 13 short at the median, p25 -23,
+  p75 +3), and off her platform 73 times where the table has 32. The world's KNOCK_ADDS is the port's rule and
+  KNOCK_STEERS (the arrow held through the flight braking her) is off (sim/world.py:341-361 has the walking ones flying
+  off at 24-188, a median 93, on R1-R3's frames); which of the two this is isn't measured.
+- All knocks from the ground (standing, or at her walk where she walked at it): the platform she came to rest on the
+  table's for 1,306 of 1,657 (79%); the most frequent disagreements are short steps between platforms (25 -> 24 35
+  times live where the table keeps her on 25; 19/21 and 32/33), where perception's platform at rest may be the cause as
+  much as the knock (not checked against frames).
+
+**What a knock off costs** (`cost`). FREE where she comes to rest on her platform (the flight and the walk back along it
+are the touch's own, whatever the knock: the planner prices where she ends up by that place's value). Off it: her EXP
+a second `rate` over the seconds it loses her: the flight and fall (`Flown.seconds`), the route planner's way back to
+where she was (`route.Planner.arrive`: KNOCK_LOST_S, the navigator's 30 s, where it has none or she's out of the map),
+and HANG_S (2 s, the navigator's: the user's upper limit on the hang) under each rope top on that way with a monster at
+it (`busy`; the climbs of `Planner.plan`'s way); and `touch_exp` (EXP a touch's HP costs her at the user's prices) over
+the touches expected on the way: TOP_TOUCH (0.95) at each busy top, `touch_rate` a second elsewhere (0 unless the
+caller has one). Where HANG_S and TOP_TOUCH come from (tops.py, the baseline's -80 climbs): a monster within TOP_REACH
+(60) of the top as she got there made the climb longer at the median by 1.8 s for her (3.40 s from the grab against
+1.61) and 0.9 s for him (3.40 against 2.52), and she was touched on the rope or within 1 s at the top in 96% (151 of
+157) and he in 97% (168 of 173), 13% and 12% with none. On 10 at the arrival study's -138, knocked left: onto 13 at
+-219, 303 down, 0.79 s, the planner's way back (jump 13 -> 11, climb -80) 4.3 s: 62 EXP at 12.2 EXP a second (seed
+28's rate for 10), 113 with a Horny at the top (2 s more and 0.95 touches at 28 EXP); at -80 none (she stays on 10); in
+the air 40 over -80 (his jump throw in place) onto 13, with the Horny at the top: 109.
+
+**Open.**
+- Live, knocks going at the monster fly shorter than the world's (28 units to rest against 41, 98 units/s against
+  ~120): the world's KNOCK_ADDS without KNOCK_STEERS overstates them; the user decides whether the world changes.
+- 8-21% of live knocks rest on another platform than the table says, mostly short steps between platforms: perception's
+  platforms or the model, unchecked against frames.
+- The table is for knocks from her platform (on it, or in a jump over it); a route's moves (a drop, a jump between
+  platforms) are `from_state`'s, ~38 us each.
+- HANG_S and TOP_TOUCH are the -80 rope's (the tower's busiest); `touch_rate` on the way back has no measure yet; the way
+  back is the planner's route time, which the arrival study's loop cycle (7.5-11 s a knock-off on seed 28) exceeds.
+- The navigator's `_knock_cost`, stance's end_drop and its margins are as they were: replacing them is the planner's
+  work, measured then.
+
+**Checks.** tests/test_knock.py (21): the constants are the world's and the navigator's; the world's own knocks staged
+(84) rest where `fly` says; going at the monster the launch is the world's; the places report's zones; the long falls
+end_drop calls short; the -80 top's three outcomes, every unit; the table against `fly` over the tower; an attack
+stopping her where she lands; `cost` on her platform, off 10 with and without a busy top, with no way back; a lookup's
+cost. tests/test_architecture.py: attack imports motion and localization only. The goldens against master 68344b2's
+traces (recorded by another workflow at ov-ropevid into D:/MapleHelper-scratch/planner/aggro/golden_base, read only):
+`golden check --jobs 2 --folder` it, 47 of 47 match. The fast suite (`-n 2`, through the job runner): 3,163 passed, 1 failed (test_geometry's px check of perception/lie_target.py, another session's file, as on master), 72 skipped, 2 xfailed.
 
 ## The simulator's magician (from 2026-11-02)
 

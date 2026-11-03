@@ -259,20 +259,21 @@ def fly(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platfor
 
 def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Platform | None = None,
            dt: float = body.TICK, limit: float = 4.0, group=body.EVERY_WALL,
-           arrow: int | None = None) -> tuple[Platform | None, float, float, float]:
+           arrow: int | None = None, cache: bool = True) -> tuple[Platform | None, float, float, float]:
     """fly's landing, and her sideways speed as she lands. Flown by the engine (body.fly), the one
     integration the simulator flies her by too, with `arrow` held all the way: by default the way she
     leaves (none straight up), as a plan holds it. Held, it does nothing to her speed at the speeds she
     jumps with (it steers toward 8.9 units/s at most); none, and the air drags her a little (a lot at the
     fall cap). Her speed as she lands is 0 after a wall stopped her. On the ground she slides on from it,
-    or runs on."""
+    or runs on. `cache` False: worked out from the same rounded start, but neither looked up nor kept (a caller
+    with a table of its own, attack.knock's, leaves the planner's landings where they are)."""
     group = _rule(group)  # (one set of landings for every group: the walls are the game's rule's)
     serial, walls, laid_out = _known(model, group)
     x, y, vx, vy = round(x, 2), round(y, 2), round(vx, 1), round(vy, 1)
     if arrow is None:
         arrow = (vx > 0) - (vx < 0)
     key = (serial, group, x, y, vx, vy, arrow, None if skip is None else skip.id, dt, limit)
-    result = _FLY_CACHE.get(key)
+    result = _FLY_CACHE.get(key) if cache else None
     if result is not None:
         _FLY_CACHE.move_to_end(key)
         return result
@@ -281,9 +282,10 @@ def flight(model: MapModel, x: float, y: float, vx: float, vy: float, skip: Plat
     if result is None:
         f = body.fly(model, x, y, vx, vy, shoe=SHOE, arrow=arrow, skip=skip, walls=walls, dt=dt, limit=limit)
         result = (f.platform, f.land_x, f.seconds, f.vx_land)
-    _FLY_CACHE[key] = result
-    if len(_FLY_CACHE) > FLY_CACHE_SIZE:
-        _FLY_CACHE.popitem(last=False)
+    if cache:
+        _FLY_CACHE[key] = result
+        if len(_FLY_CACHE) > FLY_CACHE_SIZE:
+            _FLY_CACHE.popitem(last=False)
     return result
 
 
