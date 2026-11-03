@@ -5240,6 +5240,193 @@ the lever there isn't built (On, the user's call). HANG_LONGER only ever on a hu
 never a retreat's. `--world hang-2s` (both off), `no-hang` (ROPE_HANG off) and `hang-rules` (both on: the default since
 the user's call) price them on any tip.
 
+## A touch with no monster seen by her: the throw from the air, not the claw (R1 of the cornered study; work/cornered-r1, from 2026-11-03)
+
+The user, live on 2026-11-02 at 22:51: "save the last 2 minute clip as an example of cornered character making bad
+attack move". The study of that clip and its hour (D:/MapleHelper-scratch/cornered: the clip's 1,806 frames and the
+hour's tour and perceive records; `causes/` ten root causes, `verify-R1..R3` their checks) ranked first R1, and its check
+held it on the frames: **the looks are blind at her body, and a press from the ground goes to the claw on a monster
+there, whatever she aimed at.** Measured in the hour: a monster seen 0-10 off her is seen again in the next scene 19% of
+the time, 10-20 off 42%, past 60 about 90%; 59 of the 586 ground Lucky Sevens aimed 105 or more off with nothing seen
+within 105 took no MP (presses within 0.6 s of a touch left out; jump throws, which can't swipe, 3 of 389: the bar's
+noise), and every such press checked on the frames was the claw (15-25, no star) on a monster the looks had missed 0-70
+off: episode B's at 22:50:44.1 and 44.9 (the press aimed at +123 swiped the newborn #158 20-50 off her right edge, "22"
+at f974), episode C's at the wall at 22:49:57.3 and 58.2 (the HM 35-70 off, on her pet, swipes "24" and "19" at f272,
+f286), four at HMs 268-275 off with a Green Mushroom on her for 3 s at 22:50:10.6-13.2, and two at newborns fading in
+(22:49:46.0, 22:50:57.3). Of those checked, all but the newborns' came within 2 s of a touch the looks had no monster for
+(how many of the hour's 59 did is not counted): the fight never took a touch as evidence of one on her (the MISS of
+22:50:43.7 was known at the 22:50:44.1 decision and changed nothing), where the navigator's R7 already does for retreats
+(`Navigator._toucher`, TOUCHER_S 2.0, TOUCHER_NEAR 40). And 269 of the hour's 455 touches came with no monster found
+within 75 of her in the scene before, 135 of those with a LIVE track of the feed's within 75 missed in that frame, which
+neither the fights nor her trips had (`localization.unseen` took HIDDEN tracks alone). Not R1: the corner swipes of
+episodes A and B (stand-ins 7-56 off, CLAW_ONLY on purpose at the wall, R2's) and R2's "no way out" (its verdict: not
+held). The user, on the study's four fixes: the key-binding check not wanted ("current doubt-based retrigger is fine"),
+"The other 3 items are good to merge": R1 extended is the study's step 3 (this section), R6 and R8 and R3 the others'.
+
+**What it does now** (all four on; each off is as before, and all four off is b7f7308 to the digit: five of its golden
+traces checked with them off, and seeds 3 of both characters' standard commands the same as b7f7308's cached runs in
+every field, D:/MapleHelper-scratch/cornered-fix/r1 offcheck.txt, runs/spot_off_*):
+- *A touch with no monster the look found by her has a throw past the claw's edge go from a jump in place*
+  (`attack.stance.CLAWED_AIR`, `behavior.fight.clawed`; the prototype of work/cornered, its four commits brought over).
+  A touch of hers as R7 goes by (`control.navigator.fresh_touch`: not `crowded`, its popup TOUCHER_S before the look at
+  most, and up to `fight.TOUCH_ROUND_S` 1 ms after its frame: the popup's `at` is rounded to the ms, so the first look
+  after a touch read it as from the future half the time; R7's own stays 0) with no monster *the look found* on her
+  platform (or beside her) within TOUCHER_NEAR of her is `clawed`: a monster the looks miss is on her. A stand-in of
+  one the look didn't find (the fight's hidden ones, the feed's tracks out of sight, her memory's) is such a monster,
+  the one a press from the ground would swipe (the prototype took those as explaining the touch). Then a throw at one
+  past the claw's edge goes from a jump in place where its attack surely picks it (`stance._from_air`: `_from_here`
+  without the ground, reach.air_sure with CLEAR_MARGIN, at once facing it, else turning in the air or tapping first, its
+  jitter's room and line checked as up close), in reach (`stance`'s in-reach branch) and in close quarters where the
+  ground's star was the sure throw (`_close_quarters`, `_touched`): the air has no claw, so its star takes the monster
+  the looks miss if its body reaches the search's window (37 or more ahead), else the one aimed at. Its plan says why
+  ('touched', 'touched, tap first': her log's "jump (touched)", the 'jump' records' kind). Where no jump is sure (a
+  platform overhead, out of the air's reach) the ground as before; the claw on purpose up close (CLAW_ONLY) as before;
+  the magician unchanged (no claw: POINT_BLANK off).
+- *Up close, past the one on her* (`stance.CLAWED_CLOSE`): `clawed`, where close quarters' last resort is a jump in
+  place sure of nothing (a Horny or Green Mushroom inside the jump's 54: `jump_reach`, no step away, no room to jump
+  back), a sure jump throw that way at one past it (`_from_air`) instead. With the LIVE tracks below alone, a Horny
+  Mushroom on her at a wall end had her jump in place at it 13 times in 16 s for nothing, touched 8 times (the thief's
+  standard command, seed 6, 78-94 s: `log_live_6.txt`): the clip's corner, with the stack knowing the monster was there.
+- *The LIVE tracks a look's frame missed are about* (`localization.unseen.UNSEEN_LIVE`): a track the feed still has
+  LIVE whose last sighting is before the look's frame (missed for under tracking.MISSING_S, 1-4 frames at 15 a second)
+  counts in `unseen.hidden` as a HIDDEN one does, walked on as followed; a found monster of another track doesn't
+  explain it (the tracker matched the frame's sightings to their tracks already: two of a kind side by side are two),
+  one found with no track near enough does (`_is_one`, as for a hidden one). So the fights have it about her (her
+  danger, her jumps' arcs, too close, and on her platform a target: `Hunt._with_unseen`), her attack choice and her
+  drops' guards (`Attacks.unseen`, `Looter.unseen`), and her trips (`Navigator.hidden_tracks`).
+- *The fight's hidden ones heading at her walk on* (`behavior.fight.HIDDEN_WALKS`, `hidden_place`): a monster she threw
+  at that the look doesn't see (`FightState.hidden`, for HIDDEN_FOR) and whose feed's track heads at her is where that
+  heading at its kind's speed (the game data's) has walked it since its last sighting, no nearer than where its body
+  meets hers (as the stance's PACE_STOP); one heading away, standing or flinching, or whose track is dying or gone, as
+  last seen, as before; a throw at the stand-in is at its entry (`FightState.stand_ins`, `note_throw`). On the
+  simulator's own monsters (each stand-in's sighting tagged with the world's monster, seeds 1-3, `truth_proto.txt`):
+  one heading at her unseen 0.6-1.8 s had walked 41 at her on average, where it was last seen 57 off where it was,
+  walked on 31; one heading away had gone 13 farther (hurt, it turns to chase her: the user's monster rule), last seen
+  51 off, walked on 56, so those stay where they were seen.
+
+**The scenario** `loop_tree_touched_unseen` (sim.scenarios; `far_claws`): the hunt loop on 7 alone for 10 s in the
+harness's standard thief world (`_STANDARD`: crowd, zero-walls, near-misses, walkers, the attack choice), from x -163.5
+between 7's Horny Mushroom points as in episode B, one Horny Mushroom on her at -150, one 123 off at -40, seed 3. It
+expects no press from the ground at a target past the claw's edge (her stance line's nearest, 105 or more off) taken by
+the world's claw with its look TOLD_S to TOUCHER_S after a touch, a 'jump (touched)', and a kill. On b7f7308 (this
+branch with the four switches off) seed 3 had 3 such presses, 6 touches in the 10 s and 1 kill; now none, 3 'touched'
+jumps, 7 touches, 4 kills. Over seeds 1-12 (`scripts/setpiece.py`, `sp2_base.txt`, `sp2_proto.txt`, `sp2_final.txt`;
+touches in the first 10 s, the rest of the run's 10 s hunt):
+
+| seeds 1-12 | b7f7308 | prototype | this |
+|---|---|---|---|
+| touches | 62 | 50 | 53 |
+| touches that hurt | 43 | 40 | 42 |
+| kills | 27 | 30 | 30 |
+| EXP | 1,107 | 1,230 | 1,230 |
+| the claw's swipes | 45 | 14 | 15 |
+| far_claws (presses past the claw's edge it took after a touch) | 28 | 1 | 1 |
+| stars that hit nothing | 20 | 29 | 29 |
+| 'touched' jumps | 0 | 24 | 25 |
+| all of it met | 0 of 12 | 7 | 10 (not 4: no 'touched' jump; 12: one far claw) |
+
+**The harness** (seeds 1-48 paired, 5 minutes, against b7f7308's cached sides, code bb0bbe8b...; this branch's cached
+under f202237's code a561c633..., which the branch's tip gives to the digit on seeds 3 and 9 of both (`spot_tip_*.txt`:
+its later commits re-seed two scenarios and change docs and a test), and the same to the digit on seeds 1 and 2 as its
+12-seed run before the switches were folded in:
+`pair_thief48.txt`, `pair_mage48.txt`; at 24 seeds `pair_thief24.txt`, `pair_mage24.txt`). The thief's standard command:
+
+| a run of 5 minutes | b7f7308 | this | diff (se; t) |
+|---|---|---|---|
+| EXP a minute | 319.87 | 333.32 | +13.45 (7.83; +1.72) |
+| kills | 45.58 | 47.52 | +1.94 (1.08; +1.79) |
+| touches | 60.00 | 53.88 | -6.12 (1.96; -3.13) |
+| touches that hurt | 39.25 | 35.69 | -3.56 (1.55; -2.30) |
+| touched again within 2 s | 31.83 | 26.33 | -5.50 (1.58; -3.47) |
+| potions | 16.42 | 14.75 | -1.67 (0.72; -2.31) |
+| HP lost (bars) | 5.40 | 4.85 | -0.55 (0.24; -2.31) |
+| MP a minute | 375.61 | 393.57 | +17.97 (8.18; +2.20) |
+| MP potions | 12.42 | 13.33 | +0.92 (0.40; +2.27) |
+| trip touches that hurt | 8.25 | 7.06 | -1.19 (0.52; -2.29) |
+| loot worth a minute | 248.13 | 258.43 | +10.30 (7.53; +1.37) |
+| presses from the ground | 99.85 | 82.94 | -16.92 (3.20; -5.29) |
+| ... the claw took | 16.33 | 8.02 | -8.31 (0.99; -8.42) |
+| jump throws | 59.21 | 75.48 | +16.27 (3.04; +5.35) |
+| ... that hit nothing | 19.81 | 23.29 | +3.48 (1.93; +1.80) |
+| casts that hit nothing | 31.56 | 32.38 | +0.81 (1.79; +0.45) |
+| 'touched' jumps | 0 | 16.73 | |
+
+At 24 seeds EXP +4.8% (t +1.26), touches -9.5% (t -2.18). Of the 'touched' jumps (24 seeds) 63% hurt or killed a
+monster, 23% were the star's miss, 14% hit nothing or a wall, 0.2% the claw's. The MP is the claw's swipes thrown as
+casts now (8.3 fewer a run at 14 MP each, about 23 a minute; measured +18). At the user's prices (HP 2 a meso, MP
+1 a meso, a meso half an EXP: inferred, not a measure) the HP kept is worth about +21 EXP a minute and the MP spent -9,
+the loot +5, on the +13 EXP. Her standard world (the magician: Magic Claw has no claw's swipe, so `clawed` changes
+nothing for her; the LIVE tracks and the hidden ones walked at her reach her fights and trips): EXP a minute 457.45 ->
+456.57 (-0.87, se 8.76, t -0.10), touches 32.08 -> 31.90 (t -0.14), potions -0.25 (t -0.26), MP -0.50 a minute (t
+-0.06), loot +2.18 (t +0.30): level (at 24 seeds touches +2.54, t +1.20, gone at 48). No death, fall out of the map or
+stop in any of the 192 runs; one stuck run either side of hers (b7f7308's seed 38, 2.1 s; this one's seed 43, 5.7 s).
+
+**Tried and not kept** (the thief's standard command, 12 seeds paired, `runs/`, `variants12.txt`; against b7f7308's
+cached side, EXP a minute and touches, t in brackets): the prototype alone EXP +2.1 (+0.16), touches -0.58 (-0.18);
+with the LIVE tracks alone -12.5 (-0.85) and +0.50, its jump throws that hit nothing +7.7 a run and its longest idle
++6.7 s (t +2.48) against the prototype (the clip's corner above: the stack knew the monster on her and jumped in place
+at it); every hidden one walked on along its heading both ways, with the stance's pace walking each unseen one on by its
+own track's id, -5.0 (-0.31) and -1.42 (a stand-in walked off the drops it guarded: her pile trips went among the real
+ones, seed 1's trips 80 -> 120), without the pace +5.9 (+0.39) and +0.17; walking only those heading at her +6.7 with
+the pace, -9.2 without (its touches that hurt +3.4, t +2.23); up close alone +1.5 and -1.75; the LIVE tracks with up
+close and the look's monsters alone explaining a touch -3.3 and -1.25; all four +14.9 (+0.90) and -2.92 (-0.86) (this
+branch: to the digit on seeds 1 and 2); all four with the pace +9.1 (+0.63) and -1.67. No variant had a death, fall or
+stop. Every one within its seeds' spread at 12 (se 9-17 EXP a minute): the four together kept for what each is for
+(the touch's evidence; the clip's corner; the looks' misses; the stand-ins' places, measured above), not for a winner.
+
+**The claw's push** (the study's inference that a claw swipe pushes the monster off her where a star thrown past it
+doesn't, the prototype's reason for its level table): in the simulator no swipe pushes a Horny or Green Mushroom
+(`sim.world.PUSH_BY_DAMAGE`: the claw's 9-11 against the game data's `pushed` 40 and 25), so it isn't why the prototype
+measured level there; live the claw's 15-25 is under a Horny Mushroom's 40 too, so by the game data it shouldn't push
+one live either (not checked on frames).
+
+**Tests**: tests/test_clawed.py (the throw past the claw's edge from a jump when clawed, tapping first facing away; the
+ground under a platform overhead or with the switch off; `_from_here` without the ground; `fight.clawed` as R7's test:
+TOUCHER_S, `crowded`, TOUCHER_NEAR, another platform, no danger, the rounding, a stand-in by her not explaining a touch;
+a LIVE track missed in the frame about, beside another track's, not one found untracked, off; the hidden one walked at
+her, stopped where it meets her, heading away, standing, dying or off as last seen, a throw at its stand-in its entry;
+up close past the one on her, off), tests/test_unseen.py (its two LIVE tracks seen in the look's frame, where they
+meant "not missed"), tests/test_sim.py's scenarios (loop_tree_touched_unseen). Targeted (test_clawed, test_unseen,
+test_clearance, test_fight, test_danger, test_attack, test_evade, test_landing): 191 passed. Fast suite (`-n 4`,
+through the job runner, at the goldens' commit): 3,107 passed, 3 failed (72 skipped, 2 xfailed): test_navigation's
+fighting trip (its stand-in track had no `last_seen`, which a LIVE one's test reads now: given the look's time, the
+track seen in its frame, it passes, and test_navigation 84 of 84 since), test_geometry's px check (perception/
+lie_target.py, another session's) and test_gpumatch's call sent ahead, both failing on b7f7308 too; run again beside
+them, test_gpumatch's device close as well (the GPU's timing; nothing here touches it).
+
+**Goldens** (recorded into this lab with `golden record --jobs 4`, the same as a recording into a scratch folder
+but for the two re-seeded; against b7f7308's traces, `golden_diff.txt`, `scripts/golden_first.py` for where each first
+parts): 14 of 44 the same (loop_tree_lie_detector, _lie_detector_28 and the twelve nav_tree trips, all but
+nav_tree_landing_no_shot), 30 apart, each first at one of R1's:
+- *a 'touched' throw from the air after a touch where b7f7308 threw from the ground* (17): loop_tree_attack_misses_seen,
+  _attack_unbound, _grind_attack_key, _grind_drops, _grind_lucky_seven_key, _lie_detector_grind, _out_of_darts and
+  _safety_stop at 1.1-1.3 s (a Green Mushroom 117 off just after a Horny Mushroom by her start touched her at 0.0 s:
+  `jump-throwing left at 40 ms, touched, tap first (green-mushroom -117)` for `throwing left (green-mushroom -117)`),
+  loop_tree_rope_top and _rope_top_15 (11.8 s), _grind (16.6 s), _stat_window (16.9 s), _attack_misses (33.1 s),
+  tour_tree_run (39.2 s), _walls (44.4 s), _grind_jump_key (49.1 s), loop_tree_run (58.8 s, where b7f7308 threw from the
+  ground 0.6 s after a touch, her jump held);
+- *a hidden one she threw at, heading at her, walked on* (4): loop_tree_23_near_misses (2.6 s: a Green Mushroom +27 ->
+  +21), nav_tree_landing_no_shot (4.5 s: a Horny Mushroom -125 -> -11), loop_tree_wait
+  (9.8 s: -85 -> -12, from the ground where b7f7308 jumped), loop_tree_23 (36.7 s: the Green Mushroom at -65 walked
+  up to the one at -12);
+- *a LIVE track the look's frame missed* (9): loop_tree_stat_window_put_off (1.1 s: her Lucky Seven's target reckoned
+  at full HP, another Horny Mushroom the look missed taken as its target, `Attacks.unseen`; the plans part at 66.5 s),
+  loop_tree_lie_detector_23 (20.7 s: her trip keeping clear of a Green Mushroom on 29 the look missed),
+  loop_tree_mp_runs_out (76.0 s: a second Horny Mushroom at -118 among her hidden ones); and six by her stance's log
+  alone, a line said again or not as the hidden ones changed (loop_tree_crowd 5.4 s, _ore_waits 23.5 s, _attack_no_darts
+  27.4 s, _grind_arrow_key 29.1 s, _grind_rope_top 34.2 s, _remembered_keys 92.3 s), their plans parting later.
+Two no longer showed what they're there for at their seeds, each a run's luck (the scenarios' notes): loop_tree_23_near_misses
+(sixteen kills, its twenty not met) 1 -> 3, loop_tree_attack_no_darts (one page, not two) 11 -> 29. The other 28 apart
+still show what they're for; nav_tree_landing_shot_first and nav_tree_landing_no_shot don't, as on b7f7308 (and master).
+`golden check --jobs 4`: 45 of 45 (with loop_tree_touched_unseen).
+
+**Not done.** A press from the ground with no MP drop as a monster within the claw's edge in front of her (the study's
+(c): its evidence when no touch came; here the ground presses the claw still took are 8.0 a run, the most it
+could turn into throws from the air, one press late each): not built. The cornered loops at a wall end themselves (R2:
+no way out up close) and the throws at the dead (R4), R6 and R8's aims and R3's respawn guard (other branches). The
+perception's side (monsters on her, her pet, each other, newborns fading in), its owners'. Measured live: not yet; a
+supervised grind would show it in the 'jump' records' 'touched' and in the ground presses with no MP drop after a touch.
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.
@@ -6565,7 +6752,7 @@ The supervised hunt of 2026-10-25 (`tour --loop`, 23:43-23:54, 340 EXP a minute;
 
 What she does now (each a switch, on unless said):
 - **Her drops wait while a monster that counts is by them** (`hunt._pile_block`, `PILE_CLEAR` 100): no pile is gone for, walked to or stood on with a monster that counts as a danger within 100 units of the stretch from where she'd land (the route's last landing; where she stands on its platform) to the pile: one the look found, or one about that it didn't (below). In rules 6a, 6, 5, 5b, 8 and 10; a trip for one is called off at the chain that sees it so, the pile kept. What's left of the danger there is the pile's price (`_pile_price`: `HP_EXP`, 250 EXP a bar of her HP, her pet's Orange Potions at a guessed 160 mesos) against what it's worth, EXP before loot (`_loot_first`). Replayed on the live run's 78 pile decisions (scratch `hunt-ab/B/fix/b1_replay2.py`), 17 wait: their stays had carried 5 touches and 0.81 bars in 79 s, 0.61 bars a minute, against 0.24 on the 61 let through, for 20% of the piles' worth (150 units: 18 wait). A spawn point's monster due back 5 to 12 s after a kill of hers there (`DUE_BACK`, `DUE_FROM`, `DUE_TO`) is off: the 20 stays it alone would have held carried 0.14 bars a minute, the safest of all, for 980 mesos' worth, and in the simulator it made no difference to her HP past the seeds' spread.
-- **Her decisions go by the monsters the looks missed** (`localization.unseen`; `hunt.UNSEEN_FIGHTS`, `navigator.UNSEEN_TRIPS`): the feed's tracks out of sight on screen that count (`unseen.hidden`: out of sight `TRACK_S` 1.5 s at most, walked on as followed; not the one her EXP gain still waiting would go on, `Track.owed`, the feed's own word, nor one a kill of hers in the ledger is on) and her memory's entries of the last 2 s, none the look found. Her trips keep clear of them (`Navigator.remembered` keeps those in view too; `hidden_tracks`; after a chain cut for a monster coming, its track for the next chain: `TripState.came`); her fights have them around her (the stance's danger and moves) and, those on her platform that count, as targets (rule 1 keeps off them); her drops are guarded by them (`Looter.unseen`); and a throw's attack goes by those on her platform (`Attacks.unseen`, `hunt.UNSEEN_ATTACK`: Lucky Seven at one under her body, not "nothing seen in its way"). On the live run the plan of her jump onto 23 at 23:47:42.63 would have kept the Horny her memory had at x 165 (1.8 s old, p 0.58): wherever it could be by then, -16 to 186, over her landing at 129; and the trip itself waited (above: unseen 0 units from her way).
+- **Her decisions go by the monsters the looks missed** (`localization.unseen`; `hunt.UNSEEN_FIGHTS`, `navigator.UNSEEN_TRIPS`): the feed's tracks out of sight on screen that count (`unseen.hidden`: out of sight `TRACK_S` 1.5 s at most, walked on as followed, and from 2026-11-03 those still LIVE that the look's frame missed, `unseen.UNSEEN_LIVE`: A touch with no monster seen by her; not the one her EXP gain still waiting would go on, `Track.owed`, the feed's own word, nor one a kill of hers in the ledger is on) and her memory's entries of the last 2 s, none the look found. Her trips keep clear of them (`Navigator.remembered` keeps those in view too; `hidden_tracks`; after a chain cut for a monster coming, its track for the next chain: `TripState.came`); her fights have them around her (the stance's danger and moves) and, those on her platform that count, as targets (rule 1 keeps off them); her drops are guarded by them (`Looter.unseen`); and a throw's attack goes by those on her platform (`Attacks.unseen`, `hunt.UNSEEN_ATTACK`: Lucky Seven at one under her body, not "nothing seen in its way"). On the live run the plan of her jump onto 23 at 23:47:42.63 would have kept the Horny her memory had at x 165 (1.8 s old, p 0.58): wherever it could be by then, -16 to 186, over her landing at 129; and the trip itself waited (above: unseen 0 units from her way).
 - **Her escapes keep off a long drop's end, and may jump up onto the platform overhead** (`stance.drop_limits`, `DROP_ROOM` 100, `LONG_DROP` 100; `overhead`, `ESCAPE_UP`): her steps away and jumps back from monsters on her platform keep 100 from an end with the next platform under it 100 or more down (or none) and no wall of her foothold group there (23's left end: from -97; 24's ends and 23's right have short drops or the tower's wall); on a platform too narrow for that, its middle (18, 27 and 30: steps only toward it); under a platform within her jump height the jump up onto it (a jump throw in place, "up onto 22") is an escape, by the danger where she'd land. Live, of her 17 steps away and jumps back toward 23's left end, the 6 that ended past -97 were the ones before all 3 falls (to -147 from -94 and -92, to -124 from -4: scratch `b3_replay.py`).
 - **Before going past a monster regardless, a look and a shot** (`Navigator._last_shot`, `LAST_SHOT`): after the waits, a look with the monsters, and the blocking one shot if it's there and a star reaches it (live, 2 of the 4 touches within 3 s of a pass regardless came from a Green she had seen).
 - **Spots off spawn points, and one that can touch her on her platform shot first** (`spots.SPAWN_CLEAR` 50, `_off_spawns`; `stance.TOUCHER_FIRST`): a spot keeps 50 from its platform's spawn points of kinds that count, where one reaching the ground does and it scores within that kind's touch share of the best (the knock room giving way at an end with a short drop, as far as it must): 23 from 24 at 221 (51 from 24's Green's point at 272, 97.9% of 23 in reach; it was 231, 41 off, where live she spent 172 of her 220 s on 24 within 50 units of it), 15 from 16 at 129; 7 stays shot from 8 at 147 (off its Green's point, 8's Horny's is nearer). Of the monsters in reach, one on her platform whose kind counts is thrown at first.

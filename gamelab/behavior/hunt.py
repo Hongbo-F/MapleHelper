@@ -1116,7 +1116,8 @@ class Hunt:
             can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
             around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward, goal=goal, edges=edges, up=up,
             pace=fight.pace_of(self.h, s), touch=self.fs.touch, limits=limits, moves=self.fs.moves,
-            castable=castable, **fight.wounds_of(self.h, s)), s, castable)
+            castable=castable, clawed=fight.clawed(self.h, s, visible + hidden), **fight.wounds_of(self.h, s)), s,
+            castable)
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something

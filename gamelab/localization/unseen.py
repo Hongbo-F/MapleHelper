@@ -1,8 +1,9 @@
 """The monsters she knows are about that a look didn't find (`unseen`): the perception service's tracks out of sight on
-screen (localization.tracking, HIDDEN: hit under her damage numbers, under her own body, or just missed; `hidden`),
-and her memory's of the last moments (localization.memory, seen within UNSEEN_S), each where it likeliest is by the
-look's time. Her decisions take them as the look's own: what she shoots and keeps off in a fight, where she lands for a
-pile, the monsters her trips keep clear of (behavior.hunt, control.navigator).
+screen (localization.tracking, HIDDEN: hit under her damage numbers, under her own body, or just missed; and from
+2026-11-03 those still LIVE that the look's frame missed, UNSEEN_LIVE; `hidden`), and her memory's of the last moments
+(localization.memory, seen within UNSEEN_S), each where it likeliest is by the look's time. Her decisions take them as
+the look's own: what she shoots and keeps off in a fight, where she lands for a pile, the monsters her trips keep clear
+of (behavior.hunt, control.navigator).
 
 Why: the detector is nearly blind near her. Live on 2026-10-25 on Tree Dungeon (23:43-23:54, the service's 10 fps
 records, lab/telemetry/20261025-210747-perceive.jsonl; D:/MapleHelper-scratch/analysis-1025/damage-skeptic occl.py):
@@ -51,6 +52,15 @@ TRACK_S = 1.5
 # last saw its monster, followed throw to throw) within this: the frames saw it up to a look later (0.2-0.5 s, 20-50
 # units at a mushroom's walk), and its last hit knocked it 18-25 units (a guess past those)
 KILL_NEAR = 80.0
+# R1 of the cornered study, extended (2026-11-03, D:/MapleHelper-scratch/cornered: the user's clip of 2026-11-02 22:51,
+# "cornered character making bad attack move"): a track the feed still has LIVE that the look's frame didn't find (its
+# last sighting before the frame: missed for under tracking.MISSING_S, 1-4 frames at 15 a second) is about too, walked
+# on as a hidden one is. Live in that hour 269 of BugBaby's 455 touches came with no monster found within 75 of her in
+# the scene before, and in 135 of those a LIVE track within 75 had been missed in that frame: neither the fights nor her
+# trips had it (only HIDDEN ones counted). Not one a found monster of another track is (the tracker matched the frame's
+# sightings to their tracks already, within its own gate: two of a kind side by side are two), only one found with no
+# track or near enough (`_is_one`, as for a hidden one). False: HIDDEN ones alone, as before.
+UNSEEN_LIVE = True
 
 
 def unseen(s: Scene, memory, model: MapModel, within: float = UNSEEN_S, platforms=None, kills=()) -> list[Monster]:
@@ -61,12 +71,13 @@ def unseen(s: Scene, memory, model: MapModel, within: float = UNSEEN_S, platform
     if s.where is None:
         return []
     found = [m for m in [*s.monsters, *s.swept] if m.platform is not None]
+    untracked = [m for m in found if getattr(m, "track", None) is None]  # (a LIVE one's: UNSEEN_LIVE)
     walking, body = speeds(model), bodies(model)
     out: list[Monster] = []
     for tr in hidden(s, kills, platforms):
         age = s.t - tr.last_seen
         speed = walking.get(tr.kind, DEFAULT_SPEED)
-        if _is_one(tr.kind, tr.platform, tr.x, age, speed, found):
+        if _is_one(tr.kind, tr.platform, tr.x, age, speed, untracked if tr.state == LIVE else found):
             continue
         p = model.platform(tr.platform)
         b = body.get(tr.kind)
@@ -88,13 +99,15 @@ def unseen(s: Scene, memory, model: MapModel, within: float = UNSEEN_S, platform
 
 def hidden(s: Scene, kills=(), platforms=None) -> list:
     """The feed's tracks out of sight on screen as of look `s` (Scene.tracks, tracking.Track) that count as a monster
-    about (see the top), on `platforms` (None: any): HIDDEN on a platform, last seen within TRACK_S, none that a kill of
-    hers (`kills`: the ledger's, behavior.ledger.Kill, the newest last) is on (_hers)."""
+    about (see the top), on `platforms` (None: any): HIDDEN on a platform, or LIVE and missed in the look's frame (its
+    last sighting before it: UNSEEN_LIVE), last seen within TRACK_S, none that a kill of hers (`kills`: the ledger's,
+    behavior.ledger.Kill, the newest last) is on (_hers)."""
     tracks = getattr(s, "tracks", ()) or ()
     if not tracks:
         return []
     dead = _hers(tracks, kills, s.t)
-    return [tr for tr in tracks if tr.state == HIDDEN and tr.platform is not None and tr.id not in dead
+    return [tr for tr in tracks if (tr.state == HIDDEN or UNSEEN_LIVE and tr.state == LIVE and tr.last_seen < s.t)
+            and tr.platform is not None and tr.id not in dead
             and not getattr(tr, "owed", False) and (platforms is None or tr.platform in platforms)
             and 0 <= s.t - tr.last_seen <= TRACK_S]
 
