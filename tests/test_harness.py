@@ -80,6 +80,76 @@ def test_near_her_on_her_platform_a_look_finds_a_monster_as_seldom_as_live(model
     assert (noise.near_seen, noise.off_seen) == (world_mod.NEAR_SEEN, world_mod.OFF_SEEN)
 
 
+def test_near_misses_1102_finds_a_monster_near_her_as_the_perception_of_2026_11_02(model):
+    """`--world near-misses-1102` (world.NEAR_SEEN_1102, OFF_SEEN_1102: the replay kit's dumps of 92b09c3's perception
+    on R1-R3 and BugBaby's frame sets): within 25 units of her 39% of looks find it, within 50 63%, within 100 80%,
+    within 150 83%, farther 93%, on another platform 91%; each miss in a run, as live's (NEAR_SPELL_1102,
+    OFF_SPELL_1102: a draw a spell, 0.33 s within 25 of her), where a draw a look finds one after a miss as often as
+    after a find; given with `near-misses`, in its place whatever the order (harness.LAST_WORLDS)."""
+    c = plat(model, 500, 400)
+    clock = Clock()
+
+    def looks(x: float, pid: int = c.id, n: int = 400, spells: bool = False) -> list[bool]:
+        w = still(World(model, KEYS, (c.id, 100.0), monsters=[("Snail", pid, x)], origin=clock.now,
+                        noise=Noise(near_seen=world_mod.NEAR_SEEN_1102, off_seen=world_mod.OFF_SEEN_1102,
+                                    **({"near_spell": world_mod.NEAR_SPELL_1102, "off_spell": world_mod.OFF_SPELL_1102}
+                                       if spells else {}))))
+        w.invulnerable_ms = 10 ** 9
+        h = Hunter(FakeEyes(w, clock, model), KEYS, model, log=lambda m: None)
+        out = []
+        for _ in range(n):
+            out.append(bool(h.look(wide=True).monsters))
+            clock.advance_to(clock.now + 0.05)
+        return out
+
+    def after(seen: list[bool], was: bool) -> float:
+        pairs = [b for a, b in zip(seen, seen[1:]) if a == was]
+        return sum(pairs) / len(pairs)
+    for x, share in ((115.0, 0.39), (140.0, 0.63), (180.0, 0.80), (230.0, 0.83), (400.0, 0.93)):
+        assert sum(looks(x)) / 400 == pytest.approx(share, abs=0.07)  # (a draw a look: the share alone)
+    other = plat(model, 360, 300).id
+    assert sum(looks(300.0, other)) / 400 == pytest.approx(0.91, abs=0.07)
+    runs, flat = looks(180.0, n=1200, spells=True), looks(180.0, n=1200)  # (50-100 off: a spell 0.93 s; a look here
+    assert sum(runs) / 1200 == pytest.approx(0.80, abs=0.07)                # 0.4 s, its own cost and the 0.05)
+    assert after(runs, True) > 0.85 and after(runs, False) < 0.5
+    assert after(flat, True) == pytest.approx(0.80, abs=0.07) and after(flat, False) == pytest.approx(0.80, abs=0.1)
+    assert harness.WORLDS["near-misses-1102"] == {"near_seen": world_mod.NEAR_SEEN_1102,
+                                                  "off_seen": world_mod.OFF_SEEN_1102,
+                                                  "near_spell": world_mod.NEAR_SPELL_1102,
+                                                  "off_spell": world_mod.OFF_SPELL_1102}
+    for world in (("near-misses", "near-misses-1102"), ("near-misses-1102", "near-misses")):
+        noise = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=world).noise
+        assert (noise.near_seen, noise.off_seen, noise.near_spell, noise.off_spell) == \
+            (world_mod.NEAR_SEEN_1102, world_mod.OFF_SEEN_1102, world_mod.NEAR_SPELL_1102, world_mod.OFF_SPELL_1102)
+    noise = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("near-misses",)).noise
+    assert (noise.near_spell, noise.off_spell) == ((), 0.0)
+
+
+def test_invulnerable_1_5_leaves_her_untouchable_the_sources_1_5_s(model, monkeypatch):
+    """`--world invulnerable-1.5` (world.INVULNERABLE_SOURCES): a monster still on her touches her again 1.5 s after a
+    touch, not at `walkers`' 1.45 (INVULNERABLE_LIVE), whatever the order the two are given in (harness.LAST_WORLDS);
+    the stack's own figure (perception.touches.INVULNERABLE_S) unchanged."""
+    from gamelab.perception import touches
+    monkeypatch.setattr(world_mod, "EVADE", 1.0)  # (every touch a MISS: no knock, the pig stays on her)
+    c = plat(model, 500, 400)
+    for inv in (world_mod.INVULNERABLE_LIVE, world_mod.INVULNERABLE_SOURCES):
+        w = still(world(model, c.id, 400.0, monsters=[("Pig", c.id, 410.0)], realism=Realism(invulnerable=inv)))
+        w.advance(0.05)
+        assert w.touches == 1 and w.evaded == 1
+        first = w.touch_log[0][0]
+        w.advance(first + inv - 0.02)  # (advance: to that time)
+        assert w.touches == 1
+        w.advance(first + inv + 0.02)
+        assert w.touches == 2 and w.touch_log[1][0] - first == pytest.approx(inv, abs=0.006)
+    assert harness.WORLDS["invulnerable-1.5"] == {"invulnerable": 1.5} and world_mod.INVULNERABLE_LIVE == 1.45
+    for got in (("walkers", "invulnerable-1.5"), ("invulnerable-1.5", "walkers")):
+        sc = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("zero-walls", *got))
+        assert sc.realism.invulnerable == 1.5 and sc.realism.chase
+    walkers = harness.scenario("loop", 1, "crowd", 1.0, map_id=harness.TREE, world=("walkers",))
+    assert walkers.realism.invulnerable == 1.45
+    assert touches.INVULNERABLE_S == 1.45
+
+
 def test_a_monster_back_at_its_spawn_point_is_found_once_its_fade_reaches_its_drawn_alpha(model):
     """`--world spawn-fade` and `spawn-fade-wide` (Noise.spawn_found: world.SPAWN_FOUND, SPAWN_FOUND_WIDE, measured on
     Tree Dungeon's clips): a monster back at its spawn point fades in over SPAWN_FADE_S, its alpha in what the looks

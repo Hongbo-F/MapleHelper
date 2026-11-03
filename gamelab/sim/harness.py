@@ -189,8 +189,9 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LIVE, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS,
-                    MEAT_HP, NEAR_SEEN, OFF_SEEN, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S,
+from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LIVE, INVULNERABLE_SOURCES, KNOCK_PLANNER,
+                    LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1102, NEAR_SPELL_1102, OFF_SEEN,
+                    OFF_SEEN_1102, OFF_SPELL_1102, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S,
                     TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
@@ -289,6 +290,13 @@ WORLDS["heading-wrong-sure"] = {"heading_wrong": (0.01, 0.6, 0.4, True)}
 # farther; one on another platform 70% (the live hunt of 2026-10-25), where the presets find it 90% of the time wherever
 # it is.
 WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
+# ... or as the perception of 2026-11-02 finds them (`near-misses-1102`: world.NEAR_SEEN_1102, OFF_SEEN_1102, the same
+# bands; the replay kit's dumps of R1-R3 and BugBaby's frame sets): within 25 of her 39% of looks, 63% within 50, 80%
+# within 100, 83% within 150, 93% farther, 91% on another platform, each miss in a run, as live's (NEAR_SPELL_1102,
+# OFF_SPELL_1102: drawn once 0.33 s within 25 of her, 0.73-1.07 s at 25-150, 0.47 s farther, 0.53 s on another
+# platform); with `near-misses` too, in its place (LAST_WORLDS).
+WORLDS["near-misses-1102"] = {"near_seen": NEAR_SEEN_1102, "off_seen": OFF_SEEN_1102, "near_spell": NEAR_SPELL_1102,
+                              "off_spell": OFF_SPELL_1102}
 # ... and the monsters the map spawns fading in, seen as late as live sees them (`spawn-fade`: world.SPAWN_FOUND, the
 # frame step's spawn watch on, as from 2026-11-01; Noise.spawn_found) or as the whole screen alone saw them before
 # (`spawn-fade-wide`: SPAWN_FOUND_WIDE, a median 0.53 s later), where every other world finds a newborn from its birth.
@@ -310,6 +318,11 @@ WORLDS["planner-knock"] = {"knock": KNOCK_PLANNER}
 # `walkers` had them till 2026-10-31).
 WORLDS["walkers"] = {"chase": True, "invulnerable": INVULNERABLE_LIVE}
 WORLDS["no-aggro"] = {"chase": False}
+# ... and her invulnerability after a touch the sources' 1.5 s (`invulnerable-1.5`: world.INVULNERABLE_SOURCES; with
+# `walkers` too, in its place: LAST_WORLDS), which live's frames agree with read by their frame steps (none of 88
+# re-touches at the floor 21 frames apart), where `walkers` has the frames' least gap, 1.45. The stack's own figure
+# (perception.touches.INVULNERABLE_S) unchanged.
+WORLDS["invulnerable-1.5"] = {"invulnerable": INVULNERABLE_SOURCES}
 # The game's respawn is every world's from 2026-10-31 (Realism.respawn_tick: world.TICK_S, SPAWN_CLEAR,
 # MapModel.mob_cap): `tick-respawn` is that, kept for the runs saved under its name; `clock-respawn` each monster back
 # on its own clock, `respawn` s after it died, as every world had it until then; and with nobody else on the map
@@ -377,7 +390,12 @@ WORLDS["hang-2s"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", Fals
 WORLDS["hang-rules"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", True),
                                   ("gamelab.control.navigator", "HANG_TAKE", True))}
 WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
-NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
+NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "near_spell", "off_spell",  # WORLDS' fields that are
+                "spawn_found")                                                         # world.Noise's
+# Worlds that set again a field another sets (`walkers`' invulnerability, `near-misses`' bands): applied after the
+# others whatever the order they're given in (scenario), so `--world walkers --world invulnerable-1.5` and the reverse
+# are one.
+LAST_WORLDS = ("near-misses-1102", "invulnerable-1.5")
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
 # MP (Her.cast_mp: LEVEL_25's 14 of 623) and nothing with less, her attack
@@ -515,7 +533,7 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
         raise ValueError("think or think_clock, not both")
     noise, realism = PRESETS[preset]
     her = scenarios.her_on(map_id)[1]
-    for name in world:
+    for name in sorted(world, key=lambda w: w in LAST_WORLDS):  # (stable: the others in their order, LAST_WORLDS after)
         fields = WORLDS[name]
         realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's)
                                                   if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack")})

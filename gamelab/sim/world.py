@@ -281,6 +281,16 @@ INVULNERABLE = INVULNERABLE_S
 # drops alone (none of 800 within 1.25 s of the one before, 2026-10-25/26: D:/MapleHelper-scratch/land/diag-move-away/
 # touches.py), 1.25 until the popups were read (2026-10-28), now the same.
 INVULNERABLE_LIVE = INVULNERABLE_S
+# ... and as the sources have it and the frames agree once read by their frame steps (the harness's
+# `--world invulnerable-1.5`; the touch study of 2026-11-03, D:/MapleHelper-scratch/recfix/touch-study/verify-
+# invulnerability-1.5: gaps.py, contact.txt): RustMS invincible.set_for(1500), meowdb's "1.5 s", a MISS the same. Live's
+# re-touches at the floor, 88 of them on four 15 fps sources (R1-R3, BugBaby's October hunts and walk check), are 21, 22
+# and 23 frames apart 0, 40 and 48 times, where 1.45 s gives about 22%, 70% and 8% and 1.5 s 0%, 46% and 54%; his 20 fps
+# telemetry's at a median 1.501 s; on R1's frames 1883-1884 a Horny on her line 1.400-1.467 s after the touch before
+# touched her only at 1885. The 1.45 was the least gap, 1.435 and 1.441: 22-frame gaps their timestamps' jitter pulled
+# down. The stack plans by perception.touches.INVULNERABLE_S (the navigator's immune windows, Senses), left at 1.45 (a
+# live change, to be measured on its own).
+INVULNERABLE_SOURCES = 1.5
 # s a touch's popup over her shows (sim.fakes.FakeTouches reads it off the frame's Screen.popups): v83's 400 ms opaque
 # and 600 fading (RustMS DamageLayout.h:16-24); unconfirmed in this game. The stack tells a touch the frame it first
 # shows.
@@ -900,6 +910,27 @@ TAP_LOST_MS = 50         # an arrow tap this short (as sent) can be lost (Noise.
 # in all, 64-75% and 71% without those, 70%: the preset's detect_miss (10%) found 89% of them.
 NEAR_SEEN = ((25.0, 0.0), (50.0, 0.07), (100.0, 0.34), (150.0, 0.55), (float("inf"), 0.6))
 OFF_SEEN = 0.7
+# ... and as the perception of 2026-11-02 finds them (the harness's `--world near-misses-1102`; the touch study of
+# 2026-11-03, D:/MapleHelper-scratch/recfix/touch-study/proto: detect_bands.py, pooled.py, their .txt): the replay kit's
+# dumps of 92b09c3's perception on R1-R3 (her) and on BugBaby's frame sets (his play of
+# 10-30 and the alarm clips of 10-26..10-30), by the same definition: of the frames in which the tracker follows a
+# monster on her platform, the share that found it, her on the ground, the frames within 3 s of a hit seen on it left
+# out (its bar's, her throws': the world hides those on its own, Noise.hit_hidden, CLAW_HIDDEN), and the tracker's tails
+# it dropped or lost off screen (maybe no monster there; those that ended in its death kept). Hers and his: within 25
+# of her 38% and 39%, 25-50 66% and 57%, 50-100 84% and 74%, 100-150 79% and 88%, farther 95% and 89%, another platform
+# 91% and 92%; pooled by their frames (415, 626, 1023, 603, 988; 52,691 off it) below. Counting every hidden frame (the
+# tails too) 31%, 46%, 66%, 74%, 91%, 87%; only those found again 49%, 73%, 85%, 87%, 95%, 93%. Where 2026-10-25's
+# detector (NEAR_SEEN) never found one within 25 of her.
+NEAR_SEEN_1102 = ((25.0, 0.39), (50.0, 0.63), (100.0, 0.80), (150.0, 0.83), (float("inf"), 0.93))
+OFF_SEEN_1102 = 0.91
+# ... its misses in runs, as live's come (Noise.near_spell, off_spell; runs_live.py, spell_fit.py, their .txt): of two
+# frames in a row of one track (the same frames as above), found after found 85-99% of the time, after unfound 2-13%,
+# where a draw a look (NEAR_SEEN's) gives the band's share after either (39-93%). A draw a spell of n frames, its
+# phase drawn, gives 1 - (1 - p)/n and p/n: by most likelihood (hers and his pooled) n 5 within 25 of her (0.33 s; 95%
+# 4-6), 11 at 25-50 (0.73 s; 8-16), 14 at 50-100 (0.93 s; 10-21), 16 at 100-150 (1.07 s; 10-30), 7 farther (0.47 s;
+# 5-11), 8 on another platform (0.53 s; 7-8).
+NEAR_SPELL_1102 = ((25.0, 0.33), (50.0, 0.73), (100.0, 0.93), (150.0, 1.07), (float("inf"), 0.47))
+OFF_SPELL_1102 = 0.53
 # The air pick's noise on Tree Dungeon (Noise.air_squash, air_short, air_short_ramp, air_under, air_turn_lost), fitted by
 # likelihood to the live jump throws in place at a monster on her platform of 2026-10-25 23:43 to 10-26 23:47, all 838 of
 # them with the target's track at the pick and ahead of her middle (530 straight, 308 turning in the air; every track of
@@ -976,6 +1007,11 @@ class Noise:
                                  # detect_miss has it. NEAR_SEEN: as live; () off
     off_seen: float | None = None  # ... and one on another platform with this chance (OFF_SEEN: as live); None: as
                                    # detect_miss has it
+    near_spell: tuple = ()       # ((up to units, s), ...): with near_seen, whether a look finds a monster on her
+                                 # platform drawn once a spell of that many s (the first band that holds it, its phase
+                                 # drawn per monster), not per look: live's misses come in runs (NEAR_SPELL_1102); ()
+                                 # per look
+    off_spell: float = 0.0       # ... and on another platform, with off_seen (OFF_SPELL_1102); 0 per look
     spawn_found: tuple = ()      # ((alpha, share), ...): a monster back at its spawn point fades in (SPAWN_FADE_S) and
                                  # isn't found before its alpha reaches one drawn from this table, its alpha in what's
                                  # seen while it fades (SPAWN_FOUND: as live with the spawn watch; SPAWN_FOUND_WIDE: the
