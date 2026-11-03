@@ -61,7 +61,7 @@ from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .ledger import FOLLOW_S
-from .patrol import TICK_S, Patrol, choice_text, reaching
+from .patrol import STOP_S, TICK_S, Patrol, choice_text, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go)
 # s with nothing left in reach before she leaves a stop: one look's miss isn't enough (a hit monster hides under its
@@ -193,13 +193,27 @@ class Grind(Hunt):
         """What a bar of her HP costs (Patrol.hp_price, the loop's and her stays' price of her touches): its potions at
         the user's reference prices (hunt.bar_exp) from her max HP as perception reads it (Hunter.max_hp: her HUD's
         number), patrol.HP_PRICE until it's read. And her EXP a second (Hunter.exp_rate: the loop's, Plan.rate), what
-        her landings' prices weigh her time by (behavior.fight.landing_prices)."""
+        her landings' prices weigh her time by (behavior.fight.landing_prices), and on each platform (Hunter.ground_rate:
+        `_ground_rate`, her hang under a rope's top)."""
         most = getattr(self.h, "max_hp", None)
         if most is not None:
             self.patrol.hp_price = bar_exp(most)
         plan = self.patrol.plan
         if plan is not None and plan.rate > 0:
             self.h.exp_rate = plan.rate
+        self.h.ground_rate = self._ground_rate
+
+    def _ground_rate(self, pid: int) -> float | None:
+        """EXP a second she'd make on platform `pid` as the patrol expects it now: at its stop there (Patrol.expect: the
+        monsters her memory has in reach of it and the belief's stock at its other points, her share), net of what
+        touches cost her meanwhile (Patrol.net), over its shooting at her kill time and STOP_S (as Patrol.choose rates
+        a stop with no travel); None where the platform has no stop (control.navigator.HANG_TAKE, through
+        Hunter.top_price: what the wait under the top of a rope up to it costs her)."""
+        i = self.patrol.stop_on(pid)
+        if i is None:
+            return None
+        exp, _, shoot, _ = self.patrol.expect(i, time.monotonic())
+        return self.patrol.net(i, exp) / (shoot + STOP_S) if exp > 0 else 0.0
 
     def _learn_hp(self, s: Scene) -> None:
         """Her HP bar between two looks (HP_GAP_S apart at most), what went charged to the platform she was on

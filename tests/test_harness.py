@@ -979,9 +979,15 @@ def test_rope_tops_counts_her_climbs_and_the_touches_on_a_rope_or_at_its_top_jus
 
 def test_rope_tops_counts_her_hangs_under_a_rope_s_top_from_their_events():
     """sim.harness rope_tops' hangs (control.navigator.ROPE_HANG's 'rope_hang' events): one at each hang's start, the
-    seconds from their ends, those up regardless after HANG_S."""
+    seconds from their ends, how they ended (up regardless after HANG_S, the way up clear, up at a longer wait's end,
+    the touch taken, touched), and those that went longer than HANG_S (their 'longer' event, no seconds of its own)."""
     events = [{"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "clear", "s": 1.24},
               {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "regardless", "s": 4.02},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "longer", "at": 0.5},
+              {"kind": "rope_hang", "step": "waited", "s": 2.6},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "took", "s": 0.0},
               {"kind": "climb_on"}]
-    assert harness._hangs(events) == {"hangs": 2, "hang_s": 5.3, "hang_regardless": 1}
-    assert harness._hangs([]) == {"hangs": 0, "hang_s": 0.0, "hang_regardless": 0}
+    assert harness._hangs(events) == {"hangs": 4, "hang_s": 7.9, "hang_regardless": 1, "hang_clear": 1,
+                                      "hang_waited": 1, "hang_took": 1, "hang_touched": 0, "hang_longer": 1}
+    assert harness._hangs([]) == {"hangs": 0, "hang_s": 0.0, "hang_regardless": 0, "hang_clear": 0,
+                                  "hang_waited": 0, "hang_took": 0, "hang_touched": 0, "hang_longer": 0}
