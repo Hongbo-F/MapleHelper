@@ -606,7 +606,8 @@ HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _
 # staying clear (the rest of the climb, the climb-over and STAND_PAST_S at the top, her box all the way) d s from now
 # (`_walks_off`), she hangs till d and HANG_MARGIN_S from now, where that's past HANG_S and HANG_HORIZON_S or less from
 # the hang's start, and where her hang place stays clear meanwhile (_hang_safe); re-judged at every look (d as the newest
-# state has it; a look with no such clear has HANG_S, up at once if that's past). Once a monster it hangs longer for
+# state has it, the margin from the first look that has it clear already; a look with no such clear has HANG_S, up at
+# once if that's past). Once a monster it hangs longer for
 # turns or stops (off its predicted walk by its heading as followed, away from its walk edges: `_off_walk`), or her hang
 # place isn't clear that long, back to HANG_S from the hang's start for the rest of the hang (up at once if that's
 # past). Telemetry 'rope_hang' events: step 'longer' when it first goes past HANG_S (the predicted clear, the walkers),
@@ -614,13 +615,15 @@ HUNG = "hung on the rope"  # (the cut's reason starts so: Navigator._watching, _
 # backstop event). False: HANG_S, as before.
 # The horizon and margin by the harness (D:/MapleHelper-scratch/recfix/rope2: hangs2.py, compare2.py, perhang.py;
 # HANG_LONGER alone against the 2 s hang, work/rec-all 560bd57's cached seeds, 1-24 paired, the thief's standard grind
-# and her standard world): HANG_HORIZON_S 3 s, HANG_MARGIN_S 0.3 s: the thief's EXP a minute +3.1% (t +1.45) and his touches at
-# a rope's top -12.4% (t -2.03), hers +1.6% (+1.22) and -14.8% (-1.87), the one setting better on both measures in both
-# worlds. 4 s: the thief +0.3% and -8.2%, she +0.9% and -27.0% (-2.61); 2.5 s hardly ever longer (one of her 24 seeds
-# changed); a margin of 0 at 3 s the thief -1.8% and -6.4%, of 0.6 s her +0.1% and -4.9%. A walker's decision lasts 1-3
-# s in the v83 AI and a third of the next ones stand and a third turn, so a walk predicted more than about a second
-# past HANG_S seldom holds: at 4 s 92 of the thief's 115 longer hangs were put back for a turn or a stop (55 of 75 at 3
-# s; hers 37 of 65 and 23 of 42), and the longer wait was lost time.
+# and her standard world): HANG_HORIZON_S 3 s, HANG_MARGIN_S 0.3 s: the thief's EXP a minute +2.3% (t +1.30) and his
+# touches at a rope's top -11.2% (t -1.94), hers +0.1% (+0.12) and -9.0% (-1.49), better on both measures in both
+# worlds. 4 s: the thief -0.2% and -9.9%, she +1.0% and -18.0% (-1.83); 2.5 s hardly ever longer (one of her 24 seeds
+# changed); a margin of 0 (up at the first look with the way up predicted clear) the thief -1.8% and -6.4%, she +1.8%
+# and -17.2%; 0.6 s the thief +2.5% and -9.4%, she +0.1% and -4.9%. None of these is told from nothing at 24 seeds. A
+# walker's decision lasts 1-3 s in the v83 AI and a third of the next ones stand and a third turn, so a walk predicted
+# more than about a second past HANG_S seldom holds: at 4 s 84 of the thief's 106 longer hangs were put back for a
+# turn or a stop (52 of 69 at 3 s; hers 43 of 69 and 26 of 45), and the longer wait was lost time. Of her 92 longer
+# hangs over seeds 1-48 (both rules) 1 ended at its own end ('waited'), 11 with the way judged clear.
 HANG_LONGER = True
 HANG_HORIZON_S = 3.0
 HANG_MARGIN_S = 0.3
@@ -638,12 +641,15 @@ OFF_WALK_EDGE = 25.0   # units: a monster this near its walk edge (or predicted 
 # (a navigator a hunter didn't make: a retreat's). The Lie Detector and the safety stop are raised at the hang's
 # glances, whatever it chose. A touch taken so, in the climb after, is the cut's (POST_HIT), as after any hang. A touch
 # on the rope with the top taken (_climb_on, CLIMB_LOOK) is up again at once so, where it went down to hang. False: as
-# before. By the harness (as HANG_LONGER's, both rules at 3 s against HANG_LONGER alone, 24 seeds): the touch taken at
-# 30% of the thief's hangs and 28% of hers (68 of their 77 a Green Mushroom's: hers 11.4 EXP against her 2 s at 8.5
-# EXP a second, his 8.8 at 7.2), the hanging -29% in both worlds; the thief's EXP a minute +2.1% (t +0.71), touches
-# +1.5%; hers +2.9% (+1.18), touches -4.9% (-1.21). With the grind's rate on the platform at the top (TOP_RATE_ABOVE) the touch was
-# taken at 39% and 67% of the hangs, at 8.8 and 13 EXP a second on average, and both did worse than at the hunt's
-# rate: EXP -2.5% and -2.4% (t -0.64, -1.51), her touches +7.4% (+1.85), his -2.9% (-1.01).
+# before. By the harness (as HANG_LONGER's): the touch taken at 34% of the thief's hangs and 28% of hers over seeds
+# 1-48 (on 1-24, 68 of their 77 a Green Mushroom's: hers 11.4 EXP against her 2 s at 8.5 EXP a second, his 8.8 at 7.2).
+# Both rules against the 2 s hang, seeds 1-48: her EXP a minute +3.5% (t +2.32), touches -3.9% (-1.25), her hanging
+# -24%; the thief's EXP +0.9% (+0.38), touches +7.6% (+2.42), that hurt +5.8% (+1.65), touches at a rope's top level
+# (+1.2%). Against no hang (ROPE_HANG off): her EXP -2.3% (-1.27), touches -8.4% (-2.34), at a rope's top -18.5%
+# (-1.83); his -2.1% (-0.82), -2.9% (-1.14), -21.6% (-2.73). With the grind's rate on the platform at the top
+# (TOP_RATE_ABOVE, 24 seeds, the margin then from every look) the touch was taken at 39% and 67% of the hangs, at 8.8
+# and 13 EXP a second on average, and both did worse than at the hunt's rate: EXP -2.5% and -2.4% (t -0.64, -1.51),
+# her touches +7.4% (+1.85).
 HANG_TAKE = True
 KNOCK_REACH = KNOCK_VX * 2 * KNOCK_VY / GRAVITY + LAND_SLIDE  # units a touch knocks her standing (the planner's: 53.5)
 KNOCK_LOST_S = 30.0    # s a knock off the top costs where the planner has no way back (a bound)
@@ -761,12 +767,14 @@ class TopPrice:
 class _Wait:
     """A hang's wait as judged so far (Navigator._hang_judge): `s` from its start (HANG_S, or longer: HANG_LONGER),
     the walks it was last longer for (`walks`: [(the feed's track id, the track as predicted, its plan time's start)],
-    None till then), whether it was ever longer (`said`: its 'longer' event) and whether it was put back for good
-    (`back`: one of them off its walk)."""
+    None till then), whether it was ever longer (`said`: its 'longer' event), whether it was put back for good
+    (`back`: one of them off its walk), and when the way up is predicted clear (`clear`: kept while each look has it
+    clear already, so HANG_MARGIN_S counts from then)."""
     s: float = 0.0
     walks: list | None = None
     said: bool = False
     back: bool = False
+    clear: float | None = None  # (when the way up was last predicted clear, time.monotonic; None: not)
 
 
 @dataclass
@@ -3525,8 +3533,14 @@ class Navigator:
         now = time.monotonic()
         if HANG_LONGER and not wait.back and hit is not None:
             off = self._off_walk(wait, now) if wait.walks else None
-            got = None if off is not None else self._walks_off(rope, y, start + HANG_HORIZON_S - HANG_MARGIN_S - now)
-            until = None if got is None else now + got[0] + HANG_MARGIN_S - start
+            got = None if off is not None else                 self._walks_off(rope, y, max(0.0, start + HANG_HORIZON_S - HANG_MARGIN_S - now))
+            clear = None if got is None else now + got[0]
+            if got is not None and got[0] <= 0 and wait.clear is not None and wait.clear <= now:
+                clear = wait.clear  # (predicted clear since then: the margin from then, not from every look)
+            if clear is not None and clear + HANG_MARGIN_S - start > HANG_HORIZON_S + 1e-9:
+                clear = None
+            wait.clear = clear
+            until = None if clear is None else clear + HANG_MARGIN_S - start
             if until is not None and until > HANG_S and not self._hang_safe(rope, y, until - (now - start)):
                 until, off = None, "her hang place not clear that long"
             if until is not None and until > HANG_S:
@@ -3559,8 +3573,9 @@ class Navigator:
         in the way now): where every monster in the way now (flow.danger with the planner's reach, as _way_up's) walks,
         the first set-off whose climb, climb-over and STAND_PAST_S at the top (_up_leg) meets none of the newest state's
         monsters where each likeliest is by then (MonsterTrack.at: the way it's followed walking, at its kind's speed
-        from the game data, turning at its walk edges; one standing where it stands), her invulnerability counted. None
-        if one in the way now stands (or may set off either way), or none is clear within `within`."""
+        from the game data, turning at its walk edges; one standing where it stands), her invulnerability counted; 0 and
+        none with none in the way now. None if one in the way now stands (or may set off either way), or none is clear
+        within `within`."""
         q, now = route.hung_from(self.model, rope), time.monotonic()
         tracks = self._newest_tracks(now)
         if q is None or not tracks or within < 0:
@@ -3568,7 +3583,9 @@ class Navigator:
         immune = self._immunity(now)
         leg = self._up_leg(rope, q, y)
         way = [self.flow.danger(leg, [mo], linger=STAND_PAST_S) is not None for mo in tracks]  # (in the way now)
-        if not any(way) or any(w and not mo.vx for w, mo in zip(way, tracks)):
+        if not any(way):
+            return 0.0, []
+        if any(w and not mo.vx for w, mo in zip(way, tracks)):
             return None
         tracks = [replace(mo, vx=math.copysign(mo.speed, mo.vx)) if mo.vx else mo for mo in tracks]
         path = self.flow.path(leg, STAND_PAST_S)

@@ -117,10 +117,10 @@ KNOCK_S = 0.45
 # there: the monsters there and the belief's at its points, their EXP, her share, her kill time, net of its touches).
 # False: the hunt's alone (her time worth the loop's rate wherever she is, as the grind's stays and pulls weigh it: the
 # marginal value theorem's bar, behavior.patrol). Off, by the harness (D:/MapleHelper-scratch/recfix/rope2, 24 seeds
-# paired, HANG_LONGER at 3 s): on, she took the touch at 67% of her hangs and the thief at 39% (the platform's rate a
-# mean 13 and 8.8 EXP a second, against the hunts' 8.6 and 7.3 off), and both made less EXP than off (-2.4%, t -1.51;
-# -2.5%, -0.64), she with more touches (+7.4%, +1.85): the monsters above her don't leave while she waits, so the wait
-# costs her what her time is worth anywhere, not what she makes once she's up there.
+# paired, HANG_LONGER at 3 s, its margin then from every look): on, she took the touch at 67% of her hangs and the
+# thief at 39% (the platform's rate a mean 13 and 8.8 EXP a second, against the hunts' 8.6 and 7.3 off), and both made
+# less EXP than off (-2.4%, t -1.51; -2.5%, -0.64), she with more touches (+7.4%, +1.85): the monsters above her don't
+# leave while she waits, so the wait costs her what her time is worth anywhere, not what she makes once she's up there.
 TOP_RATE_ABOVE = False
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read

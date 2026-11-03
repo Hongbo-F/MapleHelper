@@ -474,6 +474,23 @@ def test_a_walker_that_will_walk_off_the_top_has_her_hang_past_hang_s(tree_map, 
     assert _steps(nav) == ["hang", "regardless"] and HANG_S <= nav.clock.t - NOW < HANG_S + 0.1
 
 
+def test_the_longer_wait_ends_its_margin_after_the_predicted_clear_not_later(tree_map, monkeypatch):
+    """The same walker, the planner's reach (_way_up's, with its spread) never calling the way clear: she goes up at
+    the longer wait's end ('waited', no backstop), HANG_MARGIN_S after the look that first has the way up predicted
+    clear, the margin not counted again from each look after it (which ran on to HANG_HORIZON_S)."""
+    rope = _rope(tree_map)
+    nav = _navigator(tree_map, monkeypatch, [_track(1, 0.0, 10, vx=-100.0)], y=rope.top + 85)
+    _walking(nav)
+    d, _ = nav._walks_off(rope, rope.top + 85, nv.HANG_HORIZON_S)
+    real = nav._way_up_hit
+    monkeypatch.setattr(nav, "_way_up_hit", lambda rope, y: real(rope, y) or (nv.MonsterTrack(10, -60.0), 0.5))
+    text = nav._hang(rope, rope.top + 85, "a horny-mushroom on 10 by its top")
+    held = nav.clock.t - NOW
+    assert text.startswith(f"up after {held:.1f} s, the way up predicted clear by then") and _steps(nav)[-1] == "waited"
+    assert d + nv.HANG_MARGIN_S - 1.0 / HZ <= held <= d + nv.HANG_MARGIN_S + 2.0 / HZ < nv.HANG_HORIZON_S
+    assert not any(kw.get("kind") == "backstop" for _, kw in nav.events)
+
+
 def test_the_longer_wait_goes_back_to_hang_s_once_its_walker_stops(tree_map, monkeypatch):
     """The same Horny stops at 1 s, at about x -100 (43 from its walk edge: not its end's turn): the longer wait is
     put back ('back': it stopped) and she goes up regardless at HANG_S from the hang's start."""
