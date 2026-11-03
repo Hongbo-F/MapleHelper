@@ -1,4 +1,5 @@
 import copy
+import functools
 import os
 from pathlib import Path
 
@@ -50,6 +51,20 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def config_data():
     return copy.deepcopy(BASE_CONFIG)
+
+
+def _own_lab(build, live: Path, own: Path):
+    """localization.locate.build with her lab folder `lab` under the live lab `live` (the lab itself, or a character's
+    folder in it) taken as the same folder under `own`: her models looked for in a test's own lab, never the live one."""
+    top = os.path.normcase(os.path.abspath(live))
+
+    @functools.wraps(build)
+    def built(model, template, lab, *args, **kwargs):
+        p = os.path.normcase(os.path.abspath(lab))
+        if p == top or p.startswith(top + os.sep):
+            lab = own / os.path.relpath(p, top)
+        return build(model, template, lab, *args, **kwargs)
+    return built
 
 
 @pytest.fixture(autouse=True)
@@ -117,6 +132,15 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(paths.Files, "damage", property(
         lambda self: paths.DAMAGE if not self.folder else tmp_path / f"damage-{self.folder}.json"), raising=False)
     monkeypatch.setattr(damage, "THREADED", False)
+    # ... nor her scene's models from the live lab: her plate's model and pose bank (lab/plate_1366x768.npz,
+    # poses_1366x768.npz; another character's under lab/characters/<hers>/), which the Senses of eyes at 1366x768 with
+    # her name tag load from her lab folder (paths.of().lab) for her scene's locator (localization.locate.build). Where
+    # the live lab had them (and Tree Dungeon's art cached in lab/mapart), that locator placed her in 7 tests whose
+    # frames expect her dot and tag (test_framecheck, test_bench, test_window_size), failing them in the main checkout
+    # only. A lab folder under the live lab is the same folder under the test's own lab (none there: her place as
+    # before); a test that wants a locator saves the models in a folder of its own and builds from that.
+    from gamelab.localization import locate
+    monkeypatch.setattr(locate, "build", _own_lab(locate.build, paths.LAB, tmp_path / "lab"))
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
 
