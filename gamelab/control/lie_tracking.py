@@ -17,12 +17,18 @@ found the board's printed patterns 4 times a second and recorded them: this foll
   loop's steps waited 18-21 ms with a save written there). Each round's board pictures go down its stdin, one when it
   is ready for the next: behind, it takes the newest (the frames between counted `skipped`), as the 10 fps clip showed
   it can (the tracker goes by each frame's own time).
+- Each answer is where the cursor would have gone (the user, 2026-11-02: "record telemetry on what the tracker would
+  have moved the cursor to as part of the persisted logs"), the target's centre in three coordinates: `board` (px on
+  the 750 x 500 board), `client` (px in the game's own 1366 x 768 client area: `board` + its corner there,
+  lie_target.BOARD_AT_NATIVE) and `desktop` (px on the screen, where a cursor move would aim: `client` + the client
+  area's corner on the screen, window.client_rect, looked at once in ORIGIN_POLL_S at most; None without the window).
 - Each round is a file, paths.LIE_TARGETS/<YYYYmmdd-HHMMSS>.jsonl (the board's first sight), written by that process: a
   first line saying what it is, then a line an answer (`t`: monotonic s, `at`: the clock, `seq` and `run`: the
-  service's frame number and run, which the alarm clip's index has too, so the clip's frames join; `x`, `y`: the
-  target's centre on the board, `screen`: on the client, `angle`: rad, `score`, `white`: the white blob's own centre,
-  `ms`: the step's time), none before the target has been seen white; the last line the round's `end`: why, frames
-  stepped, answers, skipped, the step's median and worst ms.
+  service's frame number and run, which the alarm clip's index has too, so the clip's frames join; `board`, `client`,
+  `desktop`; `angle`: rad, `score`, `white`: the white blob's own centre, `ms`: the step's time), none before the target
+  has been seen white; the last line the round's `end`: why, frames stepped, answers, skipped, the step's median and
+  worst ms. The same answers go into the service's telemetry (its persisted log, lab/telemetry/<time>-perceive.jsonl):
+  a `lie_target` record each (the round's name added), and a `lie_target_round` record at its begin and end.
 """
 
 import json
@@ -36,7 +42,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import paths
+from .. import paths, telemetry
 from ..localization import rate
 
 ALARM_POLL_S = 0.5
@@ -45,6 +51,7 @@ BOARD_GONE_S = 3.0     # the board not seen this long: the round is over
 ROUND_MAX_S = 60.0     # a round this long is over whatever (the longest seen: 10.4 s from START)
 CHILD_IDLE_S = 60.0    # the tracker's process stopped this long after the alarm has gone
 CHILD_THREADS = 6      # OpenCV's threads in it: 64 ms a frame on 6, 71 on 4, 52 on 12 (the machine busy)
+ORIGIN_POLL_S = 1.0    # how often the client area's corner on the screen is looked at again
 FPS = rate.HZ          # the frames' nominal rate: the service's (the tracker's look-back: lie_target.BACK_S)
 NO_WINDOW, BELOW_NORMAL = 0x08000000, 0x00004000
 NAME = "%Y%m%d-%H%M%S"
@@ -56,8 +63,13 @@ class LieTracking:
     `send(msg)`, `replies()` (an iterator of its replies, read on a thread of their own) and `stop()`."""
 
     def __init__(self, folder: Path | None = None, alarm: Path | None = None, spotter=None, log=None, child=None,
-                 fps: float = FPS):
+                 fps: float = FPS, title: str | None = None, origin=None):
         self.folder = Path(folder) if folder is not None else paths.LIE_TARGETS
+        self.title = title                  # the game window's (for the client area's corner on the screen)
+        self.find_origin = origin or self._client_corner  # () -> (left, top) on the screen, or None
+        self._origin: tuple | None = None
+        self._origin_at = -1e9
+        self._round_name: str | None = None  # the round the tracker's answers are of (for the telemetry)
         self.alarm = alarm
         self.spotter = spotter
         self.log = log or (lambda msg: None)
@@ -183,8 +195,26 @@ class LieTracking:
         from ..perception.lie_target import BOARD_AT_NATIVE
         x, y, w, h = BOARD_AT_NATIVE
         self.ready.clear()
-        if self._send(("frame", t, seq, run, round(clock, 3), np.ascontiguousarray(full[y:y + h, x:x + w]))):
+        if self._send(("frame", t, seq, run, round(clock, 3), np.ascontiguousarray(full[y:y + h, x:x + w]),
+                       self.origin(now))):
             r["sent"] += 1
+
+    def origin(self, now: float) -> tuple | None:
+        """The game's client area's corner on the screen, looked at again ORIGIN_POLL_S after the last look."""
+        if not 0.0 <= now - self._origin_at < ORIGIN_POLL_S:
+            self._origin_at = now
+            try:
+                self._origin = self.find_origin()
+            except Exception:  # noqa: BLE001 (no window: no desktop place)
+                self._origin = None
+        return self._origin
+
+    def _client_corner(self) -> tuple | None:
+        if not self.title:
+            return None
+        from .. import window
+        area = window.client_rect(window.find_game(self.title))
+        return area["left"], area["top"]
 
     def _board_up(self, full: np.ndarray) -> bool:
         if self.spotter is None:
@@ -198,7 +228,9 @@ class LieTracking:
         name = time.strftime(NAME)
         self.round = {"name": name, "started": now, "board_at": now, "sent": 0, "skipped": 0}
         self.rounds += 1
+        self._round_name = name
         self._send(("begin", name, {"fps": self.fps}))
+        telemetry.emit("lie_target_round", event="begin", round=name, file=str(self.folder / f"{name}.jsonl"))
         self._say(f"the Lie Detector's board seen: its target followed, written to {self.folder / (name + '.jsonl')}")
 
     def _end(self, why: str) -> None:
@@ -230,7 +262,11 @@ class LieTracking:
         try:
             for msg in child.replies():
                 if msg[0] == "ready":
+                    if len(msg) > 1 and msg[1] is not None:  # an answer: where the cursor would have gone
+                        telemetry.emit("lie_target", round=self._round_name, **msg[1])
                     self.ready.set()
+                elif msg[0] == "ended":
+                    telemetry.emit("lie_target_round", event="end", round=self._round_name, **msg[1])
                 elif msg[0] == "error":
                     self._say(f"the Lie Detector's target tracker failed: {msg[1]}")
         except Exception as e:  # noqa: BLE001 (its pipe broke: started again at the next alarm)
@@ -289,8 +325,9 @@ class Child:
 
 def serve(inp, out, folder: Path, fps: float = FPS) -> None:
     """The tracker's process: its loop over the messages on `inp` (pickled: ("begin", name, info), ("frame", t, seq,
-    run, clock, board RGB), ("end", why, skipped), ("quit",)), each round's file written in `folder`; ("ready",) on
-    `out` at the start and after each frame."""
+    run, clock, board RGB, the client area's corner on the screen or None), ("end", why, skipped), ("quit",)), each
+    round's file written in `folder`; on `out` ("ready",) at the start, ("ready", the answer's line or None) after each
+    frame and ("ended", the round's end line) at its end."""
     import cv2
 
     from ..perception import lie_target
@@ -315,7 +352,8 @@ def serve(inp, out, folder: Path, fps: float = FPS) -> None:
                 tracker = lie_target.TargetTracker(fps=info.get("fps", fps))
                 counts = {"frames": 0, "answers": 0, "ms": []}
             elif kind == "frame":
-                _, t, seq, run, clock, board = msg
+                _, t, seq, run, clock, board, corner = msg
+                line = None
                 if tracker is not None:
                     began = time.perf_counter()
                     a = tracker.step(cv2.cvtColor(board, cv2.COLOR_RGB2BGR), t)
@@ -324,29 +362,33 @@ def serve(inp, out, folder: Path, fps: float = FPS) -> None:
                     counts["ms"].append(ms)
                     if a is not None:
                         counts["answers"] += 1
-                        fh.write(json.dumps({"t": round(t, 4), "at": time.strftime("%H:%M:%S", time.localtime(clock))
-                                             + f".{int(clock * 1000) % 1000:03d}", "seq": seq, "run": run,
-                                             "x": round(a["x"], 1), "y": round(a["y"], 1),
-                                             "screen": [round(a["x"] + bx, 1), round(a["y"] + by, 1)],
-                                             "angle": round(a["angle"], 4), "score": round(a["score"], 3),
-                                             "white": a["white"], "ms": round(ms, 1)}) + "\n")
-                reply("ready")
+                        cx, cy = round(a["x"] + bx, 1), round(a["y"] + by, 1)
+                        line = {"t": round(t, 4), "at": time.strftime("%H:%M:%S", time.localtime(clock))
+                                + f".{int(clock * 1000) % 1000:03d}", "seq": seq, "run": run,
+                                "board": [round(a["x"], 1), round(a["y"], 1)], "client": [cx, cy],
+                                "desktop": None if corner is None else [round(corner[0] + cx, 1),
+                                                                         round(corner[1] + cy, 1)],
+                                "angle": round(a["angle"], 4), "score": round(a["score"], 3), "white": a["white"],
+                                "ms": round(ms, 1)}
+                        fh.write(json.dumps(line) + "\n")
+                reply("ready", line)
             elif kind == "end":
                 _, why, skipped = msg
                 if fh is not None:
                     ms = counts.get("ms") or [0.0]
-                    fh.write(json.dumps({"end": why, "frames": counts.get("frames", 0),
-                                         "answers": counts.get("answers", 0), "skipped": skipped,
-                                         "ms_median": round(float(np.median(ms)), 1),
-                                         "ms_max": round(float(max(ms)), 1)}) + "\n")
+                    end = {"end": why, "frames": counts.get("frames", 0), "answers": counts.get("answers", 0),
+                           "skipped": skipped, "ms_median": round(float(np.median(ms)), 1),
+                           "ms_max": round(float(max(ms)), 1)}
+                    fh.write(json.dumps(end) + "\n")
                     fh.close()
+                    reply("ended", end)
                 tracker = fh = None
             elif kind == "quit":
                 break
         except Exception as e:  # noqa: BLE001 (said, and the next message taken)
             reply("error", f"{type(e).__name__}: {e}")
             if kind == "frame":
-                reply("ready")
+                reply("ready", None)
     if fh is not None:
         fh.close()
 
