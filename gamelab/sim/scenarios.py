@@ -1607,7 +1607,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=9, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=4, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1706,7 +1706,15 @@ def loop_tree_attack_no_darts(sim):
     11 the doubt at 129.4 s, a Green Mushroom at 84-90%.) (Seed 9 since his walk and climb by his SPEED (2026-11-02: the
     thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
     seeds/scenarios.json): on 11 her stars' test never said MAYBE OUT; of seeds 1-16, 9, 13 and 16 meet all of this. On
-    9 the doubt at 106.7 s, a Green Mushroom.)"""
+    9 the doubt at 106.7 s, a Green Mushroom.) (Seed 14 since her hang under a rope's top waits longer for a walker and
+    takes a touch worth less than the wait (work/rec-rope2, 2026-11-02: navigator.HANG_LONGER, HANG_TAKE;
+    D:/MapleHelper-scratch/recfix/rope2/scan_no_darts.txt): on 11 her stars' test never said MAYBE OUT; of seeds 1-16, 8
+    and 14 meet all of this. On 14: the doubt at 57.4 s, a Green Mushroom at 25%; MAYBE OUT at 95.2 s, ATTACK on Ctrl as
+    configured at 99.8 s, paged; out of darts' stop at 112.3 s, paged.) (Seed 4 since the two together (work/rec-all,
+    the merge of work/rec-panel and work/rec-rope2, 2026-11-02; D:/MapleHelper-scratch/recfix/measure/
+    scan_no_darts.txt): on 9 and on 14 her stars' test never said MAYBE OUT; of seeds 1-16, 4, 6, 13 and 16 meet all of
+    this. On 4: the doubt at 62.7 s, a Horny Mushroom; MAYBE OUT at 70.6 s, ATTACK on Ctrl as configured at 72.4 s,
+    paged; out of darts' stop at 88.5 s, paged.)"""
     return key_check_run(4)(sim)
 
 

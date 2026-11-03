@@ -41,7 +41,7 @@ from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import client
 from ..control.actions import Actions
 from ..control.mover import STILL, Mover
-from ..control.navigator import Navigator, rope_at_top
+from ..control.navigator import Navigator, TopPrice, rope_at_top
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
 from ..localization.memory import Memory
@@ -110,6 +110,18 @@ STOP_ON_LOOK = True
 # 0.22 s more). A jump keyed from a look in that time comes while she's in the air (and is lost) or still sliding, from
 # where she no longer is.
 KNOCK_S = 0.45
+# What her time up a rope is worth to her hang under its top (`top_price`: control.navigator.HANG_TAKE, the user's
+# "sometimes it may make sense to just take the damage if there are a lot EXP to earn by killing off mobs above"): her
+# hunt's EXP a second (behavior.fight.landing_prices: the grind's loop's, Hunter.exp_rate, within its band) or, where
+# more, what the grind expects a second on the platform at the rope's top (`ground_rate`: behavior.grind, its stop
+# there: the monsters there and the belief's at its points, their EXP, her share, her kill time, net of its touches).
+# False: the hunt's alone (her time worth the loop's rate wherever she is, as the grind's stays and pulls weigh it: the
+# marginal value theorem's bar, behavior.patrol). Off, by the harness (D:/MapleHelper-scratch/recfix/rope2, 24 seeds
+# paired, HANG_LONGER at 3 s, its margin then from every look): on, she took the touch at 67% of her hangs and the
+# thief at 39% (the platform's rate a mean 13 and 8.8 EXP a second, against the hunts' 8.6 and 7.3 off), and both made
+# less EXP than off (-2.4%, t -1.51; -2.5%, -0.64), she with more touches (+7.4%, +1.85): the monsters above her don't
+# leave while she waits, so the wait costs her what her time is worth anywhere, not what she makes once she's up there.
+TOP_RATE_ABOVE = False
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read
 HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and her last arrow disagreed, at most
@@ -266,6 +278,8 @@ class Hunter:
         self.report = Report()  # what she did (a tour starts a new one at every stop)
         self.exp_rate: float | None = None  # EXP a second her hunting makes, as the hunt has it (the grind's loop's rate:
                                             # the landings' prices, behavior.fight.landing_prices); None: not known
+        # platform -> EXP a second the grind expects of her there now (behavior.grind's, for `top_price`); None: no grind
+        self.ground_rate: Callable[[int], float | None] | None = None
         # Her kills her EXP told of: when, and the kind its gain's size named (None: not known). The last EXP_MEMORY s
         # of them, for kill() to match to its target (`take_exp`), and the latest few for the fights and the ledger to
         # place (`told`).
@@ -409,7 +423,29 @@ class Hunter:
         avoiding them; its fighting trips keep clear of the monsters her memory has too (Navigator.remembered)."""
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
                          escort=fight.FightOnTheWay(self) if fighting else None, rng=rng, memory=self.memory,
-                         moves=self.moves, danger=lambda: self.danger)
+                         moves=self.moves, danger=lambda: self.danger, price=self.top_price)
+
+    def top_price(self, pid: int, kind: str) -> TopPrice | None:
+        """What her time on platform `pid` is worth and what a touch by `kind` costs her (control.navigator.TopPrice:
+        her hang under the top of a rope up to it, HANG_TAKE), as her landings are priced (behavior.fight.
+        landing_prices): her EXP a second, the hunt's or, more, the grind's on that platform (TOP_RATE_ABOVE:
+        `ground_rate`, set by behavior.grind); the touch's HP (attack.danger's Danger.taken of her max HP) in potions at
+        the user's prices, times the share of her touches that hurt; whether her HP as last read (the safety stop's
+        watch) is over its reserve (HpWatch.threshold) and that touch's HP (the reserve's touch of the kind, else
+        Danger.taken's). None until her max HP is read."""
+        prices = fight.landing_prices(self, self.danger)
+        most = self.max_hp
+        if prices is None or most is None:
+            return None
+        rate, words = prices.rate, "the hunt's"
+        above = getattr(self, "ground_rate", None)
+        if TOP_RATE_ABOVE and above is not None and (here := above(pid)) is not None and here > rate:
+            rate, words = here, f"platform {pid}'s"
+        w = self.hp_watch
+        mine = next((t for t in w.reserve.touches if t.kind == kind), None)
+        touch_hp = float(mine.hp) if mine is not None else self.danger.taken(kind) * most
+        ok = w.hp is not None and w.max_hp is not None and w.hp >= w.threshold(most, self.max_mp) + touch_hp
+        return TopPrice(rate, prices.touch(kind) * prices.hurt, ok, words)
 
     def knocked(self, s: Scene) -> bool:
         """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it) was told

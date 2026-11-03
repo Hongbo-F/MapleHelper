@@ -1415,3 +1415,23 @@ def test_a_bar_of_her_hp_is_priced_by_her_max_hp_as_read_at_the_users_prices():
     j = p.stop_on(a[0])
     p.learn_hp(a[0], 1.0, 60.0)
     assert p.net(j, 100.0) == pytest.approx(100.0 * (1 - 157.0 * p.kill_s * p.hp_rate(a[0], p.stops[j].x)))
+
+
+def test_her_exp_a_second_on_a_platform_is_its_stop_s_as_the_patrol_expects_it_now(monkeypatch):
+    """Grind._ground_rate (her hang under a rope's top up to the platform: Hunter.top_price, control.navigator's
+    HANG_TAKE), handed to the hunter at every look's pricing (Hunter.ground_rate): what the patrol expects at the
+    platform's stop now (Patrol.expect: nothing seen, the belief's stock at its two Horny Mushroom points), net of its
+    touches (Patrol.net), over its shooting at her kill time and patrol.STOP_S; 0 with nothing expected; None for a
+    platform with no stop."""
+    model, a, b, p = _two_areas()
+    g = object.__new__(Grind)
+    g.patrol, g.h = p, SimpleNamespace(max_hp=None)
+    monkeypatch.setattr(grind, "time", SimpleNamespace(monotonic=lambda: 5.0))
+    g._price_hp()
+    assert g.h.ground_rate == g._ground_rate
+    j = p.stop_on(a[0])
+    exp, _, shoot, _ = p.expect(j, 5.0)
+    assert exp > 0 and g._ground_rate(a[0]) == pytest.approx(p.net(j, exp) / (shoot + patrol.STOP_S))
+    monkeypatch.setattr(p, "expect", lambda i, t: (0.0, 0.0, 0.0, 41.0))
+    assert g._ground_rate(a[0]) == 0.0
+    assert g._ground_rate(9999) is None

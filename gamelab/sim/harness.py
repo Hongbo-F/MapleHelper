@@ -139,7 +139,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    them that took HP (World.touch_place). Live on 2026-11-02, 19-23 of the hour's 170 touches over 68
                    climbs up the rope at x -80 (11 to 10): about 0.3 a climb. And her hangs under a rope's top
                    (control.navigator.ROPE_HANG: 'hangs', 'hang_s' the seconds they took, 'hang_regardless' those up
-                   regardless after HANG_S: telemetry events 'rope_hang')
+                   regardless after HANG_S, 'hang_clear' the way up clear, 'hang_waited' up at a longer wait's end
+                   (HANG_LONGER), 'hang_took' the touch taken (HANG_TAKE), 'hang_touched', and 'hang_longer' those
+                   that went past HANG_S: telemetry events 'rope_hang')
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
@@ -1021,12 +1023,17 @@ def _rope_tops(world, end: float) -> dict:
 
 def _hangs(events: list[dict]) -> dict:
     """rope_tops' hangs (see the top): her hangs under a rope's top (control.navigator.ROPE_HANG: telemetry events
-    'rope_hang', step 'hang' at a hang's start), the seconds they took (`hang_s`, from their ends' `s`), and those that
-    went up regardless after HANG_S (`hang_regardless`)."""
+    'rope_hang', step 'hang' at a hang's start), the seconds they took (`hang_s`, from their ends' `s`), and how they
+    ended: up regardless after HANG_S (`hang_regardless`), the way up clear (`hang_clear`), up at a longer wait's end
+    as predicted clear (`hang_waited`: HANG_LONGER), the touch taken (`hang_took`: HANG_TAKE), touched in it
+    (`hang_touched`); and the hangs that went longer than HANG_S at some look (`hang_longer`: their 'longer' event)."""
     hangs = [r for r in events if r.get("kind") == "rope_hang"]
-    return {"hangs": sum(1 for r in hangs if r.get("step") == "hang"),
-            "hang_s": round(sum(r.get("s", 0.0) for r in hangs if r.get("step") != "hang"), 1),
-            "hang_regardless": sum(1 for r in hangs if r.get("step") == "regardless")}
+    out = {"hangs": sum(1 for r in hangs if r.get("step") == "hang"),
+           "hang_s": round(sum(r.get("s", 0.0) for r in hangs if r.get("step") != "hang"), 1),
+           "hang_regardless": sum(1 for r in hangs if r.get("step") == "regardless")}
+    for step in ("clear", "waited", "took", "touched", "longer"):
+        out[f"hang_{step}"] = sum(1 for r in hangs if r.get("step") == step)
+    return out
 
 
 def _trips(world, records: list[dict], end: float) -> dict:

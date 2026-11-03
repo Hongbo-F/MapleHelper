@@ -95,9 +95,9 @@ Topics (map units; producers build the records, ui.state folds them):
             shots, why_not, episode, nth; kill_moved's         control.navigator), kill_moved (her kill put on
             gained, old, old_platform, old_x, new,             another monster by the tracker, from 2026-11-02:
             platform, x; rope_hang's step, x, under, s         behavior.ledger), rope_hang (a hang under a rope's
-                                                               top and its end, from 2026-11-02:
-                                                               control.navigator); `watch` and the perception
-                                                               service:
+            (its end's; 'took': left, rate, wait_exp,          top and its end, from 2026-11-02:
+            touch_exp, knock_s; a longer wait's: wait;         control.navigator; in it 'longer' and
+            'longer': at, clear, wait; 'back': at)             'back'); `watch` and the perception service:
                                                                died, exp_gain, hp_drop, touch, touch_fix, victim (a gain bound to
                                                                the monster her attack took), let_go (not it:
                                                                why 'seen alive', 'retold' or 'another seen
