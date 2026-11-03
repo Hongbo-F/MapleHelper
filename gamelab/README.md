@@ -5272,7 +5272,9 @@ touches in the first 10 s, the rest of the run's 10 s hunt):
 | all of it met | 0 of 12 | 7 | 10 (not 4: no 'touched' jump; 12: one far claw) |
 
 **The harness** (seeds 1-48 paired, 5 minutes, against b7f7308's cached sides, code bb0bbe8b...; this branch's cached
-under a561c633..., the same to the digit on seeds 1 and 2 as its 12-seed run before the switches were folded in:
+under f202237's code a561c633..., which the branch's tip gives to the digit on seeds 3 and 9 of both (`spot_tip_*.txt`:
+its later commits re-seed two scenarios and change docs and a test), and the same to the digit on seeds 1 and 2 as its
+12-seed run before the switches were folded in:
 `pair_thief48.txt`, `pair_mage48.txt`; at 24 seeds `pair_thief24.txt`, `pair_mage24.txt`). The thief's standard command:
 
 | a run of 5 minutes | b7f7308 | this | diff (se; t) |
