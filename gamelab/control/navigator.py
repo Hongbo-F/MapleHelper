@@ -1514,9 +1514,10 @@ class Navigator:
         w = s.where
         if touch is None or any(t.platform == w.platform.id and abs(t.x - w.x) <= TOUCHER_NEAR for t in tracks):
             return None
-        kind = hardest(self.model)
-        if kind is None:
+        names = {n for ns in self.model.monsters_by_platform.values() for n in ns}
+        if not names:
             return None
+        kind = kind_of(max(names, key=lambda n: (self.model.mob_damage.get(n, 0.0), n)))
         half, top = touch_box(kind, self.tracker.body.get(kind))
         return MonsterTrack(w.platform.id, w.x, self.tracker.walking.get(kind, DEFAULT_SPEED), 0, half,
                             0.0 if standing else None, touch["at"] - time.monotonic(), MONSTER_HEIGHT.get(kind, top), 0,
@@ -4085,12 +4086,6 @@ def fresh_touch(senses, s: Scene, slack: float = 0.0) -> dict | None:
             or not -slack <= s.t - touch.get("at", -1e18) <= TOUCHER_S:
         return None
     return touch
-
-
-def hardest(model: MapModel) -> str | None:
-    """The kind of the map's monsters that touches hardest (its game data's PADamage), R7's stand-in's; None with none."""
-    names = {n for ns in model.monsters_by_platform.values() for n in ns}
-    return kind_of(max(names, key=lambda n: (model.mob_damage.get(n, 0.0), n))) if names else None
 
 
 def standing(s: Scene) -> bool:
