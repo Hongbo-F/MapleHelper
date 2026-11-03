@@ -524,6 +524,9 @@ def magic_band(s: Search, near: float, far: float, bottom: float, top: float) ->
 # A touch by a monster within this many s of its respawn came from its spawn point, onto her or beside her (World.
 # fresh_log): what a waiting place by a spawn point costs.
 FRESH_S = 1.5
+# ... and one within this many s of it, a newborn as the live hour's were counted (the cornered study's verify-R3: a
+# touch within 4 s of a newborn's first sighting within 70 of her; World.newborn_log): what the spawn guard is for.
+NEWBORN_S = 4.0
 # ... but a hit pushes it (and it flinches) only if its damage, after the monster's defence (x 100 / (PDDamage + 100),
 # as STAR_DAMAGE's), reaches its `pushed` in the game data: 1 for every kind of the first map (any damage, as above),
 # 40 for a Horny Mushroom and 25 for a Green Mushroom on Tree Dungeon, Forest Up North II, 30 for an Axe Stump and 25
@@ -1075,6 +1078,11 @@ class Realism:
                                  # random points clear of monsters by SPAWN_CLEAR; 0: `respawn` s after its death, each
                                  # on its own (the default until 2026-10-31; harness `--world clock-respawn`)
     respawn_cap: float | None = None
+    # A scenario's set-up of the map's pass (with respawn_tick): the monsters of these indices (the scenario's, in its
+    # order) dead long since at the start, their points free for the first pass, and that pass this many s from the
+    # start (None: at a phase drawn, as every run's); the spawn guard's set-piece (loop_tree_respawn_pass)
+    vacant: tuple = ()
+    first_pass: float | None = None
     full_tabs: tuple = ()        # her inventory's tabs full from the start ("Use", "Etc": a drop of one refused with
                                  # FULL_MESSAGE; the harness's `--world etc-full`); (): room for everything
     fills_after: tuple = ()      # ((tab, n), ...): a tab full once she has picked up n items into it (the harness's
@@ -1154,6 +1162,14 @@ class Realism:
     newborns_touch: bool = False  # a monster the map has just spawned touches her from its birth (as the world had it
                                   # until 2026-11-02: the harness's `--world newborns-touch`); False: only once it has
                                   # faded in, NEWBORN_SOLID_S after (as live)
+    hit_inside: bool = False      # a star's line checked to its hit point taken 1 unit inside the monster's platform
+                                  # alone (as every world had it until 2026-11-03: the harness's `--world hit-inside`);
+                                  # False: the client's own hit point too where it's past the platform's end (its body
+                                  # over a wall rising from there, up close: sight_stop, reach.CLIENT_HIT_POINT)
+    skill_row: float | None = None  # how far ahead of her a skill's (Lucky Seven's) shot row starts for the line's hit
+                                  # points (reach.hit_point's `start`): None, reach.SEARCH_START's 65 as for the regular
+                                  # attack (the stack's assumption, R6's); 0.0 at her x, RustMS's port's for a skill
+                                  # (the harness's `--world hit-row-0`; the review of 2026-11-03)
     knock: tuple[float, float, bool, bool] | None = None  # her knock (vx, vy, whether its push sideways adds to her
                                   # speed, whether she lands from it at her walk's speed at most): None, the world's own
                                   # (KNOCK_VX, KNOCK_VY, KNOCK_ADDS, KNOCK_LANDS_WALKING: the client's, as R1-R3's frames
@@ -2188,6 +2204,8 @@ class World:
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
                                                         # respawn (from its spawn point)
+        self.newborn_log: list[tuple[float, float]] = []  # ... and within NEWBORN_S of it (the spawn guard's newborns:
+                                                          # behavior.hunt._respawn_guard)
         # ... and where each was: (t, her mode then: ground, air or rope, her x, her feet's y), one for each of
         # touch_log's; her climbs up a rope onto the platform at its top (climb_log: t, the rope's x, the platform);
         # and her grabs of a rope (grab_log: t, the rope's x, her feet's height under its top then). The live hour of
@@ -2354,7 +2372,11 @@ class World:
             over = len(self.monsters) - self._respawn_cap()
             for m in self._tick_rng.sample(self.monsters, max(0, over)):
                 m.alive, m.died_at, m.died_x = False, -1e6, m.home
-            self._push(int(self._tick_rng.uniform(0.0, self.realism.respawn_tick) * 1000), "map_tick")
+            for i in self.realism.vacant:  # (a scenario's: Realism.vacant, first_pass)
+                m = self.monsters[i]
+                m.alive, m.died_at, m.died_x = False, -1e6, m.home
+            first = self._tick_rng.uniform(0.0, self.realism.respawn_tick)
+            self._push(int((first if self.realism.first_pass is None else self.realism.first_pass) * 1000), "map_tick")
         for m in self.monsters:
             self._camps_watch(m)
         for at, side in self.noise.turned:
@@ -2376,9 +2398,11 @@ class World:
                     wanted.append((s.name or str(s.mob_id), p.id, s.x))
         else:
             wanted = list(monsters)
-        for i, (name, pid, x) in enumerate(wanted):
+        for i, (name, pid, x, *first) in enumerate(wanted):
             m = self._monster(i, name, pid, float(x), random.Random(self.rng.random()))
             m.start(0.0, float(x))
+            if first and not isinstance(m, SimJumper):  # (name, platform, x, s): it stands that long first, then its
+                m.d, m.t1 = 0, float(first[0])           # own walk (a set-piece's look, as live's tracks had them)
             self.monsters.append(m)
             self._keep(m)
 
@@ -3129,6 +3153,8 @@ class World:
         self.touch_place.append((self.t, self.mode, round(self.x, 1), round(self.y, 1)))
         if m.born is not None and self.t - m.born < FRESH_S:
             self.fresh_log.append((self.t, damage))
+        if m.born is not None and self.t - m.born < NEWBORN_S:
+            self.newborn_log.append((self.t, damage))
         if evaded:
             self.evaded += 1
             self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: MISS")
@@ -3335,13 +3361,16 @@ class World:
             return first[int(self.chance("band") * len(first))]
         return first[0] if first else None
 
-    def sight_stop(self, m: SimMonster):
+    def sight_stop(self, m: SimMonster, skill: bool = False):
         """What stops the star's line from her now to monster `m` (reach.wall_between, by reach.LINE: from the
         foothold group of the platform she last stood on, her feet where they are now, in a jump too; m's body
-        as the attack picks it, World.top), or None."""
+        as the attack picks it, World.top), or None. To the client's own hit point too, whatever her decisions take
+        (reach.CLIENT_HIT_POINT): past a wall rising from its platform's end where its body is over it, up close; not
+        with Realism.hit_inside. A skill's (`skill`: Lucky Seven's) row from Realism.skill_row ahead of her if set."""
         mx = m.at(self.t)
+        row = self.realism.skill_row if skill else None
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
-                                  body=(self.top(m), m.half))
+                                  body=(self.top(m), m.half), client=not self.realism.hit_inside, row_start=row)
 
     def _press_magic(self, action: str, at: float) -> None:
         """Her attack key (`action` 'attack', her wand's swing, or 'skill', Magic Claw) pressed outside the lock, as the
@@ -3501,7 +3530,7 @@ class World:
             self.darts_out_at = self.t if self.darts_out_at is None else self.darts_out_at
         elif not skill and not swipe and self.darts_left is not None:
             self.darts_left -= 1
-        stop = None if target is None or swipe else self.sight_stop(target)
+        stop = None if target is None or swipe else self.sight_stop(target, skill)
         if stop is not None:
             target, stop = None, (target, stop)
         rise = self.last_plat.y_at(self.last_plat.clamp(self.x)) - self.y  # her height above where she last stood

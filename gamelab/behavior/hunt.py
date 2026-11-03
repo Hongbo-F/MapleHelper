@@ -101,6 +101,7 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import telemetry
 from ..attack import reach, ropes, spots
 from ..attack.ropes import Refuge
+from ..attack.danger import NEWBORN_SEEN, NEWBORN_TOUCH, PASS_AFTER, PASS_BEFORE, RESPAWN_NEAR
 from ..attack.spots import GROUND_MARGIN, Spot
 from ..attack.stance import (MIN_MOVE, act_text, beside, close_to, drop_limits, jump_hits, open_above, overhead,
                              stance, too_close)
@@ -355,6 +356,38 @@ FRESH_S = OWN_S
 OLD_S = 60.0
 ALLOW_OLD = 1.0
 SAFER_MARGIN = 0.05
+# The spawn guard (`_respawn_guard`, from 2026-11-03: the cornered clip's R3, the user's "good to merge"; README, The
+# spawn guard): a trip to a pile (`_go_for`: the sweep's, a valuable pile's; one within TRIP_AHEAD_S of her) whose stand
+# there (from her arrival, or its drops' landing, to sweep.STAND_PAST_S after it) would come at or after the map's next
+# pass (the hunter's spawn clock, localization.spawnclock, once sure) waits where she is for that pass to be seen
+# (PASS_SEEN_S after it: '<rule>: the pass') where going has her within attack.danger.RESPAWN_NEAR of more free spawn
+# points of monsters whose touch hurts about the pass (PASS_BEFORE before it to PASS_AFTER after: her stand there, her
+# walk there along its platform) than waiting does (where she is): then she decides again with what the
+# pass brought in sight (the sweep's guards: a newborn shot first from where she is, or the pile left), not walking onto
+# the points as they fill (the clip's episodes A to C, her trips planned before the newborns were there), and by one
+# herself she waits off it (`_off_points`). Only where what the newborns are expected to add at the user's prices (each
+# point's fill at the pass, `_fill`, times NEWBORN_TOUCH less NEWBORN_SEEN, the touch's HP in potions, the share of her
+# touches that hurt: behavior.fight.landing_prices) is more than the wait costs her (to the pass seen, at her EXP a
+# second): at a fill of 0.27 and two Horny Mushroom points a wait under about 0.9 s, one 0.45 s. The itinerary stays
+# as the sweep solved it. And waiting (rule 9, `_safest_along`) she counts each such point's newborn
+# (attack.danger.respawn_risk) where she'd be over the next WAIT_AHEAD_S (PASS_BEFORE before a pass to PASS_AFTER
+# after it). (The first build, 2026-11-03, left a pile out of the sweep's solve whenever her stand there would meet a
+# pass, however far: 20-40 times a run, the itinerary changed each time, piles picked up 16-100 s later or never; in 4
+# runs of the standard worlds her EXP a minute 1-9% less. The second held a trip only while her stand would start
+# inside the window, PASS_BEFORE to PASS_AFTER about the pass: in the set-piece, loop_tree_respawn_pass, she then went
+# before the pass and met the newborns on her way. The third held for any point by her walk or her stand, where she
+# waited not set against it: in her standard world, seeds 1-12, her touches by a newborn 74 -> 93, held by a point
+# that then filled by her.) False: as before (the danger's free points at every moment, no clock).
+RESPAWN_GUARD = True
+TRIP_AHEAD_S = 3.0     # guess: s of travel to a pile at most for her stand there to be timed (farther: a guess of s)
+PASS_SEEN_S = 0.2      # s after a pass by which a look has its newborns (the spawn watch: at their first frame shown,
+                       # alpha 0.065 at the median, perception.spawns; and a look's latency)
+WAIT_AHEAD_S = 1.0     # guess: s ahead a place she waits at is held to the pass (a step away takes 0.3-0.7 s, a look)
+OFF_MARGIN = 5.0       # units past RESPAWN_NEAR a trip's wait for the pass is made at, by a free point (`_off_points`)
+FORGET_LOST_S = 21.0   # s of looks lost (three of the map's passes) after which the spawn clock forgets (`_lost_for`)
+# A free point's chance of a newborn at a pass where nothing better is known (the hunt loop: behavior.patrol's prior,
+# REFILL_P, 0.27; the grind's own from what it learned, Grind._fill)
+FILL_PRIOR = 0.27
 
 
 def bar_exp(max_hp: float) -> float:
@@ -592,6 +625,7 @@ class Hunt:
                     paused = time.monotonic()
                     back = self.h.senses.regain(lost, end)
                     self._paused(time.monotonic() - paused)
+                    self._lost_for(time.monotonic() - paused)
                     if back is None:
                         break
                 except KeyDoubt as doubt:  # her keys doubted (her regular attack, her casts, her moves, out of
@@ -602,7 +636,9 @@ class Hunt:
                         if doubt.doubt.kind == "stall" and getattr(out, "what", None) in ("followed", "switched"):
                             self._progress = time.monotonic()  # (her keys put right: the stretch starts again)
                     except LookLost as lost:  # (a look of the check's failed its checks: stand still, as above)
+                        lost_at = time.monotonic()
                         back = self.h.senses.regain(lost, end)
+                        self._lost_for(time.monotonic() - lost_at)
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
@@ -614,7 +650,9 @@ class Hunt:
                         else:
                             self.h.read_stats()
                     except LookLost as lost:  # (a look of the read's failed its checks: stand still, as above)
+                        lost_at = time.monotonic()
                         back = self.h.senses.regain(lost, end)
+                        self._lost_for(time.monotonic() - lost_at)
                     self._paused(time.monotonic() - paused)
                     if back is None:
                         break
@@ -687,6 +725,15 @@ class Hunt:
             self.report.on_the_way += 1
         self.report.standby_kills = len(after)
         return after
+
+    def _lost_for(self, seconds: float) -> None:
+        """Her looks lost for `seconds` (LookLost: Senses.regain): past FORGET_LOST_S the map's spawn clock forgets the
+        passes it saw (the game back may be another server's or channel's, its pass elsewhere: the review of
+        2026-11-03), the spawn guard off until it's sure again."""
+        clock = getattr(self.h, "spawn_clock", None)
+        if clock is not None and seconds > FORGET_LOST_S and clock.passes:
+            clock.forget()
+            self.log(f"  the spawn clock forgets its passes (looks lost {seconds:.0f} s)")
 
     def _paused(self, seconds: float) -> None:
         """She stood still `seconds` (LookLost: Senses.regain): her clocks move on by as much, so the pause isn't time
@@ -1116,7 +1163,8 @@ class Hunt:
             can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
             around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward, goal=goal, edges=edges, up=up,
             pace=fight.pace_of(self.h, s), touch=self.fs.touch, limits=limits, moves=self.fs.moves,
-            castable=castable, **fight.wounds_of(self.h, s)), s, castable)
+            castable=castable, clawed=fight.clawed(self.h, s, visible + hidden), **fight.wounds_of(self.h, s)), s,
+            castable)
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something
@@ -1617,6 +1665,127 @@ class Hunt:
         return tuple(sweep.Guard(m, attacks.kill_s(m) if attacks is not None else 1.0,
                                  self.tour.exp.get(m.kind, self._avg_exp())) for m in met), None
 
+    def _respawn_guard(self, s: Scene, pile: Pile, t0: float) -> str | None:
+        """Why her trip to pile `pile` waits for the map's pass to be seen (RESPAWN_GUARD, see its comment), her stand
+        there from `t0` s after look `s` (`_stand_s` and sweep.STAND_PAST_S long): where going would have her about the
+        next pass (PASS_BEFORE before it to PASS_AFTER after: her stand, if it meets that, and her walk there along its
+        platform from where she is, at WALK_SPEED) against where waiting would (where she is, or off a point by her:
+        `_off_points`), the free spawn points of kinds that count within RESPAWN_NEAR of each (attack.danger's
+        respawn_points, by every monster she knows of: `_around`), each one's newborn priced at the user's prices
+        (`_fill`, NEWBORN_TOUCH less NEWBORN_SEEN, landing_prices' touch and the share that hurt): she waits where going
+        costs more than waiting by more than the wait (to PASS_SEEN_S after the pass, at her EXP a second). None: she
+        goes (or no clock sure yet, no danger, her HP not read, nothing to the pass)."""
+        clock, d = getattr(self.h, "spawn_clock", None), getattr(self.h, "danger", None)
+        if not RESPAWN_GUARD or clock is None or d is None or not d.any or not clock.sure:
+            return None
+        now = time.monotonic()  # (the looks' clock: Scene.t, the feed's events; a look's frame may be older than now)
+        due = clock.next_pass(now - PASS_BEFORE)
+        first, last = due - PASS_BEFORE, due + PASS_AFTER  # (the window about it she'd better be off a free point in)
+        stand0 = now + t0
+        if stand0 + self._stand_s(pile) + sweep.STAND_PAST_S < first:
+            return None  # (done before the pass)
+        pid, (lo, hi) = pile.platform, self._extent(pile)
+        around = self._around(s)
+        going = [(lo, hi)] if stand0 <= last else []  # (her stand meets the window)
+        here = s.platform.id if s.platform is not None and s.where is not None else None
+        if here == pid and stand0 > first:  # (her walk there along it while the window lasts)
+            x = s.where.x
+            goal = min(max(x, lo), hi)
+
+            def walked(t: float) -> float:
+                return x + (goal - x) * min(1.0, max(0.0, (t - now) * WALK_SPEED / max(abs(goal - x), 1e-9)))
+            a, b = walked(first), walked(min(last, stand0))
+            going.append((min(a, b), max(a, b)))
+        go = {q for g0, g1 in going for q in d.respawn_points(pid, g0, g1, around)}
+        if not go:
+            return None
+        stay = set() if here is None or self._off_points(s) is not None else \
+            set(d.respawn_points(here, s.where.x, s.where.x, around))
+        prices = fight.landing_prices(self.h, d)
+        if prices is None:
+            return None
+        each = self._fill(clock.period) * (NEWBORN_TOUCH - NEWBORN_SEEN) * prices.hurt
+        touch = sum(each * prices.touch(kind) for _, kind in go) - sum(each * prices.touch(kind) for _, kind in stay)
+        wait = max(0.0, due + PASS_SEEN_S - now)
+        if touch <= wait * prices.rate:
+            return None
+        x, kind = min(go - stay or go, key=lambda q: min(abs(q[0] - lo), abs(q[0] - hi)))
+        key = (pid, round(x), round(due, 1))
+        if key != getattr(self, "_respawn_said", None):  # (once a point a pass: she looks again every 0.1 s)
+            self._respawn_said = key
+            if telemetry.recording():
+                telemetry.emit("event", kind="respawn_guard", what="trip", platform=pid, x=round(x), point_kind=kind,
+                               pass_in=round(due - now, 2), touch=round(touch, 2), wait=round(wait * prices.rate, 2),
+                               clock=clock.record())
+        return (f"a {kind} spawn point at x {x:.0f} on {pid} may fill at the pass in {due - now:.1f} s (its newborn "
+                f"{touch:.1f} EXP more than waiting, the wait {wait * prices.rate:.1f})")
+
+    def _off_points(self, s: Scene) -> tuple[str, float, float] | None:
+        """Where the spawn guard's wait for the pass is made when look `s` has her within RESPAWN_NEAR of a free spawn
+        point of a kind that counts on her platform: a walk along it (the way, how far, to where) to the nearest place
+        OFF_MARGIN past every such point's RESPAWN_NEAR, GROUND_MARGIN in from its ends, with no monster that counts in
+        the way (`_in_the_way`) and MIN_MOVE or more off; None: none (she waits where she is, and the guard prices her
+        staying there). The walk is blind (actions.walk), so only one that's safe all the way (the review of 2026-11-03:
+        uncapped, it walked her 116-230 units across the free points it was keeping her from, at the pass): away from
+        every such point by her (none of them on the side she walks to), passing within RESPAWN_NEAR of no other on the
+        way, at most WAIT_STEP (rule 9's step) and done before the pass's window opens (WALK_SPEED, PASS_BEFORE before
+        the clock's next pass); none from a look a touch's knock may still be moving her in (fight.knocked_move's), as
+        rule 9's (`_wait_place`)."""
+        d, clock = getattr(self.h, "danger", None), getattr(self.h, "spawn_clock", None)
+        if d is None or s.platform is None or s.where is None or clock is None or not clock.sure:
+            return None
+        knocked = getattr(self.h, "knocked", None)
+        if knocked is not None and knocked(s):
+            return None
+        here, x = s.platform, s.where.x
+        points = d.respawn_points(here.id, here.left, here.right, self._around(s))
+        near = [px for px, _ in points if abs(px - x) <= RESPAWN_NEAR]
+        if not near:
+            return None
+        now = time.monotonic()
+        due = clock.next_pass(now - PASS_BEFORE)
+        most = min(WAIT_STEP, WALK_SPEED * (due - PASS_BEFORE - now))  # (there before the window opens)
+        best = None
+        for g in spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN):
+            lo, hi = min(x, g), max(x, g)
+            if any(abs(px - g) <= RESPAWN_NEAR + OFF_MARGIN for px, _ in points) or abs(g - x) < MIN_MOVE \
+                    or abs(g - x) > most or any((px - x) * (g - x) > 0 for px in near) \
+                    or any(lo - RESPAWN_NEAR <= px <= hi + RESPAWN_NEAR for px, _ in points if px not in near) \
+                    or self._in_the_way(s, x, g):
+                continue
+            if best is None or abs(g - x) < abs(best - x):
+                best = g
+        return None if best is None else ((RIGHT if best > x else LEFT), abs(best - x), best)
+
+    def _around(self, s: Scene) -> list[Monster]:
+        """Every monster she knows of as of look `s` that keeps a spawn point from filling (the server's SPAWN_CLEAR):
+        the look's, those it followed off her band (Scene.swept) and those about that it missed (`_unseen`), none her
+        kills dying (ledger.dying) nor the feed's tracks taken for dead (Ledger.dead): the server counts the living."""
+        ledger = getattr(self.h, "ledger", None)
+        kills = ledger.kills if ledger is not None else []
+        die, dead = (getattr(ledger, "die", {}), getattr(ledger, "dead", {})) if ledger is not None else ({}, {})
+        seen = [*s.monsters, *[m for m in getattr(s, "swept", ()) if not any(m is o for o in s.monsters)]]
+        return [m for m in [*seen, *self._unseen(s)] if not dying(kills, m, s.t, seen, die, dead)]
+
+    def _fill(self, period: float) -> float:
+        """A free spawn point's chance of a newborn at the map's next pass (FILL_PRIOR: the hunt loop learns none)."""
+        return FILL_PRIOR
+
+    def _respawn_wait(self, s: Scene, pid: int, xs: list[float]) -> list[float]:
+        """The share of her HP the newborns of the free spawn points by each place of map xs `xs` on platform `pid` are
+        expected to take her waiting there over the next WAIT_AHEAD_S (attack.danger.respawn_risk, the clock's chance
+        about its pass; 0 each where RESPAWN_GUARD is off or the clock isn't sure): what rule 9's places weigh too."""
+        clock, d = getattr(self.h, "spawn_clock", None), self.danger
+        if not RESPAWN_GUARD or clock is None or d is None or not clock.sure:
+            return [0.0] * len(xs)
+        now = time.monotonic()
+        chance = clock.chance(now, now + WAIT_AHEAD_S, -PASS_BEFORE, PASS_AFTER)
+        if chance <= 0.0:
+            return [0.0] * len(xs)
+        fill = self._fill(clock.period)
+        points = d.respawn_points(pid, min(xs), max(xs), self._around(s))
+        return [d.respawn_risk([q for q in points if abs(q[0] - x) <= RESPAWN_NEAR], fill, chance) for x in xs]
+
     def _unsafe(self, s: Scene, p: Pile) -> str | None:
         """Why standing on pile `p` once she's there from look `s` would have a monster meet her that she can't shoot
         first from here (`_guards`), or None (rule 6a's pile: it waits)."""
@@ -1812,6 +1981,23 @@ class Hunt:
         return self._shoot_rate(s, s.monsters)[0] > 0.0
 
     def _go_for(self, pile: Pile, rule: str, s: Scene, after: tuple | None = None) -> None:
+        """A trip to pile `pile` for rule `rule` (the sweep's, a valuable pile's): its objective, the one she was on
+        suspended under it; or, where her stand there would meet the map's next pass by a free spawn point (the spawn
+        guard: `_respawn_guard`), nothing yet ('<rule>: the pass'), the next look deciding again."""
+        now = time.monotonic()
+        at = max(self._travel_to_pile(s, pile),
+                 max(0.0, pile.since + DROP_LANDS - now) if pile.status == "expected" else 0.0)
+        if at <= TRIP_AHEAD_S and (why := self._respawn_guard(s, pile, at)) is not None:
+            if why != getattr(self, "_pass_said", None):
+                self._pass_said = why
+                self.log(f"  {rule}: {_contents(pile)} on {pile.platform} at x {pile.x:.0f} after the pass: {why}")
+            if (step := self._off_points(s)) is not None:  # (by a free point herself: she waits off it)
+                self.log(f"  waiting for the pass at x {step[2]:.0f}, off the spawn point")
+                self.h.actions.walk(step[0], step[1])
+            else:
+                time.sleep(0.1)
+            self._note(f"{rule}: the pass")  # (she goes once the pass is seen, deciding again with what it brought)
+            return None
         parent = self.obj
         if parent is not None:
             self.stack.append(parent)  # suspended
@@ -2193,13 +2379,15 @@ class Hunt:
         """The danger where she is (Danger.at with this look's monsters), and the safest of _wait_place's places along
         her platform as (its danger, how far, its x), None if there's none."""
         d, here, x = self.danger, s.platform, s.where.x
-        now = d.at(here.id, x, s.monsters)
+        xs = [g for g in spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN)]
+        due = self._respawn_wait(s, here.id, [x, *xs])  # (the spawn guard's newborns about the next pass)
+        now = d.at(here.id, x, s.monsters) + due[0]
         need = self._spawns_in_reach(s, x)
         best = None  # (danger, distance, x)
-        for g in spots._stand_xs(here.left + GROUND_MARGIN, here.right - GROUND_MARGIN):
+        for g, newborn in zip(xs, due[1:]):
             if self._spawns_in_reach(s, g) < need or self._in_the_way(s, x, g):
                 continue
-            there = d.at(here.id, g, s.monsters)
+            there = d.at(here.id, g, s.monsters) + newborn
             if best is None or (round(there, 6), abs(g - x)) < (round(best[0], 6), best[1]):
                 best = (there, abs(g - x), g)
         return now, best

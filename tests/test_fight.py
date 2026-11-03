@@ -432,13 +432,14 @@ def test_a_kill_is_left_alone_as_long_as_its_death_animation_runs():
 
 
 def test_a_kill_on_the_platform_above_during_jump_throws_is_placed_there(monkeypatch):
-    # Jump-throwing at a pig beside her (cornered: another pig behind her), the attack picks its target
-    # ~49 units up, so a slime on the platform above, 100 to the side, is in its path (from the ground one
-    # 60 above needs 117): when it dies, the kill is placed there, not on the pig still in plain sight.
+    # Jump-throwing at a pig beside her (cornered: another pig behind her, 60 off: no jump at it surely takes it
+    # either, so no sure throw the other way comes first, stance.FIRST_TO_REACH; 100 off until the cornered study's R8),
+    # the attack picks its target ~49 units up, so a slime on the platform above, 100 to the side, is in its path (from
+    # the ground one 60 above needs 117): when it dies, the kill is placed there, not on the pig still in plain sight.
     def kill_at(h, t):
         if abs(t - 0.6) < 1e-6:
             h.report.exp_kills += 1
-    pig, behind, slime = target(470), target(600), target(400, y=440, platform=5, kind="slime")
+    pig, behind, slime = target(470), target(560), target(400, y=440, platform=5, kind="slime")
     h, throws = _fighter(monkeypatch, [[pig, behind, slime]] + [[pig, behind]] * 5, on_look=kill_at)
     h.looter.sweep_after = lambda deaths: None
     logged = []

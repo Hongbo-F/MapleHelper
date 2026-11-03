@@ -28,7 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from maplehelper.engine import RIGHT
+from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from ..control import client
@@ -44,7 +44,8 @@ from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare,
                     SimViolation, Trace, detector_kinds, patched)
 from . import harness
 from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, NEAR_SPELL, OFF_SEEN, OFF_SPELL,
-                    ROPE_REACH_CLIENT, TREE_DROP_MIX, Her, Noise, Realism, SimDied, World, her_climb, her_shoe)
+                    NEWBORN_S, ROPE_REACH_CLIENT, TICK_S, TREE_DROP_MIX, Her, Noise, Realism, SimDied, World,
+                    her_climb, her_shoe)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -99,6 +100,7 @@ class Scenario:
     fn: Callable
     start: tuple[int, float]
     monsters: object = None      # None: none; "all": the map's spawns; a set of platform ids; or [(name, platform, x)]
+                                 # (a 4th, s: it stands that long first: World._spawn)
     seed: int = 1
     hp: float = 1.0
     inventory_full: bool = False
@@ -779,7 +781,7 @@ _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN, n
                             off_spell=OFF_SPELL)                                 # detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -825,8 +827,146 @@ def loop_tree_23_near_misses(sim):
     invulnerability 1.5 s, world.INVULNERABLE; D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on seed 2, 22 kills
     but no Horny Mushroom the looks missed by a pile of hers (the new eyes miss fewer near her: the run parts from the
     old within its first second); of seeds 1-16 1, 3, 7, 8 and 15 show all of this; on 1, 26 kills, a Horny Mushroom
-    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.)"""
+    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.) (Seed 3 since her aim up close by a wall (2026-11-03,
+    work/cornered-aim: a star's line to the client's own hit point too, reach.CLIENT_HIT_POINT, and the monster reaching
+    her first, stance.FIRST_TO_REACH; D:/MapleHelper-scratch/cornered-fix/aim/seeds/scan1.txt): on seed 1 16 kills, the
+    run parting at 20.0 s where from 24 at x 276 a step away from a Green Mushroom at 303, its body over the tower's wall
+    at 310, is 65, not 25 (from 251 a jump throw's star at it would go into the wall); of seeds 1-16 3, 8, 12, 15 and 16
+    show all of this, 19.5 kills a run; on 3, 21.) (Seed 3 too after R1 of the cornered study extended
+    (2026-11-03, work/cornered-r1: a hidden one heading at her walks on, fight.HIDDEN_WALKS; the LIVE tracks a look
+    missed about, unseen.UNSEEN_LIVE; the throws from the air after a touch, stance.CLAWED_AIR, CLAWED_CLOSE;
+    D:/MapleHelper-scratch/cornered-fix/r1/scan_nm_*.txt): on 1, 16 kills (at 2.6 s the hidden Green Mushroom she had
+    thrown at walked on at her, +27 to +21, and she threw at it from where she stood where she had stepped away); of
+    seeds 1-16 3, 8, 10 and 13 show all of this; on 3, 20 kills.)"""
     return harness._only(_loop(4), (23,))(sim)
+
+
+# The harness's standard thief world (`run loop-grind --map 10002073 --preset crowd --attack choice --world zero-walls
+# --world near-misses --world walkers`: harness.scenario), for a set-piece in it.
+_STANDARD = dict(noise=_NEAR, attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
+                 realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"]))
+_DECISION = re.compile(r"^\s*([\d.]+) {3}(jump-throwing|throwing|jumping back|stepping away|closing in|nothing in reach)"
+                       r"(.*)$")
+_PRESSED = re.compile(r"^\s*([\d.]+) {5}(?:Lucky Seven|the regular attack): ")
+_TOUCHED_BY = re.compile(r"^\s*([\d.]+) touched by ")
+_CLAW_HITS = re.compile(r"^\s*([\d.]+) claw swipe hits ")
+CLAW_EDGE = 105.0  # units: a mushroom past this is out of the claw's box (reach.ground_sure(28): its middle's)
+TOLD_S = 0.1       # s: a touch this long before her look at least is one it has (its popup shown and read)
+
+
+def far_claws(tr: dict, within: float | None = None) -> list[tuple[float, str]]:
+    """Her presses from the ground at a target past the claw's edge that the world's claw took, decided within `within`
+    s of a touch of hers (control.navigator.TOUCHER_S by default): each claw swipe the world saw (World.log, 'claw swipe
+    hits'), its press's look (her log's last attack line before it: 'Lucky Seven: ...') TOLD_S to `within` s after a
+    touch of hers (World.log, 'touched by'), the decision in force then (her log's last stance line before that look) a
+    throw from the ground whose nearest target it names is CLAW_EDGE or more off: [(s, the decision's line)]. A press
+    the claw takes on purpose (CLAW_ONLY: one on her) names one nearer."""
+    from ..control.navigator import TOUCHER_S
+    within = TOUCHER_S if within is None else within
+    decided = [(float(m[1]), m[2], m[3]) for line in tr["log"] if (m := _DECISION.match(line))]
+    pressed = [float(m[1]) for line in tr["log"] if (m := _PRESSED.match(line))]
+    touched = [float(m[1]) for line in tr["world_log"] if (m := _TOUCHED_BY.match(line))]
+    out = []
+    for line in tr["world_log"]:
+        if (m := _CLAW_HITS.match(line)) is None:
+            continue
+        t = float(m[1])
+        look = max((p for p in pressed if p <= t), default=None)
+        before = [d for d in decided if look is not None and d[0] <= look]
+        if not before or before[-1][1] != "throwing":
+            continue
+        gaps = [abs(int(v)) for v in re.findall(r" ([+-]\d+)", before[-1][2])]
+        if gaps and min(gaps) >= CLAW_EDGE and any(TOLD_S <= look - u <= within for u in touched):
+            out.append((t, f"{before[-1][0]:.3f} throwing{before[-1][2]}"))
+    return out
+
+
+@tree((7, -163.5), monsters=[("Horny Mushroom", 7, -150.0), ("Horny Mushroom", 7, -40.0)], seed=3, limit=30,
+      may_die=True, **_STANDARD,
+      expects=(check("no press from the ground at a target past the claw's edge went to the claw within TOUCHER_S of a "
+                     "touch (far_claws)", lambda tr: not far_claws(tr)),
+               logs("jump (touched", "a jump throw went from the air for a touch with no monster seen by her"),
+               check("a kill", lambda tr: sum(tr["world"]["kills"].values()) >= 1)))
+def loop_tree_touched_unseen(sim):
+    """R1 of the cornered study (the user's clip of 2026-11-02 22:51, "cornered character making bad attack move":
+    D:/MapleHelper-scratch/cornered): the looks are blind at her body, and a press from the ground goes to the claw on a
+    monster there whatever she aimed at. The hunt loop on 7 alone in the harness's standard thief world (near-misses:
+    a monster on her platform within 25 of her never found, 7% within 50, 34% to 100; walkers: one she hits chases her),
+    from x -163.5 between 7's Horny Mushroom points as in episode B (22:50:42-22:50:54), one Horny Mushroom on her at
+    -150, the other 123 off at -40. On 690e103 (seed 3) the first touches her at once, and all six of her presses from
+    the ground, at ones 179 and 125 off as hidden and 183 seen, went to the claw on it 8-80 in front of her (swipes, no
+    star), each within 2 s of a touch the looks had no monster for: 7 touches in the 10 s, no kill, as the clip's
+    corner at x -220 (22:49:57-22:49:58). Now a touch with none about her that could have made it (behavior.fight
+    .clawed: the navigator's R7 test, TOUCHER_S, TOUCHER_NEAR) has those go from a jump in place (attack.stance
+    .CLAWED_AIR: 'jump (touched)'), whose star takes the one on her if its body reaches the search's window, else the
+    one aimed at: none to the claw, 5 touches, 2 kills. Of seeds 1-12, their first 10 s (D:/MapleHelper-scratch/
+    cornered/proto/seeds_sc2.txt), off against on: touches 70 and 57, that hurt 53 and 44, kills 11 and 24, the claw's
+    swipes 52 and 13, far_claws' 39 and 0; all of this met on none off, on 10 (all but 1, with no 'touched' jump, and 7,
+    no kill). On b7f7308 (the simulator's defaults since: the detector's misses of 2026-11-02 in runs, her
+    invulnerability 1.5 s; this branch with R1's switches off, CLAWED_AIR, CLAWED_CLOSE, unseen.UNSEEN_LIVE and
+    fight.HIDDEN_WALKS, the same to the digit), seed 3: 6 touches in the 10 s, 1 kill, 3 presses from the ground past the
+    claw's edge taken by the claw after a touch; with R1 extended (2026-11-03, work/cornered-r1): none, 3 'touched'
+    jumps, 7 touches, 4 kills. Of seeds 1-12 (D:/MapleHelper-scratch/cornered-fix/r1/scripts/setpiece.py, sp2_base.txt,
+    sp2_proto.txt, sp2_final.txt), b7f7308, the prototype and R1 extended: touches 62, 50 and 53, that hurt 43, 40 and
+    42, kills 27, 30 and 30, the claw's swipes 45, 14 and 15, far_claws' 28, 1 and 1; all of this met on none, 7 and 10
+    (all but 4, no 'touched' jump, and 12, one far claw)."""
+    return harness._only(_loop(1 / 6), (7,))(sim)
+
+
+# The spawn guard's set-piece (loop_tree_respawn_pass): 7's two Horny Mushroom points free, their pass RESPAWN_PASS s
+# in, her kill's drops between them from KILLED_S before the run
+_RESPAWN_PASS = 1.0
+_KILLED_S = 2.5
+_TOUCHED_AT = re.compile(r"^\s*([\d.]+) touched by ")
+
+
+def _newborn_touches(tr: dict, born: float = _RESPAWN_PASS) -> list[float]:
+    """The touches (World.log, 'touched by') within NEWBORN_S of a pass at `born` s: the newborns' (the set-piece's
+    only monsters are its two points')."""
+    return [t for line in tr["world_log"] if (m := _TOUCHED_AT.match(line)) and born <= (t := float(m[1])) < born
+            + NEWBORN_S]
+
+
+@tree((7, -60.0), monsters={7}, seed=4, limit=12, may_die=True, noise=_NEAR, attack="choice",
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
+      drops=(("sapphire-ore", 7, -150.0), ("mesos", 7, -165.0)),
+      realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"],
+                                  vacant=(0, 1), first_pass=_RESPAWN_PASS),
+      expects=(logs("after the pass: a horny-mushroom spawn point", "her trip to the pile waited for the pass"),
+               check("one touch by a newborn at most (within NEWBORN_S of the pass)",
+                     lambda tr: len(_newborn_touches(tr)) <= 1),
+               check("both newborns killed", lambda tr: sum(tr["world"]["kills"].values()) >= 2)))
+def loop_tree_respawn_pass(sim):
+    """R3 of the cornered study (the user's clip of 2026-11-02 22:51: D:/MapleHelper-scratch/cornered, episodes A and C
+    at 22:50:27 and 22:49:52): her trip along 7 to her drops between its two Horny Mushroom points (-207 and -94, the
+    tower's wall at -220) as the map's pass fills both. The hunt loop on 7 in the thief's standard world (near-misses,
+    walkers), from its spot at -60 (34 off -94's point), both points free (Realism.vacant) and their pass 1.0 s in
+    (Realism.first_pass), a Sapphire Ore and coins at -150 and -165 (her kill there KILLED_S before the run: the drop
+    store's pile of it; the ore valuable, rule 6a, at once), her spawn clock knowing the pass as after a hunt's first 15
+    s live (fed the three passes before the run's: localization.spawnclock is sure 14 s into the live hours' births).
+    With the spawn guard off (hunt.RESPAWN_GUARD False: as before) she sets off for the ore at 0.81 s, walks through
+    -94's point as it fills and stands between the two newborns: on seed 4 touched 3 times by them (7 in the 12 s, all
+    hurting, 5 of her presses the claw's at point blank), one kill; on (behavior.hunt._respawn_guard: 'valuable pile:
+    the pass'; going has her by both points about the pass, waiting by -94's alone, -207's newborn 3.2 EXP against 2.7
+    of waiting) she waits at -60 till the pass is seen and decides again with the newborns in sight (shot first from
+    there): once touched, both killed. On 7 nowhere is 75 off both points (hunt._off_points), so she waits where she
+    is, 34 off -94's. Of seeds 1-12, their 12 s (D:/MapleHelper-scratch/cornered-fix/respawn/scen, sp2_off.txt,
+    sp5_on.txt): off against on, touches 55 and 42, that hurt 43 and 32, by a newborn 23 and 17, kills 18 and 23, EXP
+    738 and 943, the claw's presses 29 and 15; the ore picked up by 12 s on 12 and 5 (on, the newborns shot first). All
+    of this met on none of them off (its touch and kill checks both on 5 and 7), on 6 on (3, 4, 7, 8, 10, 12)."""
+    from ..behavior.ledger import Kill
+    start, first = sim.world.origin, sim.world.realism.first_pass
+    make = sim.tour_stack
+
+    def tour_stack(**kw):
+        t = make(**kw)
+        for k in (3, 2, 1):  # (the passes before the run's first, as her clock would have them by now)
+            t.h.spawn_clock.birth(start + first - k * TICK_S, 1.0)
+        y = sim.model.platform(7).y_at(-157.0)
+        t.h.drops.on_kill(Kill(start - _KILLED_S, "horny-mushroom", 7, -157.0, y, 7))
+        return t
+    sim.tour_stack = tour_stack
+    return harness._only(_loop(1 / 5), (7,))(sim)
 
 
 @tree((20, -60.0), monsters={19, 20, 21, 22}, seed=7, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
@@ -1629,7 +1769,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=29, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1747,8 +1887,14 @@ def loop_tree_attack_no_darts(sim):
     D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on 13 her stars' test cast nothing (her retreat to the rope
     at -80, not on a platform: "her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-16, 11
     alone meets all of this. On 11: the doubt at 87.4 s, a Horny Mushroom at 41%; MAYBE OUT at 103.7 s, ATTACK on Ctrl as
-    configured at 105.5 s, paged; out of darts' stop at 117.3 s, paged.) It is re-seeded at most changes of the grind or
-    the world (more than ten times): placing its monsters would make it hold, not a seed.)"""
+    configured at 105.5 s, paged; out of darts' stop at 117.3 s, paged.) (Seed 29 since R1 of the cornered study
+    extended (2026-11-03, work/cornered-r1: the LIVE tracks a look missed about, unseen.UNSEEN_LIVE, and her throws from
+    the air after a touch, stance.CLAWED_AIR, CLAWED_CLOSE; the run parts from b7f7308's at 27.4 s, a track missed in
+    the frame among her hidden ones; D:/MapleHelper-scratch/cornered-fix/r1/scan_nd_*.txt): on 11 MAYBE OUT at 97.6 s
+    and no window read after it, so one page, out of darts' at 160.7 s; of seeds 1-40, 29, 36, 38 and 39 meet all of
+    this. On 29: the doubt at 102.4 s, a Green Mushroom; MAYBE OUT at 115.1 s, ATTACK on Ctrl as configured at 116.2 s,
+    paged; out of darts' stop at 130.4 s, paged.) It is re-seeded at most changes of the grind or the world (more than
+    ten times): placing its monsters would make it hold, not a seed.)"""
     return key_check_run(13)(sim)
 
 
@@ -1961,6 +2107,43 @@ def loop_tree_stat_window_put_off(sim):
     start, so the read is put off at once (nothing moves her for it), the hunt goes on, and the hunt loop reads it at
     its first quiet look 5 s or more later (StatsDue from health_check), as at the start: S, DETAIL, S."""
     return stat_run(1.5)(sim)
+
+
+# --- cornered by a wall: her aim up close (the cornered study's R6 and R8, 2026-11-03) ---------------------------------
+# The harness's standard thief world (`run loop-grind --map 10002073 --preset crowd --attack choice --world zero-walls
+# --world near-misses --world walkers`: harness.scenario) but for the detector's misses near her (the preset's own:
+# found 90% of the time wherever), for a set-piece about her aim, not her eyes.
+_AIM_WORLD = dict(noise=_CROWD[0], attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
+                  realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"]))
+
+
+def into_walls(tr: dict) -> int:
+    """Her stars a wall stopped (the world's 'stopped by the wall at x': reach.wall_between, to the client's own hit
+    point too)."""
+    return sum("stopped by the wall" in line for line in tr["world_log"])
+
+
+@tree((7, -152.0), monsters=[("Horny Mushroom", 7, -207.0, 5.0), ("Horny Mushroom", 7, -94.0, 5.0)], facing=LEFT,
+      seed=12, limit=30, may_die=True, **_AIM_WORLD,
+      expects=(check("no star of hers into a wall (the world's 'stopped by the wall')", lambda tr: into_walls(tr) == 0),
+               check("two kills", lambda tr: sum(tr["world"]["kills"].values()) >= 2)))
+def loop_tree_wall_corner(sim):
+    """Episode A of the user's clip of 2026-11-02 22:50 ("cornered character making bad attack move": D:/MapleHelper-
+    scratch/cornered, 22:50:25-51): the hunt loop on 7 alone for 10 s, from x -152 between 7's two Horny Mushroom
+    points, one at the foot of the trunk's wall at -207 (55 off, its body over the wall at -220 by 15), the other at -94
+    (58 off), both standing their first 5 s as the clip's tracks had them (World._spawn's 4th field), in the thief's
+    standard world but for the detector's misses near her. Live she jumped in place at the one by the wall again and
+    again, the star going into the trunk: the client's hit point as the stack takes it, the middle of where the shot's
+    row crosses its body, is past the wall (R6, reach.CLIENT_HIT_POINT), with a sure jump throw at the other one
+    standing there (R8, stance.FIRST_TO_REACH). The row's start, 65 ahead of her, is the star search's (reach
+    .SEARCH_START), assumed for the row: RustMS's port starts a skill's row (Lucky Seven's) at her x, where the hit point
+    is the body's middle, inside the platform, and nothing stops the star (`--world hit-row-0`); this world's stars into
+    the trunk rest on the live hour's split and the crop, not the port (the review of 2026-11-03). Her decisions as before (`--world aim-before`) in this world, where such a
+    star goes into the wall (on b7f7308 the world took it inside the platform and let it through), on seed 12: 3 stars
+    into the wall, 14 touches; now none, 5 touches, 2 kills. Seeds 1-12 (D:/MapleHelper-scratch/cornered-fix/aim/scan/
+    final12.txt), her decisions as before, R6 alone, both: stars into the wall 29, 24, 0; checks met on 1, 2 and 7;
+    kills 18, 18, 19; touches 68, 75, 89 (fighting, she draws the chase: as before her stars hurt nothing for a while)."""
+    return harness._only(_loop(1 / 6), (7,))(sim)
 
 
 # --- the top of a rope: hanging just under a platform, her dot snapped onto it -------------------------------------

@@ -52,7 +52,8 @@ def test_unseen_are_the_feeds_hidden_tracks_walked_on_and_her_memorys_last_momen
     t = 100.0
     tracks = [_track(1, 300.0, her, t - 1.0, vx=-50.0),  # hidden a second: walked on 50 units left
               _track(2, 600.0, her, t - unseen_mod.TRACK_S - 0.5),  # out of sight too long: not counted
-              _track(3, 700.0, her, t - 0.2, state=LIVE), _track(4, 650.0, her, t - 0.2, state=DYING)]
+              _track(3, 700.0, her, t, state=LIVE),  # seen in the look's frame (one missed in it: test_clawed's)
+              _track(4, 650.0, her, t - 0.2, state=DYING)]
     memory = SimpleNamespace(alive=lambda at, p: [_entry(900.0, her, t - 1.5, m), _entry(950.0, her, t - UNSEEN_S - 0.5, m),
                                                   _entry(310.0, her, t - 0.5, m), _entry(200.0, up, t - 1.0, m)])
     s = _scene(t, 500.0, her, monsters=[_seen("horny-mushroom", 880.0, up, m)], tracks=tracks)
@@ -81,7 +82,7 @@ def test_a_track_her_kill_is_on_isnt_about_one_kill_one_track():
     s = _scene(t, 500.0, her, tracks=tracks)
     assert [tr.id for tr in unseen_mod.hidden(s, [kill])] == [2, 3]
     assert [tr.id for tr in unseen_mod.hidden(s)] == [1, 2, 3]
-    live = _track(5, 405.0, her, t - 0.05, state=LIVE)  # seen now beside where it died: not the one dead
+    live = _track(5, 405.0, her, t, state=LIVE)  # seen now beside where it died: not the one dead
     s.tracks = tracks + [live]
     assert [tr.id for tr in unseen_mod.hidden(s, [kill])] == [2, 3]
     earlier = SimpleNamespace(t=t - 3.0, kind="horny-mushroom", platform=her, x=470.0)

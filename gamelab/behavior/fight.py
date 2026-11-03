@@ -17,6 +17,7 @@ hurt (Hunter.wounds) is finished before a fight ends, from where she is or a sho
 import json
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -25,18 +26,21 @@ from maplehelper.game import COMBAT
 
 from .. import character, directions, paths, telemetry
 from ..attack import reach
-from ..attack.stance import (AWAY, FLINCH_HOLD_S, HURT_SHARE, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH, TRACK_SEEN,
-                             JumpPlan, Pace, Prices, act_text,
-                             air_gap, decide, first_attack_s, held_step, jump_hits, jump_room, landing, move_limits,
-                             open_above, pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
+from ..attack.stance import (AWAY, FLINCH_HOLD_S, HER_HALF, HURT_SHARE, MEET_PRICE_S, TOO_CLOSE, TRACK_MATCH,
+                             TRACK_SEEN, JumpPlan, Pace, Prices, act_text,
+                             air_gap, beside, decide, first_attack_s, held_step, jump_hits, jump_room, landing,
+                             move_limits, open_above, pct, pick_target, place_to_shoot, plan_of, shooting_place, stance)
 from ..control import actions as actions_mod
 from ..control.actions import STAR_DELAY_MS
+from ..control.navigator import TOUCHER_NEAR, fresh_touch
 from ..localization.mapdata import MapModel, MobBody
 from ..localization.memory import FADE_S
 from ..localization.monsters import (DEFAULT_SPEED, MONSTER_FLINCH_TOP, MONSTER_TOP, SEARCH_SLACK, TRACK_SLACK, Monster,
                                      MonsterTrack, bodies, dead_one, seen_again, speeds, walk_vx)
 from .ledger import dying
 from ..localization.scene import Scene
+from ..localization.tracking import HIDDEN, LIVE
+from ..localization.unseen import STILL_VX
 from ..motion import physics
 from .looting import DropSpot
 
@@ -189,6 +193,8 @@ class FightState:
     last_hidden: bool = False      # ... and whether monsters she was throwing at were hidden then
     calm_since: float | None = None  # since when she's had nothing to do (see clear's `patience`)
     moves: int = 0  # her moves away up close since her last throw (attack.stance.MAX_MOVES: then she throws)
+    stand_ins: dict = field(default_factory=dict)  # the last look's hidden ones walked on (hidden's `place`): id ->
+                                                   # (the stand-in, its entry of `thrown`)
 
     def forget_faded(self, now: float, body: dict[str, MobBody] | None = None) -> None:
         """Forgets the kills that have faded out by `now`: counted as long ago as their kind's death
@@ -222,15 +228,29 @@ class FightState:
         """Forgets the monsters thrown at that haven't been seen for HIDDEN_FOR s by `now`."""
         self.thrown = [e for e in self.thrown if now - e[1] < HIDDEN_FOR]
 
-    def hidden(self, now: float) -> list[Monster]:
+    def hidden(self, now: float, place: Callable[[Monster, float], Monster] | None = None) -> list[Monster]:
         """The monsters thrown at that weren't seen in this look (`now`): still there, hit, hidden under
-        their damage numbers."""
-        return [e[0] for e in self.thrown if e[1] != now]
+        their damage numbers. As last seen, or where `place` has each (the monster as last seen, the s since: walked on
+        along its track, HIDDEN_WALKS: hidden_place), its stand-in this look (one aimed at is its entry: note_throw)."""
+        out, self.stand_ins = [], {}
+        for e in self.thrown:
+            if e[1] == now:
+                continue
+            m = e[0] if place is None else place(e[0], now - e[1])
+            if m is not e[0]:
+                self.stand_ins[id(m)] = (m, e)
+            out.append(m)
+        return out
 
     def note_throw(self, now: float, keyed_at: float | None = None) -> None:
         """A throw at the monsters in its path (`aimed`): each is kept (once) among those thrown at, seen `now`; and
-        the throw, its attack key down at `keyed_at` (Actions.attack_at), with its path (`keyed`)."""
-        self.thrown += [[m, now] for m in self.aimed if not any(e[0] is m for e in self.thrown)]
+        the throw, its attack key down at `keyed_at` (Actions.attack_at), with its path (`keyed`). A hidden one's
+        stand-in (`hidden`'s `place`) is its entry, kept as it was."""
+        def kept(m: Monster) -> bool:
+            stand_in = self.stand_ins.get(id(m))
+            return any(e[0] is m or (stand_in is not None and stand_in[0] is m and stand_in[1] is e)
+                       for e in self.thrown)
+        self.thrown += [[m, now] for m in self.aimed if not kept(m)]
         if keyed_at is not None:
             self.keyed = [k for k in self.keyed if keyed_at - k[0] <= KEYED_KEEP_S] + [(keyed_at, list(self.aimed))]
 
@@ -380,7 +400,7 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     st.forget_hidden(now)  # only after _count_kills: this look's kill may still be one of these
     dead = getattr(getattr(h, "ledger", None), "dead", ())  # (a track taken for dead: thrown at no more, hidden or not)
     st.thrown = [e for e in st.thrown if getattr(e[0], "track", None) is None or e[0].track not in dead]
-    hidden = st.hidden(now)
+    hidden = st.hidden(now, hidden_place(h, s))
     st.flinching = hit + hidden
     st.touch = _unsure_by_her(h, s)
     return wanted + hidden, visible, hidden
@@ -431,6 +451,67 @@ def walk_on(model: MapModel) -> reach.Where:
         half = reach.body_of(m.kind)[1]
         return MonsterTrack(m.platform, m.x, half=half, vx=vx).at(t, p)
     return where
+
+
+# R1 of the cornered study, extended (2026-11-03, D:/MapleHelper-scratch/cornered: the user's clip of 2026-11-02 22:51,
+# "cornered character making bad attack move"): a monster she threw at that the look doesn't see (FightState.hidden, for
+# HIDDEN_FOR) and whose track heads at her walks on at her meanwhile (hidden_place: the feed's track's heading at its
+# kind's speed from the game data, from its last sighting, no nearer than where its body meets hers, as the stance's
+# PACE_STOP has one walking at her), where it stood at its last sighting until then; one heading away, standing or
+# flinching (heading 0), or whose track is dying or gone, stays as last seen, as before. Live the clip's episode C
+# threw at a Horny Mushroom's stand-in 116 off at the wall while it walked on (C's +116). In the simulator (the thief's
+# standard command, seeds 1-3, each stand-in matched to the world's own monster: D:/MapleHelper-scratch/cornered-fix/
+# r1/truth_proto.txt) one heading at her unseen 0.6-1.8 s had walked 41 at her on average, its last sighting 57 off
+# where it was, walked on 31; one heading away had gone 13 farther (hurt, it turns to chase her: the user's monster
+# rule), its last sighting 51 off, walked on 56: so those stay. Walking every one on along its heading both ways, and
+# the stance's pace walking each unseen one on by its own track's id, were tried and not kept (D:/MapleHelper-scratch/
+# cornered-fix/r1: runs/walk, runs/walknp, runs/atwalk, runs/full3: none better at 12 seeds). False: where last seen,
+# as before.
+HIDDEN_WALKS = True
+
+
+def hidden_place(h: "Hunter", s: Scene) -> Callable[[Monster, float], Monster] | None:
+    """Where look `s` has a monster she threw at that it didn't see (FightState.hidden's `place`, HIDDEN_WALKS): one
+    heading at her (her on its platform) walked on from its last sighting along its feed's track (Scene.tracks, by
+    Monster.track: LIVE or HIDDEN; its heading at its kind's speed, under unseen.STILL_VX standing, for the time since
+    the track's last sighting: MonsterTrack.at), no nearer her than where its body meets hers (its half and HER_HALF from
+    her x, on its side); with no feed, by its pose for the `age` given (walk_vx: one seen walking the way it faced, as
+    walk_on); any other as last seen (heading away, standing, her elsewhere, its track dying, dead or gone). None (as
+    last seen) with HIDDEN_WALKS off or no map."""
+    model = getattr(h, "model", None)
+    if not HIDDEN_WALKS or model is None:
+        return None
+    fed = getattr(s, "tracks", None) or ()
+    tracks = {tr.id: tr for tr in fed}
+    walking, body = speeds(model), bodies(model)
+
+    def place(m: Monster, age: float) -> Monster:
+        if m.platform is None:
+            return m
+        speed = walking.get(m.kind, DEFAULT_SPEED)
+        if fed:
+            tr = tracks.get(getattr(m, "track", None))
+            if tr is None or tr.state not in (LIVE, HIDDEN) or tr.platform != m.platform:
+                return m
+            x0, vx, age = tr.x, tr.vx, s.t - tr.last_seen
+        else:
+            x0, vx = m.x, walk_vx(m.kind, m.facing, m.pose, walking) or 0.0
+        vx = max(-speed, min(speed, vx)) if abs(vx) > STILL_VX else 0.0
+        w = s.where
+        if not vx or w is None or getattr(w, "platform", None) is None or w.platform.id != m.platform \
+                or vx * (w.x - x0) <= 0:
+            return m  # (heading away from her, standing, or her elsewhere: as last seen; hurt, it turns to chase her)
+        try:
+            p = model.platform(m.platform)
+        except (KeyError, IndexError):
+            return m
+        b = body.get(m.kind)
+        half = b.half if b else 28.0
+        x = MonsterTrack(m.platform, x0, speed, half=half, vx=vx).at(max(0.0, age), p)
+        d = 1.0 if x0 > w.x else -1.0  # (its side of her: no nearer than where its body meets hers)
+        x = w.x + d * max((x - w.x) * d, min((x0 - w.x) * d, half + HER_HALF))
+        return replace(m, x=x, y=p.y_at(x))
+    return place
 
 
 def pace_of(h: "Hunter", s: Scene) -> Pace:
@@ -493,6 +574,30 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
     until = getattr(getattr(h, "senses", None), "invulnerable_until", None)
     window = max(0.0, until() - now) if until is not None else 0.0  # (her invulnerability left: stance's R8)
     return Pace(lead, walk, walking, body_sizes(model)[1] if model is not None else None, hold, window)
+
+
+TOUCH_ROUND_S = 0.001  # s (clawed) a touch's popup may read after the look's frame: its `at` is rounded to the ms
+                       # (perception.touches.Touch.data), and one told in the look's own frame (the first look after
+                       # it) read up to 0.5 ms after it (loop_tree_touched_unseen's seed 11 at 6.07 s)
+
+
+def clawed(h: "Hunter", s: Scene, around: list[Monster]) -> bool:
+    """Whether a monster the looks miss is on her at look `s` (attack.stance's `clawed`, CLAWED_AIR: a throw from the
+    ground would be the claw's): a touch of hers as the navigator's R7 stand-in goes by (control.navigator.fresh_touch:
+    not `crowded`, its popup TOUCHER_S before the look at most, TOUCH_ROUND_S after its frame) with no monster of
+    `around` that the look found (Scene.monsters) on her platform, or beside her (stance.beside), within TOUCHER_NEAR of
+    her (Navigator._toucher's test): a stand-in of one it didn't find (hidden, unseen: localization.unseen, its LIVE
+    tracks missed in the frame too) is a monster the looks miss, the one a press from the ground would swipe (the
+    prototype's took those as explaining the touch); False where nothing counts as a danger (the first map, as it
+    was)."""
+    d = getattr(h, "danger", None)
+    if d is None or not d.any or s.where is None or s.platform is None:
+        return False
+    if fresh_touch(getattr(h, "senses", None), s, slack=TOUCH_ROUND_S) is None:
+        return False
+    x, here = s.where.x, s.platform
+    seen = [m for m in around if any(m is o for o in getattr(s, "monsters", ()))]  # (a stand-in is one the looks miss)
+    return not any(abs(m.x - x) <= TOUCHER_NEAR and beside(m, here, x, d) for m in seen)
 
 
 # The navigator's price of a landing (FightOnTheWay.landings) by what the looks don't have now: a track not seen within
@@ -593,7 +698,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves, castable=castable, **wounds_of(h, s))
+                 moves=st.moves, castable=castable, clawed=clawed(h, s, around), **wounds_of(h, s))
     act, refused = _cast_or_wait(h, act, s, castable)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
@@ -1365,7 +1470,8 @@ def _shot(s: Scene, t: Monster, dx: float, dy: float, model: MapModel | None = N
     on = here if t.platform == here.id else None  # the target's platform, if known
     if on is None and model is not None and t.platform is not None:
         on = model.platform(t.platform)
-    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on, ty=t.y, body=reach.body_of(t.kind)) is None
+    clear = reach.wall_between(here, s.where.x, s.where.y, t.x, target=on, ty=t.y, body=reach.body_of(t.kind),
+                               client=reach.WALLS_BLOCK) is None  # (her casts: the point inside, as before R6)
     now = time.monotonic()
     return {"kind": t.kind, "dx": int(round(dx)), "dy": int(round(dy)), "her": here.id,
             "target": t.platform, "bar": t.bar, "seen": bool(s.tag_seen),

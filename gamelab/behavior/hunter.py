@@ -49,6 +49,7 @@ from ..localization.monsters import Monster, seen_again
 from ..localization.pose import Where
 from ..localization.scene import Scene
 from ..localization.senses import Senses
+from ..localization.spawnclock import SpawnClock
 from ..localization.worldstate import HP_GAP_S, TOUCH_SAME_S, reading_of, to_scene
 from ..motion import physics
 from ..perception import drops, exp_number, hp_number, lv_number
@@ -157,6 +158,7 @@ STARS_CHECKED = True
 MISS_SAID_S = 1.5    # her attack's MISS popup said once in this long (a look's and the frame's before her next key)
 STARS_WAIT_S = 15.0  # ... that check put off (no quiet moment: keycheck) this long at the most, then the stop (her Lucky
                      # Seven held meanwhile, the regular attack instead)
+CLOCK_RECORD_S = 60.0  # s between the map's spawn clock's 'spawn_clock' telemetry records (_births; recording only)
 
 
 def _throws_stars() -> bool:
@@ -316,6 +318,9 @@ class Hunter:
         # the ones they were: after the ledger, so a look's kills are in it.
         self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
                              theirs=lambda: self.ledger.theirs, moved=lambda: self.ledger.moved)
+        # The map's spawn pass (localization.spawnclock), learned from the births every look's feed saw: when a free
+        # spawn point of a monster that hurts is about to fill (the hunt loop's spawn guard: behavior.hunt)
+        self.spawn_clock = SpawnClock()
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'. Her skill cast
         # only at a body seen that her search picks, not dead, not again where it took no effect, where her profile
         # casts nothing at nothing (Policy.unseen 'none': the magician's Magic Claw; Attacks.picks)
@@ -399,7 +404,7 @@ class Hunter:
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.looter.on_look, self.wounds.on_look, self.memory.on_look,
                                   self._misses,
-                                  self.attacks.on_look, self._chat_seen]
+                                  self.attacks.on_look, self._chat_seen, self._births]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
                                          self.attacks.on_throw,  # (a cast's MP)
                                          self._tell_feed]  # (the feed's: whose kills are whose, tracking)
@@ -1033,6 +1038,18 @@ class Hunter:
         if (mpw := getattr(self, "mp_watch", None)) is not None:
             mpw.see(st.t, mp)
         self._stop_now(st)
+
+    def _births(self, s: Scene) -> None:
+        """The births the feed saw since the last look (its 'spawned' events) to the map's spawn clock; its state as a
+        'spawn_clock' telemetry record once every CLOCK_RECORD_S (and at each of the spawn guard's holds: its
+        'respawn_guard' event's `clock`), for its phase checked against the births (the review of 2026-11-03)."""
+        self.spawn_clock.see(s.events)
+        if telemetry.recording():
+            now = time.monotonic()
+            if now - getattr(self, "_clock_said", -math.inf) >= CLOCK_RECORD_S:
+                self._clock_said = now
+                telemetry.emit("spawn_clock", **self.spawn_clock.record())
+
     def _misses(self, s: Scene) -> None:
         """Her attack's MISS popups in look `s`'s frame over the targets of her presses waiting to be judged
         (`_miss_points`), into `s.misses`, for the watches (a MISS over its target: the key works)."""

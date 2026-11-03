@@ -247,7 +247,7 @@ def _judge(tree_map, tracks):
     return fight.FightOnTheWay(h).landings(tracks)
 
 
-def test_a_trips_last_move_lands_where_her_first_attack_is_sure(tree_map):
+def test_a_trips_last_move_lands_where_her_first_attack_is_sure(tree_map, monkeypatch):
     # 25 up onto 24: the route's jump straight up lands her at 226, 54 from a Green standing at 280 (by 24's spawn point,
     # 272), 10 down 24's slope from her: a jump in place takes it surely only from 74 (64 and CLEAR_MARGIN), a throw from
     # the ground from 105. The chain's touches don't have it (gone past regardless, the navigator's _meet: its price
@@ -268,10 +268,14 @@ def test_a_trips_last_move_lands_where_her_first_attack_is_sure(tree_map):
     # With where she's sent on 24 (`goal`), the walk on from the landing counts: the clear landing nearest it.
     to = flow.chain(path, start, [], price=lambda leg: judge(leg)[0], goal=(24, 180.0))[0]
     assert judge(to[-1])[0] == 0 and to[-1].end.x <= priced[-1].end.x + 1e-6
-    # Where the first way lands clear, the chain is as it was (no price, nothing else tried).
+    # Where the first way lands clear, the chain is as it was (no price, nothing else tried): a Green at 300, 74 off, by
+    # the hit point inside 24 (reach.CLIENT_HIT_POINT off). By the client's own (the cornered study's R6), its body over
+    # the tower's wall at 310 by 18, a jump throw's star from the landing (230) goes into the wall: not sure, priced.
     far = MonsterTrack(24, 300.0, speed=0.0, half=28.0, vx=0.0, height=56.0, kind=GREEN, top=56.0)
     judge_far = _judge(tree_map, [far])
     a, _, _ = flow.chain(path, start, [])
+    assert judge_far(a[-1])[0] > 0
+    monkeypatch.setattr(reach, "CLIENT_HIT_POINT", False)
     b, _, _ = flow.chain(path, start, [], price=lambda leg: judge_far(leg)[0])
     assert judge_far(a[-1])[0] == 0 and [(leg.end.x, leg.end.t) for leg in a] == [(leg.end.x, leg.end.t) for leg in b]
     # No danger counting (the first map): no price.

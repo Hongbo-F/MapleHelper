@@ -116,6 +116,10 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    alive
   fresh_hurt       touches that hurt her by a monster within world.FRESH_S of its respawn (from its spawn point),
                    and fresh_hp_lost, the HP they took
+  newborn_hurt     touches that hurt her by a monster within world.NEWBORN_S (4 s) of its respawn, and
+                   newborn_hp_lost, the HP they took; respawn_guards, the hunt loop's trips to a pile held for the map's
+                   pass by the spawn guard (its 'respawn_guard' events, behavior.hunt._respawn_guard: once a point a
+                   pass)
   wait_s           seconds the hunt loop spent waiting for respawns (its rules 'wait' and 'lull loot', from its 'hunt'
                    records), and wait_hp_lost, the HP touches took then
   pile_s           seconds the hunt loop spent on her drops (its loot rules, PILE_RULES, or an objective that's a pile,
@@ -308,6 +312,22 @@ WORLDS["spawn-fade-wide"] = {"spawn_found": SPAWN_FOUND_WIDE}
 # 2026-11-02, where it now touches only once it has faded in (world.NEWBORN_SOLID_S: none of the 72 live touches by a
 # spawn point came before 0.82 s after the respawn pass).
 WORLDS["newborns-touch"] = {"newborns_touch": True}
+# ... and a star's line checked to its hit point inside the monster's platform alone (`hit-inside`: Realism.hit_inside),
+# as every world had it until 2026-11-03, where the client's own point counts too: a jump throw up close at a monster at
+# the foot of a wall rising from its platform's end goes into the wall (reach.CLIENT_HIT_POINT, the cornered study's R6).
+WORLDS["hit-inside"] = {"hit_inside": True}
+# ... and a skill's (Lucky Seven's) shot row from her x for its hit point (`hit-row-0`: Realism.skill_row 0), as RustMS's
+# port has it (Combat.cpp apply_move, ShotPath.h origin: "a skill's is 0"), where the stack's row starts 65 ahead of her
+# (reach.SEARCH_START, assumed: R6 then rests on the live hour's split and the crop; the review of 2026-11-03): up close
+# a monster at the foot of a wall has its hit point inside the platform, and the star isn't stopped.
+WORLDS["hit-row-0"] = {"skill_row": 0.0}
+# ... and her aim up close as before the cornered study's R6 and R8 (the stack's, `stack` below: run_one sets them for
+# the run): `aim-before`, both off (the hit point inside the monster's platform alone, a jump throw up close counted sure
+# with its own key's line unchecked: attack.reach.CLIENT_HIT_POINT; the nearest the way she faces, attack.stance
+# .FIRST_TO_REACH), to price them in a world where such a star goes into the wall; `first-to-reach-off`, R8 alone off.
+WORLDS["aim-before"] = {"stack": (("gamelab.attack.reach", "CLIENT_HIT_POINT", False),
+                                  ("gamelab.attack.stance", "FIRST_TO_REACH", False))}
+WORLDS["first-to-reach-off"] = {"stack": (("gamelab.attack.stance", "FIRST_TO_REACH", False),)}
 # ... and her knock as the planner has it (`planner-knock`: Realism.knock, world.KNOCK_PLANNER: motion.physics's 180 out
 # and 220 up, landing at the speed she flew; ~58 units on flat ground, 0.22 s in the air), as every world had it until
 # 2026-11-02, where it is now the client's (world.KNOCK_VX, KNOCK_VY: 270 and 270, landing at her walk's speed at most;
@@ -808,6 +828,10 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "alive_s": round(end, 1),
         "fresh_hurt": sum(1 for t, hp in world.fresh_log if hp > 0 and t <= end),
         "fresh_hp_lost": round(sum(hp for t, hp in world.fresh_log if t <= end), 3),
+        "newborn_hurt": sum(1 for t, hp in world.newborn_log if hp > 0 and t <= end),
+        "newborn_hp_lost": round(sum(hp for t, hp in world.newborn_log if t <= end), 3),
+        "respawn_guards": sum(1 for r in events if r.get("kind") == "respawn_guard"
+                              and (start is None or r["t"] - start <= end)),
         "wait_s": round(sum(max(0.0, min(b, end) - a) for a, b in waits), 1),
         "wait_hp_lost": round(sum(hp for t, hp in world.touch_log if t <= end and any(a <= t <= b for a, b in waits)),
                               3),
@@ -1123,7 +1147,8 @@ def _trips(world, records: list[dict], end: float) -> dict:
 # The hunt loop's rules for her drops (behavior.hunt: 6a, 6, 5, 5b, 8, 10), for pile_s: while one of them decides, or
 # her objective is a pile (a trip for one: its 'hunt' record's objective "pile on ..."), she's on her drops.
 PILE_RULES = ("valuable pile", "urgent pile", "pile here", "on the way", "lull loot", "loot elsewhere",
-              "sweep", "sweep: landing", "sweep: clear first")  # (the loot sweep's, behavior.sweep, from 2026-10-30)
+              "sweep", "sweep: landing", "sweep: clear first",  # (the loot sweep's, behavior.sweep, from 2026-10-30)
+              "sweep: the pass", "valuable pile: the pass")  # (the spawn guard's holds: behavior.hunt._go_for)
 
 
 def _full_stands(world, records: list[dict], end: float) -> dict:
