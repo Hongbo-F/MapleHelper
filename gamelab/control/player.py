@@ -747,7 +747,13 @@ class Player:
                             cur["problems"].append(f"mouse {x},{y} is outside the game; skipped")
                             i += 1
                             continue
-                        window.move_cursor(client_area["left"] + x, client_area["top"] + y)
+                        moved = window.move_cursor(client_area["left"] + x, client_area["top"] + y, wait=wait)
+                        if moved == "splice":
+                            switch()
+                            i = 0
+                            continue
+                        if not moved:
+                            return
                     else:
                         _, name, kind = event
                         if not (kind == "down" and name in held):  # (held already: a splice's held key, left down)

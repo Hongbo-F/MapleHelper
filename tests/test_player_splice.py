@@ -186,3 +186,21 @@ def test_can_splice_follows_the_players_info_file(monkeypatch, tmp_path):
     assert client.can_splice() is False
     info.unlink()
     assert client.can_splice() is False
+
+
+def test_a_splice_during_a_mouse_trail_takes_over_before_the_next_event(monkeypatch, tmp_path):
+    """A trail waits through the plan's own wait: a splice due during it takes over before the old plan's next key."""
+    p, sent, inbox, outbox = _player(monkeypatch, tmp_path)
+    old = {"id": "old", "events": [[0, "mouse", 100, 100], [0, "f", "down"]], "capture": {"lead_ms": 0}}
+    new = {"id": "new", "at_ms": 0, "held": [], "events": [[0, "alt", "down"], [40, "alt", "up"]],
+           "capture": {"lead_ms": 0}}
+    (inbox / "old.running").write_text("")
+    (inbox / "old.splice").write_text(json.dumps(new))
+    monkeypatch.setattr(player_mod.window, "move_cursor", lambda x, y, wait: wait(time.perf_counter()))
+
+    result = p.run(old)
+
+    assert result["id"] == "new" and result["problems"] == []
+    assert sent == [("alt", True), ("alt", False)]  # the old plan's f never goes after its interrupted mouse move
+    answered = json.loads((outbox / "old.json").read_text())
+    assert answered["sent"] == [] and answered["problems"] == [client.SPLICED]

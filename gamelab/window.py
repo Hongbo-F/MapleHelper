@@ -1,13 +1,14 @@
 """Finding the game window, its client area, whether it's full screen, and bringing it to the front; moving the mouse
-pointer.
+pointer along a human-like trail.
 
-The elevated key player imports this: keep its imports to the standard library and maplehelper.win32.
+The elevated key player imports this: keep its imports to the standard library and maplehelper's input helpers.
 """
 
 import ctypes
 import time
 from ctypes import wintypes
 
+from maplehelper.mouse_trail import generate_trail
 from maplehelper.win32 import foreground_title, kernel32, send_mouse_move, user32  # noqa: F401  (foreground_title re-exported)
 
 SW_RESTORE = 9  # ShowWindow: un-minimize
@@ -38,6 +39,8 @@ user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BO
 user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
 user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
+user32.GetCursorPos.argtypes = (ctypes.POINTER(wintypes.POINT),)
+user32.GetCursorPos.restype = wintypes.BOOL
 user32.WindowFromPoint.argtypes = (wintypes.POINT,)
 user32.MonitorFromPoint.argtypes = (wintypes.POINT, wintypes.DWORD)
 user32.MonitorFromPoint.restype = wintypes.HMONITOR
@@ -91,14 +94,34 @@ kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 CLIENT_SIZES = ((1366, 768), (1920, 1080))
 
 
-def move_cursor(x: int, y: int) -> None:
-    """Move the mouse pointer to screen pixel x, y (no click): as a mouse would (win32.send_mouse_move: an item dragged
-    in the game follows it), then exactly there (SetCursorPos: the absolute coordinates are 1/65536 of the desktop)."""
-    try:
-        send_mouse_move(x, y)
-    except OSError:
-        pass
+def move_cursor(x: int, y: int, wait=None):
+    """Move the pointer to screen pixel x, y along a generated trail (no click), one whole-pixel mouse event at a time.
+
+    `wait` is the player's plan-aware wait when one is running: it takes the due perf_counter time and returns True to
+    carry on, or an early result (False for a stop, "splice" for a new plan) which this returns without another event.
+    With none, this sleeps until each sample is due. The last SetCursorPos removes SendInput's sub-pixel rounding.
+    """
+    here = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(here)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    trail = generate_trail(here.x, here.y, x, y)
+    started = time.perf_counter()
+    for ms, px, py in trail[1:]:
+        due = started + ms / 1000.0
+        if wait is None:
+            left = due - time.perf_counter()
+            if left > 0:
+                time.sleep(left)
+        else:
+            got = wait(due)
+            if got is not True:
+                return got
+        try:
+            send_mouse_move(round(px), round(py))
+        except OSError:
+            pass
     user32.SetCursorPos(x, y)
+    return True
 
 
 def find_game(title: str) -> int:
