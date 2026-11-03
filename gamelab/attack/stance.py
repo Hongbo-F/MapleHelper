@@ -1117,8 +1117,10 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     if y is None:
         y = nearest.y if platform is None else platform.y_at(min(max(x, platform.left), platform.right))
     others = mine if around is None else around
-    here = _from_here(x, y, side, nearest, facing, can_jump, top, half, mine, halves, platform, pace,
-                      ground_ok=not (clawed and CLAWED_AIR))  # (a monster the looks miss on her: the claw's)
+    here = _from_here(x, y, side, nearest, facing, can_jump, top, half, mine, halves, platform, pace)
+    if clawed and CLAWED_AIR and here.sure and here.act[0] == "throw":  # (a monster the looks miss on her: the claw's)
+        here = _touched(_from_here(x, y, side, nearest, facing, can_jump, top, half, mine, halves, platform, pace,
+                                   ground_ok=False))
     if not POINT_BLANK and here.sure and castable is not None and not castable(nearest):
         here = Here(("wait",), False, here.gap)  # (her: no cast at one she won't cast at, however her search picks it)
     stepping = moves < MAX_MOVES
@@ -1258,12 +1260,19 @@ def _from_air(x: float, y: float, side: str, in_reach: list[Monster], facing: st
         return None
     m = min(way, key=lambda t: abs(t.x - x))
     top = (tops or MONSTER_TOP).get(m.kind, MONSTER_TOP["pig"])
-    here = _from_here(x, y, side, m, facing, can_jump, top, half_of(m.kind, halves), [], halves, platform, pace,
-                      ground_ok=False)
-    if not here.sure or here.act[0] != "jump_throw" or (plan := plan_of(here.act)) is None:
-        return None
+    here = _touched(_from_here(x, y, side, m, facing, can_jump, top, half_of(m.kind, halves), [], halves, platform,
+                               pace, ground_ok=False))
+    return here.act if here.sure and here.act[0] == "jump_throw" else None
+
+
+def _touched(here: Here) -> Here:
+    """_from_here's answer without the ground (stance's `clawed`) with its sure jump's plan saying why ('touched', its
+    own why after it: 'touched, tap first'): the 'jump' records' kind, and her log's."""
+    plan = plan_of(here.act)
+    if not here.sure or here.act[0] != "jump_throw" or plan is None:
+        return here
     why = "touched" if plan.why in ("", "close") else f"touched, {plan.why}"
-    return (here.act[0], here.act[1], replace(plan, why=why), *here.act[3:])
+    return Here((here.act[0], here.act[1], replace(plan, why=why), *here.act[3:]), here.sure, here.gap)
 
 
 # A jump throw up close's later keys (the jitter's room) have their lines to it checked too (_jittered_up), as reach.shots'

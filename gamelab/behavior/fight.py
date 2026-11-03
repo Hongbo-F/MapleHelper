@@ -497,16 +497,22 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
 
 
 
+TOUCH_ROUND_S = 0.001  # s (clawed) a touch's popup may read after the look's frame: its `at` is rounded to the ms
+                       # (perception.touches.Touch.data), and one told in the look's own frame (the first look after
+                       # it) read up to 0.5 ms after it (loop_tree_touched_unseen's seed 11 at 6.07 s)
+
+
 def clawed(h: "Hunter", s: Scene, around: list[Monster]) -> bool:
     """Whether a monster the looks miss is on her at look `s` (attack.stance's `clawed`, CLAWED_AIR: a throw from the
     ground would be the claw's): a touch of hers as the navigator's R7 stand-in goes by (control.navigator.fresh_touch:
-    not `crowded`, its popup TOUCHER_S before the look at most) with no monster of `around` (the look's and those about
+    not `crowded`, its popup TOUCHER_S before the look at most, TOUCH_ROUND_S after its frame) with no monster of
+    `around` (the look's and those about
     her it didn't find: hidden, unseen) on her platform, or beside her (stance.beside), within TOUCHER_NEAR of her
     (Navigator._toucher's test); False where nothing counts as a danger (the first map, as it was)."""
     d = getattr(h, "danger", None)
     if d is None or not d.any or s.where is None or s.platform is None:
         return False
-    if fresh_touch(getattr(h, "senses", None), s) is None:
+    if fresh_touch(getattr(h, "senses", None), s, slack=TOUCH_ROUND_S) is None:
         return False
     x, here = s.where.x, s.platform
     return not any(abs(m.x - x) <= TOUCHER_NEAR and beside(m, here, x, d) for m in around)

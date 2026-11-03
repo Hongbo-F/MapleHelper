@@ -4074,14 +4074,15 @@ def rope_at_top(model: MapModel, where) -> Rope | None:
     return min(near, key=lambda r: abs(r.x - where.x)) if near else None
 
 
-def fresh_touch(senses, s: Scene) -> dict | None:
+def fresh_touch(senses, s: Scene, slack: float = 0.0) -> dict | None:
     """The touch of hers R7's stand-in goes by (Navigator._toucher; the fights' too, behavior.fight.clawed): `senses`'s
     newest (Senses.touch), not `crowded`, its popup TOUCHER_S before look `s` at most, her placed on a platform; else
-    None."""
+    None. `slack`: s its popup may read after the look's frame (the fights': a popup's `at` is rounded to the ms,
+    perception.touches.Touch.data, so one told in the look's own frame can read up to 0.5 ms after it; R7's own 0)."""
     touch = getattr(senses, "touch", None)
     w = s.where
     if not isinstance(touch, dict) or touch.get("crowded") or w is None or w.platform is None \
-            or not 0 <= s.t - touch.get("at", -1e18) <= TOUCHER_S:
+            or not -slack <= s.t - touch.get("at", -1e18) <= TOUCHER_S:
         return None
     return touch
 

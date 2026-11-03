@@ -835,31 +835,36 @@ _STANDARD = dict(noise=_NEAR, attack="choice", her=dataclasses.replace(LEVEL_25,
                  realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"]))
 _DECISION = re.compile(r"^\s*([\d.]+) {3}(jump-throwing|throwing|jumping back|stepping away|closing in|nothing in reach)"
                        r"(.*)$")
+_PRESSED = re.compile(r"^\s*([\d.]+) {5}(?:Lucky Seven|the regular attack): ")
 _TOUCHED_BY = re.compile(r"^\s*([\d.]+) touched by ")
 _CLAW_HITS = re.compile(r"^\s*([\d.]+) claw swipe hits ")
 CLAW_EDGE = 105.0  # units: a mushroom past this is out of the claw's box (reach.ground_sure(28): its middle's)
+TOLD_S = 0.1       # s: a touch this long before her look at least is one it has (its popup shown and read)
 
 
 def far_claws(tr: dict, within: float | None = None) -> list[tuple[float, str]]:
-    """Her presses from the ground at a target past the claw's edge that the world's claw took, within `within` s of a
-    touch of hers (control.navigator.TOUCHER_S by default): each claw swipe the world saw (World.log, 'claw swipe
-    hits'), the decision in force then (her log's last stance line before it) a throw from the ground whose nearest
-    target it names is CLAW_EDGE or more off, a touch of hers (World.log, 'touched by') `within` s before it at most:
-    [(s, the decision's line)]. A press the claw takes on purpose (CLAW_ONLY: one on her) names one nearer."""
+    """Her presses from the ground at a target past the claw's edge that the world's claw took, decided within `within`
+    s of a touch of hers (control.navigator.TOUCHER_S by default): each claw swipe the world saw (World.log, 'claw swipe
+    hits'), its press's look (her log's last attack line before it: 'Lucky Seven: ...') TOLD_S to `within` s after a
+    touch of hers (World.log, 'touched by'), the decision in force then (her log's last stance line before that look) a
+    throw from the ground whose nearest target it names is CLAW_EDGE or more off: [(s, the decision's line)]. A press
+    the claw takes on purpose (CLAW_ONLY: one on her) names one nearer."""
     from ..control.navigator import TOUCHER_S
     within = TOUCHER_S if within is None else within
     decided = [(float(m[1]), m[2], m[3]) for line in tr["log"] if (m := _DECISION.match(line))]
+    pressed = [float(m[1]) for line in tr["log"] if (m := _PRESSED.match(line))]
     touched = [float(m[1]) for line in tr["world_log"] if (m := _TOUCHED_BY.match(line))]
     out = []
     for line in tr["world_log"]:
         if (m := _CLAW_HITS.match(line)) is None:
             continue
         t = float(m[1])
-        before = [d for d in decided if d[0] <= t]
+        look = max((p for p in pressed if p <= t), default=None)
+        before = [d for d in decided if look is not None and d[0] <= look]
         if not before or before[-1][1] != "throwing":
             continue
         gaps = [abs(int(v)) for v in re.findall(r" ([+-]\d+)", before[-1][2])]
-        if gaps and min(gaps) >= CLAW_EDGE and any(0 <= t - u <= within for u in touched):
+        if gaps and min(gaps) >= CLAW_EDGE and any(TOLD_S <= look - u <= within for u in touched):
             out.append((t, f"{before[-1][0]:.3f} throwing{before[-1][2]}"))
     return out
 
