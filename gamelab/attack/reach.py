@@ -294,6 +294,25 @@ LINES = ("v83", "level")
 # rule regardless). The probes that measure it (behavior.probe: step-up, step-down, hanging-wall) switch it off
 # for their run.
 WALLS_BLOCK = True
+# Where the line checked ends (the cornered study's R6, 2026-11-03): the client's own hit point (hit_point: the middle of
+# where the shot's row crosses the monster's body, its frame's bounds about where it stands, nothing about its platform)
+# where the line to it is stopped, else the one 1 unit inside the monster's platform (_hit_on: the step's logs, below).
+# The client: RustMS's port of the decompiled v83 client (master b9e1b5bb, fetched 2026-11-03: D:/MapleHelper-scratch/
+# cornered-fix/aim/src) has the shot's stop at hit_point(shot_area, get_mob_body(target)) (Combat.cpp:1502; ShotPath.h:459,
+# FUN_00664603) checked from her x, 28 over her feet (blocked, :382, FUN_00a457d0; Combat.cpp:1504), the body the mob's
+# frame's bounds shifted to where it stands (Mob.cpp:2823): a monster at the foot of a wall rising from its platform's
+# end has its body over the wall, and up close (the row starting SEARCH_START ahead of her, inside its body) the hit
+# point is past the wall, which stops the star. Taken inside the platform, her decisions and the world had it clear.
+# Live, BugBaby's hour of 2026-11-02 22:46-23:46 (D:/MapleHelper-scratch/cornered: ep-A/wallsplit.py, its crop
+# z1_742-757 a star going into the trunk at x -220 with no number): of her jumps in place up close, the 21 whose client
+# line is stopped did damage 2 times, the 184 clear 80 (p 0.0015); her stars from the ground 105-410 off at monsters
+# 0-25 from a wall end hit as often as elsewhere (55%), where the row covers the whole body and the two points agree.
+# Taken inside its platform still where only that one is stopped: from 4's right end at a pig on 2 within 22 of its end,
+# 368-410 off, the client's point is short of the step wall (none of the logs' throws from 4 got to 2, and the user saw
+# the step stop them, 2026-10-21). False: her decisions as before (the point inside the platform alone, and a jump
+# throw up close counted sure with its first key's line unchecked: attack.stance); the simulator's world keeps the
+# client's regardless (world.Realism.hit_inside for the old: `--world hit-inside`).
+CLIENT_HIT_POINT = True
 PIG = (MONSTER_HEIGHT["pig"], MONSTER_HALF["pig"])  # the body of a kind no one knows (body_of)
 
 
@@ -592,7 +611,8 @@ def _hit_on(a: float, row: float, b: float, feet: float, top: float, half: float
     body hanging over its platform's end, the client's hit point is past that end: from platform 4 a pig on 2
     within 22 of 2's end, 368-410 off, would be hit over the step's edge, short of the step wall, where no star
     from 4 reached one on 2 in the logs and the user saw the step stop them (2026-10-21); and from a jump a
-    slime by the basin's side right beside her (the row starts 65 ahead, so its far edge) at the wall's foot."""
+    slime by the basin's side right beside her (the row starts 65 ahead, so its far edge) at the wall's foot,
+    which the client's point has behind the wall: wall_between checks that one too (CLIENT_HIT_POINT)."""
     hx, hy = hit_point(a, row, 1 if b >= a else -1, b, feet, top, half)
     return (hx if target is None else _inside(hx, target)), hy
 
@@ -712,7 +732,8 @@ def sight_stop(platform: Platform, sx: float, sy: float, ex: float, ey: float,
 
 def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise: float = 0.0,
                  target: Platform | None = None, shot_h: float | None = None, ty: float | None = None,
-                 body: tuple[float, float] | None = None, line: str | None = None) -> Segment | None:
+                 body: tuple[float, float] | None = None, line: str | None = None,
+                 client: bool | None = None) -> Segment | None:
     """What stops a star from her (map x on `platform`, the one she last stood on; her feet at y, `rise`
     units up in a jump) on its way to a monster at map x `tx`, by the line LINE (or `line`) has: a wall of her
     own foothold group (Platform.walls) that the line goes into at its outer face, or (the v83 line) a floor
@@ -721,8 +742,10 @@ def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise:
     one at the foot of a wall of her group that rises from its own platform's end (the basin's sides, from its
     floor) isn't behind it. The level line runs SHOT_H above her feet (`shot_h`, if not: the probes' scorer
     tries others) across to `tx`; the v83 line from there to the star's hit_point on the monster's body (inside
-    `target`, if known: _hit_on): its feet at map y `ty` (by default on `target` at tx, else at her height),
-    `body` (how tall, half its width: body_of; a pig's by default)."""
+    `target`, if known: _hit_on), and with `client` (CLIENT_HIT_POINT by default) where that one's clear, to the
+    client's own hit point too where it isn't inside `target` (its body over the platform's end: past a wall rising
+    from there, up close): its feet at map y `ty` (by default on `target` at tx, else at her height), `body` (how
+    tall, half its width: body_of; a pig's by default)."""
     if platform is None:
         return None
     row = y - rise - (SHOT_H if shot_h is None else shot_h)
@@ -733,7 +756,13 @@ def wall_between(platform: Platform | None, x: float, y: float, tx: float, rise:
         return min(walls, key=lambda w: abs(w.x1 - a), default=None)
     feet = ty if ty is not None else target.y_at(b) if target is not None else y
     top, half = body or PIG
-    return sight_stop(platform, a, row, *_hit_on(a, row, b, feet, top, half, target))
+    inside, hy = _hit_on(a, row, b, feet, top, half, target)
+    stop = sight_stop(platform, a, row, inside, hy)
+    if stop is None and target is not None and (CLIENT_HIT_POINT if client is None else client):
+        hx, _ = hit_point(a, row, 1 if b >= a else -1, b, feet, top, half)
+        if hx != inside:
+            stop = sight_stop(platform, a, row, hx, hy)
+    return stop
 
 
 def wall_in_way(platform: Platform | None, x: float, y: float, tx: float, rise: float = 0.0,
@@ -816,8 +845,14 @@ def clear_length(platform: Platform, x: float, y: float, target: Platform, lo: f
     feet = _ys_at(target, xs)
     near = _sight(platform).near(min(a, lo - half), min(row, float(feet.min()) - top),
                                  max(a, hi + half), max(row, float(feet.max())))  # what any of those lines can meet
-    hx, hy = _hits_on(a, row, xs, feet, top, half, target)
-    return width * int(np.count_nonzero(_sight_clear(near, a, row, hx, hy)))
+    hx, hy = _hits_on(a, row, xs, feet, top, half)
+    inside = np.minimum(np.maximum(hx, target.left + 1), target.right - 1)
+    clear = _sight_clear(near, a, row, inside, hy)
+    if CLIENT_HIT_POINT:
+        out = inside != hx  # (wall_between's: the client's own hit point too, where it isn't inside the platform)
+        if out.any():
+            clear[out] &= _sight_clear(near, a, row, hx[out], hy[out])
+    return width * int(np.count_nonzero(clear))
 
 
 def _ys_at(p: Platform, xs: np.ndarray) -> np.ndarray:
@@ -830,16 +865,17 @@ def _ys_at(p: Platform, xs: np.ndarray) -> np.ndarray:
     return ys
 
 
-def _hits_on(a: float, row: float, b: np.ndarray, feet: np.ndarray, top: float, half: float,
-             target: Platform) -> tuple[np.ndarray, np.ndarray]:
-    """_hit_on for many bodies at once (their middles at map x `b`, their feet at map y `feet`), in the same
-    arithmetic, so with the same answers."""
+def _hits_on(a: float, row: float, b: np.ndarray, feet: np.ndarray, top: float,
+             half: float) -> tuple[np.ndarray, np.ndarray]:
+    """hit_point for many bodies at once (their middles at map x `b`, their feet at map y `feet`), in the same
+    arithmetic, so with the same answers: the client's own (clear_length takes them inside the target's platform
+    as _hit_on does)."""
     d = np.where(b >= a, 1.0, -1.0)
     near, far = a + d * SEARCH_START, a + d * STAR_RANGE
     lo, hi = np.minimum(near, far), np.maximum(near, far)
     left, right = b - half, b + half
     hx = np.where(lo >= right, right, np.where(hi <= left, left, (np.maximum(lo, left) + np.minimum(hi, right)) / 2))
-    return np.minimum(np.maximum(hx, target.left + 1), target.right - 1), np.minimum(np.maximum(row, feet - top), feet)
+    return hx, np.minimum(np.maximum(row, feet - top), feet)
 
 
 def _sight_clear(footholds: list[Segment], sx: float, sy: float, ex: np.ndarray, ey: np.ndarray) -> np.ndarray:

@@ -458,12 +458,15 @@ def test_a_jump_throw_up_close_keeps_its_jitter_to_keys_whose_line_is_clear(monk
     later keys had their star stopped by her floor or one just over her where the key's hit (on 33 at x 126.9 facing
     left at a Horny Mushroom 107 off, keyed 40 the world's star hits, 41-55 stopped; on 13 at -139 facing right at one
     108 off, 40-45 hit, 46-55 stopped): the room now ends before the first key whose line, at either end of the decide
-    lag, is stopped, and every key of it hits in the world; without the check, the old rooms."""
+    lag, is stopped, and every key of it hits in the world; without the check, the old rooms. (Its first key's line is
+    checked too since the cornered study's R6, 2026-11-03: below, with reach.CLIENT_HIT_POINT on.)"""
     from maplehelper.engine import LEFT, RIGHT
+    from gamelab.attack import reach
     from gamelab.attack import stance as st
     from gamelab.behavior.fight import bodies
     model = mapdata.load(10002073)
     tops = {k: b.top for k, b in bodies(model).items()}
+    monkeypatch.setattr(reach, "CLIENT_HIT_POINT", False)  # (the first key's line unchecked, as then)
 
     def room(pid, x, mx, facing):
         p = model.platform(pid)
@@ -487,6 +490,19 @@ def test_a_jump_throw_up_close_keeps_its_jitter_to_keys_whose_line_is_clear(monk
         assert hits(pid, x, mx, facing, old[1]) == "stopped"  # (a key the old room had)
     monkeypatch.setattr(st, "ROOM_LINE", False)
     assert [room(pid, x, mx, facing) for pid, x, mx, facing, _, _ in cases] == [old for *_, old in cases]
+    # The first key's own line at both ends of the decide lag too (reach.CLIENT_HIT_POINT): on 33 its late end is the
+    # later keys' start, which her floor stops: no sure jump from there, a step to where a throw is sure (from the ground,
+    # 122 off); on 13, as before.
+    monkeypatch.setattr(st, "ROOM_LINE", True)
+    monkeypatch.setattr(reach, "CLIENT_HIT_POINT", True)
+    p = model.platform(33)
+    m = Monster(Mob("horny-mushroom", 0, 0, 30, 30, 0.9), 126.9 - 107.2, p.y_at(126.9 - 107.2), 33)
+    act = st.stance(126.9, p.y_at(126.9), p, [m], facing=LEFT, tops=tops, around=[m])
+    assert act[:2] == ("back", RIGHT)
+    x = 126.9 + act[2]
+    there = st.stance(x, p.y_at(x), p, [m], facing=LEFT, tops=tops, around=[m])
+    assert there == ("throw", LEFT)
+    assert room(13, -139.0, -31.0, RIGHT) == (40, 40)
 
 
 def test_a_simulated_runs_jitter_is_drawn_from_its_seed():

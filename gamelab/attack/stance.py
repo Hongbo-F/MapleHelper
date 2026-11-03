@@ -324,6 +324,17 @@ CLEAR_STAY = 0.05
 # Mushroom 18 off master's stack stepped 63, the room it had; with the room to 120 the branch threw from where she stood).
 ESCAPE_STEPS = True
 ESCAPE_STEP = 20
+# Up close, the throw from where she stands at whichever monster reaches her first (the cornered study's R8, 2026-11-03),
+# not at the nearest on the side she faces: of the nearest too close on each side (_close_quarters), where both throws
+# from where she stands surely take theirs (_from_here), the one whose body meets hers first as `pace` walks them
+# (_contact_s, by her attack after next: IMMINENT_S), then the most hurt (its HP bar: finish what was started, as
+# pick_target and _jump_shot have it), then the side she faces, then the nearer; and where the one she faces has only
+# an unsure jump in place left (no step, no jump back: the other hems her in), the sure throw the other way in its place.
+# Live in BugBaby's hour of 2026-11-02 22:46-23:46 (D:/MapleHelper-scratch/cornered, episode A at 22:50:27-42 on 7) 6
+# jumps in place went at a monster they didn't surely take with a sure one standing on her other side, none doing
+# damage; replayed on A's looks (ep-A/replay/proto_fix.py) the other way's jump throw comes instead. The thief's alone
+# (POINT_BLANK: the magician's casts up close are as they were). False: as before.
+FIRST_TO_REACH = True
 # Her full box against theirs (from 2026-10-31): her fights count a monster on a platform just under or over hers as on
 # hers where its body meets hers (`beside`, Danger.beside: a kind that counts, its floor less than its top under her
 # feet or less than her height over them, as her trips and the danger have it): who's too close (too_close, the hunt
@@ -463,7 +474,8 @@ def landing(platform: Platform, x: float, near, halves: dict[str, float] | None 
     her stopping where it meets her, Pace's PACE_STOP). One whose body meets hers at either, or that passes her between,
     `meets` (a touch). Her first attack surely takes the nearest then (`sure`) if a throw from the ground does there
     (reach.ground_sure: past its claw's edge) or, with no platform overhead (`can_jump`), a jump in place keyed 40 ms after
-    the jump key does (reach.air_sure, CLEAR_MARGIN farther: jump_reach on her level; the slope where it will be), and one
+    the jump key does (reach.air_sure, CLEAR_MARGIN farther: jump_reach on her level; the slope where it will be; its line
+    clear, _jump_clear: not into a wall its body is over), and one
     of a kind that hits hard (`danger`) is at least its keep-off off (Danger.keep_off: a Horny Mushroom 169). Its price
     LANDING_PRICE_S where it isn't sure, MEET_PRICE_S more where one meets her (with `prices`, Prices.landing_s and
     meet_s for the nearest's kind: hers, not Tree Dungeon's); 0 for a clear landing, with nobody on
@@ -495,7 +507,8 @@ def landing(platform: Platform, x: float, near, halves: dict[str, float] | None 
     sure = near_ground <= gap
     if not sure and air and (can_jump is None or can_jump(x, x)):
         dy = platform.y_at(min(max(mx, platform.left), platform.right)) - y
-        sure = reach.air_sure(gap - CLEAR_MARGIN, dy, top, half, physics.JUMP_ATTACK_MS)
+        sure = reach.air_sure(gap - CLEAR_MARGIN, dy, top, half, physics.JUMP_ATTACK_MS) \
+            and _jump_clear(platform, x, mx, platform, y + dy, top, half, physics.JUMP_ATTACK_MS)
     if sure and danger is not None and gap < danger.keep_off(kind):
         sure = False
     if prices is None:
@@ -1054,7 +1067,9 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
                     seen: list[Monster] | None = None, castable: Callable[[Monster], bool] | None = None) -> tuple:
     """A monster on her platform too close for a throw from the ground (`close`, as it will be when her next attack
     starts: too_close; `mine`: all on her platform), the nearest one then deciding (on the side she faces, if any will
-    be there: one walking at her stops where it meets her, on its side, Pace's PACE_STOP). The throw from where she
+    be there: one walking at her stops where it meets her, on its side, Pace's PACE_STOP; with FIRST_TO_REACH, the
+    nearest the other way where the throws at both are sure and it reaches her first, or is more hurt, and the sure throw
+    at it in place of an unsure jump in place at the one she faces). The throw from where she
     stands (_from_here, `pace`: where each will be when its attack starts) if its attack surely
     takes it: from the ground past the claw's reach, else a jump in place keyed so that it does (reach.air_sure: her feet
     then, its body on the slope as it stands then), at once if she faces it, else turning in the air where that picks
@@ -1082,6 +1097,29 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         return RIGHT if where[id(t)] > x or (where[id(t)] == x and t.x > x) else LEFT
     on_facing = [t for t in close if side_of(t) == facing]
     nearest = min(on_facing or close, key=lambda t: abs(where[id(t)] - x))
+    if y is None:
+        y = nearest.y if platform is None else platform.y_at(min(max(x, platform.left), platform.right))
+
+    def throw_at(t: Monster) -> Here:
+        return _from_here(x, y, side_of(t), t, facing, can_jump, tops.get(t.kind, MONSTER_TOP["pig"]),
+                          half_of(t.kind, halves), mine, halves, platform, pace)
+    here = throw_at(nearest)
+    alt = None  # (FIRST_TO_REACH: the sure throw at the nearest the other way, for an unsure jump at `nearest`)
+    if FIRST_TO_REACH and POINT_BLANK and platform is not None:
+        other = [t for t in close if side_of(t) != side_of(nearest)]
+        if other:
+            o = min(other, key=lambda t: abs(where[id(t)] - x))
+            there = throw_at(o)
+            if there.sure and not here.sure:
+                alt = there if here.act[0] == "jump_throw" else None
+            elif there.sure:
+                until = pace.lead + GROUND_PICK_S + IMMINENT_S
+
+                def first(t: Monster) -> tuple:
+                    return (_contact_s(t, x, pace, platform, halves, until), 1.0 if t.bar is None else t.bar,
+                            side_of(t) != facing, abs(where[id(t)] - x))
+                if first(o) < first(nearest):
+                    nearest, here = o, there
     side = side_of(nearest)
     away = directions.opposite(side)
     back = directions.sign(away)
@@ -1089,10 +1127,7 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
     behind = [t for t in mine if 0 < (t.x - x) * back < JUMP_BACK_CLEAR]
     top = tops.get(nearest.kind, MONSTER_TOP["pig"])  # a kind of unknown size: a pig's
     half = half_of(nearest.kind, halves)
-    if y is None:
-        y = nearest.y if platform is None else platform.y_at(min(max(x, platform.left), platform.right))
     others = mine if around is None else around
-    here = _from_here(x, y, side, nearest, facing, can_jump, top, half, mine, halves, platform, pace)
     if not POINT_BLANK and here.sure and castable is not None and not castable(nearest):
         here = Here(("wait",), False, here.gap)  # (her: no cast at one she won't cast at, however her search picks it)
     stepping = moves < MAX_MOVES
@@ -1104,8 +1139,9 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         and danger.share(nearest.kind) > 0 and abs(where[id(nearest)] - x) <= half + HER_HALF + CONTACT_SLACK \
         and (nearest.bar is None or nearest.bar > KILL_BAR)
     if danger is not None and platform is not None and (danger.keep_off(nearest.kind) > near_ground or touched):
-        return _escape(x, side, room, can_jump, danger, platform, others, here, halves, up, stepping, spawns,
-                       stay=CLEAR_STAY if touched else 0.0)
+        act = _escape(x, side, room, can_jump, danger, platform, others, here, halves, up, stepping, spawns,
+                      stay=CLEAR_STAY if touched else 0.0)
+        return alt.act if alt is not None and act is here.act else act
     if here.sure:
         return here.act
     jumpable = jump_reach(top, half) < near_ground
@@ -1130,7 +1166,22 @@ def _close_quarters(x: float, close: list[Monster], mine: list[Monster], facing:
         return ("back", away, min(STEP_AWAY, room), AWAY)
     if not jumpable:
         return ("throw", side) if POINT_BLANK else here.act  # (her: no claw to swipe it with)
-    return here.act
+    return here.act if alt is None else alt.act
+
+
+def _contact_s(t: Monster, x: float, pace: Pace, platform: Platform | None, halves: dict[str, float] | None,
+               until: float) -> float:
+    """s after the look until monster `t`'s body meets hers at map x (Pace.meets: as `pace` walks it, on its own
+    platform, walks_on), tried every ARC_STEP up to `until`; 0 if it's on her already, inf if not by then (it stands, walks
+    away, or comes on too slowly): which of two monsters reaches her first (FIRST_TO_REACH)."""
+    own = walks_on(t, platform)
+    half = half_of(t.kind, halves)
+    s = 0.0
+    while s <= until + 1e-9:
+        if pace.meets(t, x, s, own, half):
+            return s
+        s += ARC_STEP
+    return math.inf
 
 
 def jump_reach(top: float, half: float) -> float:
@@ -1156,7 +1207,10 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
     its attack surely takes it where `pace` has it when the attack starts: from the ground (after a tap, TAP_S later,
     unless she faces `side`) if every monster of `mine` that way is then past the claw's edge (reach.claw_edge, by half
     its width: `halves`); else a jump in place (`can_jump`: none under a platform overhead) whose attack surely picks it
-    then (reach.air_sure, CLEAR_MARGIN farther: `top` tall, `half` wide, its feet on the slope where it will be), keyed
+    then (reach.air_sure, CLEAR_MARGIN farther: `top` tall, `half` wide, its feet on the slope where it will be) and
+    whose star's line to it is clear then (with reach.CLIENT_HIT_POINT: reach.wall_in_way at both ends of the decide
+    lag, to the client's own hit point too: a monster at the foot of a wall rising from her platform's end, its body
+    over it, takes no star from a jump in place within about 70 of it, the line going into the wall), keyed
     40 ms after the jump if she faces it, else turning in the air (physics.AIR_TURN_ATTACK_MS: her feet 52-56 up then,
     a mushroom on her level picked from 144 ahead) or tapping the arrow first and jumping once the tap's walk has
     stopped (physics.JUMP_THROW_TURN_MS, then 40 ms: JumpPlan air_turn False), whichever picks it, the air turn first.
@@ -1210,7 +1264,8 @@ def _from_here(x: float, y: float, side: str, m: Monster, facing: str | None, ca
 
     for act, key, wait in tries:
         t = pace.lead + wait + jump_pick_s(key)
-        if reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, key):
+        if reach.air_sure(gap(t) - CLEAR_MARGIN, drop(t), top, half, key) \
+                and (not reach.CLIENT_HIT_POINT or clear(key, t)):  # (its own key's line too: R6)
             return Here(_jittered_up(act, m, key, wait, gap, drop, top, half, pace, clear), True, gap(t))
     if g0 < CLAW_ONLY:
         return Here(ground, False, g0)
@@ -1267,7 +1322,8 @@ def _clear_step(x: float, y: float, m: Monster, away: str, room: float, top: flo
     her next throw at it surely takes it, as `pace` has it walk meanwhile: the step's walk (physics.hold_ms) and
     STEP_SETTLE_S, then (facing away from it) a tap and a throw from the ground past its claw's edge (reach.star_sure),
     or the tap, physics.JUMP_THROW_TURN_MS and a jump in place keyed 40 ms after it (reach.air_sure, CLEAR_MARGIN
-    farther; only where `can_jump` there). Never into a monster's body on her platform (_into; with `danger`, one
+    farther, its line clear: _jump_clear; only where `can_jump` there). Never into a monster's body on her platform
+    (_into; with `danger`, one
     beside her too: BESIDE), nor to within a respawn's body of one of `spawns` ((map x, half the width of its kind):
     spawn points of her platform no monster about accounts for, where a respawn lands on her). `m` on a platform just
     under or over hers walks its own (walks_on), and a star from the ground takes it only where it would take it there
@@ -1302,9 +1358,24 @@ def _clear_step(x: float, y: float, m: Monster, away: str, room: float, top: flo
         dy = (m.y - y if platform is None or m.platform != platform.id
               else platform.y_at(min(max(mx, platform.left), platform.right))
               - platform.y_at(min(max(gx, platform.left), platform.right)))
-        if reach.air_sure((gx - mx) * d - CLEAR_MARGIN, dy, top, half, physics.JUMP_ATTACK_MS):
+        if reach.air_sure((gx - mx) * d - CLEAR_MARGIN, dy, top, half, physics.JUMP_ATTACK_MS) \
+                and _jump_clear(platform, gx, mx, own, m.y, top, half, physics.JUMP_ATTACK_MS):
             return step
     return None
+
+
+def _jump_clear(platform: Platform | None, x: float, mx: float, own: Platform | None, my: float, top: float,
+                half: float, key: int) -> bool:
+    """Whether the star of a jump in place from map x on `platform` (her feet on it there), its attack keyed `key` ms
+    after the jump key, gets to a monster at map x `mx` (on `own`, its feet on it there; at map y `my` where that isn't
+    known), `top` tall and `half` wide either side: its line clear at both ends of the decide lag (reach.wall_in_way, to
+    the client's own hit point too), as _from_here's own key's (R6). Always, without reach.CLIENT_HIT_POINT (as before)."""
+    if not reach.CLIENT_HIT_POINT or platform is None:
+        return True
+    y = platform.y_at(min(max(x, platform.left), platform.right))
+    feet = own.y_at(min(max(mx, own.left), own.right)) if own is not None else my
+    return all(reach.wall_in_way(platform, x, y, mx, physics.jump_rise(key + physics.JUMP_LAG * 1000 + lag), own,
+                                 feet, (top, half)) is None for lag in (0, physics.ATTACK_DECIDE_LAG_MS))
 
 
 def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float], bool], danger: Danger,

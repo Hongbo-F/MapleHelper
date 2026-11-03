@@ -119,15 +119,20 @@ def test_one_too_close_she_steps_to_where_her_next_throw_takes_it():
     # jumped back from (the jump back's attack, after its turn in the air, picks one on her level only from about 145).
     assert stance_mod.jump_reach(38, 34) == 88
     assert stance(500, 500, PLAT, [target(560), target(700)])[:3] == ("back", LEFT, 35)
-    # Cornered at the left end, or another monster behind her: straight up all the same, tapping the arrow on the ground
+    # Cornered at the left end: straight up all the same, tapping the arrow on the ground
     # first if she must turn (its attack 40 ms into the jump: an air turn's, 120 ms, starts 30 units higher), as by her
     # keys she faces it at once; under CLAW_ONLY (15: on her) the claw from the ground. No crossing either way.
     tap = ("jump_throw", RIGHT, stance_mod.JumpPlan(40, 0, False, "tap first"))
     assert no_room(stance(60, 500, PLAT, [target(110)])) == tap
     assert stance_mod.plan_of(stance(60, 500, PLAT, [target(110)])).room is None  # (not sure: no jitter)
     assert stance(60, 500, PLAT, [target(110)], facing=RIGHT) == ("jump_throw", RIGHT)  # (not sure: no plan)
-    assert no_room(stance(500, 500, PLAT, [target(560), target(400)])) == tap
     assert stance(60, 500, PLAT, [target(70)], facing=RIGHT) == ("throw", RIGHT)
+    # With another 100 off behind her, which a jump in place surely takes (stance.FIRST_TO_REACH, the cornered study's
+    # R8): that one, turning, where she'd have jumped at the one 60 off whose jump picks nothing for sure.
+    behind = target(400)
+    act = stance(500, 500, PLAT, [target(560), behind])
+    assert no_room(act) == ("jump_throw", LEFT, stance_mod.JumpPlan(40, 0, False, "tap first"))
+    assert stance_mod.plan_of(act).target is behind
 
 
 def test_she_keeps_working_the_side_she_faces():
