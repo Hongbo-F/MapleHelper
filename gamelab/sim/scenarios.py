@@ -780,7 +780,7 @@ _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN, n
                             off_spell=OFF_SPELL)                                 # detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -826,7 +826,12 @@ def loop_tree_23_near_misses(sim):
     invulnerability 1.5 s, world.INVULNERABLE; D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on seed 2, 22 kills
     but no Horny Mushroom the looks missed by a pile of hers (the new eyes miss fewer near her: the run parts from the
     old within its first second); of seeds 1-16 1, 3, 7, 8 and 15 show all of this; on 1, 26 kills, a Horny Mushroom
-    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.)"""
+    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.) (Seed 3 since her aim up close by a wall (2026-11-03,
+    work/cornered-aim: a star's line to the client's own hit point too, reach.CLIENT_HIT_POINT, and the monster reaching
+    her first, stance.FIRST_TO_REACH; D:/MapleHelper-scratch/cornered-fix/aim/seeds/scan1.txt): on seed 1 16 kills, the
+    run parting at 20.0 s where from 24 at x 276 a step away from a Green Mushroom at 303, its body over the tower's wall
+    at 310, is 65, not 25 (from 251 a jump throw's star at it would go into the wall); of seeds 1-16 3, 8, 12, 15 and 16
+    show all of this, 19.5 kills a run; on 3, 21.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 

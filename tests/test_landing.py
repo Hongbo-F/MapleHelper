@@ -270,7 +270,7 @@ def test_a_trips_last_move_lands_where_her_first_attack_is_sure(tree_map, monkey
     assert judge(to[-1])[0] == 0 and to[-1].end.x <= priced[-1].end.x + 1e-6
     # Where the first way lands clear, the chain is as it was (no price, nothing else tried): a Green at 300, 74 off, by
     # the hit point inside 24 (reach.CLIENT_HIT_POINT off). By the client's own (the cornered study's R6), its body over
-    # the tower's wall at 310 by 18, a jump throw's star from the landing (229) goes into the wall: not sure, priced.
+    # the tower's wall at 310 by 18, a jump throw's star from the landing (230) goes into the wall: not sure, priced.
     far = MonsterTrack(24, 300.0, speed=0.0, half=28.0, vx=0.0, height=56.0, kind=GREEN, top=56.0)
     judge_far = _judge(tree_map, [far])
     a, _, _ = flow.chain(path, start, [])
