@@ -189,13 +189,22 @@ WOUND_HIDDEN_S = 0.8     # s unseen that a wound of hers is waited for (her hit'
 # or more off with nothing seen within 105 took no MP, and every one checked on the frames was the claw on a monster the
 # looks missed 0-70 off (15-25 a swipe, no star), all but those at newborns fading in within 2 s of a touch the looks
 # had no monster for (the MISS of 22:50:43.7 known at the look of 22:50:44.1, which changed nothing). So a touch of hers
-# with no monster about her that could have made it (`clawed`: behavior.fight.clawed, the navigator's R7 stand-in's
-# test, Navigator._toucher: TOUCHER_S, TOUCHER_NEAR) has a throw at one past the claw's edge go from a jump in place
+# with no monster the look found about her that could have made it (`clawed`: behavior.fight.clawed, the navigator's R7
+# stand-in's test, Navigator._toucher: TOUCHER_S, TOUCHER_NEAR; a stand-in of one the look didn't find, hidden or
+# unseen, is a monster the looks miss) has a throw at one past the claw's edge go from a jump in place
 # where its attack surely picks it (_from_here without the ground: reach.air_sure, CLEAR_MARGIN farther), the air having
 # no claw: its star takes the one the looks miss if that one's body reaches the search's window (37 or more ahead, the
 # 35-70 of the wall corner of 22:49:57), else the one she aimed at. With none sure, from the ground as before (the
 # claw's swipe, if it's there). Off: as before.
 CLAWED_AIR = True
+# ... and up close (CLAWED_CLOSE, R1 extended, 2026-11-03): where the throw from where she stands at the one too close
+# would be a jump in place that surely picks nothing (her jump's attack picks a Horny or Green Mushroom only from 54
+# ahead: jump_reach; _close_quarters' last resort), a sure jump throw that way at one past it (_from_air: its star takes
+# the one on her if its body reaches the search's window, else the one past it). In the simulator, its stand-ins among
+# the monsters about her (localization.unseen.UNSEEN_LIVE), a Horny Mushroom on her at a wall end had her jump in place
+# at it 13 times in 16 s for nothing, touched 8 times (the thief's standard command, seed 6:
+# D:/MapleHelper-scratch/cornered-fix/r1/log_live_6.txt, 78-94 s). Off: the jump in place, as before.
+CLAWED_CLOSE = True
 
 # --- clearance, kept ahead of time (from 2026-10-27) -------------------------------------------------------------------
 # The user, 2026-10-27, watching her hunt Tree Dungeon: "I frequently find the player standing at the same X pos as the
@@ -834,9 +843,10 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     over her, the stance took one 116-122 off for in reach where her search picks from 123). `hurt`: what a monster she
     has thrown at has left (its HP's share as she reckons it, alive; None: none of hers), and `hidden_hurt` hers unseen
     this look as last seen: her wounds first, with the imminent danger before them (WOUNDS_FIRST). `clawed`: a monster
-    the looks miss is on her (a touch with none about her that could have made it: behavior.fight.clawed), so a throw
-    from the ground would go to the claw: a throw at one in reach goes from a jump in place where its attack surely
-    picks it (CLAWED_AIR: _from_air)."""
+    the looks miss is on her (a touch with none the look found about her that could have made it: behavior.fight
+    .clawed), so a throw from the ground would go to the claw: a throw at one in reach goes from a jump in place where
+    its attack surely picks it (CLAWED_AIR: _from_air), and up close so does one past the one too close where the throw
+    from where she stands would be a jump in place sure of nothing (CLAWED_CLOSE)."""
     can_jump = can_jump or (lambda a, b: True)
     counts = danger is not None and danger.any
     moves = moves if counts else 0
@@ -856,6 +866,12 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
                               (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END) if SNAIL_FAR_END
                               else None, danger, platform, body, up, y, pace, moves, seen=around, castable=castable,
                               clawed=clawed)
+        if clawed and CLAWED_CLOSE and CLAWED_AIR and POINT_BLANK and act[0] == "jump_throw" \
+                and not getattr(plan_of(act), "sure", False):  # (an unsure jump in place: past the one on her instead)
+            past = [t for t in reachable if not any(t is c for c in close)]
+            air = _from_air(x, y, act[1], past, facing, can_jump, tops, halves, platform, pace) if past else None
+            if air is not None:
+                return air
         if act[0] == "wait" and not POINT_BLANK:  # (her: none she casts at up close; another in reach that she does)
             others = [t for t in reachable if not any(t is c for c in close) and (castable is None or castable(t))]
             if others:
