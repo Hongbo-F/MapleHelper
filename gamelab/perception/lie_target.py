@@ -35,10 +35,16 @@ particle angle (2 deg steps, ~35 a frame) and its points gathered by flat index,
 map sampled at the score's points, the typical score on a 32 px grid. Against the user's references, 11 clips x 2
 seeds: 3.48 px off on average, 97.2% of frames within 10 px, 99.0% within 20 (before: 3.54, 96.9%, 99.0%). The optical
 flow stays DIS's medium preset (DIS_PRESET, 13-16 ms): fast and ultrafast save 12-14 ms but lose the 10 fps clip
-(10-14 px off on average there; the 15 fps clips as good).
+(10-14 px off on average there; the 15 fps clips as good). Then the work beside the flow (the user, 2026-11-02: "let's
+match the thread count as the light flow"): only the flow used OpenCV's threads, the rest ran on one; now the edge
+features and the masks run in worker threads while the flow is made, the flow off the scroll and the typical scores
+while the particles are scored, and the particles' scores in PARTICLE_RUNS runs (`_pool`): 43 -> 30 ms a frame on the
+11 clips (the two stepped in turn on the same frames, OpenCV on 6 threads), every answer the same bit for bit.
 """
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -183,12 +189,16 @@ def _scale(resp):
     return 1.0 / 255 if resp.dtype == np.uint8 else 1.0
 
 
+def _sums(resp, bins, xs, ys, at=None):
+    """Each pose's summed response over its on-board points, and how many of its points are on the board."""
+    v, ok = _gather(resp, bins, xs, ys, at)
+    return (v * ok).sum(1, dtype=np.float64) * _scale(resp), ok.sum(1)
+
+
 def score_at(resp, bins, xs, ys, p0, at=None) -> np.ndarray:
     """Each pose's outline score from its points (`placed`) and bins: their mean response, an off-board point counting
     as p0 (a typical point)."""
-    v, ok = _gather(resp, bins, xs, ys, at)
-    on = ok.sum(1)
-    total = (v * ok).sum(1, dtype=np.float64) * _scale(resp)
+    total, on = _sums(resp, bins, xs, ys, at)
     return (total + (xs.shape[1] - on) * p0) / xs.shape[1]
 
 
@@ -250,6 +260,52 @@ def off_the_scroll(r, lin) -> np.ndarray:
     return r.reshape(-1)[lin].mean(1)
 
 
+# --- the work spread over threads -------------------------------------------------------------------------------
+
+PARTICLE_RUNS = 3  # the particles' scores in this many runs at once: more lose to Python's GIL (on 10-29 20:31, the
+#                    filter took 11.7 ms in 1 run, 9.1 in 2, 8.4 in 3, 10.4 in 6)
+_POOL: tuple[ThreadPoolExecutor, int] | None = None
+_POOL_LOCK = threading.Lock()
+
+
+def _pool() -> tuple[ThreadPoolExecutor, int]:
+    """The trackers' worker threads and how many: as many as OpenCV's own (cv2.getNumThreads() at the first frame, the
+    optical flow's: 6 in the live tracker's process), shared by the process's trackers. The frame's other work runs in
+    them beside the flow (the features, the masks) and beside the particles' scores (the flow off the scroll, the
+    typical scores), and the particles' scores in PARTICLE_RUNS runs (numpy and OpenCV let go of the GIL)."""
+    global _POOL
+    with _POOL_LOCK:
+        if _POOL is None:
+            k = max(1, cv2.getNumThreads())
+            _POOL = (ThreadPoolExecutor(k, thread_name_prefix="lie-target"), k)
+        return _POOL
+
+
+def _chunks(n: int, k: int) -> list[tuple[int, int]]:
+    """0..n in k nearly equal runs (a, b), the empty ones left out."""
+    return [(n * i // k, n * (i + 1) // k) for i in range(k) if n * i // k < n * (i + 1) // k]
+
+
+def _masks(board, hsv):
+    """The board's own pixels (`foreign_mask`'s complement) and the green cursor's."""
+    return foreign_mask(board, hsv) == 0, cv2.inRange(hsv, GREEN_LO, GREEN_HI)
+
+
+def _off_scroll(flow, shift, cursors):
+    """`off_scroll_map` with the cursor's pixels (both frames') grown 12 px masked."""
+    return off_scroll_map(flow, shift, cv2.dilate(cursors, np.ones((25, 25), np.uint8)) > 0)
+
+
+def _particle_sums(resp, back_resp, rx, ry, bins, which, q, qb):
+    """A run of the particles' outline sums (`_sums`): at their centres q now, and at qb (where the board's scroll puts
+    them) on the look-back frame's features back_resp (None: no look-back yet); and their points' flat index now."""
+    rx, ry, bins = rx[which], ry[which], bins[which]
+    xs, ys = placed(q, rx, ry)
+    at = flat(xs, ys)
+    back = _sums(back_resp, bins, *placed(qb, rx, ry)) if back_resp is not None else None
+    return _sums(resp, bins, xs, ys, at), back, at[0]
+
+
 # --- the tracker ------------------------------------------------------------------------------------------------
 
 class TargetTracker:
@@ -282,13 +338,14 @@ class TargetTracker:
         """One frame (a 750 x 500 board crop, BGR) at time t (s): {"x", "y", "angle" (rad), "score", "white"} or None
         before the target has been seen white."""
         prev = self.history[-1] if self.history else None
+        pool, _ = _pool()
         grey = cv2.cvtColor(board, cv2.COLOR_BGR2GRAY)
         hsv = cv2.cvtColor(board, cv2.COLOR_BGR2HSV)
-        clean = foreign_mask(board, hsv) == 0
-        cursor = cv2.inRange(hsv, GREEN_LO, GREEN_HI)
+        feats, masks = pool.submit(features, board), pool.submit(_masks, board, hsv)  # beside the flow
         flow = self.dis.calc(prev[4], grey, None) if prev is not None else None
+        clean, cursor = masks.result()
         shift = flow_shift(flow, prev[5] & clean) if prev is not None else np.zeros(2)
-        resp = features(board)
+        resp = feats.result()
         self.history.append((t, board, resp, shift, grey, clean, cursor))
         del self.history[:-(self.kb + 1)]
         if self.start_t is None or t < self.start_t:
@@ -304,6 +361,9 @@ class TargetTracker:
     def _filter(self, board, t, resp, shift, prev, flow):
         pts, nrm, t0, _ = self.template
         n, rng, P = self.n, self.rng, self.P
+        pool, kw = _pool()
+        if MU and prev is not None:  # the flow off the scroll, in a thread of its own while the particles move
+            off = pool.submit(_off_scroll, flow, shift, prev[6] | self.history[-1][6])
         dt = max(1e-3, t - self.prev_t)
         self.prev_t = t
         vb = shift / dt  # the board's velocity on screen, px/s
@@ -326,21 +386,30 @@ class TargetTracker:
         th = -SPIN * (t - t0)
         # weigh: the outline now, the decoy check, the flow off the board, must move
         back = self.history[0] if len(self.history) == self.kb + 1 else None
-        p0 = typical(resp, pts, nrm, th)
+        p0 = pool.submit(typical, resp, pts, nrm, th)
         if back is not None:
             S = sum(h[3] for h in self.history[1:])  # the board's scroll since the look-back frame
-            p0b = typical(back[2], pts, nrm, th)
-        # the template turned once per distinct particle angle (to 2 deg), each particle given its angle's
+            p0b = pool.submit(typical, back[2], pts, nrm, th)
+        # the template turned once per distinct particle angle (to 2 deg), each particle given its angle's; the
+        # particles' scores in PARTICLE_RUNS runs, one a thread
         keys, which = np.unique(np.rint(np.degrees(P[:, 4]) / 2.0), return_inverse=True)
         rx, ry, bins = turned(pts, nrm, th + np.radians(2.0 * keys))
-        rx, ry, bins = rx[which], ry[which], bins[which]
-        xs, ys = placed(P[:, 0:2], rx, ry)
-        at = flat(xs, ys)
-        s = score_at(resp, bins, xs, ys, p0, at)
-        d = score_at(back[2], bins, *placed(P[:, 0:2] - S, rx, ry), p0b) if back is not None else np.zeros(n)
+        q = P[:, 0:2]
+        qb = q - S if back is not None else None
+        runs = [pool.submit(_particle_sums, resp, None if back is None else back[2], rx, ry, bins, which[a:b], q[a:b],
+                            None if qb is None else qb[a:b]) for a, b in _chunks(n, min(kw, PARTICLE_RUNS))]
+        runs = [j.result() for j in runs]
+        npts = len(pts)
+        total, on = (np.concatenate(v) for v in zip(*(now for now, _, _ in runs)))
+        s = (total + (npts - on) * p0.result()) / npts
+        if back is not None:
+            total, on = (np.concatenate(v) for v in zip(*(b for _, b, _ in runs)))
+            d = (total + (npts - on) * p0b.result()) / npts
+        else:
+            d = np.zeros(n)
         if MU and prev is not None:
-            near_cursor = cv2.dilate(prev[6] | self.history[-1][6], np.ones((25, 25), np.uint8)) > 0
-            mo = off_the_scroll(off_scroll_map(flow, shift, near_cursor), at[0])
+            r = off.result()
+            mo = np.concatenate(list(pool.map(off_the_scroll, [r] * len(runs), [lin for _, _, lin in runs])))
         else:
             mo = np.zeros(n)
         vrel = np.hypot(*(P[:, 2:4] - vb).T)

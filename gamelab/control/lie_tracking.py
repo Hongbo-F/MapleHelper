@@ -50,7 +50,8 @@ BOARD_CHECK_S = 0.25   # how often the board is looked for (its window at its pl
 BOARD_GONE_S = 3.0     # the board not seen this long: the round is over
 ROUND_MAX_S = 60.0     # a round this long is over whatever (the longest seen: 10.4 s from START)
 CHILD_IDLE_S = 60.0    # the tracker's process stopped this long after the alarm has gone
-CHILD_THREADS = 6      # OpenCV's threads in it: 64 ms a frame on 6, 71 on 4, 52 on 12 (the machine busy)
+CHILD_THREADS = 6      # OpenCV's threads in it, and the tracker's (lie_target._pool): 64 ms a frame on 6, 71 on 4, 52
+#                        on 12 (the machine busy, before the tracker's own threads: 43 -> 30 ms on the clips)
 ORIGIN_POLL_S = 1.0    # how often the client area's corner on the screen is looked at again
 FPS = rate.HZ          # the frames' nominal rate: the service's (the tracker's look-back: lie_target.BACK_S)
 NO_WINDOW, BELOW_NORMAL = 0x08000000, 0x00004000
