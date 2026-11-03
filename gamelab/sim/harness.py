@@ -316,6 +316,11 @@ WORLDS["newborns-touch"] = {"newborns_touch": True}
 # as every world had it until 2026-11-03, where the client's own point counts too: a jump throw up close at a monster at
 # the foot of a wall rising from its platform's end goes into the wall (reach.CLIENT_HIT_POINT, the cornered study's R6).
 WORLDS["hit-inside"] = {"hit_inside": True}
+# ... and a skill's (Lucky Seven's) shot row from her x for its hit point (`hit-row-0`: Realism.skill_row 0), as RustMS's
+# port has it (Combat.cpp apply_move, ShotPath.h origin: "a skill's is 0"), where the stack's row starts 65 ahead of her
+# (reach.SEARCH_START, assumed: R6 then rests on the live hour's split and the crop; the review of 2026-11-03): up close
+# a monster at the foot of a wall has its hit point inside the platform, and the star isn't stopped.
+WORLDS["hit-row-0"] = {"skill_row": 0.0}
 # ... and her aim up close as before the cornered study's R6 and R8 (the stack's, `stack` below: run_one sets them for
 # the run): `aim-before`, both off (the hit point inside the monster's platform alone, a jump throw up close counted sure
 # with its own key's line unchecked: attack.reach.CLIENT_HIT_POINT; the nearest the way she faces, attack.stance

@@ -1166,6 +1166,10 @@ class Realism:
                                   # alone (as every world had it until 2026-11-03: the harness's `--world hit-inside`);
                                   # False: the client's own hit point too where it's past the platform's end (its body
                                   # over a wall rising from there, up close: sight_stop, reach.CLIENT_HIT_POINT)
+    skill_row: float | None = None  # how far ahead of her a skill's (Lucky Seven's) shot row starts for the line's hit
+                                  # points (reach.hit_point's `start`): None, reach.SEARCH_START's 65 as for the regular
+                                  # attack (the stack's assumption, R6's); 0.0 at her x, RustMS's port's for a skill
+                                  # (the harness's `--world hit-row-0`; the review of 2026-11-03)
     knock: tuple[float, float, bool, bool] | None = None  # her knock (vx, vy, whether its push sideways adds to her
                                   # speed, whether she lands from it at her walk's speed at most): None, the world's own
                                   # (KNOCK_VX, KNOCK_VY, KNOCK_ADDS, KNOCK_LANDS_WALKING: the client's, as R1-R3's frames
@@ -3357,15 +3361,16 @@ class World:
             return first[int(self.chance("band") * len(first))]
         return first[0] if first else None
 
-    def sight_stop(self, m: SimMonster):
+    def sight_stop(self, m: SimMonster, skill: bool = False):
         """What stops the star's line from her now to monster `m` (reach.wall_between, by reach.LINE: from the
         foothold group of the platform she last stood on, her feet where they are now, in a jump too; m's body
         as the attack picks it, World.top), or None. To the client's own hit point too, whatever her decisions take
         (reach.CLIENT_HIT_POINT): past a wall rising from its platform's end where its body is over it, up close; not
-        with Realism.hit_inside."""
+        with Realism.hit_inside. A skill's (`skill`: Lucky Seven's) row from Realism.skill_row ahead of her if set."""
         mx = m.at(self.t)
+        row = self.realism.skill_row if skill else None
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
-                                  body=(self.top(m), m.half), client=not self.realism.hit_inside)
+                                  body=(self.top(m), m.half), client=not self.realism.hit_inside, row_start=row)
 
     def _press_magic(self, action: str, at: float) -> None:
         """Her attack key (`action` 'attack', her wand's swing, or 'skill', Magic Claw) pressed outside the lock, as the
@@ -3525,7 +3530,7 @@ class World:
             self.darts_out_at = self.t if self.darts_out_at is None else self.darts_out_at
         elif not skill and not swipe and self.darts_left is not None:
             self.darts_left -= 1
-        stop = None if target is None or swipe else self.sight_stop(target)
+        stop = None if target is None or swipe else self.sight_stop(target, skill)
         if stop is not None:
             target, stop = None, (target, stop)
         rise = self.last_plat.y_at(self.last_plat.clamp(self.x)) - self.y  # her height above where she last stood

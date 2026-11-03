@@ -173,3 +173,23 @@ def test_the_simulators_world_stops_such_a_star_whatever_her_decisions_take(monk
         assert (w.sight_stop(w.monsters[0]) is not None) == stopped
         monkeypatch.setattr(reach, "CLIENT_HIT_POINT", True)
         assert (w.sight_stop(w.monsters[0]) is not None) == stopped
+
+
+def test_a_skills_row_from_her_x_as_the_port_has_it_puts_the_hit_point_inside(monkeypatch):
+    # The row's start, 65 ahead of her, is the star search's (reach.SEARCH_START), assumed for the row (the review of
+    # 2026-11-03): RustMS's port starts a skill's row (Lucky Seven's) at her x, so the hit point is the middle of the
+    # body's part from -15 to 41, 13 by its feet, inside the platform: clear. `--world hit-row-0` (Realism.skill_row 0)
+    # gives the world's skill stars so; its regular attack's row as before (the port's whack reach, up to 65).
+    from test_sim import KEYS
+    from gamelab.sim.world import Realism, World
+    model, p = corner()
+    hx, _ = reach.hit_point(72, 500 - RISE - reach.SHOT_H, -1, 13, 500, *BODY, start=0.0)
+    assert hx == pytest.approx(13.0)
+    assert reach.wall_between(p, 72, 500, 13, RISE, p, ty=500, body=BODY, row_start=0.0) is None
+    w = World(model, KEYS, (p.id, 72.0), monsters=[("Green Mushroom", p.id, 13.0)], realism=Realism(skill_row=0.0))
+    w.y = 500 - RISE
+    assert w.sight_stop(w.monsters[0], skill=True) is None
+    assert w.sight_stop(w.monsters[0]) is not None
+    w = World(model, KEYS, (p.id, 72.0), monsters=[("Green Mushroom", p.id, 13.0)])
+    w.y = 500 - RISE
+    assert w.sight_stop(w.monsters[0], skill=True) is not None

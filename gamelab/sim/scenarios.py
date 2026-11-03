@@ -2133,9 +2133,12 @@ def loop_tree_wall_corner(sim):
     points, one at the foot of the trunk's wall at -207 (55 off, its body over the wall at -220 by 15), the other at -94
     (58 off), both standing their first 5 s as the clip's tracks had them (World._spawn's 4th field), in the thief's
     standard world but for the detector's misses near her. Live she jumped in place at the one by the wall again and
-    again, the star going into the trunk: the client's hit point, the middle of where the shot's row (from 65 ahead of
-    her) crosses its body, is past the wall (R6, reach.CLIENT_HIT_POINT), with a sure jump throw at the other one
-    standing there (R8, stance.FIRST_TO_REACH). Her decisions as before (`--world aim-before`) in this world, where such a
+    again, the star going into the trunk: the client's hit point as the stack takes it, the middle of where the shot's
+    row crosses its body, is past the wall (R6, reach.CLIENT_HIT_POINT), with a sure jump throw at the other one
+    standing there (R8, stance.FIRST_TO_REACH). The row's start, 65 ahead of her, is the star search's (reach
+    .SEARCH_START), assumed for the row: RustMS's port starts a skill's row (Lucky Seven's) at her x, where the hit point
+    is the body's middle, inside the platform, and nothing stops the star (`--world hit-row-0`); this world's stars into
+    the trunk rest on the live hour's split and the crop, not the port (the review of 2026-11-03). Her decisions as before (`--world aim-before`) in this world, where such a
     star goes into the wall (on b7f7308 the world took it inside the platform and let it through), on seed 12: 3 stars
     into the wall, 14 touches; now none, 5 touches, 2 kills. Seeds 1-12 (D:/MapleHelper-scratch/cornered-fix/aim/scan/
     final12.txt), her decisions as before, R6 alone, both: stars into the wall 29, 24, 0; checks met on 1, 2 and 7;
