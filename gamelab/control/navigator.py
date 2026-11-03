@@ -276,7 +276,7 @@ FALL_LOOKS = 2
 # and spent 12% longer on them (MEET_S fired 25 times against 9). Kept also: the feed's tracks out of sight (HIDDEN,
 # their walking known: Navigator.hidden_tracks), and after a chain cut for a monster coming into its way, that
 # monster's track for the next chain (TripState.came: the look after the cut can miss it as the one before did). With
-# the detector's misses near her as live (sim.world.NEAR_SEEN), these and the hunt loop's fights by what the looks
+# the detector's misses near her as live (sim.world.NEAR_SEEN_1025), these and the hunt loop's fights by what the looks
 # missed (behavior.hunt.UNSEEN_FIGHTS) made 297.7 EXP a minute against 270.9 without, lost 0.92 bars of HP a minute
 # against 1.04, and her trips were touched 2.38 times a minute against 3.25, their plans cut by a hit or a monster coming
 # 8.9 times a run against 27.8 (in the simulator: Tree Dungeon, crowd, zero-walls, near-misses, `--attack choice`, 8

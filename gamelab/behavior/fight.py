@@ -498,8 +498,8 @@ def pace_of(h: "Hunter", s: Scene) -> Pace:
 # The navigator's price of a landing (FightOnTheWay.landings) by what the looks don't have now: a track not seen within
 # STALE_S (a death's fade, localization.memory.FADE_S: after it a remembered or hidden one is as likely a ghost) and the
 # spawn points of the platform none of its tracks accounts for (a monster there the looks missed, or a respawn: in the
-# simulator's crowd a look misses one on another platform 30% of the time, sim.world.OFF_SEEN), each priced UNSEEN_PRICE
-# of one seen. By eye on the live recordings (the reviews of 2026-10-27, D:/MapleHelper-scratch/land/review-numbers/eye),
+# simulator's crowd a look missed one on another platform 30% of the time, sim.world.OFF_SEEN_1025; 9% from
+# 2026-11-03, OFF_SEEN), each priced UNSEEN_PRICE of one seen. By eye on the live recordings (the reviews of 2026-10-27, D:/MapleHelper-scratch/land/review-numbers/eye),
 # 2 of the 9 landings within 105 of a monster by hidden tracks alone had one there (the rest cap drops, another player's
 # kill dying, nothing), and 2 of 5 with none near a respawn fading in 80-130 off: a prior, 0.25. In the harness (Tree,
 # crowd, the `walkers` world, 48 seeds of 5 minutes, against master's stack: D:/MapleHelper-scratch/land/fix, tree c2)

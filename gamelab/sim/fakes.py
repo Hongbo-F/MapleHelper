@@ -823,8 +823,21 @@ class FakeEyes(Eyes):
             if w.t < m.hit_at + lo + (hi - lo) * w.chance(f"hide:{m.idx}", int(round(m.hit_at * 1000))):
                 return True
         if alive and (noise.near_seen or noise.off_seen is not None) and (seen := self._near_seen(m)) is not None:
-            return w.chance(f"see:{m.idx}") >= seen
+            return self._seen_draw(m) >= seen
         return bool(noise.detect_miss) and w.chance(f"see:{m.idx}") < noise.detect_miss
+
+    def _seen_draw(self, m) -> float:
+        """The draw a look finds monster `m` by against Noise.near_seen and off_seen (after _near_seen): its own a look,
+        or one a spell (Noise.near_spell by the same bands on her platform, off_spell on another), the spells' phase
+        drawn per monster, as live's misses come in runs (world.NEAR_SPELL_1102)."""
+        w, noise = self.world, self.noise
+        her = w.plat or w.last_plat
+        mx = m.at(w.t)
+        spell = noise.off_spell if m.platform.id != her.id else \
+            next((s for upto, s in noise.near_spell if abs(mx - w.x) < upto), 0.0)
+        if not spell:
+            return w.chance(f"see:{m.idx}")
+        return w.chance(f"seen:{m.idx}", int(w.t / spell + w.chance(f"seen-phase:{m.idx}", 0)))
 
     def _near_seen(self, m) -> float | None:
         """The chance a look finds monster `m`: on the platform she's on (or last stood on, in the air) by how near her
