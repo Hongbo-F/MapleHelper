@@ -24,12 +24,22 @@ run left going for days (`watch`) keeps the folder bounded too.
 
 Topics (map units; producers build the records, ui.state folds them):
 
-  session   map, command, mode (live/sim); continues, part     the command line, the simulator; a new part
+  session   map, command, mode (live/sim); continues, part;    the command line, the simulator; a new part;
+            physics {character, class, speed, jump, bonus,     her physics as the run plans her moves (from
+            walk, climb}                                       2026-11-02: motion.physics.record; bonus the
+                                                               Speed the client adds, motion.body.SPEED_BONUS)
+  motion    old [walk, climb], new [walk, climb], speed, was,  behavior.hunter: her planner's walk and climb
+            why (panel, kept, profile)                         changed (units/s; from 2026-11-02), the client's
+                                                               formula at SPEED `speed` (`was` before): her
+                                                               stat window's read, as her stats file kept it,
+                                                               or her profile's
   scene     her {x, y, platform, how, seen, facing, grounded}, every look (behavior.hunter, after Senses;
             hp, mp, monsters [{kind, x, y, platform, bar,      `watch` 10 a second, her facing not known;
             facing}], loot [{kind, x, y, platform}], searched, from 2026-10-21's evening also what it
             wide, looked [[platform, x0, x1]], view [x0, y0,   searched, for analysis.respawn; players only
-            x1, y1], players [{id, kind, x, y, platform}]      when there are any: localization.players)
+            x1, y1], players [{id, kind, x, y, platform}];     when there are any: localization.players; seq
+            seq, age                                           the feed's frame number, age ms since the frame
+                                                               showed: from 2026-11-02)
   tracks    list [{id, kind, state, x, y, vx, facing,          `watch` and the perception service, twice a
             pose, platform, bar, hits, seen, cause, gain,      second (localization.tracking; gain: the frame
             share}], frames                                    time of her gain the track is bound to, share:
@@ -48,7 +58,25 @@ Topics (map units; producers build the records, ui.state folds them):
             (touched on the way: from 2026-10-28 any touch,    2026-10-21: the coverage report's)
             MISS too), touch (its kind)
   monsters  list [{platform, x, vx, heading, reach}]           control.navigator (avoiding monsters)
-  trip      dst, result                                        control.navigator, at every trip's end
+  trip      dst, result; on, x, walk [[units, hold ms]]       control.navigator, at every trip's end (from
+                                                               2026-11-02 where she was as it ended, and its
+                                                               arrival walk: navigator._trip_end)
+  attack    key, why, kind, left, dead, hp, mp, platform,      behavior.attacks, each throw's attack and why
+            x; track, side                                     (Attacks._say; from 2026-11-02 its target's
+                                                               track, the perception service's, and the side:
+                                                               localization.tracking counts her aim against her
+                                                               kill's binding, the replay kit's feed reads both)
+  no_cast   why, side, by, kind, platform, x, track; mp,       behavior.attacks: a cast not sent (every one her
+            cost                                               MP refuses from 2026-11-02, with her MP reckoned;
+                                                               its target's fields an attack record's)
+  sweep     dest, candidates, order, extra, value, direct,     behavior.hunt, its itinerary when it changes (from
+            budget, out; to                                    2026-11-02 why its way goes on to dest: Hunt._sweep_to)
+  grind     what (loop, next, state, end), ...; state and     behavior.grind (from 2026-11-02 the loop's promise
+            end: loop_s, loop_exp, loop_rate, promised,        against what it gave, the s by hunt rule:
+            delivered, rule_s                                  Grind._promise)
+  summary   seconds, standby_s, kills, exp_gains, exp,         behavior.hunt, once at the run's end (from
+            exp_read, throws, casts, touches, misses, drinks,  2026-11-02: HuntReport.record)
+            lowest_hp, max_hp, a_minute {...}, rules, rule_s
   stance    act, text, aimed [{kind, x, y}]                    behavior.fight, each look of a fight
   tour      order, safe, grounds / stop, spot                  behavior.tour (stop, spot: also behavior.hunt)
   hunt      mode, rule, objective, ground, piles [{x, platform,   behavior.hunt, when the rule changes
@@ -62,10 +90,14 @@ Topics (map units; producers build the records, ui.state folds them):
                                                                exp (what a gain's size said), player (one
             by, share, seen; victim's kind, x, platform,       coming or going), died (the feed's deaths
             gain, share; let_go's kind, gain, why; retold's    not hers), backstop, follow, probe, retold (a
-            key, side                                          throw told again the way the frame showed her
-                                                               facing), landing (a trip's last landing priced:
-                                                               control.navigator); `watch` and the perception
-                                                               service:
+            key, side; backstop's (a pass regardless, from     throw told again the way the frame showed her
+            2026-11-02) move, blocker, waited, blocked_s,      facing), landing (a trip's last landing priced:
+            shots, why_not, episode, nth; kill_moved's         control.navigator), kill_moved (her kill put on
+            gained, old, old_platform, old_x, new,             another monster by the tracker, from 2026-11-02:
+            platform, x; rope_hang's step, x, under, s         behavior.ledger), rope_hang (a hang under a rope's
+            (its end's; 'took': left, rate, wait_exp,          top and its end, from 2026-11-02:
+            touch_exp, knock_s; a longer wait's: wait;         control.navigator; in it 'longer' and
+            'longer': at, clear, wait; 'back': at)             'back'); `watch` and the perception service:
                                                                died, exp_gain, hp_drop, touch, touch_fix, victim (a gain bound to
                                                                the monster her attack took), let_go (not it:
                                                                why 'seen alive', 'retold' or 'another seen

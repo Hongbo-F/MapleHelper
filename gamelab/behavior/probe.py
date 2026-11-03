@@ -83,8 +83,8 @@ from maplehelper.game import COMBAT
 from .. import directions, paths, telemetry
 from ..attack import reach
 from ..attack.stance import JUMP_BACK_SPAN, open_above, pct
-from ..control import client
-from ..control.actions import JB_RUN_MS, JB_THROW_MS, JB_TURN_MS, STAR_DELAY_MS, TAP_MS
+from ..control import actions as _actions, client
+from ..control.actions import STAR_DELAY_MS, TAP_MS
 from ..localization.mapdata import MapModel, MobBody
 from ..localization.monsters import DEFAULT_SPEED, Monster, bodies, same, speeds, walk_edges
 from ..localization.scene import Scene
@@ -326,10 +326,12 @@ PROBES = {p.name: p for p in (
 def _jump_back_out() -> float:
     """How far a jump back has carried her when its attack picks its target (JUMP_LAG after the attack key), by the
     engine with the median lags: control.actions' plan (the arrow away, the jump JB_RUN_MS after it, the turn at
-    JB_TURN_MS), replayed on flat ground, the mean over the phases the game's steps can have against the keys."""
-    events = [(0.0, "left", True), (JB_RUN_MS / 1000, "jump", True), (JB_TURN_MS / 1000, "left", False),
-              (JB_TURN_MS / 1000, "right", True), ((JB_TURN_MS + TAP_MS) / 1000, "right", False)]
-    picks = (JB_THROW_MS + physics.JUMP_LAG * 1000) / 1000
+    JB_TURN_MS), replayed on flat ground, the mean over the phases the game's steps can have against the keys. (The
+    plan's times as of now: they follow her walk, physics.set_speed's followers.)"""
+    run, turn, throw = _actions.JB_RUN_MS, _actions.JB_TURN_MS, _actions.JB_THROW_MS
+    events = [(0.0, "left", True), (run / 1000, "jump", True), (turn / 1000, "left", False),
+              (turn / 1000, "right", True), ((turn + TAP_MS) / 1000, "right", False)]
+    picks = (throw + physics.JUMP_LAG * 1000) / 1000
     out = [-body.replay(events, picks, physics.SHOE, physics.LAGS, phase=phase).points[-1][1]
            for phase in body.phases()]
     return sum(out) / len(out)

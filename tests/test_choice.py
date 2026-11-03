@@ -472,6 +472,11 @@ def test_a_throw_whose_kill_would_have_shown_by_a_frame_with_no_gain_since_didnt
     from gamelab.behavior.attacks import KILL_SHOWN_S
     from gamelab.behavior.ledger import Kill
     t0 = time.monotonic()
+    # The frame KILL_SHOWN_S after the second cast's key, from that key as on_throw has it. Written t0 + 0.9 +
+    # KILL_SHOWN_S, it was a float an ulp under (t0 + 0.05 + 0.85) + KILL_SHOWN_S wherever t0 (time.monotonic: the
+    # machine's uptime) lies between 2**16 and 2**17 s, 18-36 hours up, and Attacks._unkilled's `heard >= key +
+    # KILL_SHOWN_S` took it for a frame before (failing so on master 40ba190 and every branch of 2026-11-02)
+    shown = (t0 + 0.05 + 0.85 * 1) + KILL_SHOWN_S
 
     def two_casts(kills=None):
         a, said = _attacks(kills=(lambda: kills) if kills is not None else None)
@@ -486,20 +491,20 @@ def test_a_throw_whose_kill_would_have_shown_by_a_frame_with_no_gain_since_didnt
     a.heard(t0 + 1.0, [])  # the second cast's kill can't have shown yet: the first's surely has, and didn't
     left = a.reckon(m)
     assert 0.0 < left.dead < 0.6 and a.left(m) == pytest.approx(82, abs=1)  # (unheard 72%: the first's ruled out)
-    a.heard(t0 + 0.9 + KILL_SHOWN_S, [])  # nor the second's
+    a.heard(shown, [])  # nor the second's
     assert a.reckon(m).dead == 0.0 and a.left(m) == pytest.approx(82, abs=1)  # (what it has if alive: as it was)
     b, m = two_casts()
     assert b.reckon(m).dead == pytest.approx(0.72, abs=0.01)  # (unheard: as before)
-    b.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, frozenset({"horny-mushroom"}))])  # a gain named another kind
+    b.heard(shown, [(t0 + 1.2, frozenset({"horny-mushroom"}))])  # a gain named another kind
     assert b.reckon(m).dead == 0.0
     for kinds in (frozenset({"green-mushroom"}), None):  # one that can be its kill (or any: a share, unread) ...
         c, m = two_casts()
-        c.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, kinds)])
+        c.heard(shown, [(t0 + 1.2, kinds)])
         # ... the second cast's (0.3 s after its key), not the first's (1.15 s): as heard at t0 + 1.0, alive after it
         assert c.reckon(m).dead == pytest.approx(left.dead) and c.left(m) == pytest.approx(82, abs=1), kinds
     kills = []
     d, m = two_casts(kills)
-    d.heard(t0 + 0.9 + KILL_SHOWN_S, [(t0 + 1.2, frozenset({"green-mushroom"}))])
+    d.heard(shown, [(t0 + 1.2, frozenset({"green-mushroom"}))])
     kills.append(Kill(t0 + 1.35, "green-mushroom", 1, -200.0, 0.0, 1, "green-mushroom", t0 + 1.2))  # placed elsewhere
     d.on_look(_look([], t=t0 + 1.35))
     assert d.reckon(m).dead == 0.0  # (its gain was that one's)

@@ -158,7 +158,9 @@ def test_no_jump_in_her_key_plans_is_keyed_in_the_kicks_blind_spot():
     gap = at("alt", "down") - at("left", "down")
     assert gap == actions_mod.JB_RUN_MS and sure_jump_ms(gap) == gap and body.short_takeoff_chance(gap, SHOE, LAGS) <= 0.01
     # The mover's shortest run-up is keyed as its length says (not put off), outside the blind spot.
-    assert run_ms(MIN_RUN) == round(MIN_RUN / 0.149 + 54) and body.jump_window_ok(run_ms(MIN_RUN), SHOE, LAGS)
+    from gamelab.motion import physics
+    assert run_ms(MIN_RUN) == round(MIN_RUN / physics.WALK_UNITS_PER_MS + physics.RUN_LAG_MS) \
+        and body.jump_window_ok(run_ms(MIN_RUN), SHOE, LAGS)
 
 
 def test_a_jump_throw_that_turns_her_turns_in_the_air_or_first_with_its_wait():

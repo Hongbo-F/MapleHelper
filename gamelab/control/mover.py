@@ -102,6 +102,7 @@ class Mover:
         # under the rope instead), or None. None: unwatched, unchecked, as before.
         self.watch = None
         self.clear = None
+        self.walked: list[list] = []  # the last walk_to's walks: [units asked, hold ms] each
 
     # --- looking ----------------------------------------------------------------------------
 
@@ -183,13 +184,16 @@ class Mover:
         return None if self.clear is None or abs(x1 - x0) < 1 else self.clear(x0, x1)
 
     def walk_to(self, x: float, tolerance: float = X_TOLERANCE, tries: int = 4, s: Scene | None = None) -> Scene:
-        """Walk along her platform until her feet are at map x."""
+        """Walk along her platform until her feet are at map x. Its walks are kept for the trip's record (`walked`:
+        each one's units asked and its arrow's hold, ms; the navigator's 'trip' record, from 2026-11-02)."""
         s = s or self.locate()
+        self.walked = []
         for _ in range(tries):
             dx = x - s.where.x
             if abs(dx) <= tolerance:
                 return s
             events, _ = self.walk_events(dx, tolerance)
+            self.walked.append([round(dx, 1), events[1][0]])
             self._send(events, "walk")
             time.sleep(0.25)  # let her slide to a stop before looking
             s = self.locate()

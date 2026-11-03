@@ -297,12 +297,12 @@ def test_run_timing_and_rope_grab_lead():
     from gamelab.control.mover import grab_lead
     from gamelab.motion.physics import RUN_LAG_MS, run_ms
     from gamelab.motion.physics import WALK_SPEED
-    assert RUN_LAG_MS == 54  # she's 149 (t - 0.119) along t s in, and lifts off 65 ms after the key
-    assert run_ms(30) == pytest.approx(255, abs=1)  # jump key 255 ms in: lifts off 30 units along
-    assert run_ms(149) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
+    assert RUN_LAG_MS == 55  # she's 151.25 (t - 0.120) along t s in (the thief's), and lifts off 65 ms after the key
+    assert run_ms(30) == pytest.approx(253, abs=1)  # jump key 253 ms in: lifts off 30 units along
+    assert run_ms(WALK_SPEED) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
     # 7 units along is 101 ms in, in the blind spot (three of the game's steps into her run, she'd leave at
     # 126): later instead, at full speed, 14 units along.
-    assert run_ms(7) == 150 and run_ms(12) == 150 and run_ms(15) == 155
+    assert run_ms(7) == 150 and run_ms(12) == 150 and run_ms(15) == 154
     assert grab_lead(41) == pytest.approx(WALK_SPEED * 0.2775, abs=1)  # top of the jump over the rope
     assert grab_lead(120) is None
 
@@ -424,7 +424,7 @@ def test_arriving_at_an_x_is_the_quickest_landing_and_the_walk_from_it(model):
                     assert t <= abs(x - round(p.left + 20)) / WALK_SPEED + 1e-9
                 else:  # never more than the quickest route's landing and the walk from it
                     landing = planner.travel(p.id, p.left + 20, q.id)
-                    assert landing <= t <= landing + abs(x - round(path[-1].land_x)) / WALK_SPEED + 1e-9
+                    assert landing - 1e-9 <= t <= landing + abs(x - round(path[-1].land_x)) / WALK_SPEED + 1e-9
         assert planner.arrive(p.id, p.left + 20, p.id) == planner.travel(p.id, p.left + 20, p.id)
 
 
@@ -562,7 +562,8 @@ def test_a_rope_jump_from_under_a_rope_beyond_a_sure_grab_lands_by_the_grabs_cha
 def test_a_landing_is_worked_out_from_the_rounded_start_so_the_cache_never_changes_it(model, monkeypatch):
     from collections import OrderedDict
     from gamelab.motion import physics
-    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly
+    from gamelab.motion.physics import JUMP_SPEED, fly
+    WALK_SPEED = 149.0  # (a walk whose 0.1 units/s rounding a start 0.04 more stays within: the thief's until 2026-11-02)
     monkeypatch.setattr(physics, "_FLY_CACHE", OrderedDict())
     monkeypatch.setattr(physics, "FLY_CACHE_SIZE", 50)
     # Two starts that round the same get the same landing, whichever came first: the one from the start rounded.
@@ -1640,6 +1641,8 @@ def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(m
     the rope's top as she gets there, so waiting can't clear the way."""
     from dataclasses import replace
 
+    from gamelab import telemetry
+    from gamelab.control import navigator as nv
     from gamelab.control.navigator import WAIT_LOOKS, _key
     from gamelab.motion import flow
     # (the hop timed for one standing, as first built: this look's sighting is as old as the clock, and walking at her
@@ -1662,10 +1665,19 @@ def test_out_of_reach_a_monster_on_the_way_is_gone_around_hopped_or_waited_for(m
     regardless = nav._meet(st, s, path, monsters, legs, why, 0.0, 0.0)  # then on regardless
     assert [leg.move.kind for leg in regardless[0]] == ["climb"] and st.waited == 0
     walking = [replace(monsters[0], vx=100.0)]  # seen walking on D: no waiting
-    assert [leg.move.kind for leg in nav._meet(st, s, path, walking, legs, why, 0.0, 0.0)[0]] == ["climb"]
+    with telemetry.captured() as records:
+        assert [leg.move.kind for leg in nav._meet(st, s, path, walking, legs, why, 0.0, 0.0)[0]] == ["climb"]
     assert st.waited == 0
+    (rec,) = [r for r in records if r.get("kind") == "backstop"]  # (its record: safe to stand, not worth waiting)
+    assert rec["why_not"]["safe"] is True and rec["why_not"]["worth"] is False
     standing = [replace(monsters[0], vx=0.0)]  # seen standing: it walks off sooner or later, so she waits
     assert nav._meet(st, s, path, standing, legs, why, 0.0, 0.0) is True and st.waited == 1
+    monkeypatch.setattr(nav, "_safe_to_stand", lambda *a, **k: False)  # nowhere safe to stand: worth it isn't asked
+    monkeypatch.setattr(nv, "EVADE", False)
+    with telemetry.captured() as records:
+        assert nav._meet(st, s, path, standing, legs, why, 0.0, 0.0)[0]
+    (rec,) = [r for r in records if r.get("kind") == "backstop"]
+    assert rec["why_not"]["safe"] is False and rec["why_not"]["worth"] is None
 
 
 def test_past_meet_s_without_a_move_that_arrives_she_goes_on_regardless(model, monkeypatch):

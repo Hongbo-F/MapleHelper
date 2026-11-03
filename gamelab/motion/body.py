@@ -7,8 +7,11 @@ sees: -1 (left), 0 (none) or +1 (right).
 Where it comes from:
 - The constants are the game's own, from Physics.img (the map model's `physics`; PHYSICS_IMG is a copy
   a test checks against it): forces over the client's mass of 100 are accelerations.
-- Her SPEED and JUMP stats (config.toml [character], read by motion.physics) scale her walk and jump:
-  SPEED 119.2 walks her at 149 units/s, as measured (148-151 in the walks recorded).
+- Her SPEED and JUMP stats (her profile's: her stat window's, read by motion.physics) scale her walk and
+  jump. This client walks a character as if her SPEED were 20 more than her stat window shows
+  (SPEED_BONUS): 125 x (SPEED + 20)/100, 150 units/s at SPEED 100, where the v83 client walked her 125.
+  The magician's stat window says 100 and she walks 149.4 (66 walks of 2026-11-02), the thief's 101 and she
+  walks 151.2 (243): README "Her walk speed". A monster has no bonus: 125 x (1 + its speed/100).
 - The step is a v83 client decompile's, as RustMS ported it. That is secondhand, and this client is
   newer, so it is used where the recordings agree: speeding up at 1400 units/s² from standing (five
   starts), braking at 800 (seven stops), the kick at the jump (five jump-backs, 34 jumps of the sweeps),
@@ -44,9 +47,29 @@ PHYSICS_IMG = {
     "flyJumpDec": 0.3499999940395355,
 }
 MASS = 100.0     # the client's mass for a character (decompile)
-# The game's stat limits (decompile): SPEED counts from 80% to 140%, JUMP from 80% to 123%.
+# The game's stat limits: SPEED counts from 80% to 140% (the v83 decompile, RustMS Player.cpp get_walkspeed, "clamps
+# SPEED to 80-140": FUN_007a4dec; meowdb's cap is 140 too), JUMP from 80% to 120% (meowdb: "Jump works the old way,
+# but its cap dropped from 123 to 120"; the decompile's 123 was v83's). The lower ends are the decompile's: this
+# client's under 100 isn't known (meowdb's calculator clamps SPEED to 100-140, its guide says nothing under 100; the
+# thief's profile SPEED 99.2 until 2026-11-02, which walked her 149.0 here, it would take as 100: 150).
 SPEED_RANGE = (80.0, 140.0)
-JUMP_RANGE = (80.0, 123.0)
+JUMP_RANGE = (80.0, 120.0)
+# The Speed this client adds to a character's stat window behind the scenes, after the cap: she walks walkSpeed x
+# (SPEED + SPEED_BONUS)/100. NiaDB (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow, updated 2026-10-27;
+# measured frame by frame from COT2 video footage, its words; credited as its reuse terms ask): "Walking speed is 125 × (Speed + 20) / 100 pixels per second", "at
+# the base Speed of 100, your character walks 150 pixels per second", "MapleStory Classic World adds 20 Speed behind
+# the scenes", the cap 140 walking 200; its formulas page and calculator the same (125*(a+20)/100). Not in the game
+# data: Physics.img's walkSpeed is v83's 125 (PHYSICS_IMG), and monsters walk 125 x (1 + speed/100) as v83's (Tree
+# Dungeon's at speed -20 walked 99 and 98, against 100). Her recordings bear it out where v83's 125 x SPEED/100 is 16%
+# short: the magician (stat window SPEED 100) walked 148.2 units/s raw over 81 steady walks of 2026-11-02, 149.4
+# (bootstrap 90% 149.1-150.0) over 66 with each walk's braking tail left out and Tree's slopes taken out by the v83
+# slope rule; the thief (SPEED 101: 151.25) 151.2 (150.7-151.75) over 243 walks of 2026-10-25 to 30 by the same method;
+# her climb 119.9 units/s, meowdb's SPEED + 20 (D:/MapleHelper-scratch/recfix/walk-research; README "Her walk speed").
+# Her planner walks her by it at her stat window's SPEED from 2026-11-02, unmeasured (motion.physics.set_speed: README
+# "Her walk and climb from her stat window's SPEED").
+# Measured, not decoded: +20 and x 1.2 differ only above SPEED 100 (200 against 210 at the cap; meowdb's cap row says
+# 200). A character's shoe takes it (motion.physics.shoe_of); a monster's doesn't (sim.world.JumpSpace.shoe).
+SPEED_BONUS = 20.0
 # s per step of the game's movement: it acts on the keys it has seen, and changes her speed on the ground
 # (and lifts her off), once every STEP. In game on 2026-10-21 (18 jumps from standing keyed 40-160 ms after
 # the arrow, tracked at 30 fps) her ground run at lift-off sat in five tight groups, 0.45-0.96, 2.34-2.79,
@@ -79,7 +102,8 @@ def landing_wait(step: float = STEP) -> float:
 @dataclass(frozen=True)
 class Shoe:
     """How the game moves her: her limits and accelerations in units/s and units/s²."""
-    vmax: float           # walking speed: walkSpeed × SPEED/100 (149)
+    vmax: float           # walking speed: walkSpeed × (SPEED + bonus)/100 (a character's bonus SPEED_BONUS: her 150,
+                          # the thief's 149; a monster's none)
     acc: float            # speeding up, or turning round, with an arrow on the ground: walkForce/mass (1400)
     drag: float           # braking with no arrow on the ground, or above vmax: walkDrag/mass (800)
     vjump: float          # the jump's upward speed: jumpSpeed × JUMP/100 (555: 77 units high)
@@ -95,10 +119,12 @@ class Shoe:
     rope_vy: float = 0.5  # ... and rope_vy × vjump up (decompile; the minimap's one rope jump agrees, weakly)
 
     @classmethod
-    def from_physics(cls, physics: dict, speed: float, jump: float, fs: float = 1.0) -> "Shoe":
-        """Her shoe from Physics.img's values, her SPEED and JUMP stats (%) and the map's friction
-        `fs` (info/fs; 1 on every map in the game data: icy maps would have it below 1)."""
-        speed = min(max(speed, SPEED_RANGE[0]), SPEED_RANGE[1])
+    def from_physics(cls, physics: dict, speed: float, jump: float, fs: float = 1.0, bonus: float = 0.0) -> "Shoe":
+        """Her shoe from Physics.img's values, her SPEED and JUMP stats (%), the map's friction `fs`
+        (info/fs; 1 on every map in the game data: icy maps would have it below 1) and the Speed the client
+        adds to SPEED after its cap (`bonus`: a character's SPEED_BONUS, motion.physics.shoe_of; 0, a monster's
+        or v83's)."""
+        speed = min(max(speed, SPEED_RANGE[0]), SPEED_RANGE[1]) + bonus
         jump = min(max(jump, JUMP_RANGE[0]), JUMP_RANGE[1])
         friction = min(max(fs, physics["minFriction"]), physics["maxFriction"])
         friction = friction if friction >= 1 else friction / 2  # decompile; untested (no map has fs)

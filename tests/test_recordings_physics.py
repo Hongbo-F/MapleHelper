@@ -19,7 +19,7 @@ from gamelab.motion import body, physics
 
 NAMES = ["motion", "walk", "jb_k165", "jb_k190", "jb_k450", "held_jump"]
 LAGS = body.Lags()
-SHOE = body.Shoe.from_physics(body.PHYSICS_IMG, speed=119.2, jump=100)
+SHOE = body.Shoe.from_physics(body.PHYSICS_IMG, speed=99.2, jump=100, bonus=body.SPEED_BONUS)  # the thief's: 149
 SWEEPS = json.loads((Path(__file__).parent / "fixtures" / "kick_sweeps_2026-10-21.json").read_text(encoding="utf-8"))
 # The engine as it was before the sweeps: a 5 ms step, and the lags of the 60 fps recordings with their spread.
 FIVE_MS = body.TICK

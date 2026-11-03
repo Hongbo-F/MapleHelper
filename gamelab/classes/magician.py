@@ -25,7 +25,8 @@ from maplehelper import config
 from maplehelper.config import GameKeys
 from maplehelper.keys import parse as parse_key
 
-from ..character import AttackSpec, Box, Buff, Character, Geometry, Perception, Pet, Policy, Priors, Search, Shape
+from ..character import (AttackSpec, Box, Buff, Character, Geometry, KillCredit, Perception, Pet, Policy, Priors,
+                         Search, Shape)
 
 # [data] skills.json's tables, by skill level from 1 (tests/test_character.py checks them against it)
 MAGIC_CLAW_MP = (10, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 20)   # 2001003 mpCon
@@ -36,13 +37,19 @@ MAGIC_ARMOR_MP = (8, 8, 8, 8, 8, 10, 10, 10, 10, 10, 13, 13, 13, 13, 13, 16, 16,
 ALERT_MS = 600  # a buff's cast plays alert2, 600 ms of frames [data: actions.json]; its lock: L0's casts
 
 FIXED_STATS = config.Character(
-    speed=100.0,        # her SPEED: her stat window, read live 2026-10-28 (lab/characters/magician/her_stats.json)
+    speed=100.0,        # her SPEED: her stat window, read live 2026-10-28 and 2026-11-02 at level 32
+                        # (lab/characters/magician/her_stats.json). It walks her at 150 units/s, 125 x (100 + 20)/100
+                        # (motion.body.SPEED_BONUS: the 20 this client adds, meowdb's), until her stat window's SPEED is
+                        # read (motion.physics.set_speed); measured 149.4 over 66 walks of 2026-11-02 (each walk's
+                        # braking tail and Tree's slopes taken out; 148.2 raw over 81), where it planned her at 125
+                        # until then (README "Her walk and climb from her stat window's SPEED")
     jump=100.0,         # her JUMP: her stat window, the same read
     mp=1007.0,          # her MP when full: her stat window's MP 667/1007 at level 27 (the same read)
     lucky_seven=0.0,    # (not hers: a thief's skill)
                         # (her HP, level and W.DEF: perception's, as the thief's: behavior.bootstrap)
     avoid=18.0,         # her AVOID: her stat window's EVA 18 (the same read)
-    climb_speed=117.0,  # PLACEHOLDER (the thief's, physics.CLIMB_SPEED): one climb in L0
+                        # (her climb: SPEED + 20 by the client's formula, 120, motion.physics.climb_of; she climbed
+                        # 119.9 up and 119.6 down on 2026-11-02: where a placeholder 117, the thief's, was)
     mp_regen=0.32)      # PLACEHOLDER (the thief's, sim.world.MP_REGEN): her idle MP bar in L0, or L1's quiet stretches
 SKILLS = {"magic_claw": 20,   # PLACEHOLDER (its Master Level): her skill window -- the user's answer
           "energy_bolt": 1,   # PLACEHOLDER (Magic Claw's req [data]): her skill window
@@ -109,6 +116,16 @@ WAND = AttackSpec("wand", "attack", "the regular attack", "swinging", None, leve
                   defence="pdd", mp=0.0, ammo=0,
                   geometry=Geometry("melee", box=WAND_BOX, air=None, line=None, order="nearest"), **_TIMES)
 
+# Her kill's monster (localization.tracking's band order, from 2026-11-02): the client's search from where she was as
+# the cast picked, in its first band the oldest track first (the client takes the one that entered the map first), the
+# first band alone (tie 0: fitted on the recordings R1+R2 with her aim first in the band, the order before the review,
+# where a tie of 1 bound the same and let one more go and 2 bound 4 fewer right; not tried with the oldest first), her
+# hit landing lands_ms after the key (no flight: her victims stopped walking a median 0.49-0.50 s after the key on the
+# 130 labelled kills whose walk shows, D:/MapleHelper-scratch/recfix/credit/scripts/timings.py; 0.85 let 2 more go).
+# The monster her attack choice aimed the cast at decides nothing (it changed none of R1-R3's 164 first bindings when
+# it came first in the band: tracking.AIM_DX). README: Her kill's monster by Magic Claw's search.
+KILL = KillCredit(search=SEARCH, tie=0, lands_s=MAGIC_CLAW.lands_ms / 1000)
+
 # Her Shape (what localization takes of her attacks), from the search's outer bound with the thief's slack: a monster's
 # middle from 6 ahead of hers (its far side past 50, the widest body's half 34 back from it, and the thief's 10 behind for
 # what the tracker gets wrong) to 374 (its near side short of 300, the half, and the thief's 40 ahead); its feet up to 110
@@ -131,8 +148,9 @@ SHAPE = Shape(near=SEARCH.start - WIDEST_HALF - 10.0,           # 6
               order="band",
               look_band=(SEARCH.roof + 80, -SEARCH.floor + TALLEST_TOP + 15),  # (180, 124): attack.reach.LOOK_UP's 80
                                                                  # and LOOK_DOWN's 15 over the feet it picks
-              shows_wait_s=0.45)                                 # PLACEHOLDER (the thief's: the same lock prior) --
+              shows_wait_s=0.45,                                 # PLACEHOLDER (the thief's: the same lock prior) --
                                                                  # L1's lock
+              kill=KILL)
 POLICY = Policy(default_mode="skill",     # Magic Claw whenever her MP pays for a cast (design.md 4.6)
                 finish_with_regular=False,  # her regular attack is a swing up close [GK], not a star at range
                 regular_needs_box=True,   # PLACEHOLDER: the wand only at a monster in its box -- the user's answer

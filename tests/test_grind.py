@@ -923,6 +923,36 @@ def test_at_a_stop_she_stays_while_it_beats_going_on_and_never_waits_for_respawn
     assert 0 < p.wait_gain(g.stop, 30.0) < 0.5 * p.plan.rate
 
 
+def test_a_monster_the_fight_takes_for_dead_holds_her_not_and_waiting_on_end_for_the_held_has_a_backstop(monkeypatch):
+    """The final review of 2026-11-02 (the thief's seed 19 of the standard grind: 123 s at 16, nothing shot, nothing
+    said): a Horny her memory has alive, whose track a kill of hers is bound to (ledger.dying: the fight's dying_seen
+    leaves it out of her targets), isn't held: nothing in reach, she goes on. And held monsters she neither shoots nor
+    steps to (Hunt._wait's idle) keep her STOP_MAX_S at the most (a backstop event), however much they'd give."""
+    from dataclasses import replace
+    model, ids, far, p = _column()
+    p.replan(0.0, force=True)
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    m = replace(_sight(model, HORNY, 250, 0), track=7)
+    g, s = _at_stop(model, p, ids[0], 150.0, [m], 1.0)
+    assert [e.track for e in g._held(s)] == [7]
+    g.h.ledger = SimpleNamespace(kills=[Kill(0.5, HORNY, ids[0], 250.0, 0.0, ids[0], track=7)], die={}, dead={})
+    assert g._held(s) == []
+    g.h.ledger.kills = []
+    held = g._held(s)
+    assert held and g._leaving(s, held) is None  # (its 41 EXP beat the loop: she stays)
+    g._idle_since = clock[0]
+    clock[0] += grind.STOP_MAX_S
+    events = []
+    monkeypatch.setattr(grind.telemetry, "emit", lambda topic, **kw: events.append(kw))
+    g.visit.arrived = clock[0] - grind.STOP_MAX_S - 1.0
+    assert g._leaving(s, held) == (f"{grind.STOP_MAX_S:.0f} s waiting here for a {HORNY} on {ids[0]} at x 250, neither "
+                                   "shot nor stepped to")
+    assert events and events[0]["kind"] == "backstop" and events[0]["text"].startswith("STOP_MAX_S")
+    g._idle_since = clock[0] - 1.0  # (she shot a second ago: held, she stays)
+    assert g._leaving(s, held) is None
+
+
 def test_on_her_way_to_a_stop_a_pile_seen_elsewhere_takes_her_there(monkeypatch):
     from gamelab.behavior.hunt import Hunt
     # (refilling at a quarter of the prior's rate: at the prior's, the pile's point shot in passing below has a tenth of
@@ -985,8 +1015,10 @@ def test_a_pause_moves_grindings_clocks_on():
     g._progress, g.obj, g.stack, g._idle_since, g._hanging, g._rope_rest = now, None, [], None, None, 0.0
     g.visit = Visit(23, Spot(23, 8.0, 1.0, False), arrived=now - 5.0)
     g._start, g._alt, g._hp = now - 60.0, (now, None, 3, {}), (now, 0.9, 23)
+    g._loop_at, g._promised_at = now - 20.0, now
     g._paused(30.0)
     assert g._start == pytest.approx(now - 30.0) and g._alt is None and g._hp is None
+    assert g._loop_at == pytest.approx(now + 10.0) and g._promised_at is None  # (the loop's promise: no pause in it)
     assert g.visit.arrived == pytest.approx(now + 25.0) and g._progress == pytest.approx(now + 30.0)
 
 
@@ -1413,3 +1445,23 @@ def test_a_bar_of_her_hp_is_priced_by_her_max_hp_as_read_at_the_users_prices():
     j = p.stop_on(a[0])
     p.learn_hp(a[0], 1.0, 60.0)
     assert p.net(j, 100.0) == pytest.approx(100.0 * (1 - 157.0 * p.kill_s * p.hp_rate(a[0], p.stops[j].x)))
+
+
+def test_her_exp_a_second_on_a_platform_is_its_stop_s_as_the_patrol_expects_it_now(monkeypatch):
+    """Grind._ground_rate (her hang under a rope's top up to the platform: Hunter.top_price, control.navigator's
+    HANG_TAKE), handed to the hunter at every look's pricing (Hunter.ground_rate): what the patrol expects at the
+    platform's stop now (Patrol.expect: nothing seen, the belief's stock at its two Horny Mushroom points), net of its
+    touches (Patrol.net), over its shooting at her kill time and patrol.STOP_S; 0 with nothing expected; None for a
+    platform with no stop."""
+    model, a, b, p = _two_areas()
+    g = object.__new__(Grind)
+    g.patrol, g.h = p, SimpleNamespace(max_hp=None)
+    monkeypatch.setattr(grind, "time", SimpleNamespace(monotonic=lambda: 5.0))
+    g._price_hp()
+    assert g.h.ground_rate == g._ground_rate
+    j = p.stop_on(a[0])
+    exp, _, shoot, _ = p.expect(j, 5.0)
+    assert exp > 0 and g._ground_rate(a[0]) == pytest.approx(p.net(j, exp) / (shoot + patrol.STOP_S))
+    monkeypatch.setattr(p, "expect", lambda i, t: (0.0, 0.0, 0.0, 41.0))
+    assert g._ground_rate(a[0]) == 0.0
+    assert g._ground_rate(9999) is None

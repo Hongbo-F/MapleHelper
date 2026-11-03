@@ -37,9 +37,9 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import directions
 from ..localization.mapdata import MapModel, Platform
 from ..localization.monsters import MonsterTrack, walk_edges
-from . import bodies, body
+from . import bodies, body, physics
 from .bodies import Arc, Climb
-from .physics import (DROP_LAG, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
+from .physics import (CLIMB_SPEED, DROP_LAG, FALL_SPEED, GRAVITY, JUMP_HEIGHT, JUMP_LAG, JUMP_SPEED, LAGS, LAND_MARGIN, LAND_SLIDE,
                       RUN_LAG, SHOE, STOP_RUN, STOP_S, WALK_SPEED, fly, flight, hold_ms, sure_jump_ms, sure_landing)
 from .route import DROP_STEP, JUMP_FROM, LANDING_ROOM, ROPE_ARMS, ROPE_CLEAR, Move, drop_clear, drop_spots
 
@@ -89,14 +89,17 @@ DROP_DOWN_HOLD = 0.18  # ... and down is let go (as soon as the drop has started
 GRAB_LEAD = WALK_SPEED * JUMP_SPEED / GRAVITY  # ~41: jump this far before a rope to be at the top over it
 APEX = JUMP_HEIGHT   # 77 units: how high a jump rises
 # Two climbs traced on the minimap (60 fps): from grabbing the rope to standing on the platform at its
-# top she covers the distance at an effective 130 units/s, the step onto the platform included
+# top she covered the distance at an effective 130 units/s, the step onto the platform included
 # (predicted 2.64 s and 5.20 s, seen 2.61 s and 5.09 s; a third: 4.49 s, seen 4.41 s). Up is let go a
 # while past the predicted top. Climbing over the top is an animation: with the next arrow already
 # held from just before the top (it does nothing on a rope), she walked off ~0.34 s after arriving;
 # with the arrow pressed after arriving, only ~0.4 s after the press. Jumping off the rope sideways
 # just below the top doesn't help: it has next to no lift (she fell 360 units). So the next move's
 # arrow goes down just before the top, and she's modelled as starting to run 0.35 s after it.
-ROPE_SPEED = 130.0
+# Her climb up is her climb (physics.CLIMB_SPEED) from 2026-11-02, as set from her stat window's SPEED (`_follow`
+# below): the client's SPEED + 20 (121 the thief's, 120 the magician's: she climbed 119.9 up on that night's 15 fps
+# frames), where the minimap's traces said 130 (the climb-over's step is UP_EXTRA's and CLIMB_OVER's, not this).
+ROPE_SPEED = CLIMB_SPEED
 UP_EXTRA = 0.35
 CLIMB_OVER = 0.23    # her body after a climb: a standing start this long after the top (+ RUN_LAG = 0.35)
 PRE_ARROW = 0.1      # s before the predicted top that the next move's arrow is pressed ...
@@ -123,6 +126,15 @@ MAX_LEGS = 5
 EXPECT_MARGIN = 0.12  # s around a takeoff or landing when where she should be isn't said (Flow.expected)
 MAX_SECONDS = 3.5    # a chain this long gets a fresh look before the next one
 HOLD_MERGE_MS = 5    # a key held again within this many ms of its release stays down
+
+
+@physics.follows
+def _follow() -> None:
+    """Her walk and climb as set (physics.set_speed, which rebinds the names taken from it): GRAB_LEAD and
+    ROPE_SPEED made again of them."""
+    global GRAB_LEAD, ROPE_SPEED
+    GRAB_LEAD = physics.WALK_SPEED * JUMP_SPEED / GRAVITY
+    ROPE_SPEED = physics.CLIMB_SPEED
 
 
 @dataclass(frozen=True)

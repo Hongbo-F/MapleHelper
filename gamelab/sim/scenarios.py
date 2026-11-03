@@ -38,13 +38,13 @@ from ..behavior.hunter import Hunter
 from ..behavior.safety import HuntStop, SafetyStop
 from ..localization.mapdata import MapModel
 from ..control.navigator import Navigator
-from ..control.timeline import SIM_KEYS, SIM_KEYS_PET
+from ..control.timeline import SIM_KEYS, SIM_KEYS_MAGE, SIM_KEYS_PET
 from ..behavior.tour import Tour
 from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare, FakePlayer, SimTimeout,
                     SimViolation, Trace, detector_kinds, patched)
 from . import harness
-from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT, TREE_DROP_MIX, Her,
-                    Noise, Realism, SimDied, World)
+from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT,
+                    TREE_DROP_MIX, Her, Noise, Realism, SimDied, World, her_climb, her_shoe)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -55,6 +55,15 @@ TREE = 10002073    # Victoria Road: Tree Dungeon, Forest Up North II, the third 
 # on 2026-10-25: world.LEVEL_25; level 24 until 2026-10-26), the same keys and pet. Any other map (the tests' synthetic
 # ones): the first map's.
 HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23), TREE: (SIM_KEYS_PET, LEVEL_25)}
+# ... and another character than the thief, by (map, her character's id), where the process plays her (gamelab.character:
+# GAMELAB_CHARACTER; the harness's `--character`): the magician on Tree Dungeon as the recordings of 2026-11-02 measured
+# her (world.MAGE_32: Magic Claw as the game casts it, her stat window, her walk), with Magic Claw on Shift (SIM_KEYS_MAGE).
+HERS = {(TREE, "magician"): (SIM_KEYS_MAGE, MAGE_32)}
+# Her damage book as her stack had learned it when the hour of 2026-11-02 began (00:17:48: lab/characters/magician/
+# damage.json, its reads up to then, of her level 31 and 32 and the one under, LEVELS_BACK), which a simulated run of hers
+# starts from as live's did (behavior.damage.Book: what she reckons a monster has left); without it her stack would go by
+# her profile's prior (2 x 76-267 a cast) until 15 exact reads of the run's own.
+HER_BOOK = Path(__file__).with_name("her_damage_book.json")
 _MODEL: dict[int, MapModel] = {}
 
 
@@ -75,9 +84,13 @@ def real_map(map_id: int = MAP_ID) -> MapModel | None:
     return _MODEL[map_id]
 
 
-def her_on(map_id: int) -> tuple:
-    """Her keys and her (world.Her) on map `map_id` (HER; the first map's on any other)."""
-    return HER.get(map_id, HER[MAP_ID])
+def her_on(map_id: int, who: str | None = None) -> tuple:
+    """Her keys and her (world.Her) on map `map_id`: character `who`'s (None: the one this process plays,
+    gamelab.character) where HERS has her there, else the thief's (HER; the first map's on any other)."""
+    if who is None:
+        from .. import character
+        who = character.active_id()
+    return HERS.get((map_id, who)) or HER.get(map_id, HER[MAP_ID])
 
 
 @dataclass
@@ -104,6 +117,8 @@ class Scenario:
     attack: str | None = None    # the stack's attack a throw (behavior.attacks.MODES); None: the hunter's own
     remembered: dict | None = None  # her keys as a read of the game's window left them (control.keymap.remember, in the
                                     # run's own lab), which her hunter starts with (keymap.at_start); None: none
+    book: Path | None = None     # her damage book to start from (behavior.damage: her own file in the run's lab, HER_BOOK
+                                 # for the magician in the harness); None: none, her profile's prior
     doc: str = ""
 
 
@@ -139,6 +154,7 @@ class Sim:
         self.active = False
         self.files: dict[str, list[str]] = {}  # what the run wrote (under its stand-in for gamelab/lab)
         self.senses = []  # every hunter's (for the feed's record)
+        self.books = []   # ... and their damage books (behavior.damage: none saved past the run, below)
         self.feed = self._feed()
 
     def _attack_told(self, row: tuple) -> None:
@@ -161,7 +177,10 @@ class Sim:
         from ..localization.worldstate import WorldStep
         self.frames = FakeEyes(self.world, self.clock, self.model, guard=self.guard)
         self.frames.detector, self.frames._loot = FakeDetector(detector_kinds(self.model)), FakeLoot()
-        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN))), self.frames.observe,
+        from .. import character
+        shape = character.active().shape  # (her Shape, as the live service's: localization.service.screen_world)
+        feed = SyncFeed(WorldStep(Senses(self.frames, self.model, band=(LOOK_UP, LOOK_DOWN), shape=shape)),
+                        self.frames.observe,
                         guard=self.guard)
         self.clock.frames = (1.0 / GAME_HZ, feed.tick)
         return feed
@@ -234,6 +253,11 @@ class Sim:
 
     def __exit__(self, *exc) -> bool:
         self.active = False
+        if getattr(self, "held", False):  # (her planner held apart, Her.planned: back to her profile's for what follows)
+            from ..motion import physics
+            physics.reset()
+        for book in self.books:  # (its save at the process's end would write into the run's lab, gone by then)
+            book.path = None
         try:
             for path in sorted(self.folder.rglob("*")):
                 if path.is_file() and path.suffix in (".jsonl", ".json"):
@@ -277,7 +301,22 @@ class Sim:
             start = keymap.at_start(self.keys, "thief")
             keys = start.keys
             self.log(f"her keys: {start.source}")
+        if self.scenario.book is not None:  # (her damage book as her stack had learned it: Scenario.book)
+            from .. import paths
+            book = paths.of().damage
+            book.parent.mkdir(parents=True, exist_ok=True)
+            book.write_text(self.scenario.book.read_text(encoding="utf-8"), encoding="utf-8")
         h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)
+        if (planned := getattr(self.world.character, "planned", None)) is not None:  # (her planner held apart from her
+            from ..motion import physics                                            # stat window's SPEED: Her.planned)
+            physics.set_planned(*planned)
+            self.held = True
+            self.log(f"her planner held at walk {physics.WALK_SPEED:g} and climb {physics.CLIMB_SPEED:g} units/s, the "
+                     f"world's own {her_shoe(self.world.character).vmax:g} and {her_climb(self.world.character):g} "
+                     f"(the world's Her.planned)")
+        if getattr(h.attacks, "book", None) is not None:  # (its fits at once, not on a thread: the same run every time)
+            h.attacks.book.threaded = False
+            self.books.append(h.attacks.book)
         h.config_keys = self.keys
         h.jitter = random.Random(f"jitter:{self.scenario.seed}")  # (her jump attacks' jitter: the same run again)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
@@ -683,7 +722,7 @@ _CROWD = harness.PRESETS["crowd"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
@@ -726,14 +765,20 @@ def loop_tree_23(sim):
     1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.) (Seed 1 since her drops are swept by the
     seconds each may add to her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan:
     hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 3 seven kills, the rule
-    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.)"""
+    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.) (Seed 3 since his walk and climb
+    by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, world and planner, where 149 and the world's
+    130 up; D:/MapleHelper-scratch/recfix/calib/seeds/slow23*.json, v23_*.json): on seed 1 ten kills; of seeds 1-16 3,
+    5, 7 and 8 show all of this, at work/rec-all 1, 3, 6, 8, 9, 11-13 and 16; her kills over 1-16 12.2 a run against
+    16.8 there, the walk's change (at his walk 149 and climb 119.2 16.4; at 151.25 with the climb 130 12.4), but over
+    17-32 14.8 against 11.4 at 149: over 1-32 13.5 against 13.9, all of this met on 12 of 32 either way, the seeds'
+    luck.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=10, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -761,11 +806,22 @@ def loop_tree_23_near_misses(sim):
     missed by a pile of hers; of seeds 1-13 1, 3, 5, 7, 10 and 11 show all of this; on 1, 25 kills.) (Seed 10 since
     her drops are swept by the seconds each may add to her way and a fresh pile by her is left to her pets a moment
     (2026-11-01, work/replan: hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 1
-    13 kills; of seeds 1-16 10, 12 and 16 show all of this, most of the others under twenty kills; on 10, 22.)"""
+    13 kills; of seeds 1-16 10, 12 and 16 show all of this, most of the others under twenty kills; on 10, 22.) (Seed 11
+    since the world's touches as live (2026-11-02: a newborn touches nothing while it fades in, world.NEWBORN_SOLID_S,
+    and her body for touches is the client's line, world.HER_TOUCH; D:/MapleHelper-scratch/recfix/sim/seeds/near.txt):
+    on seed 10 7 kills, the rule 'wait' most of the run; of seeds 1-16 1, 11 and 16 show all of this, the others under
+    twenty kills (a median 14); on 11, 26.) (Seed 1 since her knock is the client's (2026-11-02: 270 out and up, its push
+    sideways added to the speed she has, landing at her walk's speed at most, world.KNOCK_VX, KNOCK_ADDS,
+    KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
+    D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on seed 11 14 kills; of seeds 1-16 1, 5 and 16 show all of this,
+    the others under twenty kills (a median 12); on 1, 24.) (Seed 2 since his walk and climb by his SPEED (2026-11-02: the
+    thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
+    seeds/slow23*.json): on seed 1 ten kills; of seeds 1-16 2, 12 and 16 show all of this, at work/rec-all 1, 5 and 16
+    (13.2 kills a run over 1-16 against 14.0); on 2, 21.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
-@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((20, -60.0), monsters={19, 20, 21, 22}, seed=7, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(_rule("wait"), logs("waiting at x"), check("alive", lambda tr: not tr["world"]["dead"])))
 def loop_tree_wait(sim):
@@ -782,7 +838,11 @@ def loop_tree_wait(sim):
     the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 1 no wait; of seeds 1-13 7 and 12 show all
     of this.) (Seed 1 since every jump attack is jittered, those the stance keys unsure too (fight.JITTER_ALL, the
     review of 2026-11-01; D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt): on 7 no wait at x; of seeds 1-24,
-    1, 4-6, 10-12, 17, 19 and 21-23 show all of this, with JITTER_ALL off 3, 7, 10, 16, 19, 20 and 22.)"""
+    1, 4-6, 10-12, 17, 19 and 21-23 show all of this, with JITTER_ALL off 3, 7, 10, 16, 19, 20 and 22.) (Seed 7 since
+    her knock is the client's (2026-11-02: 270 out and up, its push sideways added to the speed she has, landing at her
+    walk's speed at most, world.KNOCK_VX, KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where
+    it was ~58; D:/MapleHelper-scratch/recfix/sim-fix/scan2.txt, scanned with the push set outright, not added): on seed
+    1 no wait; of seeds 1-16 7 and 11 show all of this, six others the rule 'wait' but no 'waiting at x'.)"""
     return harness._only(_loop(4), (20,))(sim)
 
 
@@ -867,7 +927,7 @@ def loop_tree_grind_drops(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=26, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=7, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(check("no pile ahead of what's in reach (no ': the pile first')",
                      lambda tr: not any(": the pile first" in line for line in tr["log"])),
@@ -953,7 +1013,11 @@ def loop_tree_ore_waits(sim):
     jump attack is jittered, those the stance keys unsure too (fight.JITTER_ALL, the review of 2026-11-01;
     D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt, scan_ore2.txt): on 6 not every ore picked up; of seeds
     1-24 none meets all of this (with JITTER_ALL off 6 and 21), of 25-64, 26, 32, 36, 48, 54, 56 and 58. On 26 the six
-    ores picked up at 193-196 s, touched 3 times, 2 of them evaded.)"""
+    ores picked up at 193-196 s, touched 3 times, 2 of them evaded.) (Seed 7 since her knock is the client's (2026-11-02:
+    270 out and up, its push sideways added to the speed she has, landing at her walk's speed at most, world.KNOCK_VX,
+    KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
+    D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on 26 she picked up no ore and was hurt 17 times; of seeds 1-32 7,
+    11, 13 and 21 meet all of this.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -1261,7 +1325,7 @@ SAFETY_EXPECTS = (
     check("never the chair, no waiting for HP", lambda tr: not any(p[1] in ("chair", "stand") for p in tr["plans"])))
 
 
-@tree((23, 73.0), monsters="all", seed=1, limit=400, hp=0.8, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
+@tree((23, 73.0), monsters="all", seed=2, limit=400, hp=0.8, **dict(_LIVE, realism=Realism(zero_walls=True, potions=0)),
       expects=SAFETY_EXPECTS)
 def loop_tree_safety_stop(sim):
     """`tour --loop --map 10002073` as it runs by default (the feed, the attack choice) from 23 at 80% HP, her pet with
@@ -1274,7 +1338,10 @@ def loop_tree_safety_stop(sim):
     starts (attack.stance.Pace). Until 2026-10-28 the stop was at 65% for 2 s: here at 48% 2.9 s in, and her retreat
     took her to 1.1%. Seeds 1-12 under each rule: README, The safety stop in HP.) (Seed 1 since the stack's monsters
     turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 an attack or
-    the mouse after the stop; of seeds 1-13 all but 2-4 and 12 show all of this.)"""
+    the mouse after the stop; of seeds 1-13 all but 2-4 and 12 show all of this.) (Seed 2 since his walk and climb
+    by his SPEED (2026-11-02: the thief walks his stat window's 151.25 and climbs 121, the world as his planner, where 149
+    and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 1 an attack or the mouse
+    after the stop; of seeds 1-16 all but 1, 3, 14 and 15 show all of this.)"""
     return safety_stop(5)(sim)
 
 
@@ -1347,7 +1414,14 @@ def loop_tree_out_of_darts(sim):
     it.) (Seed 2 since the simulator's looks have her place as the world does (sim.fakes.TRUE_PLACE, 2026-10-31: live's
     localizer taken as right): on seed 1 not on a safe place once her retreat was over; of seeds 1-13, 11 meet all of
     this, 10 with her dot.) (Seed 1 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 2 not
-    on a safe place once her retreat was over; of seeds 1-13 all but 2 and 10 show all of this.)"""
+    on a safe place once her retreat was over; of seeds 1-13 all but 2 and 10 show all of this.) (Seed 2 since her knock
+    is the client's (2026-11-02: 270 out and up, its push sideways added to the speed she has, landing at her walk's
+    speed at most, world.KNOCK_VX, KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was
+    ~58; D:/MapleHelper-scratch/recfix/sim-fix/scan3.txt, scanned with the push set outright, not added): on seed 1 not
+    on a safe place once her retreat was over; of seeds 1-16 all but 1, 7 and 10 show all of this.) (Seed 1 since his
+    walk and climb by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, where 149 and the world's 130
+    up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 2 not on a safe place once her retreat was
+    over; of seeds 1-16 all but 2 and 12 show all of this.)"""
     return darts_stop(5)(sim)
 
 
@@ -1493,7 +1567,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=4, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -1514,7 +1588,10 @@ def loop_tree_attack_misses(sim):
     the old respawn clock too.) (Seed 2 since the monsters move as the v83 client's AI moves them, 2026-10-31: on seed 1
     not the key bindings' check; of seeds 1-13 all but 1 show all of this.) (Seed 4 since the stack's monsters turn
     where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 not the key
-    bindings' check; of seeds 1-13 4-11 and 13 show all of this.)"""
+    bindings' check; of seeds 1-13 4-11 and 13 show all of this.) (Seed 5 since the rope hang beside the world's touches
+    and knock as live (work/rec-all, the integration of 2026-11-02; D:/MapleHelper-scratch/recfix/integrate/diag/
+    scan1.txt): on seed 4 she was paged; of seeds 1-16, 2, 3, 5-7, 9, 11, 12 and 14-16 show all of this. On 5 the doubt
+    at 14.0 s.)"""
     return key_check_run(2)(sim)
 
 
@@ -1540,7 +1617,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=12, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=13, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1625,8 +1702,36 @@ def loop_tree_attack_no_darts(sim):
     D:/MapleHelper-scratch/replan/speed/fix/seeds/scan3.txt): on 6 no doubt of the regular attack before a key check's
     retreat at 174 s; of seeds 1-24, 12 alone meets all of this (with JITTER_ALL off 6 and 13). On 12: the doubt at
     61.1 s, a Horny Mushroom at 31%; MAYBE OUT at 68.7 s, ATTACK on Ctrl as configured at 69.8 s, paged; out of darts'
-    stop at 83.9 s, paged.)"""
-    return key_check_run(4)(sim)
+    stop at 83.9 s, paged.) (Seed 3 since the world's touches as live (2026-11-02: a newborn touches nothing while it
+    fades in, world.NEWBORN_SOLID_S, and her body for touches is the client's line, world.HER_TOUCH;
+    D:/MapleHelper-scratch/recfix/sim/seeds/no_darts.txt): on 12 her stars' test never said MAYBE OUT; of seeds 1-24 3,
+    5, 7, 13 and 14 meet all of this. On 3: the doubt at 76.2 s, a Horny Mushroom at 78%; MAYBE OUT at 83.9 s, ATTACK on
+    Ctrl as configured at 88.6 s, paged at 89.3 s; out of darts' stop at 116.4 s, paged.) (Seed 6 since her knock is the
+    client's (2026-11-02: 270 out and up, its push sideways added to the speed she has, landing at her walk's speed at
+    most, world.KNOCK_VX, KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
+    D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on 3 her stars' test never said MAYBE OUT; of seeds 1-16 6, 8 and
+    14 meet all of this. On 6: the doubt at 110.2 s, a Green Mushroom at 47%.) (Seed 11 since the rope hang beside the
+    world's touches and knock as live (work/rec-all, the integration of 2026-11-02; D:/MapleHelper-scratch/recfix/
+    integrate/diag/scan1.txt): on 6 her stars' test never said MAYBE OUT; of seeds 1-16, 11 and 14 meet all of this. On
+    11 the doubt at 129.4 s, a Green Mushroom at 84-90%.) (Seed 9 since his walk and climb by his SPEED (2026-11-02: the
+    thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
+    seeds/scenarios.json): on 11 her stars' test never said MAYBE OUT; of seeds 1-16, 9, 13 and 16 meet all of this. On
+    9 the doubt at 106.7 s, a Green Mushroom.) (Seed 14 since her hang under a rope's top waits longer for a walker and
+    takes a touch worth less than the wait (work/rec-rope2, 2026-11-02: navigator.HANG_LONGER, HANG_TAKE;
+    D:/MapleHelper-scratch/recfix/rope2/scan_no_darts.txt): on 11 her stars' test never said MAYBE OUT; of seeds 1-16, 8
+    and 14 meet all of this. On 14: the doubt at 57.4 s, a Green Mushroom at 25%; MAYBE OUT at 95.2 s, ATTACK on Ctrl as
+    configured at 99.8 s, paged; out of darts' stop at 112.3 s, paged.) (Seed 4 since the two together (work/rec-all,
+    the merge of work/rec-panel and work/rec-rope2, 2026-11-02; D:/MapleHelper-scratch/recfix/measure/
+    scan_no_darts.txt): on 9 and on 14 her stars' test never said MAYBE OUT; of seeds 1-16, 4, 6, 13 and 16 meet all of
+    this. On 4: the doubt at 62.7 s, a Horny Mushroom; MAYBE OUT at 70.6 s, ATTACK on Ctrl as configured at 72.4 s,
+    paged; out of darts' stop at 88.5 s, paged.) (Seed 13 since the final review of 2026-11-02: her hang under a rope's
+    top the 2 s hang alone again, navigator.HANG_LONGER and HANG_TAKE off, and a monster the fight takes for dead
+    holding her at a stop no more, grind's _held; D:/MapleHelper-scratch/recfix/final-fix/scan_no_darts.txt): on 4 she
+    was never paged twice, on 9 (the 2 s hang's seed of work/rec-panel) her stars' test never said MAYBE OUT; of seeds
+    1-16, 13 and 16 meet all of this. On 13: the doubt at 54.8 s, a Horny Mushroom at 81%; MAYBE OUT at 62.4 s, ATTACK
+    on Ctrl as configured at 64.3 s, paged; out of darts' stop at 77.7 s, paged at 80.3 s.) It is re-seeded at most
+    changes of the grind or the world (more than ten times): placing its monsters would make it hold, not a seed.)"""
+    return key_check_run(13)(sim)
 
 
 # --- her other keys moved in the game: followed (the user, 2026-10-28: "Follow them"; control.keymap) ----------------
@@ -1899,7 +2004,8 @@ def nav_tree_rope_top_15(sim):
 
 
 @tree((19, 250.0), monsters=[("Green Mushroom", 18, 125.0)], seed=1, limit=120, **_LIVE,
-      expects=(ends("arrived"), logs("touched on the rope"), sends("climb_on"),
+      expects=(ends("arrived"), logs("hanging on the rope"), sends("hang_up"),
+               check("touched once at most", lambda tr: tr["world"]["touches"] <= 1),
                check("on 16 by the end", lambda tr: tr["world"]["platform"] == 16)))
 def nav_tree_rope_hit(sim):
     """From 19 up to 16 by the rope at x 111 (19 -> 18), a Green Mushroom walking on 18 by its top (as at 22:58:05
@@ -1912,8 +2018,36 @@ def nav_tree_rope_hit(sim):
     work/replan's loot work on master 072e1ec (2026-10-31: her HP at the user's prices, the positioning switches as
     first built, her drops' life by the live evidence: eval/seeds/rope.txt): on seed 2 the Green Mushroom never touched
     her on the rope; of seeds 1-24, 1, 3, 5-7, 9-11, 13 and 15-23 meet all of this and tests/test_touches.py's MISS on
-    the trip.)"""
+    the trip.)
+    (From 2026-11-02, navigator.ROPE_HANG: the Green Mushroom by the top makes her stop on the rope 88 under it and
+    hang there; it stays within reach of the top the whole HANG_S, so she goes up regardless after 2.1 s, touched on the
+    rope then (a MISS, no knock), and her invulnerability after it takes her past it (the touch is the cut's: POST_HIT),
+    on 16 at 7.1 s with 1 touch where 5.1 s with 1 (climbed on after a touch 55 under the top). Her climb on after a
+    touch, CLIMB_ON, isn't shown here any more: tests/test_rope_top.py, test_evade.py and test_touches.py (without
+    ROPE_HANG).)"""
     return _nav(16, fight=True)(sim)
+
+
+# Hanging under a rope's top until the way up clears (navigator.ROPE_HANG, from 2026-11-02): live that hour (RiceBaby
+# grinding, three recordings and the hour's telemetry) 19-23 of the 170 touches came at the top of the rope at x -80 from
+# 11 to 10, the camp's only way in, by a Horny Mushroom on 10 beside it (10's Horny point is at -109), 16-48 under the
+# top or standing up there.
+
+@tree((11, -150.0), monsters=[("Horny Mushroom", 10, -60.0)], seed=8, limit=60,
+      **_LIVE, expects=(ends("arrived"), logs("hanging on the rope"), logs("the way up clear"),
+                        no_log("touched on the rope"), check("not touched", lambda tr: tr["world"]["touches"] == 0),
+                        check("on 10 by the end", lambda tr: tr["world"]["platform"] == 10)))
+def nav_tree_rope_top_10(sim):
+    """From 11 at x -150 up the rope at x -80 onto 10 (the grind's way back into the camp), a Horny Mushroom walking 10
+    by the rope's top: the climb stops on the rope 80-90 under the top while the way up isn't clear (navigator.ROPE_HANG:
+    "hanging on the rope"), out of its reach, and goes on up once it is (or after HANG_S), never touched on the rope. A
+    trip in transit, as the grind's (only what's in her way is shot), to anywhere on 10: it ends at the rope's top. On
+    seed 8 she hangs 0.5 s 83 under the top and goes up untouched, on 10 0.5 s later than without the hang (touched on
+    the rope 50 under its top then, damage 118, and up again). On seeds 1-12 (D:/MapleHelper-scratch/recfix/rope/
+    seeds_hang.py): touched on 2 of the 12 trips (1 on the rope) where without the hang on 5 (4 on the rope); 4 hangs, 2
+    of them up regardless after HANG_S (one of those touched); the 12 trips 54.2 s in all against 48.7."""
+    from ..control.navigator import TRANSIT
+    return sim.navigator(sim.hunter(), fight=True).go(10, mode=TRANSIT)
 
 
 @tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=8, limit=60, **_LIVE,
@@ -1981,7 +2115,7 @@ def _no_mover(tr: dict) -> bool:
     return not any(line.rstrip().endswith("moves to go]") for line in tr["log"])
 
 
-@tree((21, 60.0), monsters=[("Green Mushroom", 21, 130.0)], seed=2, limit=70,
+@tree((21, 60.0), monsters=[("Green Mushroom", 21, 130.0)], seed=3, limit=70,
       **dict(_LIVE, realism=Realism(zero_walls=True, chase=True, invulnerable=harness.INVULNERABLE_LIVE)),
       expects=(ends("arrived"), logs("contact:"),
                check("no move a monster blocks made by the mover", _no_mover),
@@ -1999,6 +2133,12 @@ def nav_tree_evade(sim):
     (2026-10-30, work/replan: navigator.trip_monsters, POST_HIT), the chain after that first touch is planned from the
     newest state in the window it leaves her and goes up past the mushroom: touched once, on 19 at 2.1 s where it took
     8.2 s, three touches, the spot and the passes before; on none of seeds 1-16 is a spot or a pass needed (the evade
-    step's own tests: tests/test_evade.py)."""
+    step's own tests: tests/test_evade.py). (Seed 3 since her knock is the client's (2026-11-02: 270 out and up, its push
+    sideways added to the speed she has, landing at her walk's speed at most, world.KNOCK_VX, KNOCK_ADDS,
+    KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
+    D:/MapleHelper-scratch/recfix/sim-fix/scan3.txt, scanned with the push set outright, not added): on seed 2 the first
+    touch's knock landed her on 22 and the
+    mushroom touched her again back on 21, twice in all; of seeds 1-16, 3, 5-7, 10, 13 and 16 meet all of this. On 3: the
+    jump touched and knocked back onto 21, the next up past it onto 19, touched once.)"""
     sim.world.monsters[0].aggro(sim.world.t)
     return _nav(19, seconds=60)(sim)

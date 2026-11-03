@@ -112,6 +112,7 @@ from ..localization.monsters import (DEFAULT_SPEED, Monster, Tracker, bodies, sp
 from ..localization.players import near_rival
 from ..localization.scene import Scene
 from ..localization.unseen import UNSEEN_S, unseen
+from ..motion import physics
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from ..perception.framecheck import LookLost
@@ -414,7 +415,21 @@ class Visit:
 
 @dataclass
 class HuntReport:
-    """What a hunt did."""
+    """What a hunt did, from its start to the end of its trip to stand by (Hunt.run): the run summary, the end of the
+    run's log ('hunt done: ...') and its telemetry 'summary' record (`record`).
+
+    Until 2026-11-02 it stopped counting at time-up, before that trip, and missed some of what came before: R1 of
+    2026-11-02 (RiceBaby on Tree Dungeon, 00:09:36-00:14:57) said 52 kills, +1,731 off her EXP number and 80 throws,
+    where the run had 53, +1,798 and 85 (D:/MapleHelper-scratch/recfix/records). Three causes: her EXP number's first
+    reading came with her first kill (the perception service had read it long before, and a hunt that attaches later
+    hears only its changes: now each change tells the number before it, localization.worldstate's `before`, which
+    Hunter._vitals starts from), so that kill's 26 were lost; the navigator's shots clearing her way (behavior.fight's
+    escort: 4 casts) count in the hunter's report, not the hunt's `throws`; and the stand-by trip's own shot, kill and
+    41 EXP came after the count stopped. `throws` stays the hunt's own throws (what behavior.grind learns its kill
+    times from); `casts` is every throw of hers over the run, the navigator's too. Its 'a minute' figures are over the
+    run's minutes, the stand-by trip's too (`minutes`), since its kills are counted; summaries before 2026-11-02 went
+    over the hunt's seconds alone, so the same run reads lower by the stand-by's share of its time (the simulator's
+    loop_tree_grind_drops, 19 s of 199: 169.6 EXP a minute off her number then, 153.6 now)."""
     seconds: float = 0.0
     grounds: list[int] = field(default_factory=list)  # visited, in order
     kills: dict[str, int] = field(default_factory=dict)
@@ -425,14 +440,54 @@ class HuntReport:
     piles: int = 0             # piles gone after (picked up, or tried)
     on_the_way: int = 0        # EXP gains while travelling to an objective
     rules: Counter = field(default_factory=Counter)  # passes each rule decided
+    rule_s: Counter = field(default_factory=Counter)  # ... and the s from each of those passes to the next (Hunt._note)
     stop: str = ""
+    standby_s: float = 0.0     # s of the trip to stand by after time-up (counted in all the run's figures)
+    standby_kills: int = 0     # ... her kills on it
+    casts: int = 0             # every throw of hers over the run (the hunter's report: the navigator's too)
+    touches: int = 0           # monsters' touches of her (MISS too) ...
+    misses: int = 0            # ... of them MISS
+    drinks: int = 0            # potions she drank, her pet's too, as her HP number's rises tell (fight.Report.drinks)
+    lowest_hp: float | None = None  # her lowest HP over the run, as her HP number read (None: never read)
+    max_hp: float | None = None     # ... of her max HP as read
+
+    @property
+    def minutes(self) -> float:
+        return (self.seconds + self.standby_s) / 60.0
+
+    def per_minute(self, n: float) -> float | None:
+        return n / self.minutes if self.minutes > 0 else None
 
     def __str__(self):
         read = ("not read" if self.exp_read is None else
-                f"+{self.exp_read}" + (f", {self.exp_read * 60 / self.seconds:.1f} a minute" if self.seconds else ""))
-        return (f"{self.seconds:.0f} s; grounds {self.grounds}; kills: {kills_text(self.kills)} "
-                f"(EXP gains {self.exp_gains}, EXP {self.exp:.0f}; off her EXP number {read}); throws {self.throws}; "
-                f"piles {self.piles}; ended: {self.stop}")
+                f"+{self.exp_read}" + (f", {self.per_minute(self.exp_read):.1f} a minute" if self.minutes else ""))
+        clear = self.casts - self.throws
+        a_min = (lambda n: f" ({self.per_minute(n):.1f} a minute)" if self.minutes else "")
+        lowest = ("" if self.lowest_hp is None else f", lowest HP {self.lowest_hp:.0f}"
+                  + ("" if self.max_hp is None else f" of {self.max_hp:.0f}"))
+        return (f"{self.seconds:.0f} s" + (f" and {self.standby_s:.0f} s to stand by" if self.standby_s else "")
+                + f"; grounds {self.grounds}; kills: {kills_text(self.kills)} "
+                f"(EXP gains {self.exp_gains}, EXP {self.exp:.0f}; off her EXP number {read}"
+                + (f"; {self.standby_kills} on her way to stand by" if self.standby_kills else "") + ")"
+                + f"; throws {self.casts or self.throws}"
+                + (f" ({clear} clearing her way)" if self.casts and clear > 0 else "")
+                + f"; piles {self.piles}; touches {self.touches}{a_min(self.touches)}, {self.misses} MISS; "
+                f"potions {self.drinks}{a_min(self.drinks)}{lowest}; ended: {self.stop}")
+
+    def record(self) -> dict:
+        """The telemetry 'summary' record's data (one at the run's end: Hunt.run)."""
+        m = self.minutes
+        rate = (lambda n: None if m <= 0 or n is None else round(n / m, 2))
+        return {"seconds": round(self.seconds, 1), "standby_s": round(self.standby_s, 1), "kills": dict(self.kills),
+                "exp_gains": self.exp_gains, "exp": round(self.exp, 1), "exp_read": self.exp_read,
+                "throws": self.throws, "casts": self.casts, "standby_kills": self.standby_kills,
+                "piles": self.piles, "on_the_way": self.on_the_way, "touches": self.touches, "misses": self.misses,
+                "drinks": self.drinks, "lowest_hp": None if self.lowest_hp is None else round(self.lowest_hp),
+                "max_hp": None if self.max_hp is None else round(self.max_hp),
+                "a_minute": {"exp_read": rate(self.exp_read), "exp": rate(self.exp), "kills": rate(self.exp_gains),
+                             "casts": rate(self.casts), "touches": rate(self.touches), "drinks": rate(self.drinks)},
+                "grounds": len(self.grounds), "rules": dict(sorted(self.rules.items())),
+                "rule_s": {k: round(v, 1) for k, v in sorted(self.rule_s.items())}, "stop": self.stop}
 
 
 class Hunt:
@@ -467,6 +522,7 @@ class Hunt:
         self._hung_at = 0.0                  # ... since when
         self._rope_rest = 0.0                # no rope before this (ROPE_AGAIN_S)
         self._rule = ""
+        self._noted: tuple[str, float] | None = None  # the last pass's rule and when it was noted (`_note`: rule_s)
         # Leaving a ground: why (None: not leaving), kept while she's off the ground and its spot (see `_at_ground`):
         # the decision itself is made again at every pass at the ground (kept, a weak reason such as "nothing came
         # into reach" lost respawns that came after it). The piles on her way out are the sweep's, within its budget
@@ -529,6 +585,7 @@ class Hunt:
             self._next_ground(first)
             while time.monotonic() < end:
                 try:
+                    physics.settle()  # (a SPEED her stat window read in the loop made hers: between key plans)
                     if self._pass() == "stop":
                         break
                 except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)
@@ -571,13 +628,65 @@ class Hunt:
             self.h.senses.regains = regains
             if raises is not None:
                 self.h.doubts_raise = raises
+        self._over_at = time.monotonic()  # (her kills whose EXP showed by now are the hunt's: _book_after)
         self.report.seconds = time.monotonic() - start
+        if (last := getattr(self, "_noted", None)) is not None:  # (the last pass's rule had her to time-up)
+            self.report.rule_s[last[0]] += time.monotonic() - last[1]
+            self._noted = None
         self._log_memory()
-        if meter.since is not None:
-            self.report.exp_read = meter.total - (read or 0)
         self.report.stop = self.report.stop or "time up"
+        standby = time.monotonic()
         self.tour.stand_by(mode=TRANSIT)
+        self.report.standby_s = time.monotonic() - standby
+        self._book_after()  # (her kills on the way to stand by: the run's too, HuntReport)
+        self._summary(meter, read)
         return self.report
+
+    def _summary(self, meter, read: int | None) -> None:
+        """The run's figures that the hunter counted (HuntReport): her EXP number's rise since `read` (as read at the
+        start; None: not read then), her throws, touches and potions (the hunter's report, a new one at the start), her
+        lowest HP; the telemetry 'summary' record."""
+        r, hr = self.report, self.h.report
+        if meter.since is not None:
+            r.exp_read = meter.total - (read or 0)
+        r.casts = max(r.throws, getattr(hr, "throws", 0))
+        r.touches, r.misses = getattr(hr, "touches", 0), getattr(hr, "misses", 0)
+        r.drinks, r.lowest_hp = getattr(hr, "drinks", 0), getattr(hr, "lowest_hp", None)
+        r.max_hp = getattr(self.h, "max_hp", None)
+        telemetry.emit("summary", **r.record())
+
+    def _kill_exp(self, k, avg: float) -> tuple[str | None, float]:
+        """A kill's kind and EXP: its kind's, placed or named by its gain's size (localization.gains), else `avg`."""
+        kind = k.kind or k.named
+        return kind, (self.tour.exp.get(kind, avg) if kind is not None else avg)
+
+    def _count_kill(self, kind: str | None, exp: float) -> None:
+        self.report.exp_gains += 1
+        self.report.exp += exp
+        if kind is not None:
+            self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
+
+    def _book_after(self) -> list:
+        """After her trip to stand by: the kills booked since the hunt loop's last look. Those whose EXP showed before
+        the loop was over (`_over_at`; Kill.gained, its frame's time) are the hunt's own, booked as its looks book
+        them, from her last look (_book_kills: a visit's or on her way, a grind's credit by platform): the loop's last
+        pass can end on one its looks hadn't had yet (a throw dropped for a kill its last glance saw come in:
+        loop_tree_grind's Green at 180.3 s, until the review of 2026-11-02 '1 on her way to stand by' and no
+        platform's credit). The rest she made on her trip to stand by (the navigator's shots clearing its way),
+        counted in the report as on her way. Returns those."""
+        kills = self.h.ledger.kills[self._kills_seen:]
+        self._kills_seen = len(self.h.ledger.kills)
+        over, s = getattr(self, "_over_at", None), getattr(self, "_s", None)
+        own = [k for k in kills if over is not None and s is not None and k.gained is not None and k.gained <= over]
+        if own:
+            self._book_kills(s, own)
+        after = [k for k in kills if not any(k is o for o in own)]
+        avg = self._avg_exp()
+        for k in after:
+            self._count_kill(*self._kill_exp(k, avg))
+            self.report.on_the_way += 1
+        self.report.standby_kills = len(after)
+        return after
 
     def _paused(self, seconds: float) -> None:
         """She stood still `seconds` (LookLost: Senses.regain): her clocks move on by as much, so the pause isn't time
@@ -586,6 +695,8 @@ class Hunt:
         second on disk, MIN_STAY, GROUND_S), on her spot (SPOT_REST), idle (her patience) or on a rope (HANG_MAX_S,
         ROPE_AGAIN_S). The game's own clocks (respawns, drops' lives) ran on meanwhile and aren't moved."""
         self._progress += seconds
+        if (last := getattr(self, "_noted", None)) is not None:  # (the pause is no rule's time)
+            self._noted = (last[0], last[1] + seconds)
         for o in [self.obj, *self.stack]:
             if o is not None:
                 o.started += seconds
@@ -757,30 +868,10 @@ class Hunt:
         return wide
 
     def _book(self, s: Scene) -> None:
-        """New kills in the ledger: the visit's EXP and kill times, the report, and progress. A kill's EXP is its
-        kind's, placed or named by its gain's size (localization.gains), else the average kind's worth hunting."""
+        """New kills in the ledger (_book_kills), and progress."""
         kills = self.h.ledger.kills[self._kills_seen:]
         self._kills_seen = len(self.h.ledger.kills)
-        avg = self._avg_exp()
-        for k in kills:
-            kind = k.kind or k.named
-            exp = self.tour.exp.get(kind, avg) if kind is not None else avg
-            self.report.exp_gains += 1
-            self.report.exp += exp
-            if kind is not None:
-                self.report.kills[kind] = self.report.kills.get(kind, 0) + 1
-            v = self.visit
-            mine = v is not None and v.arrived is not None and k.t >= v.arrived and (  # not on her way there
-                (k.placed and (k.platform == v.ground  # on the ground, or a far kill from it or its spot
-                               or (self.obj is None and s.platform.id in (v.ground, v.spot.platform))))
-                or (not k.placed and k.ground in (v.ground, v.spot.platform)))  # unplaced: where she was
-            if mine:
-                v.exp += exp
-                if k.placed and k.platform == v.ground:
-                    v.kills.append(time.monotonic())
-            else:
-                self.report.on_the_way += 1
-            self._progress = time.monotonic()
+        self._book_kills(s, kills)
         # A pick-up is progress once a look sees the pile she went for gone (standing on one proves
         # nothing: someone else's, or a full inventory). Counted so, the stuck guard can fire.
         gone = self.h.drops.gone_tried
@@ -794,6 +885,27 @@ class Hunt:
             old = self.fs
             self.fs = FightState(exp_counted=self.h.report.exp_kills, dying=old.dying, keyed=old.keyed)
             self._fs_key = key
+
+    def _book_kills(self, s: Scene, kills: list) -> None:
+        """Kills of the hunt's, her look `s`'s: the visit's EXP and kill times, the report, and progress. A kill's EXP
+        is its kind's, placed or named by its gain's size (localization.gains), else the average kind's worth
+        hunting."""
+        avg = self._avg_exp()
+        for k in kills:
+            kind, exp = self._kill_exp(k, avg)
+            self._count_kill(kind, exp)
+            v = self.visit
+            mine = v is not None and v.arrived is not None and k.t >= v.arrived and (  # not on her way there
+                (k.placed and (k.platform == v.ground  # on the ground, or a far kill from it or its spot
+                               or (self.obj is None and s.platform.id in (v.ground, v.spot.platform))))
+                or (not k.placed and k.ground in (v.ground, v.spot.platform)))  # unplaced: where she was
+            if mine:
+                v.exp += exp
+                if k.placed and k.platform == v.ground:
+                    v.kills.append(time.monotonic())
+            else:
+                self.report.on_the_way += 1
+            self._progress = time.monotonic()
 
     def _log_memory(self) -> None:
         """What her memory of the monsters did over the hunt (the end of the run's log)."""
@@ -1310,9 +1422,22 @@ class Hunt:
                     + (f" (a {', '.join(g.monster.kind for g in st.spot.guards)} shot first)" if st.spot.guards else "")
                     for st in it.stops) + f": {it.extra:+.1f} s on her way for {it.value:.0f} mesos' worth")
             if telemetry.recording():
+                to = self._sweep_to(dest)
                 telemetry.emit("sweep", dest=None if dest is None else [dest[0], round(dest[1])],
-                               candidates=len(spots_), **it.record())
+                               candidates=len(spots_), **it.record(), **({"to": to} if to else {}))
         return it.first
+
+    def _sweep_to(self, dest: tuple[int, float] | None) -> dict | None:
+        """Why the sweep's way goes on to `dest` (its 'sweep' record's `to`, from 2026-11-02: P32 of the recordings'
+        analysis, where a leave-sweep's destination couldn't be told from the records): the objective it's the place of
+        (`objective`, and the rule that set it, `why`), or the ground's spot she comes back to (`home`); None: neither.
+        behavior.grind's says the next stop's choice first (`peek`)."""
+        if dest is None:
+            return None
+        for o in (getattr(self, "obj", None), *reversed(getattr(self, "stack", ()))):
+            if o is not None and self._dest(o) == dest:
+                return {"objective": o.text(), **({"why": o.why} if o.why else {})}
+        return {"home": True} if self._home() == dest else None
 
     def _sweep_calls(self, s: Scene) -> bool:
         """Whether the sweep has something else for her than the trip she's on (`_interrupt`): on a trip to a spot, a
@@ -2213,7 +2338,14 @@ class Hunt:
         return n
 
     def _note(self, rule: str) -> None:
+        """A pass decided by `rule`: counted, and the time from it to the next pass's note is that rule's (`rule_s`,
+        HuntReport; a pause of her looks isn't: `_paused`); a change of rule publishes the 'hunt' record."""
         self.report.rules[rule] += 1
+        now = time.monotonic()
+        last = getattr(self, "_noted", None)
+        if last is not None:
+            self.report.rule_s[last[0]] += now - last[1]
+        self._noted = (rule, now)
         if rule != self._rule:
             self._rule = rule
             self._publish()

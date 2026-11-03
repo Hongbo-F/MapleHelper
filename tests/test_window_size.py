@@ -818,7 +818,8 @@ def _hunt_on(senses):
     tour = SimpleNamespace(safe=[], hunting_grounds=lambda v: [], stand_by=lambda mode: None)
     return SimpleNamespace(h=h, nav=nav, tour=tour, kinds=None, _visit_s=60, _end=0, _yields=None, _unseen=None,
                            _next_ground=lambda s: None, _pass=lambda: "stop", _leave_ground=lambda: None,
-                           report=SimpleNamespace(seconds=0.0, stop=None, exp_read=None), _log_memory=lambda: None)
+                           report=SimpleNamespace(seconds=0.0, stop=None, exp_read=None), _log_memory=lambda: None,
+                           _book_after=lambda: [], _summary=lambda meter, read: None)
 
 
 def test_a_hunt_loop_started_on_a_client_the_fix_mends_waits_for_its_first_try(monkeypatch):

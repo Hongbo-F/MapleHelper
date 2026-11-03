@@ -41,7 +41,7 @@ from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import client
 from ..control.actions import Actions
 from ..control.mover import STILL, Mover
-from ..control.navigator import Navigator, rope_at_top
+from ..control.navigator import Navigator, TopPrice, rope_at_top
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
 from ..localization.memory import Memory
@@ -53,6 +53,7 @@ from ..localization.worldstate import HP_GAP_S, TOUCH_SAME_S, reading_of, to_sce
 from ..motion import physics
 from ..perception import drops, exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes
+from ..perception.exp_number import ExpReading
 from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from ..perception.touches import DAMAGE, HP, MISS, POPUP
@@ -67,7 +68,7 @@ from .pet import PetCare
 from .bootstrap import Defence, HerStats, session_of_feed
 from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
 from .chatcheck import ChatCheck, ChatDue
-from .statcheck import StatCheck, StatsDue
+from .statcheck import StatCheck, StatsDue, speed_doubt
 from .safety import kinds_of as map_kinds
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
@@ -84,6 +85,13 @@ HIT_EXACT_S = 1.0     # s: a touch's text has her HP number's drop if it read on
 HP_NUMBER_WAIT_S = 10.0  # s of looks with her HP number never read: said once (the safety stop on her bar then, under
                          # bootstrap.UNREAD_SHARE of it: the perception service not restarted since 2026-10-28, a client
                          # it can't read at, such as the stretched 1920x1080, where it reads none)
+# HP: her HP number rising this much or more from one read to the next is a potion drunk (Report.drinks; her pet drinks
+# them for her). Her potions heal 150-160 (Meat 160 by the game data, Orange Potions 150), her regen between two reads a
+# few HP, a touch takes HP away: on 2026-11-02 rises of 100 or more counted 15 potions in R1's 5.35 minutes and 92 in the
+# hour, as the HP her pets' potions gave and the Meat carried (D:/MapleHelper-scratch/rec-analysis/plans/scripts/
+# numbers.py). A Red Potion's 50 wouldn't be counted, nor, from the review of 2026-11-02, a rise to a max HP other than
+# the read before's: a level's refill (R1 had none: its 15 rises were +160 each).
+POTION_RISE_HP = 100
 PLAN_DEF_STEP = 5.0  # her DEF for the positioning model (attack.danger) to this (her fit's middle moves a little with
                      # every touch: the places she stands by made again only when it moves this much)
 # The safety stop raised at the look or glance it's due at, whoever took it (Senses.checks and glance_checks:
@@ -102,6 +110,18 @@ STOP_ON_LOOK = True
 # 0.22 s more). A jump keyed from a look in that time comes while she's in the air (and is lost) or still sliding, from
 # where she no longer is.
 KNOCK_S = 0.45
+# What her time up a rope is worth to her hang under its top (`top_price`: control.navigator.HANG_TAKE, the user's
+# "sometimes it may make sense to just take the damage if there are a lot EXP to earn by killing off mobs above"): her
+# hunt's EXP a second (behavior.fight.landing_prices: the grind's loop's, Hunter.exp_rate, within its band) or, where
+# more, what the grind expects a second on the platform at the rope's top (`ground_rate`: behavior.grind, its stop
+# there: the monsters there and the belief's at its points, their EXP, her share, her kill time, net of its touches).
+# False: the hunt's alone (her time worth the loop's rate wherever she is, as the grind's stays and pulls weigh it: the
+# marginal value theorem's bar, behavior.patrol). Off, by the harness (D:/MapleHelper-scratch/recfix/rope2, 24 seeds
+# paired, HANG_LONGER at 3 s, its margin then from every look): on, she took the touch at 67% of her hangs and the
+# thief at 39% (the platform's rate a mean 13 and 8.8 EXP a second, against the hunts' 8.6 and 7.3 off), and both made
+# less EXP than off (-2.4%, t -1.51; -2.5%, -0.64), she with more touches (+7.4%, +1.85): the monsters above her don't
+# leave while she waits, so the wait costs her what her time is worth anywhere, not what she makes once she's up there.
+TOP_RATE_ABOVE = False
 ROPE_SLACK = 12  # map units: off her platform, within this of a rope's x (her dot is good to 11) she's on it, where
                  # only her back shows and her facing isn't read
 HEADING_SHOTS_MAX = 200  # crops of her kept in lab/heading where the frame and her last arrow disagreed, at most
@@ -154,6 +174,20 @@ def kinds_of(gains: list[Gain]) -> frozenset | None:
     return frozenset(k for g in gains for k in g.kinds)
 
 
+def feed_reads(events, meter: ExpMeter) -> list[tuple]:
+    """Her EXP number's readings in a feed's `events` (worldstate's 'exp_gain' and 'exp_read'), as `meter` takes them:
+    (t, reading, changed) each. A meter that has never read the number (a hunt attaching to the perception service
+    after it read it: it then hears only its changes) starts from what the first change says the number was before it
+    (worldstate's `before`), so that change's gain counts: until 2026-11-02 the first reading came with her first kill,
+    and its EXP was lost (R1 of 2026-11-02: 26, behavior.hunt.HuntReport)."""
+    reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in events if e.kind in ("exp_gain", "exp_read")]
+    first = next((e for e in events if e.kind == "exp_gain" and e.data.get("before")), None)
+    if meter.at is None and first is not None and not any(r[0] < first.t for r in reads):
+        level, exp = first.data["before"]
+        reads.insert(0, (first.t, ExpReading(exp, None, () if level is None else (level,)), False))
+    return reads
+
+
 class Hunter:
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
@@ -189,6 +223,13 @@ class Hunter:
         # her max HP, level and DEF, and where from (a W.DEF kept from before this run judged against the perception
         # service's session it looks through: bootstrap.HerStats.window_doubt)
         self.stats = HerStats(paths.of().stats, self.touches.rows, session=session_of_feed(feed))
+        # Her walk and climb: the client's formula at her stat window's SPEED (motion.physics.set_speed; the user,
+        # 2026-11-02: "Just use panel, no need to measure."), as her stats file kept it from her last read, else her
+        # profile's, at once (no chain of hers runs yet: _speed_start); a read of her stat window later sets it again
+        # (_stats_read: _speed_read). `speed_plan`: the SPEED they're planned at (or will be at the next settle) and why
+        # ('panel', 'kept', 'profile')
+        self.speed_plan: tuple[float, str] = (float(c.speed), "profile")
+        self._speed_start()
         self._notes: list[str] = []      # what changed of them since the reserve was last made (_reserve_check)
         self._given(her, feed, eyes)
         self.kinds_seen: dict[str, tuple[float, str]] = {}  # kinds a look saw that the map's spawn list hasn't
@@ -196,6 +237,7 @@ class Hunter:
         self.hp_follow = hp_number.Follow()  # her HP number off her own looks (without a feed: the feed's step reads it)
         self.lv_follow = lv_number.Follow()  # ... and her level's digits
         self._hp_box_t: float | None = None  # ... the last look it was seen on
+        self._read_max: int | None = None    # ... and the max HP its last read said (a level's refill isn't a potion)
         self._last_touch: tuple[float, int, int] | None = None  # her HP number's last touch: when, HP before, after
         self._first_look: float | None = None  # her first look's time, and whether her HP number not read since ...
         self._unread_said = False              # ... HP_NUMBER_WAIT_S has been said
@@ -236,6 +278,8 @@ class Hunter:
         self.report = Report()  # what she did (a tour starts a new one at every stop)
         self.exp_rate: float | None = None  # EXP a second her hunting makes, as the hunt has it (the grind's loop's rate:
                                             # the landings' prices, behavior.fight.landing_prices); None: not known
+        # platform -> EXP a second the grind expects of her there now (behavior.grind's, for `top_price`); None: no grind
+        self.ground_rate: Callable[[int], float | None] | None = None
         # Her kills her EXP told of: when, and the kind its gain's size named (None: not known). The last EXP_MEMORY s
         # of them, for kill() to match to its target (`take_exp`), and the latest few for the fights and the ledger to
         # place (`told`).
@@ -268,7 +312,7 @@ class Hunter:
         # The monsters she has seen anywhere, kept across looks (localization.memory), her kills (the ledger's) marking
         # the ones they were: after the ledger, so a look's kills are in it.
         self.memory = Memory(model, kills=lambda: self.ledger.kills, dead=lambda: self.ledger.dead,
-                             theirs=lambda: self.ledger.theirs)
+                             theirs=lambda: self.ledger.theirs, moved=lambda: self.ledger.moved)
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'. Her skill cast
         # only at a body seen that her search picks, not dead, not again where it took no effect, where her profile
         # casts nothing at nothing (Policy.unseen 'none': the magician's Magic Claw; Attacks.picks)
@@ -379,7 +423,29 @@ class Hunter:
         avoiding them; its fighting trips keep clear of the monsters her memory has too (Navigator.remembered)."""
         return Navigator(self.senses, self.actions, self.model, log=self.log, health=self.health_check,
                          escort=fight.FightOnTheWay(self) if fighting else None, rng=rng, memory=self.memory,
-                         moves=self.moves, danger=lambda: self.danger)
+                         moves=self.moves, danger=lambda: self.danger, price=self.top_price)
+
+    def top_price(self, pid: int, kind: str) -> TopPrice | None:
+        """What her time on platform `pid` is worth and what a touch by `kind` costs her (control.navigator.TopPrice:
+        her hang under the top of a rope up to it, HANG_TAKE), as her landings are priced (behavior.fight.
+        landing_prices): her EXP a second, the hunt's or, more, the grind's on that platform (TOP_RATE_ABOVE:
+        `ground_rate`, set by behavior.grind); the touch's HP (attack.danger's Danger.taken of her max HP) in potions at
+        the user's prices, times the share of her touches that hurt; whether her HP as last read (the safety stop's
+        watch) is over its reserve (HpWatch.threshold) and that touch's HP (the reserve's touch of the kind, else
+        Danger.taken's). None until her max HP is read."""
+        prices = fight.landing_prices(self, self.danger)
+        most = self.max_hp
+        if prices is None or most is None:
+            return None
+        rate, words = prices.rate, "the hunt's"
+        above = getattr(self, "ground_rate", None)
+        if TOP_RATE_ABOVE and above is not None and (here := above(pid)) is not None and here > rate:
+            rate, words = here, f"platform {pid}'s"
+        w = self.hp_watch
+        mine = next((t for t in w.reserve.touches if t.kind == kind), None)
+        touch_hp = float(mine.hp) if mine is not None else self.danger.taken(kind) * most
+        ok = w.hp is not None and w.max_hp is not None and w.hp >= w.threshold(most, self.max_mp) + touch_hp
+        return TopPrice(rate, prices.touch(kind) * prices.hurt, ok, words)
 
     def knocked(self, s: Scene) -> bool:
         """Whether a touch's knock may still be moving her at look `s`: a look within KNOCK_S before it (or it) was told
@@ -652,17 +718,83 @@ class Hunter:
             self.chat_check = ChatCheck(self)
         return self.chat_check.run(at_start=at_start, look=look, loop=loop)
 
+    # --- her walk and climb: her stat window's SPEED (motion.physics.set_speed) ----------------------------------------
+
+    def _speed_start(self) -> None:
+        """At her hunter's start (no chain of hers runs yet): her walk and climb those of her stat window's SPEED as her
+        stats file kept it from her last read ('kept': HerStats.window_read's `speed`, the one her walk and climb were
+        set to then), else her profile's ('profile'), at once. A stats file from before 2026-11-02's panel rule keeps
+        none: its read's SPEED is judged as a read would be against her profile's (statcheck.speed_doubt), said where
+        it isn't taken."""
+        profile = float(physics.CHARACTER.speed)
+        taken = self.stats.window_read.get("speed")  # (the SPEED taken from her last read ...)
+        read = (self.stats.window_read.get("read") or {}).get("speed")  # (... and the one it showed)
+        speed = why = None
+        if isinstance(taken, (int, float)):
+            speed, why = float(taken), speed_doubt(float(taken), float(taken))  # (in the client's range)
+        elif isinstance(read, (int, float)):
+            speed, why = float(read), speed_doubt(float(read), profile)
+        if why is not None:
+            self.log(f"her stat window's SPEED {speed:g} as her stats file kept it not taken ({why}): her walk and climb "
+                     f"her profile's, SPEED {profile:g}")
+        if speed is not None and why is None:
+            self._speed_set(speed, "kept")
+        else:
+            self._speed_set(profile, "profile")
+        physics.settle()
+
+    def _speed_read(self, speed) -> list[str]:
+        """Her stat window's SPEED `speed` (%; None: not read) to her walk and climb: taken ('panel') unless it's no
+        read (statcheck.speed_doubt: outside the client's range, or a jump from what's planned and from her stat
+        window's last read kept larger than gear gives; or, other than what's planned, not what a second frame read:
+        StatCheck.speed_again), then said and the SPEED planned kept. Taken, her walk and climb are its own from the
+        next settle (physics.propose: read_stats settles at once at a hunt's start; in the hunt loop, StatsDue, the
+        loop's next pass or a navigator's, where no chain of hers runs). What to say of it."""
+        if speed is None:
+            return []
+        planned = self.speed_plan[0]
+        kept = (self.stats.window_read.get("read") or {}).get("speed")
+        why = speed_doubt(float(speed), planned, float(kept) if isinstance(kept, (int, float)) else None)
+        again = getattr(getattr(self, "stat_check", None), "speed_again", speed)
+        if why is None and float(speed) != planned and again != speed:
+            why = "a second frame read " + ("none" if again is None else f"{again:g}")
+        if why is not None:
+            return [f"her stat window's SPEED {speed:g} not taken ({why}; a misread?): her walk and climb as they were, "
+                    f"SPEED {planned:g}"]
+        self._speed_set(float(speed), "panel")
+        return []
+
+    def _speed_set(self, speed: float, why: str) -> None:
+        """Her walk and climb to be SPEED `speed`'s by the client's formula from the next settle (physics.propose:
+        `why` 'panel', 'kept' or 'profile'), a change said once it's made (_speed_said)."""
+        self.speed_plan = (float(speed), why)
+        physics.propose(speed, then=lambda old, new: self._speed_said(old, new, why))
+
+    def _speed_said(self, old: tuple[float, float, float], new: tuple[float, float, float], why: str) -> None:
+        """Her planner's walk and climb changed (`old`, `new`: (walk, climb, SPEED)): a line in her log and a 'motion'
+        record (old, new, the SPEED and why)."""
+        src = {"panel": "her stat window's", "kept": "her stat window's as her stats file kept it",
+               "profile": f"her profile's ({profiles.stats_from('speed')} speed)"}[why]
+        self.log(f"her walk {old[0]:g} -> {new[0]:g} and climb {old[1]:g} -> {new[1]:g} units/s: SPEED {new[2]:g}, "
+                 f"{src}, by the client's formula")
+        telemetry.emit("motion", old=[round(old[0], 2), round(old[1], 2)], new=[round(new[0], 2), round(new[1], 2)],
+                       speed=new[2], was=old[2], why=why)
+
     # --- her stat window (behavior.statcheck) ----------------------------------------------------------------------
 
     def read_stats(self, at_start: bool = False, quiet: bool = True, loop: bool | None = None):
         """Her stat window opened, read and closed if it's due (statcheck.StatCheck.run): at a hunt's start
         (`at_start`: gamelab.__main__'s _hunter; `loop`: whether a hunt loop follows, where a read put off is tried
         again), and in the hunt loop when a read put off there comes due (StatsDue); `quiet` False: no quiet moment
-        waited for (`gamelab stats --read`). Its outcome. Raises StatWindowStop (the window may be open), SafetyStop (at
-        every look of it) and client.LieDetectorAlarm."""
+        waited for (`gamelab stats --read`). Its outcome; at a hunt's start, her walk and climb its SPEED's at once (no
+        chain of hers runs: physics.settle), in the hunt loop from its next pass. Raises StatWindowStop (the window may
+        be open), SafetyStop (at every look of it) and client.LieDetectorAlarm."""
         if self.stat_check is None:
             self.stat_check = StatCheck(self)
-        return self.stat_check.run(at_start=at_start, quiet=quiet, loop=loop)
+        out = self.stat_check.run(at_start=at_start, quiet=quiet, loop=loop)
+        if at_start:
+            physics.settle()
+        return out
 
     def _stats_read(self, reading, out) -> None:
         """What her stat window read (statcheck.StatCheck.run, `reading`: perception.stat_window.StatReading) to her
@@ -672,12 +804,13 @@ class Hunter:
         DEF_TOP or her touches don't bear it out: HerStats.window_doubt), kept with her level and this session; her max
         HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
         (statcheck.borne); her level if nothing has read it; her max MP her casts are reckoned at (config.toml's until
-        now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED and JUMP said
-        where config.toml's, which plan her moves, differ. Her reserve made again (_reserve_check: what changed said
-        with it)."""
+        now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED her walk and
+        climb's by the client's formula (_speed_read: not where it's no read, statcheck.speed_doubt, said), kept with
+        the read; her JUMP said where her profile's, which plans her jumps, differs, with the jump each gives
+        (statcheck.moves_notes). Her reserve made again (_reserve_check: what changed said with it)."""
         from ..motion import physics
         from .bootstrap import HerStats as Stats
-        from .statcheck import MP_SPAN, borne, disagreement
+        from .statcheck import MP_SPAN, borne, disagreement, moves_notes
         st, notes = self.stats, []
         level, most = reading.level, reading.max_hp
         scene = getattr(self.stat_check, "scene", None)
@@ -708,16 +841,13 @@ class Hunter:
             else:
                 notes.append(f"her stat window's max MP {mp} not taken ({why}): her casts reckoned at "
                              f"{self.max_mp:g} as before")
-        c = physics.CHARACTER
-        for name, mine in (("speed", c.speed), ("jump", c.jump)):
-            v = reading.get(name)
-            if v is not None and abs(float(v) - float(mine)) >= 1.0:
-                notes.append(f"her {name.upper()} {v}% by her stat window, config.toml [character] {name} {mine:g}: "
-                             "her moves planned by config.toml's")
+        notes.extend(self._speed_read(reading.get("speed")))
+        notes.extend(moves_notes(reading, physics.CHARACTER))
         if reading.wdef is not None:
             session = self.stat_check._session() if self.stat_check is not None else None
+            speed, why = self.speed_plan  # (the SPEED her walk and climb are set to from her stat window, if any)
             note = st.see_window(reading.wdef, rows=self.touches.rows, level=level if level is not None else st.level,
-                                 session=session, read=reading.values)
+                                 session=session, read=reading.values, speed=speed if why != "profile" else None)
             if note is not None:
                 notes.append(note)
         self._notes.extend(notes)
@@ -1166,8 +1296,7 @@ class Hunter:
             touched = [{"kind": DAMAGE, "text": "", "at": s.t, "how": HP}] if lost > 0 and self._last_hp is not None \
                 else []
         else:
-            reads = [(e.t, reading_of(e.data), e.kind == "exp_gain") for e in s.events
-                     if e.kind in ("exp_gain", "exp_read")]
+            reads = feed_reads(s.events, self.meter)
             lost = sum(e.data.get("lost", 0.0) for e in s.events if e.kind == "hp_drop")
             touched = [e.data for e in s.events if e.kind == "touch"]
             touched += self._untold(s, touched)
@@ -1221,6 +1350,10 @@ class Hunter:
             self._max_hp_seen(most)
             if before is not None and cur < before:
                 self._touched(t, before, cur, most)
+            last_max, self._read_max = getattr(self, "_read_max", None), most
+            if before is not None and cur - before >= POTION_RISE_HP and last_max in (None, most):
+                self.report.drinks += 1  # (a potion: her pet's, or hers; not a level's refill to a new max)
+            self.report.see_hp(cur)
         if exact is not None:
             self._max_hp_seen(exact[1])
         return exact
@@ -1429,9 +1562,15 @@ class Hunter:
                        **({"shot": shot.name} if shot is not None else {}))
 
     def _tell_feed(self, when: float, side: str) -> None:
-        """A throw (Actions.throw_listeners) told to the feed (localization.tracking: whose kills are whose)."""
+        """A throw (Actions.throw_listeners) told to the feed (localization.tracking: whose kills are whose), with the
+        monster her attack choice aimed it at (Attacks.thrown, told before this listener: its track, kind, x and
+        platform as the look she chose on had it), which her kill goes on first where her search picks it as well as
+        any (tracking's band order: the magician's; the thief's stars go by their own order, the aim aside)."""
         self.told_throws.append([when, side])
-        self._feed_throw(when, side)
+        thrown = getattr(self.attacks, "thrown", None)
+        m = thrown[1] if thrown is not None and thrown[0] == when else None
+        aim = None if m is None else (getattr(m, "track", None), m.kind, round(m.x, 1), m.platform)
+        self._feed_throw(when, side, None, aim)
 
     def _retell(self, s: Scene, side: str) -> None:
         """Look `s`'s frame shows her facing `side`, otherwise than her keys had her (Actions.see): the throws told
@@ -1495,9 +1634,12 @@ class Hunter:
     def _publish(self, s: Scene) -> None:
         """The look and the drops she remembers, for the mini-map (telemetry); with a feed, the deaths it saw that
         weren't hers ('died', as `watch` publishes them: analysis.respawn reads them as others' kills, a platform
-        emptied by someone else; hers are the 'kill' events already)."""
+        emptied by someone else; hers are the 'kill' events already). From 2026-11-02 the scene says how old its frame
+        was as the hunt got it (`age`, ms: the time since the screen showed it), with the feed's frame number (`seq`),
+        so a decision can be matched to the frame it was made on (P28 of the recordings' analysis)."""
         if telemetry.recording():
             record = s.record()
+            record["age"] = round((time.monotonic() - s.t) * 1000)
             if record["her"] is not None:  # which way she faces as best known (keys or frame: facing_by), by her keys
                 a = self.actions             # alone, and by the frame alone (and whether strongly: only a strong
                 # frame takes a throw's tap away, Actions.faces)

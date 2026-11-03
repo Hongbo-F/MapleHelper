@@ -329,6 +329,16 @@ def test_the_bar_needs_more_exp_on_most_seeds_and_nothing_worse():
     assert not harness.compare(base, [_result(k, 60.0, died=100.0 if k == 5 else None) for k in range(1, 11)])[0]
 
 
+def test_the_bar_refuses_runs_of_two_characters():
+    # As runs on two maps: the review's (2026-11-02), a thief's run against a magician's was judged by the bar
+    base = [_result(k, 50.0) for k in range(1, 11)]
+    hers = [dict(_result(k, 60.0), character="magician") for k in range(1, 11)]
+    ok, lines = harness.compare(base, hers)
+    assert not ok and lines[0] == "the runs play different characters (['thief'] and ['magician'])"
+    assert harness.compare([dict(r, character="magician") for r in base], hers)[0]
+    assert harness.compare([dict(r, character="thief") for r in base], [_result(k, 60.0) for k in range(1, 11)])[0]
+
+
 def test_outcomes_are_read_from_the_world(model):
     c = plat(model, 500, 400)
     w = still(world(model, c.id, 100.0, monsters=[("Snail", c.id, 400.0)], facing="right"))
@@ -600,7 +610,7 @@ def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model, monkeypa
     KNOCK_FALL_DY lower; one that leaves her on hers isn't one. (Her touches all take HP here: a MISS knocks nothing.)"""
     monkeypatch.setattr(world_mod, "evade_chance", lambda info, her=None, mob_level=None: 0.0)
     b = plat(model, 360, 300)
-    w = world(model, b.id, 385.0, monsters=[("Snail", b.id, 360.0)])
+    w = world(model, b.id, 375.0, monsters=[("Snail", b.id, 360.0)])
     w.monsters[0].speed = 0.0
     w.advance(2.0)
     assert w.touches >= 1 and w.plat is not None and w.plat.id != b.id
@@ -608,7 +618,7 @@ def test_a_knock_onto_a_lower_platform_is_counted_as_a_knock_off(model, monkeypa
     out = harness.outcomes(w, [], 60.0)
     assert out["knock_falls"] == 1 and out["knock_fall_dy"] == w.knock_log[0][3]
     c = plat(model, 500, 400)
-    w = world(model, c.id, 385.0, monsters=[("Snail", c.id, 360.0)])
+    w = world(model, c.id, 375.0, monsters=[("Snail", c.id, 360.0)])
     w.monsters[0].speed = 0.0
     w.advance(2.0)
     assert w.touches >= 1 and w.knock_log == []  # knocked along the floor
@@ -711,13 +721,14 @@ def test_her_trips_touches_again_and_by_what_she_was_doing_are_counted(model):
 
 def test_her_box_can_be_the_clients_in_the_simulated_world(model):
     # Realism.her_box (`--world client-body`): 22 either side of her feet and 65 tall (motion.bodies), not the
-    # simulator's 15 and 55: a slime walking on B, 140 above C's floor, never reaches her there; one on a platform 60
-    # over her does with the client's box only (her head 65 up).
+    # simulator's touch test (world.HER_TOUCH, the client's: a line 50 tall): a slime walking on B, 140 above C's
+    # floor, never reaches her there; one on a platform 60 over her does with the planner's box only (her head 65 up).
     from gamelab.motion import bodies
     assert world_mod.HER_BOX_CLIENT == (bodies.HER_HALF, bodies.HER_TALL) == (22.0, 65.0)
     assert harness.WORLDS["client-body"] == {"her_box": world_mod.HER_BOX_CLIENT}
     sc = harness.scenario("loop", 1, "game", 1.0, world=("client-body",))
     assert sc.realism.her_box == (22.0, 65.0) and Realism().her_box is None
+    assert harness.WORLDS["wide-body"] == {"her_box": (15.0, 55.0)}  # (as the world had it until 2026-11-02)
     t = tree()
     t["foothold"]["1"]["9"] = {"30": {"x1": 300, "y1": 440, "x2": 500, "y2": 440, "prev": 0, "next": 0}}
     m = mapdata.parse(1, t, "Test Map", {}, {"7": "Slime"}, {"7": 3})
@@ -755,6 +766,27 @@ def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
     rec = out["feed_record"]
     assert rec["frames"] > 0 and rec["senses"]["looks"] > 0 and out["looks"] == rec["senses"]["looks"]
     assert out["nav"]["glances"] == rec["senses"]["glances"] > 0
+
+
+def test_the_stacks_switches_a_world_sets_are_the_runs_alone(monkeypatch):
+    # `--world hang-2s` (control.navigator.HANG_LONGER and HANG_TAKE off: the 2 s hang alone, the default from the
+    # final review of 2026-11-02), `hang-rules` (both on) and `no-hang` (ROPE_HANG off): the stack's switches, set by
+    # run_one around the run and put back after, the world as the preset has it
+    if not scenarios.available(harness.TREE):
+        pytest.skip("needs Tree Dungeon's data")
+    from gamelab.control import navigator
+    seen = []
+    monkeypatch.setattr(scenarios, "run_sim", lambda sc: seen.append(
+        (navigator.HANG_LONGER, navigator.HANG_TAKE, navigator.ROPE_HANG, sc.realism)) or 1 / 0)
+    on = (navigator.HANG_LONGER, navigator.HANG_TAKE, navigator.ROPE_HANG)
+    assert on == (False, False, True)
+    for world in (("hang-2s",), ("hang-rules",), ("no-hang", "zero-walls")):
+        with pytest.raises(ZeroDivisionError):
+            harness.run_one("loop", 1, "game", minutes=0.5, map_id=harness.TREE, world=world)
+        assert (navigator.HANG_LONGER, navigator.HANG_TAKE, navigator.ROPE_HANG) == on  # (put back)
+    assert [s[:3] for s in seen] == [(False, False, True), (True, True, True), (False, False, False)]
+    game = harness.PRESETS["game"][1]
+    assert seen[0][3] == seen[1][3] == game and seen[2][3] == dataclasses.replace(game, zero_walls=True)
 
 
 def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch):
@@ -946,3 +978,37 @@ def test_the_maps_pass_fills_only_points_with_no_monster_within_100_units(model)
     assert not w.monsters[0].alive
     w.advance(8.1)
     assert w.monsters[0].alive
+
+
+def test_rope_tops_counts_her_climbs_and_the_touches_on_a_rope_or_at_its_top_just_after_one():
+    """sim.harness `rope_tops` (World.climb_log, grab_log, touch_place): a touch on a rope is one, standing within
+    ROPE_TOP_DX of a rope she climbed over ROPE_TOP_S or less before is one, one further off or later isn't; a MISS
+    counts, not as hurt; a grab from a rope's top (a climb down) isn't a climb set off on."""
+    from types import SimpleNamespace
+    w = SimpleNamespace(climb_log=[(10.0, -80.0, 10), (50.0, 111.0, 18)],
+                        grab_log=[(8.6, -80.0, 158.0), (48.0, 111.0, 175.0), (55.0, 111.0, 1.0), (65.0, -8.0, 76.0)],
+                        touch_place=[(9.5, "rope", -80.0, -1430.0),      # on the rope (before it climbed over)
+                                     (11.0, "ground", -70.0, -1469.0),   # at the top 1 s on
+                                     (11.5, "ground", -150.0, -1480.0),  # on 10, but off the rope's top
+                                     (13.0, "ground", -80.0, -1469.0),   # 3 s on
+                                     (51.0, "air", 120.0, -900.0),       # knocked off the top of rope 4 (a MISS)
+                                     (70.0, "rope", 111.0, -850.0)],     # past `end`
+                        touch_log=[(9.5, 0.12), (11.0, 0.13), (11.5, 0.1), (13.0, 0.1), (51.0, 0.0), (70.0, 0.1)])
+    assert harness._rope_tops(w, 60.0) == {"climbs": 2, "grabs": 2, "touched": 3, "on_rope": 1, "hurt": 2}
+    assert harness._rope_tops(w, 30.0) == {"climbs": 1, "grabs": 1, "touched": 2, "on_rope": 1, "hurt": 2}
+
+
+def test_rope_tops_counts_her_hangs_under_a_rope_s_top_from_their_events():
+    """sim.harness rope_tops' hangs (control.navigator.ROPE_HANG's 'rope_hang' events): one at each hang's start, the
+    seconds from their ends, how they ended (up regardless after HANG_S, the way up clear, up at a longer wait's end,
+    the touch taken, touched), and those that went longer than HANG_S (their 'longer' event, no seconds of its own)."""
+    events = [{"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "clear", "s": 1.24},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "regardless", "s": 4.02},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "longer", "at": 0.5},
+              {"kind": "rope_hang", "step": "waited", "s": 2.6},
+              {"kind": "rope_hang", "step": "hang"}, {"kind": "rope_hang", "step": "took", "s": 0.0},
+              {"kind": "climb_on"}]
+    assert harness._hangs(events) == {"hangs": 4, "hang_s": 7.9, "hang_regardless": 1, "hang_clear": 1,
+                                      "hang_waited": 1, "hang_took": 1, "hang_touched": 0, "hang_longer": 1}
+    assert harness._hangs([]) == {"hangs": 0, "hang_s": 0.0, "hang_regardless": 0, "hang_clear": 0,
+                                  "hang_waited": 0, "hang_took": 0, "hang_touched": 0, "hang_longer": 0}

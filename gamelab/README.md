@@ -34,7 +34,7 @@ The code is organized like a self-driving car's stack. Each layer is a package, 
 | `control` | Keys out | `Actions` (her key plans: throws, walking, pick-up, potions), `Mover` (one move, closed loop), `Navigator` (a route: chains, glances, cut-offs, replans), `client` (plans to the key player), `player` (the key player itself), `alarm`, `lie_recorder` (the Lie Detector's cycle recorded), `rolling` (the game's last 5 minutes kept: The rolling recording), `recording` (that recording kept by the perception service, from its own frames) | perception, localization, motion |
 | `behavior` | What to do next | `Hunter` (the agent: senses, actions, a looter, her vitals and health), `fight` (`clear`, `kill`, fighting on the way), `Looter` (sweeps, mop-ups, drops remembered), `Tour`, `probe` (the in-game probes of what a star hits, and their scorer), `PetCare` (her pet fed), `retreat` (on the Lie Detector, away to a safe place within 10 s; and at the safety stop), `safety` (her HP staying low ends the hunt: No resting; under her profile's hits of the map's largest touch, in HP: The safety stop in HP), `darts` (her presses taking no MP and killing nothing for long end it: Out of darts; the game's refusals don't count: The top of a rope) | all of the above |
 | `ui` | The mini-map window | `MapView` (draws a state; pure), `State` (the latest record per topic), sources (live, replay, a planned route), `MapWindow` | localization, motion, attack |
-| `sim` | An offline game | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer` (the Lie Detector too: `alarm_at`), 43 scenarios on Tree Dungeon, golden traces | everything but ui |
+| `sim` | An offline game, and the offline checks | `World` (her body, monsters, kills, drops), `FakeEyes`, `FakePlayer` (the Lie Detector too: `alarm_at`), 43 scenarios on Tree Dungeon, golden traces; the harness and its baselines; `replay` (her recordings through any commit's perception, scored against labels: Replaying the recordings) | everything but ui |
 | `analysis` | Combo tests and her movement on recordings; how her routes are used | `track`, `scroll`, `analyze`, `calibration`, `recordings`, `physics_check` (her tracked movement against the physics models), `coverage` (each route move planned, taken and missed, and why the others lose: Route coverage), `respawn` (how soon a platform she empties has a monster again, how long drops lie, how full the platforms are, from the telemetry: Respawns and drop life) | perception, motion, control |
 
 How a look becomes keys:
@@ -267,7 +267,7 @@ It **may be open** when it isn't seen closed after her stats key and two Escs, o
 - *Her max HP*: only if her HUD's number hasn't read, and only where her HUD's as her stats file last kept it is the same, or her HP bar bears it out (under full, its share within 5 points of the window's cur / max).
 - *Her level*: only where nothing has read it.
 - *Her max MP*: her casts are reckoned at it (`Hunter.max_mp`, `Attacks.max_mp`), where her MP bar bears it out or it's within x1.25 of what they were reckoned at. config.toml's `[character] mp` (623) was used until then; live at level 28 it's 679. Said.
-- *SPEED and JUMP*: said where they differ from config.toml's, which plan her moves (physics is loaded once, so they aren't taken).
+- *SPEED*: from 2026-11-02 her walk and climb, by the client's formula (`Hunter._speed_read`, `motion.physics.set_speed`: Her walk and climb from her stat window's SPEED, below): at once at a hunt's start, from the hunt loop's next pass for a read put off into it; kept in her stats file as the SPEED taken (`window.speed`), which her next hunter starts from. Not a SPEED outside the client's 80-140 or more than 10 from both what's planned and her last read kept (`statcheck.speed_doubt`: "her stat window's SPEED 131 not taken (+30 from the 101 planned: more than gear gives between two reads; a misread?): her walk and climb as they were, SPEED 101"), nor, from the final review of 2026-11-02, one other than what's planned that a second frame of the open window doesn't read too (`StatCheck.speed_again`). *JUMP*: said where it differs by a point or more from her profile's, which plans her jumps, with the jump each gives (`statcheck.moves_notes`). Until 2026-11-02 her SPEED was said there too, against her profile's (the thief's 99.2: "her SPEED 101% by her stat window walks her at 151.25 units/s; her moves are planned at 149"), and before that against config.toml's fitted 119.2 at every read.
 - *ATTACK, ACCURACY, EVASION, MAGIC, MAGIC DEF., STR/DEX/INT/LUK*: kept and shown by `gamelab stats`. Nothing is modelled from them yet. Her MISS chance would need the monsters' EVA and the game's hit formula; the reserve takes every touch as landing, whatever her AVOID.
 
 **Checked before it's taken** (after the review of 2026-10-28, which found a misread taken as read and a stale read kept governing):
@@ -503,7 +503,7 @@ With 200 stars (the review's runs, `fix2/darts`: Tree, crowd, choice, measured, 
 
 **To check in game** (supervised, after the user starts the player, and the perception service restarted for her place: its looks place her with `Localizer.where_dot` too): a `tour --loop --grind --map 10002073` as usual; on a touch up rope 4 "hit on the rope N under its top: up again", on 18 a moment later; at a rope's top a hang shows as "on a rope at x 102: getting off" (placed on the rope), "her dot never moved: on the rope ..." (a move from 18 that went nowhere) or "the game refused her presses: ..." (the bar read; "...; her dot where it was then: try 2" and "getting off down it" if the first try up didn't do it), never 20 refused presses and OUT OF DARTS. At the hunt's start the OCR's models load on their own thread (onnxruntime may print its lines then). The message bar's read and its crop at 1920x1080 aren't checked on a frame of that size.
 
-**Not done:** the touch on the rope isn't avoided (44 NO_WAIT and WAIT_LOOKS backstops on "climb -> 18" that night: shooting the mushroom first from 19, or another way up, is safe travel's), nor is a monster on the platform when she gets off at the top: up onto it with no look at what walks there (at 22:58 the mushroom that touched her walked on 18 by rope 4's top; in `loop_tree_rope_top` she's off at 4.17 s and a Green Mushroom on 18 touches her standing still at 5.6 s; on the climb on right after a touch she has the touch's invincibility still, 2.4 s and more later on the other ways she hasn't): waiting on the rope for it to walk off is safe travel's too; a hang 17 or less under a platform with no press, and no move from it or one 12 or less under (`STUCK_GAP`), isn't caught (standing by on it): the sprite tells it (a picture of her back cut from frame 900 matches the rope frames at a median 0.81, 0.59 at least, and the ground frames at 0.20, 0.32 at most: 1 ms a look; her heading pictures score 0.30 there and "tell" the wrong way on 40 of 76 rope frames: `diag/heading_scores.py`, one episode only), not built; the game's line for no stars is still not known; a refusal left up and the same one redrawn are the same px, so a second hang right after one at another rope's top (her dot elsewhere), with no other line between, counts its presses (the place and the move checks are for it); a press refused for its MP ("You don't have enough MP ...") left up starts no stretch again however long she stands there (not to hold off a real stop: out of darts standing still with that line left up).
+**Not done:** the touch on the rope isn't avoided (44 NO_WAIT and WAIT_LOOKS backstops on "climb -> 18" that night: shooting the mushroom first from 19, or another way up, is safe travel's), nor is a monster on the platform when she gets off at the top: up onto it with no look at what walks there (at 22:58 the mushroom that touched her walked on 18 by rope 4's top; in `loop_tree_rope_top` she's off at 4.17 s and a Green Mushroom on 18 touches her standing still at 5.6 s; on the climb on right after a touch she has the touch's invincibility still, 2.4 s and more later on the other ways she hasn't): waiting on the rope for it to walk off is safe travel's too (from 2026-11-02 a climb hangs under the top while the way up isn't clear: Hanging under a rope's top until the way up clears, below); a hang 17 or less under a platform with no press, and no move from it or one 12 or less under (`STUCK_GAP`), isn't caught (standing by on it): the sprite tells it (a picture of her back cut from frame 900 matches the rope frames at a median 0.81, 0.59 at least, and the ground frames at 0.20, 0.32 at most: 1 ms a look; her heading pictures score 0.30 there and "tell" the wrong way on 40 of 76 rope frames: `diag/heading_scores.py`, one episode only), not built; the game's line for no stars is still not known; a refusal left up and the same one redrawn are the same px, so a second hang right after one at another rope's top (her dot elsewhere), with no other line between, counts its presses (the place and the move checks are for it); a press refused for its MP ("You don't have enough MP ...") left up starts no stretch again however long she stands there (not to hold off a real stop: out of darts standing still with that line left up).
 
 ## Clearance and slopes: where a monster will be when her attack starts, and what a jump's attack takes (from 2026-10-27)
 
@@ -623,7 +623,7 @@ So her landings are priced before she lands by what her first attack there surel
 | stays within 45 of her: median, over 3 s | - | 0.84 s, 4 of 103 | 1.33 s, 18 of 74 | 0.50 s, 1 of 663 |
 | EXP a minute | 411 | 323 | 271 | 319 |
 
-The stays are live-like now (hovers of 0.5-1.5 s), and the walks at her within 100 by hurt ones less than live's (35% against 63%: here a hit's flinch stands it, 35% standing, where live its push reads as walking away). What it doesn't reproduce: the walkers within 60 of her by her lock's end (77% and 42% against live's 55% and 30%: in every try, a hurt one's chance 0.6 or 1.0, 0.8 with 0.3 unhurt, hovers of 0.5-1.5 s or 0.3-0.8, stretches of 1-4 s or 0.5-2, they came 67-77% and 42-58%; the world's own walks keep them coming on more than live's filtered tracks show, chase or none: master's world 70% and 55%); touches (11.5 hurting a minute against live's 4.3 HP drops, a median one taking one pixel of her bar), and so the knocks' landings (7.2 a minute within 105 against 0.41). So the up-close verdicts are judged in both worlds below.
+The stays are live-like now (hovers of 0.5-1.5 s), and the walks at her within 100 by hurt ones less than live's (35% against 63%: here a hit's flinch stands it, 35% standing, where live its push reads as walking away). What it doesn't reproduce: the walkers within 60 of her by her lock's end (77% and 42% against live's 55% and 30%: in every try, a hurt one's chance 0.6 or 1.0, 0.8 with 0.3 unhurt, hovers of 0.5-1.5 s or 0.3-0.8, stretches of 1-4 s or 0.5-2, they came 67-77% and 42-58%; the world's own walks keep them coming on more than live's filtered tracks show, chase or none: master's world 70% and 55%); touches (11.5 hurting a minute against live's 4.3 HP drops, a median one taking one pixel of her bar), and so the knocks' landings (7.2 a minute within 105 against 0.41: from 2026-11-02 mostly how live's were counted, and the touches nearer live's; the knock itself was short of live's, 58 units on flat ground against the client's 87, and is the client's from the review of 2026-11-02: The simulator's touches against live). So the up-close verdicts are judged in both worlds below.
 
 **Replayed on the live decisions** (read only: `D:/MapleHelper-scratch/land/fix/live`, landreplay2.py, closereplay.py, closecompare.py, gapcmp.py, on the fixed branch). Landings (by what the navigator knew at take-off, judged by where the monsters really were; an upper bound: the knowledge is the look's and the navigator's tracks, the take-offs a physics sweep): of the 518 live trip landings from another platform within 105 of a monster, 435 not sure; the branch's own candidates (its route's moves' take-offs within 40, a jump up from anywhere under, a drop from anywhere over, a walk-off at its edge) land the same at 240 of those (55%: the navigator knew of a monster on the landing platform at 215, its price said so at 195), elsewhere at 102 (23%: a median 46 units over; clear by what it knew at 62, sure by where the monsters really were at 28), none cheaper at 56, no other way at 26; at the trip's last landing onto its own platform (206 of the 435) it walks to shoot first at 9 (a median 113 units) and shoots from the take-off at 2. As the reviews had it, the first replay's 89 landings elsewhere (21 sure) and 31 shot first counted landings the code didn't price and take-offs it didn't try. Up close (the hunt loop's stance with `move_limits` on every decision of the 684 close episodes with a monster of her platform in the look): of the 553 decisions (323 first in their episode), 40 change: 33 more steps away (master: a jump in place tapping first 19, a jump back 6, a jump in place 5, a throw from the ground 3), 61 steps where master made 33. When the throw after one of the new steps would start, the nearest monster on her platform by the service's tracks was 54 or more off at 18 of 32 (105 or more at 5), on her at 13; the nearest a median 37 off at master's own act's attack and 65 at the branch's throw after the step, that throw a median 0.47 s later, farther at 22, nearer at 6; after master's own steps 54 or more off at 14 of 30, on her at 14. The kill table puts moving one from 20-40 to 40-60 at about a step's 0.5 s for 10 points of kill chance (`diag-move-away/killtable.out`: a jump in place killed 28% at 20-40, 37% at 40-60): about even.
 
@@ -707,7 +707,7 @@ Tests (`tests/test_landing.py`; six of them fail on the fix as first built, 0e02
 
 **To check in game** (supervised: attack live tests wait for the user's go). `tour --loop --map 10002073` (grinding, the default) after the user starts the player; no perception or player restart (nothing in the service or the player changed: a new tour runs the code). In her log: no "by her landing on P: shooting it first" without a throw after it, or else "none thrown at the ... by her landing" after its fight; "no shot first, no throw from the ground takes it from anywhere on platform 21 (it's N under her), nor one from a jump where she stands" before a drop 21 -> 23 or 22 -> 23 onto a monster, then "waiting for the ... to move off" or "landing on 23 by the ... anyway (price 1.2 s): ..."; before a jump straight up 25 -> 24 with a Green by its landing, the shot first from where she stands as a jump throw ("jump-throwing ... above"); rarely "shooting it first from x N" and "walking left N to shoot it first" with a throw after it; "no shot first, it's dying" after a kill by the landing. `_meet`'s own "could touch her on the way: shooting it first" may still throw nothing (00:44:09). On the run's telemetry: the 'landing' events with their `shot`, `why`, `throws` ('none thrown' rare); the landing figures by all the service's tracks against this run's (by live tracks they can't be compared with the baseline's, above), with another player there or not said; touches and EXP a minute at her level.
 
-**Not done.** Re-pricing the running chain's landings from the feed's tracks while she's on her way (`_coming` judges touches alone); a landing priced where she lands, then walked from to where she's sent (`mover.walk_to`) unless the hunt stops her there: on 24 the hunt loop's spot for 23 (x 231) is 41 from 24's Green's point; hunt spots, grind stops and waits farther off spawn points (`STOP_SLACK` cost grinding EXP) and on level ground or uphill of where monsters come from; walking through a walker inside her invulnerability after a touch (141 of the 224 live walkers had the room on the far side); pressing the arrow inside her lock earlier than 0.8 s; the simulator's touches and knocks (2.7 and 17 times live's) and walkers coming on more than live's tracks show; a landing judged by the sightings' age live (the remembered and hidden tracks' ages there are the navigator's, not checked against the recordings); the first map's and West Rocky Mountain II's goldens (not checked). From the live run of 2026-10-28, questions for the user or for another look, not changed: whether the landing price should search take-offs from their own spots (`flow.SPREAD_FROM_SPOT`, off: in the harness it leaned the wrong way, grinding 1.2% less EXP, se 0.9%, its trips 2.9% longer, t 2.1); whether `_meet`'s shot first takes a jump throw too (`fight.MEET_JUMP_SHOTS`, off: the harness above for it, the out-of-darts retreat against it); the landing's price counting a monster dying there (`nav_tree_landing_shot_first`: the chain's judge has no ledger; the shot first now doesn't fire at it, but she may wait or go priced); a shot first's walk allowing for the monster's own walk meanwhile (2 of 24 simulated walks out of reach with the Green walking); a scenario where the landing's own shot first throws (none found on 24 -> 23: `_meet` shoots first there); `_meet`'s "could touch her on the way: shooting it first" with nothing thrown (00:44:09: a log line only, its fights counted as before); her steps away from what only her memory has (28% of her steps came with nothing within 105 in her look, the nearest a hidden track or none, against 11%: at 01:09:17 the throw after the step listed a Green hidden 4 off her, the service's nearest track 126 off); moves reversed within 3 s (7 of 82 against 2 of 169: 00:42:48-51 on 24, 00:48:47-51 on 22); steps ending nearer (31%: walkers following her, or into another on the side she went: 00:36:40 on 23, a hidden Horny Mushroom 74 off); the landing price trusting a walk at full speed to the unit (00:38:37: 0.3 past the keep-off, the walker stopped); the stance's approach and step goals judged at her height where she stands (on slopes, re-decided every look); the drop 18 -> 19 by the rope's top (above: the planner's drop spot not held to `ROPE_CLEAR`, a route question); her throws at her own dead (the kill-place binding decided on before it comes); the simulator's HP (`LEVEL_25`, an Orange Potion a touch, where live she's level 28 and her pet's potions give 100).
+**Not done.** Re-pricing the running chain's landings from the feed's tracks while she's on her way (`_coming` judges touches alone); a landing priced where she lands, then walked from to where she's sent (`mover.walk_to`) unless the hunt stops her there: on 24 the hunt loop's spot for 23 (x 231) is 41 from 24's Green's point; hunt spots, grind stops and waits farther off spawn points (`STOP_SLACK` cost grinding EXP) and on level ground or uphill of where monsters come from; walking through a walker inside her invulnerability after a touch (141 of the 224 live walkers had the room on the far side); pressing the arrow inside her lock earlier than 0.8 s; the simulator's touches (from 2026-11-02 1.95 times live's, 3.3 times those that hurt, the touches again within 2 s undiagnosed; its knock the client's from the review, its knocks off a platform per hurting touch then 0.27 against live's 0.26: The simulator's touches against live) and walkers coming on more than live's tracks show; a landing judged by the sightings' age live (the remembered and hidden tracks' ages there are the navigator's, not checked against the recordings); the first map's and West Rocky Mountain II's goldens (not checked). From the live run of 2026-10-28, questions for the user or for another look, not changed: whether the landing price should search take-offs from their own spots (`flow.SPREAD_FROM_SPOT`, off: in the harness it leaned the wrong way, grinding 1.2% less EXP, se 0.9%, its trips 2.9% longer, t 2.1); whether `_meet`'s shot first takes a jump throw too (`fight.MEET_JUMP_SHOTS`, off: the harness above for it, the out-of-darts retreat against it); the landing's price counting a monster dying there (`nav_tree_landing_shot_first`: the chain's judge has no ledger; the shot first now doesn't fire at it, but she may wait or go priced); a shot first's walk allowing for the monster's own walk meanwhile (2 of 24 simulated walks out of reach with the Green walking); a scenario where the landing's own shot first throws (none found on 24 -> 23: `_meet` shoots first there); `_meet`'s "could touch her on the way: shooting it first" with nothing thrown (00:44:09: a log line only, its fights counted as before); her steps away from what only her memory has (28% of her steps came with nothing within 105 in her look, the nearest a hidden track or none, against 11%: at 01:09:17 the throw after the step listed a Green hidden 4 off her, the service's nearest track 126 off); moves reversed within 3 s (7 of 82 against 2 of 169: 00:42:48-51 on 24, 00:48:47-51 on 22); steps ending nearer (31%: walkers following her, or into another on the side she went: 00:36:40 on 23, a hidden Horny Mushroom 74 off); the landing price trusting a walk at full speed to the unit (00:38:37: 0.3 past the keep-off, the walker stopped); the stance's approach and step goals judged at her height where she stands (on slopes, re-decided every look); the drop 18 -> 19 by the rope's top (above: the planner's drop spot not held to `ROPE_CLEAR`, a route question); her throws at her own dead (the kill-place binding decided on before it comes); the simulator's HP (`LEVEL_25`, an Orange Potion a touch, where live she's level 28 and her pet's potions give 100).
 
 ## Touches: her popups, MISS or damage, and her invulnerability after one (from 2026-10-28)
 
@@ -770,6 +770,98 @@ No death, fall out of the map or stop on any side (240 runs, the two parts' belo
 - *Goldens* (the 34 of Tree Dungeon recorded again on master b310dd3 with the branch, master's four key-check scenarios among them: gsum.py, gsum_master.txt; master's in golden_master/, the build's as rebased, 051fe9a, in golden_build/). Against master's: 11 keep master's plans to the byte, the frame step's touch counters new in their feed (the 7 nav_tree trips without monsters, nav_tree_rope_top_15, the two landings'; nav_tree_rope_hit with its "touched" lines too); the other 23 part at a touch as the build's did (the world's 1.45 s and MISS shares, then the stack's MISS cuts, the knocks her pet's potion hid, a chain planned while she's invulnerable), the three key-check ones at their new seeds. Against the build as rebased, of the 31 not reseeded: 21 the same to the byte, and the other 10 the build's plans to the byte, 5 with the frame step's new count of crowded touches in their feed (loop_tree_crowd 2, loop_tree_grind 4, loop_tree_23 1, loop_tree_23_near_misses 1, loop_tree_lie_detector_23 2: none changed a plan) and 8 with a chain's "(invulnerable for ...)" 0.03-0.04 s shorter, the window as it is when the chain goes (the simulator's clock moves on while the pass plans). None of the 34 fails what it's there for; checked again on the code as committed (`golden check --jobs 4`), 34 of 34 match. The first map's and West Rocky Mountain II's goldens weren't checked (the world's 1.45 s and the touch reactions change them too).
 
 **Merge notes.** The branch is rebased onto master b310dd3: it merges as a fast-forward. The perception service runs the frame step: restart it (`perceive`) for the touch events, the states' `touch` and its log lines (and master's HP number and level, which need the same restart). Until it's restarted the commands get no touches from it and fall back on her HP as before (the hunter's `_untold`: a new HP drop no touch came with is one, by her bar alone; the navigator's `HIT`), MISSes unseen. The hunting commands need no more than a new start. Nothing changes in the player or the pet. The game data copy must hold Effect/Effect_000.wz (it does: gamedata/data/copy); without it the watch reads by width. `TOUCH_CUTS` is on and unproven (above: the user's call to keep it). The live check: `perceive`'s log saying "touched: MISS" as her popups show, the tour's log "touched: MISS, HP ..." with "plan cut short" after it on a trip, "(invulnerable for ...)" on the chain after, the telemetry's 'touch' events against her popups on the rolling recording; and rarer, "touched: damage after all" (a MISS by width that took HP), "another player on her: maybe theirs", "her invulnerability spent planning".
+
+## The simulator's touches against live (from 2026-11-02)
+
+The recordings' roadmap of 2026-11-02 (item 7; D:/MapleHelper-scratch/rec-analysis/plans/ROADMAP.md, plan-simulator.md S2 and S6a, critique-simulator.md) asked for the simulator's touches to be believable before any touch fix is measured on the thief: a newborn could touch her from its birth where live none did before it had faded in, and the thief's world gave 2.7 times live's touches and 17 times its knocks (the landings' work of 2026-10-27, above: 11.5 hurting touches a minute against BugBaby's 4.3 HP drops, knocks' landings within 105 of a monster 7.2 against 0.41). Two of the world's rules changed, every world's (the user's decision 2: "newborns untouchable while fading in, every simulator world's default"), and after the review a third, her knock; the rest is looked into here and left, the touches again within 2 s undiagnosed.
+
+**What changed** (`sim.world`: `NEWBORN_SOLID_S`, `HER_TOUCH`, `Realism.newborns_touch`, `Realism.her_box`, `World._touch`; `KNOCK_VX`, `KNOCK_VY`, `KNOCK_ADDS`, `KNOCK_LANDS_WALKING`, `Realism.knock`, `World._hit_by`, `_land`; the harness's `--world newborns-touch`, `--world wide-body` and `--world planner-knock` put each back).
+- *A newborn touches nothing while it fades in* (`NEWBORN_SOLID_S`, the fade's 0.817 s, `SPAWN_FADE_S`). Live, RiceBaby's hour (00:17:48-00:53:06, her 170 touches against the 7.115-s grid of the respawn passes: D:/MapleHelper-scratch/rec-analysis/plans/work/simulator/touch_phase.py, touch_phase.txt): of the 72 touches with her within 45 of a spawn point of her platform none came 0-0.75 s after a pass, the earliest 0.82 s (five at 0.82-0.84), where 5-6 were to be expected at the rate away from the passes (Poisson's P(0) about 0.003); the one 0.24 s after a newborn's start had her on a rope's top 175 under it. A newborn still walks while it fades and can be hit, as before. The plan's second half (a newborn under her box found only once solid) is left out: `SPAWN_FOUND` was fitted on all 323 births, the starts hidden under her among them, so the rule would count them twice (the critique's).
+- *Her body for touches is the client's touch test*: a line 50 tall over her feet, with no width of its own (`HER_TOUCH`; RustMS's copy of HeavenClient, aligned with the v83 client: `MapMobs::find_colliding`, her from where she was a frame before to where she is, against `Mob::is_in_range`, the bounds of the frame the monster shows, as `SimMonster.body` has them; D:/MapleHelper-scratch/spawn-fade/mech/rustms), where the world had 15 either side and 55 tall. The -22..22 x 65 box (`MobAttackRules.h` `user_body`, the client's FUN_0045183b) is where a monster's own attacks land; the planner keeps her clear by it (`motion.bodies`, `--world client-body`), the safe side.
+- *Her knock is the client's* (from the review of 2026-11-02: `KNOCK_VX`, `KNOCK_VY` 270 out and up, `KNOCK_ADDS`, `KNOCK_LANDS_WALKING`), apart from the planner's 180 and 220 (`motion.physics.KNOCK_VX`, `KNOCK_VY`: the navigator's `KNOCK_AIR_S`, unchanged), which the world had used: RustMS's port of the v83 client pushes her "away from the mob and up at 270 px/s", rising about 18 and landing about 73 away from standing, its push added to the speed she has without going past it. R1-R3's lossless 15 fps frames agree (the replay kit's dumps of master 40ba190's perception on them; D:/MapleHelper-scratch/recfix/sim-fix: knock_fit.py, knock_moving.py, their .txt): from standing 18 units a frame in the air (270 a second; 26 knocks at 196-274, 24 at 249-274), of the 9 that landed where she stood 7 fitted at 262-270 out (the others 200 and 250) and all 9 at 274-280 up, landing a median 73.4 away, then sliding 11-19.5 (a median 15.1, 5 of 7; one slid 6, one walked back) at 8, 4 and 2 units a frame, as her walk's 148 braked at 800 has it (14), where 270 braked by the engine slides 30: so she lands at her walk's speed at most; 84-93 units in all, where the world's knock was 40 in the air and ~19 sliding, ~58, 0.22 s in the air (fitted to hits.jsonl's pushes on the looks, quartiles 21 / 58 / 87). Walking at the monster (122-157 a second over the 2 frames before), 12 knocks flew her off at 24-188, a median 93: the push added to her walk gives 120 (the rest may be the opposite arrow held through the flight, braking at 200 units/s²; her keys aren't in the dumps, so `KNOCK_STEERS` stays off).
+
+**Measured against BugBaby's own grinds** (the thief, level 28-30, Tree Dungeon, 2026-10-28 20:51 to 10-30 17:37: 10 runs, 189.0 minutes, his touches from his popups, MISS or damage, and the HP drops none told; read only, D:/MapleHelper-scratch/recfix/sim: live_runs.py, live_touch.py, live_toucher.py, live_boxtest.py, their .txt). The world: the standard thief grind (`ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers --minutes 5`, 48 seeds: it went on past 12 for EXP, within 2 se), master 40ba190's side cached; the gaps and the re-touches from the world's own touches (simdiag.py, diag_table.py, 12 seeds):
+
+| a minute (her time hunting) | live, 189 min | master 40ba190's world | this world | this / master |
+|---|---|---|---|---|
+| touches, a MISS too | 7.26 | 16.39 | 14.18 | -13.5% (t -4.95) |
+| touches that hurt | 2.85 | 10.77 | 9.28 | -13.8% (t -3.88) |
+| her MISS share | 60.7% | 34.3% | 34.5% | |
+| touched again within 2 s (`retouch_2s`) | 2.33 | 10.54 | 8.32 | -21.1% (t -5.24) |
+| first touches (none in the 2 s before) | 4.93 | 5.85 | 5.87 | |
+| gaps between touches ending as her invulnerability ends (1.44-1.6 s), of all | 22% | 50% | 44% | (12 seeds) |
+| touched again within 2 s after a MISS; after damage | 34%; 30% | 70%; 60% | 63%; 56% | (12 seeds) |
+| knocks off her platform onto one 30+ lower (`knock_falls`) | 0.74 | 2.08 | 1.70 | -18.0% (t -3.41) |
+| ... a touch that hurt | 0.26 | 0.19 | 0.18 | |
+| hurt on her trips; on her drops; off her trips | 0.79; 1.10; 2.06 | 2.39; 2.36; 8.38 | 1.88; 2.03; 7.40 | |
+| hurt by a monster within 1.5 s of its birth (`fresh_hurt`) | | 0.67 | 0.42 | -37.5% (t -4.13) |
+| kills | 10.0 | 9.01 | 8.93 | -0.9% (t -0.47) |
+| EXP | 361 | 317.6 | 316.4 | -0.4% (se 2.1%) |
+
+Of the -2.05 touches a minute on the same 12 seeds (this branch's code with the switches: master's world put back with both gives master's 16.05 to the digit), the newborns' rule alone takes 0.80 (`--world wide-body`: 15.25), the line alone 2.33 (`--world newborns-touch`: 13.72). Her HP lost: 1.46 -> 1.28 bars a minute (-12%, t -2.9), her potions as much.
+
+**Where the excess is.**
+- *Not the first touches*: those with none in the 2 s before come 5.85 a minute in master's world against live's 4.93 (+19%). Her exposure (the density, her time by monsters, the newborns) is near live's.
+- *Touches again as her invulnerability ends*: 10.5 a minute against 2.3, half the world's gaps ending within 0.15 s of it (live 22%). After a MISS she stays where she was, live (her x moved a median 2 units by 1.0 s) and in the world (0): there 70% were touched again within 2 s, live 34%. A monster as near her then touches her less live: with the nearest seen one of her platform 0-25, 25-35, 35-45 and 45-60 off her (middle to middle) 1.40 s after a touch, the next came by 1.75 s 81%, 33%, 46% and 15% of the time live (the service's live tracks, n 78, 27, 24, 34), 100%, 100%, 89% and 59% in master's world (world truth; sim_boxtest.py), 98%, 75%, 56% and 53% in this one; 60-90 off 7% live, 5% here. So her touch zone was wider than the game's (the line takes the 25-45 band down most), and what's left is mostly one 45-60 off walking in.
+- *Her chasers.* The world's monsters chase her once she hits them (`Realism.chase`, the user's rule of 2026-10-31: 3-4 minutes, at her, re-aimed at each hit, never standing). Without the chase master's world touches 11.83 a minute (re-touches 5.52), with the line too 9.45 (3.57), nearest live's 7.26 (2.33); within 100 of her the hurt ones walk at her 56% of the time there, 63% live (the tracks of 2026-10-27: the landings' work above). That doesn't clear the chase: the review (D:/MapleHelper-scratch/recfix/review-sim: live_walks.py, live_after.py, live_heading.py, their .txt) read the hurt monsters within 100 of her by the tracker's heading, at her / away / standing, 60% / 31% / 9% live for BugBaby (10-30, n 532) and 57% / 18% / 24% for RiceBaby (11-02, n 103), 53% / 44% / 3% in the world (n 7657), the unhurt ones alike (standing 24% and 32% live, 29% here); 1.4-1.5 s after a damage touch the toucher has passed her 18% of the time in the world, 27% (thief) and 47% (RiceBaby) live; and with no chase at all, the line too, the world still touches 9.45 a minute, 1.3 times live's. What checks out: the monsters' speed (100, live 98-99), her invulnerability (1.45 s: live's shortest gaps 1.10 s for the thief, 9 of 1362 under 1.45, and 1.451 for her, none of 169), the chase's 100-unit pass and its 0.72-1.17 s decisions, never standing (the annotated `Mob::think`), no pause on a touch, and where the toucher is 0.5-1.5 s after a MISS (live 24/70/6, 31/54/15, 33/43/24 through her / on her / back on its side, the world 21/66/13, 25/54/22, 23/47/30). So what's left of the re-touches is undiagnosed, not put down to the chase. Re-aimed only by its own decisions, not by her hits (her up-close claw swipes, 15-24 damage, never push a mushroom: it stays on her), 15.03 (-6%); passing her by 250 before it turns, not 100, 15.20.
+- *The knocks.* The 17 times was mostly how live's knocks were counted: the landings' extraction saw a landing only where the service's scenes, 0.12 s apart, had her off the ground for a knock's 0.22-s hop (1.1 knocks' landings a minute for 4.3 HP drops, 26%), where the world logs every one that moves her (9.9 for 11.5, 86%). Counted alike, knocks off her platform onto one 30 or more lower within 1.5 s (live from the tour's scenes, live_touch.py), they're 0.26 a hurting touch live and 0.19 in the world. That match was of how knocks were counted, not of the knock: the world's was about 1.4 times short of live's (58 units on flat ground; her x 0.5 s after a damage touch a median 54 in the world, 74 live by the tour's scenes, n 36; on the review's scenes a median 74-81 at her landing, against 60 at most), and is the client's since (What changed). With it (48 seeds of the standard grind, paired against the planner's knock, `--world planner-knock`, at this branch's ca68532; D:/MapleHelper-scratch/recfix/sim-fix/pair_thief48.txt), knocks off her platform 1.70 -> 2.45 a minute (+44%, t 6.49), 0.18 -> 0.27 a hurting touch against live's 0.26; touches 14.18 -> 13.97 (-1.5%, t -0.43), touched again within 2 s 8.32 -> 7.67 (-7.8%, t -1.34), EXP 316.4 -> 314.1 (-0.7%, t -0.26). The knock isn't where the re-touches come from (the review's ablation, 230 out and 260 up, 12 seeds: re-touches -1.2%, t -0.18).
+- *Her MISSes.* The world's thief is level 25 (`LEVEL_25`, avoid 58 as fitted at 25: a Green's touches MISS 52%, a Horny's 26%), the grinds above were at 28-30 (avoid 70.6 as fitted at 28: 71% and 44%). At live's MISS share this world's touches would hurt 5.6 times a minute against live's 2.85: twice, as all touches are.
+- *Her eyes up close* (`--world near-misses`, 2026-10-25's detector: never within 25 of her): with perfect eyes master's world touches 14.50 a minute (-10%): she walks into fewer she can't see. Not refitted on the frame step's whole screen at 15 fps (2026-11-01).
+
+**Not done.** The re-touches left (8.3 a minute against 2.3; of what's near her as her invulnerability ends, a monster 45-60 off touches by 0.35 s 15% of the time live, 53% here), undiagnosed: the next look is R1-R3's 15 fps frames, for each of the hour's touches the toucher's stance over the 2 s after it (flinching from her cast, standing, walking past) and her x, before any rule change goes to the user (the chase is theirs, aligned with the v83 client; the 2 Hz tracks extrapolated by the tracker's speed are too coarse for the 45-60 band, n 34). The thief's profile at his level (`LEVEL_25` -> 28: HP 840 and level by his HUD, DEF 97 fitted to his touches, avoid 70.6 fitted to his MISSes, README Touches; his stars at 28, which `attack.choice` has at 25's too): it moves every Tree golden and the baseline. `NEAR_SEEN` refitted on the frame step's looks. The hop over a monster the stack times with 15 either side of her (`flow.HOP_HALF`): with the line the world lets more through; the planner's box stays 22.
+
+**Checks.** Tests: test_sim (a newborn touches at 0.817 s, not before, and from its birth with `newborns_touch`; the line against the old width), test_harness (`wide-body`; the knock off a platform with her inside the snail's box), test_touches (the same); test_heading's knocks, test_ropes' rope wait and test_replan's late replan keep the 15 x 55 they were seeded in (what they test isn't the touch). Goldens: 33 of Tree Dungeon's 43 change, recorded again (gamelab/lab, git-ignored; at the merge recorded again on the merged code, never a worktree's folder copied: work/rec-rope recorded 20 of the same again with the old body), each first going otherwise where master's world had a touch this one doesn't (D:/MapleHelper-scratch/recfix/sim/golden_why.txt, golden_lines.txt: 3 by a newborn fading in, 29 by the line, one re-seeded); `loop_tree_attack_no_darts` re-seeded 12 -> 3 (on 12 her stars' test never said MAYBE OUT; of 1-24, 3, 5, 7, 13 and 14 meet it) and `loop_tree_23_near_misses` 10 -> 11 (on 10, 7 kills; of 1-16, 1, 11 and 16 have twenty or more, a median 14). Fast suite 2920 passed, 1 failed (`test_choice`'s kill reckoning, failing on master 40ba190 too). The knock (the review's, commits 452f372 and ca68532): test_sim (its flight, height, landing and rest, the client's and the planner's; its push added to her speed walking at the monster); test_heading's knock tests and test_framecheck's pause hunts keep the planner's knock they were measured with (what they test isn't the knock); six scenarios lost what they're there for and are re-seeded, each docstring saying why (`nav_tree_evade` 2 -> 3, `loop_tree_out_of_darts` 1 -> 2, `loop_tree_attack_no_darts` 3 -> 6, `loop_tree_23_near_misses` 11 -> 1, `loop_tree_wait` 1 -> 7, `loop_tree_ore_waits` 26 -> 7; every scenario shows its purpose, `--slow` 41 passed and the 2 xfailed as before). Goldens: 30 of the 43 change again, the 13 others have no knock that hurts her; each of the 30 run with the planner's knock (and its old seed) gives the trace before it back exactly, so each first goes otherwise at its first knock (D:/MapleHelper-scratch/recfix/sim-fix/golden_why.py, golden_why.txt, golden_lines.txt); 43 of 43 at ca68532.
+
+## The simulator's magician (from 2026-11-02)
+
+The recordings' roadmap of 2026-11-02 (item 8, P41; D:/MapleHelper-scratch/rec-analysis/plans/ROADMAP.md, plan-simulator.md S5 with S1 = plan-motion.md M3, critique-simulator.md): every harness number was the thief's, so none of her fixes could be measured offline. The user, that morning, took the roadmap's decision 4 for the simulator: today's measurements are its truth for her; her live profile's placeholders (her pet's 55%, MP 1007, AVOID 18, SPEED 100) stay as they are, so the harness shows where her stack's belief is off. Built in steps, the thief's world unchanged at each (Tree Dungeon's 43 goldens the same to the byte).
+
+**Her walk, the world's own** (`world.Her.walk_speed`, `her_shoe`, `World.shoe`, `World.rope_jump`). The world walked everyone with the planner's own shoe (`physics.SHOE`), so a wrong speed in her profile couldn't show. Now the world walks her at her own speed, the game data's shoe at the SPEED that walks her so, accelerating, braking, sliding and flying as anyone's, her JUMP the planner's: the client's 150 units/s (`world.MAGE_WALK`: 125 x (SPEED + 20)/100 at her stat window's 100, Her walk speed; her steady limit with the walks' braking tails and Tree's slopes taken out is 149.4-149.7, and the world brakes her by itself). It was built at 148.2, the hour's raw median of 81 steady walks (P01: tails and slopes in it), while her planner planned v83's 125; from the integration of 2026-11-02 (work/rec-all, with item 1) her planner plans the same 150, and the world's walk stays its own (`Her.walk_speed`), so an error in her profile would show. By default (the thief) his truth by his profile's SPEED (`physics.PROFILE_SHOE`: 151.25 at his stat window's 101), to the bit, whatever his planner is set to (until 2026-11-02 the planner's own shoe). `--world walk-planned` puts her world's walk and climb at her profile's, her planner's in the simulator (whose stat window shows her profile's SPEED), to price such an error (for her the same walk and climb). `--world planner-v83` holds her planner at 125 and 117 instead (master's walk and down-climb; master climbed her up at 130) (`world.Her.planned`, `physics.set_planned`, after her hunter's start), her world its own: what item 1 is worth to her (The whole measured: +8.7% EXP, t +2.34, on 48 seeds). Her climb is the world's own too from 2026-11-02 (`world.Her.climb_speed`, `her_climb`, `World.climb`: `world.MAGE_CLIMB`, 120, hers; the thief's 121), up and down, where the world climbed everyone up at the planner's `flow.ROPE_SPEED` (130) and down at `physics.CLIMB_SPEED` (117): Her walk and climb from her stat window's SPEED.
+
+**Magic Claw as the game casts it** (`world.SimMagic`, `Her.magic`; `World._press_magic`, `magic_pick`, `magic_band`, `_aim_magic`, `_attack_magic`; the constants' comment above `CLAW_HIT` says where each comes from):
+- *Its pick*: the client's search for an aimed spell by its own numbers (`classes.magician.SEARCH`: 50..300 ahead in 13 bands 20 wide, band k's window 28 -/+ (50 + 20 k) // 4 over her feet, the first band any body overlaps, one in it drawn), never attack.reach's constants, which `attack.magic` sets to her stack's belief. Nothing stops it (no line: a Green Mushroom 58 under her on platform 10, which 9's floor stops a star at, dies), from the ground only (a press in the air does nothing at all: no MP, no lock), never behind her nor within its first 50, no swipe up close. Her wand's swing does nothing (her stack never keys it).
+- *Its damage*: two hits a cast on the one monster, each a whole number from 157 to 181 before the monster's MDDamage (fitted by most likelihood to the hour's 261 first bars of a Horny Mushroom under full within 1.5 s of her cast at one: p10 322, median 334, p90 359 a cast; D:/MapleHelper-scratch/recfix/sim-mage/scripts/claw_fit.py, claw_fit.txt; her own damage book's fit at 00:51, 157-183). So a Horny (403 HP, MDDamage 0) always takes 2 casts and a Green (233, MDDamage 30) 1, as R1-R3's kills. Against MDDamage as the stack's prior has it (x 100 / (MDD + 100)): not measured, and one cast kills a Green under any form.
+- *Its timing*: the next cast taken from 0.80 s after the key (`CLAW_LOCK_S`, the port's 800 ms; the hour's 783 casts came back to back at 0.846-0.854 s or 0.92-0.96, one frame apart, none under 0.80: a bound); her hit shows on the monster 0.53 s after the key wherever it is (`CLAW_SHOWS_S`: R2's frames, a kill's monster seen alive 8 frames after the key at the median, then dying; rec-analysis/r23-verify-monsters/out/castgap2.txt), its flinch, push, numbers and a kill drawn alive till then (`Realism.dies_late`); the monster lost to the looks 0.4-1.0 s under her hit (`CLAW_HIDDEN`, where the presets' star hides one 1-3 s).
+- *Her MP*: 20 a cast (`Her.cast_mp`), and under it the game's refusal on the message bar ("You don't have enough MP to use this skill.": `MP_REFUSAL`; no cast, no lock). Her pet's MP potion 187 MP (her HUD's number on R2's frames: 60 -> 247, 71 -> 258, 83 -> 270; mp_drinks2.png) under 6% (`MAGE_PET_MP`); her MP's own rise 2.4 a second (`MAGE_MP_REGEN`: the hour's balance with that drink, 15,660 MP of casts less the bar's net fall of 655 and a level's refill of 968 less 48 drinks; her HUD's regen ticks are 18 MP every 10.0 s, 1.8 a second, the rest +9-MP steps seen twice on R2's numbers and not explained; scripts/mp_regen.py, mp_ticks.py, mp_drinks.py).
+
+**Her as the recordings measured her** (`world.MAGE_32`): level 32, HP 858, MP 1549, W.DEF 75, AVOID 16 (her stat window, read 40 times that night: every touch hurts, as the hour's 170, 0 MISS; a Horny's 110-130, a Green's 48-58, as live), her walk the client's 150 (above; built at the raw 148.2), her pet drinking Meat under 75% (`MAGE_PET_HP`: the hour's 55 drops drunk at, all at 0.748 or under, none at 0.752 or over: critique-simulator-work/pet_threshold.py). **Meat is 160 HP**, not the 150 remembered: on R2's frames her HUD's number went 606 -> 766, 601 -> 761, 639 -> 799 and 562 -> 722, each the frame after a touch (D:/MapleHelper-scratch/recfix/sim-mage/hp_seq.png, hp_seq2.png), the hour's 92 rises were all 160, and the game data's spec says 160 (`MEAT_HP`). Her one pet, a Snail, takes nothing (whether it picks up isn't known: `Realism.pets` 0). Not kept: her HP's own regeneration (as the thief's; live it covered about a tenth of her touches' HP), her magic's misses (her book judged 4 casts, 2 of them misses: too few; none).
+
+**The harness plays her** (`python -m gamelab.sim.harness run|cached|spot ... --character magician`; `harness._who`, `scenarios.HERS`, `scenarios.HER_BOOK`). The run restarts itself with `GAMELAB_CHARACTER=magician` (or takes it from the environment, as `ab` hands its filler the key's), so her stack is as live: her profile's stats and keys (`timeline.SIM_KEYS_MAGE`: Magic Claw on Shift), `attack.magic`'s search for every decision (`magic.apply` at the run's start, as `tour` does), her Shape to the feed as the perception service's (`Senses(shape=)`), her attack her profile's whatever `--attack` says (`ATTACK_HER` is the thief's). Her damage book (`behavior.damage`) starts as hers was when the hour began (`gamelab/sim/her_damage_book.json`: her live file's reads up to 00:17:48 and the fit it went by, 125-150 a hit from her level-29/30 reads, her 31/32 reads too few for another until about 00:40: R1 and R2 ran so), its fits at once, not on a thread, and never saved past the run. On Tree Dungeon alone. Her results say `character` and carry her own counts (`casts_per_min`, `potions_per_min`, `air_presses`, `attack_locked`, `swings`); her baselines go under their own key (the GAMELAB_* environment as resolved, sim.baseline). `--world shared-exp` (`Realism.shared_exp`: another's kill of a monster she hurt gives her its EXP times the share of its HP she took, as live: P43) is new, for her standard world. The goldens stay the thief's alone (`golden` refuses another character): her scenarios aren't recorded yet. `ab --character magician` needs a base whose code has her world (master's from this branch's merge on: before it, the base's harness doesn't know `--character` and its filler fails); until then her changes are compared by `run --cache` on both commits (`cached --sha`, `compare`). `compare` refuses runs of two characters, as it does runs on two maps, and `spot` takes `--character` (both from the review of 2026-11-02).
+
+**Her standard world** (the critique's S7, as near live as is built): `run loop-grind --character magician --map 10002073 --preset crowd --costs measured --world zero-walls --world near-misses --world walkers --world spawn-fade --world map-drops --world meat --world shared-exp --minutes 5` (no `--attack`: live's `tour --loop` had none). Left out: a rival in the upper tower (S3, not built: live, others killed 6.7 a minute on 6-16, 14 in R3's crowd), her pet's pick-ups.
+
+**Against R1-R3 and the hour** (the stack as recorded: master 40ba190's, nothing of it changed here; 12 seeds of 5 minutes, commit e0beb22, cached; D:/MapleHelper-scratch/recfix/sim-mage/scripts/scorecard.py, scorecard_std.txt). Measured before the integration of 2026-11-02: her world walking 148.2 and her planner 125 (the last column her world at the planner's 125 too); on work/rec-all both walk 150 and her stack has items 1, 2, 6, 7 and 9 besides, not measured yet (the whole is measured once, after the user's next changes):
+
+| a minute (her time hunting) | R1 (4 min) | R2 | R3 | the hour | her world | the world, her walk as planned |
+|---|---|---|---|---|---|---|
+| EXP | 394 | 525 | 420 | 437 (5-min windows 346-492) | 426 (se 12) | 435 (se 13) |
+| kills | 11.2 | 14.0 | 10.2 | 11.3 | 11.9 | 12.2 |
+| casts | 18.8 | 25.7 | 21.6 | 22.2 | 20.8 | 21.2 |
+| touches (all hurt) | 5.25 | 5.2 | 4.8 | 4.82 | 7.93 (se 0.44) | 8.90 |
+| ... first (none in the 2 s before) | | | | 3.80 | 4.85 | 5.27 |
+| ... again within 2 s | | | | 1.02 | 3.08 | 3.63 |
+| HP potions (Meat) | 3.25 | 2.6 | 2.4 | 2.6 | 4.73 | 5.60 |
+| MP potions | | | | 1.39 | 0.10 (1.45 once drained) | 0.12 |
+| lowest HP of 858, a run | 527 | 542 | 536 | 520 (the hour) | 528 | 526 |
+| hurt by a newborn under 1.5 s old | | 0.5-1.0 (R2+R3) | | | 1.00 | 0.97 |
+| trips landing elsewhere than planned | | | | about 1 (first legs, P01) | 0.32 | 0.00 |
+| her casts at the dead; at nothing | | | | | 1.63; 0.95 | 1.82; 0.92 |
+| knocks onto a platform 30+ lower | | | | (9 long falls, 230-391: 0.25) | 1.08 | 1.28 |
+| casts pressed in the air (nothing cast); inside the lock | | | | | 0.50; 0 | 0.58; 0 |
+
+Live from problems.md's run-level numbers and the hour's touch events (scripts/live_retouch.py). The table's world has the planner's knock; with the client's (from the review of 2026-11-02: The simulator's touches against live, What changed), on 48 seeds of her standard world at ca68532 paired against the planner's (`--world planner-knock`, the table's world: its seeds 3 and 9 the same to the digit as e0beb22's; D:/MapleHelper-scratch/recfix/sim-fix/pair_mage48.txt): EXP 414.6 -> 393.7 a minute (-5.0%, t -2.66), kills 11.60 -> 11.15 (-3.8%, t -2.05), casts 20.25 -> 19.18 (-5.3%, t -2.79), knocks onto a platform 30+ lower 1.38 -> 1.95 a minute (+41%, t 5.74), 0.16 -> 0.22 a hurting touch, where R1-R3's frames have 0.71 a minute and 0.16 a hurting touch from the ground (10 of 63, 42-303 lower; live_knockfalls.py, live_knockfalls.txt); her touches the same (8.68 -> 8.78 a minute, +1.1%, t 0.32), and touched again within 2 s (+1.0%). So with it her EXP is 394 against the hour's 437 (its 5-minute windows 346-492), and what holds below is the table's world's. What holds: her EXP, kills and casts within the hour's spread (the world's 426 against 437; a quiet R2's 525 isn't reached, nor R3's crowd modelled), her lowest HP (her pet at 75% keeps her over 520-540), her casts never refused for the lock (the stack's pace, 0.79 s after its last plan at the least, never inside the world's 0.80: `attack_locked` 0 in 12 runs) nor for MP, never a death or a safety stop.
+
+**What doesn't, and why.**
+- *Touches 1.65 times live's* (7.93 against 4.82), almost all of it touches again as her invulnerability ends: 3.08 a minute against 1.02 (3 times), first touches 4.85 against 3.80 (1.28 times). The thief's world shows the same (The simulator's touches against live, above: re-touches 3.6 times live's), undiagnosed: not the knock (the client's leaves them as they were, on her +1.0%), and not shown to be her chasers (`Realism.chase`, the user's rule: the hurt ones near her walk away more in the world and stand less than live's; there, Her chasers). Every touch fix measured on her inherits it.
+- *HP potions 1.8 times live's*: they follow the touches (her pet drinks after each that leaves her under 75%, Meat's 160 each, as live), her HP's own regeneration aside (not kept).
+- *MP potions*: a 5-minute run starts her at 1549 and she drains 270 MP a minute (20.8 casts of 20 less 2.4 a second), so her pet drinks only near the end (0.10 a minute); once drained, 270 / 187 = 1.45 a minute, the hour's 1.39.
+- *Trips landing elsewhere*: the walk error shows (0.32 a minute against 0 with her walk as planned) but well under live's count of about 1 (P01 counted first legs ending elsewhere, the harness counts trips' misses: not the same count). What it costs her here, on 12 seeds paired: EXP +2.1% (se 4.5%) with her walk as planned, touches +12% (se 11%): not told from nothing (the roadmap's estimate for item 1: +3%, 1-5%). That priced the planner's 125 against the world's 148.2; from the integration her planner and her world both walk the client's 150, so the error is gone from her world by construction.
+- *Casts pressed in the air*, 2.5 a run (one in about 40 of her cast keys): each of the 11 in seeds 1-3 was a `throw` keyed 0.05-0.25 s after a touch, in its knock's hop (0.22 s in the air with the planner's knock, 0.27 with the client's: 2.50 a run against 2.67 on 48 seeds), before her stack was told of the touch (its popup a frame on; D:/MapleHelper-scratch/recfix/sim-mage/air_presses.txt, scripts/air_presses.py). The world casts nothing then (no MP, no lock), as the game does mid-jump; whether it takes one in a knock's hop isn't measured live.
+- *Competition*: the crowd preset's camps kill 16 a minute on the lower map (Greens, Slimes) and nobody hunts the upper tower; live R3 lost 61% of her platforms' kills to others. Her EXP matches the hour's for other reasons than R3's.
+- *Not measured on her*: her pet's pick-ups, her magic's misses, Magic Claw against MDDamage (as against PDDamage, the stack's prior: tested so, test_sim_magic, not checked live). Her knock is (R1-R3's frames: The simulator's touches against live), and her knock falls (above).
+- *Assumed, as the review listed them*: after her casts her arrows wait out the thief's lock (the crowd preset's `Realism.lock_arrows`: `ARROW_LOCK` 0.72 s, `ARROW_HELD` 0.77, measured on his attacks; her class's 800 ms, classes/magician.py, a placeholder); a monster she hurts loses its HP, and its bar drops, at the server's 0.29 s after her key (`actions.DAMAGE_SHOWS_MS`), where her hit shows at 0.53; her lock the port's 0.80 s (`CLAW_LOCK_S`; live only bounds it, at 0.846 or less); her MP's rise 2.4 a second, the hour's balance (her HUD's ticks 1.8); her pet's MP potion under 6% (`MAGE_PET_MP`) on 3 drinks.
+
+**Checks.** tests/test_sim_magic.py (each fact above: the search's bands from 50 to 300, the nearest band, through a floor the star's line stops at, nothing in the air, 2 casts a Horny and 1 a Green over 24 seeds, MDDamage taken off her casts' damage and their push (a 300-HP monster one cast kills with none and never with 30; `pushed` 150 reached only with none), `spot --character`, the lock at 0.79 refused and 0.80 and 0.846 taken, 20 MP and the refusal, the pet's MP potion and her MP's rise, the pet's Meat under 75%, her hit shown and a kill drawn at 0.53 s, the monster lost 0.4-1.0 s, her wand and her keys, the harness's `_who`, her book; `--slow`: a 45-s grind of hers in her own process, casts and kills, none in the air or the lock), tests/test_sim.py (a walk in the world apart from the planner's, 148.2 against his 149: the hold's distance, the rope jump; her world's own the client's 150, her planner's shoe: test_sim_magic), tests/test_character.py (the goldens the thief's alone, the harness the magician too). Tree Dungeon's 43 goldens the same at each step; the fast suite 2945 passed, 1 failed (`test_choice`'s kill reckoning, failing on master 40ba190 too).
 
 ## Evading: a refuge, not the mover, for a monster in her way (from 2026-10-28)
 
@@ -878,18 +970,18 @@ The user, on 2026-10-27: "I have another character magician who will use magic c
 - *Her hunt.* `tour`, `hunt` and `nav` run as her (`_refused_as` refuses only `lock`, `combo` and `probe run` for her, saying why: the thief's measurements, combos and probes). At their start gamelab.attack.magic sets attack.reach's constants (and spots' copy, stance's passing jumps) to her search: 50..300 ahead in 13 bands, aimed inside 310, no claw up close (her decisions keep a monster on her platform about 90 off, stepping away as the thief does from her claw's reach), nothing stops it, no flight; no jump shots planned for an attack her profile doesn't make from a jump (fight._air: fight's and the hunt loop's jump cover none), and no escape up onto a platform overhead (stance.ESCAPE_UP off for her: its jump throw would be a cast from the ground beside the monster her close quarters ruled too near; a step or a jump away instead). Her Actions never key an attack in the air (`ground_only`: a jump throw is a cast from the ground, a jump back the jump away alone). Her attack is Magic Claw whenever her MP pays for a cast ('skill', whatever `--attack` asked, said), never her regular attack (`Attacks.no_regular`: no wand swing at range, none to finish a monster, none for MP: no cast, said "no cast (MP)"); its damage a prior (2 x 76-267, the v83 formula on her stat window) against the monsters' MDDamage, used only to reckon what a monster has left. Out of darts' stop is off for her (its message bar reads kept, for the rope's refusal); out of MP instead (`darts.MpWatch`, `OutOfMp`, exit code 8): her MP under two casts' (40) at every read for 12 s, her pet's MP potions out. The safety stop at 3 of the map's largest touches, her HP, level and DEF from perception, as before. Her stats: SPEED and JUMP 100, MP 1007, EVA 18, her stat window's.
 - *Her casts only where they can do something* (the user, 2026-10-29 ~01:58, watching her grind: "Why you were standing on platform 18 and cast magic claw for nothing, wasting mp?"). Of her 745 casts in the grinds of 01:09-02:03 half showed nothing (D:/MapleHelper-scratch/mcasts: classify.py, its table in data/summary.txt): at monsters the look didn't see (her memory's, the feed's hidden tracks, HIDDEN_FOR's last target), at the dead, at nothing at all (the 'skill' mode cast whenever the MP paid), at ones seen unhurt after it, a few in her search's first 50; on platform 18, her placed by her dot alone, 26 casts in 24 s at a Green Mushroom whose bar never came up. Her profile's Policy.unseen 'none' turns on behavior.attacks.Attacks.picks (her Hunter's): a cast only at a body the last look saw that her search picks from where she stands (ledger.in_path by the map's bodies), not dying nor a kill's body FADE_S after the kill, not likely dead by her casts until her EXP or a look settles it, and not again at one her last cast took no effect on (judged at the first look 0.6-3 s after the key: its bar as it was, nothing up on another that way, no EXP, no MISS) until she or it moves a band (20) or its bar changes, nor from where she stands at any body that way (her spot held, Attacks.Spot, after the review: on 18 the mark's hold alone went with the feed's new tracks and the mushroom's walk) until she moves 20, an effect shows that way (a bar down or up, which only her damage makes; her EXP; a kill of hers there), she casts the other way (her next one back taps the arrow: a facing her keys had wrong) or 6 s pass (one cast tests it); a mark the feed lost under a new track is carried to it (Attacks._carry), as a kill's body is; otherwise no key, 'no cast: <why>' logged and counted, a telemetry 'no_cast', the stance's refusals too (fight.cast_or_wait, one per her casts' pace; the fight's log says 'no cast: no effect from here (green-mushroom +120)', not 'nothing in reach'). Her Policy.close_quarters 'touch' turns off stance.POINT_BLANK (attack.magic): up close a cast from the ground only where her search surely picks the monster when the cast starts and their bodies don't overlap (28 + her 22 apart), else a step, the jump away, a cast at another her search picks, or a wait, never the thief's jump throw (which went out for her as a cast from the ground, 62% showing nothing). The stance throws at none her cast won't go at (`castable`: Attacks.refused), reaching by the game's bodies as her search does (reach.can_hit's `sizes`: off her level she steps out from under one her search doesn't pick yet), and where her cast would send none the fights cast the other way at one it picks there, step 30 off her spot held, or wait (fight.cast_or_wait), so they move on. Replayed through the new Attacks (mcasts/fix/replay2.py: the live looks, kills and EXP, each logged cast asked at its time) 247 of the 382 casts that showed nothing go unsent (4,940 of 14,900 MP), and 67 of the 363 that did something wait; on 18 at 01:55:15-42, 3 of 29 go (9 with the mark's hold alone); the stance's part isn't in the replay, and the simulator has no Magic Claw. The thief's throws are as before (`picks` off, POINT_BLANK on): his goldens are the check.
 - *The evade work, hers too* (Evading, above; integrated with all of this on 2026-10-29, work/evade-int). Her movement is the thief's: the navigator's evade step for a move a monster blocks (a refuge, then a watched pass, never the unwatched mover), the mover's moves watched, the stand check to her invulnerability's end, the planner's monsters without an escort, her retreat's dodge; with an escort (her fights on the way) the refuge before her last shot and the pass regardless as the thief's, her casts in them gated as above (`Attacks.picks`). Not the fight's R8 (`stance.FIGHT_CLEAR`, off for her in attack.magic's swaps): touched, the thief's escape is a jump back throwing, hers the jump away alone, which would trade the cast from the ground her search surely picks a Green Mushroom 50-60 off with for a jump with none (at 30-40 off master's step back to where it will); touched or not her close quarters decide as before (`test_touched_her_close_quarters_are_as_without_the_fights_r8_the_thiefs_get_clear`). None of it measured for her: the simulator has no Magic Claw. So without R8 she gets none of its cut in touches up close, which the thief's numbers showed: her touches up close are for the live test to watch (her safety stop at 3 hits). With R8 forced on under her swaps (the integration's review, D:/MapleHelper-scratch/evade/int/review/mage_r8_check.txt), touched by a Green Mushroom 20-40 off she would jump back instead of master's step back of 55-75, and 50-60 off jump instead of casting from the ground; 70 or more off, and a Horny Mushroom at any gap, the same either way.
-- *Not done:* the simulator's magic (no scenario of hers; the thief's goldens are the check that nothing of his changed); her look band (the thief's 140 up, 75 down: the whole screen finds the rest); Magic Claw's lock, delays and damage measured (L1/L2); her buffs; the aim facade in place of the constants' swap.
+- *Not done:* her scenarios (the simulator's magic is in from 2026-11-02, the harness's alone: The simulator's magician, below; the thief's goldens are the check that nothing of his changed); her look band (the thief's 140 up, 75 down: the whole screen finds the rest); Magic Claw's lock, delays and damage measured (L1/L2); her buffs; the aim facade in place of the constants' swap.
 
 
-**One character a process** (`gamelab.character`), the first that names one: `python -m gamelab --character magician <command>` (it sets `GAMELAB_CHARACTER`, which the command's child processes inherit), `GAMELAB_CHARACTER`, `python -m gamelab character use magician` (lab/character.json), config.toml's `[characters] default`, the thief. It's chosen before `motion.physics` loads, which works her walk and jumps out once from her stats, and resolved once (`character.active`: physics' `CHARACTER`, her files and what lets a command run are one character's). Under `GAMELAB_FIXED_STATS` (the tests, the goldens, the harness) only `GAMELAB_CHARACTER` counts, the thief by default, and a character is her class's alone, her stats its fixed copy: config.toml isn't read. Until her bottom bar is read (the design's S0g: nothing tells a running perception service or pet feeder who plays), a command that looks at or acts in the game (`__main__.IN_GAME`: the game commands, `pet`, `perceive`, `watch`, `recorder`, `save-recent`, `spot`) plays another character only when she's named (`--character` or `GAMELAB_CHARACTER`): under the file or the default alone it plays the thief and says so ("pet plays the thief: lab/character.json ... names magician, but ..."), one that attacks refuses saying what chose her, and `perceive` is the thief's whoever is named (it serves every command; `service.ensure` clears a non-thief `GAMELAB_CHARACTER` for it; on saved frames, `perceive --frames`, offline, anyone's). So L0 runs her commands with `--character magician`. golden and the harness refuse a `GAMELAB_CHARACTER` naming another (their scenarios are the thief's until S6). `python -m gamelab character` says who plays, why, and each profile with its placeholders; `character use` what the choice does and doesn't do yet; `character check`, which is to read her bottom bar, reads nothing yet (exit 2).
+**One character a process** (`gamelab.character`), the first that names one: `python -m gamelab --character magician <command>` (it sets `GAMELAB_CHARACTER`, which the command's child processes inherit), `GAMELAB_CHARACTER`, `python -m gamelab character use magician` (lab/character.json), config.toml's `[characters] default`, the thief. It's chosen before `motion.physics` loads, which works her walk and jumps out once from her stats, and resolved once (`character.active`: physics' `CHARACTER`, her files and what lets a command run are one character's). Under `GAMELAB_FIXED_STATS` (the tests, the goldens, the harness) only `GAMELAB_CHARACTER` counts, the thief by default, and a character is her class's alone, her stats its fixed copy: config.toml isn't read. Until her bottom bar is read (the design's S0g: nothing tells a running perception service or pet feeder who plays), a command that looks at or acts in the game (`__main__.IN_GAME`: the game commands, `pet`, `perceive`, `watch`, `recorder`, `save-recent`, `spot`) plays another character only when she's named (`--character` or `GAMELAB_CHARACTER`): under the file or the default alone it plays the thief and says so ("pet plays the thief: lab/character.json ... names magician, but ..."), one that attacks refuses saying what chose her, and `perceive` is the thief's whoever is named (it serves every command; `service.ensure` clears a non-thief `GAMELAB_CHARACTER` for it; on saved frames, `perceive --frames`, offline, anyone's). So L0 runs her commands with `--character magician`. golden refuses a `GAMELAB_CHARACTER` naming another (its scenarios are the thief's); the harness plays the magician too from 2026-11-02 (`--character magician`: The simulator's magician, below), and refuses any other. `python -m gamelab character` says who plays, why, and each profile with its placeholders; `character use` what the choice does and doesn't do yet; `character check`, which is to read her bottom bar, reads nothing yet (exit 2).
 
 **Her profile** is data (gamelab/character.py; gamelab/classes/thief.py and magician.py, which import nothing of gamelab but paths: every layer may read them): her stats and skill levels, keys, attacks (`AttackSpec`, each with a `Geometry`: the thief's "star_search", attack.reach as it is, its bands described by a `Search`; Magic Claw's "search", the client's for an aimed spell: from 50 ahead of her to 300 in bands 20 wide, band k's window 28 -/+ (50 + 20 k) // 4 over her feet, 16..40 at the first and -44..100 at the last, the first band any body overlaps picking, never behind her nor in its first 50; nothing stops it, walls nor floors, and it's cast from the ground only, both the user's, settled), ammunition and stops (out of darts; out of MP), buffs, pet, policy, priors, what localization takes of her attacks (`Shape`: the nearest and farthest it picks, signed, `near` and `ahead`; how far over and under her feet, `up` and `down`; its windows; `pick_s`) and what perception reads of her (`Perception`: her files, her bottom bar's lines). The thief's values are the stack's constants, described: her code reads them where it did, and tests/test_character.py checks each against the constant it names, so the two can't drift (her Lucky Seven at `[character]`'s level, as `choice.lucky_seven`). `attacks` is data until S3's arsenal builds them, and the thief's keys are the flat tables' until S0h and S2 fill them. A magician's tables go under `[characters.magician]` (`class`, `name`, `job`, and `[characters.magician.keys]` with `magic_claw`, `magic_guard`, `magic_armor`, `energy_bolt`, `.timing`, `.stats`, `.skills`, `.pet`, `.buffs`); the flat `[keys]`, `[hotkeys]`, `[timing]` and `[character]` stay the thief's, and one class's skill key under the other is an error. A mistake in another character's table is hers (`CharacterConfig.broken`): the thief, the player and every other command go on as before there were any, and she can't play until it's put right (`gamelab character` says why); the thief's own table and `default` raise.
 
-**What reads it so far:** physics (her stats); her files (`paths.of`: the thief's are lab's names as ever, another's the same names under lab/characters/<id>/, her heading seed assets/heading_<id>.npz: her calibration, name tag and calibrate's pictures, her heading pictures and crops, her pet's state, her grounds, the shot log, the probes' log and the hit log; `calibrate` makes her folder); localization's trackers (`MonsterTracker`, `Memory`, `Senses`, and a `WorldStep`'s tracker its Senses', take a `Shape`, THIEF_SHAPE by default: their constants, 10 behind to 474 ahead and 70 up or down; a throw may say which attack it was, `throw(t, side, attack)`, and a client tells the perception service only when it's told); skills.json (`info`, `range`, `req`, `ball` and `desc_range`, the tooltip's range: Magic Claw's 300); the map's `mob_mdd`, `mob_eva` and `mob_level`. Nothing passes the magician's Shape in yet, and the commands that attack in the game (`lock`, `combo`, `hunt`, `nav`, `tour`, `probe run`) refuse to play a character whose attacks aren't built: only the thief hunts.
+**What reads it so far:** physics (her stats); her files (`paths.of`: the thief's are lab's names as ever, another's the same names under lab/characters/<id>/, her heading seed assets/heading_<id>.npz: her calibration, name tag and calibrate's pictures, her heading pictures and crops, her pet's state, her grounds, the shot log, the probes' log and the hit log; `calibrate` makes her folder); localization's trackers (`MonsterTracker`, `Memory`, `Senses`, and a `WorldStep`'s tracker its Senses', take a `Shape`, THIEF_SHAPE by default: their constants, 10 behind to 474 ahead and 70 up or down; a throw may say which attack it was and the monster it was aimed at, `throw(t, side, attack, aim)`, and a client tells the perception service only when it's told; her Shape's `kill`, from 2026-11-02, has her kills put on monsters by her search: Her kill's monster by Magic Claw's search); skills.json (`info`, `range`, `req`, `ball` and `desc_range`, the tooltip's range: Magic Claw's 300); the map's `mob_mdd`, `mob_eva` and `mob_level`. Her Shape goes in wherever she plays: the hunt's Senses (`Hunter`, her profile's `shape`), the perception service's (`service.screen_world`, by who plays) and the replay kit's; of the commands that attack in the game, `hunt`, `nav` and `tour` play her (her Magic Claw, gamelab.attack.magic, from 2026-10-29: R1-R3 of 2026-11-02 are her grinds), and `lock`, `combo` and `probe run` refuse to (`HERS_NOT_YET`: their lock, combos and probes are the thief's).
 
-**Placeholders** (gamelab/classes/magician.py, each marked with what replaces it): her stats (SPEED and JUMP 100, HP 400, MP 500, level 25; DEF, AVOID, climb and MP regen the thief's), skill levels (Magic Claw 20, Energy Bolt 1, no Magic Guard or Armor), keys, name and job line; Magic Claw's lock and delays (730 ms, the thief's with the same swing frames, where the port says 800 and meowdb shows 810; the arrow lock 800; the server's 290; its hit 515 ms after the key, the port's rule), its damage not known, its miss and the time a monster hides under its hit the thief's; her Shape's timings (0.715 s to a hit, a 1.5 s window, 3.5 s hidden, 0.065 s to the pick; its reach comes from the search: 6 to 374 ahead, 110 over her feet to 119 under); her wand's box; her pet's settings and the planner's priors the thief's; her MP policy (nothing kept back). The user's answers (design.md section 7) replace the facts; L0 (non-attack: calibration, her walk, jump and climb, her pet) and L1 (a supervised attack window: lock, delays, MP a cast, and the search confirmed on her level and a platform up) the measurements (design.md 6.1; no jump casts or casts across walls to test: the user settled those).
+**Placeholders** (gamelab/classes/magician.py, each marked with what replaces it): her stats (SPEED and JUMP 100 are her stat window's, not placeholders: from 2026-11-02 they walk her at 150 units/s by the client's formula, where she walks 149.4, Her walk speed; HP 400, MP 500, level 25; DEF, AVOID and MP regen the thief's; her climb SPEED + 20 by the client's formula, 120, from 2026-11-02: Her walk and climb from her stat window's SPEED), skill levels (Magic Claw 20, Energy Bolt 1, no Magic Guard or Armor), keys, name and job line; Magic Claw's lock and delays (730 ms, the thief's with the same swing frames, where the port says 800 and meowdb shows 810; the arrow lock 800; the server's 290; its hit 515 ms after the key, the port's rule), its damage not known, its miss and the time a monster hides under its hit the thief's; her Shape's timings (0.715 s to a hit, a 1.5 s window, 3.5 s hidden, 0.065 s to the pick; its reach comes from the search: 6 to 374 ahead, 110 over her feet to 119 under); her wand's box; her pet's settings and the planner's priors the thief's; her MP policy (nothing kept back). The user's answers (design.md section 7) replace the facts; L0 (non-attack: calibration, her walk, jump and climb, her pet) and L1 (a supervised attack window: lock, delays, MP a cast, and the search confirmed on her level and a platform up) the measurements (design.md 6.1; no jump casts or casts across walls to test: the user settled those).
 
-**Not done** (the design's S0g on): the perception service learning who plays (her bottom bar read, `Hello.character`, a rebuild with her tag, heading and Shape) and the pet feeder's exit on a switch, after which the choice by file or default counts in the game too; the player's keys per character, and `lock`'s; then the aim facade, her keys in Actions (and the attack id from Actions' throw listeners, which the behaviour layer's listeners don't take yet), her attacks from the profile, the refusal watch split from out of darts and her out of MP, the simulator's magic and her scenarios. work/clearance-slopes is merged, so S1 starts from master. Memory's monsters under her damage numbers count ahead of her only, as before (the Shape's `near` clamped at 0). **At the merge:** `python -m gamedata tables` in D:/MapleHelper, for skills.json's new fields (built here into D:/MapleHelper-scratch/mage/s0d-out, as this checkout's gamedata/data is master's; the game data copy has more monsters and maps than master's tables of 2026-10-23, which come out too: 117 monsters against 98, 336 maps against 306; nothing reads the new fields before S3); the map cache isn't rewritten (`mob_mdd`, `mob_eva`, `mob_level` are in `HP_KEYS`, so a map cached before them is read for them from the game data copy); work/kill-place edits the same lines of tracking, memory and worldstate: keep both, `shape` after its new `Memory` parameters, and its tracker windows (`VICTIM_BEHIND`/`UP`/`DOWN`, `PICK_S`, `STAR_LANDS_S`, `STAR_FLIGHT`) read where they are, the thief's: they go onto the Shape (`pick_s` is there, 0.065 as its PICK_S) when the magician's tracker needs them.
+**Not done** (the design's S0g on): the perception service learning who plays (her bottom bar read, `Hello.character`, a rebuild with her tag, heading and Shape) and the pet feeder's exit on a switch, after which the choice by file or default counts in the game too; the player's keys per character, and `lock`'s; then the aim facade, her keys in Actions (and the attack id from Actions' throw listeners, which the behaviour layer's listeners don't take yet), her attacks from the profile, the refusal watch split from out of darts and her out of MP, her scenarios (the simulator's magic: The simulator's magician, from 2026-11-02). work/clearance-slopes is merged, so S1 starts from master. Memory's monsters under her damage numbers count ahead of her only, as before (the Shape's `near` clamped at 0). **At the merge:** `python -m gamedata tables` in D:/MapleHelper, for skills.json's new fields (built here into D:/MapleHelper-scratch/mage/s0d-out, as this checkout's gamedata/data is master's; the game data copy has more monsters and maps than master's tables of 2026-10-23, which come out too: 117 monsters against 98, 336 maps against 306; nothing reads the new fields before S3); the map cache isn't rewritten (`mob_mdd`, `mob_eva`, `mob_level` are in `HP_KEYS`, so a map cached before them is read for them from the game data copy); work/kill-place edits the same lines of tracking, memory and worldstate: keep both, `shape` after its new `Memory` parameters, and its tracker windows (`VICTIM_BEHIND`/`UP`/`DOWN`, `PICK_S`, `STAR_LANDS_S`, `STAR_FLIGHT`) read where they are, the thief's: they go onto the Shape (`pick_s` is there, 0.065 as its PICK_S) when the magician's tracker needs them.
 
 ## The Lie Detector's recordings
 
@@ -1061,6 +1153,7 @@ Hunting commands (`hunt clear`/`kill`, `nav`, `tour`) record what they see and p
 - **All of it together**, against the simulator before (harness, preset `game`, 20 seeds of 20 minutes): the hunt loop 123.3 -> 131.3 EXP a minute (better on 17 of 20 seeds, the worst 7% down), HP lost 2.55 -> 2.01 bars (182 -> 135 touches that hurt), drops picked up 88.1% -> 90.1%; the tour 88.6 -> 93.8 (better on 17 of 20, the worst 24% down), HP lost 2.52 -> 2.20 bars (180 -> 149), drops 91.7% -> 94.2%. She evades 52.5% (loop) and 53.1% (tour) of all touches. The world got easier, not harder: the push outweighs the rest. Without it (the frames, damage and evasion alone) it got a little harder: 119.7 and 87.8 EXP a minute.
 
 - `python -m gamelab sim tour_tree_run --speed 4` runs a scenario and records it for the mini-map: open `python -m gamelab minimap` first to watch it as it happens.
+- `python -m gamelab.analysis.walkfit RUN ...` measures her walk, her takeoffs, her steps and her trips' arrivals in any run's telemetry against the walk the run planned her moves at (Records to measure by).
 - `python -m gamelab.analysis.physics_check` replays her recorded movement (18 recordings, or the 6 kept as test fixtures) through the physics models and prints how far each is off (see Motion planning).
 - `python -m gamelab.sim.golden check` reruns every scenario and compares it with the golden trace recorded earlier: every key plan, log line and result. A refactor that leaves those byte-identical hasn't changed what she does. `record` rewrites the traces (after an intended change). Both take `--jobs N`, the scenarios on a pool of N processes, the same traces and output (Checking a change). The traces hold map data, so they stay in `lab/golden` (git-ignored): a branch worked on in a worktree of its own re-records them in its own `lab`, so once it's merged, `record` is run in the main checkout too (with the feed's searches off the frame loop, the route track and the other players together, 32 of master's 86: the other players' and her EXP number's 27 and the five `feed_*`; Found offline).
 
@@ -1070,7 +1163,7 @@ The move into the layers above was checked this way: all 50 traces stayed identi
 
 **Comparing policies** (`python -m gamelab.sim.harness`): `run POLICY` hunts 20 simulated minutes on each of 10 world seeds (`tour`, `loop`, or `loop-grind`; `loop-avoid` until 2026-10-26), and `compare BASE CAND` applies the bar seed by seed: more EXP a minute on 8 of 10 seeds and none more than 10% worse, at least the drops share, no more HP lost, no death, no fall out of the map, no stop (the safety stop, out of darts: from 2026-10-26 a run a stop ended counts as a death does, and its time ends with her retreat after it: `alive_s`, the idle stretches). What a run gave is read from the simulated world, not from her own reports. Preset `game` adds the game's errors (27.5% of stars miss, hit monsters hidden for 1-3 s, 10% of looks miss a monster, her lags spread as measured, 60% of taps of 50 ms or less lost), arrows pressed while an attack plays swallowed as in game (`Realism.lock_arrows`: pressed less than 0.72 s after the key, seen only 0.77 s after it if still held, else never; the noisy scenarios have it too), 60% of spawns filled, another player killing a monster every 25 s (hunting one place at a time, its dot on the minimap: see Other players), and 60 potions (not monsters' poses read wrong, `Noise.pose_wrong`, which no preset has yet); `game-drops` has the drops seen in game, `game-air` jump throws missing a snail close by as often as in game (`Noise.air_snail`), `game-sparse` 15% of the spawns filled (the coverage test's world: Route coverage), each `game` otherwise, the arrows swallowed too; `plain` is the simulator's own crowded world; `--think 1` also charges the stack's real computing time to the clock (those runs aren't repeatable). `--costs measured` makes the simulator's looks as fast as they're measured after the profiling pass of Where the time goes (a look placing her 20 ms with its frame's wait and copy, her band 24 more, the whole screen 84, a strip of drops 8; as step 5 measured them, 24, 32, 122 and 8), not the 100 ms they were coded at; `--feed` takes her looks and glances from a continuous feed; `--ways 3` has her trips choose among 3 ways (Route diversity). (`rests`, comparing trips to rest at low HP with and without `--rest-avoid`, went with the rests on 2026-10-26.) Each run also counts her trips from the stack's log (`nav`: plans cut short by a hit and off the path, replans, misses and the falls among them, her glances), and `compare` shows their totals. Runs are saved in `lab/harness` (git-ignored), each with a tally of her moves for the coverage report (3-7 KB a run).
 
-On the new maps: `--map 10004021` (West Rocky Mountain II) and `--map 10002073` (Tree Dungeon, Forest Up North II) hunt there with her as she is there, from their own starting places, saved as `POLICY-PRESET-MAP`; `compare` refuses runs of two maps. `--world NAME` (again for another) switches on what isn't known: `zero-walls`, `client-sides`, `client-reach`, `touch-share` (a touch a share of PADamage, not the formula), `no-evade`, `red-potion` (her potions heal a Red Potion's 100 HP, not 30% of her HP), `client-body` (her body for the world's touches the client's, 22 either side and 65 tall as the stack plans by, `motion/bodies.py`, not the simulator's 15 x 55), `near-misses` (the detector's misses as live on 2026-10-25, `world.NEAR_SEEN` on her platform by how near her, `OFF_SEEN` off it: Cutting her touches), `spawn-fade` and `spawn-fade-wide` (a monster back at its spawn point fading in, found as late as live finds it with the spawn watch or as the whole screen alone did: `world.SPAWN_FOUND`, `SPAWN_FOUND_WIDE`; Spawns seen as they fade in), and how she plays: `lucky-seven` (her attacks as Lucky Seven's thrown live, `tour --loop --skill`: 3 of the simulator's stars a cast, `world.LUCKY_SEVEN`, so a Horny Mushroom dies in about 4 throws and a Green in 3, as live, not 12 and 7), saved as suffixes. Each run also keeps the seconds she was hunting (`alive_s`: rates a minute alive, where a death would drag a rate over the horizon down), the touches by a monster just back at its spawn point (`fresh_hurt`: within `world.FRESH_S`, 1.5 s, of its respawn) the time the hunt loop waited for respawns and the HP lost then (`wait_s`, `wait_hp_lost`: its rules 'wait' and 'lull loot'), and the time she was on the move and the touches that hurt and HP lost then (`trip_s`, `trip_hurt`, `trip_hp_lost`: a chain's or a lone move's start to its end), and from 2026-10-26 on her stays for drops (`pile_s`, `pile_hurt`, `pile_hp_lost`), off her trips (`stand_hurt`, `stand_hp_lost`), her knocks off a platform (`knock_falls`, `knock_fall_dy`), her pet's potions (`pet_potions`; her MP items `mp_potions`) and her Lucky Seven casts whose stars hit nothing (`casts_nothing`). `--grounds 23` (saved as `-g23`) has the policy hunt only those grounds, as the live hunt loop of 2026-10-24 hunted 23 alone. Presets `crowd`, `crowd-17` and `crowd-slow` are Tree Dungeon's alone: the other players the crowding study saw, camping (`harness.TREE_CAMPS`), every spawn filled, respawns at 8.8 s, 17 s (the live median on 23) or 30 s, other players' dots under hers unseen. `ropes` counts the hunt loop's waits on a rope. The policy `loop-hp50` (the hunt loop resting under half her HP) went with the rests on 2026-10-26. A run that goes through a portal keeps `left_map_at` and fails the bar as a fall does. The coverage report reads either map's runs (`coverage RUN --map M`; the first map's own questions, platform 12 and the rope hops, only there).
+On the new maps: `--map 10004021` (West Rocky Mountain II) and `--map 10002073` (Tree Dungeon, Forest Up North II) hunt there with her as she is there, from their own starting places, saved as `POLICY-PRESET-MAP`; `compare` refuses runs of two maps. `--world NAME` (again for another) switches on what isn't known: `zero-walls`, `client-sides`, `client-reach`, `touch-share` (a touch a share of PADamage, not the formula), `no-evade`, `red-potion` (her potions heal a Red Potion's 100 HP, not 30% of her HP), `client-body` (her body for the world's touches the planner's, 22 either side and 65 tall as the stack plans by, `motion/bodies.py`, not the client's touch test, a line 50 tall, `world.HER_TOUCH`, every world's from 2026-11-02), `wide-body` (her body for touches 15 either side and 55 tall, as the world had it until then: The simulator's touches against live), `newborns-touch` (a newborn touching her from its birth, as until 2026-11-02, not only once it has faded in), `near-misses` (the detector's misses as live on 2026-10-25, `world.NEAR_SEEN` on her platform by how near her, `OFF_SEEN` off it: Cutting her touches), `spawn-fade` and `spawn-fade-wide` (a monster back at its spawn point fading in, found as late as live finds it with the spawn watch or as the whole screen alone did: `world.SPAWN_FOUND`, `SPAWN_FOUND_WIDE`; Spawns seen as they fade in), and how she plays: `lucky-seven` (her attacks as Lucky Seven's thrown live, `tour --loop --skill`: 3 of the simulator's stars a cast, `world.LUCKY_SEVEN`, so a Horny Mushroom dies in about 4 throws and a Green in 3, as live, not 12 and 7), saved as suffixes. Each run also keeps the seconds she was hunting (`alive_s`: rates a minute alive, where a death would drag a rate over the horizon down), the touches by a monster just back at its spawn point (`fresh_hurt`: within `world.FRESH_S`, 1.5 s, of its respawn) the time the hunt loop waited for respawns and the HP lost then (`wait_s`, `wait_hp_lost`: its rules 'wait' and 'lull loot'), and the time she was on the move and the touches that hurt and HP lost then (`trip_s`, `trip_hurt`, `trip_hp_lost`: a chain's or a lone move's start to its end), and from 2026-10-26 on her stays for drops (`pile_s`, `pile_hurt`, `pile_hp_lost`), off her trips (`stand_hurt`, `stand_hp_lost`), her knocks off a platform (`knock_falls`, `knock_fall_dy`), her pet's potions (`pet_potions`; her MP items `mp_potions`) and her Lucky Seven casts whose stars hit nothing (`casts_nothing`). `--grounds 23` (saved as `-g23`) has the policy hunt only those grounds, as the live hunt loop of 2026-10-24 hunted 23 alone. Presets `crowd`, `crowd-17` and `crowd-slow` are Tree Dungeon's alone: the other players the crowding study saw, camping (`harness.TREE_CAMPS`), every spawn filled, respawns at 8.8 s, 17 s (the live median on 23) or 30 s, other players' dots under hers unseen. `ropes` counts the hunt loop's waits on a rope. The policy `loop-hp50` (the hunt loop resting under half her HP) went with the rests on 2026-10-26. A run that goes through a portal keeps `left_map_at` and fails the bar as a fall does. The coverage report reads either map's runs (`coverage RUN --map M`; the first map's own questions, platform 12 and the rope hops, only there).
 
 **Master's side once** (from 2026-10-28): `run ... --cache` keeps a commit's seeds and reads them after, `cached ... --sha master` reads master's without running anything, `ab` runs a candidate against them (12 seeds, more only while a headline difference isn't told from nothing), `spot` runs a saved run's seed or two again: Checking a change.
 
@@ -1078,7 +1171,7 @@ On the new maps: `--map 10004021` (West Rocky Mountain II) and `--map 10002073` 
 
 **The stack's own computing** (`python -m gamelab.sim.latency loop|tour [--seeds 5] [--minutes 10] [--profile FILE]`): the harness's hunts, with every stretch of the stack's computing between two of its calls to the game (a look, a key plan, a sleep) timed with the real clock, by the call that ended it, and not charged to the fake clock, so the runs are the harness's own. What a look's answer waits for before her next keys go out is the "before a key plan" row; in game it comes on top of the look itself (see Where the time goes).
 
-Tests can't press keys, page anyone or write under `gamelab/lab` (`tests/conftest.py` stops them), and the simulator refuses to run unless its fakes are in place. The tests, the golden traces, the harness and the simulator's latency and soak runs take her stats as measured (SPEED 119.2, JUMP 100), not as `config.toml` `[character]` has them (`physics.FIXED_STATS`), so editing those for her gear changes nothing they check: with SPEED 125 in the file, 16 tests failed and every golden trace changed.
+Tests can't press keys, page anyone or write under `gamelab/lab` (`tests/conftest.py` stops them), and the simulator refuses to run unless its fakes are in place. The tests, the golden traces, the harness and the simulator's latency and soak runs take her stats as measured (SPEED 99.2, JUMP 100: 149 units/s, 119.2 before the client's +20 was known), not as `config.toml` `[character]` has them (`physics.FIXED_STATS`), so editing those for her gear changes nothing they check: with SPEED 125 in the file, 16 tests failed and every golden trace changed.
 
 ## Checking a change: the goldens on a pool, master's baseline cached, `ab` and spot checks (from 2026-10-28)
 
@@ -1088,7 +1181,8 @@ The user, 2026-10-28, on workflows that run long (measured from the agents' tran
 1. Targeted tests while working, the fast suite before a commit.
 2. The goldens of the map worked on, on a pool: `python -m gamelab.sim.golden check NAMES --jobs 2` (4 with the game down). Tree Dungeon's 30: 411 s in one process, 265 s on 2, 135 s on 4, the same output to the byte each (30 of 30 match; the PC busy beside them, CPUs 12-23 at Idle); at the review, 607 s in one process and 152 s on 4, the same to the byte, and after the rebase onto master 4558f61 its 34 (the regular attack's key check's four with them) 153 s on 4, 34 of 34 match.
 3. The smallest harness table that answers the question, against master's cached baseline, master's side never run again: `python -m gamelab.sim.harness ab loop --map 10002073 --preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers --minutes 5 --jobs 2 [--metric close_s]` (and `loop-grind`): 12 seeds of 5 minutes; 24, then 48, only while a headline difference isn't told from nothing.
-4. A review reads the author's saved runs and `ab`'s report and spot-checks them: `python -m gamelab.sim.harness spot NAME --seeds 3,9` runs two of the author's seeds again (each the same to the digit, or the keys that differ), `cached ... --sha master` shows master's table without running anything. A whole table again only where a spot check fails.
+4. A perception change for her: her recordings replayed through the branch and scored against their labels beside its base's cached dumps, `python -m gamelab.sim.replay run --unpaced --out RUN` then `score --dumps RUN --base BASE` (BASE the commit the branch is off, `git merge-base HEAD master`; `score` never makes the base's dumps: where it says they aren't kept, `cached --commit BASE` through the wrapper, about 5 minutes paced) (Replaying the recordings).
+5. A review reads the author's saved runs and `ab`'s report and spot-checks them: `python -m gamelab.sim.harness spot NAME --seeds 3,9` runs two of the author's seeds again (each the same to the digit, or the keys that differ), `cached ... --sha master` shows master's table without running anything. A whole table again only where a spot check fails.
 
 **The goldens on a pool** (`golden check|record [names] --jobs N [--folder DIR]`; `golden.ran`, `run_one`, `_ready`, `_run_in_worker`). Each scenario runs on a `ProcessPoolExecutor` worker made ready as the command makes itself (the environment it restarted itself with, `PYTHONHASHSEED=0` and her stats fixed, inherited; the scenarios imported and every map they're on loaded), exactly as in one process, and its trace comes back as the JSON `record` writes. The longest go first, by their recorded traces' size; each is given back in the order the names were given as soon as it and those before it are done, so what's printed is in that order (what a worker's run prints is printed in its place), the exit codes are as before, and `check`'s output is the same to the byte whatever N. Default 1: in the command's own process, as it always was. `--folder DIR` writes (record) or reads (check) the traces there instead of `lab/golden`. Proof (master 0e14114 with only this change, a frozen copy: `D:/MapleHelper-scratch/fastchecks/golden`, gproof.sh): all 105 recorded scenarios (Tree Dungeon's 30, the first map's 75), `check` with 1, 2 and 4 processes gave the same output to the byte (30 match; the first map's 75 differ, as on master, where they aren't checked: recorded before the feed), and `record` into three scratch folders with 1, 2 and 4 the 105 traces the same to the byte (Tree's 30 also the same as `lab/golden`'s). Times for the 105, with other workflows' jobs on the same CPUs (12-23, Idle): `check` 1,065 s in one process, 433 s on 2, 232 s on 4; `record` 1,204, 538, 215 s.
 
@@ -1107,6 +1201,67 @@ Proof (the two standard commands below; `D:/MapleHelper-scratch/fastchecks/harne
 **Replays** (the perception identity checks: the states on a recording as saved, stamped 30 a second, held 3x). pfast's canon dumps them (`D:/MapleHelper-scratch/pfast/tools/ident.py dump --checkout --folder --drops on|off [--hold N] [--range A:B]`, `pfast/review-numbers/ident30.py` stamped 30 a second; `ident.py compare A B`), and `D:/MapleHelper-scratch/baselines/replay.py dump [--ref master] [--lab-of CHECKOUT] --folder BEFORE --drops on|off [--hold N] [--fps 30] [--range A:B]` keeps master's: `baselines/replay/<code>/<the tools' hash>/<recording>_<drops>[_hN][_f30][_rA-B]_l<lab>.jsonl.gz` with a `.json` of what it's of (the frames' stamp checked when read), made in the base checkout under the same lock the first time, its path printed after (`where`: the path, or "not cached"). `<lab>` is a hash of the dumping checkout's lab inputs, the git-ignored files there that perception reads and `code_id` can't see (`replay.LAB_INPUTS`: her calibration and name tags, each window size's, `lab/character.json`, another character's under `characters/`; each by its content, or as absent: an audit of a dump's opened files found `calibration_1366x768.json`, `character.json`, `tag_template_1366x768.npy` and `tag_template_full_1366x768.npy`; her heading pictures are the hunter's, not read). Each dump runs under an audit hook (`baselines/labread.py`) and is kept only if every lab file it opened is one of those and none changed while it ran. `replay.py compare MASTER CANDIDATE` runs `ident.py compare` once the two dumps' lab inputs are seen to be the same (from a dump's `.json`, or for one made by `ident.py` itself, from the checkout its first line names, as that lab is now), and refuses otherwise (exit 2, the files that differ; `--any-lab` compares anyway): after a recalibration, or a candidate whose lab copies are newer than ov-base's, master's dump is made on the candidate's with `--lab-of` (ov-base's own saved to `baselines/lab-saved/` first). `replay.py lab CHECKOUT` shows a checkout's lab inputs and their hash. Master's (0e14114 = 98f9181's code, `GAMELAB_GPU=0`) are cached for both Lie Detectors' `before/` (00:25, 01:01) and 23:15's, drops on and off as saved, and stamped 30 a second: 9 dumps of 3,048-4,551 frames, 123-190 s each to make and 1 s to find after, each with 0 frames differing from master 301e78e's (the GPU merge's, `wide10/gpu/ident/master_*`), so those stand for today's master too. They were made before the lab key and given it after (lab `337d2b7e`, the same in the main checkout, ov-base and ov-fast): ov-base's lab inputs were made (13:22) and last written (10-23) before the first of them (14:44), so they're the files each read; one made again with the lab key and the audit, from nothing, has 0 frames differing from its keyed copy. Held 3x isn't cached yet: `replay.py dump ... --hold 3` makes it once. kplace's `replay.py` (a hunt's recording with her throws told from its telemetry) is a different recipe and isn't wrapped: its master dumps (`sfast/merge/rep-ov-search.jsonl.gz`, `r2310 --range 0:400 --no-throws`) are reused by naming them, as gpu-merge's verify.sh does.
 
 **Found on the way**: `bg_quiet.cmd` doesn't pass on its command's exit code (`start /b /wait` leaves cmd's own 0: a script exiting 3 through it gives 0), so the workflows' `echo "exit $?"` after it have always said 0. An `exit /b %ERRORLEVEL%` after its `start` line passes it on (tried on a copy; the file itself left as it is). The exit codes of `golden --jobs` were taken without it (tests/test_golden.py).
+
+## Replaying the recordings: her own frames through any commit's perception, scored against labels (from 2026-11-02)
+
+The simulator's eyes give it no frames, and until work/rec-sim it didn't play the magician either (P41 of the 2026-11-02 analyses: D:/MapleHelper-scratch/rec-analysis/plans), so a perception change for her is checked on her own frames: the three lossless recordings of RiceBaby grinding Tree Dungeon on master 40ba190 that night (R1 00:10:57-00:14:57, 3,601 frames; R2 00:37:01-00:42:02, 4,515; R3 00:46:40-00:51:41, 4,512; 1366x768 PNG at 15 a second, 6.6 GB in D:/MapleHelper-scratch/golden-clips, kept as fixtures by the user's word), with the run's telemetry and logs beside them. Until now each analysis rebuilt the replay by hand (spawn-fade's `replay_rec.py`, the lenses' `replay.py`s, none of them telling her throws). The kit (ROADMAP item 5) is `gamelab/sim/replay.py`, `replay_run.py` and `replay_score.py`, in the simulator's layer beside the harness and its baselines (the analysis layer may import neither localization nor sim: tests/test_architecture.py):
+
+```
+python -m gamelab.sim.replay run [R1 R2 R3] [--root DIR | --commit REF] [--out DIR] [--range A:B] [--unpaced] [--jobs 2]
+python -m gamelab.sim.replay cached [CLIPS] [--commit master] [--jobs 2] [--where]   a commit's dumps, made once
+python -m gamelab.sim.replay score [CLIPS] [--dumps RUN_DIR] [--base REF] [--labels v3] [--json FILE]   never makes any
+python -m gamelab.sim.replay check A B                                     two dumps the same to the byte?
+python -m gamelab.sim.replay bench [CLIPS] --base REF [--range A:B] [--rounds 1]   pass times, side by side
+python -m gamelab.sim.replay feed R2                                       what the run's records tell the step
+```
+
+Every one that runs frames goes through the CPU rule's wrapper as any harness job (heavy.sh / `bg_quiet.cmd`): a replay takes about a core and a half while it runs, and `--jobs` recordings run at once (2 by default, the rule's workers while the user plays; 3 when the machine is idle).
+
+**What `run` runs** (`replay_run.py`, a child process per recording run as a script by its path, so the tree it's given is the `gamelab` it imports): what `service.screen_world` builds for the live service, with the saved frames for its screen (`analysis.bench.SavedEyes`: the same Eyes, its captures handed over): the map's monster detector for the game's own 1366x768, her name tag's template from her calibration, the minimap's picture, Senses with her Shape (`GAMELAB_CHARACTER=magician`) and the look band `perceive` uses, the world step on the service's schedule; then as `Service._tune` has it while the tour was attached (it was through every frame of the three: their perceive.log): the hunt's schedule and her throws known. OpenCV on one thread, Windows' timers at 1 ms, the GPU off (`GAMELAB_GPU=0`, as the baselines' replays: the GPU's answers are the same to the bit). Each frame is handed over at its own time in the recording (15 a second, the next read from disk in the slack after the pass); `--unpaced` runs them back to back. The eyes' recoveries after a frame that failed its checks (`Eyes.recover`: the minimap, her name tag and the locator lose what they held) come `RECOVER_EVERY_S` apart at most on the recording's own clock, where `feed.Runner.recover`'s real clock (the frames' own on live) would put them on other frames paced and unpaced: so pacing can't move them (from the review of 2026-11-02; on R1-R3 none ran, no frame failing its checks). The tree: this checkout as it is, another (`--root`), or a commit (`--commit`: `git archive` of its `gamelab/`, `gamedata/`, `maplehelper/` and `config.toml` under the cache's `trees/<code>-<lab>/`, with this checkout's DLLs (named by their sources' hash: a source that differs is built there) and this checkout's lab inputs, so both sides of a comparison read the same; the game data read from D:/MapleHelper's, read only).
+
+**The clock and the feed** (`clock`, `feed`). The frames are stamped in wall time (summary.json's `from`, local UTC-8, and index.jsonl's `t`); the service's telemetry names frame times on its own `time.monotonic` (a victim's gain, a touch's popup); the hunt's records are wall time at their emission. The one offset that puts the service's frame times on frames is 1793544509.301 s on all three (R1 73 of 76 within 2 ms of a frame, R2 106 of 107, R3 79 of 81), and the step runs on the service's own clock (frame 0 at `t0`), so the times it makes read against the live ones directly. What the service took from outside: her throws, each told before the first frame shown after its tour `attack` record went (when the service heard of it; its key `TURN_S` 80 ms later where her keys had her facing the other way, as `Actions.throw` taps the arrow first: 23, 46 and 39 of 80, 139 and 119), its side from the fight's `stance` record just before it (all 338: none needed her target's side of her), and the drops the hunt asked for (each tour `scene` that looked at drops: an ask on the last frame shown 12 ms before it, her platform's or every one in view as the look was wide; 319, 487, 501 asks). Not told: throws told again the other way by a frame (`hunter._retell`: no `retold` event in the whole hour, so none to tell). From 2026-11-02 each throw's aim (the monster her attack choice aimed it at: its record's kind, x and platform, by place, the live track ids being another tracker's) goes with it where the tree's step takes one (`WorldStep.throw`'s `aim`: master's doesn't, so its dumps are as before to the byte), and the record's own side and track where it has them (the hunt's attack records from then on).
+
+**Live's events, reproduced** (master's code, unpaced, against the perceive telemetry over the frames: `recfix/replay/scripts/fidelity.py`): every gain bound to the same monster first (kind, x within 15, platform): R1 45 of 45, R2 69 of 69, R3 51 of 51; let-gos 7 of 7, 12 of 12, 10 of 11; touches 21, 26 and 24, each at the same popup time to the millisecond; deaths of hers 45, 68, 45 (live 47, 69, 46) and others' 5, 18, 69 (live 4, 18, 71); and the spawn watch's onsets the analyses' replays had, the same point and frame: R2 92 of 92, R3 105 of 105, R1 47 (the analysis's 30 newborns given out, all 30, and 17 more: 15 re-finds of a newborn reported 5-7 frames before, 2 the late find of a birth under her name tag, each a real newborn on recfix/replay/sheets/r1_onsets_a,b.png).
+
+**The dump** (one gzip JSON line a frame, mtime 0, so the same lines are the same bytes; a head line with `t0` and the feed's hash, an end line with the step's, tracker's and spawn watch's counts): her place, view and bars, the state's monsters (kind, place, track, alpha, facing, bar, box, score, picture), the tracks (state, kind, place, alpha, how first seen, bar, gain, cause), the events (with their data and time), the players, the spawn watch's sightings before the hand-over, the whole screen's raw detections, the drops asked for, and what the eyes or senses logged: 0.28-0.41 MB a recording. The pass's times (the real clock's) go in a side file, never in the dump, with the lab files and the game data's files the run opened, each by its content.
+
+**The labels** (`tests/fixtures/recordings/<clip>/labels-v3.json`, 26-37 KB each, in git where no cleanup of the scratch drive can lose them; the frames stay in golden-clips, named by path; v1 built by `D:/MapleHelper-scratch/recfix/replay/scripts/build_labels.py` from the analyses' verified lists and master's replay, before any change ran on them; v2 its disputed kills checked by eye; v3 after the review: v2's two kills the eye didn't decide kept as master's binding, and the players' slivers, by `D:/MapleHelper-scratch/recfix/replay-fix/scripts/labels_v3.py`: Her kill's monster by Magic Claw's search; v1 and v2 kept beside, `score --labels v1`):
+- `onsets`: every onset the spawn watch reported, each a real newborn by eye (R2's 92 and R3's 105 on the R23 lens's sheets, every one; R1's 47 on its lens's and this work's), `refind` for one of a newborn already reported (P19: 79 of the 244).
+- `births`: every birth in view, one per newborn: its first onset, or, for the 16 the watch missed (P18: R1 7 behind drops and 3 under her, the pet or her claw; R2 1 behind the pet; R3 5 behind pets, players and mesos), its first visible frame and what covered it; the 6 that touched her as they turned solid (P07). 41, 63 and 77 births.
+- `touches`: the 71 touches in the frames (the movement lenses'), each with its popup's frame as live told it, the toucher, the damage, the lens's cause; every one showed its purple popup, the 25 live read off the HP bar alone too (P22).
+- `under_her`: the 10 frames where a monster at her body was lost by the whole screen (P15).
+- `kills`: her 165 full kills, which monster each was, by where it died: `die1` (50: its die1 animation matched at its place on the frames, the death watch's own match at every candidate track and every frame from the gain's +2 to +26, `label_kills.py`, a binding of master's agreeing), `frames` (R1's 7 let-gos, traced by the R1 lenses), `eye` (7 decided on contact sheets where die1 and the binding disagreed or a binding was let go with none after it), `binding` (87: master's final binding where die1 wasn't sure; the weakest, unchecked), `unsure` (14, left out). With each, master's first binding and whether it was right.
+- `players`: the minimap's red dots every 15th frame and whether one is within 7 px of hers (a rival beside or under her: P23); from v3 a red sliver under 4 px within 9 px of her dot's middle counts too, as a dot and as one by hers (a rival mostly under her dot, the case the class is for: the review found 14 sampled frames of v2's wrong so, R1 f1725, R2 f2505, R3 12, by zoomed crops; v3 has 15, R3 f1800 a dot more where one was by her already).
+Checked by eye for this (recfix/replay/sheets): 6 random R2/R3 onsets, 3 missed births, 6 touches' popups, 2 monsters under her, 6 minimaps' dot counts, 3 kills where die1 and the binding agreed, all right.
+
+**The scores** (`replay_score.score`: per class, plain numbers; `score` prints them per recording and in total, `--base` beside a commit's cached ones). Master's (40ba190's code), in total over the three:
+
+| class | master |
+|---|---|
+| onsets of record (R2+R3's 197, R1's 47) | 244 of 244, 0 false; 79 re-finds; R1's 30 given out, 30 |
+| births found (seen by master / missed by master) | 165 of 165 / 0 of 16; first sighting 0 frames late (median), alpha 0.06-0.08 |
+| touches found / by popup / damage read | 71 of 71 / 46 / 46; 0 false |
+| monsters under her seen | 4 of 10 |
+| kills: first binding right (strong labels / all) | 50 of 64 / 129 of 151; last binding 59 / 146; 29 let go (v1) |
+| kills by labels-v3 (strong / all): first right, on the victim's level, last right | 51 of 71 / 123 of 151; 59 / 134; 60 / 140 |
+| her casts at her dead (after its gain, at its track) left out by the state she chose on | 4 of 19 (v3) |
+| players (v3): ids a 5 minutes; sampled frames with a red dot by hers / with a player of the state's by her | 100, 130, 185; 36, 9, 78 / 1, 0, 10 |
+
+So a fix shows as: false onsets 0 kept (the spawn watch's rule) and every birth found (`births.found`: an onset at its point from 3 frames before its first visible frame to 15 after; the onsets of record need the same point and frame, so a watch that finds a newborn a frame sooner reads as one fewer there), missed births found, touches by popup up from 46, monsters under her seen (a sighting of its kind, or a track the state carries live, hidden or dying, within 40 across and 40 up or down: a hidden track kept by her counts), first bindings right up from 123 of 151 (v3), her casts at her dead left out up from 4 of 19. R1 alone: 47/47 onsets, 31 of 41 births, 21 touches, first bindings right 33 of 42 (v3).
+
+**`cached`**: a commit's dumps (master's by default) under `<GAMELAB_REPLAYS, else the baselines' root>/recordings/<code 12>/<key 16>/` with `key.json` (what it's of) and the side file, as the harness's baselines are kept: `code` the commit's `code_id` (sim.baseline: its tree under `gamelab/`, `gamedata/`, `maplehelper/`, `config.toml`, Markdown aside), `key` a hash of everything else a dump depends on: `replay_run.py`'s own source (so an edit of the runner makes every commit's dumps again: those made before the review's are another key's), the feed, the lab inputs (`LAB_INPUTS` by content: who plays, her calibration and name tags, her stat window's place, her plate and pose models, the map's art; a dump that opened any other lab file isn't kept), the child's `GAMELAB_*` environment as the harness's keys resolve it (`baseline.gamelab_env`: the character, `GAMELAB_FIXED_STATS`, the GPU, any other one set; `REPLAYS_NOT_KEYED`'s and `NOT_KEYED`'s, which say where things are, aside), Python's and the packages' versions, the recording's frames and the range (key format 2). The game data (`gamedata/data`: not in git, so not in the code) is checked rather than keyed: `key.json` names the data's files the run read, by content (`data_read`: 89 files, 68 MB, for Tree Dungeon; read again in 0.1 s), and a kept dump whose data changed since is stale, made again (`data_stale`). The labels aren't in it: a score is made from a dump in seconds and says which labels it read.
+
+**`bench`**: pass times only from runs made side by side, the base and the tree alternated (base, tree, tree, base a round) on the same frames, paced, one at a time; never against a cached dump's times (the machine isn't the same between them).
+
+**The gate, 2026-11-02** (master 40ba190, code `62efe96d3a0d`; the machine shared with other workflows' jobs, CPUs 12-23 at Idle): master's dumps made by `cached` (paced, one recording after another, 08:31-08:45) and again by `run --commit master` (paced, the three at once, 08:40-08:45) are the same to the byte, all three; so are this checkout's, run unpaced with the three at once (3 min 17 s for all of them, 08:12-08:15): pacing and the tree's copy change nothing in a dump. Scored: R2's and R3's 197 onsets of record, 197 (the same point and frame), R1's 47, 47, and 0 false; R1's 30 newborns given out, 30. A paced run takes the recording's own length (240.6 s, 301.5 s, 301.4 s), the pass then 12.1 ms (R1) and 14.6 ms (R2) at the median (p90 17.0 and 20.6, p99 34.7 and 33.8), the spawn watch 1.31 and 1.51 ms (live that night: 1.35-1.50); a frame handed over 0.13-0.35 ms after its time (median). `score` reads master's cached dumps and scores the three in 2 s. After the review (the runner's recoveries on the recording's clock, the key's environment and the game data's stamp: another key for every dump), master 40ba190's three made again by `cached` (paced, the three at once, 310 s) are the ones before to the byte. `bench R2 --range 0:90` (base, tree, tree, base): 41 s, the two sides' pass 13.4 and 12.7 ms at the median on the same code (what the machine alone varies by).
+
+Tests (`tests/test_replay.py`): the labels' counts and shapes (v3's kills the eye didn't decide as v1's, its players' slivers); the scores on small made-up dumps (onsets of record, false and re-found; touches by time, popup and number; first and last bindings; monsters under her; players; her casts at her dead, left out or not, at another killed target); a dump written twice the same to the byte, and `check` naming the frame and field where two part; the lab files the key doesn't cover named; the key's environment (`GAMELAB_FIXED_STATS` or any other one set changes it, where the dumps and recordings are doesn't); a kept dump stale when its game data changed; `score` never making the base's dumps; the runner importing nothing of gamelab before its tree is on the path; on the recordings (skipped without them): R2's clock and her 139 throws, each with its side; `--slow`: R2's frames 118-130 run twice, the same to the byte, its onset at point 5 on f121.
+
+Not done, or not sure:
+- Her kills' labels are the weakest class: 87 of the 165 are master's own final binding where die1 wasn't sure (unchecked), 14 are left out (v2: the 9 of those the band order disagreed with checked by eye, 6 put right, 1 confirmed, 2 not decided, which v3 keeps as master's binding; 78 unchecked). A fix that binds better than master's last binding there reads as wrong on `all` (on v1 master's final binding scores 146 against the band order's 139 so); `strong` (64 on v1: die1 with a binding agreeing, the R1 lenses' 7, 7 by eye; 71 on v3) is the one to trust. Labels checked only where a candidate and master part, after the candidate ran, can only move points its way: label before running it for a held-out check. The die1 match at a track's place is sure on 50 of 165 (the claw's slashes and the numbers over a dying monster), and once by eye (R3 f1723) its sure answer was another death nearby.
+- Her throws' keys: 80 ms after the attack record where her keys faced the other way, by the last scene's facing or her last throw; the hunt's asks put on the frame 12 ms before the scene record that saw them (the tour's records carry no frame number: P28). Both reproduce live's bindings and touches above; neither is exact.
+- The cache of record is the work's own, for the runner as the review left it (`GAMELAB_REPLAYS=D:/MapleHelper-scratch/recfix/replay-fix/cache`: master 40ba190's three dumps and its tree, 34 MB); the ones before (recfix/replay/cache, recfix/credit/cache) are an older runner's key's. `baselines/recordings` doesn't have them yet (a copy of the folder, or one `cached` run there, 5 minutes).
+- Players are labelled by a pixel rule (the minimap's red blobs every 15th frame), not by eye beyond 6 minimaps (the review's 18, 17 right, and the slivers v3 counts).
 
 ## Route coverage
 
@@ -3800,8 +3955,10 @@ Dungeon's 43 goldens of master 23e34d8 (the main checkout's lab/golden, copied) 
 worktree's lab/harness sf12-*, sf24-*): on 24 seeds with `spawn-fade` against without, EXP a minute 293.3 against 310.2
 (-16.8, se 9.1: within 2 se), touches that hurt 47.3 against 46.5 (+0.8, se 1.8), touches by a monster just back at its
 point 3.4 against 2.8 (+0.6, se 0.3); on 12, `spawn-fade-wide` the same as `spawn-fade` (303.8 and 303.8 a minute,
-touches 45.0 and 43.8). Its touches aren't changed: a newborn there can touch her from its birth (World._touch), where
-the clip says not before it's solid (one clip: to measure on more before the world takes it).
+touches 45.0 and 43.8). Its touches: from 2026-11-02 a newborn touches nothing in any world until it's solid
+(`world.NEWBORN_SOLID_S`, the fade's 0.817 s; `--world newborns-touch` as before), as RiceBaby's hour of 2026-11-02
+measured it: none of 72 touches by a spawn point within 0.75 s of the respawn pass (The simulator's touches against
+live).
 
 **After the review** (2026-11-01, late: the review's findings, each fixed or why not;
 D:/MapleHelper-scratch/spawn-fade/fix: replay.py, analyze.py, verify_new.py, margin.py, margin_final.py, review2/,
@@ -3884,6 +4041,919 @@ switched in its first 40 frames in 13 of 323 births against master's 5 (2 pairs 
 faint first sighting heading the wrong way: of record). The thresholds were chosen on the same 17 clips that show no
 false positive; out of sample, the review's 124 stills alone. The JPEG recordings can't test the watch (no newborn
 found there): live frames are lossless.
+
+## The integration of 2026-11-02's roadmap items (work/rec-all, from 2026-11-02)
+
+The roadmap of 2026-11-02's items 1 and 2 (work/rec-records: Records to measure by, Her walk speed), 5 and 6
+(work/rec-replay: Replaying the recordings; Her kill's monster by Magic Claw's search), 7 and 8 (work/rec-sim: The
+simulator's touches against live; The simulator's magician) and 9 (work/rec-rope: Hanging under a rope's top), each
+built and reviewed on its own branch off master 40ba190, merged into work/rec-all in that order, a merge commit each;
+then what only the four together needed.
+
+- **The merges.** One conflict in code, behavior/grind.py's bookkeeping: rec-records' `Hunt._book_kills` (the kills of a
+  look, and the loop's last ones booked after the stand-by trip) and rec-replay's credit moved with a kill the tracker
+  put on another platform, now `Grind._book_kills` following the ledger's `moved` at every look. One in this README
+  (three sections at one place: all kept). Three tests whose runs the rope hang and rec-sim's world changed together:
+  test_replan's late replan runs the world's own touch line (rec-sim had it on the old body), loop_tree_attack_misses
+  seed 4 -> 5, loop_tree_attack_no_darts 6 -> 11 (their docstrings).
+- **Her simulated world's walk** the client's 150 (`world.MAGE_WALK`), her planner's too: The simulator's magician.
+- **The place filter's cap** (`locate.WALK_MAX`) 140 -> 200, the client's walk at its SPEED cap (Physics.img's walkSpeed
+  125 x (140 + 20)/100), over both characters' walks and Tree's steepest downhill (174 at her 150). On R1-R3 through the
+  replay kit (the merged tree, unpaced; trees with 140, 174 and 200 side by side, the place filter traced:
+  D:/MapleHelper-scratch/recfix/integrate/kit, analyse.txt): the prediction lagged her measured place while she walked
+  (2,232 frames) a median 0.61 units at 140 (mean 0.95, p90 4.2), 0.07 at 200 (0.51, 3.6); her place after each
+  measurement, the dumps' and the hunt's, the same within 0.02 (p99 0.46 off at 140, 0.46 at 200); the 23 carried
+  frames 5.15 off at the median either way (7 moved, 5 nearer, 2 farther); the dumps differ in her place alone (287-338
+  frames a recording at 200), every score of the kit the same (against labels-v3: onsets, births, touches, under her, kills,
+  casts, players). 174 is within 0.04 of 200 on each.
+- **test_choice's boundary** (the frame KILL_SHOWN_S after a throw's key): its sum was a float an ulp under the key's on
+  any machine 18-36 hours up (time.monotonic between 2**16 and 2**17 s), failing on master 40ba190 and every branch.
+- **A cast's target in one schema**, the `attack` record's and the `no_cast` record's (`attacks._target_fields`:
+  kind, platform, x, track): Records to measure by's table; walkfit and the replay kit's feed read the merged records
+  (a simulated run's: D:/MapleHelper-scratch/recfix/integrate/records).
+
+Not measured at the integration (the whole is, once, after the user's next changes): the goldens (re-recorded on the
+merged code, never copied from a worktree: each branch's own are in its worktree's git-ignored lab/golden), the
+harness's tables for either character, the `--slow` suite and its scenarios. The fast suite at the integration's last
+code: 3,037 passed, none failed (72 skipped, 2 xfailed).
+
+## The whole measured: the panel's walk and climb and the longer hang merged, against master (work/rec-all, 2026-11-02, the evening)
+
+The user's later answers of 2026-11-02, built on work/rec-all 560bd57, merged into it `--no-ff` (a merge commit each, the
+fast suite after each): work/rec-panel (her walk and climb by her stat window's SPEED, nothing measured live: "Just use
+panel, no need to measure."; work/rec-calib under it), then work/rec-rope2 (her hang under a rope's top longer for
+walkers, the touch taken where the wait costs more). Then the whole measured once, offline (the game not touched; the
+machine idle but for these jobs, CPUs 12-23 at Idle, two jobs of 4 workers at most).
+
+**The formula her planner plans by** (motion.physics.walk_of, climb_of: meowdb's measured speed guide and its
+calculator, the client's Physics.img walkSpeed 125; Her walk and climb from her stat window's SPEED): walk 125 x (SPEED +
+20)/100 units/s, climb SPEED + 20, SPEED held to the client's 80-140 first (its cap walks 200: locate.WALK_MAX). The
+thief's stat window's 101: 151.25 and 121; the magician's 100: 150 and 120.
+
+- **The merges.** work/rec-panel: no conflict (its tree is the merge's). work/rec-rope2: one, loop_tree_attack_no_darts'
+  seed (each side had re-seeded 11: rec-panel 9, rec-rope2 14); with both neither says MAYBE OUT, of seeds 1-16 4, 6,
+  13 and 16 meet all of it: seed 4 (its docstring; D:/MapleHelper-scratch/recfix/measure/scan_no_darts.txt). The fast
+  suite: 3,053 passed after the first, 3,062 after the second, none failed (72 skipped, 2 xfailed); with the knobs
+  below 3,064 passed and test_lie_yolo's slow-shadow wall-clock gap failed under two analysis jobs' load (14 passed
+  alone); `--slow` once on that code: 3,106 passed, none failed (72 skipped, 2 xfailed).
+- **Knobs to price the items on her** (sim.harness WORLDS, cached and spot-checkable by their names): `planner-v83`
+  (world.Her.planned, physics.set_planned: her planner held at 125 and 117 after her hunter's start, master's walk and
+  its down-climb, her climbs up at 117 too where master planned them at flow.ROPE_SPEED's 130, the world moving her at
+  its own 150 and 120; valid only where nothing reads her stat window in the run, as in loop-grind: a read's settle
+  would put the panel's back), `hang-2s` (navigator.HANG_LONGER and HANG_TAKE off: 560bd57's 2 s
+  hang alone) and `no-hang` (ROPE_HANG off): the stack's switches, set by run_one around the run (WORLDS' `stack`).
+  `spot` of seeds 3 and 9 of this tip's and of `planner-v83`'s: the same to the digit.
+
+**Tree Dungeon's goldens** (`golden record --jobs 4`, twice: into D:/MapleHelper-scratch/recfix/measure/golden-tip and
+into this checkout's lab/golden, the 44 the same to the byte): every one of master 40ba190's 43 changed, and
+`nav_tree_rope_top_10` is new. Each change found at the stage it first shows (D:/MapleHelper-scratch/recfix/measure/
+golden_table.md, scripts/golden_table.py: master's lab, work/rec-sim's and work/rec-rope's labs, 560bd57's, rec-panel's
+and rec-rope2's recordings): records 9 (their results' report line), the walk's stat-window note 2, newborns and the
+touch line 33, the rope hang 19 and the new one, re-seeds 7 (rec-sim's and the integration's); then from 560bd57 the
+thief's walk and climb by his SPEED (149 -> 151.25, the world's climb up 130 and down 117 -> 121) 43, the longer hang
+19, re-seeds 5 (rec-panel's: loop_tree_23 1 -> 3, _23_near_misses 1 -> 2, safety_stop 1 -> 2, out_of_darts 2 -> 1;
+the merge's no_darts 11 -> 4). The kill credit and the magician's world change none (the goldens are the thief's).
+`nav_tree_landing_shot_first` and `nav_tree_landing_no_shot` don't show what they're there for, but neither do master's
+own traces under the same expects (unchanged since master): not this merge's. Only `loop_tree_mp_runs_out` is as at
+560bd57 (records' report line its only change from master).
+
+**The thief against master** (the standard command, `ab`'s seeds and verdicts: master 4b5891e's simulator is 40ba190's,
+its commits since the Lie Detector's tracker and the web UI alone, so 40ba190's cached seeds,
+baselines/harness/62efe96d.../506f99b8e97847d7, under the game data's old stamp (work/rec-rope2 had seeds 3 and 9 of
+them the same to the digit on today's); `ab` itself would fill master's under the new stamp through ov-base, so
+scripts/pair.py gives its table; this tip's cached under 4f496a88.../429c9e4a7b1f27f6): 12 seeds EXP +3.9% within 2
+se, 24 -6.4% within, 48:
+
+| a run of 5 minutes, 48 seeds | master 40ba190 | 560bd57 | this tip | tip - master | t |
+|---|---|---|---|---|---|
+| EXP a minute | 317.6 | 304.8 | 302.0 | -4.9% | -1.77 |
+| kills | 45.0 | 43.4 | 42.8 | -4.9% | -1.85 |
+| touches (all) | 82.0 | 63.0 | 62.3 | -24.0% | -8.55 |
+| ... that hurt | 53.9 | 41.9 | 41.4 | -23.1% | -7.08 |
+| ... again within 2 s | 52.7 | 33.8 | 33.5 | -36.5% | -7.82 |
+| hurt by a newborn (under 1.5 s old) | 3.33 | 1.67 | 1.44 | -56.9% | -5.60 |
+| potions | 22.3 | 17.6 | 17.4 | -22.0% | -5.74 |
+| knock falls (30+ lower) | 10.4 | 11.2 | 11.1 | +7.2% | +1.21 |
+| deaths, falls, stops | 0 | 0 | 0 | | |
+
+Master -> 560bd57 is the four branches (the touches from rec-sim's world: newborns untouchable while fading in, the
+client's touch line and knock); 560bd57 -> this tip is level on every headline (EXP -0.9%, t -0.35; touches -1.2%,
+t -0.28): the thief's 1.5% faster walk, his climb and the longer hang together move nothing told from nothing. EXP
+stays unsettled at 48 (within 2 se); no death, fall or stop on either side.
+
+**The magician** (her standard world, `run --cache` on this tip with the knobs, seeds paired; 24, then 48 where
+borderline: every row below at 48; D:/MapleHelper-scratch/recfix/measure/pair_mage_*.txt):
+
+| a run of 5 minutes, 48 seeds | planner 125/117 (`planner-v83`) | no hang (`no-hang`) | the 2 s hang (`hang-2s`) | this tip |
+|---|---|---|---|---|
+| EXP a minute | 374.5 | 429.6 | 421.1 | 407.0 |
+| kills | 52.5 | 60.1 | 59.1 | 57.0 |
+| touches (all hurt) | 41.3 | 40.1 | 37.8 | 39.6 |
+| touches at a rope's top | 7.31 | 7.08 | 4.77 | 6.48 |
+| her climbs up to a rope's top | 8.79 | 7.40 | 6.60 | 7.48 |
+| ... touched at its top, a climb (each seed's ratio, their mean) | 0.81 | 0.97 | 0.69 | 0.81 |
+| ... the same as ratios of the totals (the final review) | 0.83 | 0.96 | 0.72 | 0.87 |
+| trips landing elsewhere than planned | 1.71 | 0.19 | 0.08 | 0.17 |
+| knock falls | 10.1 | 10.6 | 8.9 | 9.6 |
+
+- *(i) Item 1, her walk and climb by the panel*: this tip against her planner held at 125 and 117 in the same world
+  (150 and 120; master's walk and down-climb, its climbs up 117 where master's were 130): EXP +8.7% (t +2.34), kills +8.5% (t +2.49), casts +8.8% (t +2.46), trips landing elsewhere 1.71
+  -> 0.17 a run (-90%, t -6.24), touches -4.1% (t -1.00, not told). The roadmap's estimate was +3% (1-5%); at 24 seeds
+  it read +2.7% within 2 se.
+- *(ii) The rope rule* (HANG_LONGER and HANG_TAKE, work/rec-rope2) **measures worse here than where it was chosen**:
+  against the 2 s hang alone EXP -3.3% (t -2.07), kills -3.5% (t -2.27), touches at a rope's top +35.8% (t +2.49),
+  touches +4.9% (t +1.40); against no hang EXP -5.2% (t -2.70), a rope's top -8.5% (t -0.81). The 2 s hang alone
+  against no hang: EXP -2.0% (t -1.13), a rope's top -32.6% (t -3.40), knock falls -15.9% (t -3.32), touches -5.8%
+  (t -1.73). work/rec-rope2 measured the rule in 560bd57's world, where she climbed up at the planner's 130 and the
+  world's 130 (here 120 both, the formula's), and found her EXP +3.5% (t +2.32) against the 2 s hang: most likely the
+  merge's climb turns it (assumed: no run varies the climb alone). Per run here: 5.9 hangs, 2.5 of them longer at some look, 1.4 touches taken (hang_took), 4.0
+  up regardless, 0.4 clear, none waited out. Live, the hour's rope top at -80 had 19-23 touches over 68 climbs (about
+  0.3 a climb; one rope's top, where the simulator's figure is every rope's): the simulator's 0.7-1.0 is 2-3 times it,
+  as its touches are (rec-sim's re-touch excess). Switched off after the final review (both rules; the 2 s hang alone:
+  The final review's fixes, below); the user's call whether to tune them again on this world.
+- *(iii) Her table against R1-R3 and the hour* (ROADMAP section 1; scripts/scorecard.py; a minute of her hunting, the
+  mean and its standard error over 48 seeds): EXP 407 (se 7) against R1 394, R2 525, R3 420, the hour 437 (its
+  5-minute windows 346-492); kills 11.4 against 10.2-14.0 (the hour 11.3); casts 19.6 against 18.8-25.7 (22.2); touches
+  7.92 (all hurt) against 4.8-5.25 (4.82), 1.6 times, touched again within 2 s 2.94; HP potions 4.71 against 2.4-3.25
+  (2.6); lowest HP 527 of 858 against 520-542; trips landing elsewhere 0.03 a minute (planner-v83: 0.34; e0beb22's
+  table, her world 148.2 and her planner 125: 0.32); newborns' hurts 0.74 a minute; casts in the air 2.79 a run; no
+  death or safety stop. Against 560bd57's 24 cached seeds this tip is level (EXP -0.8%, t -0.23) but for a rope's top
+  (+41%, t +2.85).
+
+**The replay kit on R1-R3** (`python -m gamelab.sim.replay run --unpaced --jobs 3`, then `score --base 40ba190` with
+GAMELAB_REPLAYS=D:/MapleHelper-scratch/recfix/replay-fix/cache: D:/MapleHelper-scratch/recfix/measure/replay): this
+tip's three dumps are the integration's at WALK_MAX 200 to the byte (recfix/integrate/kit/out/C), so the panel and the
+longer hang change nothing of perception. Against master's cached dumps the differences split cleanly
+(scripts/dumpdiff.py, dumpdiff_split.txt): the integration's dumps at the old cap of 140 differ from master's in the
+monsters' tracks, the state's monsters and the events alone (the kill credit: R1 1,688 frames' tracks, R2 3,078, R3
+3,984), her place never; this tip's differ from those at 140 in her place alone (287, 338 and 310 frames, a median 0.1
+unit, at most 1.2-1.9: the walk cap). The scores (labels-v3, the three together, this tip / master; labels-v3's
+kills were made from master 40ba190's replay and checked by eye only where master's binding and the band order's parted,
+9 kills, 6 put right: so "first binding right" is agreement with master's binding as corrected there, and a kill both
+got wrong isn't checked; a sample of the kills both agree on, labelled by eye, would be the ground truth): onsets 244 / 244
+of 244, 0 false either; births 165 / 165 of 165; touches 71 / 71, 46 by popup each; players the same; kills' first
+binding right 67 / 51 of 71 strong and 144 / 123 of 151, their last 66 / 60 and 144 / 140, let go 10 / 29; her casts at
+her dead left out 16 / 4 (of 18 / 19); monsters under her seen 5 / 4 of 10.
+
+**walkfit, the formula's check** (D:/MapleHelper-scratch/recfix/measure/walkfit; motion.steady's estimator: her steady
+walk on flat ground, Tree's slopes taken out by the v83 rule, against the formula at each one's stat window's SPEED):
+
+| | walk (units/s) | n | SPEED it implies | climb | n | SPEED it implies |
+|---|---|---|---|---|---|---|
+| the magician, formula at SPEED 100 | 150 | | | 120 | | |
+| R1 (its frames) | 149.4 | 6 | 99.6 | 119.9 | 8 | 99.9 |
+| R2 | 148.9 | 14 | 99.2 | 119.4 | 6 | 99.4 |
+| R3 | 149.8 | 8 | 99.8 | 120.1 | 4 | 100.1 |
+| R1's run and the hour (walkfit's runs) | 149.4 | 75 | 99.6 | 119.8 | 57 | 99.8 |
+| the thief, formula at SPEED 101 | 151.25 | | | 121 | | |
+| his hunts of 10-26 22:34-23:47 (walkfit's runs) | 150.9 | 60 | 100.8 | - | 0 | |
+| every Tree scene of his, 10-25, 10-26 and the user's play of 10-30 (the estimator alone: walkfit needs a hunt's records) | 151.19 | 243 | 101.0 | - | 0 | |
+
+Both within a SPEED point of the formula, walk and climb; the thief has no climb measured (his past ropes placed by the
+minimap's dot alone), so his 121 is the formula's, unchecked.
+
+**What's assumed, not measured**: everything above is the simulator's or the recordings', nothing live. Master's
+thief seeds are under the game data's old stamp (spot-checked by work/rec-rope2, not again here). The magician's
+comparisons are this tip's own knobs (no master side exists for her); `planner-v83` holds her planner after her
+hunter's start, so what a hunter makes of her walk while it starts is the formula's (nothing in it reads her walk).
+The rope rule's loss is in her world alone; the thief's world was measured only as the whole against 560bd57 (level).
+
+## The final review's fixes (work/rec-all, 2026-11-02, late)
+
+Two reviews of work/rec-all fee1905 for the supervised RiceBaby grind (D:/MapleHelper-scratch/recfix/final-live and
+final-claims); what each found and what's done (D:/MapleHelper-scratch/recfix/final-fix: scripts, runs, pairs):
+
+- **The rope rule off** (major, both reviews): `navigator.HANG_LONGER` and `HANG_TAKE` are off by default, the 2 s hang
+  alone (`HANG_S`, as at 560bd57), since on the merged world they measured worse for her than it (The whole measured,
+  (ii)) and the touch taken was priced at the hunt's rate, not at "a lot EXP ... above" (TOP_RATE_ABOVE, off and
+  measured worse too). Both stay built: `--world hang-rules` prices them. And the longer wait only on a navigator with
+  a price (a hunter's): a retreat's (the Lie Detector's, the safety stop's) hangs HANG_S at the most, where it could
+  hang to HANG_HORIZON_S (3 s) outside its plan's RETREAT_S.
+- **A stall at a stop** (major, the thief's seed 19 of the standard grind: 123 s at 16, nothing shot, nothing said):
+  a Horny on 15 her memory had alive was held (`Grind._held`) while the fight took it for dead (a kill of hers bound
+  to its track: ledger.dying, fight._targets' dying_seen), so it was no target and no reach step, and its 10 EXP a
+  second held her over the loop's 7.5. Now `_held` leaves out what the fight takes for dead or dying, as the fight
+  does, and STOP_MAX_S (40 s) bounds her waiting on end at a stop with monsters held, neither shot nor stepped to (a
+  backstop event; she'd waited only with nothing held before). Seed 19: EXP a minute 146 -> 289, stuck 78 s -> 0. The
+  kill bound to a live track (the ledger's binding; tracking's for the feed) is left as it was: such a monster is no
+  target for up to 8 of her kills (Ledger.kills[-8:]).
+- **navigator.KNOCK_REACH followed** (minor, both): made again with her walk (`_follow`: its landing slide), where it
+  stayed the import's (53.9) after `set_speed` or `set_planned`; tests/test_panel_speed asserts it. probe.py reads the
+  jump-back times (`actions.JB_*`) at its call, where it took them by name at import (note).
+- **A SPEED from one frame** (minor): one other than the planned is read off a second frame and taken only where the
+  two agree (`StatCheck.speed_again`; Her walk and climb from her stat window's SPEED).
+- **The throw message between versions** (note): a test that the service takes the 3-, 4- and 5-item forms and a
+  client sends the shortest that says what it knows (tests/test_service.py).
+- **Words** (minor, notes): `planner-v83` is master's walk and down-climb, not its climb up (130); the rope rule's turn
+  on the merged world is most likely the climb's, not measured alone; "a rope's top, a climb" is a mean of each seed's
+  ratio (the totals' ratio beside it); labels-v3's kills are checked against master's binding; the formula's source
+  credited as NiaDB asks (meowdb.com/reuse), "measured frame by frame from COT2 video footage"; the buff a kept SPEED
+  can carry; test_walk_speed's fixture a cross-check of motion.steady's, kept apart; test_records asserts its passes
+  aren't empty.
+- *Not defects, or open*: the live test is the merge into master, run from D:/MapleHelper with the service and the
+  pet restarted from it (a hunt from ov-recall writes plans no player reads): the merge's steps, not code.
+  `loop_tree_attack_no_darts` passes by its seed (re-seeded again, 4 -> 13: its docstring); placing its monsters would
+  make it hold. planner-v83 with a stat-window read in the run would lose its hold (none of the harness's grinds reads
+  it): said with the knob, not guarded. The simulator's re-touch excess (below) stays undiagnosed.
+
+**Measured on the fixes** (the harness, 48 seeds paired, not cached: run on the working tree; f_*.json in this lab's
+harness folder):
+
+| a run of 5 minutes, 48 seeds | master 40ba190 | 560bd57 | fee1905 | this | this - master | this - fee1905 |
+|---|---|---|---|---|---|---|
+| the thief: EXP a minute | 317.6 | 304.8 | 302.0 | 299.6 | -5.7% (t -2.02) | -0.8% (t -0.39) |
+| kills | 45.0 | 43.4 | 42.8 | 42.5 | -5.7% (t -2.18) | -0.8% |
+| touches | 82.0 | 63.0 | 62.3 | 62.5 | -23.7% (t -7.12) | +0.4% |
+| ... that hurt | 53.9 | | 41.4 | 40.8 | -24.3% (t -6.24) | |
+| ... again within 2 s | 52.7 | | 33.5 | 34.0 | -35.5% (t -6.67) | |
+| potions | 22.3 | 17.6 | 17.4 | 17.1 | -23.4% (t -5.18) | |
+| stuck (s, a run) | 0 | | 1.6 | 0 | | |
+
+The thief's EXP against master is now beyond 2 se, -5.7%, but master's side is master's world: 560bd57 -> this is
+-1.7% (t -0.59), so it's rec-sim's world (newborns, the touch line, the client's knock: master -> 560bd57 -4.0%), not
+a change of hers told from nothing; 10 of the 48 seeds are the same to the digit as fee1905's. The rope rule for him
+on this code (`--world hang-rules`, cached: baselines/harness/a2cf7ab0.../d4217071a9ff4ca2), off against on: EXP -1.3%
+(t -0.75), touches -0.7%, a rope's top -2.2%, potions -2.7%: level, nothing told from nothing; the held fix alone for
+him (hang-rules against fee1905's tip, the rule on both): EXP +0.6% (t +0.62). `spot` of seeds 3 and 9 of both
+characters' tables on the commit: the same to the digit. Her standard world
+(this against fee1905, the rope rule on there): EXP a minute 426.1 against 407.0, +4.7% (t +2.58), kills +5.1% (t
++2.93), touches at a rope's top -25.7% (t -2.38), potions -8.8% (t -2.02), touched by a newborn +16.9% (t +2.38);
+against fee1905's `hang-2s` (the 2 s hang there too, so the held fix alone): EXP +1.2% (t +1.34), touches -1.4%,
+not told from nothing. Her table against R1-R3 and the hour (a minute of her hunting): EXP 426 (se 7) against 394,
+525, 420 and 437; kills 12.0 against 10.2-14.0; casts 20.5 against 18.8-25.7; touches 7.45 against 4.8-5.25 (1.55
+times the hour's); HP potions 4.30 against 2.4-3.25; lowest HP 528 against 520-542; a rope's top 0.74 a climb (totals),
+4.9 hangs a run, 4.2 up regardless, 0.7 the way clear.
+
+**Goldens** (`golden check --jobs 4` on the fixes: 25 of 44 the same; recorded again into this lab, `--jobs 4`): 17 are
+work/rec-panel's traces again to the byte (D:/MapleHelper-scratch/recfix/panel/golden-p: the 2 s hang, as before
+work/rec-rope2), `loop_tree_grind_jump_key` parts from rec-panel's at 117.2 s (the held fix: the Horny she had just killed
+on 7 held at her stop no more, her sweep of the piles there another; plans from 117.8 s: 34 -> 36 kills, 1199 -> 1296
+EXP, 45 -> 38 touches), `loop_tree_attack_no_darts` is its new seed 13's.
+
+## Records to measure by: the run summary, the trips, the passes, the loop's promise, and walkfit (from 2026-11-02)
+
+The analysis of the three recordings of 2026-11-02 (RiceBaby grinding Tree Dungeon on master 40ba190: R1 00:09:36-00:14:57,
+the hour 00:17:48-00:53:06 with R2 and R3 inside it; D:/MapleHelper-scratch/rec-analysis/plans, ROADMAP item 2) had to
+rebuild every measure from hand-made scripts hard-wired to that day's files and to the 125 units/s her walk was
+planned at, and found the run's own summary wrong. One telemetry pass so the next recorded run can be measured from its
+records alone, and `walkfit`, the walk check every motion fix needs. Nothing she does changes: the records only read
+what's there (the Tree goldens' plans and worlds are byte-identical, their logs too but for loop_tree_grind's last line;
+9 results' report lines changed, below).
+
+**The run summary** (`behavior.hunt.HuntReport`, the 'hunt done' line and a telemetry 'summary' record). R1's said 52
+kills, +1,731 off her EXP number and 80 throws, where the run had 53, +1,798 and 85
+(D:/MapleHelper-scratch/recfix/records). Three causes, each fixed:
+- Her EXP number's first reading came with her first kill. The perception service read the number at its start
+  (00:07:38) and the hunt, attaching at 00:09:36, hears only its changes; its meter took the first change as its first
+  reading, and that kill's 26 were lost. Each 'exp_gain' event now tells the number before it (`before`: worldstate's
+  meter's last reading), which the hunter's meter starts from (`hunter.feed_reads`). Replayed through the meter, R1's 53
+  changes read +1,798 from `before`, +1,772 without (tests/test_records.py, on R1's service records).
+- The navigator's shots clearing her way (4 in R1) count in the hunter's report, not the hunt's. `casts` is now every
+  throw of hers over the run; `throws` stays the hunt's own, what the grind learns its kill time from (Patrol.learn_kills:
+  unchanged).
+- At time-up (00:14:44.0) the hunt stopped counting, and its trip to stand by shot one more Horny (cast 00:14:44.3, its
+  41 EXP at 00:14:44.8). The stand-by's seconds and kills are the run's now (`standby_s`, `standby_kills`); the grind's
+  per-platform credit stays where she hunted. A kill booked after the trip whose EXP showed before the hunt loop was
+  over (its gain's frame time, `Kill.gained`) is the hunt's own, counted and credited as its looks would have (from the
+  review of 2026-11-02, `Hunt._book_after`): the loop's last pass can end on a kill its looks hadn't had yet
+  (loop_tree_grind's Green, its EXP seen by the glance before a throw's key at 180.3 s, had been '1 on her way to stand
+  by' and no platform's credit).
+
+It also says her touches a minute (MISS too), her potions as her HP number's rises of `hunter.POTION_RISE_HP` (100) or
+more tell (her pet drinks them; the analysis counted 15 in R1 and 92 in the hour so), and her lowest HP as the number
+read. R1's, as the summary now writes it: `301 s and 13 s to stand by; grounds [...]; kills: 25 green-mushroom, 28
+horny-mushroom (EXP gains 53, EXP 1798; off her EXP number +1798, 343.6 a minute; 1 on her way to stand by); throws 85
+(5 clearing her way); piles 65; touches 29 (5.5 a minute), 0 MISS; potions 15 (2.9 a minute), lowest HP 527 of 842`
+(tests/test_records.py; the figures the analysis counted off R1's records). The hour's own summary can't be checked:
+that run was killed at 00:53:06 before writing one. Its 'a minute' figures are over the run's minutes, the stand-by's
+seconds with them as its kills are (`HuntReport.minutes`), where summaries before 2026-11-02 went over the hunt's seconds
+alone: the same run reads lower by the stand-by's share of its time (loop_tree_grind_drops, 19 s of 199: 169.6 EXP a
+minute off her number before, 153.6 now, the same +510). Rates quoted from older summaries (the bot's 283 EXP a minute
+against the user's 484, for one) are by the hunt's seconds.
+
+**The records** (telemetry topics as before; the new fields only, each left out where it has nothing to say):
+
+| record | new fields | what for |
+|---|---|---|
+| `session` (a recording command's) | `physics`: character, class, SPEED and JUMP (%), `bonus` (the client's +20, `body.SPEED_BONUS`), walk and climb (units/s) | the walk the run planned her moves at (`motion.physics.record`): walkfit's yardstick |
+| `motion` (new, from work/rec-panel) | `old`, `new` ([walk, climb], units/s), `speed`, `was` (%), `why` (`panel`, `kept`, `profile`) | her planned walk and climb changed with her stat window's SPEED (`behavior.hunter`: Her walk and climb from her stat window's SPEED): walkfit's planned walk as of a chain, and the SPEED it checks the formula at |
+| `scene` (the hunt's looks) | `seq` (the perception service's frame number; its own scenes too), `age` (ms since the frame showed) | a decision matched to its frame: a recording's index.jsonl has the same `seq` |
+| `trip` | `on`, `x` (her last look's place as it ended; the arrival walk's own look), `walk` ([units asked, hold ms] each walk on to x) | an 'arrived' trip off its platform's end shows (P02) |
+| `event` backstop of a pass regardless | `move` [kind, src, dst, x], `blocker` {kind, platform, x, rel: same/above/below}, `waited` (looks), `blocked_s`, `shots`, `why_not` {safe, worth, last_shot: worth None where not safe, not asked}, `episode`, `nth` | why each pass happened; passes of one move within `navigator.PASS_EPISODE_S` (3.5 s) are one episode, so touches are counted once an episode (P04) |
+| `attack` (each throw's) | `track` (the perception service's track of its target), `side` (work/rec-replay's, with the kill credit); its target's kind, platform and x as before (`attacks._target_fields`) | her kill's binding checked live without reconstruction (the replay kit's feed reads `side` and `track`) |
+| `no_cast` | one for every cast her MP refuses (why 'MP', `mp` as reckoned, `cost`); the log still says the 1st, 10th and 100th; its target as an `attack` record's (kind, `platform`, x, `track`: one schema, from the integration of 2026-11-02) | how often her reckoned MP refused a cast (P27) |
+| `sweep` | `to`: the next stop's peeked choice (`peek`: why, stop, travel, expected, seen, gain, skipped; `heading`), else the objective it's the place of, else her spot (`home`) | why a sweep headed where it did (P32: the 00:48:04 descent) |
+| `grind` 'state' and 'end' | `loop_s`, `loop_exp`, `loop_rate` (since the loop was taken up), `promised` (the loop's rate over her looks' time), `delivered` (EXP a minute, her kills' kinds), `rule_s` (s by hunt rule) | the loop's promise against what it gave (P30: 556 against 437 over the hour) |
+| `summary` (new) | the run's figures (`HuntReport.record`): kills, EXP both ways, throws and casts, touches, potions, lowest HP, a minute each, rules and their seconds | one record a run, for its README and its comparisons |
+| the service's `exp_gain` event | `before` [level, EXP]: its meter's last reading, only where that's the number just before the change (none with a change since unread or a jump held for a second reading) | what the hunt's meter starts from |
+
+Not here: a perception record every frame while a hunt is attached (35 MB an hour more; the service's scenes stay
+every other frame), and the 10 s line's plate share split (P26).
+
+Their size: the hour's tour.jsonl was 12,588,941 bytes. At the new fields' sizes in the simulator's loop_tree_grind
+(19.6 bytes a scene, 17.8 a trip, 80.8 a sweep, 185 a backstop, 221 a grind state) and the hour's own counts (5,410
+scenes, 708 trips, 561 sweeps, 155 backstops, 25 states), about 12.79 MB: +1.6%, half of it the scenes' `seq` and `age`
+(D:/MapleHelper-scratch/recfix/records/scripts/sizes.py; estimated, the hour can't be run again). The service's
+perceive.jsonl grows by its scenes' `seq` (about 13 bytes each: its 19,203 scenes of 00:07:38-00:53:06 make about 250 KB,
+0.9% of its 27.2 MB) and by `before` on each EXP change (about 25 bytes, 400 an hour).
+
+**walkfit** (`python -m gamelab.analysis.walkfit RUN [RUN ...] [--planned UNITS] [--character ID] [--speed SPEED]
+[--frames] [--raw] [--json]`; `analysis/walkfit.py`). A RUN is a telemetry folder (a golden clip's `telemetry/` too) or files: the hunt's and the
+perception service's. It reads the planned walk off the run's session record (older runs: `--planned`, else the
+profile of `--character` as the code has it now, said as assumed) and gives, per run and per map: her steady walk
+(median, quartiles, se, n: tag-placed stretches of the service's scenes on one platform, 0.8 s or more, a line fitted
+past her run-up), against the planned and as the SPEED (%) that would plan it; her takeoffs on walk-then-jump first
+legs against the plan's (median, after walks of 100 or more, and against the engine at her measured walk); her steps'
+ratio, gone over asked, over the steps she walked (no stance record before she stood still, gone the way asked); and
+her 'arrived' trips on another platform, with and without a touch 3 s before. `--frames` cuts each recording's folder
+to its frames' span. On R1-R3 (`--planned 125`: her profile then planned 125; `--character magician` now gives her
+profile's 150, Her walk speed):
+
+| run | min | walk: median (IQR) se, n | x planned | late, after 100+ (n) | vs engine at her walk | steps (n) | arrived: off / clean |
+|---|---|---|---|---|---|---|---|
+| R1's grind (tour 00:09:36) | 5.2 | 147.7 (146.5-149.1) 1.5, 13 | 1.182 | +11.3, +32.7 (21) | +3.8, +9.6 | 1.19 (5) | 30: 2 / 2 |
+| the hour (tour 00:17:48) | 35.2 | 148.2 (146.3-150.2) 0.4, 81 | 1.186 | +7.5, +24.9 (108) | +0.1, +3.0 | 1.19 (52) | 210: 18 / 15 |
+| Tree Dungeon, both | 40.4 | 148.2 (146.3-150.2) 0.4, 94 | 1.185 | +8.0, +25.3 (129) | +0.3, +3.9 | 1.19 (57) | 240: 20 / 17 |
+| `--frames`: R1 | 4.0 | 147.9 (145.9-149.0) 2.0, 10 | 1.184 | +14.2, +32.7 (16) | +4.4, +9.4 | 1.19 (5) | 27: 2 / 2 |
+| R2 | 5.0 | 147.5 (146.3-150.2) 0.9, 14 | 1.180 | +7.9, +21.5 (15) | +1.1, +3.7 | 1.20 (12) | 30: 2 / 2 |
+| R3 | 5.0 | 149.4 (145.8-150.6) 1.4, 12 | 1.195 | +6.9, +16.0 (21) | -2.9, -6.2 | 1.15 (7) | 23: 4 / 4 |
+
+The hour's row is the analysis' to the digit but for the steps: 148.2 over 81 walks, se 0.4 (profile_checks.py);
++7.5 / +24.9 over 108 legs, +0.1 / +3.0 at 148.2 (engine_fit.py); 18 of 210 'arrived' trips elsewhere, 15 with no
+touch (arrived_wrong.py). The slope of lateness on walk is 0.219 here over the 108 untouched legs of 20 units or more, 0.164
+in takeoff_check.py over 133 legs with touched ones and walks of 5-20 among them; the touches it leaves takeoffs and steps
+out for go by each touch's own moment (the service's 'touch' events' time less `late`, as the analysts' touch list had
+them). The steps are the ones she walked (from the review of 2026-11-02): 1.19, quartiles 1.16-1.23, over 52 of the
+hour's (57 with R1's). steps.py and walkfit at first took every 'stepping away' record for a step, 68 of 30 units or
+more (1.19, quartiles 1.14-1.22; its "71 steps" the 3 shorter too). But the hunt loop walks a step as it decides it and
+looks again once the hold is over, and the stance says a step a knock holds back again look after look
+(`fight.knocked_move`): 15 of the 68 had their next stance record 0.31-1.18 s before she stood still (bursts like
+00:50:13.8-14.0's 'left 120' three times, held back, then 'right 67' twice, the second walked; what she then walked was
+counted as each), where every walked one's came 0.08 s or more after; and 00:22:52.97's 'left 135' left her 9 units
+right. The median holds (1.191 with them, 1.194 without); R2 1.20 over 12 (was 1.21 over 14), R3 1.15, quartiles
+1.12-1.18, over 7 (was 1.13, 0.18-1.18, over 11: its 0.18 quartile three copies of one held-back step, -80 against 120).
+Tests: tests/test_walkfit.py on two stretches cut from the hour (tests/fixtures/records/hour-cut, 95 KB, every stance
+record in them: the jumps 8->7 of 00:37:57.8 and 00:38:06.6 that ended on 9, the arrival walk off 10 at 00:41:10.99), and
+on a made-up run with a step said again while held back, two walked within STEP_S of each other, and one undone.
+
+**The goldens** that changed, their results' report line alone (plans, logs and worlds identical; 34 of 43 unchanged;
+loop_tree_grind's result credit and its grind's 'kills by platform' log line too, from the review of 2026-11-02):
+
+| golden | what changed |
+|---|---|
+| loop_tree_23 | 1 s to stand by in its rate; touches, potions, lowest HP said |
+| loop_tree_23_near_misses | 57 throws (1 clearing her way), was 56; 1 s to stand by |
+| loop_tree_crowd | 129 throws (14 clearing her way), was 115; 10 s to stand by |
+| loop_tree_grind | 16 kills, +551 off her number, was 15 and +525 (the 16th a Green whose EXP showed at 180.3 s as the loop ended: the hunt's, its credit on 14 in the grind's result and its 'kills by platform' log line, from the review of 2026-11-02; '+1 on her way to stand by' before); 144 throws (3), was 141; 7 s to stand by |
+| loop_tree_grind_drops | 170 throws (4), was 166; 19 s to stand by |
+| loop_tree_mp_runs_out | 1 s to stand by; touches 0 |
+| loop_tree_run | 34 kills (+2 Greens on her way to stand by), +936, was 32 and +884; 215 throws (9), was 206; 16 s to stand by |
+| loop_tree_wait | 189 throws (24), was 165; 3 s to stand by |
+| loop_tree_walls | 210 throws (15), was 195; 2 s to stand by |
+
+**Open.** The potions are rises of her HP number of 100 or more: a Red Potion's 50 isn't counted, a potion and a
+touch between two reads hide each other, and a rise to a max HP the read before didn't say isn't counted (a level's
+refill: from the review of 2026-11-02; a potion with it too). walkfit compares a trip's `dst` with her platform as
+the records name them: a twin platform (MapModel.twins) would read as elsewhere. Old runs have no physics record: their
+planned walk is assumed from the profile now (a run before a speed change needs `--planned`: R1-R3 and every run before
+2026-11-02's walk fix, `--planned 125` for the magician, 149 for the thief). Her walk checked online (ROADMAP item 25):
+built in work/rec-calib and taken out again by the user's "Just use panel, no need to measure." (Her walk and climb from
+her stat window's SPEED); walkfit's walk from then on `motion.steady`'s estimator (her braking tails left out and Tree's
+slopes taken out, where this table's took her x speed with both in; `--raw` gives this table's walk again, 148.2 over
+81 for the hour), with her climb, against the client's formula at her stat window's SPEED (the SPEED each implies).
+
+## Her walk speed: 125 x (SPEED + 20)/100, the client's (from 2026-11-02)
+
+(From work/rec-panel, the same day, her planner takes this formula at her stat window's SPEED, her climb SPEED + 20,
+unmeasured: Her walk and climb from her stat window's SPEED, below. The thief's static 99.2 and the climb's 117 are
+gone.)
+
+The recordings of 2026-11-02 (ROADMAP item 1, P01: D:/MapleHelper-scratch/rec-analysis/plans) found the magician planned
+at 125 units/s and walking 148.2 (81 steady walks of the hour, se 0.4): every timed hold of hers went about 19% too far.
+Her takeoffs came late by about a sixth of the walk before them (+25 units after walks of 100 or more), her steps went
+1.19 times what was asked, and 15 of the hour's 210 'arrived' trips walked her off the end of their platform. The
+planner had taken v83's walk, Physics.img's walkSpeed 125 x SPEED/100 (RustMS's port: `body.Shoe.from_physics`), with
+her stat window's SPEED 100 (`classes/magician.py` FIXED_STATS). The thief's walk had been fitted instead (119.2:
+149 units/s), so it had silently taken in what v83's formula misses. The user, 2026-11-02: "1 in the ranked list need
+solving and probably you should check meowdb and community decoded client specific for this classic world client, and
+find credible source for which value should be used".
+
+**The walk** (`body.SPEED_BONUS`, `body.Shoe.from_physics(..., bonus=)`, `physics.shoe_of`): this client walks a
+character at walkSpeed 125 x (SPEED + 20)/100, SPEED her stat window's clamped to 80-140 first, so the cap walks 200. A
+monster has no bonus: 125 x (1 + its speed/100) as in v83 (`sim.world.JumpSpace.shoe`). The steady speed is exactly
+this limit: the game's 30 ms step clamps her speed at it (both decompiles; `body.ground_step`). The sources, best first
+(saved, with their URLs, commits and terms: D:/MapleHelper-scratch/recfix/walk-research, SOURCES.txt):
+- *NiaDB* (meowdb.com/msclassic/guides/speed-jump-and-movement, Nia Meow, updated 2026-10-27; credited as its reuse
+  terms ask, meowdb.com/reuse): "Walking speed is
+  125 × (Speed + 20) / 100 pixels per second"; Speed 100 walks 150; Classic World "adds 20 Speed behind the scenes";
+  the cap 140 walks 200; climbing is Speed + 20 (120 at the base); the jump works the old way, capped at 120, not v83's
+  123. Measured frame by frame from COT2 video footage (its words), not decoded. Its formulas page ("Atk Spd & Movement") and its
+  calculator (`125*(a+20)/100`, climb `a+20`) are the same source.
+- *The client's own data*, read statically: Map.wz's Physics.img is v83's (walkSpeed 125, walkForce 140000, walkDrag
+  80000, jumpSpeed 555, gravity 2000, fall 670: `body.PHYSICS_IMG`), so the 20 isn't in the data. Tree Dungeon has no
+  info/fs, and its 396 footholds carry no force or drag (163 slope, up to 0.5). Its monsters (speed -20) walk 100: 99 and
+  98 measured.
+- *Community decodes*: ohmi69/osms_datamine_dashboard (7b8da7640a, 2026-10-31; meowdb's game-data cross-reference) has
+  no walk formula. No public decode of this client's walk was found (the executable is protected and wasn't touched).
+  The v83 port RustMS (Player.cpp get_walkspeed: SPEED clamped 80-140, /100; climbing 3 px every 30 ms whatever the
+  speed) and a v40 IDA reading (ComputeMaxVelocity: speedFactor x walkStat x 125.0) show the old formula, which this
+  client departs from. HaRepacker-Resurrected's Classic World datamine (docs/maplestory-classic-world-pastecode_io.md,
+  a Themida-protected build v1.1.0.0 of 2026-04-06; checked in the review of 2026-11-02) has no walk formula, and its
+  MapSimulator's PhysicsConstants.cs models another client (walkSpeed 1250, "Speed 100 = 100 px/s").
+  mscw-guidebook.com's "Speed 100 means 125 pixels a second" multiplies Physics.img by stat/100 and measures nothing;
+  both characters' walks refute it.
+- *Her walks* (by perception at 15 fps, 1 unit = 1 game px at 1366x768; `tests/fixtures/walks_tree_2026.json`, made by
+  walk-research/tools/walk_fixture.py: each walk's braking tail left out, the last 0.15 s, and Tree's slopes taken out by
+  v83's slope rule, uphill at L along the foothold, downhill at (1 + s²) L, x speed that times cos): the magician
+  (stat window SPEED 100, read 2026-11-02 00:19) 149.44 median over 66 walks (bootstrap 90% 149.1-150.0; raw 148.2 over
+  81), the thief (SPEED 101, read 2026-10-30) 151.19 over 243 (150.7-151.75; per set 151.9, 150.8, 151.0, 150.7),
+  against 150 and 151.25. Her climb 119.9 up (183 windows) and 119.6 down, against meowdb's 120. Her takeoffs' lateness
+  stops growing with the walk before them at 152.4 (148.8-155.4). v83's rule makes uphill- and downhill-heavy walks
+  agree within a unit; the v40 rule over-corrects (+2.5 to +5.1), and raw, uphill-heavy walks run 144.
+- Why the raw 148.2: the steady-walk fit takes in each walk's braking tail (-0.6) and Tree's bumps (-0.6), leaving
+  -0.4%, 1-2 se. Not the map-unit scale (her climb and the monsters' walks would be 18.6% off too), not the step
+  overshooting (it clamps), not the map (no fs, force or drag).
+- Measured, not decoded: +20 and x 1.2 differ only above SPEED 100 (200 against 210 at the cap), and meowdb's cap row
+  says 200. The lower clamp under 100 isn't known (meowdb's calculator clamps SPEED to 100-140; the code keeps the
+  decompile's 80, which only the thief's 99.2 below meets: meowdb would walk her 150, not 149).
+
+**What changed.**
+- `motion/body.py`: `SPEED_BONUS` 20, added to the clamped SPEED for a character; `JUMP_RANGE` (80, 120), meowdb's cap
+  (nothing at JUMP 100). `motion/physics.py`: `shoe_of(stats)`, her shoe with the bonus; `SHOE` is it; the session
+  record's `physics` says `bonus`.
+- The magician: her profile's SPEED stays her stat window's 100 and now walks her at 150 units/s (her moves within 0.7%
+  of the thief's, validated on him: a kick from standing 120, a flat running jump carrying 83.3 units, 97.3 with the
+  slide, a landing slide 14.1, a stop 24.3 on, a standing start 119.6 ms behind, a rope side-jump at 195; at 125 they were
+  100, 69.4, 79.1, 9.8, 18.3, 110.6 ms and 162.5; her air steering's 8.93 is Physics.img's alone: walk-research/
+  what_changes.txt). A jump from standing is keyed 150 ms after its arrow at the soonest (`BLIND_ENDS_MS`, the thief's),
+  where at 125 it was 60: at 125 the third of the game's steps (126 units/s) already counted as full speed, so jumps
+  keyed 60-150 ms in could leave at 126, unkicked and short. No config.toml table: her class's profile.
+- The thief: config.toml `[character]` speed and `config.Character().speed` 119.2 -> 99.2, which walks 125 x (99.2 + 20)
+  /100 = 149.0 exactly, as 119.2 did (the float too): her moves, goldens and the harness's cached baselines are as
+  they were. Her stat window's 101 walks 151.25, what she's measured at (151.2): moving to it changes every one of her
+  goldens and master's baseline by 1.5%, so it waited for the simulator's next re-baselining. (From work/rec-calib and
+  work/rec-panel, 101: his walk and climb his stat window's, below.)
+- Her stat window's note (`statcheck.moves_notes`, from `Hunter._stats_read`): SPEED and JUMP compared with her
+  profile's like for like, a point or more apart said with the walk or jump each gives and where her profile's are
+  from (`character.stats_from`): the magician's 100 says nothing; the thief's 101: "her SPEED 101% by her stat window
+  walks her at 151.25 units/s; her moves are planned at 149 (config.toml [character] speed 99.2)". Before, it compared
+  the window with config.toml's fitted 119.2 at every read, and would have named config.toml for her too. (From
+  work/rec-calib her SPEED sets her walk and climb, JUMP alone said here: below.)
+- `analysis/walkfit.py`: the SPEED column is the SPEED that plans the walk by this formula (walk / 1.25 - 20); the
+  profile's walk, where a run has no physics record, is the formula's. R1-R3 and every run before this need `--planned
+  125` (the magician) or 149 (the thief): `--character magician` now says 150, what they would be planned at today.
+- The simulator's world walks the thief at `physics.SHOE` as before (149), and from the integration of 2026-11-02 the
+  magician at her world's own walk, the client's 150 too (`world.MAGE_WALK`: The simulator's magician, which
+  work/rec-sim built at the raw 148.2); its monsters have no bonus. Its stat window shows her profile's SPEED
+  rounded, 99 (was 119): two goldens' log lines, below.
+
+**R1-R3 against the new plan.** walkfit with `--character magician` (150) on the three recordings: her walk 147.7, 148.2
+and 148.2 over R1's grind, the hour and both (13, 81 and 94 walks), 0.985-0.988 of the plan (R2 0.983, R3 0.996; was
+1.182-1.195 of 125); the SPEED that plans it 98.2-99.5, her stat window's 100. Its takeoff, step and 'arrived' columns
+are what happened under 125: those runs keyed at 125. What the plan at 150 would have made of the same keys is an
+offline estimate (D:/MapleHelper-scratch/recfix/walk/scripts/estimate.py, estimate.json): the engine (`body.run_time`,
+`run_x`, `hold_for`, `hold_distance`) gives what a plan at 125 should have produced at her measured walk (each run's
+steady-walk median), each event keeps its residual against that (lags, slopes, perception), and the engine at 150 plus
+the residual is the estimate. Over R1's grind and the hour (40.4 minutes):
+
+| | under 125 (measured) | at 150 (estimated) |
+|---|---|---|
+| takeoffs, median past the plan's (129 walk-then-jump first legs, touch-free) | +8.0 | -0.2 |
+| ... after walks of 100 or more (23) | +25.3 | +2.6 |
+| ... more than the routes' 12-unit slop off, either way (`physics.LANDING_SLOP`) | 48 of 129 | 7 |
+| ... of those after walks of 100 or more | 22 of 23 | 1 |
+| steps, gone / asked (57 of 30+ she walked, touch-free: walkfit's steps) | 1.19 | 0.99 |
+| ... over by 10 units or more | 40 | 0 |
+| 'arrived' on another platform, no touch (17 of 20) | 17 | 4 |
+
+Of the 17 untouched false 'arrived' trips, 13 (R1's 1, the hour's 12) are the arrival walk's overshoot: the hold timed
+at 125 carries her, by the engine at her walk, past her platform's end or within 10 units of it (11-61 units over the
+target, targets 9-48 from the end). At 150 each stops 9.8-52 units inside the end (the nearest the hour's 00:31:19.95, a
+pile 9 from 8's end). The other 4 (asked 8.5-84.5 with 25-363 to the end) aren't the walk's length, and stay. Per
+recording (walkfit's `--frames` spans): R1 1 of its 2, R2 2 of 2, R3 4 of 4 are the overshoot, all 0 at 150 (R3's
+00:48:03.85 and 00:48:58.37 by the engine 0.2 and 6 short of the end at 125, within its spread). Her raw walk is
+taken (148.2); at her 149.4 the steps come to 0.99 too (0.985 against 0.987). The step rows are over the steps she
+walked, from the review of 2026-11-02 (walkfit's `steps`; the same script re-run: D:/MapleHelper-scratch/recfix/
+fix-records/estimate.json); over every 'stepping away' record, as first estimated, they were 73, 0.98, and 42 over by
+10 or more. Not estimated: the jumps after those takeoffs (where they land), and EXP.
+
+**Checks.** tests/test_walk_speed.py (her planned walk 150 within 1.5% of the raw 148.2 and 0.5% of the fixture's
+149.44, v83's 125 more than 15% under; the thief's 149.0 within her 148-151.5 and her stat window's 151.25 within 0.5%
+of her 151.19; each character's walks within 1% of the formula and more than 15% off v83's, raw speeds within 1% too;
+the stat window's note; where her stats are from), tests/test_body.py (the bonus at 100, 101, 99.2 and the cap, a
+monster's without; JUMP's cap 120), the records' and walkfit's tests for the session's `bonus` and the SPEED column.
+tests/test_recordings_physics.py and `analysis.physics_check` replay the thief's recordings at her 149, unchanged.
+Goldens (Tree Dungeon's 43, `--jobs 4`): 41 match. Two re-recorded, each three lines apart and nothing else: the
+simulated stat window shows her profile's SPEED rounded, 99 where it showed 119 (her read's log line, the same line
+in the result's said, and her stats file's kept read, `"speed": 99`); plans, moves and world the same:
+
+| golden | what changed |
+|---|---|
+| loop_tree_stat_window | her stat window's read says SPEED 99, was 119 (her profile's 99.2 rounded: the thief's walk under the client's +20) |
+| loop_tree_stat_window_put_off | the same, at its read 15.0 s in |
+
+No harness run: the thief's walk is 149.0 as before, to the float, so nothing she does changes, and the harness
+didn't play the magician (P41) on this branch (it does from work/rec-sim: The simulator's magician; her runs with her
+planner and her world at 150 are for the measuring of the integration's whole).
+
+**Open.**
+- The thief's SPEED 101 (151.25, her measured 151.2) in place of 99.2: done (Her walk and climb from her stat window's
+  SPEED, below; the user's last word: "Just use panel, no need to measure."). Her SPEED was read on 10-30 only; the
+  hunts of 10-25 and 26 are assumed 101 too.
+- Her climb: meowdb's SPEED + 20 (120) and her 119.9 against `physics.CLIMB_SPEED`'s shared 117 and the magician
+  profile's placeholder 117: done the same way (SPEED + 20 at her stat window's SPEED).
+- `localization/locate.py` `WALK_MAX` 140 capped the place filter's carried walk under both characters' (150, 151):
+  done at the integration (below: The integration of 2026-11-02's roadmap items), 200, the client's walk at its SPEED
+  cap, checked on R1-R3 by item 5's replay kit.
+- Slopes: the planner's closed forms are flat ground. Uphill-heavy walks on Tree run about 144 raw (-4%), so a long
+  uphill walk still ends a few units short; v83's slope rule explains it, the engine doesn't model it.
+- Tree Dungeon only, at 1366x768. Physics.img is every map's and the 20 is the character's, so the formula holds
+  everywhere, but a map's fs, a foothold's force or drag, or swimming can change a walk (none of the 10 cached maps has
+  fs). Her walk checked online (ROADMAP item 25): built in work/rec-calib, taken out by the user's "Just use panel, no
+  need to measure."; walkfit checks a run's records against the formula offline, per map.
+- `analysis.physics_check` and its `NOW` model took the walk of the character the process plays: from a checkout whose
+  lab plays the magician, it replayed the thief's recordings at 150, not her 149. From the review of 2026-11-02 they
+  take the thief's (`physics_check.SHOE`, her profile's), whoever plays: for the thief physics' own, to the float.
+
+## Her walk and climb from her stat window's SPEED: the client's formula, unmeasured (from 2026-11-02)
+
+**The formula.** Her walk is 125 × (SPEED + 20)/100 units/s and her climb, up or down a rope or a ladder, SPEED + 20
+(`physics.walk_of`, `climb_of`: Physics.img's walkSpeed 125, the 20 Speed this client adds behind the scenes, meowdb's
+speed guide and calculator, Her walk speed above), SPEED within the client's 80-140 first (`body.SPEED_RANGE`: the cap
+walks her 200 and climbs her 160). Her stat window's SPEED is what it's taken at: the thief's 101 walks him 151.25 and
+climbs him 121, the magician's 100 walks her 150 and climbs her 120.
+
+**The user's decision.** work/rec-calib (the same day) had her walk and climb measured from perception's place track in
+every hunt, kept per character and followed by her planner, correlated with her stat window's SPEED (the user at 12:45:
+"I feel this should just be measured and updated dynamically and persisted, constantly calibrated."). Shown that the
+formula and the measures agree (her walk 150 against 149.45 over 75 walks of R1-R3, her climb 120 against 119.88 over
+58, the thief's walk 151.25 against 151.2 over 243), that measuring costs about 2 µs a frame, and that following the
+measure mostly chases its noise (R1 alone would have moved her climb 120 -> 119.6) through the riskiest machinery
+(her walk rebound in every module mid-run), and asked whether to plan by the panel's formula and keep measuring as a 5%
+check, the user, about 18:40: "Just use panel, no need to measure." So (work/rec-panel, off work/rec-calib 4361f5b):
+her planned walk and climb are her stat window's SPEED's by the formula, with no measuring in the hunt; walkfit
+measures a recorded run offline against the formula (ROADMAP item 2).
+
+**When it's set** (`behavior.hunter`; `physics.set_speed`, `propose`, `settle`):
+- *At her hunter's start* (`Hunter._speed_start`), at once (no chain of hers runs yet): the SPEED her stats file kept
+  from her last read of her stat window (`lab/her_stats.json`'s `window.speed`, `HerStats.window_read`: the SPEED taken
+  then, `"kept"`), else her profile's (the thief's `config.toml [character]` 101, the magician's class profile 100:
+  `"profile"`). A stats file from before this keeps the read's SPEED alone (`window.read.speed`): it's judged as a
+  read would be against her profile's (below), and taken (`"kept"`) or not, said.
+- *At a hunt's start* (`Hunter.read_stats(at_start=True)`, from `gamelab.__main__`'s `_hunter`, and the simulator's
+  `stat_run`): her stat window's SPEED (`Hunter._speed_read`, `"panel"`), at once once the read is over
+  (`physics.settle` in `read_stats`).
+- *Put off into the hunt loop* (no quiet moment at the start: `StatsDue` from `Hunter.health_check` at a quiet look, the
+  read in the loop's handler): proposed (`physics.propose`) and made at the loop's next pass or a navigator's pass
+  (`physics.settle`: `Hunt.run`'s loop, `Navigator._follow_walk` at `Navigator.step`'s start), where no chain of hers
+  runs, so a chain already playing keeps the timings it was planned at. In the simulator (`tests/test_panel_speed.py`,
+  her stat window showing SPEED 104 among monsters): put off at 0.02 s, read at 11.9 s, her walk 151.25 -> 155 at the
+  loop's next pass the same instant, the plan before it ending at 11.26 s and the next sent at 12.0 s at the new walk.
+
+What's made again (`physics.set_speed`, as work/rec-calib built it for its measure): every name of `physics.WALK_NAMES`
+(her shoe, walk, climb, the run's lag, the stop, the slide, the hold's per-ms, the blind spot's end, the kick) by the
+expressions at each (`_derive`; the test holds them to the import's at her profile's SPEED), rebound in every gamelab
+module that took one by name (`from .physics import WALK_SPEED`), then each module's own made of them
+(`physics.follows`: route's rope jump, grab lead and slide, flow's grab lead and climb up `flow.ROPE_SPEED`, actions'
+jump back keys, navigator's climb up and walk-off lead), and `physics.EPOCH` counted on: a navigator seeing it changed
+makes its route graph again at its next pass (0.1-0.3 s on Tree Dungeon). Her SPEED planned is `physics.SPEED`. In the
+game a change is rare (her gear, her SPEED's read once a session), and her profile's SPEED is the window's for both
+characters, so at most hunts nothing changes and nothing is said.
+
+**A misread** (`statcheck.speed_doubt`, the review of 2026-10-28's rule for the window's other values): a SPEED outside
+the client's 80-140, or more than `SPEED_STEP` (10) from both what's planned and her stat window's last read kept, is
+no read: said ("her stat window's SPEED 131 not taken (+30 from the 101 planned: more than gear gives between two reads;
+a misread?): her walk and climb as they were, SPEED 101") and the SPEED planned kept (her last good one, else her
+profile's). 10 is a guess from meowdb's speed guide: between two reads her gear plausibly moves her SPEED less (shoes
++1 to +4, capes +2 and +3, a Speed Potion +8); a thief's Haste (+10 to +30, a second job's skill neither character
+has) is a buff for minutes, which a read shouldn't plan a hunt by (one read under it, taken, is kept in her stats file
+and plans her next hunter's start too, till the window is read again). Each read is kept as read, so a real change past
+10 (new gear) is taken at the next read that agrees with it; the file keeps the SPEED taken apart from the read's. From
+the final review of 2026-11-02 a SPEED other than the one planned is also read off a second frame of the open window
+(`StatCheck.speed_again`, one more OCR pass, only then) and taken only where the two agree, else said ("her stat
+window's SPEED 104 not taken (a second frame read 108; a misread?): ..."): one frame's misread within 10 (108 for
+100) would have planned her 6.7% fast till the next read (her W.DEF once read 711 for 111; the 49 SPEED reads in the
+telemetry so far are all 100 or 101).
+
+**Said and recorded.** A change of her planned walk and climb is one line in her log and one `motion` record (old and
+new walk and climb, the SPEED, the one before, why: `panel`, `kept` or `profile`): "her walk 151.25 -> 155 and climb
+121 -> 124 units/s: SPEED 104, her stat window's, by the client's formula". The session record's `physics` says the
+SPEED, walk and climb planned when it's written (`physics.record`); walkfit takes a chain's planned walk as of its time
+from them.
+
+**The simulator.** Its world moves each character at the formula's truth from her profile's SPEED
+(`physics.PROFILE_SHOE`, `PROFILE_CLIMB`; `world.her_shoe`, `her_climb`: the thief 151.25 and 121, the magician
+`MAGE_WALK` 150 and `MAGE_CLIMB` 120), up and down alike, whatever her planner is set to; its stat window shows her
+profile's SPEED, so her planner plans the same. `world.Her.walk_speed` and `climb_speed` set the world apart from it,
+and `--world walk-planned` puts both back at her profile's, to price a planner's error (for both characters now the
+same walk). Against work/rec-calib's traces (Tree Dungeon's 44, recorded here into D:/MapleHelper-scratch/recfix/
+panel/golden-p, `--jobs 4`, and checked again there: 44 of 44 deterministic; compare_goldens.py, golden_vs_calib.txt):
+12 the same; 28 the same but for rec-calib's run-scoped her_motion.json among the run's files; the two stat-window
+scenarios the same but for her stats file's `window.speed` (101, the SPEED taken); `loop_tree_23` and
+`_23_near_misses`, recorded there before their re-seed, run here at their old seed 1 give rec-calib's traces exactly.
+Every re-seed work/rec-calib made is the thief's 151.25 and 121's, none the measuring's: each old seed fails here as
+there, each new one passes (D:/MapleHelper-scratch/recfix/panel/old_seeds.txt): `loop_tree_safety_stop` 1 (an attack
+or the mouse after the stop) -> 2, `loop_tree_out_of_darts` 2 (not on a safe place) -> 1, `loop_tree_attack_no_darts`
+11 (no MAYBE OUT) -> 9, `loop_tree_23` 1 (10 kills) -> 3 (18), `_23_near_misses` 1 (10) -> 2 (21), the rope test 4 (the
+safety stop before the rope) -> 1, the heading test's knocks 25 -> 4 and its eight seeds 1-8 (not met) -> 9-16.
+
+**walkfit, the offline check** (`python -m gamelab.analysis.walkfit RUN ... [--speed SPEED]`): her steady walks and
+climbs measured from a run's perception records by `motion.steady` (the estimator work/rec-calib built: a walk's
+run-up and braking tail left out, Tree's slopes taken out by the v83 rule; climbs up and down apart; `--raw` the walk
+with its tail in and no slopes out, as before), against the client's formula at her stat window's SPEED (the run's
+`motion` records', else `--speed`, else the session's): the walk and climb it gives, the SPEED each measure implies,
+and that less the window's. R1-R3 at `--speed 100` (D:/MapleHelper-scratch/recfix/panel/walkfit_r1r3.txt): R1's grind
+149.8 over 9 walks (SPEED 99.8, -0.2) and 119.5 over 10 climbs (99.5); the hour 149.4 over 66 (99.6, -0.4) and 119.9
+over 47 (99.9; up 120.1 over 42, down 119.6 over 5); both 149.4 over 75 and 119.8 over 57, against 150 and 120. The
+thief's Tree runs of 10-25 to 30 by the same estimator: 243 walks, 151.2 (SPEED 100.95) against his 101's 151.25; his
+climbs then were placed by the minimap's dot alone, none taken.
+
+**Taken out** (work/rec-calib's, nothing of them left): the online measure (the hunter's `motion`, its look and glance
+listeners, `Feed.since`), her motion file (`paths.MOTION`, lab/her_motion.json, `Store`), the evidence rules (10 walks or
+6 climbs, the 0.75 and 2.0 errors, the 5% gross rule, the 0.4 deadband), the measure-against-panel warnings in the
+hunt, `walkfit --seed`, the simulator's online calibration (`physics.reset` at each run, its run-scoped file,
+`Hunter(motion=...)`), `--world prior-v83` and the harness's `calibration` outcome, `physics.calibrated`, `pending`,
+`PRIOR_SHOE` and `PRIOR_CLIMB` (now `PROFILE_SHOE`, `PROFILE_CLIMB`). The estimator moved from `motion/calibrate.py` to
+`motion/steady.py`, its fixture to tests/fixtures/steady.
+
+**Checks.** tests/test_panel_speed.py (the formula and both profiles; `set_speed` making every name again wherever it
+was taken, `reset` back to the import's; propose and settle; a navigator's graph made again at its next pass, a move
+planned before keeping its time; `speed_doubt`; her hunter's start from her stats file, an old file's read, a broken
+one; a misread not taken and two reads agreeing taken; in the simulator a read at a hunt's start at once and one put
+off into the hunt loop made between her key plans), tests/test_steady.py (the estimator on the fixture), test_walkfit
+(the formula's check, a `motion` record's SPEED and walk), test_statcheck (the read's SPEED taken from the next settle,
+kept), test_records, test_sim, test_jump_reach (`set_speed(99.2)` for its geometry at 149).
+
+**Open.**
+- Live, untested: the next grind is the check (her log's line, if her stat window reads other than her profile; walkfit
+  on its records against the formula).
+- Her climb is one value up and down (the formula's; she climbed 120.1 up and 119.6 down); the climb-over at a rope's
+  top (`flow.UP_EXTRA`, `CLIMB_OVER`) isn't the formula's.
+- The planner's closed forms are flat ground (slopes are taken out of walkfit's measure only).
+- The thief's goldens and the harness's thief baseline (master's cache) were recorded at his old walk (149, the world's
+  climb 130 up and 117 down): the integration re-records and re-baselines them.
+- `probe.py` takes JB_RUN_MS, JB_TURN_MS and JB_THROW_MS from actions by name and doesn't follow a change; BLIND_ENDS_MS
+  is 150 for any walk from 134 to 168 (SPEED 88-114), so a read in that range leaves them as they are.
+
+## Hanging under a rope's top until the way up clears (from 2026-11-02)
+
+The roadmap of 2026-11-02 (D:/MapleHelper-scratch/rec-analysis/plans: ROADMAP.md item 9, problems.md P08, plan-touches.md
+B as critique-touches.md revised it), from the three recordings of RiceBaby grinding on Tree Dungeon (master 40ba190):
+19-23 of the hour's 170 touches came at the top of the rope at x -80 from 11 to 10, the camp's only way in (11 of them on
+the rope, 16-48 under its top), over 68 climbs up it; 24 of those climbs went past a Horny Mushroom regardless (NO_WAIT),
+about 13 were the mover's lone climb move, which nothing watched for the top, and a climb planned clear had a Horny walk
+to the top meanwhile with nothing reacting until the touch (CLIMB_LOOK only after one). On the frames of R2 #8 (f1648),
+R2 #24 (f4270) and R3 #34 (f1469) a Horny Mushroom on 10 stands or walks beside the rope's top each time, the touch as
+her head comes up past 10's surface (D:/MapleHelper-scratch/recfix/rope: r2_08.png, r2_24.png, r3_34.png). The user
+(2026-11-02): "5, 6, 7, 8, 9 in the roadmap ranked list seems to be safe and important work to carry on, do them now."
+
+**What she does** (`control/navigator.py`, `ROPE_HANG`): while she climbs a rope up to the platform at its top, her
+glances check the way up from the newest state (`_way_up`): the rest of the climb (at physics.CLIMB_SPEED, SPEED + 20
+by her stat window: the thief's 121, hers 120; 117 until the merge of 2026-11-02), her climb-over (flow.CLIMB_OVER) and
+STAND_PAST_S standing at the top, her box all the way (flow.danger, the client's box: 22 either side, 65 tall), against every monster of the state whose touch counts, on
+any platform (a walker on 9 by its left end, 40-60 over 10 there, can touch her as she climbs over the top at -80 too),
+each walking as followed (TURN_SLACK and 20 units a second of spread, as every chain plans them), a standing one setting
+off either way for HANG_UNSURE_S (0.3 s) at the most. Where it isn't clear she stops on the rope HANG_UNDER (80) under
+the top (`_hang_due`), deeper where the platform at the top dips under the rope's top within a monster's reach of it
+(`_hang_drop`: 9.7 at 111, 4.8 at 146, 1.5 at -192, none at -80 and -8): the cut lets go of every key and the game keeps
+her where she is on a rope. It's decided at the glance before the one that would be too late, from her dot's height less
+what she climbs in the frame's age and the game's lag in letting go of up (HANG_LAG_S, body.Lags.off), at
+flow.ROPE_SPEED; past HANG_FLOOR (70 under, deeper as HANG_UNDER is) it's too late and the climb goes on as before; not
+while the glance's state has her in the air (the jump at the rope, whose top is 5 over where she grabs it: a cut there
+would let go of up before she holds the rope); and only where the hang itself is clear of every monster for HANG_S
+(`_hang_safe`). Then she hangs (`_hang`), looking at every state: once the way up is clear she climbs the rest, held as
+her climb on after a touch holds it; after HANG_S (2 s) she goes up regardless (a backstop event `HANG_S`, as a pass
+regardless goes), longer where the monsters in the way are predicted to walk off, and at once where the wait costs her
+more than the touch (How long she hangs, below); a touch while she hangs ends it too (her invulnerability takes her
+past). A touch in the hang or in
+the climb after it, told then or later (the popup's lag), is the cut's (POST_HIT: no fight while her invulnerability
+lasts, so the next chain passes the monster in it, as after a touch on the rope). The Lie Detector seen at a glance in
+the hang stops it there, as a pass's check does: no key goes out (the climb up the rest isn't sent) and the hunt stops
+then, where it waited out the hang (in loop_tree_lie_detector_grind's run with the sighting moved into its first hang,
+the hunt stopped 0.55-0.85 s after it, now 0.016-0.049 s: D:/MapleHelper-scratch/recfix/rope-fix, ld_on.txt).
+
+Every climb path: a chain's climb (`_watching`: `_hang_check`, the plan's Climb whose time is now and her dot on the
+rope above where she grabs it), the mover's lone climb move (`_move_watch`: the move cut, `HUNG`, and `_carry_out_move`
+hangs her), and a touch on the rope with the top taken (`_climb_on`, CLIMB_LOOK: down to HANG_UNDER only and the hang
+there, where it went down the whole rope; down the whole rope still where the hang place isn't clear). A cut for a hang
+isn't a miss (`st.stopped`). Each hang is a telemetry event `rope_hang` at its start (step `hang`: x, how far under) and
+its end (`clear`, `touched`, `regardless`, `waited` or `took`: s, what blocked the way, the longer wait's s, the touch's
+numbers), and in it `longer` and `back` (below), for the records of the next live run.
+
+**What the hang does, by the numbers** (the simulator's thief world, the standard grind below; the review of
+2026-11-02, D:/MapleHelper-scratch/recfix/review-rope: hangs.py, anal.py; counted again after its fixes on seeds 1-96,
+D:/MapleHelper-scratch/recfix/rope-fix): the way up seldom clears, and much of what the hang saves comes from what
+follows it. Of 476 hangs (355 at -80, 76 at -8, 41 at 111, 3 at 146, 1 at -192) 434 went up regardless after HANG_S
+and 42 cleared; 434 (91%) were followed by a touch at that rope (on it, or standing within 40 of it after the climb)
+within 3 s of the hang's end, 410 of the 434 and 24 of the 42; none was touched in a hang. A Horny at its point on 10
+(x -109, 29 from the rope at -80) or a Green at its point on 18 (x 39, 47 from the rope at -8) is within the 50 (her
+box's 22 and its 28) of the rope's top: standing there it blocks the top for good (at 7dd45bf, at the ends of the
+regardless hangs of seeds 1-24 a monster's middle was within 50 of the rope on the top platform in 94 of 115, 60 of them
+chasing her: the walkers world's aggro). After the hang the rest of the climb goes up in one push, unwatched
+(`hang_up`), and the touch in it is the cut's (POST_HIT), so the base's runs of 3-5 touches at one rope's top within 6 s
+(0.71 a run, about 2.7 touches) are nearly gone (0.04 a run, at 7dd45bf). Hanging only where `_climb_on` did, after a
+touch on the rope (24 seeds, at 7dd45bf), gave the base back (rope-top touches +2.1%, EXP -1.0%); in a world without the
+near-misses and the walkers (12 seeds) the hangs went the same way, 58 of 62 up regardless, 56 of those touched after.
+The wait does the rest: the same stop with no wait (HANG_S 0, then up the rest at once, unwatched, a touch the cut's)
+keeps only part of the saving at 96 seeds (below). Which part of the wait pays, where the judge so seldom calls the way
+clear, isn't taken apart.
+
+**Where she's out of reach** (tests/test_rope_hang.py): with her feet at the band's top or lower (HANG_FLOOR, 70 under,
+and the rope's `_hang_drop`), no Horny or Green Mushroom (28 either side, 56 tall) standing on the platform at the
+rope's top inside its walk edges can overlap her box, on every rope of Tree Dungeon with one, 4 units to spare; nor one
+on 11 under the rope at -80; at 48 under -80's top (R2 #24) one on 10 does. The deepest a monster at the top reaches
+her (the review's geom.py): 63.5 under -80's top, 64 under -8's up to 18, 65 under -8's up to 27, 66.5 under -192's,
+70 under 146's and 75 under 111's, where 18 slopes down to -883.3 at x 61 under the rope's top at -893: before the
+review the band there began at 70, in reach (`_hang_drop`). On Tree Dungeon's long ropes (190: -80 from 11 to 10, 111
+and -8 up to 18) she grabs 163-176 under the top, on the short ones (115-116: 146 from 32, -192 from 31, -8 from 30 up
+to 27) 104-116 under, all under the band, and -8 from 29 81 under, in it (route.grab_height): she hangs on the short
+ones too.
+
+**She can't cast on a rope**: the game refuses any skill there ("That cannot be used while you're on a rope or
+ladder.", read live for Lucky Seven on 2026-10-26: The top of a rope, above; the line names no skill), so a hang does
+nothing but wait.
+
+**The live hour, as an oracle** (D:/MapleHelper-scratch/recfix/rope/oracle.py, oracle.txt): of the hour's climbs the
+perception service's scenes show her 100 or less under the top of -80 (35 of the 68), the top was free for the 1.3 s
+of the rest of the climb, the climb-over and STAND_PAST_S at once on 20 (1 touched); on the other 15 (all 15 touched)
+the monsters as they really went freed it within 1 s on 5, 2 s on 8, 4 s on 11 (the last four at 4.2-8.2 s). So a hang
+can save at most about 11 of those 15 (8 within 2 s), at a median 1.5 s each, if it judged the way up as well as
+hindsight does. The simulator's judge says clear on 42 of 476 hangs: its thief world's monsters stand at the ropes'
+tops (their points within reach) more than live's, or the judge is warier than hindsight; the live 'rope_hang' events
+will say which.
+
+**In the simulator.** Its measure, the harness's `rope_tops` (sim.world's climb_log, grab_log, touch_place: her climbs
+up a rope, her grabs of one from below, her touches on a rope or within 40 of a rope she climbed over 2 s or less before;
+and the hangs from the 'rope_hang' events), in its own commit with nothing she does changed (the standard grind's 12
+seeds master 40ba190's cached results to the digit but for it). The thief's world has far more of them than live: 127
+over 92 grabs on the standard grind's 12 seeds, 1.38 a grab, against live's 0.3 a climb.
+
+`nav_tree_rope_top_10` (new): from 11 up to 10, a Horny Mushroom walking 10 by the top; on seed 8 she hangs 0.5 s 83
+under it and goes up untouched, on 10 0.5 s later than without the hang (touched on the rope 50 under, damage 118). On
+seeds 1-12, hang on against off (seeds_hang.py, seeds_top10e.json): touched on 2 of the 12 trips (1 on the rope) against
+5 (4 on the rope); 4 hangs, 2 up regardless after HANG_S (one of those touched); the 12 trips 54.2 s against 48.7.
+
+The standard thief grind (`ab loop-grind --map 10002073 --preset crowd --attack choice --costs measured --world
+zero-walls --world near-misses --world walkers --minutes 5`), seeds 1-48 against master 40ba190 (its cached results;
+rope-top touches on seeds 1-24, against the metric's commit 8008c01, the same as master's to the digit but for the new
+key): each row's difference with its t; 4 s and 2 s at 7dd45bf the builder's and the review's runs
+(D:/MapleHelper-scratch/recfix/rope, review-rope), the rest after the review's fixes (rope-fix: cand_*, hang0_*):
+
+| | EXP a minute | touches | that hurt | at a rope's top | hangs a run (up regardless) | hanging s | s a trip's arrival |
+|---|---|---|---|---|---|---|---|
+| master 40ba190 | 317.6 | 82.0 | 53.9 | 9.79 | - | - | 0.86 |
+| HANG_S 4 s (7dd45bf) | -4.2% (t -2.21) | -9.3% (-3.31) | -12.3% (-3.90) | -28.5% (-2.85) | 4.9 (4.2) | 18.3 | +23% (+4.9) |
+| HANG_S 2 s (7dd45bf) | -0.7% (-0.38) | -6.5% (-2.38) | -8.4% (-2.66) | -21.3% (-2.36) | 4.9 (4.5) | 9.7 | +9.1% (+1.94) |
+| **HANG_S 2 s** (as committed) | -0.3% (-0.14) | -6.6% (-2.38) | -8.2% (-2.53) | -19.1% (-1.93) | 5.0 (4.5) | 9.8 | +10.4% (+2.20) |
+| HANG_S 0 | +3.3% (+1.89) | -3.8% (-1.29) | -4.7% (-1.42) | -24.7% (-2.82) | 4.8 (4.8) | 0 | -6.1% (-1.56) |
+
+HANG_S 0 against 2 s, paired, the same code: seeds 1-48 EXP +3.6% (t +1.83), touches +3.0% (+1.09), that hurt +3.9%
+(+1.19), at a rope's top -2.9% (-0.38), a trip's arrival -14.9% (-3.19), as the review's 48 at 7dd45bf (EXP +3.5%, t
++1.75; touches +1.0%); seeds 49-96 EXP +0.0% (+0.02), touches +8.3% (+2.58), that hurt +6.7% (+2.04), at a rope's top
++14.6% (+2.02); seeds 1-96 EXP +1.8% (+1.21), touches +5.6% (+2.65), that hurt +5.3% (+2.28), at a rope's top +5.9%
+(+1.11), a trip's arrival -13.1% (-4.25).
+
+No death, fall out of the map or stop in any (96 seeds of each of 2 s and 0). 4 s costs EXP beyond two standard errors
+against master (-4.2%, t -2.21; against 2 s -3.5%, t -1.56). 2 s, as committed, saves 6.6% of the touches (a fifth at
+the ropes' tops) with EXP level and trips 10% longer. Without the wait (HANG_S 0) the first 48 seeds kept most of that
+and earned more; at 96 the wait's share of the saving is plain (touches +5.6%, t +2.65, against 2 s) and the EXP isn't
+(+1.8%, t +1.21): 2 s kept, the user's to change (one constant; the next supervised grind's 'rope_hang' events say how
+often the top clears live within it). Two prototypes of a better judge of the way up did worse (the review, 24 seeds
+each at 7dd45bf: a hang only where a climb set off within HANG_S is predicted clear was right 2 of 21 times, touches
++5.5% (t +1.28) against 2 s; the hang's end judged by each monster's likeliest place, no turn slack or spread, cleared
+52 of 141, 39 of those touched after, EXP -5.1% (t -1.88)).
+
+Goldens (Tree Dungeon's 44): 24 the same; `nav_tree_rope_top_10` new; 19 recorded again for the hang at 7dd45bf, each
+apart from its first hang on (the commits say where, each). After the review's fixes 11 again (loop_tree_run,
+loop_tree_walls, loop_tree_grind, loop_tree_grind_drops, loop_tree_lie_detector_grind, loop_tree_grind_attack_key,
+loop_tree_attack_unbound, loop_tree_attack_misses, loop_tree_attack_misses_seen, loop_tree_grind_lucky_seven_key,
+nav_tree_rope_hit), each from its first hang at 111 (at 146 on loop_tree_run) on, now 8-17 deeper under the top
+(`_hang_drop`): 9 end with the same touches, kills and EXP, `loop_tree_grind` (touches 52 -> 66, EXP 510 -> 458, 187 ->
+196 s) and `loop_tree_grind_lucky_seven_key` (39 -> 45, 1,407 -> 1,191) go otherwise from there, as a single seed's
+run does. Every one meets what it's there for. The Green Mushroom's point on 18 is at x 39, 47 from the top of the rope
+at -8 and 72 from 111's, so in the goldens that climb to 18 the hangs mostly run to HANG_S: of the 38 hangs in the 18
+grinds and hunts among them at 7dd45bf, 32 went up regardless (touches 520 -> 543, EXP 12,689 -> 11,760 in 3,010 s ->
+3,063; 15 of the 18 lower in EXP a second). That drop isn't the harness's: per golden its median -7.1%, mean -4.8% (se
+7.0), and the goldens are variants of a few starts and seeds (`grind_attack_key`, `jump_key`, `lucky_seven_key`,
+`attack_unbound`, `remembered_keys` one start), `rope_top` and `rope_top_15` losing rate only by 7 s more of run with
+the same EXP; the 48 seeds say EXP level (-0.3%, t -0.14), the cost they show is a trip's time (+10%, t +2.2).
+`nav_tree_rope_hit` expects the hang (97 under for 2.1 s, up regardless, touched on the rope then, a MISS, on 16 at 7.1
+s with 1 touch where 5.1 s with 1); her climb on after a touch (CLIMB_ON) is shown by tests/test_rope_top.py,
+test_evade.py and test_touches.py, without ROPE_HANG.
+
+**How long she hangs, and the touch taken** (work/rec-rope2, from 2026-11-02, on work/rec-all 560bd57). The user,
+asked whether she hangs 2 s or 4 s: "If the mob is moving and has an expectation to clear the area soon, then we may
+wait a bit longer, but otherwise 2s is what we wait. And sometimes it may make sense to just take the damage if there
+are a lot EXP to earn by killing off mobs above." So HANG_S stays 2 s, and the wait is judged at the hang's start and at
+every look of it (`_hang_judge`):
+- *Longer for walkers* (`HANG_LONGER`, `_walks_off`, `_off_walk`). Where every monster in the way up (the planner's
+  reach, as `_way_up` has it) walks, the state's monsters are walked on as each is followed (its heading, its kind's
+  speed from the game data, turning at its platform's walk edges, as the simulator's v83 AI walks one through a
+  decision) and the first set-off d s from now whose climb, climb-over and STAND_PAST_S at the top meets none of them is
+  the predicted clear: she hangs till it and `HANG_MARGIN_S` (0.3 s), where that's past HANG_S, `HANG_HORIZON_S` (3 s)
+  or less from the hang's start, and her hang place clear that long. Re-judged at every look (the margin from the look
+  that first has the way clear already); a look with no clear in time has HANG_S (up at once if that's past); a walker
+  turning or stopping off its predicted walk (away from its walk edges, where it turns as predicted) puts it back to
+  HANG_S for the rest of the hang. One standing in the way gets no longer wait.
+- *The touch taken* (`HANG_TAKE`, `_take_now`, `_knock_cost`; `Hunter.top_price`). She climbs at once where the rest of
+  the wait at her EXP a second (the hunt's: the grind's loop's rate, as her landings are priced,
+  behavior.fight.landing_prices) costs more than the touch: the blocking kind's touch (Danger.taken of her max HP) in
+  potions at the user's prices (HP 2 a meso, MESO_EXP) times the share of her touches that hurt, and the s its knock
+  would lose her at that rate (none on the rope, where the game keeps her; standing at the top the knock's flight; a
+  knock off the top platform, the planner's way back up). Never with her HP under the safety stop's reserve and that
+  touch, nor in a navigator a hunter didn't make (a retreat's). After a touch on the rope with the top taken
+  (`_climb_on`) she goes up again at once so, where she went down to hang. The Lie Detector and the safety stop are
+  raised at the hang's glances whatever it chose. What the grind expects on the platform at the top (its stop there: the
+  monsters seen and the belief's, their EXP, her share and kill time: `Grind._ground_rate`) as her time's worth there
+  where more (`behavior.hunter.TOP_RATE_ABOVE`) is off: measured worse (below).
+- *Its records*: 'rope_hang' events `longer` (when it first goes past HANG_S: the predicted clear, the walkers, the
+  wait), `back` (why), and the ends `waited` (up at the longer wait's end, no backstop event) and `took` (`left`, `rate`,
+  `wait_exp`, `touch_exp`, `knock_s`); the harness's `rope_tops` counts each end (`hang_clear`, `hang_waited`,
+  `hang_took`, `hang_touched`, beside `hang_regardless`) and `hang_longer`.
+
+**Chosen on the harness** (D:/MapleHelper-scratch/recfix/rope2: hangs2.py runs each variant by its switches, compare2.py
+pairs seeds, perhang.py the hangs; the base work/rec-all 560bd57's 2 s hang, cached for both worlds,
+which the switches off reproduce to the digit on 4 seeds of each): the thief's standard grind and her standard world
+(The simulator's magician). HANG_LONGER alone, seeds 1-24, against the 2 s hang (EXP a minute, touches at a rope's top;
+t in brackets):
+
+| horizon, margin | the thief | she |
+|---|---|---|
+| **3 s, 0.3 s** | +2.3% (+1.30), -11.2% (-1.94) | +0.1% (+0.12), -9.0% (-1.49) |
+| 4 s, 0.3 s | -0.2% (-0.05), -9.9% (-1.18) | +1.0% (+0.65), -18.0% (-1.83) |
+| 3 s, 0 | -1.8% (-0.62), -6.4% (-0.85) | +1.8% (+1.15), -17.2% (-2.56) |
+| 3 s, 0.6 s | +2.5% (+1.27), -9.4% (-1.67) | +0.1% (+0.34), -4.9% (-1.00) |
+| 2.5 s, 0.3 s | +1.5% (+1.31), -3.0% | one seed of 24 changed |
+
+3 s and 0.3 s is the one setting better on both measures in both worlds; none is told from nothing at 24 seeds. Why not
+longer: a walker's decision lasts 1-3 s in the v83 AI, a third of the next ones standing and a third turning, so a walk
+predicted more than about a second past HANG_S seldom holds: at 4 s 84 of the thief's 106 longer hangs were put back for
+a turn or a stop (52 of 69 at 3 s; hers 43 of 69 and 26 of 45). The touch taken, priced at the hunt's rate or at the
+platform's (TOP_RATE_ABOVE, both rules at 3 s, 24 seeds, the margin then counted from every look): at the platform's
+she took the touch at 67% of her hangs and the thief at 39% (the platform's rate a mean 13 and 8.8 EXP a second, the
+hunts' 8.6 and 7.3), and both made less EXP than at the hunt's (-2.4%, t -1.51; -2.5%, -0.64), she with more touches
+(+7.4%, +1.85): the monsters up there don't leave while she waits, so the wait costs what her time is worth anywhere
+(the grind's own bar, behavior.patrol), not what she makes once she's up.
+
+**As committed** (3 s, 0.3 s, the hunt's rate), seeds 1-48, against the 2 s hang (560bd57), no hang (ROPE_HANG off, on
+the same code) and, for the thief, master 40ba190's cached seeds (its world before rec-sim's: the client's knock, the
+newborns untouchable; the cache reproduced to the digit on seeds 3 and 9 on today's game data):
+
+| | EXP a minute | touches | that hurt | potions | at a rope's top a climb | hanging s a run | took / longer, of the hangs |
+|---|---|---|---|---|---|---|---|
+| she, against the 2 s hang | **+3.5% (+2.32)** | -3.9% (-1.25) | (all hurt) | -4.0% (-1.15) | -2.0% (-0.33) | 10.6 -> 8.1 | 76 / 93 of 276 |
+| she, against no hang | -2.3% (-1.27) | **-8.4% (-2.34)** | | -9.7% (-2.29) | **-19.7% (-2.78)** | 0 -> 8.1 | |
+| the thief, against the 2 s hang | +0.9% (+0.38) | **+7.6% (+2.42)** | +5.8% (+1.65) | +3.8% (+0.99) | +3.2% (+0.70) | 12.8 -> 8.5 | 102 / 129 of 299 |
+| the thief, against no hang | -2.1% (-0.82) | -2.9% (-1.14) | -2.7% (-0.88) | -2.9% (-0.88) | **-12.0% (-2.15)** | 0 -> 8.5 | |
+| the thief, against master 40ba190 | -3.2% (-1.36) | -17.2% (-5.24) | -17.7% (-4.67) | -18.1% (-3.91) | | 0 -> 8.5 | |
+
+The 2 s hang against no hang on the same code: her EXP 5.6% under (t -3.20), her touches at a rope's top 20% under
+(t -2.01); the thief's EXP 3.0% under (-1.10), his touches 9.8% under (-3.55), at a rope's top 22.5% under (-3.24). So in her world (the character played live) the two rules take
+back about 60% of the EXP the 2 s hang cost her and keep its touches at the top down (-19.7% a climb against none) with
+fewer touches than either; in the thief's they take back a little of the EXP, keep the touches at the top down as much
+as the 2 s hang, and add touches elsewhere (+7.6%, those that hurt +5.8%; re-touches within 2 s +11.6%, t +2.14): his
+touches are cheap by the pricing (a Green Mushroom's 8.8 EXP at his evasion, under his 2 s at 7.2 EXP a second), and
+he takes them at 34% of his hangs. On seeds 1-24 his EXP was +5.3% and his touches +2.9%; 25-48 took it back. No death,
+fall out of the map or stop in any run. Of her 92 longer hangs that ended in the runs, 1 ended at its own end
+('waited'), 11 with the way judged clear, 19 with the touch taken; of the 61 up regardless, 43 had been put back for a
+turn or a stop.
+
+Goldens (recorded into D:/MapleHelper-scratch/recfix/rope2/golden_cand2 as a check, beside 560bd57's in golden_base:
+golden_why2.txt): 27 the same, 17 apart from their first hang on (a touch taken, or a longer wait), loop_tree_attack_no_darts
+re-seeded 11 -> 14 (of 1-16, 8 and 14 meet all of it); the 16 others 359 -> 367 touches, 10,930 -> 11,299 EXP in 2,620
+-> 2,547 s. All meet what they're there for but nav_tree_landing_shot_first and nav_tree_landing_no_shot, which don't on
+560bd57 either. Not recorded for good here (the next stage records them).
+
+Assumed, not measured: the walk prediction's worth live (the v83 AI is the simulator's; the live hour's hindsight had
+8 of 15 blocked climbs clear within 2 s); the touch's price (its HP in potions at the user's prices, her hurt share, the
+planner's 53.5-unit knock, not the client's 87, for where a knock at the top lands her); that she can climb on at once
+after the cut of a touch taken (as after any hang).
+
+**To check in game** (a supervised grind as RiceBaby): the log's "a horny-mushroom on 10 by its top: hanging on the rope
+at x -80, N under its top" and "hung N s, the way up clear ...", and the 'rope_hang' telemetry events: per event, whether
+a touch at that rope follows within 3 s of its end (the simulator: 91%) and how often the way up clears within HANG_S
+(the simulator: 42 of 476; the live hour's hindsight: 8 of its 15 blocked climbs within 2 s); the touches at the top of
+-80 a climb (0.3 live on 2026-11-02, about 19-23 in 35 minutes over 68 climbs) and the hangs' seconds. And how long
+she hangs, the touch taken (above): "..., walking off (...): the way up predicted clear N s into the hang, hanging M s"
+and "...: back to HANG_S" (a turn or a stop), "hung N s, up after N s, the touch taken: ..."; per 'rope_hang' event
+`longer`, whether the walkers did walk off by its `clear` (the simulator: of her 92 longer hangs 1 waited out, 43 put
+back), and per `took` whether one touch came or more (her re-touches within 2 s after it); her HP never under the
+safety stop's reserve and a touch after a `took`.
+
+**Not done**: what a hang waits for is judged by the planner's reach (a walker's turn, a stander setting off), and in the
+thief's world the top seldom clears (above): when what blocks is a monster at its point or one chasing her, the lever
+is killing it (Magic Claw from below, to be measured in the magician's world now that rec-sim's simulator and this are
+merged, on work/rec-all; the thief's Lucky Seven doesn't reach 10 from 11) or another way up, not a smarter wait; the queued chain's climb (QUEUE_CHECK) is still withdrawn rather than hung on; `_meet` still waits on
+the floor below (WAIT_LOOKS) before a climb goes up and hangs; the air check is the glance's state's mode (the
+localizer's live: not checked live on a rope's jump). The touch taken prices one touch: the re-touches that may follow it
+at the top (the thief's +11.6% within 2 s) aren't in its price, and it's taken more often by the thief, whose evasion
+and the Green Mushroom's small touch make it cheap, than his EXP pays for (above); a price of what follows a touch at a
+rope's top, or a stricter one for him, is the next lever there. On the merged world (her climb the formula's 120 up and
+down, where this was chosen at 560bd57's 130 up) the rule measures worse for her than the 2 s hang alone (EXP -3.3%, t
+-2.07; a rope's top +35.8%, t +2.49; 48 seeds: The whole measured), so from the final review of 2026-11-02 both are
+off (the 2 s hang alone, as at 560bd57; The final review's fixes) till they're tuned again on this world; HANG_LONGER
+only ever on a hunter's navigator (one with a price), never a retreat's. `--world hang-rules` (both on), `hang-2s`
+(both off) and `no-hang` (ROPE_HANG off) price them on any tip.
 
 ## Localization
 
@@ -4816,13 +5886,13 @@ Per run, its means (HP lost in bars of her HP; "in taps": what the taps added to
 | Module | Does |
 |---|---|
 | `body.py` | How the game moves her: the one movement engine. One step on the ground and in the air (`ground_step`, `air_step`), the jump's kick (`takeoff`), the game's 30 ms step on which it acts on the keys, sets her speed on the ground and lifts her off (`STEP`; landing between two, she waits for the next: `LANDING_ENDS_STEP`), the lags (`Lags`: on average, the wait for the step included), closed forms on flat ground for planning, the mean over where the steps fall (`run_x`, `run_time`, `stop_distance`, `hold_for`), the chance a jump from standing leaves short (`short_takeoff_chance`, `jump_window_ok`, `blind_ends_ms`), flights over a map (`fly`, with the arrow held and her speed as she lands) and a key timeline replayed on flat ground, at any phase of the steps (`replay`). From the game's `Physics.img` and her stats (`config.toml` `[character]`); see below. |
-| `physics.py` | Her jump (`jumpSpeed` 555, gravity 2000: 77 units high, 555 ms in the air) and fall, and where a jump or fall lands, flown by the engine (`body.fly`, as the simulator flies her) against the map's platforms and the walls of the foothold group she leaves (`group`: below), with the arrow held the way she leaves and her sideways speed as she lands (`flight`). Her movement, from the engine (`body.py`, below) with the median lags: walking at 149 units/s (`WALK_SPEED`, 125 × SPEED/100), a standing start 119 ms behind (`RUN_LAG`: the arrow acted on 66 ms after the key, then 1400 units/s² up to full speed), a jump lifting off 65 ms after its key (`JUMP_LAG`), 24.0 units of slide after the arrow is let go, standing still 0.25 s later (`STOP_RUN`, `STOP_S`), 13.9 on landing with no arrow (`LAND_SLIDE`), how long to hold an arrow to walk a given distance (`hold_ms`, the engine's over the game's steps: 46 ms for 5 units and 104 for 20; 39 and 90 on the 5 ms engine, where the old straight line, 8.5 + 0.149 t, held 30 and 77), and when to press jump on a run from standing (`run_ms`, `sure_jump_ms`: never in the blind spot, so a run-up under about 14 units is keyed 150 ms in (`BLIND_ENDS_MS`, from the jump sweeps: below) and lifts her off 14 units along at full speed; 40-52 ms after the arrow leaves at full speed by the kick most of the time, not reliably enough to plan on, `KICK_JUMPS`, off). A route jump has to land on its platform at 0.85 × 149 too (`SLOW_TAKEOFF`: a takeoff three of the game's steps into a run, 126, is 0.846 × 149); every one on this map already does. When an attack from a jump comes (`JUMP_ATTACK_MS`, `JUMP_BACK_ATTACK_MS`: the key plans use them, and `attack.reach` works out from them how high she is when the attack starts, with `jump_rise`). Landings are cached, the 20,000 last used (`FLY_CACHE_SIZE`, about 9 MB when full; the planner's own jumps and falls on this map are 7,973 of them, about 3.6 MB, with the ropes in mid-air (5,726 since its jumps' takeoffs are placed for room, 3,128 before, 1.4 MB, and the 8-minute `loop_run` added none); 2,718 when the cache was bounded, before the foothold groups and the walk-offs' room rule). Each is worked out from its start rounded as its key is (to 0.01 units, and 0.1 units/s), so what is cached never changes an answer. Worked out from the exact start, a landing cached by one call went to every later one that rounded the same: the simulator's scenarios each had to start from the same cache to give the same trace. A landing not cached is flown by the engine's step in C (`gamelab/native.c`: `body.fly` as `flight` calls it, the arrow's steering and the air's drag, the fall cap, the walls of her group, a wall at her start, the corner landing, the same arithmetic in the same order) when it's built: 0.019 ms a flight instead of 0.85-0.95 in Python on this map, with the same platform, x, time and speed at landing to the bit and the type on 172,000 random flights on this map and the tests' (with and without arrows, by every wall and by group, 48,000 of them aimed through a platform's corner; tests compare 6,000). Building the map's moves, which every hunting command does as it starts, takes 0.25 s instead of 3.3 (204 moves, 7,973 landings flown; 0.07 s for the 226 moves before the takeoffs were placed for room and the ropes in mid-air), and in the simulator's tours (`sim.latency`, 5 seeds of 10 minutes) the stack's computing before a plan went out, a chain planned on the move among it, was at most 6.1 ms instead of 164 (the 99th percentile 2.2 instead of 5.5), the same hunts. The C is built with MSVC 2022's Build Tools the first time it's needed, into `gamelab/build/` (git-ignored; `python -m gamelab.native` builds it now), and without them it's all done in Python as before. The elevated key player never loads it. |
+| `physics.py` | Her jump (`jumpSpeed` 555, gravity 2000: 77 units high, 555 ms in the air) and fall, and where a jump or fall lands, flown by the engine (`body.fly`, as the simulator flies her) against the map's platforms and the walls of the foothold group she leaves (`group`: below), with the arrow held the way she leaves and her sideways speed as she lands (`flight`). Her movement, from the engine (`body.py`, below) with the median lags: walking at 149 units/s, the thief (`WALK_SPEED`, 125 × (SPEED + 20)/100: the client's hidden 20, `body.SPEED_BONUS`; the magician 150), a standing start 119 ms behind (`RUN_LAG`: the arrow acted on 66 ms after the key, then 1400 units/s² up to full speed), a jump lifting off 65 ms after its key (`JUMP_LAG`), 24.0 units of slide after the arrow is let go, standing still 0.25 s later (`STOP_RUN`, `STOP_S`), 13.9 on landing with no arrow (`LAND_SLIDE`), how long to hold an arrow to walk a given distance (`hold_ms`, the engine's over the game's steps: 46 ms for 5 units and 104 for 20; 39 and 90 on the 5 ms engine, where the old straight line, 8.5 + 0.149 t, held 30 and 77), and when to press jump on a run from standing (`run_ms`, `sure_jump_ms`: never in the blind spot, so a run-up under about 14 units is keyed 150 ms in (`BLIND_ENDS_MS`, from the jump sweeps: below) and lifts her off 14 units along at full speed; 40-52 ms after the arrow leaves at full speed by the kick most of the time, not reliably enough to plan on, `KICK_JUMPS`, off). A route jump has to land on its platform at 0.85 × 149 too (`SLOW_TAKEOFF`: a takeoff three of the game's steps into a run, 126, is 0.846 × 149); every one on this map already does. When an attack from a jump comes (`JUMP_ATTACK_MS`, `JUMP_BACK_ATTACK_MS`: the key plans use them, and `attack.reach` works out from them how high she is when the attack starts, with `jump_rise`). Landings are cached, the 20,000 last used (`FLY_CACHE_SIZE`, about 9 MB when full; the planner's own jumps and falls on this map are 7,973 of them, about 3.6 MB, with the ropes in mid-air (5,726 since its jumps' takeoffs are placed for room, 3,128 before, 1.4 MB, and the 8-minute `loop_run` added none); 2,718 when the cache was bounded, before the foothold groups and the walk-offs' room rule). Each is worked out from its start rounded as its key is (to 0.01 units, and 0.1 units/s), so what is cached never changes an answer. Worked out from the exact start, a landing cached by one call went to every later one that rounded the same: the simulator's scenarios each had to start from the same cache to give the same trace. A landing not cached is flown by the engine's step in C (`gamelab/native.c`: `body.fly` as `flight` calls it, the arrow's steering and the air's drag, the fall cap, the walls of her group, a wall at her start, the corner landing, the same arithmetic in the same order) when it's built: 0.019 ms a flight instead of 0.85-0.95 in Python on this map, with the same platform, x, time and speed at landing to the bit and the type on 172,000 random flights on this map and the tests' (with and without arrows, by every wall and by group, 48,000 of them aimed through a platform's corner; tests compare 6,000). Building the map's moves, which every hunting command does as it starts, takes 0.25 s instead of 3.3 (204 moves, 7,973 landings flown; 0.07 s for the 226 moves before the takeoffs were placed for room and the ropes in mid-air), and in the simulator's tours (`sim.latency`, 5 seeds of 10 minutes) the stack's computing before a plan went out, a chain planned on the move among it, was at most 6.1 ms instead of 164 (the 99th percentile 2.2 instead of 5.5), the same hunts. The C is built with MSVC 2022's Build Tools the first time it's needed, into `gamelab/build/` (git-ignored; `python -m gamelab.native` builds it now), and without them it's all done in Python as before. The elevated key player never loads it. |
 | `route.py` | Every move the physics allows: rope climbs and climb-downs (and a running jump at a rope hanging just past a platform's end, `_past_end`), jumps off a rope sideways onto a platform or onto another rope and up it (`rope_jump`, `side_jump`: the mover does them, closed loop), jumping up through a platform overhead, running jumps (tried from every 10 units along each platform: every 20 missed the 30-unit window of takeoffs from platform 4 up onto 2, so 2 had no route), walking off an end and dropping through (↓ + jump; not where the foothold forbids it), from the middle of where her platform overlaps the one she lands on, and never within 70 units of the basin's cliffs (`route.KNOCK_CARRY`, `void_ends`: 36's ends, the only ones here with nothing under them, which a knock as she comes down from another block can carry her through; Found offline and Fixed since). Up to 3 takeoffs are kept per landing platform. A jump is kept only if it still lands on the same platform when she leaves the ground 12 units early or late, or 10% slower: a jump meant for the basin once landed on a platform whose edge its arc passed close by. Each then takes off where it lands with the most room, near where it was found (`_placed`): up a staircase step 15 units from the end, not 33, so that taking off flow's 10 units earlier, or 12 early or late, still lands 24 and 12 in (Found offline: Jumps up a step taking off too early), its run-up from 20 units before it (`RUN_UP`). A jump off an end is looked for from 33 units back (`JUMP_FROM`) and, if none surely lands from there, a unit nearer at a time down to 15 (`END_LOOK`): on West Rocky Mountain II five land only from the last 15-33 units of a platform, which weren't found (17 onto 16, 64 up and 25 across, the way up the steps on the right: from 17 to 10 in 3.4 s now, 22.2 before, round by 22 and the rope to 14); none on the first map. A jump off an end and one found along the platform that take off at the same spot are one move. Walking off wins over a running jump down to the platform it reaches anyway. A walk-off is kept only if she can stop where it lands: she comes down at full speed, so her slide (13.9 units) and 9 more must fit before the landing platform's far end. A twin (Localization) is the platform it lies on: no move goes from or to one. Where the sure moves leave places with no way back to the rest of the map (a trap), a running jump out that lands only from a short stretch of takeoffs is kept (`_ways_out`: takeoffs tried every unit at full speed, the jump taken from the middle of the longest stretch landing on a place with a way back, its chance that she leaves the ground within half of it, her takeoff off by 5.5 units (sd: half a minimap pixel of the game's from her dot alone, the game's step and the lags); kept if over 0.5, and costing its misses at 3 s each): on West Rocky Mountain II the jump from 27 onto 25 out of the pit of stairs, 0.90; none on the first map, where every place gets to every other. Off platform 10's right end she came down 10 units from 15's end and slid off it onto 18, every time in the simulator. An end with a cliff dropping from it (platform 34 down to 36) can be walked off; the simulation used to start just inside the end and bump into the cliff's top, which left out 42 of the map's 63 walk-offs. Dijkstra finds the quickest route; a move's cost includes a small allowance for misses, measured on chained moves. With `route.ROUTES` over 1 (`--ways`) a trip chooses among that many distinct ways instead, the best route through each move, by a softmax over their times (`alternatives`, `through`, `chances`: Route diversity). How long the trip to each platform takes from where she is (`travel`, for the hunt loop's and the tour's choices) comes from one search to every platform (`times`: 1.6 ms, against 11 for a search to each of the 16 platforms monsters spawn on, the same seconds), kept for the last 256 places she was asked about. How long to stand at an x on a platform (`arrive`, for the hunt loop's piles on the way) is the quickest of the routes landing anywhere on it with the walk along it from where each lands, from the same search with every landing kept (about 210 on this map), kept as `times`' are. |
 | `bodies.py` | What a monster touches her by, for the planner's touches (`Flow.danger`) and the danger of a place (`attack/danger.py`, a fight's escape and a wait's walk): her box, one definition for the stack, the v83 client's for her standing, 22 either side of her feet and 65 tall (`HER_HALF`, `HER_TALL`: RustMS's port of the decompiled client, `MobAttackRules.h` `user_body`, from FUN_0045183b; her drawn sprites agree, standing -22 to 13 and 64 tall; HeavenClient's own test takes her as a line 50 tall, and the simulator's world has her 15 by 55, the client's box with `--world client-body`; the hop stays timed with the 15 it was checked with in game, `flow.HOP_HALF`), against a monster's, the widest and tallest of its kind's frames (`localization.monsters.touch_box`: a Horny or Green Mushroom 28 either side and 56 tall as it flinches, a pig 34 and 54; the first map's tables for their kinds), overlapping strictly as the client's rectangles do (`touches`); and her feet along a flight (`Arc`: gravity, the fall cap, never under its landing on the way down) or a climb (`Climb`). Nothing logged tells 50, 55 and 65 apart (a MISS leaves no trace); the one touch on a rope, climbing 11 -> 10 on Tree Dungeon, came with her feet 41-58 under 10's surface by her dot. |
 | `flow.py` | Turns several route moves into one continuous key timeline, predicted with the game's physics and her measured movement. She keeps running through landings, jumps on the way, and grabs ropes on the run. Each move has a few variants (keep running on landing, land and stop, jump straight up from anywhere under the platform above, or step back for a run-up), and the chain picks the variant the next move can follow on from. Each leg keeps the whole way her feet go, her runs, her flights (`bodies.Arc`), her climbs (`bodies.Climb`) and where she stands meanwhile (a jump's lift-off, lying down to drop, a landing's slide, a rope's climb-over), and `Flow.danger` checks her body's box against each monster's all along it, every 0.05 s, wherever the monster can be by then on its own platform, whichever that is (`bodies.py`, below); it used to check her runs alone, against the monsters of the platform she ran on, 15 units either side of her. A monster seen walking turns back at its platform's end (`MonsterTrack.at`), where it used to stop. A monster in the way of a run is hopped over: by the body sizes in the game data her jump can't clear a pig or slime outright, so the hop is timed so she can't touch it on the way up, and any contact comes past its middle, where the knockback pushes her on. Timed this way, 7 hops over monsters standing or walking at her took no damage. Monsters walking away from her aren't hopped: she closes on them too slowly. Climbing over a rope's top is an animation of about 0.35 s; the next move's arrow goes down just before the top if it starts a run, and when the plan has her standing there if it's a step (held 250 ms or less, `STEP_EARLY_MAX_MS`: pressed early, the step back for the jump 32 -> 29 went too far in game, and the jumps after it came down in the basin). A running jump takes off only where it lands with room to spare from where she really leaves the ground (`Flow.sure_takeoff`: 9 units in from the ends of the platform it lands on, and still on it if she leaves 8 units early or late, 10% slower or at 0.85 × 149, `TAKEOFF_SLOP`), else from another of its takeoffs (every 2 units, nearest the one picked first); a hop lands so on her own platform. Pick-up is pressed every 0.15 s through every run. Her body in a plan has a speed along the ground, and it is moved by the engine's closed forms (`body.py`, with the median lags): a standing start, a run from whatever speed she lands with, a release a stop's length early, a step from standing held as long as `hold_for` says (one under 8 units isn't taken), each jump's takeoff speed by the kick (passed to `physics.flight`), and a stop on landing that slides from the landing speed. |
 
-**How the game moves her** (`body.py`; `python -m gamelab.analysis.physics_check` replays the recordings through it). The constants are the game's own, in its `Physics.img` (forces over a mass of 100), scaled by her SPEED and JUMP stats (`config.toml` `[character]`: 119.2 and 100, from what's measured; her stat window would say exactly). How the client applies them step by step comes from a decompile of an older client (v83, ported by the RustMS project). That is secondhand, so it's kept where the recordings agree:
-- **An arrow speeds her up; it doesn't switch her to full speed.** From standing she speeds up at 1400 units/s² (walkForce 140000) to 149 (walkSpeed 125 × 1.192): full speed 0.106 s and 7.9 units after the game acts on the arrow, 66 ms after the key on average. Five standing starts at 60 fps fit 1400 (free fits 950-1500), and so do the 18 starts of the jump sweeps, step by step (below). Let go, she brakes at 800 (walkDrag), from 68 ms after the key comes up on average: 24.0 units on from full speed (18 stops at 30 fps: 24.0 ± 2.0; seven at 60 fps before: 23.4-28.1), 13.9 of them braking, which is also her slide on landing.
+**How the game moves her** (`body.py`; `python -m gamelab.analysis.physics_check` replays the recordings through it). The constants are the game's own, in its `Physics.img` (forces over a mass of 100), scaled by her SPEED and JUMP stats (her profile's: the thief's `config.toml` `[character]` 101 and 100, the magician's her stat window's 100 and 100), her walk 125 × (SPEED + 20)/100: this client adds 20 to a character's SPEED behind the scenes (`body.SPEED_BONUS`, Her walk speed). That walk, and her climb SPEED + 20, are her planner's at her stat window's SPEED from 2026-11-02, her profile's until a hunt has it (`physics.set_speed`: Her walk and climb from her stat window's SPEED). How the client applies them step by step comes from a decompile of an older client (v83, ported by the RustMS project). That is secondhand, so it's kept where the recordings agree:
+- **An arrow speeds her up; it doesn't switch her to full speed.** From standing she speeds up at 1400 units/s² (walkForce 140000) to 149 (walkSpeed 125 × (99.2 + 20)/100, the thief's): full speed 0.106 s and 7.9 units after the game acts on the arrow, 66 ms after the key on average. Five standing starts at 60 fps fit 1400 (free fits 950-1500), and so do the 18 starts of the jump sweeps, step by step (below). Let go, she brakes at 800 (walkDrag), from 68 ms after the key comes up on average: 24.0 units on from full speed (18 stops at 30 fps: 24.0 ± 2.0; seven at 60 fps before: 23.4-28.1), 13.9 of them braking, which is also her slide on landing.
 - **The jump's kick.** Leaving the ground with an arrow held, below 0.8 × 149 that way she gets 0.8 × 149 more, up to 149. On the game's steps (below) she runs 42, 84, 126 and 149 units/s after one to four steps of the arrow, so a jump lifted off by the arrow's own step leaves at 119, one after one or two steps at full speed (the kick), one after three at 126 (too fast for the kick, short of full speed), one after four or more at full speed. A flat jump at 126 lands 13 units short. The jump-backs keyed it 80 ms after the arrow: of the five recorded at 60 fps, three left at 121-127 units/s, one at 142 (the arrow seen late, so it kicked) and one at 146. `body.short_takeoff_chance` gives the chance that a jump keyed a given gap after the arrow leaves short (the steps between the arrow's and the jump's are k or k + 1 as the steps fall, spread by the lags), `jump_window_ok` which gaps are safe, and no key plan jumps in between (below).
 - **In the air** the arrow she runs with does nothing (it only steers toward 8.9 units/s), and the opposite one brakes her at 200 units/s² (five 40 ms holds in the jump-backs: -4 to -15 units/s). With no arrow the air drags at 1 unit/s², or 100 once she falls at the cap (670), so a long fall with the arrow let go lands shorter: 17 units over a 500-unit drop.
 - **In the air walls stop her by the game's rule** (`body.wall_table`, `JOINED_WALLS`, `ZERO_WALLS`; the user's choice, 2026-10-31): HeavenClient's (a rewrite of the v83 client's code: `FootholdTree::get_wall`), only the wall pieces joined to the foothold under her within two links of its end, where they overlap the 50 units above her feet, each only going over that floor into it; and every wall of a layer's group 0 (the map's own frame), either way, at any height. Her foothold group no longer counts, nor a rope. Floors of every group land her. On Tree Dungeon every wall is group 0's (the tower and its caps): there she was placed in the air at the tower's walls 351 times, never past them, 143 of those over 70 units above the floor under her, where HeavenClient's rule alone lets her through. Until 2026-10-31 her own foothold group's walls alone stopped her (`body.OWN_GROUP_WALLS`, after a reconstruction of the client's code that skips other groups' walls in the air, ThatMapleDev's "Player Physics" gist), which the first map's runs below fitted as this rule does. Six flights in the telemetry of 2026-10-19 and 20 went across another group's wall (15-37 units inside its span; one just under the floor of the block it hangs from), and each came down within 13 units of where the rule puts it (her minimap dot fitted to the engine's arcs), against 54-142 units off, or on another platform, with every wall stopping her:
@@ -5485,6 +6555,55 @@ No death, fall or stop on either side. Master's stack throws at her own dead les
 - grinding with another player on the map, the grind log's "others take" for Green Mushrooms up from the prior 0.5 as they take them (patrol.Belief: their kills 'taken' now).
 
 **Not done.** A throw decided before its kill's gain (17 of the 22 at her dead in the recordings were decided at or before it) still goes; the look's wait (KILL_SHOWN_S) is what holds those. A throw keyed at the bound one after its gain (decided before) isn't moved onto the next in its path in her reckoning. A wrong binding takes a live one for dead until it's re-found 1.2 s on (4 of 309 throws at live ones in the recordings), kept in her body's way only when it's by her, and a gain whose first pick is bound to the gain before (the same monster her two throws took) goes on the next instead (23:14:18's w2310-032-033); a search's twin track of a monster bound (w0020-089: the same green bound as #121 and re-tracked as #124) isn't left out. A throw whose tap the game swallowed is told again only when a look after it, with no arrow since, shows her strongly the other way (w0020-102's came after an arrow). Shares aren't bound (above). The death watch: at the recordings' cadence (a track every 2nd frame of 10-15 a second) it missed 36 of the 166 deaths of diag-signs, 14 looked at in the right place only before die1's clear frames (RECENT_S had closed), 11 with its window more than PAD off the feet (a lost track's last x, the camera or a jump), 8 with no track near enough, 3 covered; at the live 30 frames a second 140 of the 166 seen, the misses 8, 8, 8 and 2 (review-perception: misses2.py), and those are judged as before; its thresholds were set on Tree Dungeon's mushrooms alone (`MEASURED`: another map's kinds once a recording of them is replayed). The navigation's loop seen on `loop_tree_wait`'s old seed (a drop planned from 18 at x 110 over the rope's top at 111, the pile taken up again 3 s after "too many misses") is for the navigation's work. The scenarios re-pinned: `loop_valuable_drop_at_once` 1 -> 2 (of 1-16 all but 1, 7 and 9 show it), `loop_tree_lie_detector_28` 1 -> 7 (only 7 of 1-16; on 13 and 14 she fell out of the map before 40 s), `tour_hunt_onto_platform`'s other pig 1240 -> 1300 (seed 1), tests/test_respawn.py's simulator check 3 -> 2 (2 and 7 of 1-8); `tour_hunt_other_spot` xfail (tests/test_sim.py AFTER_KILL_PLACE): its other pig was out of reach only for the kill master's stack put by it, and with the kill on the right pig the fight reaches the other from 14, closing in or with a jump throw, in every layout tried (the other pig from 1280-1500 on seeds 1-36, a snail at 1330-1360); `nav_fight_across_runs_out` xfail too: of seeds 1-16 she arrives on every one (seed 9 in 59 s, where master's stack ran out of its 180 s). The probes' scenarios' world (`scenarios._AT_RELEASE`, damage at the star's release for their scorer) draws its kills dying from then, as before (`dies_late` off). In the slow suite `loop_rocky_bridge` and `nav_fight_up_runs_out` fail on master's tree as on this one, and `test_step_down_clears_her_platform_first_and_throws_between_its_respawns` (xfail) now passes. After the reviews the slow suite (2 workers, 23 minutes) has `loop_rocky_bridge` alone failing (master's tree too), `nav_fight_up_runs_out` meeting it; tests/test_respawn.py's hunt with another player's kills runs 3 minutes, not 2.5 (the simulator's death watch, as the service's, on Tree Dungeon's mushrooms only: in 2.5 the feed judged none of Thicket's dead, a snail's at 129 s out of view; in 3, 2).
+
+## Her kill's monster by Magic Claw's search, and the hunt following the tracker (from 2026-11-02)
+
+The magician's kills went on the thief's box: the nearest ahead of her from 110 over her feet to 75 under them, those seen in the last 0.2 s first (`tracking._picks`, VICTIM_*, FRESH_S), never asking which monster her cast was aimed at nor which her spell's search picks. On the three recordings of 2026-11-02 (R1-R3, the replay kit's: Replaying the recordings) 16% of her kills were first put on the wrong monster (63 let-gos of 398 in the hour's telemetry, P14), and the hunt acts on the first binding at once: a live monster taken for dead (a target no more, a walk-off landing on it, a ghost guarding a pile: P34), the real one cast at again, the pile and the platform's credit misplaced. R1's 7 wrong first bindings, traced by the analyses: 3 bystanders the client's search can't pick (one on platform 9 about 50 below her and 70 across, one 62-79 below on 14, one 69 below her 0-6 across) where the monster her stance aimed at was the victim; 4 victims hidden under her claw for longer than FRESH_S while a fresh bystander farther on took the gain, each victim in an earlier band of her search than the bystander (ROADMAP item 6; plans/critique-perception.md).
+
+- **By the client's own search** (`tracking._band_picks`, `_band_of`; her Shape's `kill`, `character.KillCredit`: `search`, `tie`, `lands_s`; `character.Search.band`). Where her profile has a KillCredit (the magician's; the thief has none and goes on as before), a gain's candidates are ranked by Magic Claw's search as the cast picked: each track where it was then (PICK_S after the key: no star flies, so not where it is at the gain), its body the map's (MobBody: a mushroom 28 either side, 51 tall) in the first band whose window reaches it from where she stood (`Search.band`: attack.reach.search_band's rule with her constants, 50..300 ahead in bands 20 wide, its windows 28 -/+ (50 + 20 k) // 4 over her feet; a test checks the two agree on a grid). Those in a band first: in the first band (and the next `tie`) the oldest track first (the lowest id, in the order she first saw them: the client takes the one that entered the map first, RustMS Combat.cpp:1695-1720 as attack.reach.take_chances has it; one re-found under a new id, P16, comes late), then the bands after, by band, those seen within FRESH_S first, then the nearest; after every one in a band, those the old box holds (a track the tracker has off where the client saw it). Out-of-search ones aren't excluded. Until the review the monster her attack choice aimed the cast at came first in the first band: it changed none of R1-R3's 164 first bindings (the dumps the same to the byte with it off), and the oldest first binds one more right (R2 f417, its label confirmed by eye); this branch's dumps are the review's 'oldest' variant's frame for frame.
+- **The aim, told** (`MonsterTracker.throw(t, side, attack, aim)`, `_aim_of`, `AIM_DX`; `Hunter._tell_feed`, `Attacks.thrown`; `WorldStep.throw`, the feeds' and the service's `throw`: an optional fifth item in the "throw" message, which a service started before reads as before). The hunt tells each throw's aim: the target `Attacks.key` chose, its track, kind, x and platform as the look she chose on had them. The tracker takes its track where that's one alive of that kind (a track told that's dead or of another kind: none, not one by place: her casts at her own dead, 18 in about 14 minutes of R1-R3), else, with no track told or one no longer kept, the track of that kind on that platform nearest where she saw it (60 units: a replay's aim from the hunt's records, whose track ids are another tracker's). It decides no binding: it's counted against her first binding ('aim bound', 'aim elsewhere' in the tracker's counts, a dump's end line; on the replays, by place, 145 and 19 of 164), for a live check with the service's own tracks. The thief's binding ignores it, and his counts have none of it.
+- **Her hit's time** (`KillCredit.lands_s`: MAGIC_CLAW.lands_ms, 0.515 s). Her bound victim walks on until her hit shows on it, then dies where it is (`_stray` holds a sighting to that): her victims' walks stopped a median 0.49-0.50 s after the key on the 130 labelled kills whose walk shows (p10 0.15, p90 0.64: recfix/credit/scripts/timings.py on master's dumps), where the thief's star rule (0.75 s and her distance over 1,490 a second) had them walk on to about 0.85 s.
+- **Let go, a death seen first** (`_let_go`, BAND_LET_GO_DEAD, `_keyed_throw`). A gain whose bound monster is seen alive REBIND_S on goes first on one in her search whose death was seen since and booked another's (`_picks(dead=True)`, `_taken_back`), then on the next of its picks out of sight, as before. On R1-R3 it never fired: the critique's case (R3 00:49:59.9, the victim 77 below her in band 9, outside VICTIM_DOWN, its death booked 'other') is among her picks now, and `_deaths_seen` moves the gain onto it as it dies. Kept for a victim whose track is new since the bind (a re-found body: P16's id churn).
+- **Her other timings, measured and kept**: her gains came 0.104-0.313 s after the key (median 0.194, on 151 of her labelled kills), inside her `gain_after_key` (0.1, 0.6); her victims were last seen a median 0.33 s after the gain (p90 0.47), and REBIND_S 0.9 or 1.0 let more go on R1+R2 than 1.2 (5 against 4, one more of them a right binding) and left one more final binding wrong; DEATH_AFTER_GAIN_S 0.4 changed nothing on R1+R2 (the true victims' deaths seen 0.47 s after the gain at p10 on the strong labels). The hidden time, window and pick time stay her Shape's placeholders.
+- **The hunt follows the tracker's corrections** (`Ledger.follows`, `Ledger.moved`, `_moved`, the telemetry event `kill_moved`; `Memory(moved=...)`, `_take_moves`; `Grind._book`'s `_credited`; `patrol.Belief`'s 'moved'). The ledger always followed a kill onto the track the tracker moved its gain to (its place and its expected pile with it); where her kills go by her search, it also keeps each move: her memory then has the monster the kill was first put on alive again (its track no longer dead) and the one it's on now killed, told as the one kill moved (event 'moved', not a second 'killed': from the review), so her spawn belief (`patrol.Belief`) empties the new one's point at the kill's time in place of the old one's and keeps one kill time for it (master, and the branch before the review, had two kill times and both points emptied); and the grind's credit by platform (what her grounds learn EXP from) moves the kill and its EXP to the platform it's on now. Until now each part took a kill once, as first placed. The thief's ledger keeps no moves (his goldens: the check).
+- **The cast's record** (the hunt's `attack` record: `track`, `side`): which monster each cast went at (the perception service's track) and which way, so a live check of her binding needs no reconstruction (the replay kit's feed takes `side` from it where it's there, and the record's `track`). Its target's fields are a `no_cast` record's too (Records to measure by: its table).
+
+**Measured** on the replay kit (`python -m gamelab.sim.replay run --unpaced` of this checkout after the review, `score --base 40ba190 --labels v1|v3`: master 40ba190's cached dumps; D:/MapleHelper-scratch/recfix/replay-fix/out/b1, its score-v1/v2/v3.json), fitted on R1+R2 (the tie, her lands_s and the switches: recfix/credit/scripts/shadow_run.py, every variant's tracker beside the frame step's on the same perception, its "master" variant the same to the event as master's dumps on all three). R3 isn't a held-out check: its labels were made before any of this ran, but its two disputed kills were looked at by eye after (one put right, one not decided), where only the bindings master's and the band order's parted on were looked at (so every check could only move a point the branch's way). On labels-v1, as they were before, R3 is a tie. The strong labels hold either way:
+
+| her kills: first binding right | v1 master | v1 branch | v3 master | v3 branch |
+|---|---|---|---|---|
+| strong labels (die1, the lenses', by eye), R1+R2 | 38 of 50 | 48 of 50 | 39 of 56 | 54 of 56 |
+| strong labels, R3 | 12 of 14 | 12 of 14 | 12 of 15 | 13 of 15 |
+| strong labels, all three | 50 of 64 (22% wrong) | 60 of 64 (6%) | 51 of 71 (28%) | 67 of 71 (6%) |
+| all labelled, R1+R2 | 89 of 107 | 98 of 107 | 84 of 107 | 103 of 107 |
+| all labelled, R3 | 40 of 44 | 40 of 44 | 39 of 44 | 41 of 44 |
+| all labelled, all three | 129 of 151 (15%) | 138 of 151 (9%) | 123 of 151 (19%) | 144 of 151 (5%) |
+| ... on the victim's level (the platform's credit) | 137 | 145 | 134 | 148 |
+| final binding right, strong / all (where the kill and its pile end) | 59 / 146 | 60 / 139 | 60 / 140 | 66 / 144 |
+| let-gos (of a right first binding) | 29 (5) | 10 (4) | 29 (5) | 10 (5) |
+
+On v1, master's final binding is ahead on `all` (146 against 139): 87 of v1's labels are master's own final binding, unchecked, and the 6 v2 and v3 put right by eye were among them. Her casts (v3): of her casts at a monster she had just killed (her kill's gain shown before the cast was chosen, still drawn), the state she chose on had 4 of 19 killed with master, 16 of 18 with the branch: those the hunt leaves out (Ledger.dead). The casts are live's (her decisions don't change in a replay), so this counts what the state would have kept from her, not casts saved. Casts at another target the state had killed: 3 against 4, on both sides another player's kills (R2 f1393, R3 f34 and f1173); the branch's one more is at the monster it bound R3 f2154's kill to, a kill whose label is unsure. The rest of the kit's scores are master's (onsets 244 of 244 and 0 false, births, touches 71 and 46 by popup, players), but monsters under her seen 5 of 10 against 4: the one more is a hidden track the branch kept by her (R1 f1989, #37 26 units off), not a sighting. Master's dumps made again with this runner (which tells a tree's step the aim only where it takes one) are master's cached ones to the byte, all three. Before the review (her aim first in the band: recfix/credit/out/g1), on v3: 66 of 71 strong, 143 of 151 in all, the casts left out 17 of 18.
+
+**The labels, v2 and v3** (`labels-v2.json`, `labels-v3.json`, v1 kept): the 9 kills labelled `binding` (master's final binding, unchecked) where the branch's binding differed were checked by eye on contact sheets with a map-x ruler (recfix/credit/scripts/sheet.py; sheets d1-d3.png): 6 victims put right (R1 f1948, R2 f626, f1431, f1694, f2605, R3 f2128: in each the monster master's binding named stayed and the branch's faded out, in four with drops there after; 4 of master's were where her search can't pick: 107 above her at 0 ahead, 64 below at 85, 82 above at 166, 91 above at 55), 1 confirmed (R2 f417: the branch's first binding wrong, its final right), 2 not decided (R2 f1747, R3 f3869: a crowd under her claw, kinboy hitting), `unsure` in v2: master's binding both, so v2 left out only points of master's. v3 keeps those two as master's binding (v1's label, a note why), and so each check either moved a point or kept it. Only disagreements were checked: kills where master and the branch agree on a wrong `binding` label stay unknown. The scores of record for master (Replaying the recordings) are by v3, so a fix is compared on the same labels; v1's were 50 of 64 and 129 of 151.
+
+**Not done.** The aim is told by the hunt live, but no live run has had it yet: the replays tell it by place from the attack records' x (the record's track from now on); it decides nothing, so it's for the records ('aim elsewhere' on 19 of the replays' 164 bindings with an aim, told by place). The wrong first bindings left on the strong labels (4 of 71; R2 f417, a Horny among several by her claw, right with the oldest first): a Horny among several (R2 f3353, 48 units from the die1 label, master's last binding right there), two Green Mushrooms (R2 f3783, master's monster too, on the level 120 over the victim's; R3 f2989, 41 units from the label, past the 40 a binding counts within), and one put right at its death (R3 f4250). Her memory's spawn points (patrol.Belief) take a move as the review asked (above); the old point is put back only if nothing emptied it since the kill (`killed` still the kill's time), and the thief's moved kills (the tracker's re-binds, which his ledger follows without `moved`) are still taken twice, as on master. Searching a victim mid-flinch by its flinch top (the review's finding: `MobBody.flinch_top` where its last sighting was `hit1`) changed nothing on R1-R3 (the dumps the same to the byte: recfix/replay-fix/out/flinch), so the standing top stays. The visit's EXP (hunt.Visit) and the hunt's report don't move with a kill (the kind and EXP are the same; only the platform). Why the tour kept 'dead' 0.7-1.1 s past perception's let-go (P14, R1 11:53.1) isn't diagnosed here. The thief keeps his stars' order: the client's order was worse for his stars on kplace's 85 (72 against 76), and trying the band order with his aim is the user's decision 10.
+
+**After the review** (2026-11-02, D:/MapleHelper-scratch/recfix/review-replay-credit: no blockers, two majors). Each finding:
+- *R3 "held out" and the headline rest on v2, decided by eye after the branch ran* (major): fixed. The table above gives v1 beside v3, R3 called what it is (a tie on v1), the strong labels first; v3 keeps the two kills the eye didn't decide as master's binding instead of leaving out only master's points; `score --labels v1`. For a held-out check later: label before running the candidate.
+- *The aim decided none of the 164 bindings; the client's own in-band order does as well or better* (major): fixed. The oldest track first in the first band, the aim out of the order (counted against it instead), said in the README, `_band_picks`, AIM_DX and magician.KILL; the dumps the review's 'oldest' variant's frame for frame (only the end line's two new counts apart).
+- *`score --base master` silently makes master's dumps, three at once; the cache of record stale* (minor): fixed. `score` never makes them (it says the `cached` command), `--jobs` 2 by default, the cache of record the new key's (above), a runner edit said to make every dump again.
+- *The key doesn't have the GAMELAB_* environment, nor the game data* (minor): fixed. `baseline.gamelab_env` of the child's environment (`GAMELAB_FIXED_STATS` and any other), and the game data's files read checked by content (`data_stale`).
+- *The recoveries are throttled on the real clock* (minor): fixed (on the recording's clock).
+- *A moved kill recorded twice in patrol.Belief* (minor, as on master): fixed for her (event 'moved'); the thief's re-binds as on master.
+- *The victim's band by its standing top while it may be mid-flinch* (minor, not measured): measured, no change on R1-R3 (above); left as it is.
+- *`_aim_of` falls back to place for a told track that's dead or of another kind* (minor): fixed (none).
+- *Player labels miss a rival under her dot* (minor): fixed in v3 (15 frames).
+- *A stray joined line in replay.feed* (minor): fixed.
+- *Under her: the one more is a carried hidden track* (note): said so above. *Onsets of record need the exact frame* (note): "a fix shows as" points at births found and false onsets. *The Characters paragraph stale* (note): brought up to date. *Test gaps* (note): her casts scored, the key's environment, a stale dump, `score` not making dumps, the throw message's fifth item through an older service's reading, a moved kill's events and Belief, an aim by a dead track.
+- *Ledger.moved grows for the whole hunt* (note): not a defect, left. The ledger keeps every kill for the hunt's length (`Ledger.kills`, read by index by the hunt, the grind and her memory, as on master), and a move is one small tuple for about one kill in ten; "nothing grows without bound" is the tracker's rule for the frame step's state.
+Checks: targeted tests (411 passed), the fast suite (2952 passed, 72 skipped, 2 xfailed, 1 failed: `test_choice.py::test_a_throw_whose_kill_would_have_shown_by_a_frame_with_no_gain_since_didnt_kill`, failing on master 40ba190 too), the Tree goldens (`check --jobs 4`: 43 of 43 match; the thief's binding, memory and belief take none of this).
+
+**To check in game** (the next supervised grind as her; the perception service restarted from this code: an older one takes the throw message without its aim): her attack records' `track` and `side` on every cast; the tracker's 'aim bound' and 'aim elsewhere' (her aim against the client's own order, on the service's own tracks); the service's log's "not her kill: seen alive" lines per 100 of her kills (16 then; the replays say about 5); the tour's `kill_moved` events and the grind's credit by platform in its 'end' record; and the recording through the kit, its feed's 'side told' for every throw.
 
 ## In game, on Thicket Around the Beach II
 

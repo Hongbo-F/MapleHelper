@@ -692,6 +692,12 @@ class FakeEyes(Eyes):
         from .world import DEFENCE, EVADE_ACC
         c = self.world.character
         mp = int(round(c.mp)) if c.mp else int(round(physics.CHARACTER.mp))
+        if c.magic is not None:  # (the magician: her stat window as read 40 times on 2026-11-02, her_stats.json)
+            return {"name": "RiceBaby", "job": "Wizard (Ice,Lightning)", "level": self.shown_level(),
+                    "hp": self.shown_hp(), "mp": (int(round(self.world.mp * mp)), mp), "str": 5, "dex": 5, "int": 143,
+                    "luk": 28, "attack": (23, 30), "wdef": int(round(c.defence if c.defence is not None else DEFENCE)),
+                    "magic": 126, "mdef": 75, "acc": 70, "eva": int(round(c.avoid if c.avoid is not None else 0)),
+                    "speed": int(round(physics.CHARACTER.speed)), "jump": int(round(physics.CHARACTER.jump))}
         return {"name": "BugBaby", "job": "Rogue", "level": self.shown_level(), "hp": self.shown_hp(),
                 "mp": (int(round(self.world.mp * mp)), mp), "str": 4, "dex": 25, "int": 4, "luk": 120,
                 "attack": (60, 75), "wdef": int(round(c.defence if c.defence is not None else DEFENCE)),
@@ -812,7 +818,8 @@ class FakeEyes(Eyes):
                 noise.spawn_found, w.chance(f"spawn:{m.idx}", int(round(m.born * 1000)))):
             return True  # (fading in at its spawn point, too faint yet for the looks: Noise.spawn_found)
         if alive and noise.hit_hidden and m.hit_at is not None:
-            lo, hi = noise.hit_hidden
+            # (the magician's Magic Claw hides it under its own effect: world.SimMagic.hidden, the star's 1-3 s not)
+            lo, hi = noise.hit_hidden if w.character.magic is None else w.character.magic.hidden
             if w.t < m.hit_at + lo + (hi - lo) * w.chance(f"hide:{m.idx}", int(round(m.hit_at * 1000))):
                 return True
         if alive and (noise.near_seen or noise.off_seen is not None) and (seen := self._near_seen(m)) is not None:
@@ -1063,7 +1070,9 @@ class FakePlayer:
     def cancel(self, plan_id: str) -> bool:
         """Withdraw plan `plan_id` if it hasn't started (True), else cut it short now (False). A plan due
         to start at this very moment hasn't pressed anything yet (the world at time t has taken the key
-        events before t, not those at t): it's withdrawn."""
+        events before t, not those at t): it's withdrawn. One cut before the Lie Detector is seen is answered as cut,
+        not with the alarm its run past the sighting would have had (_cutoff's `alarm`: wait raised it at the cut, the
+        hunt stopping before the Lie Detector showed; found in the review of the rope hang, 2026-11-02)."""
         p, now = self.plans[plan_id], self.clock.now
         if p.state in ("withdrawn", "untaken"):
             return True
@@ -1077,6 +1086,7 @@ class FakePlayer:
                 old.end, old.state = now, "cut"
                 p.start = p.end = now
                 p.state = "cut"
+                self._cut_alarm(old), self._cut_alarm(p)
                 self.free_from = now + START_LATENCY
                 self.trace.cancels.append([self.trace.at(now), p.index, False])
                 return False
@@ -1089,6 +1099,7 @@ class FakePlayer:
             self.world.withdraw(p.id)  # what the world hasn't taken yet won't come
             self.world.release_all(now, p.id)
             p.end, p.state = now, "cut"
+            self._cut_alarm(p)
             self.free_from = now + START_LATENCY  # ... and only then picks up the next plan
             withdrawn = False
         else:
@@ -1096,6 +1107,11 @@ class FakePlayer:
         self.trace.cancels.append([self.trace.at(now), p.index, withdrawn])
         self._requeue(p.index)
         return withdrawn
+
+    def _cut_alarm(self, p: Plan) -> None:
+        """Plan `p` cut short (cancel): no Lie Detector answer if it ended before the sighting."""
+        if p.alarm and self.alarm_at is not None and p.end < self.alarm_at:
+            p.alarm = None
 
     def _after(self, p: Plan) -> float:
         """When plan `p` starts: once handed over, and after the plans before it."""

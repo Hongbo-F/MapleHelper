@@ -154,6 +154,44 @@ def test_she_casts_magic_claw_whenever_her_mp_pays_and_never_her_regular_attack(
     assert a.summary().startswith("Magic Claw 2, the regular attack 0 (no cast: MP 1)")
 
 
+def test_every_cast_her_mp_refuses_is_a_no_cast_record():
+    """Logged the 1st, 10th and 100th time, recorded every time (from 2026-11-02: how often her reckoned MP refused a
+    cast couldn't be told, P27 of the recordings' analysis), with her MP as reckoned and the cast's."""
+    from gamelab import telemetry
+    a, said = _her_attacks()
+    with telemetry.captured() as records:
+        for _ in range(3):
+            a.on_look(_look([("green-mushroom", 200.0, 0.5)], mp=15 / 1007))
+            assert a.key("right") is None
+    refused = [r for r in records if r["topic"] == "no_cast"]
+    assert a.counts["no cast: MP"] == 3 and sum("no cast (MP)" in line for line in said) == 1
+    assert len(refused) == 3 and all(r["why"] == "MP" and r["by"] == "key" and r["mp"] == 15 and r["cost"] == 20.0
+                                     and r["kind"] == "green-mushroom" for r in refused)
+
+
+def test_a_casts_attack_record_and_a_refused_ones_no_cast_record_name_its_target_alike():
+    """One schema for a cast's target (the integration of 2026-11-02: work/rec-records' 'no_cast' records beside
+    work/rec-replay's track and side on the 'attack' record): each says the target's kind, platform, x, the perception
+    service's track, and the side."""
+    from gamelab import telemetry
+    a, _ = _her_attacks()
+
+    def look(mp):
+        s = _look([("green-mushroom", 200.0, 0.5)], mp=mp)
+        s.monsters[0] = dataclasses.replace(s.monsters[0], track=7)
+        return s
+    with telemetry.captured() as records:
+        a.on_look(look(1.0))
+        assert a.key("right") == "shift"  # (Magic Claw)
+        a.on_look(look(15 / 1007))
+        assert a.key("right") is None  # (her MP under a cast's)
+    cast = next(r for r in records if r["topic"] == "attack")
+    refused = next(r for r in records if r["topic"] == "no_cast")
+    fields = ("kind", "platform", "x", "track", "side")
+    assert {k: cast[k] for k in fields} == {k: refused[k] for k in fields} == {
+        "kind": "green-mushroom", "platform": 1, "x": 200.0, "track": 7, "side": "right"}
+
+
 def test_out_of_mp_when_her_mp_stays_under_two_casts():
     w = darts.MpWatch(20.0, 1007.0)
     t = 1000.0

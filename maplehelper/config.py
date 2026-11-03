@@ -77,9 +77,10 @@ class Timing:
 @dataclass(frozen=True)
 class Character:
     """Her stats that set how the game moves her, in % as the stat window shows them. The game walks her
-    at 125 units/s x SPEED/100 and jumps her at 555 units/s x JUMP/100 (its Physics.img), counting
-    SPEED from 80 to 140 and JUMP from 80 to 123. Gear and Haste raise them. gamelab plans her moves
-    with them (gamelab.motion.physics). And her MP and her Lucky Seven's skill level, which what a cast costs
+    at 125 units/s x (SPEED + 20)/100 (Physics.img's walkSpeed, and the 20 Speed this client adds to a character's
+    behind the scenes: gamelab.motion.body.SPEED_BONUS, meowdb's guide, her walks) and jumps her at 555 units/s x
+    JUMP/100, counting SPEED from 80 to 140 and JUMP from 80 to 120. Gear and Haste raise them. gamelab plans her
+    moves with them (gamelab.motion.physics). And her MP and her Lucky Seven's skill level, which what a cast costs
     and how many she has left come from (gamelab.attack.choice: Lucky Seven or the regular attack).
 
     Not here: her HP, her level and her DEF (W.DEF), what a monster's touch takes is measured against. They change
@@ -88,7 +89,12 @@ class Character:
     HUD's HP number, her level off its "LV." digits, her DEF off her stat window when it's read, else fitted to her
     touches). The user, 2026-10-28: "I thought hp and level will come from perception, please remove them completely
     from config.toml". A table that gives them is refused (PERCEIVED), so none lingers there unread."""
-    speed: float = 119.2    # measured: she walks 148-151 units/s (149 = 125 x 1.192)
+    speed: float = 101.0    # her stat window's SPEED (read 2026-10-30, level 30): her walk, 151.25 units/s (125 x
+                            # (101 + 20)/100), and climb, 121 (SPEED + 20), until a hunt reads her stat window's
+                            # (gamelab.motion.physics.set_speed, from 2026-11-02: the user's "Just use panel, no need to
+                            # measure."); measured, she walks 151.2 (243 walks on Tree Dungeon, 10-25 to 30). 99.2
+                            # (149.0, what 119.2 walked under the old formula) until then (README "Her walk and climb
+                            # from her stat window's SPEED")
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
     mp: float = 623.0       # her MP when full (her MP bar's number, level 25, 2026-10-25; 601 at level 24)
     lucky_seven: float = 16.0  # her Lucky Seven's skill level: 14 MP a cast in the game data (at 16 and 17); her MP
@@ -96,10 +102,10 @@ class Character:
                                # of 2026-10-25 23:43 to 01:03, 14.05 MP at 623 (13 at 14 and 15 would be 2.17 px, 15 at
                                # 18 and 19 2.50: D:/MapleHelper-scratch/hunt-ab/a/scripts/castcost_all.py); 11 at level
                                # 10, 11.4 measured on 2026-10-24
-    # What her bars are reckoned with, as the stack has them for her (nothing reads these three yet: each module has
-    # its own copy, the thief's, until her profile is read there: gamelab README, Characters).
+    # What her bars are reckoned with, as the stack has them for her (nothing reads these two yet: each module has
+    # its own copy, the thief's, until her profile is read there: gamelab README, Characters). (Her climb isn't here
+    # from 2026-11-02: SPEED + 20 by the client's formula, motion.physics.climb_of.)
     avoid: float = 27.0        # sim.world.EVADE_ACC: fit to 13 touches hopping over monsters (not her stat window's)
-    climb_speed: float = 117.0  # motion.physics.CLIMB_SPEED: units/s on a rope, measured
     mp_regen: float = 0.32     # sim.world.MP_REGEN: MP a second, idle
 
 

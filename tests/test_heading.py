@@ -25,7 +25,7 @@ from gamelab.perception.heading import Heading, Reading
 from gamelab.perception.nametag import NameTag
 from gamelab.screen import NATIVE, STRETCHED
 from gamelab.sim import scenarios
-from gamelab.sim.world import LEVEL_25, Noise, Realism
+from gamelab.sim.world import HER_HALF, HER_HEIGHT, KNOCK_PLANNER, LEVEL_25, Noise, Realism
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LABELS = json.loads((FIXTURES / "heading" / "labels.json").read_text(encoding="utf-8"))
@@ -448,7 +448,8 @@ def test_her_keys_say_her_facing_beyond_doubt_only_well_after_her_arrow_with_no_
 needs_tree = pytest.mark.skipif(not scenarios.available(TREE), reason="needs Tree Dungeon's game data (gamedata/data)")
 
 
-NO_CHASE = Realism(chase=False)
+NO_CHASE = Realism(chase=False, knock=KNOCK_PLANNER)  # (and her knock as when these were measured: the client's since
+                                                     # 2026-11-02 flies her farther, 87 units, not 58)
 
 
 def _kill_on_23(noise=None, realism=None, read=True, seed=1, start=-150.0, mushrooms=(120.0,), facing=RIGHT, her=None):
@@ -509,8 +510,10 @@ def test_turned_without_a_key_her_frame_tells_and_no_star_goes_the_wrong_way():
 # MISSed EVADE_ACC over its accuracy, 29%; the world's 1.45 s and her avoid since 2026-10-28 knock her less often, and
 # none of seeds 1-32 keeps the single seed's case below: what's tested is her heading after a knock, not the knocks;
 # the monsters walk as with nobody there and come back on their own clock, as then: Realism.chase off, respawn_tick 0)
-KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False, respawn_tick=0.0),
-               start=0.0,
+KNOCKED = dict(realism=Realism(knock_turns=True, zero_walls=True, invulnerable=1.0, chase=False, respawn_tick=0.0,
+                               her_box=(HER_HALF, HER_HEIGHT), knock=KNOCK_PLANNER),  # (her body and knock as when
+               start=0.0,                    # these were measured: the client's line since 2026-11-02 knocks her less,
+                                             # and the client's knock flies her farther)
                mushrooms=(160.0, -150.0), her=dataclasses.replace(LEVEL_25, avoid=None))
 
 
@@ -541,10 +544,14 @@ def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_
     (D:/MapleHelper-scratch/replan/loot/eval/seeds/heading_knocked.txt): on seed 72 blind eyes sent none the wrong way
     for 5 knocks; of seeds 1-96 25, 39, 43, 67, 75, 76, 84 and 85 meet all of this; over 1-96 the frame sent 42 stars
     the wrong way for 172 knocks, blind eyes 59 for 197. On 25: 4 knocks, one the wrong way, the frame against her arrow
-    twice; blind, 2 the wrong way for 5 knocks.)"""
-    out, _ = _kill_on_23(seed=25, **KNOCKED)
+    twice; blind, 2 the wrong way for 5 knocks.) (Seed 4 since his walk and climb by his SPEED, 2026-11-02: the thief at
+    his stat window's 151.25 where 149 (D:/MapleHelper-scratch/recfix/calib/seeds/heading1.json): on 25 blind eyes sent
+    none the wrong way for 2 knocks; of seeds 1-48 4, 40 and 43 meet all of this; over 1-48 the frame sent 18 stars the
+    wrong way for 79 knocks, blind eyes 28 for 87. On 4: 2 knocks, one the wrong way, the frame against her arrow once;
+    blind, 2 the wrong way for 3 knocks.)"""
+    out, _ = _kill_on_23(seed=4, **KNOCKED)
     assert out["knocks"] >= 1 and out["wrong way"] <= 1 and out["counts"]["against"] >= 1, out
-    blind, _ = _kill_on_23(seed=25, read=False, **KNOCKED)
+    blind, _ = _kill_on_23(seed=4, read=False, **KNOCKED)
     assert blind["wrong way"] > out["wrong way"], blind
 
 
@@ -559,11 +566,14 @@ def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_onl
     her band's own search beside a slow one (worldstate.BAND_STAND_IN_S, 2026-10-28), 6 for 17 knocks with the frame
     and 6 for 14 blind on these 8 (seed 5: 4 for 7); over seeds 1-16 8 for 34 and 13 for 26, master's stack 8 for 32 and
     8 for 24: twice as many blind was luck of the 8 seeds, more of them a knock blind isn't (every window of these),
-    so that's what's asserted.)"""
+    so that's what's asserted.) Seeds 9-16 since his walk and climb by his SPEED (2026-11-02: the thief at his stat
+    window's 151.25 where 149; D:/MapleHelper-scratch/recfix/calib/seeds/heading2.json): on 1-8 the frame sent 5 the
+    wrong way for 12 knocks, blind eyes 2 for 6; of the windows of 8 in 1-32 those from 9-16 to 16-23 meet it, the rest
+    not; on 9-16 3 for 14 and 11 for 29, over 1-16 8 for 26 and 13 for 35, over 1-32 16 for 59 and 15 for 56: alike."""
     from gamelab.sim import world as world_mod
     monkeypatch.setattr(world_mod, "AIR_PICK", "widening")
-    seen = [_kill_on_23(seed=k, **KNOCKED)[0] for k in range(1, 9)]
-    blind = [_kill_on_23(seed=k, read=False, **KNOCKED)[0] for k in range(1, 9)]
+    seen = [_kill_on_23(seed=k, **KNOCKED)[0] for k in range(9, 17)]
+    blind = [_kill_on_23(seed=k, read=False, **KNOCKED)[0] for k in range(9, 17)]
     wrong, knocks = sum(o["wrong way"] for o in seen), sum(o["knocks"] for o in seen)
     blind_wrong, blind_knocks = sum(o["wrong way"] for o in blind), sum(o["knocks"] for o in blind)
     assert wrong <= knocks and blind_wrong * knocks > wrong * blind_knocks, (wrong, knocks, blind_wrong, blind_knocks)

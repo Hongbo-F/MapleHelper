@@ -56,7 +56,7 @@ def test_bad_config_is_explained(config_data, mutate, message):
 
 
 def test_her_stats_default_to_the_measured_ones(config_data, tmp_path):
-    assert config.parse(config_data, NAMES).character == config.Character(speed=119.2, jump=100)
+    assert config.parse(config_data, NAMES).character == config.Character(speed=101, jump=100)  # (his stat window's)
     config_data["character"] = {"speed": 125}  # Haste
     assert config.parse(config_data, NAMES).character == config.Character(speed=125.0, jump=100.0)
     # gamelab's physics reads just this table, before anything else
@@ -72,7 +72,7 @@ def test_her_hp_level_and_def_arent_config_tomls(config_data, tmp_path, given):
     config.toml": perception reads them (behavior.bootstrap); a [character] table that gives one is refused, saying
     so, so no stale number lingers there unread. The shipped config.toml has none."""
     path = tmp_path / "config.toml"
-    path.write_text(f"[character]\nspeed = 119.2\n{given}\n")
+    path.write_text(f"[character]\nspeed = 99.2\n{given}\n")
     with pytest.raises(config.ConfigError, match=r"her HP, level and DEF aren't read from config.toml .* delete the "
                                                  r"line"):
         config.character(path)

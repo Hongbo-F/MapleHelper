@@ -59,6 +59,32 @@ def test_asks_from_every_client_are_merged_and_mesos_only_if_each_asked_only_for
     assert svc._fulls[-1] == (a, 8, 10.6, True)
 
 
+def test_her_throw_is_taken_in_each_form_a_client_sends_and_a_client_sends_the_short_ones_without_an_aim():
+    # (the final review of 2026-11-02: a service and its clients of either version together) ('throw', t, side) from a
+    # client of before her attack's id, (..., attack) from one of before her aim, (..., attack, aim) now; the service
+    # hands the step what it has, None for the rest. A client sends the shortest form that says what it knows, so a
+    # service of before her aim reads msg[1..3] as ever (it ignores a fifth item).
+    svc = _svc()
+    hunt = _attach(svc, name="tour", acts=True, throws=True)
+    told = []
+    svc.runner = SimpleNamespace(step=SimpleNamespace(throw=lambda *a: told.append(a)))
+    aim = (5, "horny-mushroom", 10.0, 3)
+    for msg in (("throw", 1.0, "left"), ("throw", 2.0, "right", "lucky_seven"), ("throw", 3.0, "left", None, aim)):
+        assert svc._take(hunt, msg, None) is None
+    assert told == [(1.0, "left", None, None), (2.0, "right", "lucky_seven", None), (3.0, "left", None, aim)]
+    c = ServiceClient("tour", acts=True, throws=True, map_id=2, start=False, ensure=None)
+    sent = []
+    c._send = lambda *msg: sent.append(msg) or True
+    c.throw(1.0, "left")
+    c.throw(2.0, "right", "lucky_seven")
+    c.throw(3.0, "left", None, list(aim))
+    assert sent == [("throw", 1.0, "left"), ("throw", 2.0, "right", "lucky_seven"), ("throw", 3.0, "left", None, aim)]
+    quiet = ServiceClient("watch", map_id=2, start=False, ensure=None)  # (one that doesn't tell her throws: none)
+    quiet._send = lambda *msg: sent.append(msg) or True
+    quiet.throw(4.0, "left")
+    assert len(sent) == 3
+
+
 def test_one_pace_and_searches_whoever_is_attached_the_drops_asked_for_by_a_hunt_and_her_throws_follow_it():
     # The user, 2026-10-26: "Run the perception at the same rate between hunt and idle. The idea is perception is
     # running as a constant thing and hunt is only a consumer of it." Until then a command that hunts had the frames at

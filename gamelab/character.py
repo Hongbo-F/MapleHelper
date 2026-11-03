@@ -83,6 +83,22 @@ class Search:
         """... and the highest."""
         return self.window(self.bands - 1)[1]
 
+    def band(self, ahead: float, dy: float, half: float, top: float) -> int | None:
+        """The first band a body overlaps (strictly, sideways and up and down: attack.reach.search_band's rule), its
+        middle `ahead` in front of her, its feet `dy` below hers (+ below), `half` wide either side and `top` tall;
+        None: the search doesn't pick it (behind her, its far side within `start`, its near side at `range` or past, or
+        no band's window reaching it)."""
+        near, far, bottom, roof = ahead - half, ahead + half, -dy, top - dy
+        if far <= self.start or near >= self.range or far <= near:
+            return None
+        first = max(0, int((near - self.start) // self.step))
+        last = min(self.bands - 1, math.ceil((far - self.start) / self.step) - 1)
+        for k in range(first, last + 1):
+            lo, hi = self.window(k)
+            if bottom < hi and roof > lo:
+                return k
+        return None
+
 
 @dataclass(frozen=True)
 class Geometry:
@@ -132,6 +148,18 @@ class AttackSpec:
 
 
 @dataclass(frozen=True)
+class KillCredit:
+    """Which monster her kill was, where her attack picks by the client's own search and no star flies (the
+    magician's Magic Claw; localization.tracking `_picks`, `_let_go`; the hunt following the tracker's corrections:
+    behavior.ledger, grind, localization.memory). The thief has none: his stars' nearest-ahead box and timings
+    (tracking's constants)."""
+    search: Search          # the search her attack picks by: each candidate's first band from where she was at the pick
+    tie: int                # the bands past the first taken as the first (the tracker's x error), the oldest track
+                            # first across them (0: the first band alone)
+    lands_s: float          # s after the key her hit shows on the monster: it walks on till then, then dies where it is
+
+
+@dataclass(frozen=True)
 class Shape:
     """What localization takes of her attacks (their union): which monsters a use of one went at, and how long
     after its key what it did can show. Passed into the trackers (MonsterTracker, Memory, Senses); THIEF_SHAPE is
@@ -151,6 +179,7 @@ class Shape:
     order: str                          # "line": the first in a star's way | "band": the first band, any in it
     look_band: tuple[float, float]      # how far above and below her feet a look searches (attack.reach.LOOK_*)
     shows_wait_s: float                 # a look for the next attack waits for a kill to show this long at most
+    kill: KillCredit | None = None      # her kill's monster by the client's search (None: the thief's stars)
 
 
 @dataclass(frozen=True)
@@ -342,6 +371,27 @@ def stats(path=CONFIG, environ=os.environ) -> config.Character:
     if which == DEFAULT:
         return config.character(path)
     return load(which, path, environ).stats
+
+
+def stats_from(stat: str, path=CONFIG, environ=os.environ) -> str:
+    """Where the stats this process plays with (`stats`) take `stat` ("speed", "jump", ...) from, in words (the hunter's
+    note when her stat window disagrees, 2026-11-02): under FIXED_STATS her class's fixed copy; the thief's config.toml
+    [character]; another's [characters.<id>.stats] if it gives `stat`, else her class's profile. (It reads config.toml
+    from inside a hunt, Hunter._stats_read: a file made unreadable since the process started says "her profile", the
+    stats being what was read then, rather than raise there.)"""
+    if environ.get(FIXED_STATS):
+        return f"her class's fixed stats ({FIXED_STATS})"
+    try:
+        which = _ACTIVE[0].id if _ACTIVE else active_id(environ, path)  # (who plays as resolved, physics' stats hers)
+        if which == DEFAULT:
+            return "config.toml [character]"
+        table = config.characters(path)[1].get(which)
+    except config.ConfigError:
+        return "her profile"
+    if table is not None and not table.broken and stat in table.stats:
+        return f"config.toml [characters.{which}.stats]"
+    klass = table.klass if table is not None else which
+    return f"her profile (gamelab/classes/{klass}.py FIXED_STATS)"
 
 
 _ACTIVE: list[Character] = []

@@ -241,12 +241,14 @@ def test_a_jump_from_standing_is_never_keyed_in_the_kicks_blind_spot(model):
 def test_a_jump_leaves_with_what_she_has_on_the_ground(model):
     c = by_y(model, 500, 400)
     # Landed at 120 units/s with the arrow held (a jump that left so): she speeds up again at 1400 units/s²,
-    # and a jump at once leaves at what she has by then (no kick above 0.8 x 149).
+    # and a jump at once leaves at what she has by then (no kick above 0.8 x her walk: 121 of 151.25).
+    from gamelab.motion import physics
+    w = physics.WALK_SPEED
     landed = Body(1.0, 100.0, c, run=1, landed=True, v=120.0)
     press, t, x, vx = Flow.liftoff(landed, 1, 1.0)
-    assert press == pytest.approx(landed.ready_at) and vx == pytest.approx(min(149.0, 120 + 1400 * (t - 1.0)))
-    full = 29 / 1400  # s to full speed
-    assert x == pytest.approx(100 + (120 + 149) / 2 * full + 149 * (t - 1.0 - full))
+    assert press == pytest.approx(landed.ready_at) and vx == pytest.approx(min(w, 120 + 1400 * (t - 1.0)))
+    full = (w - 120) / 1400  # s to full speed
+    assert x == pytest.approx(100 + (120 + w) / 2 * full + w * (t - 1.0 - full))
 
 
 def test_a_stop_landing_slides_from_her_landing_speed(model):

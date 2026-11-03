@@ -1510,10 +1510,12 @@ def _log(message: str) -> None:
 
 def _record(command: str, map_id: int) -> None:
     """Record this run's telemetry (lab/telemetry), for the mini-map to follow live or replay later, Python's garbage
-    collections among it once a minute (gcstats)."""
+    collections among it once a minute (gcstats). Its 'session' record says her physics as the run plans her moves
+    (`physics`: motion.physics.record, from 2026-11-02)."""
     from . import gcstats
+    from .motion import physics
     path = telemetry.record_to(command)
-    telemetry.emit("session", map=map_id, command=command, mode="live")
+    telemetry.emit("session", map=map_id, command=command, mode="live", physics=physics.record())
     gcstats.report_every(telemetry.emit, when=telemetry.to_file)
     _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`: a window, and a page for a phone)")
 

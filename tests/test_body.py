@@ -4,6 +4,7 @@ over a map. The numbers are the measured ones (gamelab/README.md, Motion plannin
 needs no game data, the real map's test (Tree Dungeon's) is skipped without it."""
 
 import random
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -17,7 +18,8 @@ from gamelab.sim import scenarios
 
 from test_navigation import by_y, seg, tree
 
-SHOE = Shoe.from_physics(body.PHYSICS_IMG, speed=119.2, jump=100)  # config.toml's defaults
+SHOE = Shoe.from_physics(body.PHYSICS_IMG, speed=99.2, jump=100, bonus=body.SPEED_BONUS)  # (the engine at 149, the
+# thief's profile's walk until 2026-11-02: what its measures below were taken at)
 LAGS = Lags()
 REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE), reason="needs the map's game data (gamedata/data)")
 
@@ -52,17 +54,36 @@ def test_the_physics_is_the_game_datas():
 
 
 def test_her_shoe_from_physics_img_and_her_stats():
-    assert SHOE.vmax == pytest.approx(149.0)  # 125 x 1.192: she walks 148-151 units/s in the recordings
+    assert SHOE.vmax == 149.0  # 125 x (99.2 + 20)/100, exactly 119.2's under the old formula (the goldens' walk until
+                               # 2026-11-02: the thief's 151.25 since, his stat window's 101)
+    assert SHOE.vmax == Shoe.from_physics(body.PHYSICS_IMG, speed=119.2, jump=100).vmax  # (125 x 119.2/100, v83's)
     assert (SHOE.acc, SHOE.drag, SHOE.vjump, SHOE.gravity, SHOE.fall) == (1400, 800, 555, 2000, 670)
     assert (SHOE.air_acc, SHOE.air_drag, SHOE.air_drag_fall) == (200, 1, 100)
-    assert SHOE.air_speed == pytest.approx(8.93, abs=0.01)
-    # The game counts SPEED up to 140% and JUMP up to 123% (Haste can't take her past them).
-    hasted = Shoe.from_physics(body.PHYSICS_IMG, speed=160, jump=130)
-    assert hasted.vmax == pytest.approx(175) and hasted.vjump == pytest.approx(555 * 1.23)
+    assert SHOE.air_speed == pytest.approx(8.93, abs=0.01)  # (Physics.img's alone: no SPEED in it)
+    # The game counts SPEED up to 140% and JUMP up to 120% (meowdb: v83's 123 is 120 in this client), the client's
+    # 20 on top of the capped SPEED: Haste can't take her past 200 units/s (meowdb's cap row).
+    hasted = Shoe.from_physics(body.PHYSICS_IMG, speed=160, jump=130, bonus=body.SPEED_BONUS)
+    assert hasted.vmax == pytest.approx(200) and hasted.vjump == pytest.approx(555 * 1.20)
+
+
+def test_a_characters_walk_is_the_clients_125_x_speed_plus_20():
+    """This client walks a character at 125 x (SPEED + 20)/100 (body.SPEED_BONUS; meowdb's guide "Speed, Jump and
+    Movement": "At the base Speed of 100, your character walks 150 pixels per second", its formulas page and calculator
+    125*(a+20)/100): her stat window's SPEED 100 walks 150, the thief's 101 151.25, the cap 200; a monster's walk is
+    v83's, no bonus (sim.world.JumpSpace.shoe: Tree Dungeon's at speed -20 walk 100, measured 99 and 98)."""
+    def walk(speed, bonus=body.SPEED_BONUS):
+        return Shoe.from_physics(body.PHYSICS_IMG, speed, 100, bonus=bonus).vmax
+    assert body.SPEED_BONUS == 20.0
+    assert walk(100) == 150.0 and walk(101) == 151.25 and walk(140) == walk(160) == 200.0 and walk(99.2) == 149.0
+    assert walk(100, bonus=0.0) == 125.0  # (v83's, which planned the magician until 2026-11-02)
+    from gamelab.sim.world import JumpSpace
+    assert JumpSpace.shoe(SimpleNamespace(shoes={}), 100.0).vmax == 100.0  # (a monster: speed -20 in the game data)
 
 
 def test_physics_takes_her_stats_from_the_config():
-    assert physics.SHOE == Shoe.from_physics(body.PHYSICS_IMG, physics.CHARACTER.speed, physics.CHARACTER.jump)
+    assert physics.SHOE == physics.shoe_of(physics.CHARACTER)
+    assert physics.SHOE == Shoe.from_physics(body.PHYSICS_IMG, physics.CHARACTER.speed, physics.CHARACTER.jump,
+                                             bonus=body.SPEED_BONUS)
 
 
 def test_the_tests_take_her_measured_stats_whatever_the_config_says(tmp_path):
@@ -78,7 +99,7 @@ def test_the_tests_take_her_measured_stats_whatever_the_config_says(tmp_path):
 def test_turning_from_a_run_lags_a_standing_start_by_the_braking():
     # Kept for its name: from full speed the other way she brakes 0.106 s at 1400 (7.9 units on), then
     # speeds up as from standing.
-    assert physics.TURN_EXTRA == pytest.approx(1.5 * 149 / 1400, abs=1e-3)
+    assert physics.TURN_EXTRA == pytest.approx(1.5 * physics.WALK_SPEED / 1400, abs=1e-3)
 
 
 # --- on the ground --------------------------------------------------------------------------------------
@@ -353,15 +374,16 @@ def _ledge_map():
 
 def test_walking_off_through_another_groups_wall_lands_beyond_it(monkeypatch):
     m, ledge, floor, basin = _ledge_map()
-    f = body.fly(m, 200.5, 299, 149.0, 0.0, shoe=SHOE, arrow=1, group=ledge.group)
-    assert f.platform is floor and f.land_x == pytest.approx(200.5 + 149 * f.seconds, abs=1) and f.vx_land == 149
+    v = physics.WALK_SPEED  # (the planner's walk-off leaves at her walk)
+    f = body.fly(m, 200.5, 299, v, 0.0, shoe=SHOE, arrow=1, group=ledge.group)
+    assert f.platform is floor and f.land_x == pytest.approx(200.5 + v * f.seconds, abs=1) and f.vx_land == v
     # Every wall stopping her, she comes down along H's wall: into the basin with the arrow let go (where
     # the planner, which took no notice of the arrow before it flew her by the engine, had platform 3's
     # walk-off going: into the basin, 36, where in game she landed on 17 three times out of three); with the
     # arrow held, the air steers her round the wall's foot onto F, 8 units past it.
-    every = body.fly(m, 200.5, 299, 149.0, 0.0, shoe=SHOE, arrow=0)
+    every = body.fly(m, 200.5, 299, v, 0.0, shoe=SHOE, arrow=0)
     assert every.platform is basin and 211 < every.land_x < 212
-    round_foot = body.fly(m, 200.5, 299, 149.0, 0.0, shoe=SHOE, arrow=1)
+    round_foot = body.fly(m, 200.5, 299, v, 0.0, shoe=SHOE, arrow=1)
     assert round_foot.platform is floor and 212 < round_foot.land_x < 221 and round_foot.vx_land < 9
 
     def walk_off() -> list[tuple[int, int]]:  # where walking off L's right end lands, by the planner

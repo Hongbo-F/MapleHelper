@@ -403,6 +403,7 @@ class Attacks:
         self._target: Monster | None = None
         self._regular = False
         self._asked = False
+        self.thrown: tuple[float, Monster | None] | None = None  # the last throw's key time and what `key` aimed it at
 
     # --- after every look ------------------------------------------------------------------------
 
@@ -601,8 +602,7 @@ class Attacks:
                      f"body seen that her search picks from where she stands"
                      + ("" if self.counts[said] == 1 else f" ({self.counts[said]} times)"))
         if telemetry.recording():
-            telemetry.emit("no_cast", why=why, side=side, by=by, kind=None if first is None else first.kind,
-                           x=None if first is None else round(first.x, 1))
+            telemetry.emit("no_cast", why=why, side=side, by=by, **_target_fields(first))
         return True
 
     def _held_here(self, side: str, s: Scene) -> bool:
@@ -859,6 +859,11 @@ class Attacks:
                 self.log(f"    no cast ({why}): her regular attack isn't thrown"
                          + (f" (her MP {self.mp * self.max_mp:.0f} under a cast's {self.skill.mp:g}: her pet's MP "
                             f"potions)" if why == "MP" and self.mp is not None and self.skill is not None else ""))
+            if telemetry.recording():  # (every one, from 2026-11-02: the log says the 1st, 10th and 100th alone, so
+                # how often her reckoned MP refused a cast couldn't be told, P27 of the recordings' analysis)
+                telemetry.emit("no_cast", why=why, side=side, by="key", **_target_fields(target),
+                               mp=None if self.mp is None else round(self.mp * self.max_mp),
+                               cost=None if self.skill is None else self.skill.mp)
             return None
         self._target, self._regular, self._asked = target, attack is self.regular, True
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
@@ -886,7 +891,7 @@ class Attacks:
                 self._turned(side)
         self.counts[attack.key] += 1
         self.counts[why] += 1
-        self._say(attack, why, target, left, alive, hp)
+        self._say(attack, why, target, left, alive, hp, side)
         return getattr(self.keys, attack.key).name
 
     def on_throw(self, at: float, side: str) -> None:
@@ -895,6 +900,7 @@ class Attacks:
         LANDS_S count from it), and the look the next is decided on waits for its kill to show (`shown_by`); a cast
         `key` chose takes its MP off now (looks shown before it could show still read it: on_look). Its regular
         attack's press, or its cast at a target, told to the doubt's watch (`watch`)."""
+        self.thrown = (at, self._target if self._asked else None)  # (its aim, told to the feed: Hunter._tell_feed)
         if self.watch is not None:
             if not self._asked:  # (the regular attack alone: her Actions keyed it, its target as a throw that way takes)
                 self._watch_regular(at, self.target(side))
@@ -1176,7 +1182,7 @@ class Attacks:
         return next((mk for mk in self.marks if mk.m is m or seen_again(mk.m, [m]) is m), None)
 
     def _say(self, attack: Attack, why: str, target: Monster | None, left: Left | None, alive: Left | None,
-             hp: float) -> None:
+             hp: float, side: str | None = None) -> None:
         mp = None if self.mp is None else max(0.0, choice.mp_points(self.mp, self.max_mp))
         if target is None:
             what = "nothing seen in its way"
@@ -1193,12 +1199,20 @@ class Attacks:
         self.log(f"    {attack.name}: {what}" + (f"; {reason}" if reason else "")
                  + ("" if mp is None or why == "MP" else f" (MP {mp:.0f})"))
         if telemetry.recording():  # (where its target was seen too: sim.harness counts the throws at the dead)
-            telemetry.emit("attack", key=attack.key, why=why, kind=None if target is None else target.kind,
+            # (which monster it went at and which way, the perception service's track of it among its fields, so a
+            # live check of her kill's binding needs no reconstruction: _target_fields, a 'no_cast' record's too)
+            telemetry.emit("attack", key=attack.key, why=why, **_target_fields(target),
                            left=None if alive is None else round(alive.hp),
                            dead=None if left is None else round(left.dead, 3), hp=hp,
-                           mp=None if mp is None else round(mp),
-                           platform=None if target is None else target.platform,
-                           x=None if target is None else round(target.x, 1))
+                           mp=None if mp is None else round(mp), side=side)
+
+
+def _target_fields(m: Monster | None) -> dict:
+    """A throw's target in its 'attack' record (`_say`), and a cast's not sent in its 'no_cast' record (one schema,
+    from the integration of 2026-11-02: work/rec-records' records beside work/rec-replay's track): its kind, platform,
+    x and the perception service's track (None each, no target)."""
+    return {"kind": None if m is None else m.kind, "platform": None if m is None else m.platform,
+            "x": None if m is None else round(m.x, 1), "track": None if m is None else getattr(m, "track", None)}
 
 
 def _believable(bar: float | None) -> bool:

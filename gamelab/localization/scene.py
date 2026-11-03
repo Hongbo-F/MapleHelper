@@ -79,6 +79,8 @@ class Scene(Observation):
                                                 # without
     what_if: bool = False         # a look made up from another (her put where a chain ends: the navigator's _stop_calls,
                                   # _look_ahead) for what a trip's `until` would say there: nothing it decides is kept
+    seq: int | None = None        # with a continuous feed, the frame number of the state it's of (worldstate.WorldState:
+                                  # the perception service's, its recording's `seq`); None without
 
     @classmethod
     def of(cls, obs: Observation) -> "Scene":
@@ -160,7 +162,8 @@ class Scene(Observation):
         are none); and where the map's minimap picture was found and how well it matched (`minimap`: its corner x, y in
         full-size px, the score; left out without one), which a dot read with the wrong origin is told by; from
         2026-10-24's evening, where it searched for monsters (`rows`: map y from, to) and the monsters a slice of the
-        sweep found (`swept`, left out when it found none)."""
+        sweep found (`swept`, left out when it found none); from 2026-11-02 the frame number of the perception
+        service's state it's of (`seq`, left out without a feed: matched to a recording's frames by its index's `seq`)."""
         her = None if self.where is None else {
             "x": round(self.where.x, 1), "y": round(self.where.y, 1),
             "platform": None if self.platform is None else self.platform.id, "how": self.how, "seen": self.tag_seen,
@@ -172,7 +175,8 @@ class Scene(Observation):
             h, w = self.frame.shape[:2]
             view = [round(self.map_x(0)), round(self.map_y(0)), round(self.map_x(w)),
                     round(self.map_y(h * self.geo.hud_top))]
-        return {"her": her, "hp": round(self.hp, 3), "mp": round(self.mp, 3),
+        return {**({"seq": self.seq} if self.seq is not None else {}), "her": her, "hp": round(self.hp, 3),
+                "mp": round(self.mp, 3),
                 **({"hp_of": list(self.hp_of)} if self.hp_of is not None else {}),
                 **({"level_of": self.level_of} if getattr(self, "level_of", None) is not None else {}),
                 "monsters": [_monster_record(m) for m in self.monsters],

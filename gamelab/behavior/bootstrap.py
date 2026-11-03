@@ -69,7 +69,8 @@ SESSION_S = 3 * 3600.0  # s: her stat window's read is this session's for this l
                         # (new gear on 10-26 to 10-28), so an evening's read isn't the next one's
 # What her stat window shows besides her W.DEF, kept with it in her stats file (`see_window`'s `read`): her level, max HP
 # and MP, ATTACK, ACCURACY and EVASION (her MISS chance and a touch's: not modelled from them yet), MAGIC, MAGIC DEF., her
-# four stats, SPEED and JUMP (config.toml's speed and jump plan her moves: said where they differ)
+# four stats, SPEED (her walk and climb's, where it's taken: `see_window`'s `speed`, behavior.hunter) and JUMP (her
+# profile's plans her jumps: said where they differ, statcheck.moves_notes)
 WINDOW_KEEPS = ("level", "hp", "mp", "attack", "acc", "eva", "magic", "mdef", "str", "dex", "int", "luk", "speed",
                 "jump")
 
@@ -254,11 +255,12 @@ class HerStats:
         return int(v) if isinstance(v, (int, float)) and v > 0 else None
 
     def _kept_read(self) -> dict:
-        """The rest of her stat window's read as kept (its level, session and WINDOW_KEEPS' values), {} if none."""
+        """The rest of her stat window's read as kept (its level, session and WINDOW_KEEPS' values, and the SPEED her
+        walk and climb were set to from her stat window then), {} if none."""
         kept = self._kept.get("window")
         if self.window is None or not isinstance(kept, dict):
             return {}
-        return {k: kept[k] for k in ("level", "session", "read") if k in kept}
+        return {k: kept[k] for k in ("level", "session", "read", "speed") if k in kept}
 
     def _save(self) -> None:
         """Her stats file: her DEF as known now (and her stat window's, if read), and her max HP and level as last read,
@@ -349,11 +351,13 @@ class HerStats:
         return f"her level {level} by {source}" + ("" if was is None else f" (was {was})")
 
     def see_window(self, wdef: float, at: float | None = None, rows=None, level: int | None = None,
-                   session: str | None = None, read: dict | None = None) -> str | None:
+                   session: str | None = None, read: dict | None = None, speed: float | None = None) -> str | None:
         """Her stat window read her W.DEF `wdef` (perception.stat_window; behavior.statcheck opens it): hers from now
         on, kept with her level then (`level`: the window's own, else hers as read; None: not known), the session it was
-        read in (`session`: the perception service's run; None: none) and what else it showed (`read`: WINDOW_KEEPS'),
-        checked against her touches (said if they don't fit it: her measured touches raise her reserve past it anyway).
+        read in (`session`: the perception service's run; None: none), what else it showed (`read`: WINDOW_KEEPS') and
+        the SPEED her walk and climb are set to from her stat window (`speed`: its read's, or one before where a read's
+        isn't taken, behavior.hunter; None: none taken, her profile's), checked against her touches (said if they don't
+        fit it: her measured touches raise her reserve past it anyway).
         What changed, in words; None if her DEF is as it was (a read again: kept with its new time). A W.DEF outside 0 to
         DEF_TOP is no read (a misread: the review of 2026-10-28, an OCR's "711" for 111 put her reserve at 117 HP of
         840): not kept, her DEF as it was, said. One her touches don't bear out isn't her DEF either (`window_doubt`)."""
@@ -365,7 +369,8 @@ class HerStats:
         level = level if level is not None else self.level
         self.window_read = {"level": level, "session": session,
                             "read": {k: (list(v) if isinstance(v, tuple) else v) for k, v in (read or {}).items()
-                                     if k in WINDOW_KEEPS and v is not None}}
+                                     if k in WINDOW_KEEPS and v is not None},
+                            **({} if speed is None else {"speed": float(speed)})}
         rows = self._rows if rows is None else rows  # (her touches as last refitted: the hunter's)
         note = self.refit(rows)
         if note is None:

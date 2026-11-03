@@ -4,7 +4,7 @@
                                              [--costs coded|measured|measured-1366] [--ways N] [--map 10004021]
                                              [--world zero-walls ...] [--grounds 23,...]
                                              [--attack choice|skill|regular] [--think K | --think-clock K]
-                                             [--cache]
+                                             [--character magician] [--cache]
     python -m gamelab.sim.harness cached POLICY [run's options] [--sha master]   a commit's cached seeds, read
     python -m gamelab.sim.harness ab POLICY [run's options] [--base master] [--metric KEY ...] [--max-seeds 48]
     python -m gamelab.sim.harness compare BASELINE CANDIDATE    two saved runs, seed by seed, against the bar
@@ -12,6 +12,14 @@
     python -m gamelab.sim.harness check                         the bookkeeping agrees with every scenario's world
 
 POLICY: tour, loop, loop-grind (the hunting commands), or walk (movement only, as the live QA walk: _walk).
+
+`--character magician` (from 2026-11-02; the thief by default, or GAMELAB_CHARACTER's) plays the magician: the run
+restarts itself with GAMELAB_CHARACTER=magician (her stack: her profile's stats, keys and Magic Claw, attack.magic's
+search for every decision, her Shape), the world her as the recordings of 2026-11-02 measured her (sim.scenarios.HERS:
+world.MAGE_32, Magic Claw as the game casts it, her walk the client's 150, her planner's too) on Tree Dungeon alone, her
+damage book as her stack had it then (sim.scenarios.HER_BOOK), `--attack` her profile's (Magic Claw whenever her MP pays,
+whatever is asked: ATTACK_HER is the thief's); her runs' results say `character`, and their baselines are cached under
+her own key (sim.baseline: the GAMELAB_* environment as resolved). README: The simulator's magician.
 
 `--cache` reads the seeds this checkout's code (its commit's) has already run with the same arguments from the baseline
 cache (sim.baseline: D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json) and runs only the others,
@@ -124,6 +132,16 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    ('refused'), moves her dot never moved on ('rope_top': control.navigator._rope_top) and her climbs
                    on after a touch ('climb_on': navigator.CLIMB_ON), telemetry events of those kinds; refused, her
                    attacks the world refused on a rope
+  rope_tops        her climbs up a rope onto the platform at its top ('climbs': World.climb_log), her grabs of a
+                   rope from below ('grabs': World.grab_log, GRAB_UNDER or more under its top: the climbs she set off
+                   on), and her touches (a MISS too) at a rope's top: on a rope ('on_rope'), or standing within
+                   ROPE_TOP_DX of the rope she climbed over ROPE_TOP_S or less before; 'touched' both, 'hurt' those of
+                   them that took HP (World.touch_place). Live on 2026-11-02, 19-23 of the hour's 170 touches over 68
+                   climbs up the rope at x -80 (11 to 10): about 0.3 a climb. And her hangs under a rope's top
+                   (control.navigator.ROPE_HANG: 'hangs', 'hang_s' the seconds they took, 'hang_regardless' those up
+                   regardless after HANG_S, 'hang_clear' the way up clear, 'hang_waited' up at a longer wait's end
+                   (HANG_LONGER), 'hang_took' the touch taken (HANG_TAKE), 'hang_touched', and 'hang_longer' those
+                   that went past HANG_S: telemetry events 'rope_hang')
   backstops        how often each backstop cap fired (telemetry events kind 'backstop')
   nav              her trips, from the stack's log (`navigation`): plans cut short by a hit and off the planned
                    path, replans, misses (landed elsewhere than planned) and falls among them, and her glances; of the
@@ -154,6 +172,7 @@ import argparse
 import bisect
 import dataclasses
 import difflib
+import importlib
 import json
 import math
 import os
@@ -170,9 +189,9 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, INVULNERABLE_LIVE, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, OFF_SEEN,
-                    POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp,
-                    Noise, Realism, tab_of)
+from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LIVE, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS,
+                    MEAT_HP, NEAR_SEEN, OFF_SEEN, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND, SPAWN_FOUND_WIDE, TICK_S,
+                    TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
 POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
@@ -245,11 +264,14 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
-# ... and her body as the client has it (`client-body`: 22 either side of her feet and 65 tall, motion.bodies, which the
-# planner keeps her clear of monsters by), not the simulator's 15 and 55 (world.HER_HALF, HER_HEIGHT).
+# ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
+# motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
+# (`wide-body`: 15 either side and 55 tall, world.HER_HALF, HER_HEIGHT), not the client's touch test (world.HER_TOUCH: a
+# line 50 tall over her feet, every world's since).
 WORLDS["client-body"] = {"her_box": HER_BOX_CLIENT}
+WORLDS["wide-body"] = {"her_box": (HER_HALF, HER_HEIGHT)}
 # ... and the monsters' HP bars read empty once they're hurt (`bars-empty`: Realism.bars_empty, sim.fakes.FakeEyes.bar),
 # as the stack read them live at 1366x768 until 2026-10-25 (perception.hud.hp_bar took the bar's black frame for its
 # fill: 488 of 567 bars read 0), so what a monster has left was her throws' reckoning alone (behavior.attacks).
@@ -272,6 +294,15 @@ WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN}
 # (`spawn-fade-wide`: SPAWN_FOUND_WIDE, a median 0.53 s later), where every other world finds a newborn from its birth.
 WORLDS["spawn-fade"] = {"spawn_found": SPAWN_FOUND}
 WORLDS["spawn-fade-wide"] = {"spawn_found": SPAWN_FOUND_WIDE}
+# ... and a newborn touching her from its birth (`newborns-touch`: Realism.newborns_touch), as every world had it until
+# 2026-11-02, where it now touches only once it has faded in (world.NEWBORN_SOLID_S: none of the 72 live touches by a
+# spawn point came before 0.82 s after the respawn pass).
+WORLDS["newborns-touch"] = {"newborns_touch": True}
+# ... and her knock as the planner has it (`planner-knock`: Realism.knock, world.KNOCK_PLANNER: motion.physics's 180 out
+# and 220 up, landing at the speed she flew; ~58 units on flat ground, 0.22 s in the air), as every world had it until
+# 2026-11-02, where it is now the client's (world.KNOCK_VX, KNOCK_VY: 270 and 270, landing at her walk's speed at most;
+# ~87, 0.27 s, as R1-R3's 15 fps frames have it).
+WORLDS["planner-knock"] = {"knock": KNOCK_PLANNER}
 # ... and her invulnerability after a touch as live (`walkers`: INVULNERABLE_LIVE; Realism.invulnerable), with the
 # monsters she hits chasing her (Realism.chase, world.AGGRO_S: every world's since 2026-10-31; till then this world's
 # alone, by chance, CHASE_TREE; and each monster back 17 s after its own death, RESPAWN_LIVE, until the server's respawn
@@ -318,6 +349,33 @@ WORLDS["meat"] = {"potion": MEAT_HP, "potions": POTIONS}
 # other worlds' drops are hers to pick up alone: live, 26-29% of the drops taken on her platform went with her 45 units
 # or more off, or with her never within 15 of them.
 WORLDS["pet-loot"] = {"pets": 2}
+# ... and another player's kill of a monster she hurt giving her its EXP times the share of its HP she took
+# (`shared-exp`: world.Realism.shared_exp), as live on 2026-11-02 (the hour's 26 shares by the log, mostly +32-35 of a Horny
+# Mushroom's 41 after her first claw: the rule's 32.8-36.5; plans/problems.md P43), where the other worlds give nothing.
+WORLDS["shared-exp"] = {"shared_exp": True}
+# ... and her walk and climb in the world her planner's (`walk-planned`: world.Her.walk_speed and climb_speed None,
+# physics.PROFILE_SHOE and PROFILE_CLIMB: the client's formula at her profile's SPEED, which her planner plans by in the
+# simulator, whose stat window shows that SPEED), where her own world moves her at its own (world.MAGE_32's, MAGE_WALK
+# and MAGE_CLIMB): what a planner's speed error costs her. Built to price the roadmap's item 1 (P01: her planner's 125
+# against the world's 148.2, then); from the integration of 2026-11-02 both are the client's 150 (and 120 climbing), so
+# for her the two worlds move alike; the thief's world is his profile's formula (151.25 and 121) either way.
+WORLDS["walk-planned"] = {"walk_speed": None, "climb_speed": None}
+# ... and her planner held at v83's walk and the old climb (`planner-v83`: world.Her.planned, physics.set_planned; 125
+# and 117 units/s, as master 40ba190 planned her: v83's 125 without the client's Speed, and the shared placeholder 117,
+# though master planned a climb up at flow.ROPE_SPEED's 130), the world moving her at its own (hers the client's 150 and
+# 120): what the roadmap's item 1 (her walk and climb from her stat window's SPEED) is worth, measured as the planner's
+# error it takes away.
+WORLDS["planner-v83"] = {"planned": (125.0, 117.0)}
+# ... and the stack's own rules switched off to price them (`stack`: (module, name, value) set around the run by run_one
+# and put back after; not the world's): her hang under a rope's top the 2 s hang alone (`hang-2s`:
+# control.navigator.HANG_LONGER and HANG_TAKE off, as work/rec-all 560bd57 had it, and the default from the final review
+# of 2026-11-02), with both rules on (`hang-rules`: as work/rec-rope2 built them, to price them), or none (`no-hang`:
+# ROPE_HANG off, her climbs as before 2026-11-02's item 9).
+WORLDS["hang-2s"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", False),
+                               ("gamelab.control.navigator", "HANG_TAKE", False))}
+WORLDS["hang-rules"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", True),
+                                  ("gamelab.control.navigator", "HANG_TAKE", True))}
+WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -458,11 +516,11 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
     her = scenarios.her_on(map_id)[1]
     for name in world:
         fields = WORLDS[name]
-        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()
-                                                  if k not in HER_FIELDS and k not in NOISE_FIELDS})
+        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's)
+                                                  if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack")})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
-    if attack is not None:
+    if attack is not None and her.magic is None:  # (the thief's Lucky Seven: the magician's attack is her Magic Claw)
         her = dataclasses.replace(her, **ATTACK_HER)
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
@@ -473,7 +531,8 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
                               starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
                               realism=realism, may_die=True, think=think_clock or think, think_reads=bool(think_clock),
                               map_id=map_id,
-                              her=her if world or attack else None, attack=attack)
+                              her=her if world or attack else None, attack=attack,
+                              book=scenarios.HER_BOOK if her.magic is not None else None)
 
 
 def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0, think: float = 0.0,
@@ -483,14 +542,22 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     the ways her trips choose among (route.ROUTES; None: as it is); `map_id`: the map (STARTS); `world`: WORLDS on;
     `attack`: the stack's attack a throw; `think`, `think_clock`: the stack's computing charged to the clock (scenario;
     the result has `think_clock` only where it's set)."""
-    from .. import telemetry
+    from .. import character, telemetry
+    from ..attack import magic
     from ..localization import feed
     from ..motion import route
     from . import fakes, scenarios
+    if not magic.applied():  # (the magician's Magic Claw for every decision, as `tour` sets it: nothing for the thief)
+        magic.apply(character.active())
     fakes_costs = {name: value for name, value in COSTS[costs].items() if name != "feed"}
     before = {name: getattr(fakes, name) for name in fakes_costs}
     routes, feed_costs = route.ROUTES, feed.COSTS
+    stack = [(importlib.import_module(mod), name, value)  # (the stack's switches the worlds set: WORLDS' `stack`)
+             for w in world for mod, name, value in WORLDS[w].get("stack", ())]
+    kept = [(mod, name, getattr(mod, name)) for mod, name, _ in stack]  # (as they were: put back after the run)
     try:
+        for mod, name, value in stack:
+            setattr(mod, name, value)
         for name, value in fakes_costs.items():
             setattr(fakes, name, value)
         if "feed" in COSTS[costs]:  # (the feed made for the run takes COSTS as it is then)
@@ -504,6 +571,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         for name, value in before.items():
             setattr(fakes, name, value)
         route.ROUTES, feed.COSTS = routes, feed_costs
+        for mod, name, value in reversed(kept):
+            setattr(mod, name, value)
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=True, costs=costs,
                ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])
@@ -515,6 +584,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         out["attack"] = attack
     if think_clock:
         out["think_clock"] = think_clock
+    if (who := character.active_id()) != character.DEFAULT:  # (`--character`: the thief's results as they were)
+        out["character"] = who
     out["coverage"] = coverage.tally(records, coverage.graph_for(sim.model))  # her moves, for the coverage report
     f = trace["feed"]
     out["feed_record"] = {"frames": f["frames"], "asked": f["asked"], "busy_s": f["busy_s"],
@@ -724,6 +795,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "ropes": sum(1 for r in events if r.get("kind") == "rope"),
         # (a rope's top: the game refusing her presses, a move her dot never moved on, her climb on after a touch)
         "rope_top": {k: sum(1 for r in events if r.get("kind") == k) for k in ("refused", "rope_top", "climb_on")},
+        "rope_tops": {**_rope_tops(world, end), **_hangs(events)},
         "refused": getattr(world, "refused", 0),  # her attacks refused on a rope (world.ROPE_REFUSAL)
         # (up close: from 2026-10-27, clearance and slopes)
         "claw_s": round(getattr(world, "claw_ms", 0) / 1000, 1),
@@ -737,7 +809,18 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         "landing_events": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "landing")),
         "moves_away": _moves_away(records, end),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
+        **(_magic(world, end) if world.character.magic is not None else {}),
     }
+
+
+def _magic(world, end: float) -> dict:
+    """The magician's own (world.Her.magic): her casts a minute alive (casts_per_min), her attack keys pressed in the air
+    (air_presses: nothing cast), inside the last attack's lock (attack_locked: ignored by the game, so her stack's pace
+    is too quick for the world's lock if any), her wand's swings (swings: never, Attacks.no_regular), and her HP and MP
+    potions a minute (potions_per_min, mp_potions_per_min is everyone's)."""
+    return {"casts_per_min": round(world.casts / (end / 60), 2) if end else None, "air_presses": world.air_presses,
+            "attack_locked": world.attack_locked, "swings": world.swings,
+            "potions_per_min": round(world.potions_used / (end / 60), 2) if end else None}
 
 
 TAKEN_BINS = ((15.0, "<=15"), (45.0, "15-45"), (150.0, "45-150"), (math.inf, ">150"))  # (_pets_took) units
@@ -862,6 +945,9 @@ DEAD_NEAR = 40.0     # ... this near it (map units, the same kind on the same pl
                      # units from where its kill was placed)
 
 
+SKILL_KEYS = ("lucky_seven", "magic_claw")  # her skill's key in her 'attack' records: the thief's, the magician's
+
+
 def _at_dead(world, records: list[dict]) -> dict:
     """at_dead and casts_at_dead (see the top): her attacks whose target as the stack chose it (its 'attack' record:
     behavior.attacks, the kind, platform and x it was seen at) had died DEAD_BEFORE_S or less before the choice, within
@@ -877,7 +963,7 @@ def _at_dead(world, records: list[dict]) -> dict:
         if any(t - DEAD_BEFORE_S <= dt <= t and kind == r.get("kind") and plat == r.get("platform")
                and abs(x - r["x"]) <= DEAD_NEAR for dt, kind, plat, x in deaths):
             n += 1
-            casts += r.get("key") == "lucky_seven"
+            casts += r.get("key") in SKILL_KEYS
     return {"at_dead": n, "casts_at_dead": casts}
 
 
@@ -890,7 +976,7 @@ def _at_dead_ids(world) -> dict:
     log = getattr(world, "aim_log", [])
     dead = [a for a in log if a[3] in ("her", "rival")]
     return {"at_dead_hers": sum(a[3] == "her" for a in log), "at_dead_others": sum(a[3] == "rival" for a in log),
-            "casts_at_dead_id": sum(a[1] == "lucky_seven" for a in dead), "aims": len(log),
+            "casts_at_dead_id": sum(a[1] in SKILL_KEYS for a in dead), "aims": len(log),
             "live_taken": len(getattr(world, "live_taken", []))}
 
 
@@ -931,6 +1017,47 @@ def _retouches(world, end: float) -> int:
     the one before (live in walk B, 53 of 148, 34 of them 1.43-1.6 s on, as her invulnerability ended)."""
     ts = [t for t, _ in world.touch_log if t <= end]
     return sum(1 for a, b in zip(ts, ts[1:]) if b - a <= RETOUCH_S)
+
+
+ROPE_TOP_S = 2.0    # (rope_tops) s after she climbs over a rope's top that a touch standing there is the climb's ...
+ROPE_TOP_DX = 40.0  # ... within this of the rope's x
+GRAB_UNDER = 20.0   # (rope_tops' grabs) a grab of a rope this far under its top or more: from below, to climb it
+
+
+def _rope_tops(world, end: float) -> dict:
+    """rope_tops (see the top): her climbs up a rope onto the platform at its top up to `end` (World.climb_log), her
+    grabs of a rope from below (`grabs`: GRAB_UNDER or more under its top, World.grab_log: the climbs she set off on, a
+    climb down from a rope's top not one), and her touches at a rope's top (World.touch_place, a MISS too): on a rope
+    (`on_rope`), or on the platform at its top within ROPE_TOP_DX of the rope she climbed over ROPE_TOP_S or less before
+    (`touched` is both; `hurt` those of them that took HP). The live hour of 2026-11-02 (RiceBaby, Tree Dungeon, 35
+    minutes) had 19-23 of its 170 touches at the top of the rope at x -80 from 11 to 10, 11 of them on the rope, over 68
+    climbs up it: about 0.3 a climb."""
+    climbs = [c for c in getattr(world, "climb_log", ()) if c[0] <= end]
+    grabs = sum(1 for t, _, under in getattr(world, "grab_log", ()) if t <= end and under >= GRAB_UNDER)
+    on_rope = top = hurt = 0
+    for (t, mode, x, _), (_, hp) in zip(getattr(world, "touch_place", ()), world.touch_log):
+        if t > end:
+            continue
+        at = mode == "rope" or any(0.0 <= t - tc <= ROPE_TOP_S and abs(x - rx) <= ROPE_TOP_DX for tc, rx, _ in climbs)
+        on_rope += mode == "rope"
+        top += at and mode != "rope"
+        hurt += at and hp > 0
+    return {"climbs": len(climbs), "grabs": grabs, "touched": on_rope + top, "on_rope": on_rope, "hurt": hurt}
+
+
+def _hangs(events: list[dict]) -> dict:
+    """rope_tops' hangs (see the top): her hangs under a rope's top (control.navigator.ROPE_HANG: telemetry events
+    'rope_hang', step 'hang' at a hang's start), the seconds they took (`hang_s`, from their ends' `s`), and how they
+    ended: up regardless after HANG_S (`hang_regardless`), the way up clear (`hang_clear`), up at a longer wait's end
+    as predicted clear (`hang_waited`: HANG_LONGER), the touch taken (`hang_took`: HANG_TAKE), touched in it
+    (`hang_touched`); and the hangs that went longer than HANG_S at some look (`hang_longer`: their 'longer' event)."""
+    hangs = [r for r in events if r.get("kind") == "rope_hang"]
+    out = {"hangs": sum(1 for r in hangs if r.get("step") == "hang"),
+           "hang_s": round(sum(r.get("s", 0.0) for r in hangs if r.get("step") != "hang"), 1),
+           "hang_regardless": sum(1 for r in hangs if r.get("step") == "regardless")}
+    for step in ("clear", "waited", "took", "touched", "longer"):
+        out[f"hang_{step}"] = sum(1 for r in hangs if r.get("step") == step)
+    return out
 
 
 def _trips(world, records: list[dict], end: float) -> dict:
@@ -1204,6 +1331,8 @@ def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]:
     every = cand  # deaths count on every seed, compared or not: "no death" isn't a comparison
     if (maps := _maps(base, cand)) is not None:
         return False, [maps, "does NOT pass the bar"]
+    if (who := _characters(base, cand)) is not None:
+        return False, [who, "does NOT pass the bar"]
     base, cand = _paired(base, cand)
     if len(cand) < MIN_PAIRS:
         return False, [f"{len(cand)} seed(s) in both runs: the bar needs {MIN_PAIRS}", "does NOT pass the bar"]
@@ -1251,6 +1380,14 @@ def _maps(base: list[dict], cand: list[dict]) -> str | None:
     first map's), or None."""
     a, b = ({r.get("map", FIRST_MAP) for r in runs} for runs in (base, cand))
     return None if a == b and len(a) == 1 else f"the runs are on different maps ({sorted(a)} and {sorted(b)})"
+
+
+def _characters(base: list[dict], cand: list[dict]) -> str | None:
+    """Why two saved runs can't be compared: they play different characters (runs saved before the character was kept
+    are the thief's), or None."""
+    from ..character import DEFAULT
+    a, b = ({r.get("character", DEFAULT) for r in runs} for runs in (base, cand))
+    return None if a == b and len(a) == 1 else f"the runs play different characters ({sorted(a)} and {sorted(b)})"
 
 
 def save(name: str, results: list[dict]) -> None:
@@ -1407,27 +1544,40 @@ def check() -> int:
     return 1 if bad else 0
 
 
-def _thief_only() -> str | None:
-    """The scenarios are the thief's (a magician's come with the simulator's magic, the design's S6): a GAMELAB_CHARACTER
-    naming another, inherited by the run that restarts below, would play them with her stats (her class's fixed copy),
-    and `record` write that over the thief's traces. Why not, or None."""
+CHARACTERS = ("thief", "magician")  # the characters the simulator plays (sim.scenarios.HER, HERS)
+
+
+def _who(argv: list[str], environ=os.environ) -> tuple[str | None, str]:
+    """The character a run plays: `--character`, else GAMELAB_CHARACTER (as `ab` hands the base's filler the key's), else
+    the thief; (it, "") or (None, why not): one the simulator doesn't play, or the two naming different ones."""
     from ..character import DEFAULT, ENV
-    who = os.environ.get(ENV)
-    if who and who != DEFAULT:
-        return (f"{ENV} names {who}: the simulator's scenarios are the thief's until hers come (the design's S6); "
-                f"run it with {ENV} unset")
-    return None
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--character")
+    named = pre.parse_known_args(argv)[0].character
+    env = environ.get(ENV)
+    if named and env and env != named:
+        return None, f"{ENV} names {env} and --character {named}: one of them"
+    who = named or env or DEFAULT
+    if who not in CHARACTERS:
+        return None, f"the simulator plays {' or '.join(CHARACTERS)}, not {who}"
+    return who, ""
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if refused := _thief_only():
-        print(refused)
+    who, why = _who(argv)
+    if who is None:
+        print(why)
         return 2
+    from ..character import DEFAULT, ENV
     from ..motion.physics import FIXED_STATS
-    # The same set order in every run, and her stats as measured, not as config.toml has them.
-    if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1":
+    # The same set order in every run, her stats as measured, not as config.toml has them, and the character it plays
+    # (GAMELAB_CHARACTER: her physics and her profile are the process's, gamelab.character)
+    if (os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get(FIXED_STATS) != "1"
+            or os.environ.get(ENV, DEFAULT) != who):
         env = dict(os.environ, PYTHONHASHSEED="0", **{FIXED_STATS: "1"})
+        if who != DEFAULT:
+            env[ENV] = who
         return subprocess.call([sys.executable, "-X", "utf8", "-m", "gamelab.sim.harness", *argv], env=env,
                                cwd=str(REPO))
     p = argparse.ArgumentParser(prog="python -m gamelab.sim.harness")
@@ -1458,11 +1608,16 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--seeds", type=lambda v: [int(k) for k in v.split(",")],
                    help="the seeds to run again, e.g. 3,9 (default: its first and its last)")
     s.add_argument("--jobs", type=int, default=1)
+    s.add_argument("--character", choices=CHARACTERS, default=argparse.SUPPRESS,
+                   help="the character the saved run plays (default: GAMELAB_CHARACTER's, else the thief)")
     sub.add_parser("check")
     args = p.parse_args(argv)
     from . import scenarios
     if args.cmd == "spot":
         results = load(args.run)
+        if theirs := sorted({r.get("character", DEFAULT) for r in results} - {who}):
+            print(f"the run plays {', '.join(theirs)}: spot it with --character {theirs[0]}")
+            return 2
         seeds = args.seeds or sorted({min(r["seed"] for r in results), max(r["seed"] for r in results)})
         map_id = results[0].get("map", FIRST_MAP) if results else FIRST_MAP
         if not scenarios.available(map_id):
@@ -1481,6 +1636,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if args.map not in PRESET_MAPS.get(args.preset, (args.map,)):
         print(f"preset {args.preset} is map {', '.join(map(str, PRESET_MAPS[args.preset]))}'s alone")
+        return 2
+    if who != DEFAULT and (args.map, who) not in scenarios.HERS:
+        print(f"the simulator plays {who} on map{'s' if len(scenarios.HERS) > 1 else ''} "
+              f"{', '.join(str(m) for m, w in scenarios.HERS if w == who)} alone (sim.scenarios.HERS): --map")
         return 2
     if args.cmd == "cached":
         return _cached(args)
@@ -1527,6 +1686,9 @@ def _run_options(r: argparse.ArgumentParser) -> argparse.ArgumentParser:
                    help="what isn't known of the game, switched on (WORLDS; again for another)")
     r.add_argument("--grounds", type=lambda v: tuple(int(g) for g in v.split(",")), default=(),
                    help="hunt only these grounds, e.g. 23 (default: all of them)")
+    r.add_argument("--character", choices=CHARACTERS, default=argparse.SUPPRESS,
+                   help="the character the run plays (default: GAMELAB_CHARACTER's, else the thief): the magician as "
+                        "the recordings of 2026-11-02 measured her (sim.scenarios.HERS), on Tree Dungeon")
     r.add_argument("--attack", choices=("choice", "skill", "regular"),
                    help="the stack's attack a throw (behavior.attacks), her Lucky Seven key casting it at its MP "
                         "(ATTACK_HER): choice, Lucky Seven but the regular attack to finish a monster and while her MP "
@@ -1546,7 +1708,14 @@ def _name(args) -> str:
             + (f"-{args.map}" if args.map != FIRST_MAP else "")
             + "".join(f"-{w}" for w in args.world)
             + (f"-g{'-'.join(map(str, args.grounds))}" if args.grounds else "")
-            + (f"-attack-{args.attack}" if args.attack else ""))
+            + (f"-attack-{args.attack}" if args.attack else "")
+            + (f"-{_character()}" if _character() != "thief" else ""))
+
+
+def _character() -> str:
+    """The character this process plays (gamelab.character: the harness restarts itself with GAMELAB_CHARACTER)."""
+    from .. import character
+    return character.active_id()
 
 
 def _command_line(args) -> list[str]:
@@ -1565,6 +1734,8 @@ def _command_line(args) -> list[str]:
         out += ["--grounds", ",".join(map(str, args.grounds))]
     if args.attack:
         out += ["--attack", args.attack]
+    if _character() != "thief":
+        out += ["--character", _character()]
     return out
 
 
