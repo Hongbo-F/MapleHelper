@@ -20,7 +20,7 @@ from gamelab.localization.monsters import bodies
 from gamelab.localization.tracking import DYING, LIVE
 from gamelab.localization.unseen import unseen
 
-from test_clearance import FLAT, HALVES, mon, stance
+from test_clearance import FLAT, GREEN, HALVES, mon, stance
 from test_unseen import _map, _scene, _seen, _track
 
 OTHER = Platform(1, [Segment(0, 400, 1000, 400)])
@@ -200,3 +200,23 @@ def test_up_close_an_unsure_jump_in_place_becomes_a_sure_one_past_the_monster_on
     assert act[:2] == ("jump_throw", RIGHT) and touched(act) and st.plan_of(act).target is past
     monkeypatch.setattr(st, "CLAWED_CLOSE", False)
     assert stance(10, [on_her, past], clawed=True) == before
+
+
+def test_up_close_the_other_ways_throw_is_weighed_as_a_clawed_decision_throws(monkeypatch):
+    # The three cornered fixes together (work/cornered-all): with FIRST_TO_REACH her close quarters weigh the nearest on
+    # each side, and with `clawed` neither throw is from the ground (a monster the looks miss is on her: the claw would
+    # take the press). A Green 45 off ahead (a jump in place picks one from 54: unsure) and another 120 off behind her
+    # (past the claw's edge: from the ground sure, unclawed), which also hems her in (no step, no jump back): the sure
+    # throw the other way in place of the unsure jump. Unclawed from the ground; clawed from a jump in place
+    # ('touched'), not a ground press the claw on her would take (where R1 alone had the unsure jump ahead).
+    ahead, behind = mon(545), mon(380)
+    args = (500, [ahead, behind], [ahead, behind], RIGHT, FLAT.left, FLAT.right, lambda a, b: True, {GREEN: 51.0},
+            HALVES)
+    kw = dict(platform=FLAT, y=500.0)
+    monkeypatch.setattr(st, "FIRST_TO_REACH", True)
+    assert st._close_quarters(*args, **kw) == ("throw", LEFT)
+    act = st._close_quarters(*args, clawed=True, **kw)
+    assert act[:2] == ("jump_throw", LEFT) and touched(act) and st.plan_of(act).target is behind
+    monkeypatch.setattr(st, "FIRST_TO_REACH", False)
+    act = st._close_quarters(*args, clawed=True, **kw)
+    assert act[:2] == ("jump_throw", RIGHT) and not touched(act)  # (the unsure jump in place at the one ahead)
