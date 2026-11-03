@@ -13,7 +13,7 @@ import numpy as np
 
 from gamelab import telemetry
 from gamelab.control import lie_tracking as lt
-from gamelab.perception.lie_target import BOARD_AT_NATIVE
+from gamelab.perception.lie_target import BOARD_AT_NATIVE, RIM, TargetTracker
 from tests.test_lie_target import FPS, round_frames
 
 
@@ -167,7 +167,7 @@ def test_the_trackers_loop_writes_a_rounds_answers_on_the_target_in_three_coordi
         except EOFError:
             break
     rows = [json.loads(line) for line in open(tmp_path / "20261102-120000.jsonl", encoding="utf-8")]
-    head, answers, end = rows[0], rows[1:-1], rows[-1]
+    head, answers, end = rows[0], [r for r in rows[1:-1] if "angle" in r], rows[-1]
     assert replies == [("ready",)] + [("ready", a) for a in answers] + [("ended", end)]
     assert head["round"] == "20261102-120000" and head["board"] == list(BOARD_AT_NATIVE)
     assert len(answers) == len(frames) and answers[0]["white"] and answers[0]["seq"] == 0
@@ -177,6 +177,43 @@ def test_the_trackers_loop_writes_a_rounds_answers_on_the_target_in_three_coordi
         assert a["client"] == [round(a["board"][0] + 308, 1), round(a["board"][1] + 180, 1)]
         assert a["desktop"] == (None if n == 10 else [round(a["client"][0] + 100, 1), round(a["client"][1] + 50, 1)])
     assert end["end"] == "board gone" and end["frames"] == len(frames) and end["skipped"] == 2
+
+
+def test_the_trackers_loop_writes_each_template_it_takes_before_its_answer_and_each_answer_names_its_template(tmp_path):
+    """The user, 2026-11-03: "Does the telemetry include which template it used to match? If not, we should add that?"
+    (the review of 00:01's round drew its answers with another frame's template than the tracker's): before each white
+    answer the template taken from its frame, as the tracker has it, and each answer's `template` its seq."""
+    frames = round_frames(n=12)
+    board = frames[0][1]
+    board[:236][(board[:236] > 240).all(-1)] = (60, 120, 180)  # the first frame's star's top covered: a bigger one next
+    inp = io.BytesIO()
+    pickle.dump(("begin", "20261102-120002", {"fps": FPS}), inp, protocol=5)
+    for n, (t, board, _) in enumerate(frames):
+        pickle.dump(("frame", t, 100 + n, 1, 1700000000.0 + t, board[..., ::-1].copy(), None), inp, protocol=5)
+    pickle.dump(("end", "board gone", 0), inp, protocol=5)
+    pickle.dump(("quit",), inp, protocol=5)
+    inp.seek(0)
+    lt.serve(inp, io.BytesIO(), tmp_path)
+    rows = [json.loads(line) for line in open(tmp_path / "20261102-120002.jsonl", encoding="utf-8")][1:-1]
+    tracker = TargetTracker(fps=FPS)
+    taken, template = [], None
+    for k, row in enumerate(rows):
+        if "points" in row:  # a template: right before its own frame's white answer, the tracker's own
+            nxt = rows[k + 1]
+            assert nxt["white"] and nxt["seq"] == row["template"] and row["board"] == nxt["board"]
+            template = row["template"]
+            taken.append(row)
+            continue
+        assert row["template"] == template  # an answer: the last template's
+        a = tracker.step(frames[row["seq"] - 100][1], frames[row["seq"] - 100][0])
+        assert a["white"] == (row["seq"] == template)
+        if a["white"]:
+            pts, nrm, _, area = tracker.template
+            assert taken[-1]["area"] == area and taken[-1]["rim"] == RIM and len(taken[-1]["points"]) == len(pts)
+            assert np.abs(np.array(taken[-1]["points"]) - pts).max() <= 0.05
+            assert np.abs(np.array(taken[-1]["normals"]) - nrm).max() <= 0.0005
+    assert [r["template"] for r in taken] == [100, 101] and rows[0] is taken[0] and taken[1]["area"] > taken[0]["area"]
+    assert {r["template"] for r in rows if "angle" in r} == {100, 101}
 
 
 def test_the_trackers_own_process_answers_through_its_pipes(tmp_path):
@@ -192,7 +229,8 @@ def test_the_trackers_own_process_answers_through_its_pipes(tmp_path):
     child.send(("end", "board gone", 0))
     child.stop()
     rows = [json.loads(line) for line in open(tmp_path / "20261102-120001.jsonl", encoding="utf-8")]
-    assert len(rows) == len(frames) + 2 and rows[-1]["frames"] == len(frames)
+    answers = [r for r in rows if "angle" in r]
+    assert len(answers) == len(frames) and rows[-1]["frames"] == len(frames)
 
 
 class Answering(FakeChild):

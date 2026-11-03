@@ -28,9 +28,13 @@ found the board's printed patterns 4 times a second and recorded them: this foll
 - Each round is a file, paths.LIE_TARGETS/<YYYYmmdd-HHMMSS>.jsonl (the board's first sight), written by that process: a
   first line saying what it is, then a line an answer (`t`: monotonic s, `at`: the clock, `seq` and `run`: the
   service's frame number and run, which the alarm clip's index has too, so the clip's frames join; `board`, `client`,
-  `desktop`; `angle`: rad, `score`, `white`: the white blob's own centre, `ms`: the step's time), none before the target
-  has been seen white; the last line the round's `end`: why, frames stepped, answers, skipped, frames without the
-  board, the step's median and worst ms. The same answers go into the service's telemetry (its persisted log, lab/telemetry/<time>-perceive.jsonl):
+  `desktop`; `angle`: rad, `score`, `white`: the white blob's own centre, `template`: the `seq` of the template it was
+  matched with, `ms`: the step's time), none before the target has been seen white; before each white answer the
+  template the tracker took from its frame (lie_target.TargetTracker: a bigger white star, and the answers' angle 0 from
+  then on; `template`: its `seq`, `run`, `board`: the star's centre, `area`, `rim` px, `points`: its outline in board px
+  around the centre, `normals`: rad mod pi), so an answer is drawn as it was matched without its frame; the last line
+  the round's `end`: why, frames stepped, answers, skipped, frames without the board, the step's median and worst ms.
+  The same answers go into the service's telemetry (its persisted log, lab/telemetry/<time>-perceive.jsonl):
   a `lie_target` record each (the round's name added), `lie_target_cursor` records at queue/move/failure, and a
   `lie_target_round` record at its begin and end.
 """
@@ -467,7 +471,7 @@ def serve(inp, out, folder: Path, fps: float = FPS) -> None:
                 fh.write(json.dumps({"kind": "the Lie Detector's target (perception.lie_target)", "round": name,
                                      "board": list(lie_target.BOARD_AT_NATIVE), **info}) + "\n")
                 tracker = lie_target.TargetTracker(fps=info.get("fps", fps))
-                counts = {"frames": 0, "answers": 0, "ms": []}
+                counts = {"frames": 0, "answers": 0, "ms": [], "template": None}
             elif kind == "frame":
                 _, t, seq, run, clock, board, corner = msg
                 line = None
@@ -479,6 +483,14 @@ def serve(inp, out, folder: Path, fps: float = FPS) -> None:
                     counts["ms"].append(ms)
                     if a is not None:
                         counts["answers"] += 1
+                        if a["white"]:  # a template taken from this frame's white star: its outline before the answer
+                            pts, nrm, _, area = tracker.template
+                            counts["template"] = seq
+                            fh.write(json.dumps({"template": seq, "run": run,
+                                                 "board": [round(a["x"], 1), round(a["y"], 1)], "area": area,
+                                                 "rim": lie_target.RIM,
+                                                 "points": np.round(pts.astype(np.float64), 1).tolist(),
+                                                 "normals": np.round(nrm.astype(np.float64), 3).tolist()}) + "\n")
                         cx, cy = round(a["x"] + bx, 1), round(a["y"] + by, 1)
                         line = {"t": round(t, 4), "at": time.strftime("%H:%M:%S", time.localtime(clock))
                                 + f".{int(clock * 1000) % 1000:03d}", "seq": seq, "run": run,
@@ -486,7 +498,7 @@ def serve(inp, out, folder: Path, fps: float = FPS) -> None:
                                 "desktop": None if corner is None else [round(corner[0] + cx, 1),
                                                                          round(corner[1] + cy, 1)],
                                 "angle": round(a["angle"], 4), "score": round(a["score"], 3), "white": a["white"],
-                                "ms": round(ms, 1)}
+                                "template": counts["template"], "ms": round(ms, 1)}
                         fh.write(json.dumps(line) + "\n")
                 reply("ready", line)
             elif kind == "end":
