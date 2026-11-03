@@ -8,7 +8,9 @@ found the board's printed patterns 4 times a second and recorded them: this foll
   the service has taken of the game is kept (`saw`, from Service._emit: its picture by reference, its number and run;
   the frame loop never waits). A thread of the service's (`run`) looks at it for the mini-game's board every
   BOARD_CHECK_S (perception.lie_detector's `over_play`, 5 ms): from the board's first sight the round is on, until the
-  board has been gone for BOARD_GONE_S, the alarm has gone, or ROUND_MAX_S.
+  board has been gone for BOARD_GONE_S, the alarm has gone, or ROUND_MAX_S. In a round the board is looked for every
+  BOARD_ROUND_S: from a look without it no frame is sent to the tracker (counted `off_board`) and the cursor stops (the user, 2026-11-03: "Fix lie detector code", the 00:01 round's answers had gone on 2.9 s into the Truth
+  Booth), going on if the board shows again within BOARD_GONE_S (a frame or two it wasn't seen on).
 - The tracker runs in a process of its own (`python -m gamelab.control.lie_tracking`, below normal priority, OpenCV on
   CHILD_THREADS threads), started when the alarm goes up and stopped CHILD_IDLE_S after it has gone: in the service,
   whose OpenCV runs on one thread (localization.service.settle), a frame took 78 ms against 52-64 on 6-12, over the 66
@@ -21,14 +23,14 @@ found the board's printed patterns 4 times a second and recorded them: this foll
   screen: `client` + the client area's corner on the screen, window.client_rect, looked at once in ORIGIN_POLL_S at
   most; None without the window). A cursor thread takes the newest desktop answer and hands its client coordinate to
   the elevated player (client.move_lie_cursor), whose window.move_cursor generates the trail: the administrator game
-  blocks the ordinary service's input. Only the cursor moves inside the board, never a button or key; the round's end
-  or the service's close cancels its plan.
+  blocks the ordinary service's input. Only the cursor moves inside the board, never a button or key; a frame without
+  the board, the round's end or the service's close cancels its plan.
 - Each round is a file, paths.LIE_TARGETS/<YYYYmmdd-HHMMSS>.jsonl (the board's first sight), written by that process: a
   first line saying what it is, then a line an answer (`t`: monotonic s, `at`: the clock, `seq` and `run`: the
   service's frame number and run, which the alarm clip's index has too, so the clip's frames join; `board`, `client`,
   `desktop`; `angle`: rad, `score`, `white`: the white blob's own centre, `ms`: the step's time), none before the target
-  has been seen white; the last line the round's `end`: why, frames stepped, answers, skipped, the step's median and
-  worst ms. The same answers go into the service's telemetry (its persisted log, lab/telemetry/<time>-perceive.jsonl):
+  has been seen white; the last line the round's `end`: why, frames stepped, answers, skipped, frames without the
+  board, the step's median and worst ms. The same answers go into the service's telemetry (its persisted log, lab/telemetry/<time>-perceive.jsonl):
   a `lie_target` record each (the round's name added), `lie_target_cursor` records at queue/move/failure, and a
   `lie_target_round` record at its begin and end.
 """
@@ -48,7 +50,9 @@ from .. import paths, telemetry
 from ..localization import rate
 
 ALARM_POLL_S = 0.5
-BOARD_CHECK_S = 0.25   # how often the board is looked for (its window at its place: over_play)
+BOARD_CHECK_S = 0.25   # how often the board is looked for (its window at its place: over_play) before a round
+BOARD_ROUND_S = 1.0    # ... and in one, this often (the user, 2026-11-03: "1 in 15 frames, every literal second": 4.0
+#                        ms a look on one thread), the frames between going as the last look said
 BOARD_GONE_S = 3.0     # the board not seen this long: the round is over
 ROUND_MAX_S = 60.0     # a round this long is over whatever (the longest seen: 10.4 s from START)
 CHILD_IDLE_S = 60.0    # the tracker's process stopped this long after the alarm has gone
@@ -192,18 +196,29 @@ class LieTracking:
         t, full, seq, run, clock = item
         if full.shape[:2] != (768, 1366):  # (the board's place is known at the game's own size only)
             return
-        if now - self._checked >= BOARD_CHECK_S:
+        if self.round is None:
+            if now - self._checked < BOARD_CHECK_S:
+                return
             self._checked = now
-            board = self._board_up(full)
-            if board and self.round is None and up:
-                self._begin(now)
-            if board and self.round is not None:
-                self.round["board_at"] = now
+            if not (up and self._board_up(full)):
+                return
+            self._begin(now)
+            board = True
+        else:
+            r = self.round
+            if now - r["looked"] >= BOARD_ROUND_S:  # none after a look without the board goes to the tracker
+                r["looked"] = now
+                r["board"] = self._board_up(full)
+                if r["board"]:
+                    r["board_at"] = now
+            board = r["board"]
         r = self.round
-        if r is None:
-            return
         if now - r["board_at"] > BOARD_GONE_S or now - r["started"] > ROUND_MAX_S or not up:
             self._end("board gone" if now - r["board_at"] > BOARD_GONE_S else "too long" if up else "alarm gone")
+            return
+        self._cursor_on(board)
+        if not board:
+            r["off_board"] += 1
             return
         if self.child is None or not self.ready.is_set():
             r["skipped"] += 1
@@ -242,7 +257,8 @@ class LieTracking:
         if self.child is None:
             self._start_child()
         name = time.strftime(NAME)
-        self.round = {"name": name, "started": now, "board_at": now, "sent": 0, "skipped": 0}
+        self.round = {"name": name, "started": now, "board_at": now, "sent": 0, "skipped": 0, "off_board": 0,
+                      "looked": now, "board": True}
         self.rounds += 1
         self._round_name = name
         with self._cursor_cond:
@@ -257,9 +273,22 @@ class LieTracking:
         with self._cursor_cond:
             self._cursor_round = self._cursor_target = None
             self._cursor_cond.notify_all()
-        self._send(("end", why, r["skipped"]))
+        off = r.get("off_board", 0)
+        self._send(("end", why, r["skipped"], off))
         self._say(f"the Lie Detector's target followed {time.monotonic() - r['started']:.0f} s ({why}): {r['sent']} "
-                  f"frames, {r['skipped']} skipped")
+                  f"frames, {r['skipped']} skipped, {off} without the board")
+
+    def _cursor_on(self, on: bool) -> None:
+        """The cursor follows the answers only while the board shows (the user, 2026-11-03: "Fix lie detector code",
+        its answers had followed the 2026-11-03 00:01 round 2.9 s into the Truth Booth): off, its trail ends and no
+        answer is taken (the tracker's answers to the frames sent before still come); on again, the round's (the
+        board unseen on a frame or two)."""
+        name = self.round["name"] if on and self.round is not None else None
+        with self._cursor_cond:
+            if self._cursor_round != name:
+                self._cursor_round = name
+                self._cursor_target = None
+                self._cursor_cond.notify_all()
 
     def _send(self, msg: tuple) -> bool:
         """A message to the tracker's process; False (and the process given up: started again at the next turn with the
@@ -412,7 +441,8 @@ class Child:
 
 def serve(inp, out, folder: Path, fps: float = FPS) -> None:
     """The tracker's process: its loop over the messages on `inp` (pickled: ("begin", name, info), ("frame", t, seq,
-    run, clock, board RGB, the client area's corner on the screen or None), ("end", why, skipped), ("quit",)), each
+    run, clock, board RGB, the client area's corner on the screen or None), ("end", why, skipped, frames without the
+    board), ("quit",)), each
     round's file written in `folder`; on `out` ("ready",) at the start, ("ready", the answer's line or None) after each
     frame and ("ended", the round's end line) at its end."""
     import cv2
@@ -460,11 +490,12 @@ def serve(inp, out, folder: Path, fps: float = FPS) -> None:
                         fh.write(json.dumps(line) + "\n")
                 reply("ready", line)
             elif kind == "end":
-                _, why, skipped = msg
+                _, why, skipped, *off = msg
                 if fh is not None:
                     ms = counts.get("ms") or [0.0]
                     end = {"end": why, "frames": counts.get("frames", 0), "answers": counts.get("answers", 0),
-                           "skipped": skipped, "ms_median": round(float(np.median(ms)), 1),
+                           "skipped": skipped, "off_board": off[0] if off else 0,
+                           "ms_median": round(float(np.median(ms)), 1),
                            "ms_max": round(float(max(ms)), 1)}
                     fh.write(json.dumps(end) + "\n")
                     fh.close()

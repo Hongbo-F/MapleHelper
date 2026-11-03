@@ -108,6 +108,36 @@ def test_with_the_alarm_up_a_round_begins_at_the_board_and_frames_go_only_when_t
     assert child.sent[-1][0] == "end" and child.sent[-1][1] == "board gone" and t.round is None
 
 
+def test_after_a_look_without_the_board_no_frame_is_sent_and_the_cursor_stops_until_the_board_shows_again(tmp_path):
+    """The user, 2026-11-03: "Fix lie detector code": the 00:01 round's answers went on 2.9 s into the Truth Booth
+    (BOARD_GONE_S), the cursor following them; looked for once a second ("1 in 15 frames, every literal second")."""
+    assert lt.BOARD_ROUND_S == 1.0
+    t, children, _ = tracking(tmp_path)
+    full = screen(round_frames(n=1)[0][1])
+    t.step(0.0, item(0, 0.0, full))  # the board: the round begins (the tracker's process just started: not sent)
+    child = children[0]
+
+    def frame(n, at, board):
+        t.spotter.board = board
+        t.ready.set()
+        t.step(at, item(n, at, full))
+        return [m[2] for m in child.sent if m[0] == "frame"]
+
+    assert frame(1, 0.5, False) == [1] and t._cursor_round == t.round["name"]  # (not looked at: as the last look)
+    t._cursor_target = (t.round["name"], 1, 2, 0)  # an answer not yet taken by the cursor
+    assert frame(2, 1.0, False) == [1]  # looked at, the board gone: not sent, the cursor off
+    assert t.round["off_board"] == 1 and t._cursor_round is None and t._cursor_target is None
+    t._queue_cursor((5, 6), seq=1)  # the tracker's answer to the frame sent before: not followed
+    assert t._cursor_target is None
+    assert frame(3, 1.5, True) == [1]  # not looked at: still as the last look
+    assert frame(4, 2.0, True) == [1, 4] and t._cursor_round == t.round["name"]  # seen again: the same round goes on
+    assert frame(5, 2.5, False) == [1, 4, 5]  # not looked at: as the last look, the board's
+    assert frame(6, 3.0, False) == [1, 4, 5]
+    t.step(2.0 + lt.BOARD_GONE_S + 0.1, item(7, 2.0 + lt.BOARD_GONE_S + 0.1, full))
+    assert child.sent[-1] == ("end", "board gone", 1, 3) and t.round is None  # (skipped: the first, not ready)
+    t.close()
+
+
 def test_saw_keeps_only_the_newest_frame_and_counts_the_ones_it_replaces_in_a_round(tmp_path):
     t, _, _ = tracking(tmp_path)
     t.round = {"skipped": 0}

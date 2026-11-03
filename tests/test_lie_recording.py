@@ -375,6 +375,38 @@ def test_the_truth_booth_is_the_outcome_when_a_failed_test_sends_her_there(tmp_p
     assert summary["forms"]["truth booth"] == {"first": 1.0, "last": 1.5, "frames": 3}
 
 
+def test_the_recording_ends_its_test_s_tail_after_the_board_the_truth_booth_up_its_cycle_going_on(tmp_path):
+    """The user, 2026-11-03: "Only include frames of up to 5s once the board disappears", the recording of 00:01 had
+    run 68 s into the Truth Booth. The cycle itself goes on (its alarm, the Truth Booth's lock) to its end, its folder
+    saying so for `clear-alarm` (lie_recorder.going)."""
+    screen = Screen()
+    dog, flag, said, alarms = make_dog(tmp_path, screen, test_tail_s=0.5)
+    t = play(dog, screen, [1, 1, 2, 2, 0, 3, 3])  # the countdown, the board, gone, the Truth Booth: 0.5 s off the test
+    assert dog.recording is None and dog.cycle_t0 is not None and flag.is_set()
+    [(folder, summary, index)] = written(dog)
+    assert summary["end"] == "test over" and summary["outcome"] == "sent to the Truth Booth"
+    assert summary["test_last"] == 0.75 and index[-1]["t"] == 1.5 and len(index) == 7
+    assert abs(summary["first_seen_at"] - time.time()) < 30
+    assert lie_recorder.going(folder.parent) == folder  # the cycle going: `clear-alarm` waits
+    t = play(dog, screen, [3] * 8, t)  # the Truth Booth on: nothing more recorded, no second alarm
+    assert lines(folder) == index and alarms == [True] and lie_recorder.going(folder.parent) == folder
+    play(dog, screen, [0] * 5, t)  # its end
+    assert dog.cycle_t0 is None and lie_recorder.going(folder.parent) is None
+    assert not (folder / lie_recorder.LIVE).exists() and len(list(folder.parent.iterdir())) == 1
+    assert any(m.startswith("Lie Detector recording ended (test over): 7 looks") for m in said)
+
+
+def test_a_truth_booth_seen_only_after_the_test_s_tail_goes_into_the_summary_at_the_cycle_s_end(tmp_path):
+    screen = Screen()
+    dog, *_ = make_dog(tmp_path, screen, test_tail_s=0.5)
+    t = play(dog, screen, [2, 2, 0, 0, 0, 0])  # the board, then 1 s of nothing: under end_s, over the test's tail
+    [(folder, summary, _)] = written(dog)
+    assert summary["end"] == "test over" and summary["outcome"] == "answered"
+    play(dog, screen, [3, 3] + [0] * 5, t)
+    assert lie_recorder.summary_of(folder)["outcome"] == "sent to the Truth Booth"
+    assert lie_recorder.summary_of(folder)["truth_booth_after"] is True
+
+
 def test_the_recording_stops_at_the_cap_and_the_cycle_goes_on_unrecorded(tmp_path):
     screen = Screen()
     dog, flag, said, alarms = make_dog(tmp_path, screen, cap_s=2.0)

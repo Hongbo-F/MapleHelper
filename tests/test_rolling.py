@@ -537,11 +537,13 @@ def _cycle_over(player, last_seen):
     (player / SUMMARY).write_text(json.dumps({"last_seen": last_seen}), encoding="utf-8")
 
 
-def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_its_cycle_s_end(tmp_path, alarm_file):
+def test_an_alarm_gets_a_clip_of_its_own_from_2_s_before_it_to_its_cycle_s_end(tmp_path, alarm_file):
     """The user, 2026-10-25: "For an alarmed lie detector save, save T-10s to T+1min automatically, regardless of
     [the] lie detector's own save or not. I need this as a 2nd line of defense"; since 2026-11-01 to the cycle's end,
-    written then (the user: "no more 60s, save all recordings you need at the 10s mark"). With no recording of the
-    player's, the cycle ends when the alarm is cleared."""
+    written then (the user: "no more 60s, save all recordings you need at the 10s mark"); since 2026-11-03 from 2 s
+    before the Lie Detector's first frame ("Only include frames that are 2s before the bottom right count down"), here
+    none showing it (the made-up frames): 2 s before the alarm. With no recording of the player's, the cycle ends when
+    the alarm is cleared."""
     rec = recorder(tmp_path, folder_wait=0.3)
     run_ticks(rec, 400, poll=True)
     seen = _alarm_at(rec, alarm_file)
@@ -553,10 +555,10 @@ def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_its_cycle_s_end(
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = summary(clip)
     assert clip.name.endswith("-lie-detector-mini-game-notice") and s["kind"] == "the alarm's clip"
-    assert s["alarm"]["form"] == "mini-game notice" and s["asked"] == [-10.0, pytest.approx(30.0, abs=0.15)]
-    assert s["cut_short"] is False and s["player_recording"] is None
-    assert s["alarm_t"] == pytest.approx(10.0, abs=0.15) and 399 <= s["ticks"] <= 402 and s["frames"] == s["ticks"]
-    assert lines(clip)[-1]["t"] == pytest.approx(40.0, abs=0.15)
+    assert s["alarm"]["form"] == "mini-game notice" and s["asked"] == [-2.0, pytest.approx(30.0, abs=0.15)]
+    assert s["cut_short"] is False and s["player_recording"] is None and s["first_shown"] is None
+    assert s["alarm_t"] == pytest.approx(2.0, abs=0.15) and 319 <= s["ticks"] <= 322 and s["frames"] == s["ticks"]
+    assert lines(clip)[-1]["t"] == pytest.approx(32.0, abs=0.15)
     # Lossless: PNG, each frame exactly the grab it was.
     assert s["format"] == "png" and s["jpeg_quality"] is None and lines(clip)[0]["file"] == "00000.png"
     shot = cv2.imread(str(clip / "00000.png"))
@@ -566,17 +568,18 @@ def test_an_alarm_gets_a_clip_of_its_own_from_10_s_before_it_to_its_cycle_s_end(
     (before,) = (tmp_path / "recent").iterdir()
     assert summary(before)["kind"] == "before the Lie Detector" and summary(before)["format"] == "jpeg"
     assert summary(before)["alarm_t"] == pytest.approx(40.0, abs=0.6)  # all the ring held: 40 s
-    assert any("its own clip from 10 s before it to 10 s after its cycle's last sight" in m for m in rec.said)
+    assert any("its own clip from 2 s before its first frame to 5 s after its test's last sight" in m for m in rec.said)
     rec.close()
     assert len(list((tmp_path / "alarm_clips").iterdir())) == 1  # written once
-    assert lines(clip)[0]["at"] == rolling.clock_time(seen - 9.9)  # its first moment, 10 s before the alarm's
+    assert lines(clip)[0]["at"] == rolling.clock_time(seen - 1.9)  # its first moment, 2 s before the alarm's
 
 
-def test_an_alarm_s_clip_and_part_before_are_written_10_s_after_the_cycle_s_last_sight(tmp_path, alarm_file):
+def test_an_alarm_s_clip_and_part_before_are_written_5_s_after_the_cycle_s_last_sight(tmp_path, alarm_file):
     """Since 2026-11-01 the clip is the Lie Detector's only video (the player's recording keeps no frames): it runs
     while the player's recording of the cycle does (its folder there, no summary yet), and it and the part before are
     written once the cycle is summed up, ending CLIP_TAIL_S after its last sight (the user: "no more 60s, save all
-    recordings you need at the 10s mark")."""
+    recordings you need at the 10s mark"; 5 s since 2026-11-03), from the folder's name in a summary of before then
+    (no `first_seen_at`, no `test_last`)."""
     rec = recorder(tmp_path)
     run_ticks(rec, 100, poll=True)
     seen = _alarm_at(rec, alarm_file)
@@ -584,19 +587,68 @@ def test_an_alarm_s_clip_and_part_before_are_written_10_s_after_the_cycle_s_last
     player.mkdir(parents=True)
     run_ticks(rec, 300, poll=True)  # 30 s on, the cycle still going: nothing written
     assert rec.flush(30) and not (tmp_path / "alarm_clips").exists() and not (player / BEFORE).exists()
-    _cycle_over(player, 24.0)  # the cycle over: last seen 24 s after its first sight
+    _cycle_over(player, 30.0)  # the cycle over: last seen 30 s after its first sight
     run_ticks(rec, 30, poll=True)
-    assert rec.flush(30) and not (tmp_path / "alarm_clips").exists()  # (33 s on: the last sight's 10 s not past)
-    run_ticks(rec, 30, poll=True)
+    assert rec.flush(30) and not (tmp_path / "alarm_clips").exists()  # (33 s on: the last sight's 5 s not past)
+    run_ticks(rec, 40, poll=True)
     assert rec.flush(30) and (player / BEFORE / SUMMARY).exists()
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = summary(clip)
-    end = rolling.stamp_time(player.name) + 24.0 + rolling.CLIP_TAIL_S  # (the folder's name: its first sight)
-    assert s["asked"][0] == -10.0 and s["asked"][1] == pytest.approx(end - seen, abs=1e-3) and 34 < s["asked"][1] <= 35
+    end = rolling.stamp_time(player.name) + 30.0 + rolling.CLIP_TAIL_S  # (the folder's name: its first sight)
+    assert s["asked"][0] == -2.0 and s["asked"][1] == pytest.approx(end - seen, abs=1e-3) and 35 < s["asked"][1] <= 36
     assert s["player_recording"] == str(player) and s["cut_short"] is False
     assert lines(clip)[-1]["at"] == rolling.clock_time(max(it.t for it in rec.ring.items if it.t <= end))
-    assert abs(s["ticks"] - 10 * (10 + s["asked"][1])) <= 2
+    assert abs(s["ticks"] - 10 * (2 + s["asked"][1])) <= 2
     rec.close()
+
+
+def test_an_alarm_s_clip_runs_from_2_s_before_its_first_frame_to_5_s_after_its_test_s_last_sight(tmp_path, alarm_file):
+    """The user, 2026-11-03: "Only include frames that are 2s before the bottom right count down", "Only include
+    frames of up to 5s once the board disappears" (the clip of 00:01 had run 10 s before the alarm to 85 s into the
+    Truth Booth). The first frame showing the Lie Detector is found on the clip's frames (`shows`: here the grabs from
+    the 98th on, 0.3 s before the alarm); the end from the player's recording: its first sight's time and its test's
+    last sight, whatever was seen after (the Truth Booth)."""
+    grab = Grab()
+    shown = []
+
+    def shows(px):
+        n = next(k for k in range(256) if k * 3 % 256 == px[0, -1, 0])  # (Grab's frames: a shade a grab)
+        shown.append(n)
+        return n >= 98
+
+    rec = recorder(tmp_path, grab=grab, shows=shows)
+    run_ticks(rec, 100, poll=True)  # grabs 1 to 100: the alarm at the 101st's time
+    seen = _alarm_at(rec, alarm_file)
+    player = tmp_path / "lie_detector" / time.strftime(lie_recorder.STAMP, time.localtime(seen + 1))
+    player.mkdir(parents=True)
+    run_ticks(rec, 300, poll=True)
+    (player / SUMMARY).write_text(json.dumps({"first_seen_at": seen + 0.4, "test_last": 20.0, "last_seen": 60.0}),
+                                  encoding="utf-8")
+    run_ticks(rec, 1, poll=True)
+    assert rec.flush(30)
+    (clip,) = (tmp_path / "alarm_clips").iterdir()
+    s = summary(clip)
+    first = seen - 0.3  # grab 98's time
+    assert s["first_shown"] == rolling.day_time(first) and s["asked"][0] == pytest.approx(-2.3, abs=1e-3)
+    assert s["asked"][1] == pytest.approx(25.4, abs=1e-3)  # 0.4 + 20 + 5
+    assert lines(clip)[0]["at"] == rolling.clock_time(first - 1.9) and s["alarm_t"] == pytest.approx(2.2, abs=0.01)
+    end = seen + 0.4 + 20.0 + rolling.CLIP_TAIL_S
+    assert lines(clip)[-1]["at"] == rolling.clock_time(max(it.t for it in rec.ring.items if it.t <= end))
+    assert max(shown) == 98 and min(shown) >= 70  # looked for from 3 s before the alarm, up to the first showing it
+    assert np.array_equal(cv2.imread(str(clip / "00000.png")), bgra(79)[..., :3])  # grab 79: 1.9 s before grab 98
+    rec.close()
+
+
+def test_a_clip_starting_inside_a_chain_starts_with_its_frame_made_whole():
+    """The perception service's frames are kept as differences, a whole frame a second (a chain): a clip that starts
+    inside one starts with its frame made whole, in the chain's own order (RGB), exactly as shown."""
+    frames = [np.random.default_rng(n).integers(0, 256, (48, 64, 3), np.uint8) for n in range(5)]  # RGB, as shown
+    items = [rolling.Item(float(n), rolling.pack(f) if n == 0 else rolling.pack_diff(f, frames[n - 1]), size=(64, 48),
+                          key=n == 0, rgb=True, seq=n) for n, f in enumerate(frames)]
+    out = rolling.starting_at(items, 3)
+    assert [it.seq for it in out] == [3, 4] and out[0].key and out[0].rgb and not out[1].key
+    assert [np.array_equal(px, frames[k][..., ::-1]) for k, (_, px) in zip((3, 4), rolling.decode(out))] == [True] * 2
+    assert rolling.starting_at(items, 0) == items and rolling.starting_at(items, 5) == []
 
 
 def test_an_alarm_s_clip_ends_3_minutes_after_it_however_long_the_cycle_runs(tmp_path, alarm_file):
@@ -610,7 +662,7 @@ def test_an_alarm_s_clip_ends_3_minutes_after_it_however_long_the_cycle_runs(tmp
     run_ticks(rec, 10, poll=True)
     assert rec.flush(30)
     (clip,) = (tmp_path / "alarm_clips").iterdir()
-    assert summary(clip)["asked"] == [-10.0, rolling.CLIP_MAX_S] and abs(summary(clip)["ticks"] - 1900) <= 2
+    assert summary(clip)["asked"] == [-2.0, rolling.CLIP_MAX_S] and abs(summary(clip)["ticks"] - 1820) <= 2
     rec.close()
 
 
@@ -625,7 +677,7 @@ def test_an_alarm_s_clip_keeps_its_moments_however_little_the_ring_keeps(tmp_pat
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = summary(clip)
     assert clip.name.endswith("-lie-detector-quiz-warning")
-    assert 699 <= s["ticks"] <= 702 and s["alarm_t"] == pytest.approx(10.0, abs=0.15)
+    assert 619 <= s["ticks"] <= 622 and s["alarm_t"] == pytest.approx(2.0, abs=0.15)
     rec.close()
 
 
@@ -637,7 +689,7 @@ def test_an_alarm_s_clip_is_written_cut_short_when_the_recorder_stops(tmp_path, 
     rec.close()
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = summary(clip)
-    assert s["cut_short"] is True and 149 <= s["ticks"] <= 151 and s["alarm_t"] == pytest.approx(10.0, abs=0.15)
+    assert s["cut_short"] is True and 69 <= s["ticks"] <= 71 and s["alarm_t"] == pytest.approx(2.0, abs=0.15)
 
 
 def test_an_alarm_s_clips_are_kept_to_their_budget(tmp_path, alarm_file):

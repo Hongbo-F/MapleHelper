@@ -334,8 +334,9 @@ def test_an_alarm_saves_the_minutes_before_it_into_before_and_its_own_clip(tmp_p
     (clip,) = (tmp_path / "alarm_clips").iterdir()
     s = json.loads((clip / SUMMARY).read_text(encoding="utf-8"))
     assert s["kind"] == "the alarm's clip" and s["format"] == "png" and s["fps"] == 15.0
-    assert s["frames"] == s["ticks"] and 595 <= s["frames"] <= 620  # 40 s at 15 a second, from a whole frame
-    assert s["alarm_t"] == pytest.approx(10.0, abs=1.1) and s["sources"] == {"perception service": s["frames"]}
+    assert s["frames"] == s["ticks"] and 478 <= s["frames"] <= 482  # 32 s at 15 a second (2 s before the alarm: no
+    # frame shows the Lie Detector here), its first made a whole frame (its chain's differences before it left out)
+    assert s["alarm_t"] == pytest.approx(2.0, abs=0.1) and s["sources"] == {"perception service": s["frames"]}
     index = [json.loads(x) for x in (clip / INDEX).read_text(encoding="utf-8").splitlines()]
     for r in index[:3] + index[-3:]:  # lossless, each the frame its number says
         assert np.array_equal(cv2.imread(str(clip / r["file"])), bgr(r["seq"]))

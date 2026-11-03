@@ -16,8 +16,8 @@ has no frame of the game to give. One recorder at a time, whichever (MUTEX). Wha
     recording's folder as `before/`
     (control.lie_recorder), so the whole cycle is kept with what led up to it; as one is written, the Lie Detector's
     recordings are pruned to their 10 GB counting those parts (`_prune_lie`), whatever the player's age; and, on its
-    own whatever becomes of those, the alarm's clip, from 10 s before it to 10 s after the cycle's last sight (the
-    cycle's only video since 2026-11-01; 3 minutes after the alarm at most), to
+    own whatever becomes of those, the alarm's clip, from 2 s before the Lie Detector's first frame to 5 s after its
+    test's last sight (the cycle's only video since 2026-11-01; 3 minutes after the alarm at most), to
     paths.ALARM_CLIPS/<YYYYmmdd-HHMMSS>-lie-detector[-<form>] (CLIP_BEFORE_S, CLIP_TAIL_S, CLIP_MAX_S), lossless (PNG);
     both written as soon as the cycle is over (Recorder.cycle_end);
   - on demand (`python -m gamelab save-recent`, `ask` here): the last N s, to paths.RECENT/<YYYYmmdd-HHMMSS>[-name],
@@ -67,7 +67,7 @@ import uuid
 from collections import Counter, deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import cv2
@@ -135,22 +135,30 @@ LOG_EVERY_S = 600.0   # a line in its log this often: what it keeps, its rate an
 FOLDER_WAIT_S = 20.0
 FOLDER_SLACK_S = 2.0  # ... a recording counts as the alarm's if its folder is named for no more than this before it
 # Each alarm also gets a clip of its own, whatever becomes of the player's recording and the part before it (the user,
-# 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the alarm to the cycle's end, in paths.ALARM_CLIPS,
+# 2026-10-25: "a 2nd line of defense"): from CLIP_BEFORE_S before the Lie Detector's first frame to its test's end, in
+# paths.ALARM_CLIPS,
 # written once its last moment is past (or, cut short, when the recorder stops). Its moments are
 # held by the clip itself as they come, so a ring that loses them first (its cap) loses none of the clip's. Written as
 # PNG, lossless: 70 s at 1366x768 is about 560 MB (813 KB a frame on the six frames of PNG_PARAMS' note), in about 14 s
 # on ENCODERS threads; the oldest go past CLIPS_KEEP_BYTES, about 55 of them (D: had 27 GB free on 2026-10-25; the
 # user is making room).
-CLIP_BEFORE_S = 10.0
+# Since 2026-11-03 from CLIP_BEFORE_S before the first frame that shows the Lie Detector (the user: "Only include frames
+# that are 2s before the bottom right count down"; 10 s before the alarm until then), found as the clip is written
+# (Recorder.shows: the spotter's `near`) among its frames from CLIP_LOOK_BACK_S before the alarm (the mini-game's notice
+# showed 0.28 s before the alarm of 2026-11-03 00:01:54); with none showing it, CLIP_BEFORE_S before the alarm. The
+# frames are held from both before the alarm.
+CLIP_BEFORE_S = 2.0
+CLIP_LOOK_BACK_S = 3.0
 # Since 2026-11-01 the clip is the Lie Detector's only video (the user: "stop keeping the 4fps recording and only use
 # the unified recorder's 15fps video saving": the player's recording keeps its looks' scores and summary, no frames).
 # It runs while the player's recording of the cycle does (its summary not written: the Lie Detector still up, or gone
-# for less than lie_recorder.END_S, 10 s), to CLIP_TAIL_S after the cycle's last sight, and it and the part before are
-# written then, at that 10 s mark (the user: "no more 60s, save all recordings you need at the 10s mark"; until then a
-# clip ran 60 s after the alarm, and the part before was written then). With no recording of the player's, until the
-# alarm is cleared. At most CLIP_MAX_S after the alarm (a cycle sent to the Truth Booth runs minutes, a minimized game
+# for less than lie_recorder.END_S, 10 s, or its test, every form but the Truth Booth, for lie_recorder.TEST_TAIL_S,
+# 5 s), to CLIP_TAIL_S after its test's last sight (the recording's `test_last`; else its last sight), and it and the
+# part before are written then (the user, 2026-11-03: "Only include frames of up to 5s once the board disappears": the
+# clip of 00:01 had run 85 s into the Truth Booth; until then 10 s after the cycle's last sight, the Truth Booth's too).
+# With no recording of the player's, until the alarm is cleared. At most CLIP_MAX_S after the alarm (a minimized game
 # keeps a cycle going: its moments are held meanwhile, about 5 MB a second of the service's frames, 0.9 GB at the most).
-CLIP_TAIL_S = 10.0
+CLIP_TAIL_S = 5.0
 CLIP_MAX_S = 180.0
 # Another program's window over part of the game (window.overs: a notification, this app's window over a corner, the
 # remote desktop's toolbar) leaves the frame kept as grabbed, with the boxes it covered noted (the user, 2026-11-01:
@@ -350,6 +358,21 @@ def from_key(items: list[Item], i: int) -> list[Item]:
     return items[i:]
 
 
+def starting_at(items: list[Item], i: int) -> list[Item]:
+    """items[i:], items[i] made a whole frame if it's a difference, decoded from its chain's whole frame (its pixels
+    in its chain's order: RGB, the service's); one that can't be decoded from its chain's (`from_key`)."""
+    if i >= len(items) or items[i].data is None or items[i].key:
+        return items[i:]
+    chain = from_key(items, i)
+    px = None
+    for _, px in decode(chain[:len(chain) - (len(items) - i) + 1]):
+        pass
+    if px is None:
+        return chain
+    raw = cv2.cvtColor(px, cv2.COLOR_BGR2RGB) if items[i].rgb else px
+    return [replace(items[i], data=pack(raw), key=True)] + items[i + 1:]
+
+
 # --- what it looks at and grabs ------------------------------------------------------------------------------------
 
 class GameWindow:
@@ -479,7 +502,7 @@ class Recorder:
                  clips_keep: int = CLIPS_KEEP_BYTES, encoders: int | Callable[[], int] = ENCODERS,
                  cpu: Callable[[], float] = time.process_time, source: str = "its own grabs (mss)",
                  extra: Callable[[], dict] | None = None, writer_priority: int = WRITER_PRIORITY,
-                 apart: bool = False):
+                 apart: bool = False, shows: Callable[[np.ndarray], bool] | None = None):
         self.game, self.grab, self.ring = game, grab, ring or Ring()
         box = Path(box or paths.RECORDER)
         self.inbox, self.outbox, self.status_path = box / "inbox", box / "outbox", box / "status.json"
@@ -491,6 +514,7 @@ class Recorder:
         self.clips_keep = clips_keep
         self.encoders, self.cpu, self.source, self.extra = encoders, cpu, source, extra
         self.writer_priority, self.apart = writer_priority, apart
+        self.shows = shows  # whether a frame (BGR) shows the Lie Detector: the clip's start (by default the spotter's)
         self._lock = threading.RLock()  # what a moment changes (the clips, the counts), `add` coming from another thread
         self.pending_clips: list[Clip] = []  # alarms whose clip's last moment isn't past yet
         self.started = self.clock()
@@ -653,13 +677,14 @@ class Recorder:
         # before: the ring may lose them, its cap, before the clip's end.
         with self._lock:
             snapshot = self.ring.last(self.ring.seconds)
-            first = next((i for i, it in enumerate(snapshot) if it.t > seen - CLIP_BEFORE_S), len(snapshot))
+            first = next((i for i, it in enumerate(snapshot) if it.t > seen - CLIP_LOOK_BACK_S - CLIP_BEFORE_S),
+                         len(snapshot))
             self.pending_clips.append(Clip(info, seen, from_key(snapshot, first), snapshot))
         seen_as = f", {info['form']}" if info.get("form") else ""
         self._say(f"recorder: Lie Detector alarm ({info.get('reason', '?')}{seen_as}, {key}): saving the "
                   f"{len(snapshot) / self.fps:.0f} s before it with the player's recording of it, and its own clip "
-                  f"from {CLIP_BEFORE_S:g} s before it to {CLIP_TAIL_S:g} s after its cycle's last sight in "
-                  f"{self.clips}, once the cycle is over")
+                  f"from {CLIP_BEFORE_S:g} s before its first frame to {CLIP_TAIL_S:g} s after its test's last sight "
+                  f"in {self.clips}, once the test is over")
 
     def check_clips(self, now: float, cut_short: bool = False) -> None:
         """Each alarm whose cycle is over (`cycle_end`; `cut_short`: all, as the recorder stops): its clip, the moments
@@ -678,8 +703,10 @@ class Recorder:
 
     def cycle_end(self, clip: Clip, now: float) -> float | None:
         """When an alarm's clip ends (time.time's clock), or None while that can't be told yet: once the player's
-        recording of the cycle is summed up (the Lie Detector gone for lie_recorder.END_S), CLIP_TAIL_S after its last
-        sight of it; while it's going, not yet. With no recording of the player's for it within `folder_wait` (the
+        recording of the cycle is summed up (the Lie Detector gone for lie_recorder.END_S, or its test for
+        lie_recorder.TEST_TAIL_S), CLIP_TAIL_S after its test's last sight (`test_last`; its last sight of any form in
+        a recording of before 2026-11-03), from its first sight (`first_seen_at`; its folder's name before); while
+        it's going, not yet. With no recording of the player's for it within `folder_wait` (the
         player not running, `watch --lie-detector` raised the alarm), when the alarm is cleared. CLIP_MAX_S after the
         alarm at the most."""
         most = clip.seen + CLIP_MAX_S
@@ -696,7 +723,9 @@ class Recorder:
             done = json.loads((clip.folder / lie_recorder.SUMMARY).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None  # (the cycle still going: its summary comes as it ends)
-        first, last = stamp_time(clip.folder.name), done.get("last_seen")
+        first, last = done.get("first_seen_at"), done.get("test_last")
+        first = first if isinstance(first, (int, float)) else stamp_time(clip.folder.name)
+        last = last if isinstance(last, (int, float)) else done.get("last_seen")
         if first is None or not isinstance(last, (int, float)):
             return now
         return min(first + last + CLIP_TAIL_S, most)
@@ -812,12 +841,37 @@ class Recorder:
                       f"{self.clips_keep / 1024 ** 3:g} GB")
         dest = new_folder(self.clips, safe_name(f"lie-detector {clip.info.get('form') or ''}".strip()))
         after = None if end is None else round(end - clip.seen, 3)
+        shown = self._first_shown(items, clip.seen)
+        start = (clip.seen if shown is None else shown) - CLIP_BEFORE_S
+        items = starting_at(items, next((i for i, it in enumerate(items) if it.t > start), len(items)))
         summary = self._write(dest, items, {
             "kind": "the alarm's clip", "alarm": clip.info, "alarm_at": day_time(clip.seen),
             "alarm_t": None if not items else round(clip.seen - items[0].t, 3),
-            "asked": [-CLIP_BEFORE_S, after], "cut_short": cut_short,
+            "first_shown": None if shown is None else day_time(shown),
+            "asked": [round(start - clip.seen, 3), after], "cut_short": cut_short,
             "player_recording": None if clip.folder is None else str(clip.folder)}, png=True)
         self._saved(dest, summary)
+
+    def _first_shown(self, items: list[Item], seen: float) -> float | None:
+        """When the first frame from CLIP_LOOK_BACK_S before the alarm (`seen`) to a second after it that shows the Lie
+        Detector was (`shows`); None if none does."""
+        if self.shows is None:
+            from ..perception.lie_detector import LieDetectorSpotter
+            spotter = LieDetectorSpotter()
+            self.shows = lambda px: max(spotter.near(cv2.cvtColor(px, cv2.COLOR_BGR2RGB)).values()) >= 1.0
+        k = next((i for i, it in enumerate(items) if it.t > seen - CLIP_LOOK_BACK_S), len(items))
+        for it, px in decode(from_key(items, k)):
+            if it.t > seen + 1.0:
+                break
+            if px is not None and it.t > seen - CLIP_LOOK_BACK_S and self._shows(px):
+                return it.t
+        return None
+
+    def _shows(self, px: np.ndarray) -> bool:
+        try:
+            return bool(self.shows(px))
+        except Exception:  # (a frame the spotter can't take, as the watchdog's: smaller than its templates)
+            return False
 
     def _prune_lie(self, spare: Path) -> None:
         """The Lie Detector's recordings kept to `lie_keep` (lie_recorder.KEEP_BYTES), their parts before counted, the

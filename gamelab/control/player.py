@@ -278,8 +278,11 @@ class Watchdog(threading.Thread):
     set first (any keys stop within ~10 ms, mid-plan too), then on_alarm writes the alarm, named for that form, and its
     screenshot and pages (control.alarm.raise_alarm), as before; only
     then does the recording start (control.lie_recorder), with that first frame. From there every grab goes into it
-    until the game has shown no Lie Detector for `end_s` (lie_recorder.END_S): the cycle's end; or, at the latest,
-    `cap_s` after the first sight, when the recording stops and the cycle goes on unrecorded. A grab with the game
+    until the game has shown no Lie Detector for `end_s` (lie_recorder.END_S): the cycle's end; or its test (every
+    form but the Truth Booth) for `test_tail_s` (lie_recorder.TEST_TAIL_S, the user's of 2026-11-03), when the
+    recording stops and the cycle goes on unrecorded, its folder saying so (lie_recorder.cycle_going: `clear-alarm`
+    waits for it) to its end or `cap_s`; or, at the latest, `cap_s` after the first sight, when the recording stops
+    and the cycle goes on unrecorded. A grab with the game
     window gone or minimized is recorded as such, with no frame, and doesn't count as the Lie Detector gone; one with
     another window over some of the game (checked for the Lie Detector all the same: the screen as it is there) is
     recorded with no frame too, but counts as gone when the check sees none (the user, 2026-10-29: "count seconds when
@@ -325,7 +328,7 @@ class Watchdog(threading.Thread):
 
     def __init__(self, game_title: str, alarm: threading.Event, spotter=None, grab=None,
                  interval: float = 0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None,
-                 pusher=None, auto_resume=None):
+                 pusher=None, auto_resume=None, test_tail_s=None):
         super().__init__(name="lie-detector-watch", daemon=True)
         from ..perception.framecheck import anchors_off
         from ..perception.lie_detector import NATIVE_FRAME, WHOLE_EVERY, LieDetectorSpotter
@@ -345,7 +348,9 @@ class Watchdog(threading.Thread):
         self.log = log or _log
         self.end_s = lie_recorder.END_S if end_s is None else end_s
         self.cap_s = lie_recorder.CAP_S if cap_s is None else cap_s
+        self.test_tail_s = lie_recorder.TEST_TAIL_S if test_tail_s is None else test_tail_s
         self.Recording = lie_recorder.Recording
+        self.cycle_going, self.cycle_over = lie_recorder.cycle_going, lie_recorder.cycle_over
         self.pusher = pusher                  # the phone's pushes of a cycle (control.notify.Pusher; None: none)
         self.auto_resume = AUTO_RESUME if auto_resume is None else auto_resume
         self.truth_booth = lie_recorder.TRUTH_BOOTH
@@ -358,6 +363,9 @@ class Watchdog(threading.Thread):
         self.cycle_t0: float | None = None    # when the cycle in progress was first seen (monotonic s), else None
         self.gone_since: float | None = None  # since when the game has shown no Lie Detector (None: seen, or the game
                                               # not showing, since the last look)
+        self.test_seen = False                # the cycle's test (a form but the Truth Booth) seen in it
+        self.test_gone_since: float | None = None  # since when the game has shown no test, as gone_since
+        self.test_ended = None                # the folder of the cycle's recording ended at its test's end
         self.recording = None                 # the cycle's recording while it's written
         self.ended: list = []                 # recordings finished, their writers maybe still at it
         self.troubles: dict[str, int] = {}
@@ -403,6 +411,7 @@ class Watchdog(threading.Thread):
         elif self.gone_since is None:
             self.gone_since = now
         if seen and self.cycle_t0 is None:
+            first_seen = time.time()  # (before the alarm's raising, its screenshot and paging)
             self.alarm.set()  # first: keys stop within ~10 ms
             self.form = max(scores, key=scores.get)
             info = self._raise(frame)  # the alarm, its screenshot, paging: before anything of the recording
@@ -417,21 +426,37 @@ class Watchdog(threading.Thread):
                          "(it takes plans again only once it's started again)")
                       + ("" if self.alarm_written else " (the alarm file couldn't be written: locked until it's "
                                                        "stopped)"))
-            self._start_recording(info)
+            self._start_recording(info, first_seen)
         elif seen and self.alarm_written and not alarm_up():
             self._raise_again(frame)
         if seen:
             self.cycle_forms.update(name for name, score in scores.items() if score >= 1)
+        if seen and any(score >= 1 for name, score in scores.items() if name != self.truth_booth):
+            self.test_seen, self.test_gone_since = True, None
+        elif frame is None:
+            self.test_gone_since = None  # (as gone_since: the game not showing may have it up behind)
+        elif self.test_gone_since is None:
+            self.test_gone_since = now
         if seen and self.pusher is not None:  # (after the alarm: the keys have stopped, the PC paged)
             self._pushed(lambda: self.pusher.seen(now, max(scores, key=scores.get)))
         if self.recording is not None:
             self.recording.add(now - self.cycle_t0, frame if shown else None, scores, why)
             if now - self.cycle_t0 >= self.cap_s:
                 self._end_recording("cap")
+            elif self.test_seen and self.test_gone_since is not None and now - self.test_gone_since >= self.test_tail_s:
+                self.test_ended = self.recording.folder
+                self._end_recording("test over")
+        if self.test_ended is not None and self.cycle_t0 is not None:
+            if now - self.cycle_t0 < self.cap_s and not self.gone_for(now):
+                self.cycle_going(self.test_ended)  # (its folder says the cycle goes on: `clear-alarm` waits)
+            else:
+                self.cycle_over(self.test_ended, self.truth_booth in self.cycle_forms)
+                self.test_ended = None
         if self.cycle_t0 is not None and self.gone_for(now):
             if self.recording is not None:
                 self._end_recording("gone")
             self.cycle_t0 = None
+            self.test_seen, self.test_gone_since = False, None
             if self.pusher is not None:
                 self._pushed(lambda: self.pusher.ended(now))
             answered, self.cycle_forms = self.truth_booth not in self.cycle_forms, set()
@@ -554,14 +579,15 @@ class Watchdog(threading.Thread):
             return None
         return info if isinstance(info, dict) else None
 
-    def _start_recording(self, info) -> None:
+    def _start_recording(self, info, first_seen: float | None = None) -> None:
         try:
-            self.recording = self.Recording(self.folder, info, log=self._say, end_s=self.end_s, cap_s=self.cap_s)
+            self.recording = self.Recording(self.folder, info, log=self._say, end_s=self.end_s, cap_s=self.cap_s,
+                                            t0=first_seen)
         except Exception as e:  # (no folder: the cycle goes on unrecorded)
             self._trouble("starting the Lie Detector recording failed", e)
             return
         self._say(f"recording the Lie Detector's looks (its video: the rolling recorder's clip), until it's been off "
-                  f"the screen {self.end_s:g} s: {self.recording.folder}")
+                  f"the screen {self.end_s:g} s, or its test {self.test_tail_s:g} s: {self.recording.folder}")
 
     def _end_recording(self, end: str) -> None:
         rec, self.recording = self.recording, None
@@ -984,7 +1010,8 @@ def _serve(player: "Player", watchdog: "Watchdog", idle_since: float) -> None:
     alarm = player.alarm
     with win32.precise_timers():
         while not STOP.exists() and not watchdog.cleared.is_set() and time.monotonic() - idle_since < IDLE_LIMIT_S:
-            if watchdog.recording is not None:  # a Lie Detector's recording goes on to its end, idle or not
+            if watchdog.recording is not None or watchdog.test_ended is not None:  # a Lie Detector's recording goes
+                # on to its end, idle or not, and its cycle after its test's end (its folder saying so) up to the cap
                 idle_since = time.monotonic()
             if not watchdog.is_alive():  # (it can't take a picture: mss refused) nothing would see a Lie Detector
                 _log("the Lie Detector watch has stopped: stopping, as nothing would see one")

@@ -1,19 +1,22 @@
 """Recording the Lie Detector's whole cycle, for whoever answers it: from the moment the player's watchdog first sees
-it until it has been off the screen for END_S, every look the watchdog takes (4 a second) goes into an index and, at
-the end, a summary. The user asked for it on 2026-10-24: the player used to shut down at the alarm, so nothing it
-saved showed them answering the Lie Detector. Its pictures (JPEG, 4 a second) were saved too until 2026-11-01 (the
-user: "stop keeping the 4fps recording and only use the unified recorder's 15fps video saving"): the cycle's video is
-the rolling recorder's alarm clip, 15 a second, lossless, written once this recording's summary says the cycle is over
-(control.rolling: Recorder.cycle_end).
+it until it has been off the screen for END_S, or its test (any form but the Truth Booth) for TEST_TAIL_S, every look
+the watchdog takes (4 a second) goes into an index and, at the end, a summary. The user asked for it on 2026-10-24:
+the player used to shut down at the alarm, so nothing it saved showed them answering the Lie Detector. Its pictures
+(JPEG, 4 a second) were saved too until 2026-11-01 (the user: "stop keeping the 4fps recording and only use the
+unified recorder's 15fps video saving"): the cycle's video is the rolling recorder's alarm clip, 15 a second, lossless,
+written once this recording's summary says its test is over (control.rolling: Recorder.cycle_end).
 
 One folder a cycle, paths.LIE_RECORDINGS/<YYYYmmdd-HHMMSS> (when it was first seen):
   index.jsonl    a line a look: `t` (s since the first sight) and either the look's frame number `i` (a frame of the
                  game itself), the spotter's per-form `scores` (match / threshold, 1 = seen) and whether the Lie
                  Detector was `seen`, or `game`: why there was no frame of the game ("no window", "minimized"; or
                  "covered": another window over the game, with the `scores` and `seen` of what was on top);
-  summary.json   at the end (`Recording.summary`): when it was first and last seen, how long the recording ran, its
-                 looks, the forms seen and when each first and last showed, whether the Truth Booth did (the
-                 outcome as far as the picture tells), how it ended, the alarm's screenshot and the window's size;
+  summary.json   at the end (`Recording.summary`): when it was first seen (`first_seen_at`, the clock's) and last
+                 seen, its test last (`test_last`), how long the recording ran, its looks, the forms seen and when
+                 each first and last showed, whether the Truth Booth did (the outcome as far as the picture tells),
+                 how it ended, the alarm's screenshot and the window's size;
+  cycle.live     (LIVE) while the cycle goes on after a recording ended at its test's end (the Truth Booth up): the
+                 watchdog touches it every look and deletes it at the cycle's end (`going`);
   before/        written by the rolling recorder when it runs (control.rolling): the game 15 times a second for the 5
                  minutes before the alarm and on into this recording's first seconds, frames, index and summary of
                  its own.
@@ -55,6 +58,13 @@ from ..paths import LIE_RECORDINGS
 # that shows nothing for longer may end the cycle early: then the recording stops there and `clear-alarm` may stop the
 # player while it's still up, which only a person starting it again undoes).
 END_S = 10.0
+# The recording ends this long after its test's last sight (the board, the quiz, the countdown and the boxes before
+# them: every form but the Truth Booth) even if the cycle goes on (the user, 2026-11-03: "Only include frames of up to
+# 5s once the board disappears", the recording of 00:01 had run 68 s into the Truth Booth); the cycle itself still ends
+# END_S after the last sight of any form (control.player.Watchdog), the Truth Booth's too, and its recording's folder
+# says it's going till then (LIVE). A test that sends her to the Truth Booth does so at once (0.4 s after the board,
+# 2026-11-03 00:02:19): the recording sees it; one seen only later is put in the summary at the cycle's end.
+TEST_TAIL_S = 5.0
 # ... and at the latest this long after the first sight, seen or not: the longest cycle the game makes, as far as
 # it has been seen, is a test left unanswered (its windows run a minute or two) and the Truth Booth it sends her to
 # (4:44 left on its timer in the screenshot taken as she arrived, 2026-10-18), then END_S: about 8 minutes. Ten
@@ -70,7 +80,7 @@ KEEP_BYTES = 10 * 1024 ** 3
 QUEUE_ITEMS = 16  # looks waiting to be written to the index (4 s of them); past it one is dropped
 LIVE_S = 5.0      # a recording whose index was written this recently, and not summed up, is still being written
 STAMP = "%Y%m%d-%H%M%S"
-INDEX, SUMMARY = "index.jsonl", "summary.json"
+INDEX, SUMMARY, LIVE = "index.jsonl", "summary.json", "cycle.live"
 TRUTH_BOOTH = "truth booth"  # the spotter's name for the Truth Booth's form (perception.lie_detector.HALF_SIZE)
 
 
@@ -80,18 +90,19 @@ class Recording:
     can't) and deletes the oldest recordings past `keep_bytes`."""
 
     def __init__(self, root: Path | None = None, alarm_info: dict | None = None, log=print,
-                 keep_bytes: int = KEEP_BYTES, end_s: float = END_S, cap_s: float = CAP_S):
+                 keep_bytes: int = KEEP_BYTES, end_s: float = END_S, cap_s: float = CAP_S, t0: float | None = None):
         self.root = _root(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.folder = _new_folder(self.root)
         self.started = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.t0 = time.time() if t0 is None else t0  # the first sight (t 0), the clock's: the alarm clip's end by it
         self.screenshot = (alarm_info or {}).get("screenshot") if isinstance(alarm_info, dict) else None
         self.log, self.end_s, self.cap_s = log, end_s, cap_s
         # The watchdog's side (only it adds), read by the writer once the recording is ended.
         self.grabs = self.numbered = self.dropped = self._dropped_since = 0
         self.missing: Counter = Counter()  # grabs with no frame, by why
         self.forms: dict[str, dict] = {}   # form: first, last, frames
-        self.first_seen = self.last_seen = None
+        self.first_seen = self.last_seen = self.test_last = None
         self.last_t = 0.0
         self.window = None
         self.end = None
@@ -127,6 +138,8 @@ class Recording:
                     form = self.forms.setdefault(name, {"first": record["t"], "last": record["t"], "frames": 0})
                     form["last"] = record["t"]
                     form["frames"] += 1
+                    if name != TRUTH_BOOTH:
+                        self.test_last = record["t"]
             if seen:
                 self._seen_at(record["t"])
         self.grabs += 1
@@ -149,8 +162,9 @@ class Recording:
         self.last_seen = t if self.last_seen is None else max(self.last_seen, t)
 
     def finish(self, end: str) -> None:
-        """End it ('gone': off the screen for END_S, 'cap': CAP_S after the first sight, 'stopped': the player
-        stopped): the writer writes what's waiting, then the summary, and logs the end. Returns at once."""
+        """End it ('gone': off the screen for END_S, 'test over': its test for TEST_TAIL_S, 'cap': CAP_S after the
+        first sight, 'stopped': the player stopped): the writer writes what's waiting, then the summary, and logs the
+        end. Returns at once."""
         self.end = end
         self.ended.set()
 
@@ -164,11 +178,12 @@ class Recording:
         showed, "answered" if the Lie Detector went away without it, else "unknown" (still up when the recording
         ended at the cap or as the player stopped)."""
         booth = TRUTH_BOOTH in self.forms
-        outcome = ("sent to the Truth Booth" if booth else "answered" if self.end == "gone" else
+        outcome = ("sent to the Truth Booth" if booth else "answered" if self.end in ("gone", "test over") else
                    "unknown: still up when the recording ended")
         seen_s = None if self.first_seen is None else round(self.last_seen - self.first_seen, 3)
-        return {"folder": str(self.folder), "started": self.started, "first_seen": self.first_seen,
-                "last_seen": self.last_seen, "seen_s": seen_s, "duration_s": round(self.last_t, 3),
+        return {"folder": str(self.folder), "started": self.started, "first_seen_at": round(self.t0, 3),
+                "first_seen": self.first_seen, "last_seen": self.last_seen, "test_last": self.test_last,
+                "seen_s": seen_s, "duration_s": round(self.last_t, 3),
                 "grabs": self.grabs, "not_showing": dict(self.missing), "dropped": self.dropped,
                 "forms": self.forms, "truth_booth": booth, "outcome": outcome, "end": self.end,
                 "end_stretch_s": self.end_s, "cap_s": self.cap_s, "alarm_screenshot": self.screenshot,
@@ -304,17 +319,47 @@ def summary_of(folder: Path) -> dict | None:
 
 
 def going(root: Path | None = None, now: float | None = None) -> Path | None:
-    """The recording still being written in `root` (LIE_RECORDINGS), if any: the newest, with no summary yet and its
-    index written in the last LIVE_S (the watchdog adds a line every grab, 4 a second, even with the game minimized).
-    One the player stopped in the middle of has no summary either, but its index is old."""
+    """The recording still being written in `root` (LIE_RECORDINGS), if any, or whose cycle is still going: the
+    newest, with no summary yet and its index written in the last LIVE_S (the watchdog adds a line every grab, 4 a
+    second, even with the game minimized), or summed up at its test's end with its LIVE file touched in the last LIVE_S
+    (the cycle going on: the Truth Booth). One the player stopped in the middle of has an old index or LIVE file."""
     folders = recordings(root)
-    if not folders or (folders[-1] / SUMMARY).exists():
+    if not folders:
         return None
+    newest = folders[-1]
     try:
-        written = os.stat(folders[-1] / INDEX).st_mtime
+        if (newest / SUMMARY).exists():
+            written = os.stat(newest / LIVE).st_mtime
+        else:
+            try:
+                written = os.stat(newest / INDEX).st_mtime
+            except OSError:
+                written = os.stat(newest).st_mtime  # just made: no line yet
+    except OSError:  # (no LIVE file: its cycle over; or gone meanwhile)
+        return None
+    return newest if (time.time() if now is None else now) - written <= LIVE_S else None
+
+
+def cycle_going(folder: Path) -> None:
+    """The cycle of a recording ended at its test's end still going: its LIVE file touched (made if need be)."""
+    try:
+        (Path(folder) / LIVE).touch()
     except OSError:
+        pass  # (`going` then says it's over a little early: `clear-alarm` raises it again if it's still up)
+
+
+def cycle_over(folder: Path, truth_booth: bool) -> None:
+    """The cycle of a recording ended at its test's end over: its LIVE file gone, and its summary told if the cycle
+    showed the Truth Booth after the recording ended."""
+    folder = Path(folder)
+    summary = summary_of(folder)
+    if truth_booth and summary is not None and not summary.get("truth_booth"):
+        summary.update(truth_booth=True, outcome="sent to the Truth Booth", truth_booth_after=True)
         try:
-            written = os.stat(folders[-1]).st_mtime  # just made: no line yet
-        except OSError:  # gone meanwhile
-            return None
-    return folders[-1] if (time.time() if now is None else now) - written <= LIVE_S else None
+            (folder / SUMMARY).write_text(json.dumps(summary, indent=1), encoding="utf-8")
+        except OSError:
+            pass
+    try:
+        (folder / LIVE).unlink(missing_ok=True)
+    except OSError:
+        pass
