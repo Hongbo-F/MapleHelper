@@ -779,7 +779,7 @@ _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN, n
                             off_spell=OFF_SPELL)                                 # detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -825,7 +825,12 @@ def loop_tree_23_near_misses(sim):
     invulnerability 1.5 s, world.INVULNERABLE; D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on seed 2, 22 kills
     but no Horny Mushroom the looks missed by a pile of hers (the new eyes miss fewer near her: the run parts from the
     old within its first second); of seeds 1-16 1, 3, 7, 8 and 15 show all of this; on 1, 26 kills, a Horny Mushroom
-    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.)"""
+    unseen by her drops on 20 at 135.4 s and on 23 at 165.7 s.) (Seed 3 since R1 of the cornered study extended
+    (2026-11-03, work/cornered-r1: a hidden one heading at her walks on, fight.HIDDEN_WALKS; the LIVE tracks a look
+    missed about, unseen.UNSEEN_LIVE; the throws from the air after a touch, stance.CLAWED_AIR, CLAWED_CLOSE;
+    D:/MapleHelper-scratch/cornered-fix/r1/scan_nm_*.txt): on 1, 16 kills (at 2.6 s the hidden Green Mushroom she had
+    thrown at walked on at her, +27 to +21, and she threw at it from where she stood where she had stepped away); of
+    seeds 1-16 3, 8, 10 and 13 show all of this; on 3, 20 kills.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
@@ -890,7 +895,14 @@ def loop_tree_touched_unseen(sim):
     one aimed at: none to the claw, 5 touches, 2 kills. Of seeds 1-12, their first 10 s (D:/MapleHelper-scratch/
     cornered/proto/seeds_sc2.txt), off against on: touches 70 and 57, that hurt 53 and 44, kills 11 and 24, the claw's
     swipes 52 and 13, far_claws' 39 and 0; all of this met on none off, on 10 (all but 1, with no 'touched' jump, and 7,
-    no kill)."""
+    no kill). On b7f7308 (the simulator's defaults since: the detector's misses of 2026-11-02 in runs, her
+    invulnerability 1.5 s; this branch with R1's switches off, CLAWED_AIR, CLAWED_CLOSE, unseen.UNSEEN_LIVE and
+    fight.HIDDEN_WALKS, the same to the digit), seed 3: 6 touches in the 10 s, 1 kill, 3 presses from the ground past the
+    claw's edge taken by the claw after a touch; with R1 extended (2026-11-03, work/cornered-r1): none, 3 'touched'
+    jumps, 7 touches, 4 kills. Of seeds 1-12 (D:/MapleHelper-scratch/cornered-fix/r1/scripts/setpiece.py, sp2_base.txt,
+    sp2_proto.txt, sp2_final.txt), b7f7308, the prototype and R1 extended: touches 62, 50 and 53, that hurt 43, 40 and
+    42, kills 27, 30 and 30, the claw's swipes 45, 14 and 15, far_claws' 28, 1 and 1; all of this met on none, 7 and 10
+    (all but 4, no 'touched' jump, and 12, one far claw)."""
     return harness._only(_loop(1 / 6), (7,))(sim)
 
 
@@ -1694,7 +1706,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=11, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=29, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1812,8 +1824,14 @@ def loop_tree_attack_no_darts(sim):
     D:/MapleHelper-scratch/sim-defaults/seeds/scan1.txt): on 13 her stars' test cast nothing (her retreat to the rope
     at -80, not on a platform: "her stars: not known"), so no MAYBE OUT and one page, out of darts'; of seeds 1-16, 11
     alone meets all of this. On 11: the doubt at 87.4 s, a Horny Mushroom at 41%; MAYBE OUT at 103.7 s, ATTACK on Ctrl as
-    configured at 105.5 s, paged; out of darts' stop at 117.3 s, paged.) It is re-seeded at most changes of the grind or
-    the world (more than ten times): placing its monsters would make it hold, not a seed.)"""
+    configured at 105.5 s, paged; out of darts' stop at 117.3 s, paged.) (Seed 29 since R1 of the cornered study
+    extended (2026-11-03, work/cornered-r1: the LIVE tracks a look missed about, unseen.UNSEEN_LIVE, and her throws from
+    the air after a touch, stance.CLAWED_AIR, CLAWED_CLOSE; the run parts from b7f7308's at 27.4 s, a track missed in
+    the frame among her hidden ones; D:/MapleHelper-scratch/cornered-fix/r1/scan_nd_*.txt): on 11 MAYBE OUT at 97.6 s
+    and no window read after it, so one page, out of darts' at 160.7 s; of seeds 1-40, 29, 36, 38 and 39 meet all of
+    this. On 29: the doubt at 102.4 s, a Green Mushroom; MAYBE OUT at 115.1 s, ATTACK on Ctrl as configured at 116.2 s,
+    paged; out of darts' stop at 130.4 s, paged.) It is re-seeded at most changes of the grind or the world (more than
+    ten times): placing its monsters would make it hold, not a seed.)"""
     return key_check_run(13)(sim)
 
 
