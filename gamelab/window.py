@@ -95,18 +95,23 @@ kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 CLIENT_SIZES = ((1366, 768), (1920, 1080))
 
 
-def move_cursor(x: int, y: int, wait=None):
+def move_cursor(x: int, y: int, wait=None, played: list | None = None):
     """Move the pointer to screen pixel x, y along a generated trail (no click), one whole-pixel mouse event at a time.
 
     `wait` is the player's plan-aware wait when one is running: it takes the due perf_counter time and returns True to
     carry on, or an early result (False for a stop, "splice" for a new plan) which this returns without another event.
     With none, this sleeps until each sample is due. The last SetCursorPos removes SendInput's sub-pixel rounding.
+    `played`, a list: where the pointer was, as [clock time (s), x, y] in screen px, at the start, at each event sent
+    and at the landing; as far as it went when stopped early or failing (the review's overlay of the Lie Detector's
+    cursor, the user, 2026-11-03).
     """
     here = wintypes.POINT()
     if not user32.GetCursorPos(ctypes.byref(here)):
         raise ctypes.WinError(ctypes.get_last_error())
     trail = generate_trail(here.x, here.y, x, y)
     started = time.perf_counter()
+    if played is not None:
+        played.append([round(time.time(), 3), here.x, here.y])
     for ms, px, py in trail[1:]:
         due = started + ms / 1000.0
         if wait is None:
@@ -118,8 +123,12 @@ def move_cursor(x: int, y: int, wait=None):
             if got is not True:
                 return got
         send_mouse_move(round(px), round(py))
+        if played is not None:
+            played.append([round(time.time(), 3), round(px), round(py)])
     if not user32.SetCursorPos(x, y):
         raise ctypes.WinError(ctypes.get_last_error())
+    if played is not None:
+        played.append([round(time.time(), 3), x, y])
     return True
 
 

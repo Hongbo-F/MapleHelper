@@ -673,21 +673,30 @@ def test_the_elevated_player_runs_the_lie_cursor_trail_and_reports_windows_failu
     game = _Game(monkeypatch, tmp_path)
     p, said = _alarmed_player()
     moves = []
-    monkeypatch.setattr(player_mod.window, "move_cursor",
-                        lambda x, y, wait: moves.append((x, y, wait(time.perf_counter()))) or True)
+    monkeypatch.setattr(player_mod.window, "client_rect",
+                        lambda hwnd: {"left": 100, "top": 50, "width": 1366, "height": 768})
+
+    def move(x, y, wait, played):
+        moves.append((x, y, wait(time.perf_counter())))
+        played.extend([[1700000000.0, 380, 220], [1700000000.008, x, y]])  # (screen px)
+        return True
+
+    monkeypatch.setattr(player_mod.window, "move_cursor", move)
     plan = _plan("cursor", [[0, "mouse", 309, 182]], alarm_mod.LIE_CURSOR)
     plan["focus"] = False
     result = p.run(plan)
     assert "error" not in result and result["sent"][0][1:] == ["mouse", 309, 182]
-    assert moves == [(309, 182, True)] and game.sent == [] and game.fronted == [] and said == []
+    assert moves == [(409, 232, True)] and game.sent == [] and game.fronted == [] and said == []
+    assert result["trail"] == [[1700000000.0, 280, 170], [1700000000.008, 309, 182]]  # where it went, in client px
 
-    def denied(x, y, wait):
+    def denied(x, y, wait, played):
+        played.append([1700000000.0, 380, 220])  # (the start, then SendInput refused)
         raise OSError(5, "blocked")
 
     monkeypatch.setattr(player_mod.window, "move_cursor", denied)
     plan["id"] = "cursor_denied"
     result = p.run(plan)
-    assert result["sent"] == []
+    assert result["sent"] == [] and result["trail"] == [[1700000000.0, 280, 170]]
     assert result["problems"] == [f"cursor movement failed (OSError: {OSError(5, 'blocked')})"]
     assert game.sent == [] and game.fronted == []
 
@@ -790,8 +799,11 @@ def test_the_client_hands_the_lie_cursor_to_the_player_without_focus_capture_or_
     alarm_file.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(client, "done", lambda pid: True)
     monkeypatch.setattr(client, "wait",
-                        lambda pid, timeout: {"sent": [[0, "mouse", 309, 182]], "problems": []})
-    assert client.move_lie_cursor(309, 182, active=lambda: True) is True
+                        lambda pid, timeout: {"sent": [[0, "mouse", 309, 182]], "problems": [],
+                                              "trail": [[1700000000.0, 300, 170], [1700000000.008, 309, 182]]})
+    trail = []
+    assert client.move_lie_cursor(309, 182, active=lambda: True, trail=trail) is True
+    assert trail == [[1700000000.0, 300, 170], [1700000000.008, 309, 182]]  # the player's, handed back
     path = next(client.INBOX.glob("*lie_cursor*.json"))
     plan = json.loads(path.read_text(encoding="utf-8"))
     assert plan == {"events": [[0, "mouse", 309, 182]],
@@ -817,9 +829,12 @@ def test_an_inactive_lie_cursor_already_running_is_cancelled_and_collected(monke
     monkeypatch.setattr(client, "send", lambda *a, **kw: "cursor1")
     monkeypatch.setattr(client, "done", lambda pid: False)
     monkeypatch.setattr(client, "cancel", lambda pid: calls.append(("cancel", pid)) or False)
-    monkeypatch.setattr(client, "wait", lambda pid, timeout: calls.append(("wait", pid)) or {"problems": ["cancelled"]})
-    assert client.move_lie_cursor(309, 182, active=lambda: False) is False
+    monkeypatch.setattr(client, "wait", lambda pid, timeout: calls.append(("wait", pid)) or {
+        "problems": ["cancelled"], "trail": [[1700000000.0, 300, 170]]})
+    trail = []
+    assert client.move_lie_cursor(309, 182, active=lambda: False, trail=trail) is False
     assert calls == [("cancel", "cursor1"), ("wait", "cursor1")]
+    assert trail == [[1700000000.0, 300, 170]]  # as far as it went
 
 
 def test_the_client_sends_only_the_named_kinds_with_the_alarm_up(alarm_file):

@@ -99,11 +99,13 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     return plan_id
 
 
-def move_lie_cursor(x: int, y: int, active) -> bool:
+def move_lie_cursor(x: int, y: int, active, trail: list | None = None) -> bool:
     """Move to client pixel x, y through the elevated player while `active()` says the mini-game's round is still on.
 
     This is the only mouse plan allowed with the alarm up: no focus, click, key, capture or final wait. The player
     generates and plays the trail (window.move_cursor). Returns False when the round ends and the plan is cancelled.
+    `trail`, a list: where the player's pointer went, [clock time (s), client x, client y] (its result's `trail`), as
+    far as it went.
     """
     plan_id = send([[0, "mouse", x, y]], focus=False, lead_ms=0, name="lie_cursor", kind=LIE_CURSOR)
     try:
@@ -111,13 +113,17 @@ def move_lie_cursor(x: int, y: int, active) -> bool:
             if not active():
                 if cancel(plan_id):  # not picked up: withdrawn, and no result will come
                     return False
-                wait(plan_id, timeout=5)  # already running: collect its result, whether it finished or was cancelled
+                got = wait(plan_id, timeout=5)  # already running: its result, whether it finished or was cancelled
+                if trail is not None:
+                    trail.extend(got.get("trail", []))
                 return False
             time.sleep(POLL_S)
         result = wait(plan_id, timeout=5)
     except BaseException:
         cancel(plan_id)  # also withdraw it if the service is closing or the mover failed
         raise
+    if trail is not None:
+        trail.extend(result.get("trail", []))
     if result.get("problems") == ["cancelled"]:
         return False
     if not result.get("sent"):

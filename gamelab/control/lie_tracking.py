@@ -23,7 +23,8 @@ found the board's printed patterns 4 times a second and recorded them: this foll
   screen: `client` + the client area's corner on the screen, window.client_rect, looked at once in ORIGIN_POLL_S at
   most; None without the window). A cursor thread takes the newest desktop answer and hands its client coordinate to
   the elevated player (client.move_lie_cursor), whose window.move_cursor generates the trail: the administrator game
-  blocks the ordinary service's input. Only the cursor moves inside the board, never a button or key; a frame without
+  blocks the ordinary service's input. Where the pointer went, as the player played it (its plan's result), goes into
+  the move's `move finished` or `failed` record: `trail`, [clock time (s), client x, client y] a mouse event. Only the cursor moves inside the board, never a button or key; a frame without
   the board, the round's end or the service's close cancels its plan.
 - Each round is a file, paths.LIE_TARGETS/<YYYYmmdd-HHMMSS>.jsonl (the board's first sight), written by that process: a
   first line saying what it is, then a line an answer (`t`: monotonic s, `at`: the clock, `seq` and `run`: the
@@ -72,7 +73,8 @@ class LieTracking:
     """The service's side (see the top): `saw` from the frame loop, `start` and `close` with the service, `line` for its
     status. `child` (for tests) stands in for starting the tracker's process: a callable returning an object with
     `send(msg)`, `replies()` (an iterator of its replies, read on a thread of their own) and `stop()`. `mover` stands
-    in for window.move_cursor, with its same (x, y, wait=...) call."""
+    in for the elevated player's move, with its same (x, y, wait=..., played=...) call: `played` a list it fills with
+    where the pointer went, [clock time (s), client x, client y]."""
 
     def __init__(self, folder: Path | None = None, alarm: Path | None = None, spotter=None, log=None, child=None,
                  fps: float = FPS, title: str | None = None, origin=None, mover=None):
@@ -332,7 +334,7 @@ class LieTracking:
             self.child = None
             self.ready.clear()
 
-    def _move_cursor(self, x: int, y: int, wait):
+    def _move_cursor(self, x: int, y: int, wait, played: list | None = None):
         """Move through the elevated player, whose window.move_cursor generates the trail. The ordinary perception
         process's SendInput is blocked by the administrator game; its old direct call also hid that failure."""
         from . import client
@@ -340,7 +342,7 @@ class LieTracking:
         if corner is None:
             raise RuntimeError("the game window's desktop position isn't known")
         return client.move_lie_cursor(round(x - corner[0]), round(y - corner[1]),
-                                      active=lambda: wait(time.perf_counter()) is True)
+                                      active=lambda: wait(time.perf_counter()) is True, trail=played)
 
     def _queue_cursor(self, desktop, seq=None) -> None:
         """Give the cursor thread only the newest unanswered target; never make the tracker's reply thread wait for a trail."""
@@ -371,19 +373,20 @@ class LieTracking:
                 continue
             began = time.perf_counter()
             telemetry.emit("lie_target_cursor", event="move started", round=name, x=x, y=y, seq=seq)
+            played = []  # where the pointer went: the player's trail
             try:
-                result = self.mover(x, y, wait=lambda due, name=name: self._cursor_wait(name, due))
+                result = self.mover(x, y, wait=lambda due, name=name: self._cursor_wait(name, due), played=played)
             except Exception as e:  # noqa: BLE001 (tracking and its records carry on; only cursor movement stops)
                 self.cursor_why_off = f"{type(e).__name__}: {e}"
                 self._say(f"the Lie Detector's cursor movement is off: {self.cursor_why_off}")
                 telemetry.emit("lie_target_cursor", event="failed", round=name, x=x, y=y, seq=seq,
-                               error=self.cursor_why_off)
+                               error=self.cursor_why_off, trail=played)
                 with self._cursor_cond:
                     self._cursor_target = None
             else:
                 telemetry.emit("lie_target_cursor", event="move finished", round=name, x=x, y=y, seq=seq,
                                result=result if isinstance(result, (bool, str)) else str(result),
-                               ms=round(1000 * (time.perf_counter() - began), 1))
+                               ms=round(1000 * (time.perf_counter() - began), 1), trail=played)
 
     def _cursor_wait(self, name: str, due: float) -> bool:
         """Wait for a trail sample, ending the trail early when its round ends or the service closes."""

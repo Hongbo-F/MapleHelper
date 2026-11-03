@@ -60,11 +60,16 @@ def test_move_cursor_replays_each_timed_trail_sample_then_lands_exactly(monkeypa
     monkeypatch.setattr(window.time, "perf_counter", lambda: clock[0])
     monkeypatch.setattr(window.time, "sleep", sleep)
 
-    assert _move_cursor(130, 140) is True
+    monkeypatch.setattr(window.time, "time", lambda: 1700000000.0 + clock[0])
+    played = []
+    assert _move_cursor(130, 140, played=played) is True
     assert asked == [(100, 120, 130, 140)]
     assert moves == [(110, 125), (130, 140)]
     assert sleeps == pytest.approx([0.01, 0.01])
     assert exact == [(130, 140)]
+    # where it went, for the review: the start, each event at its clock time, the landing
+    assert played == [[1700000010.0, 100, 120], [1700000010.01, 110, 125], [1700000010.02, 130, 140],
+                      [1700000010.02, 130, 140]]
 
 
 @pytest.mark.parametrize("early", [False, "splice"])
@@ -75,8 +80,9 @@ def test_move_cursor_stops_before_another_event_when_the_plan_wait_ends_early(mo
     monkeypatch.setattr(window.user32, "SetCursorPos", lambda x, y: exact.append((x, y)) or True)
     monkeypatch.setattr(window, "send_mouse_move", lambda x, y: moves.append((x, y)))
 
-    assert _move_cursor(10, 10, wait=lambda due: early) == early
-    assert moves == [] and exact == []
+    played = []
+    assert _move_cursor(10, 10, wait=lambda due: early, played=played) == early
+    assert moves == [] and exact == [] and [p[1:] for p in played] == [[0, 0]]  # only where it started
 
 
 def test_move_cursor_surfaces_a_send_input_failure(monkeypatch):

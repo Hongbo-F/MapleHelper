@@ -63,7 +63,7 @@ def tracking(tmp_path, alarm_up=True):
         children.append(FakeChild())
         return children[-1]
 
-    def move(x, y, wait):
+    def move(x, y, wait, played=None):
         moves.append((x, y))
         return True
 
@@ -267,8 +267,9 @@ def test_each_answer_and_the_rounds_begin_and_end_go_into_the_services_telemetry
     alarm.write_text("{}", encoding="utf-8")
     child, moves = Answering(), []
 
-    def move(x, y, wait):
+    def move(x, y, wait, played=None):
         moves.append((x, y))
+        played.extend([[1700000000.0, 300, 170], [1700000000.008, 309, 182]])  # where the player's pointer went
         return True
 
     t = lt.LieTracking(folder=tmp_path / "out", alarm=alarm, spotter=Spotter(), child=lambda: child,
@@ -295,28 +296,54 @@ def test_each_answer_and_the_rounds_begin_and_end_go_into_the_services_telemetry
     first = next(m[2] for m in child.sent if m[0] == "frame")  # (the first frame it was ready for: 0 or 1)
     assert answer["round"] == begin["round"] and answer["seq"] == first and answer["desktop"] == [409.0, 232.0]
     assert end["round"] == begin["round"] and end["end"] == "board gone"
+    finished = next(r for r in records if r.get("event") == "move finished")  # the trail, for the review's overlay
+    assert finished["seq"] in {m[2] for m in child.sent if m[0] == "frame"}
+    assert finished["trail"] == [[1700000000.0, 300, 170], [1700000000.008, 309, 182]]
+
+
+def test_a_failed_move_records_the_trail_as_far_as_it_went(tmp_path):
+    t, _, _ = tracking(tmp_path)
+
+    def move(x, y, wait, played=None):
+        played.append([1700000000.0, 300, 170])
+        raise RuntimeError("the player is gone")
+
+    t.mover = move
+    t._cursor_round = "round"
+    with telemetry.captured() as records:
+        t._queue_cursor((400, 220), seq=7)
+        deadline = time.monotonic() + 5
+        while not any(r.get("event") == "failed" for r in records) and time.monotonic() < deadline:
+            time.sleep(0.01)
+    failed = next(r for r in records if r.get("event") == "failed")
+    assert failed["seq"] == 7 and failed["trail"] == [[1700000000.0, 300, 170]]
+    assert "the player is gone" in failed["error"]
+    t.close()
 
 
 def test_the_default_mover_uses_the_elevated_players_trail_based_cursor_move(monkeypatch, tmp_path):
     from gamelab.control import client
     calls = []
 
-    def move(x, y, active):
+    def move(x, y, active, trail=None):
         calls.append((x, y))
         assert active() is True
+        trail.append([1700000000.0, 309, 182])
         return True
 
     monkeypatch.setattr(client, "move_lie_cursor", move)
     t, _, _ = tracking(tmp_path)
-    assert t._move_cursor(409, 232, wait=lambda due: True) is True
+    played = []
+    assert t._move_cursor(409, 232, wait=lambda due: True, played=played) is True
     assert calls == [(309, 182)]  # desktop target converted to the player plan's client coordinates
+    assert played == [[1700000000.0, 309, 182]]  # the player's trail handed back
 
 
 def test_the_cursor_thread_takes_only_the_newest_queued_target(tmp_path):
     t, _, _ = tracking(tmp_path)
     calls, started, release = [], threading.Event(), threading.Event()
 
-    def move(x, y, wait):
+    def move(x, y, wait, played=None):
         calls.append((x, y))
         if len(calls) == 1:
             started.set()
@@ -344,7 +371,7 @@ def test_ending_the_round_interrupts_the_current_cursor_trail(tmp_path):
     t, _, _ = tracking(tmp_path)
     started, done, result = threading.Event(), threading.Event(), []
 
-    def move(x, y, wait):
+    def move(x, y, wait, played=None):
         started.set()
         result.append(wait(time.perf_counter() + 5))
         done.set()
@@ -366,7 +393,7 @@ def test_a_cursor_failure_is_logged_and_recorded_with_its_target(tmp_path):
     said, error = [], OSError(5, "blocked")
     t.log = said.append
 
-    def denied(x, y, wait):
+    def denied(x, y, wait, played=None):
         raise error
 
     t.mover = denied

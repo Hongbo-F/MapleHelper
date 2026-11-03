@@ -786,11 +786,16 @@ class Player:
                             cur["problems"].append(f"mouse {x},{y} is outside the game; skipped")
                             i += 1
                             continue
+                        played = []
                         try:
-                            moved = window.move_cursor(client_area["left"] + x, client_area["top"] + y, wait=wait)
+                            moved = window.move_cursor(client_area["left"] + x, client_area["top"] + y, wait=wait,
+                                                       played=played)
                         except OSError as e:
                             cur["problems"].append(f"cursor movement failed ({type(e).__name__}: {e})")
                             return
+                        finally:  # where the pointer went, in client px (its result's `trail`)
+                            cur.setdefault("trail", []).extend(
+                                [t, px - client_area["left"], py - client_area["top"]] for t, px, py in played)
                         if moved == "splice":
                             switch()
                             i = 0
@@ -851,6 +856,8 @@ class Player:
             (INBOX / f"{cur['plan']['id']}.splice").unlink(missing_ok=True)  # (one come too late: never taken)
         result = {"sent": cur["sent"], "problems": cur["problems"], "region": region, "scale": scale,
                   "client": client_area}
+        if cur.get("trail"):
+            result["trail"] = cur["trail"]
         if cur["plan"] is not plan:  # spliced: this is the last plan's result (serve answers it under its id)
             result["id"] = cur["plan"]["id"]
         if self.alarm.is_set() and not during:
