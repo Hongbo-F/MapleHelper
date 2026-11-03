@@ -1,7 +1,7 @@
 """The Lie Detector mini-game's target followed live on the perception service's frames (control.lie_tracking): only
-while the alarm is up and the board shows, the newest frame sent when the tracker is ready for it, a round's file of
-answers (where the cursor would have gone: on the board, in the game's client area, on the screen) and its end, the same
-in the service's telemetry; the tracker's process, its loop and the real one, on a drawn round (tests.test_lie_target)."""
+while the alarm is up and the board shows, the newest frame sent when the tracker is ready for it, its desktop answers
+followed by trail-based cursor movement, a round's file and the same answers in the service's telemetry; the tracker's
+process, its loop and the real one, on a drawn round (tests.test_lie_target)."""
 import io
 import json
 import pickle
@@ -57,12 +57,19 @@ def tracking(tmp_path, alarm_up=True):
     alarm = tmp_path / "ALARM.json"
     if alarm_up:
         alarm.write_text("{}", encoding="utf-8")
-    children = []
+    children, moves = [], []
 
     def child():
         children.append(FakeChild())
         return children[-1]
-    t = lt.LieTracking(folder=tmp_path / "out", alarm=alarm, spotter=Spotter(), child=child, origin=lambda: (100, 50))
+
+    def move(x, y, wait):
+        moves.append((x, y))
+        return True
+
+    t = lt.LieTracking(folder=tmp_path / "out", alarm=alarm, spotter=Spotter(), child=child,
+                       origin=lambda: (100, 50), mover=move)
+    t.moves = moves
     return t, children, alarm
 
 
@@ -190,21 +197,28 @@ class Answering(FakeChild):
 def test_each_answer_and_the_rounds_begin_and_end_go_into_the_services_telemetry(tmp_path):
     alarm = tmp_path / "ALARM.json"
     alarm.write_text("{}", encoding="utf-8")
-    child = Answering()
+    child, moves = Answering(), []
+
+    def move(x, y, wait):
+        moves.append((x, y))
+        return True
+
     t = lt.LieTracking(folder=tmp_path / "out", alarm=alarm, spotter=Spotter(), child=lambda: child,
-                       origin=lambda: (100, 50))
+                       origin=lambda: (100, 50), mover=move)
     full = screen(round_frames(n=1)[0][1])
     with telemetry.captured() as records:
         t.step(0.0, item(0, 0.0, full))
         assert t.ready.wait(5)
         t.step(0.3, item(1, 0.3, full))
         deadline = time.monotonic() + 5
-        while not any(r["topic"] == "lie_target" for r in records) and time.monotonic() < deadline:
+        while (not any(r["topic"] == "lie_target" for r in records) or not moves) and time.monotonic() < deadline:
             time.sleep(0.01)
+        assert moves == [(409, 232)]  # the answer's desktop target really goes to the cursor mover
         t._end("board gone")
         while not any(r.get("event") == "end" for r in records) and time.monotonic() < deadline:
             time.sleep(0.01)
         child.stop()
+    t.close()
     begin = next(r for r in records if r["topic"] == "lie_target_round" and r["event"] == "begin")
     answer = next(r for r in records if r["topic"] == "lie_target")
     end = next(r for r in records if r["topic"] == "lie_target_round" and r["event"] == "end")
@@ -212,3 +226,61 @@ def test_each_answer_and_the_rounds_begin_and_end_go_into_the_services_telemetry
     first = next(m[2] for m in child.sent if m[0] == "frame")  # (the first frame it was ready for: 0 or 1)
     assert answer["round"] == begin["round"] and answer["seq"] == first and answer["desktop"] == [409.0, 232.0]
     assert end["round"] == begin["round"] and end["end"] == "board gone"
+
+
+def test_the_default_mover_uses_gamelabs_trail_based_cursor_move(monkeypatch):
+    from gamelab import window
+    calls = []
+    monkeypatch.setattr(window, "move_cursor", lambda x, y, wait: calls.append((x, y, wait)) or True)
+    wait = lambda due: True
+    assert lt.LieTracking._move_cursor(409, 232, wait) is True
+    assert calls == [(409, 232, wait)]
+
+
+def test_the_cursor_thread_takes_only_the_newest_queued_target(tmp_path):
+    t, _, _ = tracking(tmp_path)
+    calls, started, release = [], threading.Event(), threading.Event()
+
+    def move(x, y, wait):
+        calls.append((x, y))
+        if len(calls) == 1:
+            started.set()
+            release.wait(5)
+        return True
+
+    t.mover = move
+    t._queue_cursor((1, 1))       # no round: nothing sent
+    t._queue_cursor(None)         # no desktop place: nothing sent
+    assert t._cursor_thread is None
+    t._cursor_round = "round"
+    t._queue_cursor((1, 1))
+    assert started.wait(5)
+    t._queue_cursor((2, 2))
+    t._queue_cursor((3, 3))       # replaces the answer not yet taken while the first trail runs
+    release.set()
+    deadline = time.monotonic() + 5
+    while len(calls) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert calls == [(1, 1), (3, 3)]
+    t.close()
+
+
+def test_ending_the_round_interrupts_the_current_cursor_trail(tmp_path):
+    t, _, _ = tracking(tmp_path)
+    started, done, result = threading.Event(), threading.Event(), []
+
+    def move(x, y, wait):
+        started.set()
+        result.append(wait(time.perf_counter() + 5))
+        done.set()
+        return result[-1]
+
+    t.mover = move
+    t.round = {"name": "round", "started": 0.0, "board_at": 0.0, "sent": 1, "skipped": 0}
+    t._cursor_round = "round"
+    t._queue_cursor((100, 200))
+    assert started.wait(5)
+    t._end("board gone")
+    assert done.wait(1) and result == [False]
+    assert t.cursor_why_off == ""
+    t.close()

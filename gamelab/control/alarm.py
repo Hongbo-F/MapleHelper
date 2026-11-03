@@ -21,10 +21,10 @@ LIE_DETECTOR_ERROR = "Lie Detector on screen: all input stopped"  # the player's
 # warning come before their test, so the page says how long there is.
 PAGED = {
     "mini-game notice": ("MapleStory Lie Detector mini-game in 10 s",
-                         "gamelab stopped the hunt (a hunt moves her to a safe place). Follow the figure with the "
-                         "mouse yourself."),
+                         "gamelab stopped the hunt (a hunt moves her to a safe place). The tracker will follow the "
+                         "figure with the mouse; watch it."),
     "mini-game": ("MapleStory Lie Detector mini-game on screen",
-                  "gamelab stopped all input. Follow the figure with the mouse yourself."),
+                  "gamelab stopped the hunt's other input. The tracker follows the figure with the mouse; watch it."),
     "quiz warning": ("MapleStory image quiz in 30 s",
                      "gamelab stopped the hunt (a hunt moves her to a safe place). Click the matching images and "
                      "Confirm yourself."),

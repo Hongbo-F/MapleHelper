@@ -2500,8 +2500,8 @@ def cmd_perceive(args) -> int:
     time on the PC; it ends itself if its frame loop hangs (service.STUCK_S), for the babysitter or a command to start
     another. It keeps the rolling recording (control.recording: its frames 15 times a second, the last 5 minutes,
     what `gamelab recorder` kept) unless --no-record, once no `gamelab recorder` runs; and while the Lie Detector's
-    alarm is up, the mini-game's target followed on its frames and written down (control.lie_tracking: recorded only,
-    nothing sent). With --frames, saved frames
+    alarm is up, the mini-game's target followed on its frames, the cursor moved to it with a generated trail and the
+    answers written down (control.lie_tracking). With --frames, saved frames
     instead of the game, round and round, nothing published or recorded (offline), at a pipe, mutex and info file of its
     own (service.SAVED_ADDRESS: the live one starts and runs beside it; a command reaches it with
     GAMELAB_PERCEIVE=saved)."""
