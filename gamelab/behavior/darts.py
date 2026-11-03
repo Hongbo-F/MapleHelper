@@ -89,7 +89,20 @@ Nor, from 2026-10-27, a press from the ground at a monster within the claw's rea
 no MP taken whatever her darts. Up close the stance claws one on her (attack.stance.CLAW_ONLY), and a whole Horny
 Mushroom pinning her at a platform's wall end (Tree Dungeon's 6, 7, 13, 15, 19, 20 and 31, where a touch's knock doesn't
 move her off: its 403 HP 21.1 swipes, `swipes`) would have stopped the hunt with her darts in her bag (review of
-2026-10-27: the branch clawed one standing on her in 222 of Tree Dungeon's stand placements, master in 18)."""
+2026-10-27: the branch clawed one standing on her in 222 of Tree Dungeon's stand placements, master in 18).
+
+Nor, from 2026-11-03, a press from the ground keyed within TOUCHED_S after a touch of hers (any: a MISS too, a
+monster's body on her), told late or not (`touched`: the presses keyed since it come off the stretch; a jump throw's,
+keyed in the air, is a cast's whatever is on her, and counts): one on her that the looks don't find is in the claw's
+reach all the same, and the touches go on every 1.45 s while it stays (perception.touches.
+INVULNERABLE_S). In the simulator a Horny Mushroom on her at platform 19's right end, lost under the damage numbers of
+her own swipes (Noise.hit_hidden) and so never seen, touched her every 1.7 s for 17 s and took 21 swipes for 6.9 of its
+8.9 HP: the stop came with her stars in her bag (the pile-up study's thief seed 6 at e040fb9, 241 s,
+D:/MapleHelper-scratch/pileup/darts). At 01:28 the stretch had no touch (her HP 90% from 01:28:07 to her first touch at
+01:28:37), so its stop is as before. Nor do loop_tree_out_of_darts's stop (148.2 s) and loop_tree_grind_lucky_seven_key's
+key check (23.5 s) move: with every press after a touch left out they came 16 and 13 s later, her 'touched' jump
+throws among them; with those counted, as here, to the hundredth of a second as before. The same thief seed 6 and the
+first map's seed 8 (583 s) at e040fb9 run on with this to their ends (6 and 12 minutes)."""
 
 import math
 from dataclasses import dataclass, field
@@ -119,6 +132,8 @@ READ_EVERY = 12        # a stretch this many presses long, and each as many more
 READ_FIRST = 3         # a stretch this many presses long, each CHAT_EVERY more, and at the stop: the message bar read
 CHAT_EVERY = 3         # (at 22:58 the refusal was up at the 3rd press, 2.4 s after her first refused one; it was up
                        # 8.0, 2.8, 4.1 and 3.8 s at a time between other lines, then 10.1 s; those up 0.6-1.3 s)
+TOUCHED_S = 2.0        # s after a touch that her presses swipe the monster on her (not counted): its next touch due
+                       # 1.45 s after (perception.touches.INVULNERABLE_S), 1.7-1.8 s in the simulator's case
 KEEP_S = 90.0          # s of the rolling recording saved after the stop (control.alarm.keep_recent)
 REPORT_FROM = 4        # a hunt's longest stretch this long or longer is said at its end (DartWatch.summary)
 
@@ -204,24 +219,44 @@ class DartWatch:
     roped: bool = False             # her latest look has her on a rope: presses keyed now don't count
     roped_presses: int = 0
     swiped_presses: int = 0         # presses from the ground at a monster within the claw's reach (not counted)
+    touched_at: float | None = None  # her latest touch (`touched`) ...
+    touched_presses: int = 0        # ... and the presses from the ground keyed within TOUCHED_S after one (not counted)
+    aired: list[float] = field(default_factory=list)  # the stretch's presses keyed in the air (a jump throw's star is
+                                                      # a cast's, a monster on her or not: `touched` keeps them)
     at_top: bool = False            # her latest look has her placed at a rope's top (control.navigator.rope_at_top) ...
     top_presses: int = 0            # ... the presses not counted keyed so in a row, no kill since (`regular`, swipes) ...
     top_read: int = 0               # ... and as many when the message bar was last read for them (`asks_chat`)
     mp_shown_at: float | None = None  # the last read that showed a cast's MP (FALL_STEPS under the stretch's highest):
                                       # she has her stars then (behavior.keycheck's doubt asks)
 
-    def cast(self, t: float, swipe: bool = False) -> None:
+    def cast(self, t: float, swipe: bool = False, ground: bool = True) -> None:
         """A Lucky Seven press, its key at `t` (not counted while she's on a rope, `roped`: the game refuses it; nor one
         from the ground at a monster within the claw's reach, `swipe`: the claw swipes it, no MP taken whatever her
-        darts)."""
+        darts; nor one from the ground, `ground`, within TOUCHED_S after a touch of hers, `touched`: one on her takes
+        the swipe; a jump throw's, keyed in the air, is a cast's whatever is on her)."""
         if self.roped:
             self.roped_presses += 1
             return
-        if swipe:
-            self.swiped_presses += 1
+        touched = (not swipe and ground and self.touched_at is not None
+                   and 0.0 <= t - self.touched_at <= TOUCHED_S)
+        if swipe or touched:
+            self.swiped_presses += swipe
+            self.touched_presses += touched
             self.regular(t)  # (watched at a rope's top all the same: the game refuses those there too)
             return
         self.keys.append(t)
+        if not ground:
+            self.aired.append(t)
+
+    def touched(self, at: float) -> None:
+        """A touch of hers (a monster's body on her, a MISS or damage) at `at`, told now or a look late: the presses
+        from the ground keyed in the TOUCHED_S after it swipe the one on her, so those counted already come off the
+        stretch (those keyed in the air stay: `aired`), and those to come aren't counted (`cast`)."""
+        if self.touched_at is None or at > self.touched_at:
+            self.touched_at = at
+        n, aired = len(self.keys), set(self.aired)
+        self.keys = [k for k in self.keys if k in aired or not 0.0 <= k - at <= TOUCHED_S]
+        self.touched_presses += n - len(self.keys)
 
     def regular(self, t: float) -> None:
         """A press none of the stretch's (the regular attack's, or the claw's swipe: `cast`), its key at `t`: keyed with
@@ -328,6 +363,9 @@ class DartWatch:
         if self.swiped_presses:
             said += ("; " if said else "her Lucky Seven presses: ") + (
                 f"{self.swiped_presses} from the ground at a monster the claw reaches: not counted")
+        if self.touched_presses:
+            said += ("; " if said else "her Lucky Seven presses: ") + (
+                f"{self.touched_presses} within {TOUCHED_S:g} s of a touch of hers: not counted")
         return said
 
     def followed(self, t: float) -> None:
@@ -340,6 +378,7 @@ class DartWatch:
     def _restart(self, after: float) -> None:
         """A new stretch: the presses keyed after `after` (their MP not shown yet) go on into it."""
         self.keys = [k for k in self.keys if k > after]
+        self.aired = [k for k in self.aired if k > after]
         self.shown, self.span, self.read, self.told, self.chat_read = 0, 0.0, 0, None, 0
 
 

@@ -1492,14 +1492,17 @@ class Hunter:
         """A monster touched her (a 'touch' event's data, perception.touches.Touch.data: its `kind`, MISS, damage or
         unread, and `at`, when its popup showed), told in look `s`: it's her last touch (`hit_at`, `hit_kind`,
         `touch_at`; one that took HP her last knock too, `knock_at`: a MISS doesn't move her; and her regular presses
-        about it not judged, behavior.keycheck's RegularWatch.touched, as her HP dropping was before), counted in the
-        report, sent as a telemetry event 'touch' with its kind, and logged with her HP number's drop if it read one
+        about it not judged, behavior.keycheck's RegularWatch.touched, as her HP dropping was before; any kind, her
+        Lucky Seven presses about it not out of darts', DartWatch.touched), counted in the report, sent as a telemetry
+        event 'touch' with its kind, and logged with her HP number's drop if it read one
         this soon (HIT_EXACT_S) and how far it pushed her when no key was pressed (_log_hit)."""
         kind, at = touch.get("kind", DAMAGE), touch.get("at", s.t)
         if touch.get("was") == MISS:  # (worldstate's 'touch_fix': told as a MISS, it took HP after all)
             self._touch_fixed(s, touch)
             return
         self.hit_at, self.hit_kind, self.touch_at = s.t, kind, at
+        if (darts := getattr(self, "darts", None)) is not None:
+            darts.touched(at)  # (her presses about it swipe the one on her: not out of darts', darts.TOUCHED_S)
         if kind == DAMAGE:
             self.knock_at = s.t
             if (watch := getattr(self.attacks, "watch", None)) is not None:

@@ -388,9 +388,11 @@ class Attacks:
         self.darts = None
         # Whether the throw whose key is being chosen is one from the ground (the Hunter's: Actions.keyed_ground), and
         # whether the cast `key` just chose is at a monster the claw reaches from there (`_swipe`: no MP whatever her
-        # darts, so out of darts doesn't count it: DartWatch.cast)
+        # darts, so out of darts doesn't count it: DartWatch.cast) and whether it's from the ground (`_ground`: one on
+        # her after a touch takes its swipe, DartWatch.touched)
         self.from_ground: Callable[[], bool] | None = None
         self._swipe = False
+        self._ground = True
         # The doubt that her regular attack's key isn't the game's (behavior.keycheck.RegularWatch: the Hunter's), her
         # look having her on a rope or at its top (the Hunter's: those presses aren't judged), an attack forced for the
         # throw `key` is asked next ("lucky_seven": her stars' test, behavior.keycheck), and what `key` chose for its
@@ -868,6 +870,7 @@ class Attacks:
         self._target, self._regular, self._asked = target, attack is self.regular, True
         self._cast = attack.mp / self.max_mp if attack.mp > 0 and self.max_mp > 0 else None
         self._swipe = self._cast is not None and target is not None and self._clawed(target)
+        self._ground = self.from_ground() if self.from_ground is not None else True
         self._keyed = None
         if target is not None and target.kind in self.stats and not self._dying(target, now, seen):
             mk = self._mark_of(target)
@@ -937,7 +940,7 @@ class Attacks:
         self._keyed_at = at  # (her no casts counted from it: no_cast)
         self._cast = None
         if self.darts is not None:
-            self.darts.cast(at, swipe=self._swipe)
+            self.darts.cast(at, swipe=self._swipe, ground=self._ground)
 
     def _watch_regular(self, at: float, m: Monster | None, w=None) -> None:
         """A regular press keyed at `at` at `m` told to the doubt's watch, with what decides whether it's judged: its
