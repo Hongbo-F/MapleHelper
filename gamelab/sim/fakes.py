@@ -1232,9 +1232,9 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
                 if fn.__kwdefaults__ and any(moved(v) is not v for v in fn.__kwdefaults__.values()):
                     put(fn, "__kwdefaults__", {k: moved(v) for k, v in fn.__kwdefaults__.items()})
         from .. import paths
-        for name, file in (("TOUCHES", "touches.jsonl"), ("STATS", "her_stats.json")):
-            if getattr(paths, name).parent != folder:  # (her touches and her stats: the run's own, wherever a test
-                put(paths, name, folder / file)       # pointed them, so no run starts from another's)
+        for name, file in (("TOUCHES", "touches.jsonl"), ("STATS", "her_stats.json"), ("MOTION", "her_motion.json")):
+            if getattr(paths, name).parent != folder:  # (her touches, her stats and her walk and climb: the run's own,
+                put(paths, name, folder / file)       # wherever a test pointed them, so no run starts from another's)
         for obj, name, value in _write_guards(LAB):
             put(obj, name, value)
         from maplehelper import win32

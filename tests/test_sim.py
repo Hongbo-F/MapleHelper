@@ -134,10 +134,14 @@ def test_walking_is_the_engines(model):
 
 def test_her_walk_in_the_world_can_differ_from_the_planners(model):
     # Her.walk_speed: the world walks her at her own speed (148.2 units/s here, the magician's raw median of 2026-11-02,
-    # against the planner's 149 under FIXED_STATS), the game data's shoe at that SPEED (accelerating, braking and in the
-    # air as anyone's), her JUMP the planner's; by default the planner's own shoe, to the bit.
+    # against the planner's 151.25 under FIXED_STATS), the game data's shoe at that SPEED (accelerating, braking and in
+    # the air as anyone's), her JUMP the planner's; by default her truth, her prior's shoe (the planner's, uncalibrated),
+    # to the bit, whatever her planner calibrates to.
     c = plat(model, 500, 400)
-    assert world(model, c.id, 100.0).shoe is physics.SHOE
+    assert world(model, c.id, 100.0).shoe is physics.PRIOR_SHOE is physics.SHOE
+    physics.set_motion(140.0)
+    assert world(model, c.id, 100.0).shoe is physics.PRIOR_SHOE is not physics.SHOE
+    physics.reset()
     her = world_mod.Her(walk_speed=148.2)
     shoe = world_mod.her_shoe(her)
     assert shoe.vmax == pytest.approx(148.2) and shoe.vjump == physics.SHOE.vjump and shoe.acc == physics.SHOE.acc
@@ -191,8 +195,10 @@ def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(m
     # Lifted off by the arrow's own step she leaves at 119 (or straight up, if the jump's step came first),
     # after one or two kicked to full speed, after three at 126 (as in game: 3 of 4 keyed 100 ms after it).
     c = plat(model, 500, 400)
-    for gap, speeds in ((None, {0.0}), (0.0, {0.0, 119.2}), (0.045, {149.0}), (0.08, {126.0, 149.0}),
-                        (0.2, {149.0})):
+    full = physics.WALK_SPEED  # (the thief's, 151.25: the world's and his planner's prior alike)
+    top = round(full, 1)
+    for gap, speeds in ((None, {0.0}), (0.0, {0.0, round(0.8 * full, 1)}), (0.045, {top}), (0.08, {126.0, top}),
+                        (0.2, {top})):
         seen = set()
         for phase in PHASES:
             w = world(model, c.id, 100.0, step_phase=phase)
@@ -212,7 +218,7 @@ def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(m
         tap(w, 0.08, "alt", 0.04)
         w.advance(0.3)
         speeds.append(w.flight.speeds[0][0])
-    assert min(speeds) < 130 and max(speeds) == 149.0 and sum(v == 149.0 for v in speeds) >= 10
+    assert min(speeds) < 130 and max(speeds) == full and sum(v == full for v in speeds) >= 10
 
 
 def test_in_the_air_the_opposite_arrow_brakes_her_and_her_own_does_nothing(model):
@@ -230,7 +236,7 @@ def test_in_the_air_the_opposite_arrow_brakes_her_and_her_own_does_nothing(model
     held = jump(lambda w: None)
     braked = jump(lambda w: tap(w, 0.7, "left", 0.04))
     let_go = jump(lambda w: w.key(0.55, "right", False))
-    assert held.vx == 149.0  # the arrow she flies with does nothing at speed
+    assert held.vx == physics.WALK_SPEED  # the arrow she flies with does nothing at speed
     # left acted on from the step at 0.78 s to the one at 0.81: 30 ms at 200 units/s²
     assert held.vx - braked.vx == pytest.approx(200 * 0.030, abs=0.1) and braked.facing == "left"
     assert held.vx - let_go.vx == pytest.approx(1 * (1.0 - 0.63), abs=0.01)  # no arrow: 1 unit/s² of drag
@@ -303,7 +309,8 @@ def test_a_jump_back_leaves_at_full_speed_and_lands_about_90_units_away(model):
         w.advance(1.5)
         lands.append(w.x - 300)
     assert min(speeds) >= 0.94 * physics.WALK_SPEED
-    assert 86 <= min(lands) and max(lands) <= 97 and sorted(lands)[15] == pytest.approx(94, abs=1)
+    # (86-97, 94 at the median, at the thief's 149 until 2026-11-02; at his 151.25 since 88-98, 95)
+    assert 87 <= min(lands) and max(lands) <= 99 and sorted(lands)[15] == pytest.approx(95.3, abs=1)
 
 
 def test_after_a_climb_she_runs_off_as_the_minimap_traced_it(model):
@@ -357,10 +364,11 @@ def test_a_running_jump_lands_where_the_engine_and_the_planner_say(model):
     g = w.flight
     assert g.platform is b and g.land_x == pytest.approx(f.land_x, abs=0.5)
     # ... with no arrow: dragged at 1 unit/s², and at 100 for the last few steps, falling at the cap (670)
-    assert 140 < g.vx_land < 146
+    assert physics.WALK_SPEED - 9 < g.vx_land < physics.WALK_SPEED - 3
     w.advance(3.0)
     assert w.plat is b and w.vx == 0
-    assert w.x == pytest.approx(g.land_x + body.slide(g.vx_land, physics.SHOE), abs=0.01)  # 13 units on
+    assert w.x == pytest.approx(g.land_x + body.slide(g.vx_land, physics.SHOE), abs=0.05)  # 13 units on (braked a
+    # step at a time: 0.04 off the closed form at the thief's 151.25, 0.01 at the 149 of before)
 
 
 def test_a_jump_key_pressed_in_the_air_is_ignored(model, monkeypatch):
@@ -873,7 +881,7 @@ def test_a_knock_flies_her_as_the_client_and_lands_her_at_her_walk(model, monkey
     assert w.vx == 0 and rest[0] <= 400 - w.x <= rest[1]
 
 
-@pytest.mark.parametrize("knock, flies", [(None, 270.0 - 149.0),                   # the client's: 270 less her 149
+@pytest.mark.parametrize("knock, flies", [(None, 270.0 - physics.WALK_SPEED),     # the client's: 270 less her 151.25
                                            (world_mod.KNOCK_PLANNER, 180.0)])      # the planner's, set outright
 def test_a_knocks_push_adds_to_the_speed_she_has(model, monkeypatch, knock, flies):
     # world.KNOCK_ADDS (the client's "each axis adds to the speed without going past the push"; R1-R3's frames: walking

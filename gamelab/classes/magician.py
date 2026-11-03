@@ -38,16 +38,19 @@ ALERT_MS = 600  # a buff's cast plays alert2, 600 ms of frames [data: actions.js
 
 FIXED_STATS = config.Character(
     speed=100.0,        # her SPEED: her stat window, read live 2026-10-28 and 2026-11-02 at level 32
-                        # (lab/characters/magician/her_stats.json). It walks her at 150 units/s, 125 x (100 + 20)/100
-                        # (motion.body.SPEED_BONUS: the 20 this client adds, meowdb's); measured 149.4 over 66 walks of
-                        # 2026-11-02 (each walk's braking tail and Tree's slopes taken out; 148.2 raw over 81), where
-                        # it planned her at 125 until then (README "Her walk speed")
+                        # (lab/characters/magician/her_stats.json). Her prior walk, 150 units/s, 125 x (100 + 20)/100
+                        # (motion.body.SPEED_BONUS: the 20 this client adds, meowdb's), until her calibration has it
+                        # measured (motion.calibrate); measured 149.4 over 66 walks of 2026-11-02 (each walk's braking
+                        # tail and Tree's slopes taken out; 148.2 raw over 81), where it planned her at 125 until then
+                        # (README "Her walk and climb, calibrated")
     jump=100.0,         # her JUMP: her stat window, the same read
     mp=1007.0,          # her MP when full: her stat window's MP 667/1007 at level 27 (the same read)
     lucky_seven=0.0,    # (not hers: a thief's skill)
                         # (her HP, level and W.DEF: perception's, as the thief's: behavior.bootstrap)
     avoid=18.0,         # her AVOID: her stat window's EVA 18 (the same read)
-    climb_speed=117.0,  # PLACEHOLDER (the thief's, physics.CLIMB_SPEED): one climb in L0
+                        # (her climb: SPEED + 20 by the client's formula, 120, motion.physics.climb_of; she climbed
+                        # 119.9 up and 119.6 down on 2026-11-02, and her calibration measures it as she climbs,
+                        # motion.calibrate: where a placeholder 117, the thief's, was)
     mp_regen=0.32)      # PLACEHOLDER (the thief's, sim.world.MP_REGEN): her idle MP bar in L0, or L1's quiet stretches
 SKILLS = {"magic_claw": 20,   # PLACEHOLDER (its Master Level): her skill window -- the user's answer
           "energy_bolt": 1,   # PLACEHOLDER (Magic Claw's req [data]): her skill window

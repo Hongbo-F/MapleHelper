@@ -26,8 +26,14 @@ Topics (map units; producers build the records, ui.state folds them):
 
   session   map, command, mode (live/sim); continues, part;    the command line, the simulator; a new part;
             physics {character, class, speed, jump, bonus,     her physics as the run plans her moves (from
-            walk, climb}                                       2026-11-02: motion.physics.record; bonus the
+            walk, climb, prior_walk, prior_climb, calibrated}  2026-11-02: motion.physics.record; bonus the
                                                                Speed the client adds, motion.body.SPEED_BONUS)
+  calibration  what (walk, climb), old, new, why (measured,    motion.calibrate: her planner's walk or climb
+            prior, loaded), n, se, prior, panel, implied, map; changed (old -> new, units/s, from the stretches
+            or what, warn, panel, implied                      measured, n; her stat window's SPEED, panel, and
+                                                               the SPEED the new one implies by the client's
+                                                               formula); or her measure off her stat window's
+                                                               SPEED by more than SPEED_TOL (warn)
   scene     her {x, y, platform, how, seen, facing, grounded}, every look (behavior.hunter, after Senses;
             hp, mp, monsters [{kind, x, y, platform, bar,      `watch` 10 a second, her facing not known;
             facing}], loot [{kind, x, y, platform}], searched, from 2026-10-21's evening also what it

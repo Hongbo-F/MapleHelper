@@ -261,7 +261,7 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
@@ -350,11 +350,18 @@ WORLDS["pet-loot"] = {"pets": 2}
 # (`shared-exp`: world.Realism.shared_exp), as live on 2026-11-02 (the hour's 26 shares by the log, mostly +32-35 of a Horny
 # Mushroom's 41 after her first claw: the rule's 32.8-36.5; plans/problems.md P43), where the other worlds give nothing.
 WORLDS["shared-exp"] = {"shared_exp": True}
-# ... and her walk in the world as her planner has it (`walk-planned`: world.Her.walk_speed None, physics.SHOE), where her own
-# world walks her at its own (world.MAGE_32's, MAGE_WALK): what a planner's speed error costs her. Built to price the
-# roadmap's item 1 (P01: her planner's 125 against the world's 148.2, then); from the integration of 2026-11-02 both
-# are the client's 150, so for her the two worlds walk alike. The thief's world is the planner's already.
+# ... and her walk in the world her truth by her stats (`walk-planned`: world.Her.walk_speed None, physics.PRIOR_SHOE: the
+# client's formula at her profile's SPEED, her planner's prior), where her own world walks her at its own (world.MAGE_32's,
+# MAGE_WALK): what a planner's speed error costs her. Built to price the roadmap's item 1 (P01: her planner's 125 against
+# the world's 148.2, then); from the integration of 2026-11-02 both are the client's 150, so for her the two worlds walk
+# alike; the thief's world was the planner's own until 2026-11-02's calibration, his truth (151.25, his stat window's 101)
+# since, whatever his planner calibrates to.
 WORLDS["walk-planned"] = {"walk_speed": None}
+# ... and her planner starting from v83's walk and the old climb (`prior-v83`: world.Her.planned, her calibration's start:
+# motion.calibrate), 125 and 117 units/s, where every other world starts it at her prior (the client's formula at her
+# profile's SPEED, which her world walks her at): her calibration measuring her walk and climb as the world moves her and
+# her planner following, from a prior far off (`calibration` in each run's outcomes: its changes and when).
+WORLDS["prior-v83"] = {"planned": (125.0, 117.0)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -568,7 +575,22 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     out["attack_kinds"] = attack_kinds(sim.world, records)
     out["nav"] = navigation(trace["log"], sim.model)
     out["nav"]["glances"] = f["senses"].get("glances", 0)
+    out["calibration"] = calibration(records)
     return out
+
+
+def calibration(records: list[dict]) -> dict:
+    """Her calibration over a run (motion.calibrate's 'calibration' records): each change of her planner's walk or climb
+    (s into the run, what, old, new, the stretches it was measured on), and what each was at the end."""
+    t0 = min((r["t"] for r in records if "t" in r), default=0.0)
+    changes = [[round(r["t"] - t0, 1), r["what"], r.get("old"), r.get("new"), r.get("n")] for r in records
+               if r.get("topic") == "calibration" and r.get("new") is not None]
+    last = {}
+    for _, what, old, new, _ in changes:
+        last.setdefault(what, old)
+        last[what] = new
+    return {"changes": changes, "walk": last.get("walk"), "climb": last.get("climb"),
+            "warned": sum(1 for r in records if r.get("topic") == "calibration" and r.get("warn"))}
 
 
 def turning(plans: list, records: list[dict], world=None) -> dict:

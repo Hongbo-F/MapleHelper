@@ -162,9 +162,13 @@ def test_the_loops_promise_against_what_it_gave():
 
 def test_the_session_says_her_physics_as_planned():
     rec = physics.record()  # (FIXED_STATS: the thief's)
-    assert rec["character"] == "thief" and rec["speed"] == 99.2 and rec["walk"] == pytest.approx(149.0)
-    assert rec["bonus"] == 20.0  # (the client's hidden Speed: 125 x (99.2 + 20)/100)
-    assert rec["climb"] == physics.CLIMB_SPEED and json.dumps(rec)
+    assert rec["character"] == "thief" and rec["speed"] == 101.0 and rec["walk"] == pytest.approx(151.25)
+    assert rec["bonus"] == 20.0  # (the client's hidden Speed: 125 x (101 + 20)/100)
+    assert rec["climb"] == physics.CLIMB_SPEED == 121.0 and json.dumps(rec)
+    assert (rec["prior_walk"], rec["prior_climb"], rec["calibrated"]) == (151.25, 121.0, False)
+    physics.set_motion(150.4, 120.2)  # (as her calibration has them: motion.calibrate)
+    rec = physics.record()
+    assert (rec["walk"], rec["climb"], rec["prior_walk"], rec["calibrated"]) == (150.4, 120.2, 151.25, True)
 
 
 # --- a simulated grind's records ----------------------------------------------------------------------------------

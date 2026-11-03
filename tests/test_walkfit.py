@@ -17,21 +17,29 @@ FIX = Path(__file__).parent / "fixtures" / "records"
 
 def test_walkfit_on_the_hours_two_stretches():
     """The fixture's stretches: her steady walks at 146-151 against the 125 planned (her profile's SPEED 100 then),
-    the jumps 8->7 of 00:37:57.8 and 00:38:06.6 taking off a median 20 late after walks of 106 and 126 (+1.5 against
+    the jumps 8->7 of 00:37:57.8 and 00:38:06.6 taking off a median 20 late after walks of 106 and 126 (+0.9 against
     the engine at her walk: the lateness is her walk's), her steps
     1.19 times what was asked, and of 7 'arrived' trips 2 on another platform with no touch (00:41:10.99: off 10's end
-    onto 12). The same measures over the whole hour: 148.2 (81 walks), +7.5 / +24.9 late (108 legs; +0.1 / +3.0 against
-    the engine at 148.2), steps 1.19 (52 walked), 18 of 210 'arrived' elsewhere, 15 untouched (README: "Records to
-    measure by")."""
+    onto 12). Her walk by her live calibration's estimator (motion.calibrate: the braking tails left out, Tree's slopes
+    taken out by the v83 rule) 147.2 over the 5, her x speed 146.5; walkfit's own until 2026-11-02 (`raw`: tails in, no
+    slopes) 146.4. The same measures over the whole hour: 149.4 (66 walks; raw 148.2 over 81), +7.5 / +24.9 late (108
+    legs), steps 1.19 (52 walked), 18 of 210 'arrived' elsewhere, 15 untouched (README: "Records to measure by")."""
     (f,) = walkfit.fit_runs([FIX / "hour-cut"], planned=125.0)
     assert f["planned"] == 125.0 and f["planned_from"] == "--planned" and f["by"] == "perception"
     w = f["walk"]
-    assert w["n"] == 5 and w["median"] == pytest.approx(146.4, abs=0.05) and 146.0 < w["q3"] < 151.0
-    assert w["ratio"] == pytest.approx(146.4 / 125, abs=0.002)
-    assert w["speed"] == pytest.approx(97.1, abs=0.1)  # (the SPEED that plans 146.4: 146.4 / 1.25 - 20, the client's)
+    assert w["n"] == 5 and w["median"] == pytest.approx(147.2, abs=0.05) and w["v"] == pytest.approx(146.5, abs=0.05)
+    assert 146.0 < w["q1"] < w["q3"] < 151.0 and f["slopes"] == "v83's"
+    assert w["ratio"] == pytest.approx(147.2 / 125, abs=0.002)
+    assert w["speed"] == pytest.approx(97.7, abs=0.1)  # (the SPEED that walks 147.2: 147.2 / 1.25 - 20, the client's)
     t = f["takeoff"]
     assert t["n"] == 4 and t["long_n"] == 2 and t["long"] == pytest.approx(20.2, abs=0.05)
-    assert t["engine_long"] == pytest.approx(1.5, abs=0.05)
+    assert t["engine_long"] == pytest.approx(0.9, abs=0.05)
+    c = f["climb"]  # (her climbs there: 2 up, 1 down, 119.2 by the median; SPEED + 20 at her 100 is 120)
+    assert c["n"] == 3 and c["median"] == pytest.approx(119.2, abs=0.05) and c["up"]["n"] == 2
+    (raw,) = walkfit.fit_runs([FIX / "hour-cut"], planned=125.0, raw=True)
+    assert raw["walk"]["n"] == 5 and raw["walk"]["median"] == pytest.approx(146.4, abs=0.05)
+    assert raw["walk"]["speed"] == pytest.approx(97.1, abs=0.1) and raw["takeoff"]["engine_long"] == pytest.approx(1.5,
+                                                                                                                 abs=0.05)
     assert f["steps"]["n"] == 4 and f["steps"]["ratio"] == pytest.approx(1.19, abs=0.005)
     assert f["arrived"] == {"n": 7, "elsewhere": 2, "untouched": 2}
     assert "20261102-001748-tour" in walkfit.table([f])
@@ -53,7 +61,7 @@ def test_walkfit_reads_the_planned_walk_off_the_runs_session_and_each_file_once(
     (b / tour.name).write_text(lines[0] + "\n" + lines[1] + "\n", encoding="utf-8")  # (a shorter copy: not read)
     (f,) = walkfit.fit_runs([b, a])
     assert f["planned"] == 150.0 and f["planned_from"].startswith("the run's records (magician)")
-    assert f["walk"]["ratio"] == pytest.approx(146.4 / 150.0, abs=0.002) and f["arrived"]["n"] == 7
+    assert f["walk"]["ratio"] == pytest.approx(147.2 / 150.0, abs=0.002) and f["arrived"]["n"] == 7
 
 
 def test_walkfit_cuts_a_recordings_folder_to_its_frames(tmp_path):

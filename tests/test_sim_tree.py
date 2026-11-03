@@ -108,7 +108,7 @@ def test_a_rope_90_up_is_grabbed_at_the_planners_reach_and_not_at_the_clients():
 # --- the planner on Tree Dungeon, Forest Up North II ---------------------------------------------------------------
 
 def test_the_planner_gets_onto_7_from_8_and_up_from_the_bottom_by_29():
-    from gamelab.motion.route import GRAB_CHANCE, MISS_S, Planner
+    from gamelab.motion.route import CLIMB_SPEED, GRAB_CHANCE, MISS_S, Planner
     m = tree_map()
     planner = Planner(m)
     by = {(mv.kind, mv.src, mv.dst): mv for mv in planner.moves}
@@ -119,7 +119,8 @@ def test_the_planner_gets_onto_7_from_8_and_up_from_the_bottom_by_29():
     assert ("jump", 25, 29) in by
     # The rope at -8 from 30 ends 94.3 above it: beyond a sure grab (82), within ROPE_REACH (95)
     climb = by["climb", 30, 27]
-    assert climb.chance == GRAB_CHANCE and climb.seconds == pytest.approx(by["climb", 29, 27].seconds + 0.49
+    deeper = (m.platform(30).y_at(-8) - m.platform(29).y_at(-8)) / CLIMB_SPEED  # (57.5 more to climb: 0.47 s at 121)
+    assert climb.chance == GRAB_CHANCE and climb.seconds == pytest.approx(by["climb", 29, 27].seconds + deeper
                                                                           + (1 / GRAB_CHANCE - 1) * MISS_S, abs=0.01)
     assert [f"{mv.kind} {mv.src}->{mv.dst}" for mv in planner.plan(30, 60.0, 27)] == ["jump 30->29", "climb 29->27"]
     up = planner.plan(33, 100.0, 6)

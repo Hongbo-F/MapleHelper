@@ -50,6 +50,8 @@ PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.fe
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 DAMAGE = LAB / "damage.json"     # her attacks' damage as the monsters' bars showed it, learned as she hunts
                                  # (behavior.damage: the reads and each attack's fit)
+MOTION = LAB / "her_motion.json"  # her walk and climb as perception's place track measured them, calibrated as she
+                                  # hunts (motion.calibrate: each stretch, with its map, when and her SPEED then)
 TELEMETRY = LAB / "telemetry"    # what each run saw and planned, for the mini-map (one file per run)
 KEYBINDINGS = "keybindings-{}.json"  # (under LAB) a character's key bindings as the game's window last showed them
                                     # (control.keymap: read by behavior.keycheck, `gamelab keys --read`)
@@ -63,7 +65,7 @@ CHARACTERS = "characters"
 MINE = {"calibration": "CALIBRATION", "tag_template": "TAG_TEMPLATE", "tag_full": "TAG_FULL", "heading": "HEADING",
         "heading_seed": "HEADING_SEED", "heading_shots": "HEADING_SHOTS", "shot_log": "SHOT_LOG",
         "probe_log": "PROBE_LOG", "hit_log": "HIT_LOG", "touches": "TOUCHES", "stats": "STATS", "pet": "PET",
-        "grounds": "GROUNDS", "damage": "DAMAGE"}
+        "grounds": "GROUNDS", "damage": "DAMAGE", "motion": "MOTION"}
 
 
 class Files:

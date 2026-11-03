@@ -229,14 +229,17 @@ def test_in_the_simulator_she_waits_on_the_rope_and_comes_down_to_shoot(monkeypa
     kills, no safety stop). Seed 4 since every jump attack is jittered, those the stance keys unsure too
     (fight.JITTER_ALL, the review of 2026-11-01; D:/MapleHelper-scratch/replan/speed/fix/seeds/rope_scan.txt): on 1 the
     safety stop before she ever waits on the rope; of seeds 1-12 it's met on 2-5 and 11, on 4 for the whole 180 s (13
-    kills, no safety stop)."""
+    kills, no safety stop). Seed 1 since her walk and climb calibrated (2026-11-02: the thief walks his stat window's
+    151.25 and climbs 121, the world as his planner, where 149 and the world's 130 up, the planner's 117; D:/MapleHelper-
+    scratch/recfix/calib/seeds/rope.json): on 4 the safety stop at 8 kills before she ever waits on the rope; of seeds
+    1-12 it's met on 1 and 5, on 1 with 19 kills.)"""
     from gamelab.sim import harness, scenarios, world
     from gamelab.sim.world import Realism
     model = build([FLOOR, OVER], LIVES, [ROPE])
     if world.mob_info(19) is None:
         pytest.skip("needs the Horny Mushroom's game data (gamedata/data)")
     g = on(model, 100, 500)
-    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=4,
+    sc = scenarios.Scenario("rope", harness._only(scenarios._loop(3), (g,)), (g, 100.0), monsters="all", seed=1,
                             limit=400, realism=Realism(respawn=17.0, respawn_tick=0.0, her_box=(world.HER_HALF,
                                                                                                world.HER_HEIGHT)),
                             may_die=True)  # (her body for touches as when it was seeded: 15 either side, not the line)

@@ -56,7 +56,7 @@ def test_bad_config_is_explained(config_data, mutate, message):
 
 
 def test_her_stats_default_to_the_measured_ones(config_data, tmp_path):
-    assert config.parse(config_data, NAMES).character == config.Character(speed=99.2, jump=100)
+    assert config.parse(config_data, NAMES).character == config.Character(speed=101, jump=100)  # (his stat window's)
     config_data["character"] = {"speed": 125}  # Haste
     assert config.parse(config_data, NAMES).character == config.Character(speed=125.0, jump=100.0)
     # gamelab's physics reads just this table, before anything else

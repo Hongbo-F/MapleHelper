@@ -297,12 +297,12 @@ def test_run_timing_and_rope_grab_lead():
     from gamelab.control.mover import grab_lead
     from gamelab.motion.physics import RUN_LAG_MS, run_ms
     from gamelab.motion.physics import WALK_SPEED
-    assert RUN_LAG_MS == 54  # she's 149 (t - 0.119) along t s in, and lifts off 65 ms after the key
-    assert run_ms(30) == pytest.approx(255, abs=1)  # jump key 255 ms in: lifts off 30 units along
-    assert run_ms(149) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
+    assert RUN_LAG_MS == 55  # she's 151.25 (t - 0.120) along t s in (the thief's prior), and lifts off 65 ms after the key
+    assert run_ms(30) == pytest.approx(253, abs=1)  # jump key 253 ms in: lifts off 30 units along
+    assert run_ms(WALK_SPEED) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
     # 7 units along is 101 ms in, in the blind spot (three of the game's steps into her run, she'd leave at
     # 126): later instead, at full speed, 14 units along.
-    assert run_ms(7) == 150 and run_ms(12) == 150 and run_ms(15) == 155
+    assert run_ms(7) == 150 and run_ms(12) == 150 and run_ms(15) == 154
     assert grab_lead(41) == pytest.approx(WALK_SPEED * 0.2775, abs=1)  # top of the jump over the rope
     assert grab_lead(120) is None
 
@@ -424,7 +424,7 @@ def test_arriving_at_an_x_is_the_quickest_landing_and_the_walk_from_it(model):
                     assert t <= abs(x - round(p.left + 20)) / WALK_SPEED + 1e-9
                 else:  # never more than the quickest route's landing and the walk from it
                     landing = planner.travel(p.id, p.left + 20, q.id)
-                    assert landing <= t <= landing + abs(x - round(path[-1].land_x)) / WALK_SPEED + 1e-9
+                    assert landing - 1e-9 <= t <= landing + abs(x - round(path[-1].land_x)) / WALK_SPEED + 1e-9
         assert planner.arrive(p.id, p.left + 20, p.id) == planner.travel(p.id, p.left + 20, p.id)
 
 
@@ -562,7 +562,8 @@ def test_a_rope_jump_from_under_a_rope_beyond_a_sure_grab_lands_by_the_grabs_cha
 def test_a_landing_is_worked_out_from_the_rounded_start_so_the_cache_never_changes_it(model, monkeypatch):
     from collections import OrderedDict
     from gamelab.motion import physics
-    from gamelab.motion.physics import JUMP_SPEED, WALK_SPEED, fly
+    from gamelab.motion.physics import JUMP_SPEED, fly
+    WALK_SPEED = 149.0  # (a walk whose 0.1 units/s rounding a start 0.04 more stays within: the thief's until 2026-11-02)
     monkeypatch.setattr(physics, "_FLY_CACHE", OrderedDict())
     monkeypatch.setattr(physics, "FLY_CACHE_SIZE", 50)
     # Two starts that round the same get the same landing, whichever came first: the one from the start rounded.

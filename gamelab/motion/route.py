@@ -23,7 +23,7 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import directions
 from ..localization.mapdata import MapModel, Platform, Rope
-from . import body
+from . import body, physics
 from .body import slide
 from .physics import (CLIMB_SPEED, FALL_SPEED, GRAB_SURE, GRAVITY, JUMP_HEIGHT, JUMP_SPEED, LAND_MARGIN, ROPE_REACH,
                       SHOE, SLOW_TAKEOFF, WALK_SPEED, fall_time, flight, fly, sure_landing)
@@ -130,6 +130,19 @@ DROP_EXTRA_S = 0.4
 # Moving one move at a time, running jumps missed often and this was 1.5 s; chained (flow.py) about
 # one move in 15 lands elsewhere, mostly drops and straight-up jumps timed off.
 RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25, "rope_jump": 0.5}  # (rope_jump's: a guess, not measured)
+
+
+@physics.follows
+def _follow() -> None:
+    """Her walk as calibrated (physics.set_motion, which rebinds the names taken from it): ROPE_VX, ROPE_VY, GRAB_LEAD
+    and ROPE_JUMP_SLIDE made again of it (a navigator makes its route graph again: physics.EPOCH)."""
+    global ROPE_VX, ROPE_VY, GRAB_LEAD, ROPE_JUMP_SLIDE
+    ROPE_VX = physics.SHOE.rope_vx * physics.SHOE.vmax
+    ROPE_VY = physics.SHOE.rope_vy * physics.SHOE.vjump
+    GRAB_LEAD = physics.WALK_SPEED * JUMP_SPEED / GRAVITY
+    ROPE_JUMP_SLIDE = slide(ROPE_VX, physics.SHOE)
+
+
 # A way out of a trap (_ways_out): a place the sure moves give no way back from gets a running jump that lands only
 # from a stretch of takeoffs too short for the rules above, if one does. Takeoffs are tried every ESCAPE_STEP units at
 # full speed; the jump takes off from the middle of the longest stretch landing on a place with a way back, and lands

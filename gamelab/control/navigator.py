@@ -60,7 +60,7 @@ from ..localization.tracking import HIDDEN, HIDE_S, LIVE
 from ..localization.unseen import hidden
 from ..localization.worldstate import to_scene
 from ..motion import bodies as her_body
-from ..motion import route
+from ..motion import flow, physics, route
 from ..motion.bodies import Climb
 from ..motion.flow import (CLIMB_OVER, END_LINGER, MAX_LEGS, ROPE_SPEED, UP_EXTRA, Body, Flow, Leg, Span, chain_record,
                            ms)
@@ -354,6 +354,17 @@ KEY_COMMIT_S = 0.068         # s: a takeoff whose key goes this little after a s
                              # lands her
 KEY_LEAD = {"jump": JUMP_LAG, "jump_up": JUMP_LAG, "hop": JUMP_LAG, "climb": JUMP_LAG, "drop": DROP_LAG,
             "walk_off": STOP_S}  # s from a leg's takeoff key (a walk-off's: the arrow let go to stop short) to its flight
+
+
+@physics.follows
+def _follow() -> None:
+    """Her walk and climb as calibrated (physics.set_motion, which rebinds the names taken from it): flow's climb up
+    (ROPE_SPEED, flow's own follower's) and a walk-off's lead (KEY_LEAD) made again of them."""
+    global ROPE_SPEED
+    ROPE_SPEED = flow.ROPE_SPEED
+    KEY_LEAD["walk_off"] = physics.STOP_S
+
+
 BETTER_EVERY_S = 5 * STATE_S  # s between looks for a better way (a guess: 3 a second)
 SWITCH_GAIN_S = 0.25         # s sooner a better way must get her there (a guess) ...
 SWITCH_MIN_S = 0.5           # ... and s after the last switch at the soonest (a guess)
@@ -888,6 +899,7 @@ class Navigator:
         self.mode = HUNT if escort is not None else AVOID  # a trip's mode unless go() says otherwise
         self._mode = self.mode                             # the running trip's
         self.planner = Planner(model)
+        self._epoch = physics.EPOCH  # her walk and climb the planner's moves were made at (_follow_walk)
         self.mover = Mover(senses, actions, model, log)
         self.rng = rng or random.Random()
         # Like a player, not the same way every time: each trip weighs every move by a random 1 to
@@ -993,6 +1005,16 @@ class Navigator:
             st.fresh = scene
         return st
 
+    def _follow_walk(self) -> None:
+        """At a pass's start, where no chain of hers runs: a change of her walk or climb her calibration proposed made
+        (physics.settle: motion.calibrate), and the route graph made again if her walk or climb is another than its
+        moves were made at (physics.EPOCH: their takeoffs, landings and costs), with what was worked out of its moves
+        (the pricing's siblings). A chain planned before keeps its timings: its keys are the player's, and it has ended
+        by now."""
+        physics.settle()
+        if self._epoch != physics.EPOCH:
+            self.planner, self._epoch, self._siblings = Planner(self.model), physics.EPOCH, None
+
     def fresh(self, s: Scene) -> bool:
         """Whether look `s` still shows where she is: taken FRESH_S ago at most, with no key plan sent since."""
         return s.where is not None and s.t >= self.actions.sent_at and time.monotonic() - s.t <= FRESH_S
@@ -1003,6 +1025,7 @@ class Navigator:
         Returns the trip once it's over (and sends its 'trip' record), else None."""
         if st.over:
             return st.trip
+        self._follow_walk()
         self._mode, self._weights = st.mode, st.weights
         try:
             trip = self._pass(st)

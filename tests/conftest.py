@@ -117,5 +117,20 @@ def offline(monkeypatch, tmp_path):
     monkeypatch.setattr(paths.Files, "damage", property(
         lambda self: paths.DAMAGE if not self.folder else tmp_path / f"damage-{self.folder}.json"), raising=False)
     monkeypatch.setattr(damage, "THREADED", False)
+    # ... nor her walk and climb as calibrated live (lab/her_motion.json, lab/characters/<hers>/her_motion.json:
+    # motion.calibrate): a test's hunter starts from her prior (and her planner's prior again after it: her_prior)
+    monkeypatch.setattr(paths, "MOTION", tmp_path / "her_motion.json")
+    monkeypatch.setattr(paths.Files, "motion", property(
+        lambda self: paths.MOTION if not self.folder else paths.MOTION.with_name(f"her_motion-{self.folder}.json")),
+        raising=False)  # (paths.MOTION's folder: a simulated run's own, sim.fakes.patched)
     for obj, name, value in _write_guards(paths.LAB):
         monkeypatch.setattr(obj, name, value)
+
+
+@pytest.fixture(autouse=True)
+def her_prior():
+    """Her planner's walk and climb her prior's after every test (motion.physics.reset): a test that calibrates them
+    (motion.calibrate, physics.set_motion) leaves the next its own."""
+    yield
+    from gamelab.motion import physics
+    physics.reset()

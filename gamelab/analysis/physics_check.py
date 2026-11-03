@@ -12,8 +12,9 @@ The models, each with fixed lags:
   game's 30 ms steps can have against the keys (what the planner's closed forms expect). `--fit` adds the
   engine with its lags and its steps' phase fitted to each recording, which shows what is left once the
   lags' spread is taken out.
-The recordings are the thief's, so both models now walk her as the thief's profile does (SHOE: 149), whichever
-character the process plays (before 2026-11-02's review, that character's: the magician's 150 from her lab).
+The recordings are the thief's, so both models now walk her as the thief's profile does (SHOE: his prior, 151.25 at his
+stat window's SPEED 101 from 2026-11-02's calibration, motion.calibrate; 149 before), whichever character the process
+plays (before 2026-11-02's review, that character's: the magician's 150 from her lab).
 
   python -m gamelab.analysis.physics_check                 every recording in CASES
   python -m gamelab.analysis.physics_check jb_k165 --fit   one, with the fitted lags too
@@ -141,7 +142,7 @@ class Steps:
 
 # The recordings are the thief's: her shoe and the step model's constants from it, whoever the process plays (until the
 # review of 2026-11-02 they were the character's it played: from a checkout whose lab plays the magician, her 150
-# against the thief's 149). For the thief, physics' own, to the float.
+# against the thief's 149). For the thief, physics' prior (PRIOR_SHOE), to the float.
 SHOE = physics.shoe_of(thief.FIXED_STATS)
 BEFORE = Steps(walk=149.0, run_lag=0.12, jump_lag=0.055, stop_run=27.0, land_slide=13.0)
 NOW = Steps(walk=SHOE.vmax, run_lag=physics.LAGS.on + SHOE.vmax / (2 * SHOE.acc), jump_lag=physics.JUMP_LAG,

@@ -300,8 +300,8 @@ def test_the_navigator_tells_the_watch_what_her_dot_showed_of_a_chain():
     nav._keys_seen(running, [(100.0 + i / 15, (0.0, 0.0)) for i in range(30)])
     assert calls == [("jump", False), ("run", False)]
     calls.clear()
-    nav._keys_seen(running, [(100.0 + i / 15, (0.0, 0.0)) for i in range(5)], until=100.3)
-    assert calls == []  # (cut at 0.3 s: the run's 45 units not gone yet, the jump not seen)
+    nav._keys_seen(running, [(100.0 + i / 15, (0.0, 0.0)) for i in range(5)], until=100.29)
+    assert calls == []  # (cut at 0.29 s: the run's 44 units at her 151.25 not gone yet, RUN_CUT_UNITS; the jump not seen)
     running = _Running("p", [dataclasses.replace(leg, move=SimpleNamespace(kind="climb"), spans=[])], 100.0, False)
     nav._keys_seen(running, [(100.0 + i / 15, (0.0, 0.0)) for i in range(30)])
     assert calls == []

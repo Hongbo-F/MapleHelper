@@ -227,27 +227,23 @@ def borne(pair, share: float | None, kept: float | None = None, span: float | No
 
 
 def moves_notes(reading: sw.StatReading, stats=None, where: Callable[[str], str] | None = None) -> list[str]:
-    """What to say where her stat window's SPEED or JUMP isn't the one her moves are planned by (`stats`: physics'
-    CHARACTER; `where(stat)`: what they're from, gamelab.character.stats_from), a point or more apart: each with the walk
-    or jump it gives and the one planned. physics is loaded once, so neither is taken: a profile to change, or gear or
-    Haste since it was set. Before 2026-11-02 the planned walk was 125 x SPEED/100 and the thief's 119.2 (her walk fitted:
-    149 units/s) said "her SPEED 101% by her stat window, config.toml [character] speed 119.2" at every read; with the
-    client's +20 (motion.body.SPEED_BONUS) her window's SPEED gives her walk, and the magician's 100 says nothing. The
-    thief's 99.2 (149, kept for the simulator's goldens) against her window's 101 (151.25) says so, as it should."""
+    """What to say where her stat window's JUMP isn't the one her jumps are planned by (`stats`: physics' CHARACTER;
+    `where(stat)`: what it's from, gamelab.character.stats_from), a point or more apart: the jump it gives and the one
+    planned. physics' JUMP is loaded once: a profile to change, or gear since it was set. Her SPEED isn't said here
+    from 2026-11-02: her walk and climb are measured as she moves and correlated with it (motion.calibrate:
+    Calibration.panel_seen, the hunter's), her prior the window's SPEED by the client's formula (125 x (SPEED + 20)/100,
+    motion.body.SPEED_BONUS). Before, the planned walk was 125 x SPEED/100 and the thief's 119.2 (her walk fitted: 149
+    units/s) said "her SPEED 101% by her stat window, config.toml [character] speed 119.2" at every read."""
     from .. import character
     from ..motion import physics
     stats = physics.CHARACTER if stats is None else stats
     where = character.stats_from if where is None else where
     out = []
-    for name, mine in (("speed", stats.speed), ("jump", stats.jump)):
-        v = reading.get(name)
-        if v is None or abs(float(v) - float(mine)) < 1.0:
-            continue
-        theirs, planned = (physics.shoe_of(replace(stats, **{name: float(v)})), physics.shoe_of(stats))
-        what, gives, plan = (("walks her at", theirs.vmax, planned.vmax) if name == "speed" else
-                             ("jumps her at", theirs.vjump, planned.vjump))
-        out.append(f"her {name.upper()} {v}% by her stat window {what} {gives:g} units/s; her moves are planned at "
-                   f"{plan:g} ({where(name)} {name} {mine:g})")
+    v = reading.get("jump")
+    if v is not None and abs(float(v) - float(stats.jump)) >= 1.0:
+        theirs, planned = physics.shoe_of(replace(stats, jump=float(v))), physics.shoe_of(stats)
+        out.append(f"her JUMP {v}% by her stat window jumps her at {theirs.vjump:g} units/s; her moves are planned at "
+                   f"{planned.vjump:g} ({where('jump')} jump {stats.jump:g})")
     return out
 
 

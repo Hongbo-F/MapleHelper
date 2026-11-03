@@ -26,6 +26,7 @@ from maplehelper.engine import LEFT, RIGHT
 from maplehelper.game import COMBAT, MOVEMENT
 
 from .. import directions
+from ..motion import physics
 from ..motion.physics import (AIR_TURN_ATTACK_MS, AIR_TURN_MS, BLIND_ENDS_MS, FORWARD_JUMP_MS, JUMP_ATTACK_MS,
                               JUMP_BACK_ATTACK_MS, JUMP_THROW_TURN_MS,
                               KICK_JUMPS, hold_ms)
@@ -97,6 +98,18 @@ JB_THROW_MS = JB_RUN_MS + AIR_TURN_ATTACK_MS  # the attack key physics.AIR_TURN_
                                # 2026-10-26 25 ms after the arrow (235), the star just before she landed, and both live
                                # jump backs of 2026-10-25 threw the wrong way: the attack picks its target as it starts,
                                # in the air either way
+
+
+@physics.follows
+def _follow() -> None:
+    """Her walk as calibrated (physics.set_motion, which rebinds the names taken from it): the jump back's keys made
+    again of BLIND_ENDS_MS (the same 150 for any walk from 134 to 168: physics._blind_ends)."""
+    global JB_RUN_MS, JB_TURN_MS, JB_THROW_MS
+    JB_RUN_MS = 52 if KICK_JUMPS else physics.BLIND_ENDS_MS
+    JB_TURN_MS = JB_RUN_MS + AIR_TURN_MS
+    JB_THROW_MS = JB_RUN_MS + AIR_TURN_ATTACK_MS
+
+
 # A jump throw that turns her first: the turn's arrow tap (MOVEMENT.tap_turn_ms) walks her, and a jump that
 # lifts off before she has stopped carries that speed into the air (the arrow is let go by then: no kick).
 # Keyed TURN_SETTLE_MS (30) after the tap, the jump lifted off with her at 71 units/s and came down 44 units
