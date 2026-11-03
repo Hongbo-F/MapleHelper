@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from gamelab.perception import lie_target as lt
-from gamelab.perception.lie_detector_yolo import BOARD_AT_NATIVE
+from gamelab.perception.lie_target import BOARD_AT_NATIVE
 
 FPS = 15
 

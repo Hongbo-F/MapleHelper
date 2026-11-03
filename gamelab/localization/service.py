@@ -18,7 +18,9 @@ her EXP: `Publisher`), in <time>-perceive.jsonl, and every 10 s the pass's pace 
 console line says them: `Perf`).
 It keeps the rolling recording too (control.recording, handed to it by `perceive`: its own frames, every one, the last 5
 minutes in memory; `perceive --no-record` without), which `gamelab recorder` kept with a capture of its own until
-2026-10-26.
+2026-10-26. And while the Lie Detector's alarm is up, its frames go to the mini-game's target tracking too
+(control.lie_tracking, handed to it by `perceive`: the newest frame kept, the tracker in a process of its own), which
+replaced the player's YOLO shadow on 2026-11-02.
 
 The commands are its clients (`ServiceClient`, a localization.feed.Feed: what Senses reads), attaching and detaching
 as they start and end, any number at once, none of them its children:
@@ -412,7 +414,7 @@ class Service:
                  geometry: Callable[[], tuple[Geometry | None, Problem | None]], *, address: str = ADDRESS,
                  authkey: bytes | None = None, info: Path | None = None, log: Callable[[str], None] = print,
                  publish: "Publisher | None" = None, hz: float = HZ, stuck_s: float | None = None,
-                 glimpse: Callable[[], np.ndarray | None] | None = None, recording=None):
+                 glimpse: Callable[[], np.ndarray | None] | None = None, recording=None, lie_tracking=None):
         self.make, self.map_id, self.geometry, self.log = make, map_id, geometry, log
         self.glimpse = glimpse
         self.address, self.authkey = address, authkey or secrets.token_bytes(32)
@@ -420,6 +422,7 @@ class Service:
         self.publish = publish
         self.hz = hz
         self.recording = recording  # control.recording.Recording (the command line's: no layer below imports it)
+        self.lie_tracking = lie_tracking  # control.lie_tracking.LieTracking (the command line's too)
         self.stuck_s = stuck_s
         self._beat = (time.monotonic(), BUILD_STUCK_S)  # when the frame loop last went round, and how long it may not
         self.runner: Runner | None = None
@@ -591,6 +594,8 @@ class Service:
             threading.Thread(target=self._watchdog, name="perceive-watchdog", daemon=True).start()
         if self.recording is not None:
             self.recording.start(hunting=self.fast)
+        if self.lie_tracking is not None:
+            self.lie_tracking.start()
         try:
             while not self._stop and (until is None or time.monotonic() < until):
                 if self.runner is None or self._rebuild is not None:
@@ -796,6 +801,8 @@ class Service:
             self._answer_fulls(None, st)
         if self.recording is not None:
             self.recording.saw(st, frame, self.epoch)  # (its picture by reference: never waits)
+        if self.lie_tracking is not None:
+            self.lie_tracking.saw(st, frame, self.epoch)  # (the newest kept while the alarm is up: never waits)
         self._send_state(replace(st, frame=None, epoch=self.epoch), st)
         self._frames_since += 1
         self._say()
@@ -823,6 +830,8 @@ class Service:
             line += self.publish.status(now, rate)
         if self.recording is not None:
             line += self.recording.line()
+        if self.lie_tracking is not None:
+            line += self.lie_tracking.line()
         if self.runner is not None and hasattr(self.runner.frames, "holds"):
             held, longest = self.runner.frames.holds()  # (frames.HELD_COUNT_S: how often the capture holds a frame)
             if held:
@@ -840,6 +849,8 @@ class Service:
             self._drop(c)
         if self.recording is not None:  # (its saves queued written, the clips cut short)
             self.recording.close()
+        if self.lie_tracking is not None:
+            self.lie_tracking.close()
         if self.runner is not None:
             self.runner.step.close()
         for ring in (self.ring, self.full_ring):

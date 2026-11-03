@@ -43,7 +43,7 @@ def test_a_cycle_seen_then_gone_saves_every_look_in_an_index_and_a_summary_and_n
     rec = Recording(tmp_path, {"screenshot": "lab/lie_detector_101500.png"}, log=said.append, end_s=1.0)
     plan = [COUNTDOWN] * 4 + [GONE] + [MINI_GAME] * 3 + [GONE] * 5  # a moment between the two windows
     for n, scores in enumerate(plan):
-        assert rec.add(n * 0.25, frame(n * 10), scores) == n  # numbered, for the YOLO shadow's checks
+        assert rec.add(n * 0.25, frame(n * 10), scores) == n  # numbered
     summary = finished(rec)
     assert rec.folder.parent == tmp_path and len(rec.folder.name) == len("20261024-101500")
     assert sorted(p.name for p in rec.folder.iterdir()) == [INDEX, SUMMARY]  # no pictures: the rolling clip's
@@ -59,17 +59,6 @@ def test_a_cycle_seen_then_gone_saves_every_look_in_an_index_and_a_summary_and_n
     assert summary["alarm_screenshot"] == "lab/lie_detector_101500.png" and summary["window"] == [64, 48]
     assert summary["dropped"] == 0 and summary["not_showing"] == {} and summary["end_stretch_s"] == 1.0
     assert said[-1].startswith("Lie Detector recording ended (gone): 13 looks over 3 s") and "answered" in said[-1]
-
-
-def test_the_yolo_shadow_s_check_of_a_look_is_a_line_of_its_own_with_the_look_s_number(tmp_path):
-    rec = Recording(tmp_path, log=lambda m: None, end_s=1.0)
-    assert rec.add(0.0, frame(), COUNTDOWN) == 0 and rec.add(0.25, frame(), GONE) == 1
-    assert rec.add(0.5, None, None, "minimized") is None
-    assert rec.add_shadow(0.25, 1, "yolo patterns", 1.25, [], 0.1)
-    s = finished(rec)
-    assert s["grabs"] == 3 and s["forms"]["yolo patterns"]["frames"] == 1 and s["last_seen"] == 0.25
-    index = lines(rec.folder)
-    assert [r.get("i") for r in index] == [0, 1, None, 1] and index[3]["shadow"] == 1.25
 
 
 def test_the_truth_booth_is_the_outcome_when_it_shows(tmp_path):
@@ -416,7 +405,7 @@ def test_a_game_window_gone_or_minimized_mid_cycle_is_recorded_as_such_not_as_th
 def test_a_game_with_another_window_over_it_is_checked_and_counted_as_the_lie_detector_gone(tmp_path):
     """The user, 2026-10-29: "count seconds when game window is covered" (this app's window over a corner of the game
     kept the player locked after the answer): a look with another window over some of the game is checked as the
-    screen is, numbered as no frame of the game (the YOLO shadow doesn't check it), and with none seen it counts toward
+    screen is, numbered as no frame of the game, and with none seen it counts toward
     the stretch without the Lie Detector, so a cycle ends under cover too; gone or minimized still doesn't count (the
     test above)."""
     screen = Screen()
@@ -687,9 +676,6 @@ def fake_lab(tmp_path, monkeypatch, screen, end_s=0.4, cap_s=60.0, keys=None):
     monkeypatch.setattr(player_mod.window, "client_rect",
                         lambda hwnd: {"left": 0, "top": 0, "width": 64, "height": 48})
     def watchdog(*args, **kwargs):
-        # serve() enables the real YOLO shadow in production; this fake lab must not load a GPU model (its first
-        # inference takes seconds, and parallel tests would all contend for the GPU).
-        kwargs["shadow"] = None
         return Watchdog(*args, spotter=Spotter(), grab=screen, interval=0.02, end_s=end_s, cap_s=cap_s,
                         folder=tmp_path / "lie_detector", **kwargs)
 

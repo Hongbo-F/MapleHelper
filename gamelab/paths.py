@@ -25,6 +25,7 @@ PLAYER_INFO = LAB / "player.json"  # what the running player can do ({"splice": 
 RECORDINGS = LAB / "recordings"  # saved frames + key events, by name
 LIE_RECORDINGS = LAB / "lie_detector"  # each Lie Detector's whole cycle as the player saw it (control.lie_recorder)
 RECENT = LAB / "recent"          # the rolling recording's last minutes, saved on demand (control.rolling)
+LIE_TARGETS = LAB / "lie_target"  # each mini-game round's target followed live, a file a round (control.lie_tracking)
 ALARM_CLIPS = LAB / "alarm_clips"  # each Lie Detector alarm, 10 s before it to 60 s after, the rolling recorder's
                                    # own copy (control.rolling)
 RECORDER = LAB / "recorder"      # the rolling recorder's inbox, outbox and status (control.rolling)

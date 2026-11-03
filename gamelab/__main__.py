@@ -2497,7 +2497,9 @@ def cmd_perceive(args) -> int:
     It never sends a key and never brings the game forward, and waits for the game window when there's none. One at a
     time on the PC; it ends itself if its frame loop hangs (service.STUCK_S), for the babysitter or a command to start
     another. It keeps the rolling recording (control.recording: its frames 15 times a second, the last 5 minutes,
-    what `gamelab recorder` kept) unless --no-record, once no `gamelab recorder` runs. With --frames, saved frames
+    what `gamelab recorder` kept) unless --no-record, once no `gamelab recorder` runs; and while the Lie Detector's
+    alarm is up, the mini-game's target followed on its frames and written down (control.lie_tracking: recorded only,
+    nothing sent). With --frames, saved frames
     instead of the game, round and round, nothing published or recorded (offline), at a pipe, mutex and info file of its
     own (service.SAVED_ADDRESS: the live one starts and runs beside it; a command reaches it with
     GAMELAB_PERCEIVE=saved)."""
@@ -2513,7 +2515,7 @@ def cmd_perceive(args) -> int:
         return 0
     service.settle()
     band, title = (reach.LOOK_UP, reach.LOOK_DOWN), _game_title()
-    publish, glimpse, recording = None, None, None
+    publish, glimpse, recording, tracking = None, None, None, None
     if args.frames:
         files = sorted(str(p) for p in Path(args.frames).glob("*.png"))
         if not files:
@@ -2546,12 +2548,14 @@ def cmd_perceive(args) -> int:
         if not args.no_record:
             from .control.recording import Recording
             recording = Recording(title, log=lambda m: print(m, flush=True))
+        from .control.lie_tracking import LieTracking
+        tracking = LieTracking(log=lambda m: print(m, flush=True))  # (the mini-game's target, while the alarm is up)
         print(f"perceiving the game for every command at {service.HZ:g} frames a second; telemetry: {path} (the "
               f"mini-map follows it); " + ("the rolling recording: not kept (--no-record)" if recording is None else
                                            "the rolling recording kept here") + "; Ctrl+C stops", flush=True)
     svc = service.Service(make, args.map, where, address=service.pipe_address(on_saved),
                           info=service.info_path(on_saved), log=_log, publish=publish, stuck_s=service.STUCK_S,
-                          glimpse=glimpse, recording=recording)
+                          glimpse=glimpse, recording=recording, lie_tracking=tracking)
     try:
         svc.serve(time.monotonic() + args.minutes * 60 if args.minutes else None)
     except KeyboardInterrupt:

@@ -438,23 +438,6 @@ def test_waits_end_early_when_the_alarm_goes_off():
     assert _sleep_until(time.perf_counter() + 0.01) is True
 
 
-def test_the_yolo_shadow_s_ready_line_says_the_device_it_checks_on():
-    """On the CPU a cycle's checks cost 6.4-6.7 cores, on the GPU 0.09-0.10: the player's log says which it got."""
-    from gamelab.control.player import ShadowWorker
-
-    class Shadow:
-        def __init__(self, device):
-            self.device = device
-
-        def warm(self):
-            pass
-
-    for device, said_as in (("cpu", "on the CPU"), (0, "on GPU 0")):
-        said = []
-        ShadowWorker(Shadow(device), said.append)._warm_up()
-        assert said[0].startswith(f"the YOLO shadow is ready {said_as}: loaded and a first check in"), said
-
-
 def _player_sending(monkeypatch, tmp_path, flag=None):
     from gamelab.control import player as player_mod
     from maplehelper.keys import parse

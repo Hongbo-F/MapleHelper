@@ -25,8 +25,9 @@ How:
     target's usual speed, pointing away from a near edge, so a turn is followed in a frame or two.
 - Estimate: the heaviest particle's neighbourhood (40 px), weighted.
 
-The tracker is fed board crops one by one (`TargetTracker.step`), as the game would give them; `track_clip` runs it on
-a recorded alarm clip. It suggests where the target is; it moves nothing and sends no input.
+The tracker is fed board crops one by one (`TargetTracker.step`), as the game gives them; `track_clip` runs it on a
+recorded alarm clip. Live, the perception service runs it through each round on its own frames (control.lie_tracking)
+and records where it is. It suggests where the target is; it moves nothing and sends no input.
 
 Speed (2026-11-02): 43 ms a frame on the 11 clips (below-normal priority, 6 cores), against the 66 of 15 a second; it
 took 92. The edge features by a table per bin and one grey dilation (30 -> 8 ms), the template turned once per distinct
@@ -43,8 +44,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .lie_detector_yolo import BOARD_AT_NATIVE, NATIVE_FRAME
 
+NATIVE_FRAME = (1366, 768)  # the game's own client size
+BOARD_AT_NATIVE = (308, 180, 750, 500)  # xywh: the playable board there, below its blue header
 SPIN = 2.0  # rad/s, constant on every clip measured; in this module's rotation convention the angle goes down
 NB = 8  # orientation bins over 180 deg
 LUT = np.array([1.0, 0.75, 0.3, 0.0, 0.0])  # similarity by bin distance (0..4)

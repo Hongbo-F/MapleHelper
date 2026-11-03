@@ -1,0 +1,152 @@
+"""The Lie Detector mini-game's target followed live on the perception service's frames (control.lie_tracking): only
+while the alarm is up and the board shows, the newest frame sent when the tracker is ready for it, a round's file of
+answers and its end; the tracker's process, its loop and the real one, on a drawn round (tests.test_lie_target)."""
+import io
+import json
+import pickle
+import threading
+from types import SimpleNamespace
+
+import numpy as np
+
+from gamelab.control import lie_tracking as lt
+from gamelab.perception.lie_target import BOARD_AT_NATIVE
+from tests.test_lie_target import FPS, round_frames
+
+
+def screen(board_bgr):
+    """A 1366x768 RGB frame of the game with the board where it shows."""
+    full = np.zeros((768, 1366, 3), np.uint8)
+    x, y, w, h = BOARD_AT_NATIVE
+    full[y:y + h, x:x + w] = board_bgr[..., ::-1]
+    return full
+
+
+class Spotter:
+    def __init__(self):
+        self.board = True
+
+    def over_play(self, full):
+        return "mini-game" if self.board else None
+
+
+class FakeChild:
+    """The tracker's process as the tests see it: what it was sent; its replies none until it's stopped (the real one's
+    ending stream means it's gone)."""
+
+    def __init__(self):
+        self.sent = []
+        self.done = threading.Event()
+
+    def send(self, msg):
+        self.sent.append(msg)
+
+    def replies(self):
+        self.done.wait(30)
+        yield from ()
+
+    def stop(self):
+        self.sent.append(("stopped",))
+        self.done.set()
+
+
+def tracking(tmp_path, alarm_up=True):
+    alarm = tmp_path / "ALARM.json"
+    if alarm_up:
+        alarm.write_text("{}", encoding="utf-8")
+    children = []
+
+    def child():
+        children.append(FakeChild())
+        return children[-1]
+    t = lt.LieTracking(folder=tmp_path / "out", alarm=alarm, spotter=Spotter(), child=child)
+    return t, children, alarm
+
+
+def item(n, t, full):
+    return (t, full, n, 1, 1700000000.0 + t)
+
+
+def test_no_alarm_nothing_kept_and_no_tracker_started(tmp_path):
+    t, children, _ = tracking(tmp_path, alarm_up=False)
+    t.saw(SimpleNamespace(seq=1), SimpleNamespace(full=np.zeros((768, 1366, 3), np.uint8), t=1.0, visible=True), 1)
+    assert t._newest is None
+    t.step(1.0, None)
+    assert children == [] and t.round is None
+
+
+def test_with_the_alarm_up_a_round_begins_at_the_board_and_frames_go_only_when_the_tracker_is_ready(tmp_path):
+    t, children, alarm = tracking(tmp_path)
+    full = screen(round_frames(n=1)[0][1])
+    t.spotter.board = False
+    t.step(0.0, item(0, 0.0, full))  # the alarm up, the board not yet: the tracker's process started, no round
+    assert len(children) == 1 and t.round is None and children[0].sent == []
+    t.spotter.board = True
+    t.step(0.3, item(1, 0.3, full))  # the board seen: the round begins; the tracker not ready yet: skipped
+    child = children[0]
+    assert child.sent[0][0] == "begin" and t.round["skipped"] == 1 and t.round["sent"] == 0
+    t.ready.set()
+    t.step(0.6, item(2, 0.6, full))
+    kind, tt, seq, run, clock, board = child.sent[-1]
+    assert (kind, tt, seq, run) == ("frame", 0.6, 2, 1) and board.shape == (500, 750, 3)
+    assert np.array_equal(board, full[180:680, 308:1058]) and not t.ready.is_set()
+    # the board gone for BOARD_GONE_S: the round is over
+    t.spotter.board = False
+    t.ready.set()
+    t.step(0.9, item(3, 0.9, full))
+    t.step(0.9 + lt.BOARD_GONE_S + 0.1, item(4, 0.9 + lt.BOARD_GONE_S + 0.1, full))
+    assert child.sent[-1][0] == "end" and child.sent[-1][1] == "board gone" and t.round is None
+
+
+def test_saw_keeps_only_the_newest_frame_and_counts_the_ones_it_replaces_in_a_round(tmp_path):
+    t, _, _ = tracking(tmp_path)
+    t.round = {"skipped": 0}
+    for n in range(3):
+        t.saw(SimpleNamespace(seq=n), SimpleNamespace(full=np.zeros((768, 1366, 3), np.uint8), t=n * 0.07,
+                                                     visible=True), 1)
+    assert t._newest[2] == 2 and t.round["skipped"] == 2
+
+
+def test_the_trackers_loop_writes_a_rounds_answers_on_the_target_and_its_end(tmp_path):
+    frames = round_frames(n=30)
+    inp = io.BytesIO()
+    pickle.dump(("begin", "20261102-120000", {"fps": FPS}), inp, protocol=5)
+    for n, (t, board, _) in enumerate(frames):
+        pickle.dump(("frame", t, n, 1, 1700000000.0 + t, board[..., ::-1].copy()), inp, protocol=5)
+    pickle.dump(("end", "board gone", 2), inp, protocol=5)
+    pickle.dump(("quit",), inp, protocol=5)
+    inp.seek(0)
+    out = io.BytesIO()
+    lt.serve(inp, out, tmp_path)
+    out.seek(0)
+    replies = []
+    while True:
+        try:
+            replies.append(pickle.load(out))
+        except EOFError:
+            break
+    assert replies == [("ready",)] * (len(frames) + 1)
+    rows = [json.loads(line) for line in open(tmp_path / "20261102-120000.jsonl", encoding="utf-8")]
+    head, answers, end = rows[0], rows[1:-1], rows[-1]
+    assert head["round"] == "20261102-120000" and head["board"] == list(BOARD_AT_NATIVE)
+    assert len(answers) == len(frames) and answers[0]["white"] and answers[0]["seq"] == 0
+    for a, (_, _, z) in zip(answers[6:], frames[6:]):
+        assert np.hypot(a["x"] - z[0], a["y"] - z[1]) < 12, a
+        assert a["screen"] == [round(a["x"] + 308, 1), round(a["y"] + 180, 1)]
+    assert end["end"] == "board gone" and end["frames"] == len(frames) and end["skipped"] == 2
+
+
+def test_the_trackers_own_process_answers_through_its_pipes(tmp_path):
+    frames = round_frames(n=8)
+    child = lt.Child(tmp_path, FPS)
+    replies = child.replies()
+    assert next(replies) == ("ready",)
+    child.send(("begin", "20261102-120001", {"fps": FPS}))
+    for n, (t, board, _) in enumerate(frames):
+        child.send(("frame", t, n, 1, 1700000000.0 + t, board[..., ::-1].copy()))
+        assert next(replies) == ("ready",)
+    child.send(("end", "board gone", 0))
+    child.stop()
+    rows = [json.loads(line) for line in open(tmp_path / "20261102-120001.jsonl", encoding="utf-8")]
+    assert len(rows) == len(frames) + 2 and rows[-1]["frames"] == len(frames)
+

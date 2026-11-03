@@ -556,7 +556,7 @@ def test_the_services_status_line_says_the_fence_only_while_its_asked_for():
         grabber = SimpleNamespace(fence_line=lambda: fence_line)
         frames = SimpleNamespace(grabber=grabber, holds=lambda: (0, 0.0))
         me = SimpleNamespace(_status=-1e9, _frames_since=30, attached=lambda: [], rate=lambda: 30, publish=None,
-                             recording=None, runner=SimpleNamespace(frames=frames), log=said.append)
+                             recording=None, lie_tracking=None, runner=SimpleNamespace(frames=frames), log=said.append)
         service_module.Service._say(me)
         return said[0].removesuffix("; " + gcstats.STATS.line("status"))
     assert line("").endswith("attached: nobody")
