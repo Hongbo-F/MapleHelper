@@ -260,6 +260,7 @@ def test_her_casts_and_her_bar_reach_the_watch_through_her_attack_choice():
     a = object.__new__(Attacks)
     a.darts, a._cast, a.mp, a._casts, a._read, a._warned = DartWatch(), 0.02, 0.5, [], None, False
     a.counts, a._keyed, a._swipe = Counter(), None, False  # (no throw at a target chosen: on_throw's pending time)
+    a._ground = True
     a.on_throw(1.0, "left")
     assert a.darts.keys == [1.0]
     a.on_throw(2.0, "left")  # the regular attack (no cast chosen): not a press of Lucky Seven
@@ -267,6 +268,9 @@ def test_her_casts_and_her_bar_reach_the_watch_through_her_attack_choice():
     a._cast, a._swipe = 0.02, True  # from the ground at a monster the claw reaches: no MP whatever her darts
     a.on_throw(2.5, "left")
     assert a.darts.keys == [1.0] and a.darts.swiped_presses == 1
+    a._cast, a._swipe, a._ground = 0.02, False, False  # a jump throw's, keyed in the air (Actions.keyed_ground)
+    a.on_throw(2.7, "left")
+    assert a.darts.keys == [1.0, 2.7] and a.darts.aired == [2.7]
     a.glance(3.0, 0.4)
     assert a.darts.read_at == 3.0 and a.darts.top == round(0.4 * MP_STEPS)
 
@@ -333,3 +337,48 @@ def test_a_press_from_the_ground_at_a_monster_the_claw_reaches_is_no_press_for_o
     for i in range(PRESSES + 5):
         watch.cast(float(i), swipe=True)
     assert watch.keys == [] and watch.swiped_presses == PRESSES + 5 and "the claw reaches: not counted" in watch.summary()
+
+
+def test_presses_within_touched_s_of_a_touch_are_no_presses_for_out_of_darts():
+    # The simulator's thief seed 6 of the pile-up study (e040fb9, 241 s): a Horny Mushroom on her at platform 19's right
+    # end, lost under her own swipes' damage numbers and never seen, touched her every 1.7 s while every press swiped it
+    # (0.85 s apart, no MP): 21 presses over 17 s stopped the hunt with her stars in her bag. A touch, told a look late,
+    # takes the presses keyed since it off the stretch and keeps those to come off it for TOUCHED_S.
+    from gamelab.behavior.darts import TOUCHED_S
+    w, t, touch = DartWatch(PRESSES), 0.0, 0.3
+    for _ in range(3 * PRESSES):
+        w.cast(t)
+        t += 0.85
+        if t >= touch + 0.4:  # (told at the next look after it)
+            w.touched(touch)
+            touch += 1.7
+        w.see(t, _px(40))
+        assert w.due(t) is None
+    assert w.longest[0] <= 1 and w.touched_presses >= 3 * PRESSES - 1
+    assert f"within {TOUCHED_S:g} s of a touch of hers: not counted" in w.summary()
+    # ... and once the touches stop (the one on her dead, or gone), her presses count again: out of darts stops it
+    w.see(t + TOUCHED_S, _px(40))
+    stop = None
+    t = _stretch(w, PRESSES, t0=t + TOUCHED_S + 0.1)
+    stop = w.due(t)
+    assert stop is not None and stop.presses == PRESSES
+
+
+def test_a_touch_of_any_kind_reaches_out_of_darts_watch_from_the_hunter():
+    from gamelab.behavior.fight import Report
+    from gamelab.perception.touches import DAMAGE, MISS, Touch
+    h = Hunter.__new__(Hunter)  # (only what _touch_told uses)
+    h.hit_at = h.hit_kind = h.knock_at = h.touch_at = h._last_touch = None
+    h.report, h.log, h._last_where = Report(), (lambda text: None), None
+    h.actions = SimpleNamespace(pressed=True)
+    h.attacks = SimpleNamespace()
+    h.darts = DartWatch(PRESSES)
+    h.darts.keys = [9.0, 9.9, 10.4, 10.9]
+    h._touch_told(SimpleNamespace(t=10.5, hp=0.9, where=None), Touch(10.0, MISS, MISS).data())
+    assert h.darts.touched_at == 10.0 and h.darts.keys == [9.0, 9.9] and h.darts.touched_presses == 2
+    h.darts.cast(11.95, ground=False)  # (a jump throw's, keyed in the air: a cast's whatever is on her)
+    h._touch_told(SimpleNamespace(t=12.0, hp=0.8, where=None), Touch(11.9, DAMAGE, "54").data())
+    assert h.darts.touched_at == 11.9 and h.darts.keys == [9.0, 9.9, 11.95] and h.darts.touched_presses == 2
+    h.darts.cast(12.5, ground=False)
+    h.darts.cast(12.9)
+    assert h.darts.keys == [9.0, 9.9, 11.95, 12.5] and h.darts.touched_presses == 3
