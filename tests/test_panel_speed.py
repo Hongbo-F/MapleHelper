@@ -64,15 +64,16 @@ def test_set_speed_makes_every_name_of_her_walk_again_wherever_it_was_taken():
     assert route.ROPE_VX == pytest.approx(1.3 * 125.0) and route.ROPE_JUMP_SLIDE == body.slide(route.ROPE_VX,
                                                                                                 physics.SHOE)
     assert actions.JB_RUN_MS == physics.BLIND_ENDS_MS == 60  # (the blind spot of three steps ends sooner at 125)
-    knock = lambda: physics.KNOCK_VX * 2 * physics.KNOCK_VY / physics.GRAVITY + physics.LAND_SLIDE
-    assert navigator.KNOCK_REACH == pytest.approx(knock())  # (its landing slide hers: the final review, 2026-11-02)
+    knock = lambda: navigator.KNOCK_PUSH * 2 * navigator.KNOCK_PUSH / physics.GRAVITY + physics.LAND_SLIDE
+    assert navigator.KNOCK_REACH == pytest.approx(knock())  # (its landing slide hers: the final review, 2026-11-02;
+                                                            # the client's push, 270 out and up, from the rope rule's)
     assert physics.RUN_LAG == pytest.approx(physics.LAGS.on + 125.0 / 2800)
     assert world.her_shoe(world.Her()) is physics.PROFILE_SHOE and world.her_climb(world.Her()) == PROFILE[1]
     assert not physics.set_speed(80.0) and physics.EPOCH == epoch + 1  # (the same: nothing made again)
     assert physics.reset() and physics.SPEED == 101.0 and physics.SHOE is physics.PROFILE_SHOE
     assert {n: getattr(physics, n) for n in physics.WALK_NAMES} == AT_IMPORT
     assert flow.ROPE_SPEED == navigator.ROPE_SPEED == PROFILE[1] and actions.JB_RUN_MS == 150
-    assert navigator.KNOCK_REACH == pytest.approx(knock()) == pytest.approx(53.9, abs=0.05)
+    assert navigator.KNOCK_REACH == pytest.approx(knock()) == pytest.approx(87.2, abs=0.05)  # (R1-R3's 84-93)
 
 
 def test_a_change_proposed_waits_for_settle_and_is_told_once_made():

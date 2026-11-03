@@ -455,8 +455,8 @@ NEVER = _price(0.0, 1e9)  # (a hunter's price at which no touch is worth taking:
 
 @pytest.fixture
 def rules(monkeypatch):
-    """HANG_LONGER and HANG_TAKE on, as work/rec-rope2 built them (off by default from the final review of 2026-11-02:
-    measured worse than the 2 s hang alone on the merged world)."""
+    """HANG_LONGER and HANG_TAKE on (the default again from the user's "keep the rope rule on", 2026-11-02, where the
+    final review had them off), whatever the default."""
     monkeypatch.setattr(nv, "HANG_LONGER", True)
     monkeypatch.setattr(nv, "HANG_TAKE", True)
 
@@ -535,27 +535,77 @@ def test_one_standing_at_the_top_gets_no_longer_wait(tree_map, monkeypatch, rule
 
 
 def test_she_takes_the_touch_at_once_where_the_wait_costs_more_than_it(tree_map, monkeypatch, rules):
-    """HANG_TAKE: a Horny standing at the top; her time up there worth 20 EXP a second and its touch 25 EXP: the
-    wait's 2 s (40 EXP) cost more, so she climbs at once ('took', 0 s, its numbers in the event), as after a hang. At 10
-    EXP a second (20 EXP), with her HP under the safety stop's reserve and the touch, with no price (a retreat's
-    navigator), or HANG_TAKE off: she hangs HANG_S."""
+    """HANG_TAKE: a Horny on 10 walking right past the top of the rope at -80 (from 30 left of it, at 100): it touches
+    her on the rope and is gone from the top by the end of her invulnerability after it (no second touch,
+    _touched_again; the game keeps her on the rope: no knock); her time up there worth 20 EXP a second and its touch 25
+    EXP: the wait's 2 s (40 EXP) cost more, so she climbs at once ('took', 0 s, its numbers in the event), as after a
+    hang. One standing at the top (10 right of the rope), at 10 EXP a second (20 EXP), with her HP under the safety
+    stop's reserve and the touch, with no price (a retreat's navigator), or HANG_TAKE off: she hangs HANG_S."""
     rope = _rope(tree_map)
-    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x + 10, 10)], y=rope.top + 85)
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 30, 10, vx=100.0)], y=rope.top + 85)
     nav.price = _price(20.0, 25.0)
     text = nav._hang(rope, rope.top + 85, "a horny-mushroom on 10 by its top")
     assert text.startswith("up after 0.0 s, the touch taken: 2.0 s more of the wait at 20.0 EXP a second") \
         and nav.clock.t == NOW
     took = next(kw for _, kw in nav.events if kw.get("step") == "took")
-    assert {k: took[k] for k in ("left", "rate", "wait_exp", "touch_exp", "knock_s", "s")} == \
-        {"left": 2.0, "rate": 20.0, "wait_exp": 40.0, "touch_exp": 25.0, "knock_s": 0.0, "s": 0.0}
+    assert {k: took[k] for k in ("left", "rate", "wait_exp", "touch_exp", "knock_s", "touches", "s")} == \
+        {"left": 2.0, "rate": 20.0, "wait_exp": 40.0, "touch_exp": 25.0, "knock_s": 0.0, "touches": 1, "s": 0.0}
     assert [name for name, _ in nav.played] == ["hang_up"] and _steps(nav) == ["hang", "took"]
-    for price, take in ((_price(10.0, 25.0), True), (_price(20.0, 25.0, ok=False), True), (None, True),
-                        (_price(20.0, 25.0), False)):
+    for price, take in ((_price(20.0, 25.0), True), (_price(10.0, 25.0), True), (_price(20.0, 25.0, ok=False), True),
+                        (None, True), (_price(20.0, 25.0), False)):
         monkeypatch.setattr(nv, "HANG_TAKE", take)
         nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x + 10, 10)], y=rope.top + 85)
         nav.price = price
         assert nav._hang(rope, rope.top + 85, "a horny").startswith("up regardless")
         assert HANG_S <= nav.clock.t - NOW < HANG_S + 0.1
+
+
+def test_a_touch_taken_where_its_monster_stays_at_the_top_costs_a_second_touch_and_its_knock(tree_map, monkeypatch,
+                                                                                             rules):
+    """HANG_TAKE's price (the rope rule's on the merged world, 2026-11-02: D:/MapleHelper-scratch/recfix/rope-on): a
+    Horny standing 10 right of the top of the rope at -80 touches her on the rope (no knock) and, once her
+    invulnerability after it is over (INVULNERABLE_S less IMMUNE_MARGIN_S), again standing where she climbed over
+    (_touched_again), its knock the client's (KNOCK_REACH, ~87 at her walk: R1-R3's frames' 84-93) left from -80, 83
+    from 10's left end: off 10, the planner's way back up in its price (it was the planner's 53.7, on 10). So it's not
+    taken even at 100 EXP a second (200 EXP of the wait against 2 touches of 25 and the way back), where one touch alone
+    would be. Standing 10 left of the rope its second touch knocks her right, onto 10: the knock's flight alone, taken
+    at 100 EXP a second. One walking past has no second touch."""
+    rope = _rope(tree_map)
+    q = tree_map.platform(10)
+    assert nv.KNOCK_REACH == pytest.approx(nv.KNOCK_PUSH ** 2 * 2 / 2000.0 + nv.LAND_SLIDE) and nv.KNOCK_REACH > 84
+    assert rope.x - nv.KNOCK_REACH < q.left + 1 < rope.x - 53.7  # (off 10 by the client's knock, on it by the planner's)
+    y = rope.top + 85
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x + 10, 10)], y=y)
+    mo, t = nav._way_up_hit(rope, y)
+    assert t < 85 / CLIMB_SPEED and nav._knock_cost(rope, q, y, mo, t) == 0.0  # (on the rope)
+    again = nav._touched_again(rope, q, y, mo, t)
+    assert again is not None and again >= t + nv.INVULNERABLE_S - nv.IMMUNE_MARGIN_S - 1e-9
+    assert nav._knock_cost(rope, q, y, mo, again) > nv.KNOCK_AIR_S + 1.0  # (off 10: the way back up)
+    nav.price = _price(100.0, 25.0)
+    assert nav._take_now(rope, y, HANG_S, (mo, t)) is None
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 10, 10)], y=y)
+    mo, t = nav._way_up_hit(rope, y)
+    again = nav._touched_again(rope, q, y, mo, t)
+    assert again is not None and nav._knock_cost(rope, q, y, mo, again) == nv.KNOCK_AIR_S
+    nav.price = _price(100.0, 25.0)
+    assert nav._take_now(rope, y, HANG_S, (mo, t)).startswith("the touch taken") and nav._took["touches"] == 2
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 30, 10, vx=100.0)], y=y)
+    mo, t = nav._way_up_hit(rope, y)
+    assert nav._touched_again(rope, q, y, mo, t) is None  # (walking past: gone from the top by then)
+
+
+def test_no_longer_wait_for_a_walker_she_hurt_it_chases_her(tree_map, monkeypatch, rules):
+    """HANG_LONGER: the walker of the first test, but hurt (its HP bar seen: the feed's Track.bar), chases her by the
+    user's monster rule (a hit draws a chase), so it doesn't walk off: no longer wait (_chasing; on the merged world 63
+    of 72 longer waits for one chasing her were put back for its turn, none cleared): HANG_S, up regardless."""
+    rope = _rope(tree_map)
+    hurt = dataclasses.replace(_track(1, 0.0, 10, vx=-100.0), bar=0.6)
+    nav = _navigator(tree_map, monkeypatch, [hurt], y=rope.top + 85)
+    nav.price = NEVER
+    _walking(nav)
+    mo = nav._newest_tracks()[0]
+    assert nav._chasing(mo) and nav._walks_off(rope, rope.top + 85, nv.HANG_HORIZON_S) is None
+    assert nav._hang(rope, rope.top + 85, "a horny").startswith("up regardless") and "longer" not in _steps(nav)
 
 
 def test_a_touch_s_knock_costs_nothing_on_the_rope_its_flight_on_the_top_and_the_way_back_off_it(tree_map,
@@ -582,23 +632,38 @@ def test_a_touch_s_knock_costs_nothing_on_the_rope_its_flight_on_the_top_and_the
 
 def test_touched_on_the_rope_with_the_top_taken_and_the_touch_worth_taking_she_climbs_on_at_once(tree_map,
                                                                                                    monkeypatch, rules):
-    """_climb_on (CLIMB_LOOK, ROPE_HANG) touched 30 under the top with a Horny there, the wait worth more than its touch
-    (HANG_TAKE): up again at once (as without CLIMB_LOOK), where she went down to hang; a 'rope_hang' event of no hang
-    ('took', 0 s). Not worth it: down to HANG_UNDER and the hang, as before."""
+    """_climb_on (CLIMB_LOOK, ROPE_HANG) touched 30 under the top, her invulnerability over 0.55 s on, with a Horny
+    walking right past the top there (from 60 left of it, at 100), the wait worth more than its touch (HANG_TAKE): up
+    again at once (as without CLIMB_LOOK), where she went down to hang; a 'rope_hang' event of no hang ('took', 0 s).
+    The touch she'd climb into comes once her invulnerability is over, as she climbs over at the top (_top_touch), its
+    knock in its price (right, onto 10: its flight), where it was priced as one on the rope (none). Not worth it, or a
+    Horny standing by the top (a knock off 10 left and a second touch in its price: not taken at 20 EXP a second): down
+    to HANG_UNDER and the hang, as before."""
     rope = _rope(tree_map)
-    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x + 5, 10)], y=rope.top + 30)
+    q = tree_map.platform(10)
+    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x - 60, 10, vx=100.0)], y=rope.top + 30)
+    nav.senses.invulnerable_until = lambda: NOW + 0.55
     nav.price = _price(20.0, 25.0)
+    mo, t = nav._top_touch(rope, q, rope.top + 30, nav.state.tracks[0])
+    assert t > 30 / CLIMB_SPEED and nav._knock_cost(rope, q, rope.top + 30, mo, t) == nv.KNOCK_AIR_S
     nav._climb_on(rope.top, rope.top + 30, rope.x)
     assert [name for name, _ in nav.played] == ["climb_on"] and _steps(nav) == ["hang", "took"]
-    nav = _navigator(tree_map, monkeypatch, [_track(1, rope.x + 5, 10)], y=rope.top + HANG_UNDER)
-    nav.price = _price(5.0, 25.0)
-    nav._climb_on(rope.top, rope.top + 30, rope.x)
-    assert [name for name, _ in nav.played] == ["hang_down", "hang_up"]
+    took = next(kw for _, kw in nav.events if kw.get("step") == "took")
+    assert took["knock_s"] == round(nv.KNOCK_AIR_S, 2) and took["touches"] == 1
+    for track, price in ((_track(1, rope.x - 60, 10, vx=100.0), _price(5.0, 25.0)),
+                         (_track(1, rope.x + 5, 10), _price(20.0, 25.0))):
+        nav = _navigator(tree_map, monkeypatch, [track], y=rope.top + HANG_UNDER)
+        nav.senses.invulnerable_until = lambda: NOW + 0.55
+        nav.price = price
+        nav._climb_on(rope.top, rope.top + 30, rope.x)
+        assert [name for name, _ in nav.played] == ["hang_down", "hang_up"]
 
 
 def test_her_price_up_a_rope_is_the_hunt_s_rate_or_the_platform_s_and_the_touch_in_potions(monkeypatch):
-    """Hunter.top_price (HANG_TAKE's): her EXP a second the hunt's (behavior.fight.landing_prices: the loop's, within its
-    band), or with TOP_RATE_ABOVE (off) the grind's on the platform at the top where more (`ground_rate`); a touch the kind's
+    """Hunter.top_price (HANG_TAKE's): her EXP a second with TOP_RATE_ABOVE (on from 2026-11-02) the grind's on the
+    platform at the top (`ground_rate`: the user's "a lot EXP to earn by killing off mobs above"), 0 where the grind has
+    no stop there, the hunt's without a grind (behavior.fight.landing_prices: the loop's, within its band), and the
+    hunt's alone with it off; a touch the kind's
     share of her HP (the positioning model's Danger.taken) in potions at the user's prices (858 HP: 214.5 EXP a bar)
     times the share that hurt (no touches yet: HURT_SHARE); her HP over the safety stop's reserve (3 touches of 130)
     and that touch (the reserve's), else not ok; None before her max HP is read."""
@@ -611,10 +676,11 @@ def test_her_price_up_a_rope_is_the_hunt_s_rate_or_the_platform_s_and_the_touch_
                         danger=SimpleNamespace(taken=lambda kind: 0.15), hp_watch=w, ground_rate=None)
     got = hm.Hunter.top_price(h, 10, HORNY)
     assert got.rate == 7.0 and got.touch == pytest.approx(0.15 * 214.5 * HURT_SHARE) and got.hp_ok
-    h.ground_rate = lambda pid: 12.0 if pid == 10 else None
-    assert hm.Hunter.top_price(h, 10, HORNY).rate == 7.0  # (TOP_RATE_ABOVE off: the hunt's)
-    monkeypatch.setattr(hm, "TOP_RATE_ABOVE", True)
-    assert hm.Hunter.top_price(h, 10, HORNY).rate == 12.0 and hm.Hunter.top_price(h, 9, HORNY).rate == 7.0
+    h.ground_rate = lambda pid: {10: 12.0, 11: 5.0}.get(pid)
+    assert hm.Hunter.top_price(h, 10, HORNY).rate == 12.0 and hm.Hunter.top_price(h, 11, HORNY).rate == 5.0
+    assert hm.Hunter.top_price(h, 9, HORNY).rate == 0.0  # (no stop up there: nothing to earn above)
+    monkeypatch.setattr(hm, "TOP_RATE_ABOVE", False)
+    assert hm.Hunter.top_price(h, 10, HORNY).rate == 7.0 == hm.Hunter.top_price(h, 9, HORNY).rate  # (the hunt's)
     w.hp = 3 * 130 + 130 - 1.0
     assert not hm.Hunter.top_price(h, 10, HORNY).hp_ok
     h.max_hp = None
