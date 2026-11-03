@@ -880,15 +880,17 @@ def loop_tree_touched_unseen(sim):
     D:/MapleHelper-scratch/cornered): the looks are blind at her body, and a press from the ground goes to the claw on a
     monster there whatever she aimed at. The hunt loop on 7 alone in the harness's standard thief world (near-misses:
     a monster on her platform within 25 of her never found, 7% within 50, 34% to 100; walkers: one she hits chases her),
-    from x -163.5 between 7's Horny Mushroom points as in episode B (22:49:39-22:49:51), one Horny Mushroom on her at
-    -150, the other 123 off at -40. On 690e103 (seed 3, 10 s) the first touches her at once, and every one of her six
-    presses from the ground, at ones 179 and 125 off as hidden and 183 seen, went to the claw on it 8-80 in front of her
-    (swipes, no star), four of them within 2 s of a touch the looks had no monster for: 10 touches, no kill, as the
-    clip's corner at x -220 (22:49:56-22:49:58). Now a touch with none about her that could have made it (behavior.fight
+    from x -163.5 between 7's Horny Mushroom points as in episode B (22:50:42-22:50:54), one Horny Mushroom on her at
+    -150, the other 123 off at -40. On 690e103 (seed 3) the first touches her at once, and all six of her presses from
+    the ground, at ones 179 and 125 off as hidden and 183 seen, went to the claw on it 8-80 in front of her (swipes, no
+    star), each within 2 s of a touch the looks had no monster for: 7 touches in the 10 s, no kill, as the clip's
+    corner at x -220 (22:49:57-22:49:58). Now a touch with none about her that could have made it (behavior.fight
     .clawed: the navigator's R7 test, TOUCHER_S, TOUCHER_NEAR) has those go from a jump in place (attack.stance
     .CLAWED_AIR: 'jump (touched)'), whose star takes the one on her if its body reaches the search's window, else the
-    one aimed at. (Of seeds 1-6 of this set-piece, 10 s each: off, 46 touches, 33 that hurt, 6 kills, 23 swipes; on, 36,
-    31, 11, 2: D:/MapleHelper-scratch/cornered/proto.)"""
+    one aimed at: none to the claw, 5 touches, 2 kills. Of seeds 1-12, their first 10 s (D:/MapleHelper-scratch/
+    cornered/proto/seeds_sc2.txt), off against on: touches 70 and 57, that hurt 53 and 44, kills 11 and 24, the claw's
+    swipes 52 and 13, far_claws' 39 and 0; all of this met on none off, on 10 (all but 1, with no 'touched' jump, and 7,
+    no kill)."""
     return harness._only(_loop(1 / 6), (7,))(sim)
 
 

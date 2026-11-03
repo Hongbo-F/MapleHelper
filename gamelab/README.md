@@ -5186,6 +5186,96 @@ the lever there isn't built (On, the user's call). HANG_LONGER only ever on a hu
 never a retreat's. `--world hang-2s` (both off), `no-hang` (ROPE_HANG off) and `hang-rules` (both on: the default since
 the user's call) price them on any tip.
 
+## A touch with no monster seen by her: the throw from the air, not the claw (work/cornered, from 2026-11-03)
+
+The user, live on 2026-11-02 at 22:51: "save the last 2 minute clip as an example of cornered character making bad
+attack move". The study of that clip and its hour (D:/MapleHelper-scratch/cornered: the clip's 1,806 frames and the
+hour's tour and perceive records; `causes/` ten root causes, `verify-R1..R3` their checks) ranked first R1, and its check
+held it on the frames: **the looks are blind at her body, and a press from the ground goes to the claw on a monster
+there, whatever she aimed at.** Measured in the hour: a monster seen 0-10 off her is seen again in the next scene 19% of
+the time, 10-20 off 42%, past 60 about 90%; 59 of the 586 ground Lucky Sevens aimed 105 or more off with nothing seen
+within 105 took no MP (presses within 0.6 s of a touch left out; jump throws, which can't swipe, 3 of 389: the bar's
+noise), and every such press checked on the frames was the claw (15-25, no star) on a monster the looks had missed 0-70
+off: episode B's at 22:50:44.1 and 44.9 (the press aimed at +123 swiped the newborn #158 20-50 off her right edge, "22"
+at f974), episode C's at the wall at 22:49:57.3 and 58.2 (the HM 35-70 off, on her pet, swipes "24" and "19" at f272,
+f286), four at HMs 268-275 off with a Green Mushroom on her for 3 s at 22:50:10.6-13.2, and two at newborns fading in
+(22:49:46.0, 22:50:57.3). Of those checked, all but the newborns' came within 2 s of a touch the looks had no monster for
+(how many of the hour's 59 did is not counted): the fight never took a touch as evidence of one on her (the MISS of
+22:50:43.7 was known at the 22:50:44.1 decision and changed nothing), where the navigator's R7 already does for retreats
+(`Navigator._toucher`, TOUCHER_S 2.0, TOUCHER_NEAR 40). Not R1: the corner swipes of episodes A and B (stand-ins 7-56 off,
+CLAW_ONLY on purpose at the wall, R2's) and R2's "no way out" (its verdict: not held).
+
+**What it does now** (`attack.stance.CLAWED_AIR`, on; `behavior.fight.clawed`). A touch of hers as R7 goes by
+(`control.navigator.fresh_touch`: not `crowded`, its popup TOUCHER_S before the look at most, and up to
+`fight.TOUCH_ROUND_S` 1 ms after its frame: the popup's `at` is rounded to the ms, so the first look after a touch read
+it as from the future half the time; R7's own stays 0) with no monster of the look's, hidden or unseen on her platform
+(or beside her) within TOUCHER_NEAR of her is `clawed`: a monster the looks miss is on her. Then a throw at one past the
+claw's edge goes from a jump in place where its attack surely picks it (`stance._from_air`: `_from_here` without the
+ground, reach.air_sure with CLEAR_MARGIN, at once facing it, else turning in the air or tapping first, its jitter's room
+and line checked as up close), in reach (`stance`'s in-reach branch) and in close quarters where the ground's star was
+the sure throw (`_close_quarters`, `_touched`): the air has no claw, so its star takes the monster the looks miss if its
+body reaches the search's window (37 or more ahead), else the one aimed at. Its plan says why ('touched', 'touched, tap
+first': her log's "jump (touched)", the 'jump' records' kind). Where no jump is sure (a platform overhead, out of the
+air's reach) the ground as before; the claw on purpose up close (CLAW_ONLY) as before; the magician unchanged (no claw:
+POINT_BLANK off). Off: as 690e103.
+
+**The scenario** `loop_tree_touched_unseen` (sim.scenarios; `far_claws`): the hunt loop on 7 alone for 10 s in the
+harness's standard thief world (`_STANDARD`: crowd, zero-walls, near-misses, walkers, the attack choice), from x -163.5
+between 7's Horny Mushroom points as in episode B, one Horny Mushroom on her at -150, one 123 off at -40, seed 3. It
+expects no press from the ground at a target past the claw's edge (her stance line's nearest, 105 or more off) taken by
+the world's claw with its look TOLD_S to TOUCHER_S after a touch, a 'jump (touched)', and a kill. On 690e103 (its code
+with this scenario alone: D:/MapleHelper-scratch/cornered/proto/src690t, the test failing for that) all six of her
+presses from the ground, at ones 179 and 125 off as hidden and 183 seen, went to the claw on the one on her 8-80 in
+front, each within 2 s of a touch: 7 touches in the 10 s, no kill, as the clip's corner. Now none, a 'touched' jump
+4 times, 5 touches and 2 kills. Over seeds 1-12 of the set-piece, its first 10 s (D:/MapleHelper-scratch/cornered/proto/
+scripts/seeds_sc.py, CLAWED_AIR off against on, seeds_sc2.txt): touches 70 against 57, touches that hurt 53 against 44,
+kills 11 against 24, EXP 451 against 984, the claw's swipes 52 against 13, far_claws' 39 against 0; all three checks
+met on none of the 12 off, on 10 of 12 on (seed 1: no 'touched' jump was
+chosen, none of its presses past the claw's edge taken by it either; 7: no kill).
+
+**The harness** (the standard thief command, `ab ... --base 690e103`, seeds 1-24 paired, master 690e103's cached:
+D:/MapleHelper-scratch/baselines/harness/42c1a3f67980.../429c9e4a7b1f27f6; `scripts/pair.py`): the mechanism moves, the
+outcome doesn't at 24 seeds.
+
+| a run of 5 minutes | 690e103 | this | diff (se; t) |
+|---|---|---|---|
+| EXP a minute | 301.5 | 301.6 | +0.15 (10.06; +0.01) |
+| touches | 62.6 | 61.6 | -1.04 (3.50; -0.30) |
+| touches that hurt | 40.2 | 40.1 | -0.08 (2.61; -0.03) |
+| kills | 42.5 | 42.8 | +0.29 (1.36; +0.21) |
+| potions | 16.6 | 16.4 | -0.21 (1.26; -0.17) |
+| MP a minute | 346.4 | 347.2 | +0.82 (12.26; +0.07) |
+| ground presses the claw took (swipes) | 20.3 | 13.0 | -7.38 (1.92; -3.85) |
+| presses from the ground | 107.0 | 86.3 | -20.8 (4.87; -4.26) |
+| jump throws | 45.4 | 60.3 | +14.8 (3.94; +3.76) |
+| ... that hit nothing | 13.4 | 17.6 | +4.17 (1.62; +2.58) |
+| 'touched' jumps | 0 | 14.5 | |
+
+No death, fall or stop either side. Why level (`scripts/diag2.py`, seeds 1-8 run again with each decision taken while
+`clawed` recorded, its attack's outcome in the world's log and the touches 1.5 s after): of the presses from the ground
+that a touch had a monster missed on her for (29.1 a run), 45% hurt their target, 27% went to the claw; of the
+'touched' jumps in their place (27.1), 57% hurt one, 2% a claw's (the jump landed first), 19% hit nothing; the touches
+after either 0.40 a decision (hurt 0.29 and 0.30). So the throws do more, about 3.5 more hits a run, but a swipe pushes
+the monster in its box off her (sim.world: a hit that doesn't kill pushes it), a star thrown past it doesn't, and her
+EXP and touches stay within the seeds' spread (se 10 EXP a minute). The set-piece is the episode's case, where the miss
+is all there is to the fight; the grind has it 1.4 times a minute.
+
+**Tests**: tests/test_clawed.py (the throw past the claw's edge from a jump when clawed, tapping first facing away; the
+ground under a platform overhead or with the switch off; `_from_here` without the ground; `fight.clawed` as R7's test:
+TOUCHER_S, `crowded`, TOUCHER_NEAR, another platform, no danger, the rounding), tests/test_sim.py's scenarios
+(loop_tree_touched_unseen). Fast suite: FAST_SUITE.
+
+**Goldens**: GOLDENS.
+
+**Not done** (R1's other fixes, the verdict's order): a press from the ground with no MP drop as a monster within the
+claw's edge in front of her (its evidence when no touch came: the hour's 6.27 newborn and 77.62); `unseen()` counting
+LIVE tracks missed in one frame (135 of the hour's 269 touches with no detection within 75 had one); the fight's hidden
+monsters walked by their track rather than kept where last seen (C's +116 ghosts at the wall; fight.HIDDEN_FOR,
+pace_of's walk() 0 for one not seen), the ghosts' throws (R4), which a jump from the air throws at as the ground did
+(the 4.2 more jumps a run that hit nothing). And the perception's side (monsters on her, her pet, each other, newborns
+fading in), its owners'. Measured live: not yet; a supervised grind would show it in the 'jump' records' 'touched' and
+in the ground presses with no MP drop after a touch.
+
 ## Localization
 
 Her position comes from the minimap dot, which is always visible. The minimap is the map at 1/16 scale shown 1.40625× larger, so one minimap pixel is 11.4 map units; the dot is snapped to the platform she's standing on. Where the map's picture sits in the minimap window isn't in the map data: the picture is centred across in a window as wide as the map's name needs, so it moves from map to map, and on a map taller than the window shows the window scrolls it with her. The eyes match the map's own picture there (`minimap.MinimapPicture`, the miniMap canvas from the game data, `mapdata.minimap_picture`, as bands of it) and read every dot as if the picture were where it was on the first map, where the dot's origin was fitted (`PICTURE_BASE`, game px (47, 72)), by whole game px. The game draws it at whole game px: an edge fit of the picture's sides (the motion track's, 2026-10-23, since replaced by the match) put its top-left corner at game px 46.95-46.96 across on all 30 saved frames of the first map, 41.96-41.98 on all 133 of West Rocky Mountain II at 1920×1080 and 42.03-42.04 on its 31 at 1366×768, 71.92-71.98 down on all. So on the first map nothing moves (its saved frames place her as before, to the unit), and on West Rocky Mountain II the picture is 5 game px to the left: with the first map's origin her x read 80 map units left of where she stood (one minimap pixel of the game's is 16 units; on the floating step 24 -1026, clamped to its left end, for the -938 two ropes in view put her at, -946 through the picture; at 1366×768 on stair 28, -880 on no platform, for the -792 the ropes put her at, and -800 on 28 through the picture). On Tree Dungeon, Forest Up North II the picture (67 × 183 game px) scrolls in a window showing 112 rows: read with the first map's origin her dot put her at x 902 on a map 360..410 wide. With another map's picture, nothing on the minimap, or Kerning City Construction Site's wider window, nothing is found, and until it has been a look isn't handed on (Perception: Capture checks; the dots were read as they are, which on Tree Dungeon put her off the map for a whole hunt). With her name tag on screen, her x is refined from a rope in view (ropes are drawn exactly at their map x) or the visible end of her platform; on a map narrower than the view (Tree Dungeon, Forest Up North II, 770 wide) the camera can't move across and is centred, so her x comes from her name tag first (`pose.camera_x`). Her place on screen comes from her name tag. When the tag is hidden, for example behind the party HP box at the map's edge, it comes from the dot and the camera instead: the camera keeps her at a fixed spot on screen except near the map's edges, where it stops, and it learns that spot from the looks where the tag is visible.

@@ -185,16 +185,16 @@ WOUND_HIDDEN_S = 0.8     # s unseen that a wound of hers is waited for (her hit'
 # R1 of the cornered study (2026-11-03, D:/MapleHelper-scratch/cornered: the user's clip of 2026-11-02 22:51, "cornered
 # character making bad attack move"): the looks are blind at her body (a monster seen 0-20 off her is seen in the next
 # look 19-42% of the time live, against ~90% past 60), and a press from the ground goes to the claw whenever a monster's
-# body is in its box in front of her, whatever she aimed at. Live in that hour 59 of 586 ground Lucky Sevens aimed 105 or
-# more off with nothing seen within 105 took no MP, and every one checked on the frames was the claw on a monster the
-# looks missed 0-70 off (15-25 a swipe, no star), most of them just after a touch the looks had no monster for (the
-# MISS of 22:50:43.7 known at the look of 22:50:44.1, which changed nothing). So a touch of hers with no monster about
-# her that could have made it (`clawed`: behavior.fight.clawed, the navigator's R7 stand-in's test, Navigator._toucher:
-# TOUCHER_S, TOUCHER_NEAR) has a throw at one past the claw's edge go from a jump in place where its attack surely picks
-# it (_from_here without the ground: reach.air_sure, CLEAR_MARGIN farther), the air having no claw: its star takes the
-# one the looks miss if that one's body reaches the search's window (37 or more ahead, the 50-60 of the wall corner of
-# 22:49:57), else the one she aimed at. With none sure, from the ground as before (the claw's swipe, if it's there). Off:
-# as before.
+# body is in its box in front of her, whatever she aimed at. Live in that hour 59 of 586 ground Lucky Sevens aimed 105
+# or more off with nothing seen within 105 took no MP, and every one checked on the frames was the claw on a monster the
+# looks missed 0-70 off (15-25 a swipe, no star), all but those at newborns fading in within 2 s of a touch the looks
+# had no monster for (the MISS of 22:50:43.7 known at the look of 22:50:44.1, which changed nothing). So a touch of hers
+# with no monster about her that could have made it (`clawed`: behavior.fight.clawed, the navigator's R7 stand-in's
+# test, Navigator._toucher: TOUCHER_S, TOUCHER_NEAR) has a throw at one past the claw's edge go from a jump in place
+# where its attack surely picks it (_from_here without the ground: reach.air_sure, CLEAR_MARGIN farther), the air having
+# no claw: its star takes the one the looks miss if that one's body reaches the search's window (37 or more ahead, the
+# 35-70 of the wall corner of 22:49:57), else the one she aimed at. With none sure, from the ground as before (the
+# claw's swipe, if it's there). Off: as before.
 CLAWED_AIR = True
 
 # --- clearance, kept ahead of time (from 2026-10-27) -------------------------------------------------------------------
