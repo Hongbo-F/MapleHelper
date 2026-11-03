@@ -37,7 +37,6 @@ from ..attack import danger
 from ..behavior.hunter import Hunter
 from ..behavior.safety import HuntStop, SafetyStop
 from ..localization.mapdata import MapModel
-from ..motion import physics
 from ..control.navigator import Navigator
 from ..control.timeline import SIM_KEYS, SIM_KEYS_MAGE, SIM_KEYS_PET
 from ..behavior.tour import Tour
@@ -244,7 +243,6 @@ class Sim:
 
     def __enter__(self) -> "Sim":
         _import_all()
-        physics.reset()  # (her planner's walk and climb her prior's: a run before's calibration isn't this one's start)
         self._tmp = tempfile.TemporaryDirectory(prefix="gamelab-sim-")
         self.folder = Path(self._tmp.name)
         self._patch = patched(self.clock, self.player, self.folder)
@@ -255,7 +253,6 @@ class Sim:
 
     def __exit__(self, *exc) -> bool:
         self.active = False
-        physics.reset()  # (her calibration's changes were this run's: the next starts from her prior)
         for book in self.books:  # (its save at the process's end would write into the run's lab, gone by then)
             book.path = None
         try:
@@ -306,11 +303,7 @@ class Sim:
             book = paths.of().damage
             book.parent.mkdir(parents=True, exist_ok=True)
             book.write_text(self.scenario.book.read_text(encoding="utf-8"), encoding="utf-8")
-        kw.setdefault("motion", self.world.character.planned)  # (her planner's start: her prior unless the world's Her
-        h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)  # says another: Her.planned)
-        # Her calibration measures her walk as the world walks her: on a slope at her walk along x, the world having no
-        # slope rule (sim.world: the live client's, v83's, which the calibration takes out live, isn't the world's)
-        h.motion.walks.slopes = False
+        h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)
         if getattr(h.attacks, "book", None) is not None:  # (its fits at once, not on a thread: the same run every time)
             h.attacks.book.threaded = False
             self.books.append(h.attacks.book)
@@ -762,8 +755,8 @@ def loop_tree_23(sim):
     1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.) (Seed 1 since her drops are swept by the
     seconds each may add to her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan:
     hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 3 seven kills, the rule
-    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.) (Seed 3 since her walk and climb
-    calibrated (2026-11-02: the thief at his stat window's 151.25 and 121, world and planner, where 149 and the world's
+    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.) (Seed 3 since his walk and climb
+    by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, world and planner, where 149 and the world's
     130 up; D:/MapleHelper-scratch/recfix/calib/seeds/slow23*.json, v23_*.json): on seed 1 ten kills; of seeds 1-16 3,
     5, 7 and 8 show all of this, at work/rec-all 1, 3, 6, 8, 9, 11-13 and 16; her kills over 1-16 12.2 a run against
     16.8 there, the walk's change (at his walk 149 and climb 119.2 16.4; at 151.25 with the climb 130 12.4), but over
@@ -811,7 +804,7 @@ def loop_tree_23_near_misses(sim):
     sideways added to the speed she has, landing at her walk's speed at most, world.KNOCK_VX, KNOCK_ADDS,
     KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
     D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on seed 11 14 kills; of seeds 1-16 1, 5 and 16 show all of this,
-    the others under twenty kills (a median 12); on 1, 24.) (Seed 2 since her walk and climb calibrated (2026-11-02: the
+    the others under twenty kills (a median 12); on 1, 24.) (Seed 2 since his walk and climb by his SPEED (2026-11-02: the
     thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
     seeds/slow23*.json): on seed 1 ten kills; of seeds 1-16 2, 12 and 16 show all of this, at work/rec-all 1, 5 and 16
     (13.2 kills a run over 1-16 against 14.0); on 2, 21.)"""
@@ -1335,8 +1328,8 @@ def loop_tree_safety_stop(sim):
     starts (attack.stance.Pace). Until 2026-10-28 the stop was at 65% for 2 s: here at 48% 2.9 s in, and her retreat
     took her to 1.1%. Seeds 1-12 under each rule: README, The safety stop in HP.) (Seed 1 since the stack's monsters
     turn where the game turns them, 20 from a platform's end (monsters.walk_edges), 2026-10-31: on seed 2 an attack or
-    the mouse after the stop; of seeds 1-13 all but 2-4 and 12 show all of this.) (Seed 2 since her walk and climb
-    calibrated (2026-11-02: the thief walks his stat window's 151.25 and climbs 121, the world as his planner, where 149
+    the mouse after the stop; of seeds 1-13 all but 2-4 and 12 show all of this.) (Seed 2 since his walk and climb
+    by his SPEED (2026-11-02: the thief walks his stat window's 151.25 and climbs 121, the world as his planner, where 149
     and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 1 an attack or the mouse
     after the stop; of seeds 1-16 all but 1, 3, 14 and 15 show all of this.)"""
     return safety_stop(5)(sim)
@@ -1415,8 +1408,8 @@ def loop_tree_out_of_darts(sim):
     is the client's (2026-11-02: 270 out and up, its push sideways added to the speed she has, landing at her walk's
     speed at most, world.KNOCK_VX, KNOCK_ADDS, KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was
     ~58; D:/MapleHelper-scratch/recfix/sim-fix/scan3.txt, scanned with the push set outright, not added): on seed 1 not
-    on a safe place once her retreat was over; of seeds 1-16 all but 1, 7 and 10 show all of this.) (Seed 1 since her
-    walk and climb calibrated (2026-11-02: the thief at his stat window's 151.25 and 121, where 149 and the world's 130
+    on a safe place once her retreat was over; of seeds 1-16 all but 1, 7 and 10 show all of this.) (Seed 1 since his
+    walk and climb by his SPEED (2026-11-02: the thief at his stat window's 151.25 and 121, where 149 and the world's 130
     up; D:/MapleHelper-scratch/recfix/calib/seeds/scenarios.json): on seed 2 not on a safe place once her retreat was
     over; of seeds 1-16 all but 2 and 12 show all of this.)"""
     return darts_stop(5)(sim)
@@ -1710,7 +1703,7 @@ def loop_tree_attack_no_darts(sim):
     14 meet all of this. On 6: the doubt at 110.2 s, a Green Mushroom at 47%.) (Seed 11 since the rope hang beside the
     world's touches and knock as live (work/rec-all, the integration of 2026-11-02; D:/MapleHelper-scratch/recfix/
     integrate/diag/scan1.txt): on 6 her stars' test never said MAYBE OUT; of seeds 1-16, 11 and 14 meet all of this. On
-    11 the doubt at 129.4 s, a Green Mushroom at 84-90%.) (Seed 9 since her walk and climb calibrated (2026-11-02: the
+    11 the doubt at 129.4 s, a Green Mushroom at 84-90%.) (Seed 9 since his walk and climb by his SPEED (2026-11-02: the
     thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
     seeds/scenarios.json): on 11 her stars' test never said MAYBE OUT; of seeds 1-16, 9, 13 and 16 meet all of this. On
     9 the doubt at 106.7 s, a Green Mushroom.)"""

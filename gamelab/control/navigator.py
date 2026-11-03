@@ -358,7 +358,7 @@ KEY_LEAD = {"jump": JUMP_LAG, "jump_up": JUMP_LAG, "hop": JUMP_LAG, "climb": JUM
 
 @physics.follows
 def _follow() -> None:
-    """Her walk and climb as calibrated (physics.set_motion, which rebinds the names taken from it): flow's climb up
+    """Her walk and climb as set (physics.set_speed, which rebinds the names taken from it): flow's climb up
     (ROPE_SPEED, flow's own follower's) and a walk-off's lead (KEY_LEAD) made again of them."""
     global ROPE_SPEED
     ROPE_SPEED = flow.ROPE_SPEED
@@ -1006,11 +1006,11 @@ class Navigator:
         return st
 
     def _follow_walk(self) -> None:
-        """At a pass's start, where no chain of hers runs: a change of her walk or climb her calibration proposed made
-        (physics.settle: motion.calibrate), and the route graph made again if her walk or climb is another than its
-        moves were made at (physics.EPOCH: their takeoffs, landings and costs), with what was worked out of its moves
-        (the pricing's siblings). A chain planned before keeps its timings: its keys are the player's, and it has ended
-        by now."""
+        """At a pass's start, where no chain of hers runs: a change of her walk and climb proposed made (physics.settle:
+        her stat window's SPEED read in the hunt loop, behavior.hunter), and the route graph made again if her walk or
+        climb is another than its moves were made at (physics.EPOCH: their takeoffs, landings and costs), with what was
+        worked out of its moves (the pricing's siblings). A chain planned before keeps its timings: its keys are the
+        player's, and it has ended by now."""
         physics.settle()
         if self._epoch != physics.EPOCH:
             self.planner, self._epoch, self._siblings = Planner(self.model), physics.EPOCH, None

@@ -585,7 +585,7 @@ class Hunt:
             self._next_ground(first)
             while time.monotonic() < end:
                 try:
-                    physics.settle()  # (her walk and climb as her calibration has them now: between key plans)
+                    physics.settle()  # (a SPEED her stat window read in the loop made hers: between key plans)
                     if self._pass() == "stop":
                         break
                 except LookLost as lost:  # the game doesn't look as expected: stand still until it does (senses)

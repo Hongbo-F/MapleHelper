@@ -314,13 +314,17 @@ def test_a_simulated_grind_of_hers_casts_from_the_ground_inside_her_lock_never()
 
 
 def test_her_walk_as_planned_is_a_world_of_its_own():
-    # `--world walk-planned`: her world's walk the planner's (physics.SHOE), what a planner's error costs her; from the
-    # integration of 2026-11-02 her world's own is the client's 150 (MAGE_WALK), what her profile's SPEED 100 plans
+    # `--world walk-planned`: her world's walk and climb her profile's (physics.PROFILE_SHOE, PROFILE_CLIMB: her planner's
+    # in the simulator), what a planner's error costs her; from the integration of 2026-11-02 her world's own is the
+    # client's 150 (MAGE_WALK), what her profile's SPEED 100 plans, and from work/rec-panel her climb 120 (MAGE_CLIMB)
     import dataclasses
     from gamelab.motion import body, physics
     from gamelab.sim import harness
-    assert harness.WORLDS["walk-planned"] == {"walk_speed": None} and "walk_speed" in harness.HER_FIELDS
-    assert world_mod.her_shoe(dataclasses.replace(MAGE_32, walk_speed=None)) is physics.SHOE
+    assert harness.WORLDS["walk-planned"] == {"walk_speed": None, "climb_speed": None}
+    assert {"walk_speed", "climb_speed"} <= set(harness.HER_FIELDS)
+    planned = dataclasses.replace(MAGE_32, walk_speed=None, climb_speed=None)
+    assert world_mod.her_shoe(planned) is physics.PROFILE_SHOE is physics.SHOE
+    assert world_mod.her_climb(planned) == physics.PROFILE_CLIMB and world_mod.her_climb(MAGE_32) == 120.0
     assert world_mod.her_shoe(MAGE_32).vmax == world_mod.MAGE_WALK == 150.0
     her_planner = body.Shoe.from_physics(body.PHYSICS_IMG, 100.0, physics.CHARACTER.jump, bonus=body.SPEED_BONUS)
     assert world_mod.her_shoe(MAGE_32) == her_planner  # (the shoe her profile's SPEED 100 plans her with: the same)

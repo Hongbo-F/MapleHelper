@@ -357,12 +357,6 @@ class Feed:
         """She threw toward `side` at t (Actions.throw_listeners), with `attack` (its id: gamelab.character) and `aim`
         (the monster her attack choice aimed it at: tracking.MonsterTracker.throw), if told."""
 
-    def since(self, seq: int) -> list[WorldState]:
-        """The states of the frames after frame `seq` the feed still holds (KEEP), in order, nothing asked or waited for:
-        her place track between looks (motion.calibrate, the hunter's: every frame's, where the looks and glances come
-        often enough)."""
-        return [st for st in list(self._states()) if st.seq > seq]
-
     def close(self) -> None:
         pass
 

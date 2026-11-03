@@ -330,7 +330,7 @@ def test_the_thiefs_profile_is_todays_constants():
     # Her HP, level and DEF aren't the profile's (nor config.toml's): perception's (behavior.bootstrap).
     assert not {"hp", "level", "defence"} & {f.name for f in __import__("dataclasses").fields(c)}
     from gamelab.motion import physics
-    assert physics.climb_of(c.speed) == physics.CLIMB_SPEED == 121.0 and t.fixed_stats == c  # (SPEED + 20: his prior)
+    assert physics.climb_of(c.speed) == physics.CLIMB_SPEED == 121.0 and t.fixed_stats == c  # (SPEED + 20: his profile's)
 
 
 def test_the_magicians_skill_tables_are_the_game_datas():

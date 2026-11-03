@@ -47,10 +47,12 @@ read): its level or max HP not her HUD's where both are read (`disagreement`), n
 outside 0 to DEF_TOP, nor one her touches don't bear out: HerStats.window_doubt), kept with her level and the session;
 her max HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
 (`borne`); her level where nothing has read it; her max MP her casts are reckoned at (Hunter.max_mp, Attacks.max_mp:
-config.toml [character] mp until then, said), where her MP bar bears it out or it's within MP_SPAN of theirs; ATTACK,
-ACCURACY, EVASION, MAGIC, MAGIC DEF., her four stats, SPEED and JUMP kept in her stats file (not modelled from yet:
-said where SPEED and JUMP differ from her profile's, which plan her moves, with the walk and jump each gives:
-`moves_notes`)."""
+config.toml [character] mp until then, said), where her MP bar bears it out or it's within MP_SPAN of theirs; her
+SPEED her walk and climb's by the client's formula (Hunter._speed_read: motion.physics.set_speed, from 2026-11-02), but
+not one outside the client's range or SPEED_STEP from both what's planned and her last read kept (`speed_doubt`: a
+misread, said, the SPEED planned kept); ATTACK, ACCURACY, EVASION, MAGIC, MAGIC DEF., her four stats, SPEED and JUMP
+kept in her stats file (JUMP not modelled from yet: said where it differs from her profile's, which plans her jumps,
+with the jump each gives: `moves_notes`)."""
 
 import json
 import time
@@ -61,6 +63,7 @@ import numpy as np
 
 from .. import paths, telemetry
 from ..control import alarm, client
+from ..motion import body
 from ..perception import stat_window as sw
 from ..perception.framecheck import BadLook
 from .bootstrap import session_of_feed
@@ -91,6 +94,11 @@ SHOTS_MAX = READS_MAX  # the window's frames kept a run
 BAR_TOL = 0.05         # her bar's share against the window's cur / max: this far apart at the most
 MP_SPAN = 1.25         # the window's max MP within this factor (either way) of her casts' max MP
 VALUE_TOP = 30000      # the game's cap on max HP and MP: a number over it is a misread
+# ... and its SPEED (`speed_doubt`) within the client's range (motion.body.SPEED_RANGE, 80-140), SPEED_STEP at most from
+# what her walk and climb are planned at or from her last read kept: between two reads her gear plausibly changes it by
+# less (a guess from meowdb's speed guide, 2026-10-27: shoes +1 to +4, capes +2 and +3, a Speed Potion +8; a thief's Haste,
+# +10 to +30, neither character's, is a buff for minutes the read shouldn't plan a hunt by)
+SPEED_STEP = 10.0
 
 
 class StatWindowStop(HuntStop):
@@ -226,14 +234,29 @@ def borne(pair, share: float | None, kept: float | None = None, span: float | No
     return ", ".join(x for x in (known, bar) if x) + ": not borne out"
 
 
+def speed_doubt(speed: float, planned: float, kept: float | None = None) -> str | None:
+    """Why her stat window's SPEED `speed` (%) is no read to plan her walk and climb by (None: it is one): outside the
+    client's range (motion.body.SPEED_RANGE), or more than SPEED_STEP from both the SPEED they're planned at
+    (`planned`: her stat window's taken last, else her profile's) and her stat window's last read kept (`kept`:
+    HerStats.window_read's, None: none). So a misread doesn't move her plan, and a change of her gear past SPEED_STEP is
+    taken once two reads agree (each read is kept as read)."""
+    lo, hi = body.SPEED_RANGE
+    if not lo <= speed <= hi:
+        return f"outside the client's {lo:g}-{hi:g}"
+    if abs(speed - planned) <= SPEED_STEP or (kept is not None and abs(speed - kept) <= SPEED_STEP):
+        return None
+    last = "" if kept is None or kept == planned else f" and {speed - kept:+g} from her last read, {kept:g}"
+    return f"{speed - planned:+g} from the {planned:g} planned{last}: more than gear gives between two reads"
+
+
 def moves_notes(reading: sw.StatReading, stats=None, where: Callable[[str], str] | None = None) -> list[str]:
     """What to say where her stat window's JUMP isn't the one her jumps are planned by (`stats`: physics' CHARACTER;
     `where(stat)`: what it's from, gamelab.character.stats_from), a point or more apart: the jump it gives and the one
     planned. physics' JUMP is loaded once: a profile to change, or gear since it was set. Her SPEED isn't said here
-    from 2026-11-02: her walk and climb are measured as she moves and correlated with it (motion.calibrate:
-    Calibration.panel_seen, the hunter's), her prior the window's SPEED by the client's formula (125 x (SPEED + 20)/100,
-    motion.body.SPEED_BONUS). Before, the planned walk was 125 x SPEED/100 and the thief's 119.2 (her walk fitted: 149
-    units/s) said "her SPEED 101% by her stat window, config.toml [character] speed 119.2" at every read."""
+    from 2026-11-02: her walk and climb are the window's SPEED's by the client's formula (125 x (SPEED + 20)/100,
+    motion.body.SPEED_BONUS; Hunter._speed_read). Before, the planned walk was 125 x SPEED/100 and the thief's 119.2
+    (her walk fitted: 149 units/s) said "her SPEED 101% by her stat window, config.toml [character] speed 119.2" at
+    every read."""
     from .. import character
     from ..motion import physics
     stats = physics.CHARACTER if stats is None else stats

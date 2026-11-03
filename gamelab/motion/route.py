@@ -134,8 +134,8 @@ RISK = {"jump": 0.25, "walk_off": 0.2, "drop": 0.25, "rope_jump": 0.5}  # (rope_
 
 @physics.follows
 def _follow() -> None:
-    """Her walk as calibrated (physics.set_motion, which rebinds the names taken from it): ROPE_VX, ROPE_VY, GRAB_LEAD
-    and ROPE_JUMP_SLIDE made again of it (a navigator makes its route graph again: physics.EPOCH)."""
+    """Her walk as set (physics.set_speed, which rebinds the names taken from it): ROPE_VX, ROPE_VY, GRAB_LEAD and
+    ROPE_JUMP_SLIDE made again of it (a navigator makes its route graph again: physics.EPOCH)."""
     global ROPE_VX, ROPE_VY, GRAB_LEAD, ROPE_JUMP_SLIDE
     ROPE_VX = physics.SHOE.rope_vx * physics.SHOE.vmax
     ROPE_VY = physics.SHOE.rope_vy * physics.SHOE.vjump

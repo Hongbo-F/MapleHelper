@@ -923,11 +923,11 @@ def test_a_jump_forward_whose_short_kick_lands_on_the_platform_above_is_not_take
     # Under a platform 60 up whose end is at 450: the kick at full speed (149) lands her on the floor at 484, at 119
     # (the arrow seen at the jump's own step) up on the platform (review, 2026-10-25), as physics.sure_landing finds
     # of the same jump; with the platform's end at 440 every way lands on the floor, and she takes it. (Her planner at
-    # the 149 these were found at: physics.set_motion, as her calibration sets it; at the thief's 151.25 the end that
-    # catches the short kick is 455-460.)
+    # the 149 these were found at, SPEED 99.2: physics.set_speed, as her stat window's read sets it; at the thief's
+    # 151.25 the end that catches the short kick is 455-460.)
     from gamelab.attack.stance import plan_of, stance
     from maplehelper.engine import RIGHT
-    physics.set_motion(149.0)
+    physics.set_speed(99.2)
     for end, sure in ((450, False), (440, True)):
         model = build({"1": [seg(1, 0, 500, 1500, 500)], "2": [seg(2, 200, 440, end, 440)]})
         floor = plat(model, 500, 600)

@@ -10,8 +10,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   on average, a whole number of steps), and she turns when it sees the press; of the arrows it sees held,
   the one pressed last counts. The steps fall every 30 ms from a phase drawn from the seed (step_phase);
 - on the ground, at each step, the arrow it sees speeds her up at 1400 units/s² to her walk speed (her truth: the
-  client's formula at her stats' SPEED, physics.PRIOR_SHOE, or her own, Her.walk_speed: World.shoe, apart from her
-  planner's, which her calibration moves: motion.calibrate)
+  client's formula at her profile's SPEED, physics.PROFILE_SHOE, or her own, Her.walk_speed: World.shoe, apart from her
+  planner's, physics.SHOE, which her stat window's SPEED sets: physics.set_speed)
   (turning her round the same way), and none brakes her at 800 (body.ground_step over the step), and she
   runs the step evenly; walking past a platform's end she falls, unless a wall rises there;
 - the jump key lifts her off at the step after the game sees it (Lags.jump, 65 ms, after the key on
@@ -29,8 +29,8 @@ on the world's 5 ms tick, and the game's 30 ms step (body.STEP: STEP_MS):
   (jump-backs and jump-throws slid 1.4-2.9 units in game). Below the map's lowest floor she has fallen out
   of the map, and the run ends there (SimFellOut);
 - up held at a rope's foot, or anywhere along it in the air, grabs it (its bottom Realism.rope_reach above her
-  feet at most); up climbs at her climb (her truth: SPEED + 20 at her stats' SPEED, physics.PRIOR_CLIMB, or her own,
-  Her.climb_speed: World.climb) onto
+  feet at most); up climbs at her climb (her truth: SPEED + 20 at her profile's SPEED, physics.PROFILE_CLIMB, or her
+  own, Her.climb_speed: World.climb) onto
   the platform at its top (a short climb-over, flow.CLIMB_OVER), down climbs down at it too
   and lets go at its bottom; down on a rope's top grabs it from above; the jump key with an arrow jumps
   her off it sideways (ROPE_JUMP); down and jump on a floor whose foothold forbids it (forbidFallDown)
@@ -151,10 +151,9 @@ from ..perception.touches import INVULNERABLE_S
 TICK_MS = 5              # the world's tick, which is also the engine's own step in the air (body.TICK)
 STEP_MS = round(body.STEP * 1000)  # the game's step: it acts on keys, and sets her speed on the ground, every
                                    # 30 ms (body.STEP)
-# Her climb, up and down (World.climb, her_climb): the client's SPEED + 20 at her stats' SPEED (physics.PRIOR_CLIMB: the
-# thief's 121, the magician's 120; she climbed 119.9 up and 119.6 down on 2026-11-02), as her calibration measures it
-# (motion.calibrate). Until 2026-11-02 up at the planner's flow.ROPE_SPEED (130, the minimap's traces) and down at its
-# physics.CLIMB_SPEED (117).
+# Her climb, up and down (World.climb, her_climb): the client's SPEED + 20 at her profile's SPEED
+# (physics.PROFILE_CLIMB: the thief's 121, the magician's 120; she climbed 119.9 up and 119.6 down on 2026-11-02). Until
+# 2026-11-02 up at the planner's flow.ROPE_SPEED (130, the minimap's traces) and down at its physics.CLIMB_SPEED (117).
 # A climb ends in an animation onto the platform at the rope's top: flow.CLIMB_OVER is how long after the
 # top she makes a standing start, which the game then sees an arrow already held for Lags.on later. So she
 # stands still for both (0.30 s), less the wait for the game's next step that comes after it (12.5 ms on
@@ -177,7 +176,7 @@ def rope_jump(shoe: body.Shoe) -> tuple[float, float]:
     return (shoe.rope_vx * shoe.vmax, shoe.rope_vy * shoe.vjump) if ROPE_JUMP_SHOE else (shoe.vmax, 220.0)
 
 
-ROPE_JUMP = rope_jump(physics.PRIOR_SHOE)  # (her prior's: the world's own is World.rope_jump)
+ROPE_JUMP = rope_jump(physics.PROFILE_SHOE)  # (her profile's: the world's own is World.rope_jump)
 # Her body for the world's touches (Realism.her_box), (half its width, its height) about her feet. By default the
 # client's touch test (from 2026-11-02): RustMS's copy of HeavenClient, aligned with the v83 client, has a monster touch
 # her where its frame's box (Mob::is_in_range: the bounds of the frame it shows, as SimMonster.body has them) meets
@@ -1192,15 +1191,12 @@ class Her:
                                  # her was a swipe of 15-24 or a MISS, no MP
     walk_speed: float | None = None  # map units a second the world walks her at (her_shoe: the game's Physics.img shoe at
                                  # the SPEED that walks her so, her JUMP the planner's); None: her truth, the client's
-                                 # formula at her stats' SPEED (physics.PRIOR_SHOE: the thief's 151.25), whatever her
-                                 # planner has (until 2026-11-02 the planner's own, physics.SHOE). Apart from the
+                                 # formula at her profile's SPEED (physics.PROFILE_SHOE: the thief's 151.25), whatever
+                                 # her planner has (until 2026-11-02 the planner's own, physics.SHOE). Apart from the
                                  # planner's, a wrong speed in her profile shows in the world (her steps overshoot, her
-                                 # jumps after a run carry farther than planned), as it did live (MAGE_32), until her
-                                 # calibration has her walk measured (motion.calibrate)
+                                 # jumps after a run carry farther than planned), as it did live (MAGE_32)
     climb_speed: float | None = None  # ... and climbs her at, up and down (her_climb); None: her truth, SPEED + 20 at her
-                                 # stats' SPEED (physics.PRIOR_CLIMB: the thief's 121)
-    planned: tuple[float, float] | None = None  # her planner's walk and climb at the start instead of her prior (her
-                                 # calibration's starting point: sim.harness `--world prior-v83`); None: her prior
+                                 # profile's SPEED (physics.PROFILE_CLIMB: the thief's 121)
     mp_regen: float = MP_REGEN   # MP a second she regains all the while (Her.mp kept)
     magic: SimMagic | None = None  # her skill key's attack Magic Claw as the game casts it (SimMagic: the magician's,
                                  # MAGE_32), her MP its ammunition (`cast_mp` a cast, nothing with less, MP_REFUSAL
@@ -1208,20 +1204,20 @@ class Her:
 
 
 def her_shoe(her: Her) -> body.Shoe:
-    """The shoe the world walks and jumps her with: her truth, the client's at her stats' SPEED and JUMP
-    (physics.PRIOR_SHOE: never her planner's, which her calibration moves), unless Her.walk_speed says otherwise, then the
-    game's Physics.img shoe at the SPEED that walks her at it (walkSpeed x SPEED / 100), her JUMP the planner's. Only
-    her walk differs: the acceleration, braking and the air's drag are the game data's for everyone."""
+    """The shoe the world walks and jumps her with: her truth, the client's at her profile's SPEED and JUMP
+    (physics.PROFILE_SHOE: never her planner's, which her stat window's SPEED sets), unless Her.walk_speed says
+    otherwise, then the game's Physics.img shoe at the SPEED that walks her at it (walkSpeed x SPEED / 100), her JUMP the
+    planner's. Only her walk differs: the acceleration, braking and the air's drag are the game data's for everyone."""
     if her.walk_speed is None:
-        return physics.PRIOR_SHOE
+        return physics.PROFILE_SHOE
     speed = 100.0 * her.walk_speed / body.PHYSICS_IMG["walkSpeed"]
     return body.Shoe.from_physics(body.PHYSICS_IMG, speed, physics.CHARACTER.jump)
 
 
 def her_climb(her: Her) -> float:
-    """How fast (units/s) the world climbs her, up and down: her truth, SPEED + 20 at her stats' SPEED
-    (physics.PRIOR_CLIMB), unless Her.climb_speed says otherwise."""
-    return physics.PRIOR_CLIMB if her.climb_speed is None else float(her.climb_speed)
+    """How fast (units/s) the world climbs her, up and down: her truth, SPEED + 20 at her profile's SPEED
+    (physics.PROFILE_CLIMB), unless Her.climb_speed says otherwise."""
+    return physics.PROFILE_CLIMB if her.climb_speed is None else float(her.climb_speed)
 
 
 LEVEL_19 = Her()
@@ -1270,8 +1266,7 @@ LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=62
 #   live (attack.danger.touch_taken, meowdb's formula);
 # - her walk the client's, 150 units/s (walk_speed: MAGE_WALK, below), as her planner plans it from item 1 (her
 #   profile's SPEED 100): the world walks her at its own all the same (Her.walk_speed), so a planner's error shows;
-#   her climb the client's too, 120 up and down (climb_speed: MAGE_CLIMB), her planner's prior, which her calibration
-#   moves (motion.calibrate) where the world's doesn't;
+#   her climb the client's too, 120 up and down (climb_speed: MAGE_CLIMB), as her planner plans it;
 # - her pet drinks Meat, 160 HP (MEAT_HP: on R2's frames her HUD's number 606 -> 766, 601 -> 761, 639 -> 799 and
 #   562 -> 722, the frame after a touch; D:/MapleHelper-scratch/recfix/sim-mage/hp_seq.png, hp_seq2.png; the hour's 92
 #   rises all 160; the game data's spec hp 160, where the user remembered 150), under 75% of her HP (MAGE_PET_HP: the

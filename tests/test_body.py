@@ -55,7 +55,7 @@ def test_the_physics_is_the_game_datas():
 
 def test_her_shoe_from_physics_img_and_her_stats():
     assert SHOE.vmax == 149.0  # 125 x (99.2 + 20)/100, exactly 119.2's under the old formula (the goldens' walk until
-                               # 2026-11-02's calibration: the thief's prior 151.25 since, his stat window's 101)
+                               # 2026-11-02: the thief's 151.25 since, his stat window's 101)
     assert SHOE.vmax == Shoe.from_physics(body.PHYSICS_IMG, speed=119.2, jump=100).vmax  # (125 x 119.2/100, v83's)
     assert (SHOE.acc, SHOE.drag, SHOE.vjump, SHOE.gravity, SHOE.fall) == (1400, 800, 555, 2000, 670)
     assert (SHOE.air_acc, SHOE.air_drag, SHOE.air_drag_fall) == (200, 1, 100)

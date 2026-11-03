@@ -102,8 +102,8 @@ JB_THROW_MS = JB_RUN_MS + AIR_TURN_ATTACK_MS  # the attack key physics.AIR_TURN_
 
 @physics.follows
 def _follow() -> None:
-    """Her walk as calibrated (physics.set_motion, which rebinds the names taken from it): the jump back's keys made
-    again of BLIND_ENDS_MS (the same 150 for any walk from 134 to 168: physics._blind_ends)."""
+    """Her walk as set (physics.set_speed, which rebinds the names taken from it): the jump back's keys made again
+    of BLIND_ENDS_MS (the same 150 for any walk from 134 to 168: physics._blind_ends)."""
     global JB_RUN_MS, JB_TURN_MS, JB_THROW_MS
     JB_RUN_MS = 52 if KICK_JUMPS else physics.BLIND_ENDS_MS
     JB_TURN_MS = JB_RUN_MS + AIR_TURN_MS

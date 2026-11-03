@@ -89,12 +89,12 @@ class Character:
     HUD's HP number, her level off its "LV." digits, her DEF off her stat window when it's read, else fitted to her
     touches). The user, 2026-10-28: "I thought hp and level will come from perception, please remove them completely
     from config.toml". A table that gives them is refused (PERCEIVED), so none lingers there unread."""
-    speed: float = 101.0    # her stat window's SPEED (read 2026-10-30, level 30): her prior walk, 151.25 units/s (125 x
-                            # (101 + 20)/100), and climb, 121 (SPEED + 20), until her calibration has them measured
-                            # (gamelab.motion.calibrate: from 2026-11-02, the user's "measured and updated dynamically
-                            # and persisted"); measured, she walks 151.2 (243 walks on Tree Dungeon, 10-25 to 30). 99.2
-                            # (149.0, what 119.2 walked under the old formula) until then (README "Her walk and climb,
-                            # calibrated")
+    speed: float = 101.0    # her stat window's SPEED (read 2026-10-30, level 30): her walk, 151.25 units/s (125 x
+                            # (101 + 20)/100), and climb, 121 (SPEED + 20), until a hunt reads her stat window's
+                            # (gamelab.motion.physics.set_speed, from 2026-11-02: the user's "Just use panel, no need to
+                            # measure."); measured, she walks 151.2 (243 walks on Tree Dungeon, 10-25 to 30). 99.2
+                            # (149.0, what 119.2 walked under the old formula) until then (README "Her walk and climb
+                            # from her stat window's SPEED")
     jump: float = 100.0     # measured: her jumps rise 77-78 units (77 at 100%)
     mp: float = 623.0       # her MP when full (her MP bar's number, level 25, 2026-10-25; 601 at level 24)
     lucky_seven: float = 16.0  # her Lucky Seven's skill level: 14 MP a cast in the game data (at 16 and 17); her MP
@@ -104,7 +104,7 @@ class Character:
                                # 10, 11.4 measured on 2026-10-24
     # What her bars are reckoned with, as the stack has them for her (nothing reads these two yet: each module has
     # its own copy, the thief's, until her profile is read there: gamelab README, Characters). (Her climb isn't here
-    # from 2026-11-02: SPEED + 20 by the client's formula, motion.physics.climb_of, then measured as she climbs.)
+    # from 2026-11-02: SPEED + 20 by the client's formula, motion.physics.climb_of.)
     avoid: float = 27.0        # sim.world.EVADE_ACC: fit to 13 touches hopping over monsters (not her stat window's)
     mp_regen: float = 0.32     # sim.world.MP_REGEN: MP a second, idle
 

@@ -544,7 +544,7 @@ def test_in_a_world_where_a_knock_turns_her_the_frame_keeps_her_stars_going_the_
     (D:/MapleHelper-scratch/replan/loot/eval/seeds/heading_knocked.txt): on seed 72 blind eyes sent none the wrong way
     for 5 knocks; of seeds 1-96 25, 39, 43, 67, 75, 76, 84 and 85 meet all of this; over 1-96 the frame sent 42 stars
     the wrong way for 172 knocks, blind eyes 59 for 197. On 25: 4 knocks, one the wrong way, the frame against her arrow
-    twice; blind, 2 the wrong way for 5 knocks.) (Seed 4 since her walk and climb calibrated, 2026-11-02: the thief at
+    twice; blind, 2 the wrong way for 5 knocks.) (Seed 4 since his walk and climb by his SPEED, 2026-11-02: the thief at
     his stat window's 151.25 where 149 (D:/MapleHelper-scratch/recfix/calib/seeds/heading1.json): on 25 blind eyes sent
     none the wrong way for 2 knocks; of seeds 1-48 4, 40 and 43 meet all of this; over 1-48 the frame sent 18 stars the
     wrong way for 79 knocks, blind eyes 28 for 87. On 4: 2 knocks, one the wrong way, the frame against her arrow once;
@@ -566,7 +566,7 @@ def test_over_eight_seeds_of_knocks_that_turn_her_her_stars_go_the_wrong_way_onl
     her band's own search beside a slow one (worldstate.BAND_STAND_IN_S, 2026-10-28), 6 for 17 knocks with the frame
     and 6 for 14 blind on these 8 (seed 5: 4 for 7); over seeds 1-16 8 for 34 and 13 for 26, master's stack 8 for 32 and
     8 for 24: twice as many blind was luck of the 8 seeds, more of them a knock blind isn't (every window of these),
-    so that's what's asserted.) Seeds 9-16 since her walk and climb calibrated (2026-11-02: the thief at his stat
+    so that's what's asserted.) Seeds 9-16 since his walk and climb by his SPEED (2026-11-02: the thief at his stat
     window's 151.25 where 149; D:/MapleHelper-scratch/recfix/calib/seeds/heading2.json): on 1-8 the frame sent 5 the
     wrong way for 12 knocks, blind eyes 2 for 6; of the windows of 8 in 1-32 those from 9-16 to 16-23 meet it, the rest
     not; on 9-16 3 for 14 and 11 for 29, over 1-16 8 for 26 and 13 for 35, over 1-32 16 for 59 and 15 for 56: alike."""

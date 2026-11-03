@@ -86,7 +86,7 @@ def test_the_splice_point_on_a_run_from_standing_is_where_the_chains_physics_has
     """SPLICE_PHYSICS (the review of 2026-10-31): on a leg's run from its start with its arrow held all along, the splice
     point is where the chain's own physics has her (flow._ground: the arrow seen LAGS.on after its key, her speeding up
     from standing), not the run's span (a straight line at its mean speed for monster checks): at 0.06 s she hasn't
-    moved yet, at 0.5 s she runs at full speed (151.25, the thief's prior: 0.120 s behind a standing start's); the span
+    moved yet, at 0.5 s she runs at full speed (151.25, the thief's: 0.120 s behind a standing start's); the span
     had her 174.5 at 149 there, 100 + 5 at 0.06. Off: the span's, as before; with no keys known, the span's too."""
     from gamelab.motion import body as engine
     from gamelab.motion.flow import LAGS, SHOE
@@ -401,7 +401,7 @@ def test_a_monster_whose_replan_was_dropped_late_with_no_room_to_stop_is_asked_a
     # it. Here the ask came at 1.1972 s and its splice read 1.197; before, a later splice met the test, and with
     # navigator.ROPE_HANG's hang at the top of the rope at 146 at 6.8 s, HANG_S 2 s, none comes later)
     assert any(sp[0] >= asks[i + 1][0] - 5e-4 - 1e-9 and sp[4] for sp in trace["splices"]), (asks, trace["splices"])
-    # ... and nothing cut for it: within REACT_AGAIN_S of the ask after (from 2026-11-02's calibration the thief walks
+    # ... and nothing cut for it: within REACT_AGAIN_S of the ask after (from 2026-11-02 the thief walks
     # 151.25 and climbs 121, where 149 and 130: the run's later chains go otherwise, and one at 15.9 s, 14 s on, is cut
     # for a Green Mushroom coming on 30 again, another approach of its own)
     assert not any("plan cut short" in line and nv.COMING in line

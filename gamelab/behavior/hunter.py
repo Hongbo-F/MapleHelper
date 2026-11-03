@@ -51,7 +51,6 @@ from ..localization.scene import Scene
 from ..localization.senses import Senses
 from ..localization.worldstate import HP_GAP_S, TOUCH_SAME_S, reading_of, to_scene
 from ..motion import physics
-from ..motion.calibrate import Calibration, Panel
 from ..perception import drops, exp_number, hp_number, lv_number
 from ..perception.eyes import Eyes
 from ..perception.exp_number import ExpReading
@@ -69,7 +68,7 @@ from .pet import PetCare
 from .bootstrap import Defence, HerStats, session_of_feed
 from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
 from .chatcheck import ChatCheck, ChatDue
-from .statcheck import StatCheck, StatsDue
+from .statcheck import StatCheck, StatsDue, speed_doubt
 from .safety import kinds_of as map_kinds
 
 EXP_MEMORY = 30     # s her EXP gains are kept (exp_events), for kill() to match to its target
@@ -182,7 +181,7 @@ class Hunter:
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
                  low_hp: float | None = None, potion_hp: float = 0.5, skill: bool = False, feed=None,
-                 her: danger.Her | None = None, attack: str | None = None, motion: tuple[float, float] | None = None):
+                 her: danger.Her | None = None, attack: str | None = None):
         """`low_hp`: the safety stop's threshold (behavior.safety: her HP under it ends the hunt; 1 or under a share of
         her max HP, over 1 HP; None: her reserve, her profile's hits of the map's largest touch, under `potion_hp`'s with
         a potion key of her own); `potion_hp`: her potion key's (drink_if_low; none bound, her pet drinks them). `feed`:
@@ -193,8 +192,7 @@ class Hunter:
         has her HUD's numbers, then every look). `attack`: which attack each throw is (behavior.attacks.MODES:
         'choice', Lucky Seven but to finish a monster and while her MP is under a cast; 'skill', Lucky Seven while she
         has the MP; 'regular'; None: 'skill' with `skill`, else 'regular'), with her MP and Lucky Seven's level from
-        config.toml [character]. `motion`: her walk and climb (units/s) her calibration starts from instead of her
-        prior (motion.calibrate: the simulator's wrong priors); None: as her file has them, else her prior."""
+        config.toml [character]."""
         self.model, self.log = model, log
         c = physics.CHARACTER
         self.potion_hp = potion_hp
@@ -213,15 +211,13 @@ class Hunter:
         # her max HP, level and DEF, and where from (a W.DEF kept from before this run judged against the perception
         # service's session it looks through: bootstrap.HerStats.window_doubt)
         self.stats = HerStats(paths.of().stats, self.touches.rows, session=session_of_feed(feed))
-        # Her walk and climb as perception's place track measures them (motion.calibrate; the user, 2026-11-02: "I feel
-        # this should just be measured and updated dynamically and persisted, constantly calibrated. Also correlate that
-        # with the stats panel value."): her planner's from her file (paths.of().motion) at once, else her prior by the
-        # client's formula at her stat window's SPEED as her stats file last kept it (else her profile's); every frame's
-        # state her looks and glances find taken in (_track_her), her planner following once enough is measured (at a
-        # pass's start: physics.settle); her stat window's read correlated with it (_stats_read).
-        self.motion = Calibration(paths.of().motion, c.speed, panel=self._panel_kept(), model=model, prior=motion,
-                                  log=log)
-        self.motion.start()
+        # Her walk and climb: the client's formula at her stat window's SPEED (motion.physics.set_speed; the user,
+        # 2026-11-02: "Just use panel, no need to measure."), as her stats file kept it from her last read, else her
+        # profile's, at once (no chain of hers runs yet: _speed_start); a read of her stat window later sets it again
+        # (_stats_read: _speed_read). `speed_plan`: the SPEED they're planned at (or will be at the next settle) and why
+        # ('panel', 'kept', 'profile')
+        self.speed_plan: tuple[float, str] = (float(c.speed), "profile")
+        self._speed_start()
         self._notes: list[str] = []      # what changed of them since the reserve was last made (_reserve_check)
         self._given(her, feed, eyes)
         self.kinds_seen: dict[str, tuple[float, str]] = {}  # kinds a look saw that the map's spawn list hasn't
@@ -386,8 +382,7 @@ class Hunter:
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.looter.on_look, self.wounds.on_look, self.memory.on_look,
                                   self._misses,
-                                  self.attacks.on_look, self._chat_seen, self._track_her]
-        self.senses.glance_checks.append(self._track_her)
+                                  self.attacks.on_look, self._chat_seen]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
                                          self.attacks.on_throw,  # (a cast's MP)
                                          self._tell_feed]  # (the feed's: whose kills are whose, tracking)
@@ -687,24 +682,63 @@ class Hunter:
             self.chat_check = ChatCheck(self)
         return self.chat_check.run(at_start=at_start, look=look, loop=loop)
 
-    # --- her walk and climb (motion.calibrate) -----------------------------------------------------------------------
+    # --- her walk and climb: her stat window's SPEED (motion.physics.set_speed) ----------------------------------------
 
-    def _panel_kept(self) -> Panel | None:
-        """Her stat window's SPEED and JUMP as her stats file last kept them (HerStats.window_read), None if never read."""
-        read = (self.stats.window_read or {}).get("read") or {}
-        if not isinstance(read.get("speed"), (int, float)):
-            return None
-        at = getattr(self.stats.window, "at", None)
-        return Panel(float(read["speed"]), read.get("jump"), at)
+    def _speed_start(self) -> None:
+        """At her hunter's start (no chain of hers runs yet): her walk and climb those of her stat window's SPEED as her
+        stats file kept it from her last read ('kept': HerStats.window_read's `speed`, the one her walk and climb were
+        set to then), else her profile's ('profile'), at once. A stats file from before 2026-11-02's panel rule keeps
+        none: its read's SPEED is judged as a read would be against her profile's (statcheck.speed_doubt), said where
+        it isn't taken."""
+        profile = float(physics.CHARACTER.speed)
+        taken = self.stats.window_read.get("speed")  # (the SPEED taken from her last read ...)
+        read = (self.stats.window_read.get("read") or {}).get("speed")  # (... and the one it showed)
+        speed = why = None
+        if isinstance(taken, (int, float)):
+            speed, why = float(taken), speed_doubt(float(taken), float(taken))  # (in the client's range)
+        elif isinstance(read, (int, float)):
+            speed, why = float(read), speed_doubt(float(read), profile)
+        if why is not None:
+            self.log(f"her stat window's SPEED {speed:g} as her stats file kept it not taken ({why}): her walk and climb "
+                     f"her profile's, SPEED {profile:g}")
+        if speed is not None and why is None:
+            self._speed_set(speed, "kept")
+        else:
+            self._speed_set(profile, "profile")
+        physics.settle()
 
-    def _track_her(self, _seen=None) -> None:
-        """Every frame's state since the last one taken in, as the feed still holds them (Feed.since: its last KEEP), to
-        her calibration (motion.calibrate.Calibration.feed_states): at every look (Senses.listeners) and glance
-        (glance_checks: a chain's watch glances ~15 times a second), her place track at 15 frames a second where they
-        come that often."""
-        since = getattr(self.senses.feed, "since", None)
-        if since is not None:
-            self.motion.feed_states(since(self.motion.seq))
+    def _speed_read(self, speed) -> list[str]:
+        """Her stat window's SPEED `speed` (%; None: not read) to her walk and climb: taken ('panel') unless it's no
+        read (statcheck.speed_doubt: outside the client's range, or a jump from what's planned and from her stat
+        window's last read kept larger than gear gives), then said and the SPEED planned kept. Taken, her walk and climb
+        are its own from the next settle (physics.propose: read_stats settles at once at a hunt's start; in the hunt
+        loop, StatsDue, the loop's next pass or a navigator's, where no chain of hers runs). What to say of it."""
+        if speed is None:
+            return []
+        planned = self.speed_plan[0]
+        kept = (self.stats.window_read.get("read") or {}).get("speed")
+        why = speed_doubt(float(speed), planned, float(kept) if isinstance(kept, (int, float)) else None)
+        if why is not None:
+            return [f"her stat window's SPEED {speed:g} not taken ({why}; a misread?): her walk and climb as they were, "
+                    f"SPEED {planned:g}"]
+        self._speed_set(float(speed), "panel")
+        return []
+
+    def _speed_set(self, speed: float, why: str) -> None:
+        """Her walk and climb to be SPEED `speed`'s by the client's formula from the next settle (physics.propose:
+        `why` 'panel', 'kept' or 'profile'), a change said once it's made (_speed_said)."""
+        self.speed_plan = (float(speed), why)
+        physics.propose(speed, then=lambda old, new: self._speed_said(old, new, why))
+
+    def _speed_said(self, old: tuple[float, float, float], new: tuple[float, float, float], why: str) -> None:
+        """Her planner's walk and climb changed (`old`, `new`: (walk, climb, SPEED)): a line in her log and a 'motion'
+        record (old, new, the SPEED and why)."""
+        src = {"panel": "her stat window's", "kept": "her stat window's as her stats file kept it",
+               "profile": f"her profile's ({profiles.stats_from('speed')} speed)"}[why]
+        self.log(f"her walk {old[0]:g} -> {new[0]:g} and climb {old[1]:g} -> {new[1]:g} units/s: SPEED {new[2]:g}, "
+                 f"{src}, by the client's formula")
+        telemetry.emit("motion", old=[round(old[0], 2), round(old[1], 2)], new=[round(new[0], 2), round(new[1], 2)],
+                       speed=new[2], was=old[2], why=why)
 
     # --- her stat window (behavior.statcheck) ----------------------------------------------------------------------
 
@@ -712,11 +746,15 @@ class Hunter:
         """Her stat window opened, read and closed if it's due (statcheck.StatCheck.run): at a hunt's start
         (`at_start`: gamelab.__main__'s _hunter; `loop`: whether a hunt loop follows, where a read put off is tried
         again), and in the hunt loop when a read put off there comes due (StatsDue); `quiet` False: no quiet moment
-        waited for (`gamelab stats --read`). Its outcome. Raises StatWindowStop (the window may be open), SafetyStop (at
-        every look of it) and client.LieDetectorAlarm."""
+        waited for (`gamelab stats --read`). Its outcome; at a hunt's start, her walk and climb its SPEED's at once (no
+        chain of hers runs: physics.settle), in the hunt loop from its next pass. Raises StatWindowStop (the window may
+        be open), SafetyStop (at every look of it) and client.LieDetectorAlarm."""
         if self.stat_check is None:
             self.stat_check = StatCheck(self)
-        return self.stat_check.run(at_start=at_start, quiet=quiet, loop=loop)
+        out = self.stat_check.run(at_start=at_start, quiet=quiet, loop=loop)
+        if at_start:
+            physics.settle()
+        return out
 
     def _stats_read(self, reading, out) -> None:
         """What her stat window read (statcheck.StatCheck.run, `reading`: perception.stat_window.StatReading) to her
@@ -726,12 +764,10 @@ class Hunter:
         DEF_TOP or her touches don't bear it out: HerStats.window_doubt), kept with her level and this session; her max
         HP if her HUD's number hasn't read, where her HUD's as her stats file last kept it or her HP bar bears it out
         (statcheck.borne); her level if nothing has read it; her max MP her casts are reckoned at (config.toml's until
-        now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED to her walk and
-        climb's calibration (motion.calibrate.Calibration.panel_seen: her prior by the client's formula from it, her
-        stretches measured at another SPEED counted at it until measured again, and what her measured walk and climb
-        imply against it, said: within SPEED_TOL, or warned of beyond, a buff, gear, a map's physics or the formula
-        wrong, never stopping her); her JUMP said where her profile's, which plans her jumps, differs, with the jump each
-        gives (statcheck.moves_notes). Her reserve made again (_reserve_check: what changed said with it)."""
+        now; said), where her MP bar bears it out or it's within statcheck.MP_SPAN of theirs; her SPEED her walk and
+        climb's by the client's formula (_speed_read: not where it's no read, statcheck.speed_doubt, said), kept with
+        the read; her JUMP said where her profile's, which plans her jumps, differs, with the jump each gives
+        (statcheck.moves_notes). Her reserve made again (_reserve_check: what changed said with it)."""
         from ..motion import physics
         from .bootstrap import HerStats as Stats
         from .statcheck import MP_SPAN, borne, disagreement, moves_notes
@@ -765,12 +801,13 @@ class Hunter:
             else:
                 notes.append(f"her stat window's max MP {mp} not taken ({why}): her casts reckoned at "
                              f"{self.max_mp:g} as before")
-        notes.extend(self.motion.panel_seen(reading.get("speed"), reading.get("jump")))
+        notes.extend(self._speed_read(reading.get("speed")))
         notes.extend(moves_notes(reading, physics.CHARACTER))
         if reading.wdef is not None:
             session = self.stat_check._session() if self.stat_check is not None else None
+            speed, why = self.speed_plan  # (the SPEED her walk and climb are set to from her stat window, if any)
             note = st.see_window(reading.wdef, rows=self.touches.rows, level=level if level is not None else st.level,
-                                 session=session, read=reading.values)
+                                 session=session, read=reading.values, speed=speed if why != "profile" else None)
             if note is not None:
                 notes.append(note)
         self._notes.extend(notes)

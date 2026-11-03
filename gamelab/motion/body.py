@@ -51,7 +51,7 @@ MASS = 100.0     # the client's mass for a character (decompile)
 # SPEED to 80-140": FUN_007a4dec; meowdb's cap is 140 too), JUMP from 80% to 120% (meowdb: "Jump works the old way,
 # but its cap dropped from 123 to 120"; the decompile's 123 was v83's). The lower ends are the decompile's: this
 # client's under 100 isn't known (meowdb's calculator clamps SPEED to 100-140, its guide says nothing under 100; the
-# thief's profile SPEED 99.2 until 2026-11-02's calibration, which walked her 149.0 here, it would take as 100: 150).
+# thief's profile SPEED 99.2 until 2026-11-02, which walked her 149.0 here, it would take as 100: 150).
 SPEED_RANGE = (80.0, 140.0)
 JUMP_RANGE = (80.0, 120.0)
 # The Speed this client adds to a character's stat window behind the scenes, after the cap: she walks walkSpeed x
@@ -65,8 +65,8 @@ JUMP_RANGE = (80.0, 120.0)
 # (bootstrap 90% 149.1-150.0) over 66 with each walk's braking tail left out and Tree's slopes taken out by the v83
 # slope rule; the thief (SPEED 101: 151.25) 151.2 (150.7-151.75) over 243 walks of 2026-10-25 to 30 by the same method;
 # her climb 119.9 units/s, meowdb's SPEED + 20 (D:/MapleHelper-scratch/recfix/walk-research; README "Her walk speed").
-# Her prior: her walk and climb are measured as she moves from 2026-11-02 (motion.calibrate: README "Her walk and climb,
-# calibrated").
+# Her planner walks her by it at her stat window's SPEED from 2026-11-02, unmeasured (motion.physics.set_speed: README
+# "Her walk and climb from her stat window's SPEED").
 # Measured, not decoded: +20 and x 1.2 differ only above SPEED 100 (200 against 210 at the cap; meowdb's cap row says
 # 200). A character's shoe takes it (motion.physics.shoe_of); a monster's doesn't (sim.world.JumpSpace.shoe).
 SPEED_BONUS = 20.0

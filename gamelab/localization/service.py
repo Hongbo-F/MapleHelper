@@ -1441,12 +1441,6 @@ class ServiceClient(Feed):
             st = newest_frame(self.states)
         return st if st is not None and st.usable and st.t >= after else None
 
-    def since(self, seq: int) -> list[WorldState]:
-        with self._cond:
-            if not self.alive or not self.on_map():
-                return []
-            return [st for st in self.states if st.seq > seq]
-
     def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
         if self.hello.throws:  # (her attack's id and aim only when told: a service started before takes the message as
             # ever, reading what it knows of it)

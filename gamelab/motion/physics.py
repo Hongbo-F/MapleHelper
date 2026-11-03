@@ -55,7 +55,7 @@ def climb_of(speed: float) -> float:
     """The climb (units/s, up or down a rope or a ladder) a stat window's SPEED (%) gives by the client's formula:
     SPEED + 20 (meowdb's guide and its calculator, `a + 20`; v83 climbed a fixed 100 whatever her SPEED, RustMS
     PlayerStates.cpp's 3 px every 30 ms), SPEED within body.SPEED_RANGE: 120 at 100, 121 at 101. Her recordings of
-    2026-11-02 at SPEED 100: 119.9 up, 119.6 down (README "Her walk and climb, calibrated")."""
+    2026-11-02 at SPEED 100: 119.9 up, 119.6 down (README "Her walk and climb from her stat window's SPEED")."""
     s = min(max(float(speed), body.SPEED_RANGE[0]), body.SPEED_RANGE[1])
     return CLIMB_BASE * (s + body.SPEED_BONUS) / 100.0
 
@@ -65,7 +65,7 @@ CLIMB_BASE = 100.0  # units/s a character climbs at SPEED + bonus 100 (v83's eve
 
 def speed_of_walk(walk: float) -> float:
     """The SPEED (%) a stat window would show for a measured walk by the client's formula (walk_of's inverse, no
-    clamp): walk / 1.25 - 20 (her 149.4 is 99.5)."""
+    clamp): walk / 1.25 - 20 (her 149.4 is 99.5; analysis.walkfit's check of the formula)."""
     return float(walk) / (body.PHYSICS_IMG["walkSpeed"] / 100.0) - body.SPEED_BONUS
 
 
@@ -77,32 +77,31 @@ def speed_of_climb(climb: float) -> float:
 def record() -> dict:
     """Her physics as this process plans her moves, for the telemetry 'session' record (from 2026-11-02, so a run's
     records say what walk its timed holds were planned at: analysis.walkfit measures her walk against it): who plays
-    (`character`, `class`), her stats' SPEED and JUMP (%), the Speed the client adds to hers (`bonus`: body.SPEED_BONUS,
-    from 2026-11-02's walk fix) and the walk and climb they give (units/s), as planned when it's written: her stats'
-    by the client's formula (`prior_walk`, `prior_climb`), or her calibration's (motion.calibrate: `calibrated`); a
-    change later in the run is a 'calibration' record of its own."""
+    (`character`, `class`), the SPEED her walk and climb are planned at and her JUMP (%), the Speed the client adds to
+    hers (`bonus`: body.SPEED_BONUS, from 2026-11-02's walk fix) and the walk and climb they give (units/s), as planned
+    when it's written (her profile's SPEED until a hunter sets her stat window's: set_speed; a change later in the run
+    is a 'motion' record of its own, behavior.hunter)."""
     c = character.resolved() or character.active()
-    return {"character": c.id, "class": c.klass, "speed": CHARACTER.speed, "jump": CHARACTER.jump,
-            "bonus": body.SPEED_BONUS, "walk": round(WALK_SPEED, 2), "climb": round(CLIMB_SPEED, 2),
-            "prior_walk": round(PRIOR_SHOE.vmax, 2), "prior_climb": round(PRIOR_CLIMB, 2), "calibrated": calibrated()}
+    return {"character": c.id, "class": c.klass, "speed": SPEED, "jump": CHARACTER.jump, "bonus": body.SPEED_BONUS,
+            "walk": round(WALK_SPEED, 2), "climb": round(CLIMB_SPEED, 2)}
 
 
 CHARACTER = character.active().stats  # (who plays, resolved once: stats() as the process has it, her profile's)
 LAGS = body.Lags()
-# Her walk and climb by her stats' SPEED and the client's formula: where her planner starts (her prior), until her
-# calibration has them measured (motion.calibrate: from perception's place track, kept in her lab between runs, the
-# prior her stat window's SPEED where it has been read; set_motion below). The simulator's world walks her at the prior
-# whatever her planner has (sim.world.her_shoe: the world's truth).
-PRIOR_SHOE = shoe_of(CHARACTER)
-PRIOR_CLIMB = climb_of(CHARACTER.speed)
-SHOE = PRIOR_SHOE
+# Her walk and climb by the client's formula at her profile's SPEED (walk_of, climb_of): her planner's until a hunter
+# sets her stat window's SPEED (set_speed below: behavior.hunter, the one her stats file kept from her last read, or
+# her read at a hunt's start or in its hunt loop). The simulator's world moves her at her profile's (sim.world.her_shoe,
+# her_climb: the world's truth), whatever her planner has.
+PROFILE_SHOE = shoe_of(CHARACTER)
+PROFILE_CLIMB = climb_of(CHARACTER.speed)
+SPEED = CHARACTER.speed  # % her walk and climb are planned at: her profile's, or her stat window's once set (set_speed)
+SHOE = PROFILE_SHOE
 
-WALK_SPEED = SHOE.vmax   # map units/s: 125 x (SPEED + 20)/100 (body.SPEED_BONUS) by her stats, or as calibrated: the
-                         # magician's 150 at her stat window's 100 (she walks 149.4), the thief's 151.25 at his 101 (he
-                         # walks 151.2)
-CLIMB_SPEED = PRIOR_CLIMB  # map units/s: SPEED + 20 by her stats (climb_of), or as calibrated: the magician's 120 (she
-                           # climbs 119.9 up, 119.6 down), the thief's 121 (until 2026-11-02 a shared 117: the thief's
-                           # 0.165 screen px/ms at 1920x1080)
+WALK_SPEED = SHOE.vmax   # map units/s: 125 x (SPEED + 20)/100 (body.SPEED_BONUS): the magician's 150 at her stat
+                         # window's 100 (she walks 149.4), the thief's 151.25 at his 101 (he walks 151.2)
+CLIMB_SPEED = PROFILE_CLIMB  # map units/s: SPEED + 20 (climb_of): the magician's 120 (she climbs 119.9 up, 119.6
+                             # down), the thief's 121 (until 2026-11-02 a shared 117: the thief's 0.165 screen px/ms at
+                             # 1920x1080)
 JUMP_SPEED = SHOE.vjump  # physics: jumpSpeed x JUMP/100 (555)
 GRAVITY = SHOE.gravity   # physics: gravityAcc (2000)
 FALL_SPEED = SHOE.fall   # physics: fallSpeed (670, terminal)
@@ -560,34 +559,34 @@ def run_ms(units: float) -> int:
     return sure_jump_ms(round(units / WALK_UNITS_PER_MS + RUN_LAG_MS))
 
 
-# --- her walk and climb as calibrated (motion.calibrate) ----------------------------------------------------------
-# Her planner's walk and climb follow what perception's place track measures of her (the user, 2026-11-02: "I feel this
-# should just be measured and updated dynamically and persisted, constantly calibrated"; her climb: "Same comment as
-# above"): motion.calibrate keeps the measure, and changes them here, once its evidence is enough, through propose and
-# settle. A change is made only where no chain of hers runs (settle: at the start of a navigator's pass, Navigator.step,
-# and of the hunt loop's, Hunt._loop; at a hunter's start), so a chain already running keeps the timings it was planned
-# with (its keys are the player's already, its legs' times and places worked out). What's made again then
-# (set_motion): every name of WALK_NAMES here (her shoe, and each lag, slide and hold made of her walk: the expressions
-# at each name above, made again by _derive), each rebound in every module of gamelab that took it by name (`from
-# .physics import WALK_SPEED`: the old object found there, under its own name, replaced; the simulator's world takes
-# none of them, its walk its own: sim.world.her_shoe), then each module's own made of them (`follows`: motion.route's
-# rope jump and grab lead, motion.flow's grab lead and climb, control.actions' jump back's lead, control.navigator's
-# key leads), and EPOCH counted on: a navigator seeing it changed makes its route graph again (its running jumps'
-# takeoffs and landings, the moves' costs: route.Planner, 0.1-0.3 s on Tree Dungeon). Not made again, as nothing in
-# them is of her walk: fly's landings (_FLY_CACHE: her flight's air steps take Physics.img's and her JUMP's alone,
-# body.air_step) and the C flight's shoes (_SHOES, by shoe); motion.body's closed forms take the shoe as an argument,
-# its one cache (body.steps_run) keyed by it, so a new shoe never gets an old one's answer.
+# --- her walk and climb from her stat window's SPEED (behavior.hunter) --------------------------------------------
+# Her planner's walk and climb are the client's formula's at her stat window's SPEED (the user, 2026-11-02, shown that
+# the formula and her measured walks and climbs agree: "Just use panel, no need to measure."): her profile's at import,
+# her stat window's once a hunter sets it (behavior.hunter: at its start the SPEED her stats file kept from her last
+# read, at a read at a hunt's start, or at a read put off into its hunt loop). A change is made only where no chain of
+# hers runs: at once at a hunter's start (set_speed), or proposed in the hunt loop (propose) and made at the next
+# settle (at the start of a navigator's pass, Navigator._follow_walk, and of the hunt loop's, Hunt.run), so a chain
+# already running keeps the timings it was planned with (its keys are the player's already, its legs' times and places
+# worked out). What's made again (set_speed): every name of WALK_NAMES here (her shoe, and each lag, slide and hold made
+# of her walk: the expressions at each name above, made again by _derive), each rebound in every module of gamelab that
+# took it by name (`from .physics import WALK_SPEED`: the old object found there, under its own name, replaced; the
+# simulator's world takes none of them, its walk its own: sim.world.her_shoe), then each module's own made of them
+# (`follows`: motion.route's rope jump and grab lead, motion.flow's grab lead and climb up, control.actions' jump back's
+# lead, control.navigator's key leads), and EPOCH counted on: a navigator seeing it changed makes its route graph again
+# (its running jumps' takeoffs and landings, the moves' costs: route.Planner, 0.1-0.3 s on Tree Dungeon). Not made
+# again, as nothing in them is of her walk: fly's landings (_FLY_CACHE: her flight's air steps take Physics.img's and
+# her JUMP's alone, body.air_step) and the C flight's shoes (_SHOES, by shoe); motion.body's closed forms take the shoe
+# as an argument, its one cache (body.steps_run) keyed by it, so a new shoe never gets an old one's answer.
 WALK_NAMES = ("SHOE", "WALK_SPEED", "CLIMB_SPEED", "RUN_LAG", "TURN_EXTRA", "STOP_RUN", "STOP_S", "LAND_SLIDE",
               "WALK_UNITS_PER_MS", "WALK_UNITS_FIXED", "RUN_LAG_MS", "BLIND_ENDS_MS", "KICK_SPEED")
-EPOCH = 0  # one more at every change of her walk or climb (set_motion): what a navigator's route graph was made at
+EPOCH = 0  # one more at every change of her walk or climb (set_speed): what a navigator's route graph was made at
 _FOLLOWERS: list[Callable[[], None]] = []
-_PENDING: tuple[float, float, Callable | None] | None = None  # (walk, climb, told once it's made) a change waiting
-                                                              # for the next settle
+_PENDING: tuple[float, Callable | None] | None = None  # (SPEED, told once it's made) a change waiting for the next settle
 
 
 def _derive(shoe: body.Shoe, climb: float) -> None:
     """Every name of WALK_NAMES made again for `shoe` and `climb`, by the expressions at each name above (tests/
-    test_calibrate.py holds the two to the same answers at her prior)."""
+    test_panel_speed.py holds the two to the same answers at her profile's SPEED)."""
     global SHOE, WALK_SPEED, CLIMB_SPEED, RUN_LAG, TURN_EXTRA, STOP_RUN, STOP_S, LAND_SLIDE, WALK_UNITS_PER_MS
     global WALK_UNITS_FIXED, RUN_LAG_MS, BLIND_ENDS_MS, KICK_SPEED
     SHOE, WALK_SPEED, CLIMB_SPEED = shoe, shoe.vmax, float(climb)
@@ -604,23 +603,25 @@ def _derive(shoe: body.Shoe, climb: float) -> None:
 
 
 def follows(fn: Callable[[], None]) -> Callable[[], None]:
-    """Decorator: `fn` makes its module's own names of her walk again (its globals), after every change (set_motion),
-    in the order the modules registered (as they were imported: a module's before those importing it)."""
+    """Decorator: `fn` makes its module's own names of her walk again (its globals), after every change (set_speed), in
+    the order the modules registered (as they were imported: a module's before those importing it)."""
     _FOLLOWERS.append(fn)
     return fn
 
 
-def set_motion(walk: float | None = None, climb: float | None = None) -> bool:
-    """Her planner's walk and climb (units/s; None: as they are) made `walk` and `climb` at once, and everything of them
-    (see above): her shoe the prior's (Physics.img's, her JUMP's) at that walk. Whether anything changed. Only where no
-    chain of hers runs: settle's, a hunter's start's, the simulator's and the tests' (and `reset`)."""
-    global EPOCH
-    walk = WALK_SPEED if walk is None else float(walk)
-    climb = CLIMB_SPEED if climb is None else float(climb)
-    if walk == WALK_SPEED and climb == CLIMB_SPEED:
+def set_speed(speed: float) -> bool:
+    """Her planner's walk and climb those of SPEED `speed` (%) by the client's formula (shoe_of at her profile's JUMP,
+    climb_of), at once, and everything of them made again (see above). Whether her walk or climb changed (a SPEED past
+    the client's range walks as its end does: body.SPEED_RANGE). Only where no chain of hers runs: a hunter's start,
+    settle's, the tests' (and `reset`)."""
+    global EPOCH, SPEED
+    SPEED = float(speed)
+    shoe = PROFILE_SHOE if SPEED == CHARACTER.speed else shoe_of(replace(CHARACTER, speed=SPEED))
+    climb = climb_of(SPEED)
+    if shoe.vmax == WALK_SPEED and climb == CLIMB_SPEED:
         return False
     old = {n: globals()[n] for n in WALK_NAMES}
-    _derive(PRIOR_SHOE if walk == PRIOR_SHOE.vmax else replace(PRIOR_SHOE, vmax=walk), climb)  # (her prior's own again)
+    _derive(shoe, climb)
     me = sys.modules[__name__]
     for mod in list(sys.modules.values()):
         if mod is me or not getattr(mod, "__name__", "").startswith("gamelab."):
@@ -635,42 +636,33 @@ def set_motion(walk: float | None = None, climb: float | None = None) -> bool:
     return True
 
 
-def propose(walk: float, climb: float, then: Callable[[tuple[float, float], tuple[float, float]], None] | None = None
+def propose(speed: float, then: Callable[[tuple[float, float, float], tuple[float, float, float]], None] | None = None
             ) -> None:
-    """Her walk and climb to be `walk` and `climb` from the next settle (one proposed before replaced), `then(old, new)`
-    told once it's made ((walk, climb) each)."""
+    """Her walk and climb to be SPEED `speed`'s from the next settle (one proposed before replaced), `then(old, new)`
+    told once they've changed ((walk, climb, SPEED) each)."""
     global _PENDING
-    _PENDING = (float(walk), float(climb), then)
-
-
-def pending() -> tuple[float, float] | None:
-    """The walk and climb proposed and not settled yet, None if none."""
-    return None if _PENDING is None else _PENDING[:2]
+    _PENDING = (float(speed), then)
 
 
 def settle() -> bool:
-    """A change proposed made now (set_motion): where no chain of hers runs (see above). Whether one was."""
+    """A change proposed made now (set_speed): where no chain of hers runs (see above). Whether her walk or climb
+    changed."""
     global _PENDING
     if _PENDING is None:
         return False
-    walk, climb, then = _PENDING
+    speed, then = _PENDING
     _PENDING = None
-    old = (WALK_SPEED, CLIMB_SPEED)
-    if not set_motion(walk, climb):
+    old = (WALK_SPEED, CLIMB_SPEED, SPEED)
+    if not set_speed(speed):
         return False
     if then is not None:
-        then(old, (WALK_SPEED, CLIMB_SPEED))
+        then(old, (WALK_SPEED, CLIMB_SPEED, SPEED))
     return True
 
 
-def calibrated() -> bool:
-    """Whether her planner's walk or climb is other than her prior's (her stats' by the client's formula)."""
-    return WALK_SPEED != PRIOR_SHOE.vmax or CLIMB_SPEED != PRIOR_CLIMB
-
-
 def reset() -> bool:
-    """Her walk and climb back to her prior's, nothing proposed (the simulator's every run starts and ends so, as the
-    tests do: sim.scenarios.Sim, tests/conftest.py). Whether anything changed."""
+    """Her walk and climb back to her profile's, nothing proposed (the tests' after each: tests/conftest.py). Whether
+    anything changed."""
     global _PENDING
     _PENDING = None
-    return set_motion(PRIOR_SHOE.vmax, PRIOR_CLIMB)
+    return set_speed(CHARACTER.speed)

@@ -297,7 +297,7 @@ def test_run_timing_and_rope_grab_lead():
     from gamelab.control.mover import grab_lead
     from gamelab.motion.physics import RUN_LAG_MS, run_ms
     from gamelab.motion.physics import WALK_SPEED
-    assert RUN_LAG_MS == 55  # she's 151.25 (t - 0.120) along t s in (the thief's prior), and lifts off 65 ms after the key
+    assert RUN_LAG_MS == 55  # she's 151.25 (t - 0.120) along t s in (the thief's), and lifts off 65 ms after the key
     assert run_ms(30) == pytest.approx(253, abs=1)  # jump key 253 ms in: lifts off 30 units along
     assert run_ms(WALK_SPEED) == pytest.approx(1000 + RUN_LAG_MS, abs=10)
     # 7 units along is 101 ms in, in the blind spot (three of the game's steps into her run, she'd leave at

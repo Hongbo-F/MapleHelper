@@ -455,7 +455,7 @@ def test_her_climb_on_after_a_touch_only_under_the_rope_s_top():
     """The review's: up again went at -2 and -12 under the top, her off the rope already, and its hold kept her by the
     mushroom on the platform: under the top by CLIMB_ON_UNDER at least, by her dot or (none) the plan's height; and
     held as a chain's climb holds it (52 under at flow.ROPE_SPEED, her climb, and UP_EXTRA: 0.78 s at the thief's 121,
-    0.75 s at the 130 of before 2026-11-02's calibration, where climb_ms had 0.945 s)."""
+    0.75 s at the 130 of before 2026-11-02, where climb_ms had 0.945 s)."""
     import time
     from gamelab.control.navigator import CLIMB_ON_UNDER, _Running
     from gamelab.motion.bodies import Climb

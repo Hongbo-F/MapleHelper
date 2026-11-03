@@ -135,12 +135,12 @@ def test_walking_is_the_engines(model):
 def test_her_walk_in_the_world_can_differ_from_the_planners(model):
     # Her.walk_speed: the world walks her at her own speed (148.2 units/s here, the magician's raw median of 2026-11-02,
     # against the planner's 151.25 under FIXED_STATS), the game data's shoe at that SPEED (accelerating, braking and in
-    # the air as anyone's), her JUMP the planner's; by default her truth, her prior's shoe (the planner's, uncalibrated),
-    # to the bit, whatever her planner calibrates to.
+    # the air as anyone's), her JUMP the planner's; by default her truth, her profile's shoe (the planner's, but for a
+    # stat window's SPEED read otherwise), to the bit, whatever her planner is set to.
     c = plat(model, 500, 400)
-    assert world(model, c.id, 100.0).shoe is physics.PRIOR_SHOE is physics.SHOE
-    physics.set_motion(140.0)
-    assert world(model, c.id, 100.0).shoe is physics.PRIOR_SHOE is not physics.SHOE
+    assert world(model, c.id, 100.0).shoe is physics.PROFILE_SHOE is physics.SHOE
+    physics.set_speed(92.0)  # (140)
+    assert world(model, c.id, 100.0).shoe is physics.PROFILE_SHOE is not physics.SHOE
     physics.reset()
     her = world_mod.Her(walk_speed=148.2)
     shoe = world_mod.her_shoe(her)
@@ -195,7 +195,7 @@ def test_a_jump_from_standing_gets_the_kick_unless_she_is_nearly_at_full_speed(m
     # Lifted off by the arrow's own step she leaves at 119 (or straight up, if the jump's step came first),
     # after one or two kicked to full speed, after three at 126 (as in game: 3 of 4 keyed 100 ms after it).
     c = plat(model, 500, 400)
-    full = physics.WALK_SPEED  # (the thief's, 151.25: the world's and his planner's prior alike)
+    full = physics.WALK_SPEED  # (the thief's, 151.25: the world's and his planner's alike)
     top = round(full, 1)
     for gap, speeds in ((None, {0.0}), (0.0, {0.0, round(0.8 * full, 1)}), (0.045, {top}), (0.08, {126.0, top}),
                         (0.2, {top})):

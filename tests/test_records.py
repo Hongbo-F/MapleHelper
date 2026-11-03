@@ -165,10 +165,9 @@ def test_the_session_says_her_physics_as_planned():
     assert rec["character"] == "thief" and rec["speed"] == 101.0 and rec["walk"] == pytest.approx(151.25)
     assert rec["bonus"] == 20.0  # (the client's hidden Speed: 125 x (101 + 20)/100)
     assert rec["climb"] == physics.CLIMB_SPEED == 121.0 and json.dumps(rec)
-    assert (rec["prior_walk"], rec["prior_climb"], rec["calibrated"]) == (151.25, 121.0, False)
-    physics.set_motion(150.4, 120.2)  # (as her calibration has them: motion.calibrate)
+    physics.set_speed(104)  # (her stat window's SPEED, as a hunter sets it: behavior.hunter)
     rec = physics.record()
-    assert (rec["walk"], rec["climb"], rec["prior_walk"], rec["calibrated"]) == (150.4, 120.2, 151.25, True)
+    assert (rec["speed"], rec["walk"], rec["climb"]) == (104.0, 155.0, 124.0)
 
 
 # --- a simulated grind's records ----------------------------------------------------------------------------------

@@ -47,11 +47,10 @@ def test_her_planned_walk_is_her_measured_one():
     assert v83 == 125.0 and HER_RAW / v83 > 1.15
 
 
-def test_the_thiefs_prior_walk_is_his_stat_windows_and_within_his_measured():
-    """The thief's profile's SPEED is his stat window's 101 from 2026-11-02's calibration (the user: "measured and
-    updated dynamically and persisted"; motion.calibrate), his prior 151.25, inside his measured 148-151.5 and within
-    0.5% of his 151.2 on Tree Dungeon; until then 99.2, 149.0 (119.2's under the old formula), kept for the
-    simulator's goldens."""
+def test_the_thiefs_walk_is_his_stat_windows_and_within_his_measured():
+    """The thief's profile's SPEED is his stat window's 101 from 2026-11-02 (his walk until a hunt reads his stat
+    window's: motion.physics.set_speed), 151.25, inside his measured 148-151.5 and within 0.5% of his 151.2 on Tree
+    Dungeon; until then 99.2, 149.0 (119.2's under the old formula), kept for the simulator's goldens."""
     planned = physics.shoe_of(thief.FIXED_STATS).vmax
     assert thief.FIXED_STATS == config.Character() and planned == 151.25 == physics.WALK_SPEED  # (the tests play her)
     assert THIEF_BAND[0] <= planned <= THIEF_BAND[1]
@@ -79,12 +78,12 @@ def test_the_recorded_walks_are_the_clients_formula_not_v83s(who):
 def test_her_stat_window_said_only_where_it_isnt_her_jump():
     """The hunter's note on her stat window's JUMP (statcheck.moves_notes): before 2026-11-02 it compared the window's
     SPEED with config.toml's fitted 119.2 and said so at every read for the thief. Her SPEED isn't said there from
-    2026-11-02's calibration: her walk and climb are measured and correlated with it (motion.calibrate, the hunter's
-    Calibration.panel_seen: tests/test_calibrate.py). A JUMP apart is."""
+    2026-11-02: her walk and climb are its own by the client's formula (Hunter._speed_read, motion.physics.set_speed:
+    tests/test_panel_speed.py). A JUMP apart is."""
     reading = lambda **v: SimpleNamespace(get=v.get)
     where = lambda stat: "her profile"
     assert statcheck.moves_notes(reading(speed=100, jump=100), magician.FIXED_STATS, where) == []
-    assert statcheck.moves_notes(reading(speed=130, jump=100), thief.FIXED_STATS, where) == []  # (her calibration's)
+    assert statcheck.moves_notes(reading(speed=130, jump=100), thief.FIXED_STATS, where) == []  # (her walk's own)
     assert statcheck.moves_notes(reading(speed=None, jump=110), magician.FIXED_STATS, where) == [
         "her JUMP 110% by her stat window jumps her at 610.5 units/s; her moves are planned at 555 (her profile jump "
         "100)"]

@@ -96,9 +96,9 @@ APEX = JUMP_HEIGHT   # 77 units: how high a jump rises
 # with the arrow pressed after arriving, only ~0.4 s after the press. Jumping off the rope sideways
 # just below the top doesn't help: it has next to no lift (she fell 360 units). So the next move's
 # arrow goes down just before the top, and she's modelled as starting to run 0.35 s after it.
-# Her climb up is her climb (physics.CLIMB_SPEED) from 2026-11-02, as calibrated (motion.calibrate: `_follow` below):
-# the client's SPEED + 20 by her stats (121 the thief's, 120 the magician's: she climbed 119.9 up on that night's 15
-# fps frames), where the minimap's traces said 130 (the climb-over's step is UP_EXTRA's and CLIMB_OVER's, not this).
+# Her climb up is her climb (physics.CLIMB_SPEED) from 2026-11-02, as set from her stat window's SPEED (`_follow`
+# below): the client's SPEED + 20 (121 the thief's, 120 the magician's: she climbed 119.9 up on that night's 15 fps
+# frames), where the minimap's traces said 130 (the climb-over's step is UP_EXTRA's and CLIMB_OVER's, not this).
 ROPE_SPEED = CLIMB_SPEED
 UP_EXTRA = 0.35
 CLIMB_OVER = 0.23    # her body after a climb: a standing start this long after the top (+ RUN_LAG = 0.35)
@@ -130,7 +130,7 @@ HOLD_MERGE_MS = 5    # a key held again within this many ms of its release stays
 
 @physics.follows
 def _follow() -> None:
-    """Her walk and climb as calibrated (physics.set_motion, which rebinds the names taken from it): GRAB_LEAD and
+    """Her walk and climb as set (physics.set_speed, which rebinds the names taken from it): GRAB_LEAD and
     ROPE_SPEED made again of them."""
     global GRAB_LEAD, ROPE_SPEED
     GRAB_LEAD = physics.WALK_SPEED * JUMP_SPEED / GRAVITY
