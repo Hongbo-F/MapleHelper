@@ -44,7 +44,8 @@ from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare,
                     SimViolation, Trace, detector_kinds, patched)
 from . import harness
 from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, NEAR_SPELL, OFF_SEEN, OFF_SPELL,
-                    ROPE_REACH_CLIENT, TREE_DROP_MIX, Her, Noise, Realism, SimDied, World, her_climb, her_shoe)
+                    NEWBORN_S, ROPE_REACH_CLIENT, TICK_S, TREE_DROP_MIX, Her, Noise, Realism, SimDied, World,
+                    her_climb, her_shoe)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -910,6 +911,62 @@ def loop_tree_touched_unseen(sim):
     42, kills 27, 30 and 30, the claw's swipes 45, 14 and 15, far_claws' 28, 1 and 1; all of this met on none, 7 and 10
     (all but 4, no 'touched' jump, and 12, one far claw)."""
     return harness._only(_loop(1 / 6), (7,))(sim)
+
+
+# The spawn guard's set-piece (loop_tree_respawn_pass): 7's two Horny Mushroom points free, their pass RESPAWN_PASS s
+# in, her kill's drops between them from KILLED_S before the run
+_RESPAWN_PASS = 1.0
+_KILLED_S = 2.5
+_TOUCHED_AT = re.compile(r"^\s*([\d.]+) touched by ")
+
+
+def _newborn_touches(tr: dict, born: float = _RESPAWN_PASS) -> list[float]:
+    """The touches (World.log, 'touched by') within NEWBORN_S of a pass at `born` s: the newborns' (the set-piece's
+    only monsters are its two points')."""
+    return [t for line in tr["world_log"] if (m := _TOUCHED_AT.match(line)) and born <= (t := float(m[1])) < born
+            + NEWBORN_S]
+
+
+@tree((7, -60.0), monsters={7}, seed=4, limit=12, may_die=True, noise=_NEAR, attack="choice",
+      her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
+      drops=(("sapphire-ore", 7, -150.0), ("mesos", 7, -165.0)),
+      realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"],
+                                  vacant=(0, 1), first_pass=_RESPAWN_PASS),
+      expects=(logs("after the pass: a horny-mushroom spawn point", "her trip to the pile waited for the pass"),
+               check("one touch by a newborn at most (within NEWBORN_S of the pass)",
+                     lambda tr: len(_newborn_touches(tr)) <= 1),
+               check("both newborns killed", lambda tr: sum(tr["world"]["kills"].values()) >= 2)))
+def loop_tree_respawn_pass(sim):
+    """R3 of the cornered study (the user's clip of 2026-11-02 22:51: D:/MapleHelper-scratch/cornered, episodes A and C
+    at 22:50:27 and 22:49:52): her trip along 7 to her drops between its two Horny Mushroom points (-207 and -94, the
+    tower's wall at -220) as the map's pass fills both. The hunt loop on 7 in the thief's standard world (near-misses,
+    walkers), from its spot at -60 (34 off -94's point), both points free (Realism.vacant) and their pass 1.0 s in
+    (Realism.first_pass), a Sapphire Ore and coins at -150 and -165 (her kill there KILLED_S before the run: the drop
+    store's pile of it; the ore valuable, rule 6a, at once), her spawn clock knowing the pass as after a hunt's first 15
+    s live (fed the three passes before the run's: localization.spawnclock is sure 14 s into the live hours' births).
+    With the spawn guard off (hunt.RESPAWN_GUARD False: as before) she sets off for the ore at 0.81 s, walks through
+    -94's point as it fills and stands between the two newborns: on seed 4 touched 3 times by them (7 in the 12 s, all
+    hurting, 5 of her presses the claw's at point blank), one kill; on (behavior.hunt._respawn_guard: 'valuable pile:
+    the pass'; going has her by both points about the pass, waiting by -94's alone, -207's newborn 3.2 EXP against 2.7
+    of waiting) she waits at -60 till the pass is seen and decides again with the newborns in sight (shot first from
+    there): once touched, both killed. On 7 nowhere is 75 off both points (hunt._off_points), so she waits where she
+    is, 34 off -94's. Of seeds 1-12, their 12 s (D:/MapleHelper-scratch/cornered-fix/respawn/scen, sp2_off.txt,
+    sp5_on.txt): off against on, touches 55 and 42, that hurt 43 and 32, by a newborn 23 and 17, kills 18 and 23, EXP
+    738 and 943, the claw's presses 29 and 15; the ore picked up by 12 s on 12 and 5 (on, the newborns shot first). All
+    of this met on none of them off (its touch and kill checks both on 5 and 7), on 6 on (3, 4, 7, 8, 10, 12)."""
+    from ..behavior.ledger import Kill
+    start, first = sim.world.origin, sim.world.realism.first_pass
+    make = sim.tour_stack
+
+    def tour_stack(**kw):
+        t = make(**kw)
+        for k in (3, 2, 1):  # (the passes before the run's first, as her clock would have them by now)
+            t.h.spawn_clock.birth(start + first - k * TICK_S, 1.0)
+        y = sim.model.platform(7).y_at(-157.0)
+        t.h.drops.on_kill(Kill(start - _KILLED_S, "horny-mushroom", 7, -157.0, y, 7))
+        return t
+    sim.tour_stack = tour_stack
+    return harness._only(_loop(1 / 5), (7,))(sim)
 
 
 @tree((20, -60.0), monsters={19, 20, 21, 22}, seed=7, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,

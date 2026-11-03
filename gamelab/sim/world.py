@@ -524,6 +524,9 @@ def magic_band(s: Search, near: float, far: float, bottom: float, top: float) ->
 # A touch by a monster within this many s of its respawn came from its spawn point, onto her or beside her (World.
 # fresh_log): what a waiting place by a spawn point costs.
 FRESH_S = 1.5
+# ... and one within this many s of it, a newborn as the live hour's were counted (the cornered study's verify-R3: a
+# touch within 4 s of a newborn's first sighting within 70 of her; World.newborn_log): what the spawn guard is for.
+NEWBORN_S = 4.0
 # ... but a hit pushes it (and it flinches) only if its damage, after the monster's defence (x 100 / (PDDamage + 100),
 # as STAR_DAMAGE's), reaches its `pushed` in the game data: 1 for every kind of the first map (any damage, as above),
 # 40 for a Horny Mushroom and 25 for a Green Mushroom on Tree Dungeon, Forest Up North II, 30 for an Axe Stump and 25
@@ -1075,6 +1078,11 @@ class Realism:
                                  # random points clear of monsters by SPAWN_CLEAR; 0: `respawn` s after its death, each
                                  # on its own (the default until 2026-10-31; harness `--world clock-respawn`)
     respawn_cap: float | None = None
+    # A scenario's set-up of the map's pass (with respawn_tick): the monsters of these indices (the scenario's, in its
+    # order) dead long since at the start, their points free for the first pass, and that pass this many s from the
+    # start (None: at a phase drawn, as every run's); the spawn guard's set-piece (loop_tree_respawn_pass)
+    vacant: tuple = ()
+    first_pass: float | None = None
     full_tabs: tuple = ()        # her inventory's tabs full from the start ("Use", "Etc": a drop of one refused with
                                  # FULL_MESSAGE; the harness's `--world etc-full`); (): room for everything
     fills_after: tuple = ()      # ((tab, n), ...): a tab full once she has picked up n items into it (the harness's
@@ -2192,6 +2200,8 @@ class World:
         self.touch_log: list[tuple[float, float]] = []  # (t, the share of her HP it took: 0 if evaded) for every touch
         self.fresh_log: list[tuple[float, float]] = []  # ... of those, the touches by a monster within FRESH_S of its
                                                         # respawn (from its spawn point)
+        self.newborn_log: list[tuple[float, float]] = []  # ... and within NEWBORN_S of it (the spawn guard's newborns:
+                                                          # behavior.hunt._respawn_guard)
         # ... and where each was: (t, her mode then: ground, air or rope, her x, her feet's y), one for each of
         # touch_log's; her climbs up a rope onto the platform at its top (climb_log: t, the rope's x, the platform);
         # and her grabs of a rope (grab_log: t, the rope's x, her feet's height under its top then). The live hour of
@@ -2358,7 +2368,11 @@ class World:
             over = len(self.monsters) - self._respawn_cap()
             for m in self._tick_rng.sample(self.monsters, max(0, over)):
                 m.alive, m.died_at, m.died_x = False, -1e6, m.home
-            self._push(int(self._tick_rng.uniform(0.0, self.realism.respawn_tick) * 1000), "map_tick")
+            for i in self.realism.vacant:  # (a scenario's: Realism.vacant, first_pass)
+                m = self.monsters[i]
+                m.alive, m.died_at, m.died_x = False, -1e6, m.home
+            first = self._tick_rng.uniform(0.0, self.realism.respawn_tick)
+            self._push(int((first if self.realism.first_pass is None else self.realism.first_pass) * 1000), "map_tick")
         for m in self.monsters:
             self._camps_watch(m)
         for at, side in self.noise.turned:
@@ -3135,6 +3149,8 @@ class World:
         self.touch_place.append((self.t, self.mode, round(self.x, 1), round(self.y, 1)))
         if m.born is not None and self.t - m.born < FRESH_S:
             self.fresh_log.append((self.t, damage))
+        if m.born is not None and self.t - m.born < NEWBORN_S:
+            self.newborn_log.append((self.t, damage))
         if evaded:
             self.evaded += 1
             self.note(f"touched by {m.kind} #{m.idx} at x {mx:.0f}: MISS")

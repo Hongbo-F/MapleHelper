@@ -90,4 +90,5 @@ def test_drop_takers_drops_left_alone_go_at_the_first_expiry_pass_past_their_lif
 def test_the_harness_worlds_switch_them_on():
     assert harness.WORLDS["map-drops"] == {"drop_mix": TREE_DROP_MIX}
     assert harness.WORLDS["drop-takers"] == {"drop_takers": True}
-    assert harness.PILE_RULES[-3:] == ("sweep", "sweep: landing", "sweep: clear first")
+    assert harness.PILE_RULES[-5:] == ("sweep", "sweep: landing", "sweep: clear first",  # (the spawn guard's holds:
+                                       "sweep: the pass", "valuable pile: the pass")       # behavior.hunt._go_for)

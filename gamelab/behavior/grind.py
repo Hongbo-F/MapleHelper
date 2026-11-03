@@ -61,7 +61,7 @@ from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .ledger import FOLLOW_S, dying
-from .patrol import STOP_S, TICK_S, Patrol, choice_text, reaching
+from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
 
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go); and from the final
                        # review of 2026-11-02, s waiting there on end (Hunt._wait, nothing shot, no step) with monsters
@@ -421,6 +421,12 @@ class Grind(Hunt):
         if best is None or abs(best[1] - x) < 10:
             return None
         return (RIGHT if best[1] > x else LEFT), min(abs(best[1] - x), REACH_STEP)
+
+    def _fill(self, period: float) -> float:
+        """A free spawn point's chance of a newborn at the map's next pass (the spawn guard's: Hunt._respawn_guard), as
+        the grind has learned the refill (patrol.Belief.rate, a second a free point: what her own kills and the other
+        players' bring back) over the pass's `period` (patrol.filled)."""
+        return filled(self.patrol.belief.rate * period)
 
     def _stay_gain(self, s: Scene, held: list[Monster]) -> float:
         """EXP a second of staying at the stop (see the top): the `held` monsters' EXP over their kill time and the
