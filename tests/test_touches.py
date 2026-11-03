@@ -441,9 +441,13 @@ def test_her_trips_legs_pass_a_monster_while_she_cant_be_touched():
 
 # --- the simulator --------------------------------------------------------------------------------------------------
 
-def test_the_worlds_invulnerability_is_the_frames_and_her_evasion_the_games_hit_check():
+def test_the_worlds_invulnerability_is_the_sources_and_her_evasion_the_games_hit_check():
+    # The world's invulnerability the sources' 1.5 s, which the frames agree with read by their frame steps (the touch
+    # study's, the default from 2026-11-03); the stack's own figure the frames' least gap, 1.45, as every world had it
+    # until then (world.INVULNERABLE_LEAST_GAP, `--world invulnerable-1.45`).
     from gamelab.sim import world as world_mod
-    assert world_mod.INVULNERABLE == world_mod.INVULNERABLE_LIVE == INVULNERABLE_S == 1.45
+    assert world_mod.INVULNERABLE == world_mod.INVULNERABLE_LIVE == world_mod.INVULNERABLE_SOURCES == 1.5
+    assert INVULNERABLE_S == world_mod.INVULNERABLE_LEAST_GAP == 1.45
     green, horny = world_mod.MobInfo(54.0, 79.0), world_mod.MobInfo(110.0, 94.0)  # (Tree Dungeon's: game data)
     her = world_mod.LEVEL_25
     assert her.avoid == world_mod.LEVEL_25_AVOID == 58.0
