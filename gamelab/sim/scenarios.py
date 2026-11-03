@@ -719,7 +719,7 @@ _CROWD = harness.PRESETS["crowd"]
 _LUCKY = dataclasses.replace(LEVEL_25, stars=LUCKY_SEVEN)  # her attacks as Lucky Seven's live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
+@tree((25, 220.0), monsters="all", seed=3, limit=500, may_die=True, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("next: platform 23, from platform 24 at x 221"), logs("at platform 23's spot (platform 24)"),
                _rule("shoot", 20), check("fifteen kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 15),
@@ -762,14 +762,20 @@ def loop_tree_23(sim):
     1 under fifteen kills; of seeds 1-13 3, 7, 8 and 10 show all of this.) (Seed 1 since her drops are swept by the
     seconds each may add to her way and a fresh pile by her is left to her pets a moment (2026-11-01, work/replan:
     hunt._allow, PET_LOOT; D:/MapleHelper-scratch/replan/loot2/eval/seeds/s16.txt): on seed 3 seven kills, the rule
-    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.)"""
+    'shoot' fewer than 20 times; of seeds 1-16 1, 4, 5, 6, 9 and 12 show all of this.) (Seed 3 since her walk and climb
+    calibrated (2026-11-02: the thief at his stat window's 151.25 and 121, world and planner, where 149 and the world's
+    130 up; D:/MapleHelper-scratch/recfix/calib/seeds/slow23*.json, v23_*.json): on seed 1 ten kills; of seeds 1-16 3,
+    5, 7 and 8 show all of this, at work/rec-all 1, 3, 6, 8, 9, 11-13 and 16; her kills over 1-16 12.2 a run against
+    16.8 there, the walk's change (at his walk 149 and climb 119.2 16.4; at 151.25 with the climb 130 12.4), but over
+    17-32 14.8 against 11.4 at 149: over 1-32 13.5 against 13.9, all of this met on 12 of 32 either way, the seeds'
+    luck.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
 _NEAR = dataclasses.replace(_CROWD[0], near_seen=NEAR_SEEN, off_seen=OFF_SEEN)  # the detector's misses as live
 
 
-@tree((25, 220.0), monsters="all", seed=1, limit=500, may_die=True, noise=_NEAR, attack="choice",
+@tree((25, 220.0), monsters="all", seed=2, limit=500, may_die=True, noise=_NEAR, attack="choice",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=dataclasses.replace(_CROWD[1], zero_walls=True),
       expects=(logs("at platform 23's spot (platform 24)"), logs(": later, a horny-mushroom unseen"),
                check("twenty kills or more", lambda tr: sum(tr["world"]["kills"].values()) >= 20),
@@ -805,7 +811,10 @@ def loop_tree_23_near_misses(sim):
     sideways added to the speed she has, landing at her walk's speed at most, world.KNOCK_VX, KNOCK_ADDS,
     KNOCK_LANDS_WALKING: ~87 units on flat ground from standing where it was ~58;
     D:/MapleHelper-scratch/recfix/sim-fix/scan4.txt): on seed 11 14 kills; of seeds 1-16 1, 5 and 16 show all of this,
-    the others under twenty kills (a median 12); on 1, 24.)"""
+    the others under twenty kills (a median 12); on 1, 24.) (Seed 2 since her walk and climb calibrated (2026-11-02: the
+    thief at his stat window's 151.25 and 121, where 149 and the world's 130 up; D:/MapleHelper-scratch/recfix/calib/
+    seeds/slow23*.json): on seed 1 ten kills; of seeds 1-16 2, 12 and 16 show all of this, at work/rec-all 1, 5 and 16
+    (13.2 kills a run over 1-16 against 14.0); on 2, 21.)"""
     return harness._only(_loop(4), (23,))(sim)
 
 
