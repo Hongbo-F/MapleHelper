@@ -308,6 +308,17 @@ WORLDS["spawn-fade-wide"] = {"spawn_found": SPAWN_FOUND_WIDE}
 # 2026-11-02, where it now touches only once it has faded in (world.NEWBORN_SOLID_S: none of the 72 live touches by a
 # spawn point came before 0.82 s after the respawn pass).
 WORLDS["newborns-touch"] = {"newborns_touch": True}
+# ... and a star's line checked to its hit point inside the monster's platform alone (`hit-inside`: Realism.hit_inside),
+# as every world had it until 2026-11-03, where the client's own point counts too: a jump throw up close at a monster at
+# the foot of a wall rising from its platform's end goes into the wall (reach.CLIENT_HIT_POINT, the cornered study's R6).
+WORLDS["hit-inside"] = {"hit_inside": True}
+# ... and her aim up close as before the cornered study's R6 and R8 (the stack's, `stack` below: run_one sets them for
+# the run): `aim-before`, both off (the hit point inside the monster's platform alone, a jump throw up close counted sure
+# with its own key's line unchecked: attack.reach.CLIENT_HIT_POINT; the nearest the way she faces, attack.stance
+# .FIRST_TO_REACH), to price them in a world where such a star goes into the wall; `first-to-reach-off`, R8 alone off.
+WORLDS["aim-before"] = {"stack": (("gamelab.attack.reach", "CLIENT_HIT_POINT", False),
+                                  ("gamelab.attack.stance", "FIRST_TO_REACH", False))}
+WORLDS["first-to-reach-off"] = {"stack": (("gamelab.attack.stance", "FIRST_TO_REACH", False),)}
 # ... and her knock as the planner has it (`planner-knock`: Realism.knock, world.KNOCK_PLANNER: motion.physics's 180 out
 # and 220 up, landing at the speed she flew; ~58 units on flat ground, 0.22 s in the air), as every world had it until
 # 2026-11-02, where it is now the client's (world.KNOCK_VX, KNOCK_VY: 270 and 270, landing at her walk's speed at most;

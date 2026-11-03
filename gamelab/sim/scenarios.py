@@ -28,7 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from maplehelper.engine import RIGHT
+from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from ..control import client
@@ -99,6 +99,7 @@ class Scenario:
     fn: Callable
     start: tuple[int, float]
     monsters: object = None      # None: none; "all": the map's spawns; a set of platform ids; or [(name, platform, x)]
+                                 # (a 4th, s: it stands that long first: World._spawn)
     seed: int = 1
     hp: float = 1.0
     inventory_full: bool = False
@@ -1961,6 +1962,40 @@ def loop_tree_stat_window_put_off(sim):
     start, so the read is put off at once (nothing moves her for it), the hunt goes on, and the hunt loop reads it at
     its first quiet look 5 s or more later (StatsDue from health_check), as at the start: S, DETAIL, S."""
     return stat_run(1.5)(sim)
+
+
+# --- cornered by a wall: her aim up close (the cornered study's R6 and R8, 2026-11-03) ---------------------------------
+# The harness's standard thief world (`run loop-grind --map 10002073 --preset crowd --attack choice --world zero-walls
+# --world near-misses --world walkers`: harness.scenario) but for the detector's misses near her (the preset's own:
+# found 90% of the time wherever), for a set-piece about her aim, not her eyes.
+_AIM_WORLD = dict(noise=_CROWD[0], attack="choice", her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER),
+                  realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"], **harness.WORLDS["walkers"]))
+
+
+def into_walls(tr: dict) -> int:
+    """Her stars a wall stopped (the world's 'stopped by the wall at x': reach.wall_between, to the client's own hit
+    point too)."""
+    return sum("stopped by the wall" in line for line in tr["world_log"])
+
+
+@tree((7, -152.0), monsters=[("Horny Mushroom", 7, -207.0, 5.0), ("Horny Mushroom", 7, -94.0, 5.0)], facing=LEFT,
+      seed=12, limit=30, may_die=True, **_AIM_WORLD,
+      expects=(check("no star of hers into a wall (the world's 'stopped by the wall')", lambda tr: into_walls(tr) == 0),
+               check("two kills", lambda tr: sum(tr["world"]["kills"].values()) >= 2)))
+def loop_tree_wall_corner(sim):
+    """Episode A of the user's clip of 2026-11-02 22:50 ("cornered character making bad attack move": D:/MapleHelper-
+    scratch/cornered, 22:50:25-51): the hunt loop on 7 alone for 10 s, from x -152 between 7's two Horny Mushroom
+    points, one at the foot of the trunk's wall at -207 (55 off, its body over the wall at -220 by 15), the other at -94
+    (58 off), both standing their first 5 s as the clip's tracks had them (World._spawn's 4th field), in the thief's
+    standard world but for the detector's misses near her. Live she jumped in place at the one by the wall again and
+    again, the star going into the trunk: the client's hit point, the middle of where the shot's row (from 65 ahead of
+    her) crosses its body, is past the wall (R6, reach.CLIENT_HIT_POINT), with a sure jump throw at the other one
+    standing there (R8, stance.FIRST_TO_REACH). Her decisions as before (`--world aim-before`) in this world, where such a
+    star goes into the wall (on b7f7308 the world took it inside the platform and let it through), on seed 12: 3 stars
+    into the wall, 14 touches; now none, 5 touches, 2 kills. Seeds 1-12 (D:/MapleHelper-scratch/cornered-fix/aim/scan/
+    final12.txt), her decisions as before, R6 alone, both: stars into the wall 29, 24, 0; checks met on 1, 2 and 7;
+    kills 18, 18, 19; touches 68, 75, 89 (fighting, she draws the chase: as before her stars hurt nothing for a while)."""
+    return harness._only(_loop(1 / 6), (7,))(sim)
 
 
 # --- the top of a rope: hanging just under a platform, her dot snapped onto it -------------------------------------

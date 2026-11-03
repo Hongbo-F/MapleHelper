@@ -1154,6 +1154,10 @@ class Realism:
     newborns_touch: bool = False  # a monster the map has just spawned touches her from its birth (as the world had it
                                   # until 2026-11-02: the harness's `--world newborns-touch`); False: only once it has
                                   # faded in, NEWBORN_SOLID_S after (as live)
+    hit_inside: bool = False      # a star's line checked to its hit point taken 1 unit inside the monster's platform
+                                  # alone (as every world had it until 2026-11-03: the harness's `--world hit-inside`);
+                                  # False: the client's own hit point too where it's past the platform's end (its body
+                                  # over a wall rising from there, up close: sight_stop, reach.CLIENT_HIT_POINT)
     knock: tuple[float, float, bool, bool] | None = None  # her knock (vx, vy, whether its push sideways adds to her
                                   # speed, whether she lands from it at her walk's speed at most): None, the world's own
                                   # (KNOCK_VX, KNOCK_VY, KNOCK_ADDS, KNOCK_LANDS_WALKING: the client's, as R1-R3's frames
@@ -2376,9 +2380,11 @@ class World:
                     wanted.append((s.name or str(s.mob_id), p.id, s.x))
         else:
             wanted = list(monsters)
-        for i, (name, pid, x) in enumerate(wanted):
+        for i, (name, pid, x, *first) in enumerate(wanted):
             m = self._monster(i, name, pid, float(x), random.Random(self.rng.random()))
             m.start(0.0, float(x))
+            if first and not isinstance(m, SimJumper):  # (name, platform, x, s): it stands that long first, then its
+                m.d, m.t1 = 0, float(first[0])           # own walk (a set-piece's look, as live's tracks had them)
             self.monsters.append(m)
             self._keep(m)
 
@@ -3338,10 +3344,12 @@ class World:
     def sight_stop(self, m: SimMonster):
         """What stops the star's line from her now to monster `m` (reach.wall_between, by reach.LINE: from the
         foothold group of the platform she last stood on, her feet where they are now, in a jump too; m's body
-        as the attack picks it, World.top), or None."""
+        as the attack picks it, World.top), or None. To the client's own hit point too, whatever her decisions take
+        (reach.CLIENT_HIT_POINT): past a wall rising from its platform's end where its body is over it, up close; not
+        with Realism.hit_inside."""
         mx = m.at(self.t)
         return reach.wall_between(self.last_plat, self.x, self.y, mx, target=m.platform, ty=m.y(mx),
-                                  body=(self.top(m), m.half))
+                                  body=(self.top(m), m.half), client=not self.realism.hit_inside)
 
     def _press_magic(self, action: str, at: float) -> None:
         """Her attack key (`action` 'attack', her wand's swing, or 'skill', Magic Claw) pressed outside the lock, as the
