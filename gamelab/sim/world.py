@@ -1197,6 +1197,11 @@ class Her:
                                  # jumps after a run carry farther than planned), as it did live (MAGE_32)
     climb_speed: float | None = None  # ... and climbs her at, up and down (her_climb); None: her truth, SPEED + 20 at her
                                  # profile's SPEED (physics.PROFILE_CLIMB: the thief's 121)
+    planned: tuple[float, float] | None = None  # her planner's walk and climb (units/s) held at these after her hunter's
+                                 # start, apart from her stat window's SPEED (physics.set_planned: Sim.hunter), the
+                                 # world moving her at its own (walk_speed, climb_speed): what a planner's error costs
+                                 # her (sim.harness's `planner-v83`); None: her planner by her stat window's SPEED, as
+                                 # live (in the simulator her profile's)
     mp_regen: float = MP_REGEN   # MP a second she regains all the while (Her.mp kept)
     magic: SimMagic | None = None  # her skill key's attack Magic Claw as the game casts it (SimMagic: the magician's,
                                  # MAGE_32), her MP its ammunition (`cast_mp` a cast, nothing with less, MP_REFUSAL

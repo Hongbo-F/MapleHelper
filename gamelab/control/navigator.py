@@ -577,8 +577,9 @@ HANG_UNDER = 80.0
 HANG_FLOOR = 70.0
 # The cut is decided at the glance before the one that would be too late: from her dot's height (on the rope above where
 # she grabbed it, and not in the air by the glance's state: in the jump at it no cut), less what she climbs in the
-# glance's frame age and the game's lag in letting go of up (motion.body.Lags.off, 68 ms), at flow.ROPE_SPEED (130; live
-# 117-120, so she stops a little lower).
+# glance's frame age and the game's lag in letting go of up (motion.body.Lags.off, 68 ms), at flow.ROPE_SPEED (her climb,
+# SPEED + 20 by her stat window: the thief's 121, hers 120, as she climbed; until 2026-11-02 the planner's 130, so she
+# stopped a little lower then).
 HANG_LAG_S = 0.068
 # HANG_S: the most she hangs. The roadmap's 4 s (about a touch's price, attack.stance.MEET_PRICE_S 2.86 s, and the climb
 # down it saves), 2 s and 0 (the stop under the top, then up the rest at once, unwatched, a touch the cut's), on the
@@ -3446,8 +3447,9 @@ class Navigator:
         return [replace(mo, unsure=HANG_UNSURE_S) if mo.unsure is not None else mo for mo in tracks]
 
     def _up_leg(self, rope: Rope, q: Platform, y: float) -> Leg:
-        """The rest of a climb up `rope` from her feet at map y set off now (plan time 0): at physics.CLIMB_SPEED (live
-        117-120 units/s: the longer, the surer), and her climb-over (flow.CLIMB_OVER) onto platform `q` at its top."""
+        """The rest of a climb up `rope` from her feet at map y set off now (plan time 0): at physics.CLIMB_SPEED (SPEED +
+        20 by her stat window: the thief's 121, hers 120 units/s, as she climbed), and her climb-over (flow.CLIMB_OVER)
+        onto platform `q` at its top."""
         up = max(0.0, y - rope.top) / CLIMB_SPEED
         return Leg(Move("climb", q.id, q.id, rope.x, rope.x, rope_x=rope.x, rope_top=rope.top, rope_bottom=rope.bottom),
                    Body(0.0, rope.x, q), Body(up + CLIMB_OVER, rope.x, q), rope=[Climb(0.0, up, rope.x, y, rope.top)],

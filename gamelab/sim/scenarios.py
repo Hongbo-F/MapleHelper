@@ -44,7 +44,7 @@ from .fakes import (EPOCH, Clock, FakeDetector, FakeEyes, FakeLoot, FakePetCare,
                     SimViolation, Trace, detector_kinds, patched)
 from . import harness
 from .world import (LEVEL_19, LEVEL_23, LEVEL_25, LUCKY_SEVEN, MAGE_32, NEAR_SEEN, OFF_SEEN, ROPE_REACH_CLIENT,
-                    TREE_DROP_MIX, Her, Noise, Realism, SimDied, World)
+                    TREE_DROP_MIX, Her, Noise, Realism, SimDied, World, her_climb, her_shoe)
 
 MAP_ID = 10000012  # Victoria Road: Thicket Around the Beach II (__main__.DEFAULT_MAP)
 ROCKY = 10004021   # Victoria Road: West Rocky Mountain II, the second map (from 2026-10-23)
@@ -253,6 +253,9 @@ class Sim:
 
     def __exit__(self, *exc) -> bool:
         self.active = False
+        if getattr(self, "held", False):  # (her planner held apart, Her.planned: back to her profile's for what follows)
+            from ..motion import physics
+            physics.reset()
         for book in self.books:  # (its save at the process's end would write into the run's lab, gone by then)
             book.path = None
         try:
@@ -304,6 +307,13 @@ class Sim:
             book.parent.mkdir(parents=True, exist_ok=True)
             book.write_text(self.scenario.book.read_text(encoding="utf-8"), encoding="utf-8")
         h = Hunter(self.eyes, keys, self.model, log=self.log, feed=self.feed, **kw)
+        if (planned := getattr(self.world.character, "planned", None)) is not None:  # (her planner held apart from her
+            from ..motion import physics                                            # stat window's SPEED: Her.planned)
+            physics.set_planned(*planned)
+            self.held = True
+            self.log(f"her planner held at walk {physics.WALK_SPEED:g} and climb {physics.CLIMB_SPEED:g} units/s, the "
+                     f"world's own {her_shoe(self.world.character).vmax:g} and {her_climb(self.world.character):g} "
+                     f"(the world's Her.planned)")
         if getattr(h.attacks, "book", None) is not None:  # (its fits at once, not on a thread: the same run every time)
             h.attacks.book.threaded = False
             self.books.append(h.attacks.book)

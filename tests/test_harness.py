@@ -768,6 +768,26 @@ def test_a_harness_run_takes_her_looks_from_the_feed_with_todays_look_costs():
     assert out["nav"]["glances"] == rec["senses"]["glances"] > 0
 
 
+def test_the_stacks_switches_a_world_sets_are_the_runs_alone(monkeypatch):
+    # `--world hang-2s` (control.navigator.HANG_LONGER and HANG_TAKE off: the 2 s hang alone) and `no-hang` (ROPE_HANG
+    # off): the stack's switches, set by run_one around the run and put back after, the world as the preset has it
+    if not scenarios.available(harness.TREE):
+        pytest.skip("needs Tree Dungeon's data")
+    from gamelab.control import navigator
+    seen = []
+    monkeypatch.setattr(scenarios, "run_sim", lambda sc: seen.append(
+        (navigator.HANG_LONGER, navigator.HANG_TAKE, navigator.ROPE_HANG, sc.realism)) or 1 / 0)
+    on = (navigator.HANG_LONGER, navigator.HANG_TAKE, navigator.ROPE_HANG)
+    assert on == (True, True, True)
+    for world in (("hang-2s",), ("no-hang", "zero-walls")):
+        with pytest.raises(ZeroDivisionError):
+            harness.run_one("loop", 1, "game", minutes=0.5, map_id=harness.TREE, world=world)
+        assert (navigator.HANG_LONGER, navigator.HANG_TAKE, navigator.ROPE_HANG) == on  # (put back)
+    assert [s[:3] for s in seen] == [(False, False, True), (True, True, False)]
+    game = harness.PRESETS["game"][1]
+    assert seen[0][3] == game and seen[1][3] == dataclasses.replace(game, zero_walls=True)
+
+
 def test_the_feeds_costs_as_measured_at_1366x768_are_the_runs_alone(monkeypatch):
     # --costs measured-1366: the fakes' look costs as `measured`'s, and the feed made for the run takes
     # feed.COSTS_1366 (SyncFeed's costs are COSTS as it is when it's made); both put back after the run.

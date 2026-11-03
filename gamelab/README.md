@@ -4462,8 +4462,8 @@ her head comes up past 10's surface (D:/MapleHelper-scratch/recfix/rope: r2_08.p
 (2026-11-02): "5, 6, 7, 8, 9 in the roadmap ranked list seems to be safe and important work to carry on, do them now."
 
 **What she does** (`control/navigator.py`, `ROPE_HANG`): while she climbs a rope up to the platform at its top, her
-glances check the way up from the newest state (`_way_up`): the rest of the climb (at physics.CLIMB_SPEED, 117: live
-117-120, the longer the surer), her climb-over (flow.CLIMB_OVER) and STAND_PAST_S standing at the top, her box all the
+glances check the way up from the newest state (`_way_up`): the rest of the climb (at physics.CLIMB_SPEED, SPEED + 20
+by her stat window: the thief's 121, hers 120; 117 until the merge of 2026-11-02), her climb-over (flow.CLIMB_OVER) and STAND_PAST_S standing at the top, her box all the
 way (flow.danger, the client's box: 22 either side, 65 tall), against every monster of the state whose touch counts, on
 any platform (a walker on 9 by its left end, 40-60 over 10 there, can touch her as she climbs over the top at -80 too),
 each walking as followed (TURN_SLACK and 20 units a second of spread, as every chain plans them), a standing one setting

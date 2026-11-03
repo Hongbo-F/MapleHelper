@@ -172,6 +172,7 @@ import argparse
 import bisect
 import dataclasses
 import difflib
+import importlib
 import json
 import math
 import os
@@ -263,7 +264,7 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned")
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
@@ -359,6 +360,19 @@ WORLDS["shared-exp"] = {"shared_exp": True}
 # against the world's 148.2, then); from the integration of 2026-11-02 both are the client's 150 (and 120 climbing), so
 # for her the two worlds move alike; the thief's world is his profile's formula (151.25 and 121) either way.
 WORLDS["walk-planned"] = {"walk_speed": None, "climb_speed": None}
+# ... and her planner held at v83's walk and the old climb (`planner-v83`: world.Her.planned, physics.set_planned; 125
+# and 117 units/s, as master 40ba190 planned her: v83's 125 without the client's Speed, and the shared placeholder 117,
+# though master planned a climb up at flow.ROPE_SPEED's 130), the world moving her at its own (hers the client's 150 and
+# 120): what the roadmap's item 1 (her walk and climb from her stat window's SPEED) is worth, measured as the planner's
+# error it takes away.
+WORLDS["planner-v83"] = {"planned": (125.0, 117.0)}
+# ... and the stack's own rules switched off to price them (`stack`: (module, name, value) set around the run by run_one
+# and put back after; not the world's): her hang under a rope's top the 2 s hang alone (`hang-2s`:
+# control.navigator.HANG_LONGER and HANG_TAKE off, as work/rec-all 560bd57 had it), or none (`no-hang`: ROPE_HANG off,
+# her climbs as before 2026-11-02's item 9).
+WORLDS["hang-2s"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", False),
+                               ("gamelab.control.navigator", "HANG_TAKE", False))}
+WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "spawn_found")  # WORLDS' fields that are world.Noise's
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
@@ -499,8 +513,8 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
     her = scenarios.her_on(map_id)[1]
     for name in world:
         fields = WORLDS[name]
-        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()
-                                                  if k not in HER_FIELDS and k not in NOISE_FIELDS})
+        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's)
+                                                  if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack")})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
     if attack is not None and her.magic is None:  # (the thief's Lucky Seven: the magician's attack is her Magic Claw)
@@ -535,7 +549,12 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     fakes_costs = {name: value for name, value in COSTS[costs].items() if name != "feed"}
     before = {name: getattr(fakes, name) for name in fakes_costs}
     routes, feed_costs = route.ROUTES, feed.COSTS
+    stack = [(importlib.import_module(mod), name, value)  # (the stack's switches the worlds set: WORLDS' `stack`)
+             for w in world for mod, name, value in WORLDS[w].get("stack", ())]
+    kept = [(mod, name, getattr(mod, name)) for mod, name, _ in stack]  # (as they were: put back after the run)
     try:
+        for mod, name, value in stack:
+            setattr(mod, name, value)
         for name, value in fakes_costs.items():
             setattr(fakes, name, value)
         if "feed" in COSTS[costs]:  # (the feed made for the run takes COSTS as it is then)
@@ -549,6 +568,8 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
         for name, value in before.items():
             setattr(fakes, name, value)
         route.ROUTES, feed.COSTS = routes, feed_costs
+        for mod, name, value in reversed(kept):
+            setattr(mod, name, value)
     out = outcomes(sim.world, records, minutes * 60)
     out.update(policy=policy, seed=seed, preset=preset, minutes=minutes, think=think, feed=True, costs=costs,
                ways=routes if ways is None else ways, map=map_id, result=str(trace["result"])[:120])

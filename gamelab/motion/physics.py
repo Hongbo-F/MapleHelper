@@ -614,10 +614,26 @@ def set_speed(speed: float) -> bool:
     climb_of), at once, and everything of them made again (see above). Whether her walk or climb changed (a SPEED past
     the client's range walks as its end does: body.SPEED_RANGE). Only where no chain of hers runs: a hunter's start,
     settle's, the tests' (and `reset`)."""
-    global EPOCH, SPEED
+    global SPEED
     SPEED = float(speed)
     shoe = PROFILE_SHOE if SPEED == CHARACTER.speed else shoe_of(replace(CHARACTER, speed=SPEED))
-    climb = climb_of(SPEED)
+    return _apply(shoe, climb_of(SPEED))
+
+
+def set_planned(walk: float, climb: float) -> bool:
+    """The simulator's alone (sim.world.Her.planned: the harness's `--world planner-v83`): her planner's walk and climb
+    held at `walk` and `climb` (units/s) apart from her stat window's SPEED, the world moving her at its own, to price a
+    planner's error: the client's shoe at the SPEED that walks her so (speed_of_walk: 125 is SPEED 80's, as v83's SPEED
+    100 without the client's Speed), the climb as given (not the formula's), everything of them made again as set_speed
+    makes it (SPEED left as it was: what her stat window says). Until the next set_speed (a hunter's start, `reset`).
+    Whether her walk or climb changed."""
+    return _apply(shoe_of(replace(CHARACTER, speed=speed_of_walk(walk))), float(climb))
+
+
+def _apply(shoe: body.Shoe, climb: float) -> bool:
+    """Her planner's walk and climb those of `shoe` and `climb`, everything of them made again (set_speed, set_planned:
+    see above). Whether her walk or climb changed."""
+    global EPOCH
     if shoe.vmax == WALK_SPEED and climb == CLIMB_SPEED:
         return False
     old = {n: globals()[n] for n in WALK_NAMES}

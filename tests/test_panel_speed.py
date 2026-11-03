@@ -84,6 +84,42 @@ def test_a_change_proposed_waits_for_settle_and_is_told_once_made():
     assert not physics.settle() and len(told) == 1
 
 
+def test_the_simulators_planner_can_be_held_apart_from_her_stat_windows_speed():
+    """physics.set_planned (the simulator's `--world planner-v83`, world.Her.planned): her planner at v83's walk 125 (the
+    client's shoe at SPEED 80, v83's at 100 without the client's Speed, as master planned her) and the old climb 117
+    whatever her SPEED, every name of her walk made again as set_speed makes it, SPEED kept; reset back to the formula's."""
+    from gamelab.motion import flow
+    epoch = physics.EPOCH
+    assert physics.set_planned(125.0, 117.0) and physics.EPOCH == epoch + 1
+    assert (physics.WALK_SPEED, physics.CLIMB_SPEED, physics.SPEED, flow.ROPE_SPEED) == (125.0, 117.0, 101.0, 117.0)
+    assert physics.SHOE == body.Shoe.from_physics(body.PHYSICS_IMG, 100.0, physics.CHARACTER.jump)  # (v83's, no bonus)
+    assert not physics.set_planned(125.0, 117.0)
+    assert physics.reset() and (physics.WALK_SPEED, physics.CLIMB_SPEED) == PROFILE and physics.EPOCH == epoch + 2
+
+
+@REAL
+def test_the_harness_planner_v83_holds_her_planner_and_the_world_walks_her_at_her_own():
+    """`--world planner-v83` (world.Her.planned): after her hunter's start her planner at 125 and 117 (Sim.hunter, said in
+    her log), the world walking her at her own (her truth, the thief's 151.25 and 121); her profile's again at the run's
+    end (Sim's exit)."""
+    from gamelab.sim import world
+    assert harness.WORLDS["planner-v83"] == {"planned": (125.0, 117.0)} and "planned" in harness.HER_FIELDS
+    got = {}
+
+    def fn(sim):
+        sim.hunter()
+        got["planned"] = (physics.WALK_SPEED, physics.CLIMB_SPEED)
+        got["world"] = (world.her_shoe(sim.world.character).vmax, world.her_climb(sim.world.character))
+        got["log"] = list(sim.trace.log)
+        return {}
+    sc = harness.scenario("loop", 1, "game", 0.05, map_id=harness.TREE, world=("planner-v83",))
+    scenarios.run_sim(dataclasses.replace(sc, fn=fn))
+    assert got["planned"] == (125.0, 117.0) and got["world"] == PROFILE
+    assert any(line.endswith("her planner held at walk 125 and climb 117 units/s, the world's own 151.25 and 121 (the "
+                             "world's Her.planned)") for line in got["log"])
+    assert (physics.WALK_SPEED, physics.CLIMB_SPEED) == PROFILE  # (put back at the run's end)
+
+
 @REAL
 def test_a_navigator_makes_its_route_graph_again_at_its_next_pass_and_a_move_planned_keeps_its_time():
     """A change proposed mid-run is made at the navigator's next pass (Navigator._follow_walk, at Navigator.step's start),
