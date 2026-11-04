@@ -943,7 +943,7 @@ OFF_SPELL_1102 = 0.53
 # master's the same numbers again) on the frame step's replays of R1-R3 with the finder on (D:/MapleHelper-scratch/unseen/
 # fix/bands.txt, her own frames): 100%, 100%, 99.3%, 99.4%, 100%, another platform 98.6%, its misses in spells of a frame
 # near her, 0.6 s on another platform. On BugBaby's lossless clip of 2026-11-02 22:49 (fix/gaps.py, by chains of its
-# finds): within 100 x 70 of her 96.4% of the monster-frames, a miss 2 frames on average; farther 92%, 6 frames. Pooled by
+# finds, a floor): within 100 x 70 of her 96.4% of the monster-frames, a miss 2 frames on average; farther 92%, 6 frames. Pooled by
 # their frames, what's below. The search's misses it fills in; a monster hit isn't lost under its numbers or her effect
 # (those cover part of it, 14 of 14 found in the hand sample: Noise.hit_hidden off with it). Not measured live.
 NEAR_SEEN_1104 = ((100.0, 0.98), (float("inf"), 0.97))
