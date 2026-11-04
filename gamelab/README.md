@@ -7693,7 +7693,7 @@ What it can and can't say. Its monsters the look misses are alive (90% against 5
 - **Not used:** the aggro memory (ends with the deaths the feed has, no evidence of its own; its place for a stand-in not tried), damage numbers over the place (the same fill as Tree Dungeon's platforms and leaves), `Attacks._corpse` for the thief (a dead walker's new id when seen: the finder's die1 on a search's detection covers part: seen targets dead or gone 7-11% live, not measured with it).
 - **First binding of her kills** on R1-R3: 142 against 144 of 151 right first (65 against 67 of the 71 strong), final the same: more bodies near her to bind to, let go sooner.
 
-## The target-first planner (from 2026-11-04; on by default, `GAMELAB_TARGET=0` off)
+## The target-first planner (from 2026-11-04; off by default, its second gate not passed; `GAMELAB_TARGET=1` on)
 
 The user, 2026-11-04: "I think on a short term, planner should just decide which mob to hit and plan against that. This is simple, less costly, and easy to follow." And: "you should watch for respawns at each frame. You should also change target if a mob is moving towards you and can knock you back, if you are not already attacking that mob. While you pick the primary target, it's also good to think about what's your next target". On loot: "you should aim for 100% pick up rate and if backpack is full, send a regular push notification". It replaces nothing but the grind's fights and loot on a platform, arrivals included; the platform choice (`Patrol.choose`), trips between platforms, rope hangs, the Lie Detector stop, the low-HP stop and pet feeding are as they were. Off, the grind is the one before it to the digit (harness: 20 runs of both characters in both worlds; goldens: 47 of 47 to the byte).
 
@@ -7736,7 +7736,7 @@ The harness's `drops_share` counts only fates known by the end: 0.957 her, 0.918
 
 Why no look every frame while her lock lasts: her own spell's effect is over the body right then (the finder's world: 13% found within 100), so at the key there was no body to cast at, and a cast was judged "no effect" at 0.6 s on the dot, holding a side for seconds. Nothing can be keyed meanwhile, so a glance does it: the decision stays at the look after her key, as in the hunt loop.
 
-### The gate (written first: `D:/MapleHelper-scratch/target-plan/gate_prereg.txt`; 50f2c78, seeds 201-296, 5 minutes, both characters, paired against 9060ff7, run once): PASS
+### The first gate, on the code before the reviews' fixes (written first: `D:/MapleHelper-scratch/target-plan/gate_prereg.txt`; 50f2c78, seeds 201-296, 5 minutes, both characters, paired against 9060ff7, run once): PASS
 
 World on both sides: the finder's (`near-misses-exact`), her standard command plus `drop-takers`; the thief's plus `map-drops`, `drop-takers`, `spawn-fade`.
 
@@ -7774,12 +7774,68 @@ Off 10: 138 -> 121, 245 -> 214. Off others (her, thief): 7: 99 -> 64, 86 -> 99; 
 
 **Newborns.** First frame to the choice: on her platform within 300, a median 0.33 s, p90 1.4-1.5, p99 6-8 (walks and stands in between: they aren't cut); anywhere, 0.7-0.9, p90 10-13 (they aren't hers to take until she's by them). A frame's glance takes them in at once during her lock.
 
+### The reviews' fixes and the second gate: FAIL
+
+Two reviews of the code above found what's listed under "How it works" as it now stands: the log line, the records, her walk read when asked, a monster's arrival counted once against her lock, every pile by one allowance, the none-landed mark by a search that can say so, a revive for a pile's whole life; the place pricing, the allowance's growth and `first_taken` gone.
+
+**Dev arms, seeds 101-148, EXP a minute against master's 493.4 and 336.6 (t), drops_share.** Eight arms this stage, on the seeds the code was chosen on, so these flatter it.
+
+| Arm | Her | Thief |
+|---|---|---|
+| The first gate's code | +12.2 (+1.5), .987 | +9.9 (+1.3), .978 |
+| ... the review's simplifications | +7.6 (+1.0), .989 | +11.9 (+1.8), .976 |
+| ... none landed by a strict search, from `looting.SETTLE` (3 s) | -5.4 (-0.6), .985 | +13.4 (+1.8), .969 |
+| ... a step off a knock's zone, the primary first by a pile, both as first built | -13.6 (-1.5), .982 | +17.1 (+2.4), .969 |
+| ... the step's bounds fixed | -9.6 (-1.2), .985 | +17.1 (+2.4), .969 |
+| ... the mark from the drops' landing (2.2 s), the search as strict | +10.8 (+1.6), .988 | +9.1 (+1.3), .974 |
+| ... the gate's rule back, the revive kept | +3.5 (+0.4), .988 | +10.3 (+1.5), .974 |
+| **Without the step and the gate by the pile: the second gate's code** | **+11.2 (+1.7), .988** | **+10.4 (+1.5), .975** |
+
+The 3 s hold cost her 20.4 EXP a minute against 2.2 s (t +3.00), the thief's side -8.0 (t -1.27). How isn't shown: her kill-to-key time rises (p90 7.2 to 7.9 s), and a guess that she stood idle by the pile was tested (the gate by the pile) and was wrong. It fits piles staying open longer, keeping her on her platform. The step and that gate did nothing measurable (the code without them: +0.4, +1.4).
+
+**The second gate** (written first: `D:/MapleHelper-scratch/target-plan/gate2_prereg.txt`; 40bddff, seeds 401-496, 5 minutes, both characters, paired against 9060ff7, run once; `gate2_result.txt`). **FAIL**, so the switch went off by default, as written beforehand.
+
+| | Her master | Her planner | diff (t) | Thief master | Thief planner | diff (t) |
+|---|---|---|---|---|---|---|
+| **EXP a minute** | 497.5 | **506.0** | **+8.5 (+1.67)** | 335.6 | **347.2** | **+11.7 (+1.73)** |
+| **drops_share** | 0.957 | **0.986** | +0.028 (+5.6) | 0.940 | **0.973** | +0.034 (+4.4) |
+| **value_share** | 0.959 | **0.988** | +0.028 (+5.2) | 0.946 | **0.975** | +0.029 (+3.8) |
+| landed by 120 s, picked up | 0.904 | 0.975 | | 0.876 | 0.948 | |
+| of all landed by 285 s | 0.899 | 0.940 | +0.040 (+4.8) | 0.820 | 0.886 | +0.066 (+4.1) |
+| loot's worth a minute | 245.2 | 261.3 | +16.1 (+3.3) | 150.7 | 165.5 | +14.8 (+2.9) |
+| **deaths / falls out** | 0 / 0 | **0 / 0** | | 0 / 0 | **0 / 0** | |
+| **off 10 anywhere, a -80 climb** | .099 | **.147** | (+1.55) | .300 | **.249** | (-1.93) |
+| off 10 to 13 (climbs) | 32 (363) | 45 (334) | | 114 (426) | 81 (377) | |
+| kills | 69.6 | 70.9 | +1.3 (+1.95) | 47.8 | 49.1 | +1.3 (+1.45) |
+| touches | 27.5 | 29.7 | +2.2 (+2.3) | 52.9 | 56.3 | +3.4 (+2.3) |
+| at piles, hurt | 4.6 | 11.0 | +6.4 (+11.6) | 4.4 | 10.9 | +6.5 (+8.9) |
+| MP used | 2391 | 2430 | +39 (+1.6) | 1947 | 2060 | +113 (+4.2) |
+| attacks at the dead | 8.0 | 9.1 | +1.1 (+2.3) | 8.3 | 9.3 | +1.0 (+2.2) |
+
+Its lines: EXP not below master's for either, passed; **at least one t >= +2, failed (+1.67, +1.73)**; drops and value above master's for both, passed; no deaths or falls out, passed; off 10 per climb lower for the thief, passed, and for her not worse at t >= +2, passed. That last threshold was loosened from the first gate's "lower for both", knowing her dev numbers. Hers rose in all three sets of seeds (first gate .131 to .143, dev .118 to .141, this gate .099 to .147), so "no real difference" was too kind: read it as worse for her. By the first gate's own line (off 10 to 13 lower for both) she'd have failed too. On the 76 seeds no review had run (it ran 401-416 and 451-454 on an earlier tip) the verdict is the same line by line: her +10.5 (t +1.77), the thief's +7.9 (t +0.98), so the thief's other 20 seeds flattered him.
+
+The set-piece on this code, seeds 1-16, off 10 anywhere: her 3 -> 3 (27, 25 climbs), the thief's 16 -> 5 (31, 29), his touches 113 -> 160.
+
+**What far piles cost her: the user's to choose.** The second gate's code against itself with piles on other platforms adding nothing to her way, even near their end (dev seeds 101-148, a measuring arm, `far0`, not on the branch):
+
+| Far piles off -> on | Her | Thief |
+|---|---|---|
+| EXP a minute | 524.3 -> 504.6, -19.7 (t -2.65, 95% -34 to -5) | 352.4 -> 347.1, -5.3 (t -0.67) |
+| loot's worth a minute | 222.3 -> 261.9, +39.5 | 132.6 -> 171.1, +38.5 |
+| landed by 120 s, picked up | .821 -> .985 | .753 -> .957 |
+| at piles, hurt | 1.6 -> 11.9 | 0.7 -> 10.0 |
+
+On, as the user's "aim for 100% pick up rate" has it. Off would be two lines in `Targeting.loot_allow`. There's no meso-to-EXP rate to settle it by, and off has had no gate.
+
 ### Goldens and tests
 
-Switch off: 47 of 47 to the byte. On: 15 differ, all grinds; 32 not. First diverging events: the target's own log line, or her stance's list down to one, then a key: `loop_tree_grind`: a throw at 34.2 s turns into a jump attack; `loop_tree_grind_drops`: a jump attack at 1.56 s into a throw; `loop_tree_lie_detector_grind`: a walk at 4.03 s into a stand on her drops at 4.23; `loop_tree_attack_no_darts`: a new seed (of seeds 21-44 her stars' test comes before out of darts' stop on 31 and 34). Re-recorded; the set-piece's added: 48 of 48. `tests/test_target.py`; the fast suite passes but test_geometry's known failure on another session's file.
+On the second gate's code with the switch off: 47 of 47 of master's own recorded traces to the byte (`golden check --folder` on the main checkout's), so off this is master. Recorded so here, with the set-piece's (forced on): 48 of 48. Her `loop_tree_attack_no_darts` is back on seed 29 (with the switch on it needs 31, as below). The suite: 3325 pass, and test_geometry's one failure on `perception/lie_target.py`, master's, not touched here.
+
+At the first gate, switch off: 47 of 47 to the byte. On: 15 differ, all grinds; 32 not. First diverging events: the target's own log line, or her stance's list down to one, then a key: `loop_tree_grind`: a throw at 34.2 s turns into a jump attack; `loop_tree_grind_drops`: a jump attack at 1.56 s into a throw; `loop_tree_lie_detector_grind`: a walk at 4.03 s into a stand on her drops at 4.23; `loop_tree_attack_no_darts`: a new seed (of seeds 21-44 her stars' test comes before out of darts' stop on 31 and 34). The set-piece's added then. On the second gate's code, on: 16 differ, 6 by the log's wording, all 16 still meeting what they're there for. `tests/test_target.py`.
 
 ### Not done
 
+- **Off by default, and not merged.** Whether to run it anyway (+8 to +12 EXP a minute and clearly more loot in every set of seeds, with more touches, and her knock-offs off 10 up), or to gate it further, is the user's.
 - **Not live.** Nothing here has seen the game. The first grind is its check: the 'target' records, "none landed" in 'target_end' against the pickup log (a drop a search misses comes back when seen: the `pile_revived` events), and the push.
 - **100% isn't reached in a 5-minute run:** far piles wait for her way (a 5-minute run's cut). What they cost is the user's to choose, below.
 - **A knock-zone step** before attacking (the user on the -80 rope: "or go to a side that is less likely to get knocked down") was tried twice and dropped: as a knock price on each place (gone with the review's simplifications: those together moved EXP -4.6, t -0.93, and +2.0, t +0.32, on the dev seeds; the price alone wasn't measured); as a step off the zone before attacking (`attack.knock`'s table), it fired 0.19 and 0.54 a run with her knock-offs off 10 no lower (24 against 22). The monster that knocked her along the platform is mostly on her way back, so there's no clear step. The thief's knock-offs fell without it; hers didn't.

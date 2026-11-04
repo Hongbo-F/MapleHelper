@@ -1778,7 +1778,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=31, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=29, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1789,8 +1789,8 @@ def loop_tree_attack_misses_seen(sim):
                      lambda tr: len(tr["result"]["pages"]) == 2 and "STARS MAY BE OUT" in tr["result"]["pages"][0][2]
                      and "out of darts" in tr["result"]["pages"][1][1])))
 def loop_tree_attack_no_darts(sim):
-    """(Seed 31 since the target-first planner: of seeds 21-44 she stops out of darts on 20, her stars' test before it on 31
-    and 34, as on 29 until then.) `tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts
+    """(With the target-first planner on, GAMELAB_TARGET=1, this needs seed 31: of seeds 21-44 she stops out of darts on 20,
+    her stars' test before it on 31 and 34, as on 29 with it off.) `tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts
     Lucky Seven's presses, so it doesn't fire while she throws it) with 40 throwing stars: gone at about 50 s, her regular presses only swing the
     claw, nothing at range; 5 in a row without effect at a Green Mushroom she had hurt, the doubt at 107.4 s; away to 25
     (its retreat timed out, 8.2 s: later checks wait where she is), a safe platform: the check there, her stars' test,

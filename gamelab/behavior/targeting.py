@@ -1,9 +1,9 @@
 """The target-first planner at a grind's stop (`Targeting`): what perception says at each look turned into attack.target's
 Her and Foes, its choice narrowing the hunt's targets to the one monster to hit, and the plan against it: the stance's
 own answer for that monster (attack.stance: up close, a jump attack, a step to range; a jump's shot), or the walk to the
-nearest place along her platform that works (attack.target.places: its way checked once, flow.danger, by the navigator). On
-by default since its gate of 2026-11-04; off (GAMELAB_TARGET=0: `on`) none of this runs, and the grind is the
-one before it to the digit. README: "The target-first planner".
+nearest place along her platform that works (attack.target.places: its way checked once, flow.danger, by the navigator). Off
+by default: its second gate of 2026-11-04 didn't pass (GAMELAB_TARGET=1 turns it on: `on`). Off, none of this runs, and the
+grind is master's to the digit. README: "The target-first planner".
 
 Everything else about a stop stays the grind's: where she goes next (Grind._leaving, Patrol.choose), her potions and the
 safety stop, the Lie Detector's stop. Her drops come in as they're due (`pile_first`, `loot_allow`: LOOT_ALL ...). The choice
@@ -53,9 +53,9 @@ _FORCED: list[bool | None] = [None]    # (`forced_on`: a set-piece's)
 
 
 def on() -> bool:
-    """Whether the grind's fights go by the target-first planner (GAMELAB_TARGET: '0' off, master's to the digit; on by default
-    since its gate, 2026-11-04: README)."""
-    return _FORCED[0] if _FORCED[0] is not None else os.environ.get("GAMELAB_TARGET", "1") != "0"
+    """Whether the grind's fights go by the target-first planner (GAMELAB_TARGET: '1' on; anything else off, master's to the
+    digit: the default, its second gate of 2026-11-04 not passed: README)."""
+    return _FORCED[0] if _FORCED[0] is not None else os.environ.get("GAMELAB_TARGET", "0") == "1"
 
 
 @contextlib.contextmanager
