@@ -238,6 +238,17 @@ def hp_bar(frame: np.ndarray, x: int, top: int, geo: Geometry = STRETCHED) -> fl
     return None
 
 
+def bar_shared(mob, mobs, geo: Geometry = STRETCHED) -> bool:
+    """Whether another detection of `mobs` stands so that its HP bar, if it has one, lies where hp_bar looks for `mob`'s
+    (BAR_SLACK, and the 2 px bar_box adds): then a bar there can be either's, and one not hit reads its neighbour's.
+    Detections: .x, .y (centre), .h."""
+    s = geo.frame_scale
+    sx, up, down = BAR_SLACK
+    top = mob.y - mob.h // 2
+    return any(o is not mob and abs(o.x - mob.x) <= sx * s + 2
+               and -up * s - 2 <= (o.y - o.h // 2) - top <= down * s + 2 for o in mobs)
+
+
 def bar_box(shape: tuple, x: float, top: float, geo: Geometry = STRETCHED) -> tuple[int, int, int, int]:
     """Where hp_bar looks for the bar of a monster whose centre is at `x` and top at `top` in a look frame of `shape`
     (geometry `geo`): x0, y0, x1, y1 (BAR_AT, BAR_SLACK), cut at the frame's edges. What it reads depends on these px

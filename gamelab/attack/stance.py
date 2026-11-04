@@ -815,7 +815,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
            pace: Pace = NO_PACE, touch: list[Monster] = (), limits: tuple[float, float] | None = None,
            moves: int = 0, castable: Callable[[Monster], bool] | None = None,
            hurt: Callable[[Monster], float | None] | None = None, hidden_hurt: list[Monster] = (),
-           clawed: bool = False) -> tuple:
+           clawed: bool = False, unsure: list[Monster] = ()) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units[, AWAY]) to step away,
@@ -859,7 +859,11 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     the looks miss is on her (a touch with none the look found about her that could have made it: behavior.fight
     .clawed), so a throw from the ground would go to the claw: a throw at one in reach goes from a jump in place where
     its attack surely picks it (CLAWED_AIR: _from_air), and up close so does one past the one too close where the throw
-    from where she stands would be a jump in place sure of nothing (CLAWED_CLOSE)."""
+    from where she stands would be a jump in place sure of nothing (CLAWED_CLOSE). `unsure`: monsters the look missed
+    that no throw is worth (behavior.fight.shots_at), not among `wanted`, that her body keeps off all the same: with none
+    of `wanted` too close, one of them too close has her step away or jump away as from one she'd throw at (a jump back's
+    key sends no star at it: behavior.attacks), never a throw at it, and with no such move she goes on as if it weren't
+    there."""
     can_jump = can_jump or (lambda a, b: True)
     counts = danger is not None and danger.any
     moves = moves if counts else 0
@@ -890,6 +894,18 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
             if others:
                 return ("throw", _throw_side(x, others, facing, platform, danger))
         return act
+    if unsure:  # (too close, no throw worth it: kept off all the same)
+        near = [t for t in unsure if beside(t, platform, x, danger)
+                and too_close(t, x, halves, danger, pace, platform, _side_of(t, x) != facing)]
+        if near:
+            slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
+            if limits is not None:
+                slo, shi = max(platform.left, limits[0]), min(platform.right, limits[1])
+            act, _ = _close_quarters_here(x, near, mine + near, facing, slo, shi, can_jump, tops or MONSTER_TOP, halves,
+                                          None, danger, platform, body, up, y, pace, moves, seen=around,
+                                          no_throw=True)
+            if act[0] != "wait":
+                return act
     # (`castable` asked only where its answer decides: behavior.fight.Castable keeps those it refused, for the log)
     in_reach = [t for t in reachable if castable is None or castable(t)]
     if in_reach:
@@ -1109,7 +1125,7 @@ def _close_quarters_here(x: float, close: list[Monster], mine: list[Monster], fa
                          around: list[Monster] | None = None, up: Callable[[float], Platform | None] | None = None,
                          y: float | None = None, pace: Pace = NO_PACE, moves: int = 0,
                          seen: list[Monster] | None = None, castable: Callable[[Monster], bool] | None = None,
-                         clawed: bool = False) -> tuple[tuple, bool]:
+                         clawed: bool = False, no_throw: bool = False) -> tuple[tuple, bool]:
     """A monster on her platform too close for a throw from the ground (`close`, as it will be when her next attack
     starts: too_close; `mine`: all on her platform), the nearest one then deciding (on the side she faces, if any will
     be there: one walking at her stops where it meets her, on its side, Pace's PACE_STOP; with FIRST_TO_REACH, the
@@ -1135,9 +1151,10 @@ def _close_quarters_here(x: float, close: list[Monster], mine: list[Monster], fa
     surely picks it with (_from_here), and with none, `castable` saying no to it, or her search not picking it then,
     no throw at it: a step, a jump back (the jump away alone) or ('wait',), never the claw's swipe nor a jump in place
     (which went out as a cast from the ground that picked nothing). `clawed` (stance's): no throw from the ground at it
-    is sure (CLAWED_AIR: the claw takes it). Returns the act and whether it's the throw from where she stands whose
-    attack surely takes nothing (_from_here's `sure` False: an unsure jump in place, a tap first or not, for stance's
-    CLAWED_CLOSE; JumpPlan.sure is its jitter room's, not its target's: the review of 2026-11-03)."""
+    is sure (CLAWED_AIR: the claw takes it). `no_throw` (stance's `unsure`): no throw at it, only her moves away, a jump
+    back's star going at whatever else there is, or ('wait',). Returns the act and whether it's the throw from where she
+    stands whose attack surely takes nothing (_from_here's `sure` False: an unsure jump in place, a tap first or not, for
+    stance's CLAWED_CLOSE; JumpPlan.sure is its jitter room's, not its target's: the review of 2026-11-03)."""
     at = pace.lead + GROUND_PICK_S  # where each will be when a throw from the ground would start (its side, how near)
     where = {id(t): pace.at(t, x, at, walks_on(t, platform)) for t in close}
 
@@ -1182,6 +1199,8 @@ def _close_quarters_here(x: float, close: list[Monster], mine: list[Monster], fa
     others = mine if around is None else around
     if not POINT_BLANK and here.sure and castable is not None and not castable(nearest):
         here = Here(("wait",), False, here.gap)  # (her: no cast at one she won't cast at, however her search picks it)
+    if no_throw:
+        here, alt = Here(("wait",), False, here.gap), None
     stepping = moves < MAX_MOVES
     spawns = ([(sx, half_of(kind, halves)) for sx, kind in danger.free_points(platform.id, others if seen is None
                                                                               else seen)]
@@ -1199,7 +1218,8 @@ def _close_quarters_here(x: float, close: list[Monster], mine: list[Monster], fa
     if here.sure:
         return here.act, False
     jumpable = jump_reach(top, half) < near_ground
-    if JUMP_THROW_SNAILS and not jumpable and jump_reach(top, half) < 2 * near_ground and can_jump(x, x):
+    if JUMP_THROW_SNAILS and not jumpable and jump_reach(top, half) < 2 * near_ground and can_jump(x, x) \
+            and not no_throw:
         # (cornered or not, a kind the jump's attack picks at all near her: a snail from 143, not one 5 tall)
         return (("jump_throw", side) if facing == side
                 else ("jump_throw", side, JumpPlan(physics.JUMP_ATTACK_MS, 0, False, "tap first"))), True
@@ -1219,7 +1239,8 @@ def _close_quarters_here(x: float, close: list[Monster], mine: list[Monster], fa
         # times). Step away, else throw from the ground.
         return ("back", away, min(STEP_AWAY, room), AWAY), False
     if not jumpable:
-        return (("throw", side), False) if POINT_BLANK else (here.act, not here.sure)  # (her: no claw to swipe it with)
+        return (("throw", side), False) if POINT_BLANK and not no_throw else (here.act, not here.sure)  # (her: no claw
+        # to swipe it with; `no_throw`: none at it)
     return (here.act, not here.sure) if alt is None else (alt.act, False)
 
 

@@ -7535,6 +7535,164 @@ Checks: targeted tests (411 passed), the fast suite (2952 passed, 72 skipped, 2 
 
 **To check in game** (the next supervised grind as her; the perception service restarted from this code: an older one takes the throw message without its aim): her attack records' `track` and `side` on every cast; the tracker's 'aim bound' and 'aim elsewhere' (her aim against the client's own order, on the service's own tracks); the service's log's "not her kill: seen alive" lines per 100 of her kills (16 then; the replays say about 5); the tour's `kill_moved` events and the grind's credit by platform in its 'end' record; and the recording through the kit, its feed's 'side told' for every throw.
 
+## Monsters near her, and her throws at what no look has (from 2026-11-04)
+
+The user, watching the live grind of 2026-11-04: "There is a bug, mobs near the player are not detected by perception and kept for 2s, during which the motion planner will keep attempting attack the mob even tho it may well have died". Two things, each with its diagnosis (D:/MapleHelper-scratch/unseen/perception, unseen/decisions) and this work's runs (unseen/fix). Measured below unless said; "inferred" where it's inferred.
+
+### What was wrong
+
+- **Perception.** Nothing masks her region. What covers a monster (her body, her pet, her plate, damage numbers, effects, drops) lowers the masked correlation with the share still showing: on the lossless clip of 2026-11-02 22:49 (1806 frames, an exact-pixel oracle) found 7% at 0.2-0.4 of its picture showing, 14% at 0.4-0.6, 31% at 0.6-0.8, 91% at 0.8-0.95, 99% above; on her level 6% within 25 units across, 27% at 25-50, 68% at 50-75, 84% at 75-150. 88% of the misses were refused at one gate (mobs.FINE_GATE). Lowering the thresholds gains little before scenery (252 new detections under 10% exact a thousand frames at 0.40, a leaf).
+- **Decisions.** Live (2026-11-02 22:46 and 11-04 00:22, 118.5 minutes) 430 of her 2,831 throws went at a target no look had (13-17%), another 110 were regular attacks at nothing. Effect shown 40-47% against 76-77% for targets seen; the target dead or gone by the key 34-43% (a floor) against 7-11%; 245 of them (213 casts, 3,408 MP, and 32 regular attacks) showed nothing, 234 s. Nothing in the thief's decisions asked whether the monster was still there: the fixed windows (`fight.HIDDEN_FOR` 1.8 s, renewed by a stand-in's throw to 3.3-3.8 s after its sighting; `attacks.HIDDEN_FOR` from her last throw, self-renewing; `unseen.TRACK_S` 1.5, `UNSEEN_S` 2.0) ended only on a kill placed on it, and her reckoned HP couldn't notice (with no EXP gain `_unkilled` rules the kill out: 214 then 182 "left" on a ghost). On the frames (the 13 such throws of the 00:25 clip, by eye): 2 did damage, 3 real but not hit, 5 dead, 1 wrong place, 2 at a bystander.
+
+### The exact finder (`perception/exact.py`, `exact.c`; `worldstate.EXACT`)
+
+The game draws a picture's opaque pixels as they are. On a frame of its own size what shows of a monster is its picture's pixels exactly, however little of it shows. Each picture's anchors (pairs of side-by-side pixels rare in it, the first of a colour sparse on the map's background) vote for places; a place with `MIN_VOTES` 6 has its pixels counted, `MIN_EXACT` 200 at least a find, each frame pixel one find's only. On the search's thread (`HALVES`), the game's own 1366x768 only. Beside the search, not instead: it can't see a fade-in, a shade or JPEG (it finds nothing there). A find is added where no detection lies within 8 px (`exact.fresh`), of score 1: the exact pixels of a live picture, however little shows, which the death watch has no business doubting (its share as its score had every partly covered monster looked at for a neighbour's corpse). A die1 picture found is that track's death (`WorldStep._died_seen`: the track found on it with no live picture there, else the nearest of its kind not found alive within reach), and one animation tells one death: a die1 find within 12 units and 0.9 s of one that told, the finder's or the watch's, tells nothing more (`DIE_ONE_NEAR`, `DIE_ONE_S`: each of its 12 or so frames went to the nearest of its kind a frame missed; R2's #10 marked dead at frame 425, walking on as #12). Two detections so near that one's bar lies where the other's is looked for (`hud.bar_shared`, only with the finder: the search never finds two so): neither's is read, each as last read (a healthy one read its neighbour's). The spawn watch goes without the finds: with a covered monster's box left out of its fit, one standing on a point read as a newborn (R1's frame 3301). `Track.blind` counts the frames it looked and missed a track (`exact.confirmed`: finds on the frame, or an empty screen as before: a frame with the search's detections and no find, not counted).
+
+| Through the real frame step, `sim.replay` on R1-R3 (her lossless frames) | Master | With the finder |
+|---|---|---|
+| Spawn onsets, false onsets | 244, 0 | 244, 0 |
+| Touches found (of 71) | 71 | 71 |
+| Monsters under her body seen (labels, of 10) | 5 | 8 |
+| Her kills: final binding right, first right (of 151) | 144, 144 | 144, 142 |
+| Bindings let go | 10 | 6 |
+| Her casts at her dead: at them, left out | 18, 16 | 18, 17 |
+
+| NEAR_SEEN's definition (`detect_bands.py`, D, unhit) on those dumps (`fix/bands.txt`) | <25 | 25-50 | 50-100 | 100-150 | 150+ | Another platform |
+|---|---|---|---|---|---|---|
+| Master (NEAR_SEEN_1102's numbers again) | 38.3% | 65.7% | 84.0% | 79.2% | 94.6% | 90.6% |
+| With the finder | 100% | 100% | 99.3% | 99.4% | 100% | 98.6% |
+
+What its finds did to the deaths and bars, on the step's dumps (`fix2/frames_sum.py`; "before": this work before its review's fixes; a pair is of one kind within 25 units across; those left are bars as last read, carried, after a read not traced):
+
+| Master, before, now | Deaths | Dead within 4 frames of first sight | Death looks | Bars seen hit (`bar_hit`) | Pair-frames with one bar value |
+|---|---|---|---|---|---|
+| BugBaby's clip of 22:49 | 38, 46, 42 | 1, 6, 1 | 1,682, 2,020, 912 | 19, 34, 31 | 0, 24, 5 |
+| R1 | -, 50, 50 | -, 1, 1 | -, 3,483, 1,341 | -, 35, 34 | -, 8, 0 |
+| R2 | -, 94, 91 | -, 3, 3 | -, 7,823, 3,376 | 95, 135, 116 | -, 104, 49 |
+| R3 | -, 148, 143 | -, 6, 2 | -, 6,877, 2,965 | 19, 56, 53 | -, 13, 1 |
+
+Against the oracle on the 22:49 clip: 100% in every band (the same evidence; the hand sample's 49 of 50, the one missed 9% showing, is the independent check). By chains of its finds on that clip, within 100 x 70 of her it has 96.4% of the monster-frames, gaps of 1-4 frames (0.33 s the longest) on 17 of 945, and near chains end in a die1 seen (a floor: chains swap and join monsters; the same pairing says 72.7% on the user's clip, its 9 gaps checked there all such, the finder on them all found). A fresh sample of 72 frames labelled blind on crops, the review's: of 47 alive and solid monsters the search found 32, with the finder 47 (under her body 5 and 10 of 10, covered 14 and 29 of 29). By eye: 24 of its finds the search hadn't (the 12 lowest shares, 12 at random: `fix/sheet_finds.png`) all real monsters, under her, her pet, effects, the HUD; the diagnosis's 104 crops none false. Time on one thread: 3.60 ms median, p99 7.2 on the 22:49 clip, 5.05 and 9.9 on her clip of 2026-11-02 00:10, 66 pictures, 17,052 anchors (without the map's background 5.84 and 10.4). Tables 27 ms at the step's making. The whole pass, `sim.replay bench R2` (paced, 900 frames, base, tree, tree, base, other jobs on the machine): 14.43 ms median, p90 20.8, p99 34.3 on master, 17.46, 24.2, 35.5 with it, against the frame's 66.7.
+
+Not measured: any live run, any map but Tree Dungeon (a find is 200 exact pixels of a map's own picture, so on any map at the game's own size), the JPEG clip (nothing, by design).
+
+The simulator's eyes have no pixels. `sim.world.NEAR_SEEN_1104` etc., the harness's `--world near-misses-exact` (Noise.exact; `hit_hidden` off: 14 of 14 under numbers or effects found in the hand sample), is that table pooled with BugBaby's clip: frames justify it, but it isn't the default until the finder has run live, so the gate's pairing with master stays in one world.
+
+### Her throws at what no look has (`behavior/presence.py`, the thief's; `presence.EVIDENCE`)
+
+**The chance a throw shows an effect**, log-odds, read again at every look and at the key (`Attacks.evidence`; `Hunter._still` hands it the feed's newest tracks: `Attacks.newest`). Weights: a logistic fit on the 401 live throws with no seen monster in their path, on her gains as the code hears them, all of them (`Attacks._told`; `fix2/live2.py`); out of sample (one hour's fit on the other) logloss 0.617 and 0.651 against a constant's 0.688 and 0.672. Evidence with no stable sign between the hours (a hurt bar at the last sighting, off her platform, how far off, a touch just now) has no weight.
+
+| Evidence | Log-odds | By hour | Live, n, shown / target dead or gone |
+|---|---|---|---|
+| Start | +0.39 | 0.20, 0.72 | |
+| Each second since its sighting | -0.63 | -0.38, -1.28 | <=0.3 s 58/17 ... >1.8 s 22/74 |
+| Its track gone from the feed | -0.86 | -0.75, -0.51 | 19, 11/95 |
+| Dying or dead by the feed | -2.5 (set by hand; the fit's -0.37 is its bystanders') | | 9, 33/100: the 33 bystanders' |
+| Its track seen in 3 frames or fewer | -0.50 | -0.38, -0.39 | a flicker's, a dead walker's new id |
+| Her last throw at it unseen showed nothing | -0.65 | -0.74, -0.41 | 85, 19/56 |
+| ... and something | +0.68 | 0.65, 0.43 | 55, 58/35 |
+| A gain of its kind in the 1.2 s before | -0.82 | -1.02, -0.28 | 69 of 401, 30/62, against 43/36 without |
+| Her reckoned damage spent, with nothing shown | -0.35 | -0.37, -0.36 | 59, 14/61, against 23, 26/48 |
+| Each frame the finder missed it past the 1st | -0.39 (the real step's dumps, not the live hours') | | after 1, 2, 3, 4, 6, 8, 10 frames near her 59, 46, 32, 23, 12, 6, 4% came back; the model's 59, 48, 37, 28, 14, 6, 3 (`fix2/blind_fit.py`) |
+
+"Showed": a gain since her key, a bar lower or new that way, her MISS popup where it was, a ground cast that took no MP (the claw: a body there): `Attacks._judge_blind`, the thief's rule 3, at LANDS_S after its key. It can hide a real hit: chances are floors. A gain her throw the other way made counts against it too (n 1 of 69: 2026-11-04 00:23:58.751, a real kill refused so): too few to tell apart.
+
+**The price** (the user's: MP 1 a meso, a meso 0.5 EXP): a landing is worth the share of its EXP and expected drops (Horny 52.7, Green 33.1 EXP-equivalent) her attack takes off what it has left; a throw costs its MP and its lock at what she makes a second: about 14 a cast, 6 a regular attack. Made, not promised (`fight.made_rate`, what she has made over the grind with a minute of the hunt's rate in it): live Plan.rate's median was 426 and 537 EXP a minute against 340 and 428 made so far, and at Plan.rate the replay below refuses 155 throws with 31 real effects among them, against 134 and 21 (10 kills on the target against 6; out of sample 43 effects against 35, what's saved less what's lost about even). `landing_prices` and her other decisions go on by Plan.rate. A throw goes while chance x landing beats its cost (`Attacks.worth_a_throw`) and beats a throw at one she sees and wants in reach (`seen_net`, at 0.76). So a nearly dead one goes on thinner evidence than a whole one, a regular attack on thinner than a cast (`_regular_pays`; why "unseen"). No window: a monster's last throw falls out of the sums at its own time.
+
+**What changed in the flow.** `fight.shots_at`: of the hidden ones, those worth it are targets, the rest her body's (`st.unsure`, if the chance of a touch at its price outweighs a step's time: `_not_thrown_at`), both still in the stance's `around` as before. `attack.stance`'s `unsure`: too close, kept off by a step or a jump back (whose key goes by what's there), never a throw. A jump back that sent no attack key is a move, no throw (`Actions.keyless`, `fight.keyless`: nothing noted, not counted, among her moves; the magician's jump away alone counts as ever). `Attacks.target` and `key`: only those worth it; the mark fallback by that alone where no look has the mark, and `SEEN_MARK_S` (1.8 s from her throw, as ever) where one does and it's out of a star's way (LOST_S still forgets a mark). `fight.owed`: hidden wounds likewise. No key with nothing there (`_nothing_there`: nothing seen in reach that way, no fresh touch), and the stance's throw a wait (`nothing_to_throw_at`). `FightState.sightings`: a stand-in thrown at as old as its sighting. `hunt._same`: by track where both have one. The windows stay for her body alone. The magician's `picks` has all of it off: her casts never go at a body unseen.
+
+Her telemetry: 'attack' records of a target no look has have `chance`, `unseen_s`, `blank`, `blind`, `state`; 'no_throw' records; `tracks` records `blind`. Not read by anything yet: for the first live check.
+
+### Replayed on the live throws (`fix2/live_final.py`: her own `presence.chance` and `net` on the telemetry's evidence, one throw at a time: a throw stopped doesn't change the next row's)
+
+As the code decides: every gain heard (until 2026-11-04's review the replay saw 95 and 82 of the 758 and 736), the lock at `fight.made_rate` from the grind's state records. Evidence as the telemetry has it (`fix/fit2.py`; the sighting by place, of its kind, so a little young), no `seen_net` (the replay has no reach for what she saw) and no `blind` (no finder then): so it stops fewer than the code would. Stopped, a throw at a target no look had that the code would refuse; "regular" one it would send as the regular attack instead of a cast.
+
+| | 11-02 22:46 (60.5 min) | 11-04 00:22 (58.0 min) |
+|---|---|---|
+| Throws at a target no look had | 254 | 176 |
+| ... a monster seen in the path too: target that one | 10 | 19 |
+| Stopped | 82 (1,200 MP, 76 s) | 52 (752 MP, 48 s) |
+| ... of them nothing shown | 68 | 45 |
+| ... target dead or gone / alive | 58 / 24 | 37 / 15 |
+| ... real effects lost: killed it, hurt it, claw, on another | 2, 1, 1, 10 | 4, 1, 0, 2 |
+| Regular instead of a cast | 19 (10 nothing shown) | 2 (1) |
+| Kept | 143 (71 nothing shown; 44 dead or gone) | 103 (43; 18) |
+| Priced: MP and lock saved, EXP-equivalent / landings given up at most | 1,071 / 429 | 713 / 257 |
+| Regular at no target | 64: no key on 52 (41 nothing shown, 11 on another, 3 of them kills), 47 s | 46: no key on 27 (19, 8, 3 kills), 26 s |
+
+So 21 real effects given up by the stops (6 kills on the target of 48, 7 kills on another), 40 with the no-key presses'. With each hour's weights from the other hour's fit alone: 94 of 244 stopped, 69 nothing shown, lost 4 kills, 6 hurts, 3 claws, 12 on another (11-02); 55 of 157, 45 nothing shown, lost 6 kills, 2 hurts, 2 on another (11-04); saved 1,980, given up at most 1,391. "Lost" kills on it are at most: stopped, the look that next finds it has it to throw at. The weights before the review, as the code would have used them: 173 stopped at this price, 38 real effects, 11 kills on the target (at Plan.rate 190, 46, 16: the review's).
+
+The frame-checked 13 of the 00:25 clip, at the code's price: the user's case (00:24:00.537 and 01.384, a dead Horny Mushroom's ghost, its track gone) stopped at chance 0.15 and 0.05; 00:25:02.214 (dead, a gain 0.8 s before) stopped at 0.34; 00:25:13.858 (killed the 11% one) thrown at 0.56; 00:25:49.287's regular at nothing no key; 00:25:17.082 (real, the star over it) stopped at 0.18. And 00:23:58.751, **a real kill, stopped** at 0.32 (net -1.6: her gain 0.6 s before, from her seen throw to the right). Still thrown: 2 dead ones (00:23:53.073 at 0.35, net +4.0; 53.923 at 0.58), one taken by another player (00:23:08.602), one real not hit (00:25:03.210), the stand-in 150 off (00:25:14.863, 0.45, net +7.8), 00:25:48.431's regular (a Green that way in reach). Those are where the finder has to tell (its die1 finds, its misses): not replayable on JPEG. On the lossless 22:49 clip's 23 throws of that hour (`fix/finder_on_rows.py`, loose: any of its kind within reach): 3 had none of its kind found in the 6 frames before the key, all 3 nothing shown, 2 with a die1 by.
+
+### The harness (seeds 1-48, 5 minutes, both standard commands, paired against master's own, the same to the digit as planner/fix's m71 and d1a71)
+
+| A run of 5 minutes | Thief: master | Master's world: decisions alone | The finder's world: both |
+|---|---|---|---|
+| EXP a minute | 334.1 | 318.2 (**-4.8%, t -2.35**) | 340.2 (+1.8%, t +0.80) |
+| Kills | 47.7 | 45.4 (-4.8%, t -2.52) | 48.6 (+1.8%, t +0.82) |
+| Touches | 53.2 | 56.7 (+6.6%, t +1.69) | 52.4 (-1.5%, t -0.48) |
+| ... that hurt | 35.2 | 36.5 (+3.7%, t +0.82) | 35.4 (+0.4%, t +0.10) |
+| Again within 2 s | 25.4 | 28.2 (+11.3%, t +1.59) | 25.3 (-0.2%, t -0.03) |
+| HP potions | 14.4 | 15.0 (+4.5%, t +0.84) | 14.5 (+1.3%, t +0.27) |
+| MP used | 1,947 | 1,851 (-4.9%, t -2.52) | 1,977 (+1.6%, t +0.74) |
+| MP potions | 13.1 | 12.2 (-7.3%, t -2.57) | 13.4 (+2.1%, t +0.63) |
+| Mesos a minute | 259.6 | 246.3 (-5.1%, t -1.80) | 262.8 (+1.2%, t +0.44) |
+| Throws at one seen | 114.0 | 118.6 | 151.7 |
+| ... that hit nothing | 20.8 | 23.0 | 32.2 |
+| At one no look had | 38.5 | 32.2 (-16.5%, t -4.32) | 3.4 (-91.1%, t -34.4) |
+| ... alive, its attack took it | 17.8 | 15.7 | 1.3 |
+| ... alive, took another or nothing | 17.0 | 14.2 | 1.9 |
+| ... dead | 3.8 | 2.3 (-38.7%, t -4.38) | 0.2 (-94.5%, t -12.6) |
+| ... damage done / kills / hit nothing | 21.2 / 11.2 / 10.9 | 17.9 / 8.9 / 9.2 | 1.9 / 1.0 / 0.9 |
+| Regular at no target | 6.3 | 2.7 (t -5.10) | 2.3 (t -6.16) |
+| Presses that hit nothing, all | 35.2 | 33.5 (-4.8%, t -1.05) | 34.5 (-1.8%, t -0.38) |
+| Her presses at the dead, seen or not (the world's truth) | 9.6 | 9.0 (-5.7%, t -0.86) | 8.1 (-15.3%, t -2.27) |
+
+Of the two columns the finder's is what a live run at 1366x768 has. Master's world is a run with the finder off (another size, its C not built: the service's first line says so). There these weights cost: against the weights before the review's refit, EXP -4.3% (t -2.11), kills -3.9% (t -1.88), MP -4.3%, touches +0.9% (t +0.31); in the finder's world EXP -0.8% (t -0.61), touches -0.2% (t -0.08). Where it comes from, master's world, 48 seeds each against those weights at Plan.rate: `SEEN_MARK_S` -0.5% (t -0.36), with `made_rate` -1.5% (t -0.89), the new weights at Plan.rate -4.7% (t -2.44), with `made_rate` -4.3%, with GAIN back at -1.31 -3.3% (t -1.58): the weights, more throws at the unseen (32.2 against 27.4) and fewer at the seen (118.6 against 126.5, t -3.51), not one weight alone. Tried and not kept: a landing given up valued at 0.75 or 0.5 of itself (-2.6%, t -1.42; -4.0%, t -1.87: no order in it), the weights fitted on an effect on the target itself rather than any (-2.5%, t -1.01; finder's world -2.9%, t -2.01; 58 real effects lost on the replay). So: the fit that says what the code hears, the honest floor on the replay, and in the world it will run in no difference to tell.
+
+In the finder's world evidence on against off (`presence.EVIDENCE`; x48off): EXP 0.0% (t 0.00), touches -4.8% (t -1.27), at one no look had 6.4 to 3.4, dead 1.5 to 0.2, presses that hit nothing -8.0% (t -1.66). Keeping off every one no throw is worth (`STEP_S` 0) in master's world: touches +1.0% (t +1.30), EXP +1.5% (t +2.23): that price decides little.
+
+| A run of 5 minutes | Magician: master | Master's world | The finder's world |
+|---|---|---|---|
+| EXP a minute | 475.5 | 474.9 (-0.1%, t -0.23) | 498.8 (+4.9%, t +3.38) |
+| Kills | 66.5 | 66.5 | 69.3 (+4.1%, t +3.02) |
+| Touches (all hurt) | 31.1 | 30.7 (-1.3%, t -0.86) | 28.4 (-8.6%, t -2.30) |
+| Again within 2 s | 9.4 | 9.6 | 8.5 (-9.5%, t -1.05) |
+| HP potions | 18.1 | 18.0 | 16.2 (-10.4%, t -2.49) |
+| MP used | 2,286 | 2,280 | 2,414 (+5.6%, t +3.71) |
+| MP potions | 1.1 | 1.1 | 1.8 (+61%, t +3.89) |
+| Her drops' worth a minute | 228.9 | 230.7 (+0.8%) | 249.0 (+8.8%, t +2.52) |
+| Knocked off a platform | 8.2 | 8.0 | 7.0 (-15.2%, t -2.48) |
+| Presses that hit nothing | 3.8 | 3.8 | 4.3 (t +1.11) |
+
+(Her numbers are from before the review's refit: nothing since is hers; seeds 16, 27 and 46 in both worlds again, the same to the digit on every field.) No death nor fall in the thief's 96 runs nor the magician's 96; no safety or darts stop in the thief's 96 (the harness's `safety_stops`, `darts_stops`, kept from these runs) nor her 6 re-run (her other runs didn't keep them). Her casts at a body unseen: none in any. In master's world her numbers move only by `_same` and the stand-ins' stamp; in the finder's, by what she sees.
+
+What it can and can't say. Its monsters the look misses are alive (90% against 57-66% live): it has no dead walkers nor mis-bound kills, so what stopping a ghost saves doesn't show, only what a chance fitted on the live hours gives up on monsters that are there. Its detector is a table. So perception is measured on frames, decisions on the live replay, and the harness says whether either harms: **in master's world** the decisions alone (no finder, near her as blind as ever), **in the finder's world** both.
+
+### Goldens
+
+47 scenarios recorded in this checkout's lab (`--jobs 4`), `golden check` 47 of 47; `test_sim`'s with `--slow`: 134 passed, the two landing scenarios xfailed as before. Against master's (8ae2c5f, recorded with its checkout; `fix2/golden_cmp.txt`) 26 to the byte, 21 apart; together kills 647 against 636, EXP 22,273 against 21,629, touches 630 against 656 (one of them on another seed, below). Each by its first diverging event:
+
+- **A monster no look has, not worth a throw** (`shots_at`; mostly just after a kill, her next throw going at its neighbour's stand-in): `loop_tree_grind_arrow_key` 33.288 a sweep where master jumped at +44, `grind_rope_top` 37.291 (+92), `stat_window` 30.955 at a Green +293 where master at +23, `touched_unseen` 4.154, `grind_jump_key` 88.218 off to the next where master's 88.622 cast went at one unseen, `run` 23.288, `ore_waits` 4.486, `grind_attack_key` 113.476, `grind_lucky_seven_key` 13.955, `mp_runs_out` 7.085, `wait` 11.555, `grind_drops` 151.490 and `lie_detector_grind` 43.886 (those two the log line alone).
+- **Kept off, unshot** (`unsure`): `wall_corner` 2.816 a step 120 away where master jumped in place at it (touches 2 against 4).
+- **A stand-in as old as its sighting**: `loop_tree_23` 43.350 and `lie_detector_23` 50.824: the stance's line has it once (it was twice, at the same x).
+- **No key at nothing**: `attack_misses_seen` 28.821, `remembered_keys` 37.751, `out_of_darts` 2.765 (her stars last no longer for it there, 12 kills against 18 at its seed; on seeds 1-12 16.9 kills against 16.8, touches 12.6 against 15.0, none unmet against 1); **a target by evidence where the 1.8 s had ended**: `nav_tree_landing_no_shot` 4.669, the regular attack at one ~70 HP left where master's went at nothing (the log line alone).
+- **Its seed, changed here** (its comment): `23_near_misses` 3 to 7 (at 3 she had 13 kills against master's 22, 'twenty kills' unmet; on seeds 1-12 unmet on 6 either way, kills 18.7 against 18.2, touches 15.2 against 15.9; seeds 7, 10 and 11 meet it either way). `ore_waits`'s 'hurt five times at most' is six (one over at its seed, 6; hurt on seeds 1-12 4.1 against 4.75; it fails often for its other checks either way, on 8 of 12 against 9 of 12). `fix2/setp_branch.txt`, `fix/setp*_master.txt`.
+
+### Not done
+
+- **Not live.** Nothing here has seen the game. The first run with it is the check: the service's first line ("the exact finder on (66 pictures, 17,052 anchors)", or off and why; the 'session' record's `finder`): off, the run is master's world above; the 10 s line and each 'perf' record's `exact_ms`, `exact_finds_a_min`, `bars_shared_a_min`; 'attack' records' `chance`, `unseen_s`, `blank`, `blind`, `state`, 'no_throw', tracks' `blind`. Build it first (`python -m gamelab.native`): MSVC's build shouldn't delay a live start. Its finds behind a HUD window are real monsters (2 and 1 in the sheets): watch them there.
+- **The weights are one map's, the thief's, and from before the finder.** Refit on a live hour with it: `BLIND` is her own clips' gaps; hidden throws should be few by then.
+- **The harness can't show what this saves:** no dead walkers nor mis-bound kills in its world (its hidden targets 90% alive against 57-66% live). In master's world the decisions cost EXP -4.8% (t -2.35) and touches +6.6% (t +1.69); not the default world once the finder is live: `NEAR_SEEN = NEAR_SEEN_1104` then, and the goldens anew.
+- **A size the finder doesn't run at** (1920x1080's halved look frames): the decisions alone, as master's world has them.
+- **`_nothing_there` is a rule, not a price.** On the replay it saves 79 presses and gives up the 19 of them that showed effects (13 hurts, 6 kills): about even at rough prices, and with the finder those others should mostly be seen. For after a live hour.
+- **A touch isn't evidence of presence in `chance`** (no stable sign between the hours), and `_not_thrown_at` reads `chance`, an effect shown, as a body there: a floor. No harm measured in the finder's world: seeds 1-8, her idle within 44 units of a live monster 11.3 s a run against master's 11.5 (t -0.10), touches then 13.8 against 15.1 (t -0.63), the longest such spell 0.68 s against 0.78. In master's world 13.9 s (t +1.29), 18.8 (t +1.96), 1.12 s.
+- **`_best_net`'s lock** reads the last key's `keyed_ground` when the stance asks (about 1.6 EXP-equivalent off; at the key it's that throw's). A jump's or a throw's isn't known that early.
+- **Her fights' `finish_targets`** still lists hidden ones in her way (`Attacks.key` refuses them at the key; a walk toward one possible while she's owed).
+- **Non-attack holds keep their windows:** `grind._held` (3.5 s), `hunt._about`, the navigator's. They hold or route her, no key.
+- **The magician's jump away alone** still counts as a throw (`note_throw`, `moves`, her report), as ever: hers, and not this work's to change here.
+- **Not used:** the aggro memory (ends with the deaths the feed has, no evidence of its own; its place for a stand-in not tried), damage numbers over the place (the same fill as Tree Dungeon's platforms and leaves), `Attacks._corpse` for the thief (a dead walker's new id when seen: the finder's die1 on a search's detection covers part: seen targets dead or gone 7-11% live, not measured with it).
+- **First binding of her kills** on R1-R3: 142 against 144 of 151 right first (65 against 67 of the 71 strong), final the same: more bodies near her to bind to, let go sooner.
+
 ## In game, on Thicket Around the Beach II
 
 - **Navigation:** 21 moves in a row across every move type without a miss, and a 17-move climb from the basin to the top. Chained, a 13-move route up took 19.0 s in 3 key plans with no misses (33.4 s one move at a time). Over 10 test routes, a move landed elsewhere about once in 15, usually a drop or a straight-up jump timed off; each time she replanned from where she was.

@@ -41,7 +41,7 @@ from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import client
 from ..control.actions import Actions
 from ..control.mover import STILL, Mover
-from ..control.navigator import Navigator, TopPrice, rope_at_top
+from ..control.navigator import Navigator, TopPrice, fresh_touch, rope_at_top
 from ..localization.aggro import Aggro
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
@@ -283,6 +283,7 @@ class Hunter:
             log(note)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
+        self.exp_made: tuple[float, float] | None = None  # EXP she has made over the grind so far, and in how many s (fight.made_rate)
         self.exp_rate: float | None = None  # EXP a second her hunting makes, as the hunt has it (the grind's loop's rate:
                                             # the landings' prices, behavior.fight.landing_prices); None: not known
         # platform -> EXP a second the grind expects of her there now (behavior.grind's, for `top_price`); None: no grind
@@ -348,6 +349,10 @@ class Hunter:
         if book is not None and (said := book.said(spell.key)):
             log(f"her damage: {said}")
         self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
+        # (what her throws at monsters no look has go by: behavior.presence)
+        self.attacks.next_key = lambda: getattr(self.actions, "lock_until", 0.0)
+        self.attacks.rate = lambda: fight.made_rate(self)
+        self.attacks.touched = lambda s: fresh_touch(self.senses, s, slack=fight.TOUCH_ROUND_S) is not None
         if mode != "regular":
             self.actions.choose = self.attacks.key
             self.senses.shows = self.attacks.shown_by  # (the look a throw is decided on has the last one's kill)
@@ -1093,8 +1098,7 @@ class Hunter:
             return []
         casts = getattr(self.attacks, "casts", None)
         targets = watch.boxes(s.t) + ([] if casts is None else casts.boxes(s.t))
-        if getattr(self.attacks, "picks", False):  # (her casts judged: a MISS over its target, it picked it)
-            targets += self.attacks.boxes(s.t)
+        targets += self.attacks.boxes(s.t)  # (her casts judged, her throws at those unseen: a MISS over it, it picked it)
         if not targets:
             return []
         upp = s.geo.units_per_px
@@ -1268,6 +1272,7 @@ class Hunter:
         if st is None:
             return True
         self.attacks.glance(st.t, getattr(st, "mp", None))  # (her MP too: a drink shown since the look)
+        self.attacks.newest(st.t, getattr(st, "tracks", None))  # (and what the feed has of the monsters the look missed)
         self._miss_glance(st)  # (her attack's MISS over a press's target: the frame before her next key)
         events = [e for e in feed.pending_events(st.t) if e.kind in ("exp_gain", "exp_read")]
         if not any(e.kind == "exp_gain" for e in events):

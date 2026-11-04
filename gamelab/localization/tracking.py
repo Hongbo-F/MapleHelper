@@ -306,6 +306,8 @@ class Track:
                                   # (or never seen fading)
     solid_at: float | None = None  # when it turns solid by its fade (the watch's last sighting of it: alpha a at t,
                                    # solid at t + (1 - a) / FADE_PER_S); None: never seen fading in
+    blind: int = 0           # frames since its last sighting that the exact finder looked at (`update`'s `exact`) and
+                             # didn't find it, on screen: absence that says something (behavior.presence)
 
     def record(self) -> dict:
         """As telemetry data ('tracks'): its `vx` the game data's speed the way it heads (since 2026-10-30, no measure:
@@ -316,7 +318,8 @@ class Track:
                 **({"cause": self.cause} if self.cause else {}),
                 **({"gain": round(self.gain, 3)} if self.gain is not None else {}),
                 **({"share": True} if self.share else {}),
-                **({"fading": round(self.fading, 3)} if self.fading is not None else {})}
+                **({"fading": round(self.fading, 3)} if self.fading is not None else {}),
+                **({"blind": self.blind} if self.blind else {})}
 
     def opacity(self, t: float) -> float | None:
         """Its alpha at t by its fade (FADE_PER_S from the spawn watch's last sighting of it), 1.0 once solid; None:
@@ -474,14 +477,15 @@ class MonsterTracker:
     def update(self, t: float, found: list[Monster], view: View | None, her: tuple[float, float] | None,
                players: list[Player] | None = None,
                read: Callable[[Monster, "Track | None"], Monster] | None = None,
-               dying: Callable[[dict[int, Monster]], list[int]] | None = None) -> list[Event]:
+               dying: Callable[[dict[int, Monster]], list[int]] | None = None, exact: bool = False) -> list[Event]:
         """The frame shown at t: `found`, the whole screen's detections in it, placed on the map; `view`, what it shows
         of the map (None: she isn't placed, and nothing can be judged); `her`, where she is; `players`, the other
         players on the map (localization.players; None: not known). Each detection is matched to a track (`_match`) or
         is a new one; `read(m, track)` (the world step's: its HP bar read if that's due, worldstate._bar_due; the track
         None for a new one) gives the detection as the track takes it. Which detection each track was is left in
         `matched`. `dying(matched)`: the tracks whose death this frame shows (perception.deaths, the world step's), told
-        before her gains and deaths are judged. Returns what happened."""
+        before her gains and deaths are judged. `exact`: the exact finder looked at this frame and can see on it
+        (perception.exact.confirmed): each track on screen it didn't find counts it (Track.blind). Returns what happened."""
         events: list[Event] = []
         if players is not None:
             self.players = players
@@ -509,6 +513,8 @@ class MonsterTracker:
         for tr in list(self.tracks.values()):
             if tr.id not in seen:
                 self._unseen(tr, t, view, events)
+                if exact and tr.state in (LIVE, HIDDEN):
+                    tr.blind += 1
         if dying is not None:
             for tid in dying(self.matched):
                 self.seen_dying(tid, t)
@@ -655,6 +661,7 @@ class MonsterTracker:
             tr.facing = m.facing
         tr.pose = m.pose
         tr.last_seen, tr.seen, tr.crowded, tr.seen_x = t, tr.seen + 1, False, m.x
+        tr.blind = 0
         if tr.still_x is None or abs(m.x - tr.still_x) > FADE_MOVE:
             tr.still_x, tr.still_since = m.x, t
         if tr.state in (HIDDEN, OFFSCREEN):

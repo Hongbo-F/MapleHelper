@@ -198,6 +198,7 @@ class Actions:
         self.lock_until = 0.0  # when her last attack stops locking out the next one
         self.arrow_until = 0.0  # ... and stops swallowing arrows (ARROW_LOCK_MS after its key)
         self._attack_at = 0.0   # when the last attack key went down (time.monotonic)
+        self.keyless = False    # whether the last throw carried out was a jump back that sent no attack key (jump_back)
         # The player's answer to her last plan played here (its 'sent': each key as pressed, ms into the plan; None: none
         # read), and the jump and attack keys of her last jump throw or jump back (key_gap)
         self.sent: list | None = None
@@ -474,6 +475,9 @@ class Actions:
                   *([] if key is None else tap(throw_ms, key))]
         if key is not None:
             self._thrown(throw_ms, direction)
+        else:
+            self.keyless = not self.ground_only  # (no attack her choice would send: behavior.fight.keyless. The magician's
+            # jump away alone counts as her throw, as it always has)
         self.play(sorted(events, key=lambda e: e[0]), "jump_back")  # the player wants them in time order
         self.facing = direction
         # Locked until the attack's lock ends, which is after she lands: counted, as a jump throw's, from when the plan
@@ -494,6 +498,7 @@ class Actions:
         """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent."""
         when = time.monotonic() + key_ms / 1000
         self._attack_at = when
+        self.keyless = False
         for listener in self.throw_listeners:
             listener(when, direction)
 

@@ -5,9 +5,11 @@ attack key asks `key` (the fights, the hunt loop, grinding and the navigator's f
 
 - The monster a throw takes: the likeliest in its way from where she stands in the last look that searched for
   monsters (ledger.in_path: the claw's stance, else the star's search's first band) that isn't likelier dead than
-  alive by her throws (DEAD_LIKELY: one is, and the star takes the next), else the one she last threw at that way
-  within fight.HIDDEN_FOR (hit, it hides under its damage numbers), one not likely dead first, else none: then
-  nothing seen is in its way, and it's the regular attack (no MP thrown at nothing). Never one dead or dying
+  alive by her throws (DEAD_LIKELY: one is, and the star takes the next), else the one she last threw at that way, one
+  not likely dead first, else none: then nothing seen is in its way, and with nothing that way that it could take
+  there's no throw at all (`_nothing_there`), else it's the regular attack (no MP thrown at nothing). One a look missed
+  (those about, `unseen`, and her marks) only while a throw at it is worth its price on the evidence of this look and
+  her throws since (`worth_a_throw`: behavior.presence; the magician's casts go at none). Never one dead or dying
   (ledger.dying: with the feed, its track one a kill or a share of hers is bound to, or found dead, Ledger.dead;
   without, of a placed kill's kind on its platform, the nearest it within DYING_DX, while its death animation plays):
   it's still drawn, and no throw at it makes a mark; a mark on one is closed at once (`on_look`). Live on 2026-10-25
@@ -137,8 +139,12 @@ from ..localization.monsters import GAIN_AFTER_KEY, Monster, bodies, same, seen_
 from ..localization.scene import Scene
 from ..perception.kinds import kind_of
 from .ledger import dying, in_path, is_kill
+from . import presence
+from .looting import expected_worth, worth_for
+from .presence import Evidence
 
-HIDDEN_FOR = 1.8   # s a monster she threw at is still taken to be in a throw's way unseen (fight.HIDDEN_FOR)
+HIDDEN_FOR = 1.8   # s of the doubt's watch (keycheck) and of her hidden wounds (fight.owed): no throw goes by it (`worth_a_throw`)
+SEEN_MARK_S = HIDDEN_FOR  # s after her last throw that one goes at a mark a look has, out of its way (`target`)
 LANDS_S = 0.6      # s after a throw's attack key by which its damage has shown on its target's bar, if it hit: the
                    # server's (actions.DAMAGE_SHOWS_MS), live a Horny Mushroom's bar first lower 0.21-0.55 s after a
                    # cast's key (p10-p90), a kill's gain by 0.46 s. 0.85 until 2026-10-26, when the star's flight was
@@ -247,6 +253,9 @@ class Mark:
     proven: bool = False  # a cast of hers at it has shown an effect since it was marked or its hold lifted (`picks`)
     read: tuple[float, float] | None = None  # its bar as a look last read it between empty and full, and when (`book`)
     keyed: list = field(default_factory=list)  # her throws at it, [key time, Attack] each, oldest first (`book`)
+    blind: list = field(default_factory=list)  # her throws at it while no look had it, waiting to be judged (`_judge_blind`)
+    blank: int = 0  # how many of those in a row showed nothing, since a look last had it
+    shown: bool = False  # ... and whether the last of them showed something
 
     @property
     def thrown(self) -> float:
@@ -267,6 +276,19 @@ class Cast:
     ahead: float
     others: tuple = ()  # ((Monster, its bar), ...)
     side: str = RIGHT  # the way she cast
+
+
+@dataclass
+class Blind:
+    """A throw of hers at a mark no look had (`worth_a_throw`), waiting to be judged at the first look LANDS_S after its
+    key (`Attacks._judge_blind`): its attack key's time (its choice's until its throw says), the way she threw, the MP
+    share it should take (None: no MP), whether it's from the ground, her MP bar before it, whether an effect has shown."""
+    t: float
+    side: str
+    cast: float | None
+    ground: bool
+    mp: float | None
+    shown: bool = False
 
 
 @dataclass(frozen=True)
@@ -318,6 +340,13 @@ class Attacks:
     _known: dict = {}
     _keyed_at = -1e18
     _said_at = -1e18
+    next_key = None
+    worth: dict = {}
+    rate = None
+    touched = None
+    _told: list = []
+    _newest = None
+    _blinded = None
 
     def __init__(self, model: MapModel, keys, mode: str = "choice", max_mp: float = 623.0, level: float = 16.0,
                  log: Callable[[str], None] = print, kills: Callable[[], list] | None = None,
@@ -406,11 +435,23 @@ class Attacks:
         self._regular = False
         self._asked = False
         self.thrown: tuple[float, Monster | None] | None = None  # the last throw's key time and what `key` aimed it at
+        # What her throws at monsters no look has go by (`worth_a_throw`: behavior.presence): each kind's worth in EXP (its
+        # EXP and expected drops), her EXP a second (the Hunter's: fight.made_rate; None: the prior), whether a monster the
+        # looks miss has just touched her (the Hunter's: `_nothing_there`), every gain her EXP told lately, kept whoever's
+        # kill it was placed on (`_gains` loses those), the feed's tracks as of its newest frame (`newest`), the mark
+        # `key` just put a throw at one on, until its throw says when
+        self.worth = _worth_of(model)
+        self.rate: Callable[[], float] | None = None
+        self.touched: Callable[[Scene], bool] | None = None
+        self._told: list[tuple[float, frozenset | None]] = []
+        self._newest: tuple[float, list] | None = None
+        self._blinded: Mark | None = None
 
     # --- after every look ------------------------------------------------------------------------
 
     def on_look(self, s: Scene) -> None:
         """Her MP; the marks followed, their bars read, forgotten when unseen LOST_S, untouched FORGET_S or killed."""
+        self._newest = None  # (this look's tracks are as new)
         if (read := self._mp_read(s)) is not None:
             self.mp = self._believed(read, s.t)
         if self.darts is not None:
@@ -446,6 +487,8 @@ class Attacks:
             self._lift_spots(s, prev)
             found = self._carry(found, s)
             self._seen_tracks(s)
+        else:  # (her throws at the ones no look had, judged: the thief's rule 3)
+            self._judge_blind(found, s, prev)
         for mk, again in zip(self.marks, found):
             if again is None:
                 continue
@@ -497,10 +540,19 @@ class Attacks:
         didn't kill (`reckon`); a gain a kill of hers was placed on (ledger.Kill.gained) is that monster's, no other's (on_look)."""
         self._gains = {g: k for g, k in self._gains.items() if t - g < GAINS_KEPT_S}
         self._gains.update((g, k) for g, k in gains if t - g < GAINS_KEPT_S)  # (a look's after a glance's: its meter's)
+        self._told = [(g, k) for g, k in self._told if t - g < GAINS_KEPT_S]
+        self._told += [(g, k) for g, k in gains if t - g < GAINS_KEPT_S and not any(abs(g - o) < GAIN_SAME_S
+                                                                                     for o, _ in self._told)]
         self._heard = max(self._heard, t)
         for w in (self.watch, self.casts):
             if w is not None:
                 w.heard(gains)
+
+    def newest(self, t: float, tracks) -> None:
+        """The feed's tracks off its newest state, of a frame shown at `t` newer than the latest look (None: none told):
+        what her last look before a throw's key knows of a monster the look missed (Hunter._still; `worth_a_throw`)."""
+        if tracks:
+            self._newest = (t, list(tracks))
 
     def shown_by(self) -> float:
         """When a frame shows what her last throw at a target did to it, if it killed it: KILL_SHOWN_S after its key
@@ -614,13 +666,11 @@ class Attacks:
                 and abs(s.where.x - sp.x) < HOLD_MOVED)
 
     def boxes(self, t: float) -> list[Monster]:
-        """(`picks`) The targets of her casts waiting to be judged whose MISS popup a look at `t` could show
-        (keycheck's MISS_FROM_S to MISS_BY_S after the key): where behavior.hunter reads her attack's MISS, as it
-        does over her regular presses' targets (Hunter._miss_points)."""
-        if not self.picks:
-            return []
+        """The targets of her casts waiting to be judged (`picks`) or of her throws at those no look had (`_judge_blind`),
+        whose MISS popup a look at `t` could show (keycheck's MISS_FROM_S to MISS_BY_S after the key): where
+        behavior.hunter reads her attack's MISS, as it does over her regular presses' targets (Hunter._miss_points)."""
         from .keycheck import MISS_BY_S, MISS_FROM_S
-        return [mk.m for mk in self.marks if any(c.t + MISS_FROM_S <= t <= c.t + MISS_BY_S for c in mk.casts)]
+        return [mk.m for mk in self.marks if any(c.t + MISS_FROM_S <= t <= c.t + MISS_BY_S for c in [*mk.casts, *mk.blind])]
 
     def _her_target(self, side: str) -> tuple[Monster | None, str, Monster | None]:
         """(`picks`) Her cast's target that way: of the bodies the last look that searched saw, not dying nor a corpse
@@ -824,7 +874,10 @@ class Attacks:
                 self.no_cast(side, none_why, first, by="key")
                 return None
         else:
-            target = aimed if aimed is not None and not self._dying(aimed, now, seen) else self.target(side)
+            target = (aimed if aimed is not None and not self._dying(aimed, now, seen) and self.worth_a_throw(aimed)
+                      else self.target(side))
+            if target is None and self.forced is None and self._nothing_there(side):
+                return self._no_throw(side)
         hp, pdd = self.stats.get(target.kind, (0.0, 0.0)) if target is not None else (0.0, 0.0)
         left = None if target is None else self.reckon(target)
         alive = None if left is None else left.alive() or left  # as it is if it's alive when the throw lands
@@ -833,6 +886,8 @@ class Attacks:
         # for little. Until 2026-10-26 by the latter, the dead chance then mostly stale (KILL_SHOWN_S).
         what = None if target is None else float("inf") if left is None else left if DEAD_CHOICE else alive
         attack, why = choice.pick(what, pdd, self.mp, self.max_mp, self.skill, self.mode, self.regular)
+        if attack is self.skill and target is not None and self.forced is None and self._regular_pays(target):
+            attack, why = self.regular, "unseen"  # (no look has it: not worth a cast's MP, worth a regular attack's lock)
         skill_held = self.watch is not None and getattr(self.watch, "skill_held", False)
         if attack is self.skill and skill_held and self.forced is None:
             attack, why = self.regular, "Lucky Seven held"  # (out of darts due, its key's check put off: keycheck)
@@ -892,6 +947,9 @@ class Attacks:
                                      tuple((o, o.bar) for o in way), side))
                 self._judged = mk
                 self._turned(side)
+            if not self.picks and self._missed(target):  # (no look has it: what this throw shows is judged)
+                mk.blind.append(Blind(now, side, self._cast, self._ground, None if self._last is None else self._last.mp))
+                self._blinded = mk
         self.counts[attack.key] += 1
         self.counts[why] += 1
         self._say(attack, why, target, left, alive, hp, side)
@@ -917,6 +975,10 @@ class Attacks:
             elif not self._swipe and self.forced is None:  # (up close the key swipes; her stars' test's are its own)
                 self._watch_regular(at, self._target, self.casts)
         self._asked, self._regular = False, False
+        if self._blinded is not None:  # (... and her throw at one no look has)
+            if self._blinded.blind:
+                self._blinded.blind[-1].t = at
+            self._blinded = None
         if self._judged is not None:  # (her cast judged from its key's time: rule 3)
             if self._judged.casts:
                 self._judged.casts[-1].t = at
@@ -964,26 +1026,194 @@ class Attacks:
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look (and those
         about that it didn't find: `unseen`) that isn't likely dead by her throws (DEAD_LIKELY; the likeliest if all
-        are), else the one she last threw at that way within HIDDEN_FOR (unseen: under its damage numbers), one not
-        likely dead first, else None; never one dying where a kill of hers was placed (ledger.dying, by all of them:
-        an unseen one nearer the kill is taken for the dying one, not a live one the look found beside it). With
-        `picks` (the magician's), `_her_target`'s: a body seen that her search picks, none about unseen, no fallback."""
+        are), else the one she last threw at that way (unseen: under its damage numbers; one a look still has, out of its
+        way, within SEEN_MARK_S), one not likely dead first, else None; of those a look missed, only one a throw is worth
+        (`worth_a_throw`), at any age; never one dying where a kill of hers was
+        placed (ledger.dying, by all of them: an unseen one nearer the kill is taken for the dying one, not a live one the
+        look found beside it). With `picks` (the magician's), `_her_target`'s: a body seen that her search picks, none
+        about unseen, no fallback."""
         if self.picks:
             return self._her_target(side)[0]
         s = self._last
         if s is not None and s.where is not None and s.platform is not None:
             now = time.monotonic()
             about = s.monsters + ([] if self.unseen is None else list(self.unseen(s)))
-            path = in_path(s, side, [m for m in about if not self._dying(m, now, about)])  # (no star: dying)
+            path = in_path(s, side, [m for m in about if not self._dying(m, now, about)
+                                     and self.worth_a_throw(m)])  # (no star: dying; none she doesn't believe in)
             if path:
                 return next((m for m in path if (left := self.reckon(m)) is None or left.dead < DEAD_LIKELY), path[0])
             x = s.where.x
-            recent = [mk for mk in self.marks if now - mk.thrown < HIDDEN_FOR and (mk.m.x > x) == (side == RIGHT)
-                      and not self._dying(mk.m, now)]
+            recent = [mk for mk in self.marks if (mk.m.x > x) == (side == RIGHT) and not self._dying(mk.m, now)
+                      and self.worth_a_throw(mk.m)
+                      and (now - mk.thrown < SEEN_MARK_S or (presence.EVIDENCE and self._missed(mk.m)))]
             alive = [mk for mk in recent if (left := self.reckon(mk.m)) is None or left.dead < DEAD_LIKELY]
             if recent:  # (as the path: one not likely dead first, the likeliest if all are)
                 return max(alive or recent, key=lambda mk: mk.thrown).m
         return None
+
+    def _missed(self, m: Monster) -> bool:
+        """Whether no look has monster `m`: not of the last look that searched (a stand-in of it isn't), nor seen in the
+        feed's newest frame (`newest`), by its track."""
+        s = self._last
+        if s is None or any(o is m for o in s.monsters):
+            return False
+        track = getattr(m, "track", None)
+        if track is not None and any(getattr(o, "track", None) == track for o in s.monsters):
+            return False
+        if self._newest is not None and track is not None:
+            t, tracks = self._newest
+            return not any(tr.id == track and tr.last_seen >= t - GAIN_SAME_S for tr in tracks)
+        return True
+
+    def evidence(self, m: Monster, at: float | None = None) -> Evidence:
+        """What's known of monster `m`, which no look has, for a throw keyed at `at` (the next she can: her lock, Hunter's
+        `next_key`; presence.Evidence): its feed track as of the newest state told (`newest`) or the last look, her
+        throws at it since it was seen (its mark), her gains lately."""
+        s = self._last
+        at = self._key_time() if at is None else at
+        track = getattr(m, "track", None)
+        tracks = self._newest[1] if self._newest is not None else (getattr(s, "tracks", None) or ())
+        tr = None if track is None else next((q for q in tracks if q.id == track), None)
+        mk = self._mark_of(m)
+        if tr is not None:
+            age, state, short, blind = (at - tr.last_seen, tr.state, tr.seen <= presence.SHORT_FRAMES,
+                                        getattr(tr, "blind", 0))
+        else:
+            age = (at - mk.seen) if mk is not None else (at - s.t) if s is not None else 0.0
+            state, short, blind = ("gone" if track is not None else None), False, 0  # (a track: there's a feed)
+        gain = any(at - presence.GAIN_S <= g <= at and (kinds is None or m.kind in kinds) for g, kinds in self._told)
+        spent = 0.0
+        if mk is not None and mk.blank > 0:
+            left = mk.left
+            for _, a in mk.pending:
+                left = left.after(a, self.miss)
+            spent = left.dead
+        return Evidence(age, state, 0 if mk is None else mk.blank, mk is not None and mk.shown, gain, short, spent, blind)
+
+    def _key_time(self) -> float:
+        """When her next throw's attack key can go: her lock's end, or now."""
+        now = time.monotonic()
+        return max(now, self.next_key()) if self.next_key is not None else now
+
+    def chance(self, m: Monster) -> float | None:
+        """How likely a throw at monster `m` shows an effect, by what's known now (presence.chance), or None: a look has
+        it, as sure as a look makes it."""
+        return presence.chance(self.evidence(m)) if self._missed(m) else None
+
+    def seen_net(self, m: Monster) -> float:
+        """What a throw at monster `m`, which a look has, is worth in EXP (presence.net at SEEN_CHANCE)."""
+        return self._best_net(m, presence.SEEN_CHANCE)[0]
+
+    def worth_a_throw(self, m: Monster, than: float | None = None) -> bool:
+        """Whether a throw at monster `m` goes: one a look has, always; else its best attack's net (`_best_net`) over
+        nothing, and over `than` if given (what a throw at a monster she sees would be worth, `seen_net`). Always with
+        `picks` (the magician's casts have their own checks: `refused`)."""
+        if self.picks or self.mode == "regular" or not presence.EVIDENCE:
+            return True
+        p = self.chance(m)
+        if p is None:
+            return True
+        net = self._best_net(m, p)[0]
+        return net >= 0.0 and (than is None or not presence.OVER_SEEN or net >= than)
+
+    def _best_net(self, m: Monster, p: float) -> tuple[float, Attack | None]:
+        """The attack she'd do best to throw at monster `m` with chance `p` of landing, and what that's worth in EXP
+        (presence.net): Lucky Seven where she has the MP for a cast and her mode throws it, the regular attack unless
+        never thrown (`no_regular`, her key held). What it has left as she reckons it, if alive; a kind whose HP isn't
+        known, as much as a whole one of three regular stars."""
+        left, stats = self.reckon(m), self.stats.get(m.kind)
+        hp = (left.alive() or left).hp if left is not None else 3 * self.regular.mean()
+        scale = 100.0 / (100.0 + stats[1]) if stats is not None else 1.0
+        rate = presence_rate(self.rate)
+        lock = presence.THROW_LOCK_S if self.from_ground is None or self.from_ground() else presence.JUMP_LOCK_S
+        worth = self.worth.get(m.kind, self.worth.get(None, 20.0))
+        out: tuple[float, Attack | None] = (-1e18, None)
+        if self.skill is not None and self.mode != "regular" and (
+                self.mp is None or choice.can_cast(self.mp, self.max_mp, self.skill.mp)):
+            out = (presence.net(p, worth, hp, self.skill.mean() * scale, self.skill.mp, lock, rate), self.skill)
+        if not self.no_regular and not (self.watch is not None and self.watch.holds(m)):
+            net = presence.net(p, worth, hp, self.regular.mean() * scale, self.regular.mp, lock, rate)
+            if net > out[0]:
+                out = (net, self.regular)
+        return out
+
+    def _regular_pays(self, m: Monster) -> bool:
+        """Whether a throw at monster `m`, which no look has, does better as the regular attack than as the cast her
+        choice would make: at thin evidence a cast's MP is what's not worth it (presence.net)."""
+        if self.picks or self.mode == "regular" or self.no_regular or not presence.EVIDENCE:
+            return False
+        p = self.chance(m)
+        return p is not None and self._best_net(m, p)[1] is self.regular
+
+    def _nothing_there(self, side: str) -> bool:
+        """Whether a throw that way has nothing it could take (`key`'s no throw): no monster the last look saw that way
+        in a star's reach, none a touch says is on her (`touched`). Always False with `picks` and in her modes that throw
+        whatever: what's left is the keys of a throw at a monster she no longer believes in."""
+        s = self._last
+        if s is None or s.where is None or s.platform is None or self.picks or self.mode != "choice" \
+                or not presence.EVIDENCE:
+            return False
+        if self.touched is not None and self.touched(s):
+            return False
+        x, y, now = s.where.x, s.where.y, time.monotonic()
+        return not any((m.x > x) == (side == RIGHT) and not self._dying(m, now, s.monsters)
+                       and reach.can_hit(s.platform, x, y, m, others=s.monsters) for m in s.monsters)
+
+    def nothing_to_throw_at(self, side: str) -> bool:
+        """(fight._cast_or_wait) Whether her throw that way would go with no key (`key`'s no throw): no target and nothing
+        there."""
+        return self.mode == "choice" and not self.picks and self.forced is None and self.target(side) is None \
+            and self._nothing_there(side)
+
+    def _no_throw(self, side: str) -> None:
+        """`key`'s answer to a throw with nothing to take (`_nothing_there`): none, said the 1st, 10th and 100th time."""
+        self._cast, self._keyed, self._regular, self._target, self._asked = None, None, False, None, False
+        said = "no throw: nothing there"
+        self.counts[said] += 1
+        if self.counts[said] in (1, 10, 100):
+            self.log(f"    no throw {side}: nothing a look has that way, none worth one unseen"
+                     + ("" if self.counts[said] == 1 else f" ({self.counts[said]} times)"))
+        if telemetry.recording():
+            telemetry.emit("no_throw", side=side)
+        return None
+
+    def _judge_blind(self, found: list, s: Scene, prev: Scene | None) -> None:
+        """Her throws at marks no look had, judged at look `s` (`found`: seen_again's for each mark; `prev`, the look
+        that searched before it): the thief's rule 3 (`picks` has `_judge`). A mark seen again owes nothing, its count
+        starts anew. Else each throw shows an effect as soon as a look says so (`_showed`), and LANDS_S after its key
+        with none it's one that showed nothing (Mark.blank): what the next throw at that mark goes by."""
+        for mk, again in zip(self.marks, found):
+            if again is not None:
+                mk.blind, mk.blank, mk.shown = [], 0, False
+                continue
+            if not mk.blind:
+                continue
+            for b in mk.blind:
+                b.shown = b.shown or (s.t >= b.t + SHOWS_S and self._showed(b, mk, s, prev))
+            for b in [b for b in mk.blind if b.shown or s.t - b.t >= LANDS_S]:
+                mk.blank, mk.shown = (0, True) if b.shown else (mk.blank + 1, False)
+                if not b.shown:
+                    self.counts["unseen: showed nothing"] += 1
+            mk.blind = [b for b in mk.blind if not b.shown and s.t - b.t < LANDS_S]
+
+    def _showed(self, b: Blind, mk: Mark, s: Scene, prev: Scene | None) -> bool:
+        """Whether look `s` shows an effect of throw `b` at mark `mk`: any gain of her EXP from SHOWS_S after its key (`_told`:
+        a kill, maybe another's); a bar lower or newly up on a monster that way (`_hurt`: a bar shows her damage alone);
+        her attack's MISS popup where the mark was (keycheck's box: she picked it, and missed); a cast from the ground
+        with its MP not taken, her claw's swipe (a body there, MP_SHOWS_S on)."""
+        if any(g >= b.t + SHOWS_S for g, _ in self._told):
+            return True
+        if prev is not None and any(
+                (now := seen_again(o, s.monsters)) is not None and (now.x > s.where.x) == (b.side == RIGHT)
+                and _hurt(o.bar, now.bar) for o in prev.monsters):
+            return True
+        if misses := (getattr(s, "misses", None) or ()):
+            from .keycheck import MISS_BY_S, MISS_DOWN, MISS_DX, MISS_FROM_S, MISS_UP
+            if b.t + MISS_FROM_S <= s.t <= b.t + MISS_BY_S and any(
+                    abs(mx - mk.m.x) <= MISS_DX and mk.m.y - MISS_UP <= my <= mk.m.y + MISS_DOWN for mx, my in misses):
+                return True
+        return (b.cast is not None and b.ground and b.mp is not None and s.mp is not None and s.mp > 0.0
+                and s.t >= b.t + MP_SHOWS_S and b.mp - s.mp < b.cast / 2)
 
     def _clawed(self, m: Monster) -> bool:
         """Whether the throw whose key is being chosen is one from the ground (`from_ground`) at monster `m` within the
@@ -1148,6 +1378,16 @@ class Attacks:
         if self.book is not None:
             self.book.save()
 
+    def _doubt(self, m: Monster | None) -> dict:
+        """What her 'attack' record says of a target no look has (presence.Evidence): `chance`, its seconds since a
+        sighting, her throws at it that showed nothing, the track's frames unseen by the exact finder. Nothing for one a
+        look has, or with `picks`."""
+        if m is None or self.picks or not self._missed(m):
+            return {}
+        e = self.evidence(m)
+        return {"chance": round(presence.chance(e), 3), "unseen_s": round(e.age, 3), "blank": e.blank, "blind": e.blind,
+                "state": e.state}
+
     def _dying(self, m: Monster, t: float, seen: list[Monster] = ()) -> bool:
         """Whether `m` is taken for dead or dying (ledger.dying: its track, or where a kill of hers was placed), at t,
         seen with `seen`."""
@@ -1207,7 +1447,35 @@ class Attacks:
             telemetry.emit("attack", key=attack.key, why=why, **_target_fields(target),
                            left=None if alive is None else round(alive.hp),
                            dead=None if left is None else round(left.dead, 3), hp=hp,
-                           mp=None if mp is None else round(mp), side=side)
+                           mp=None if mp is None else round(mp), side=side, **self._doubt(target))
+
+
+def presence_rate(rate: Callable[[], float] | None) -> float:
+    """Her EXP a second for a throw's price: `rate`'s (the Hunter's: fight.made_rate), else the prior (fight.RATE_PRIOR)."""
+    if rate is not None:
+        return rate()
+    from .fight import RATE_PRIOR
+    return RATE_PRIOR
+
+
+def _worth_of(model) -> dict:
+    """Each kind's worth in EXP, for a landing's price (behavior.presence): its EXP and what its kill is expected to drop
+    at the user's reference price (looting.expected_worth, presence.MESO_EXP); None's: the mean of the map's. {} where the
+    map doesn't say (tests' stand-ins)."""
+    exps = getattr(model, "mob_exp", None)
+    if not exps:
+        return {}
+    try:
+        value = worth_for(model)
+    except (AttributeError, KeyError, TypeError):
+        value = None
+    out = {}
+    for name, exp in exps.items():
+        kind = kind_of(name)
+        out[kind] = float(exp) + (presence.MESO_EXP * expected_worth(kind, value) if value is not None else 0.0)
+    if out:
+        out[None] = sum(out.values()) / len(out)
+    return out
 
 
 def _target_fields(m: Monster | None) -> dict:

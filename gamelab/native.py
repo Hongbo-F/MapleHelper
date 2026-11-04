@@ -16,7 +16,8 @@ The monster search's step 1 is a DLL of its own (search.c, `search_lib`: the ban
 silhouettes' scores where the cover test keeps a window, the peaks and the places, in a few calls a band), built the
 same way, loaded only where the CPU has AVX2 (its intrinsics); without it the search's step 1 is numpy's and OpenCV's
 as before (perception.mobs). So are her cues' (locate.c, `locate_lib`) and the spawn watch's (spawns.c, `spawns_lib`:
-the blend fit's integer sums of the monsters fading in at their spawn points, perception.spawns).
+the blend fit's integer sums of the monsters fading in at their spawn points, perception.spawns). The exact finder's
+(exact.c, `exact_lib`: perception.exact) takes no AVX2: plain C; without it the finder isn't there, the search alone.
 
 The DLLs are built from their sources (native.c's with gpumatch.c and gpumatch.hlsl in it) with MSVC 2022 (the Build
 Tools) the first time they're needed, into build/ next to this file (git-ignored), each named for its sources' hash: an
@@ -318,6 +319,41 @@ def spawns_lib() -> ctypes.CDLL | None:
             spawns_why = str(e).splitlines()[0] if str(e) else type(e).__name__
         _spawns_tried = True
     return _spawns
+
+
+EXACT_SOURCE = Path(__file__).with_name("exact.c")  # the exact finder's votes and counts (`exact_lib`)
+EXACT_SIGNATURES = {  # exact.c's functions: (return type, argument types)
+    "ex_open": (_P, [_I, _P, _P, _P, _I, _P]),
+    "ex_close": (None, [_P]),
+    "ex_find": (_I, [_P, _P, _I, _I, _L, _I, _I, _I, _I, _I, _I, _P, _I]),
+}
+_exact: ctypes.CDLL | None = None
+_exact_tried = False
+exact_why = ""  # why the exact finder's DLL isn't in use, if it isn't
+
+
+def exact_lib() -> ctypes.CDLL | None:
+    """The exact finder's DLL (exact.c: perception.exact), built and loaded on first use; None if it can't be (`exact_why`
+    says why) or with USE off: then the frame step has the whole screen's search alone (worldstate.EXACT)."""
+    global _exact, _exact_tried, exact_why
+    if not USE:
+        exact_why = "turned off (native.USE)"
+        return None
+    if _exact_tried:
+        return _exact
+    with _lock:
+        if _exact_tried:
+            return _exact
+        try:
+            dll = ctypes.CDLL(str(build(EXACT_SOURCE)))
+            for name, (restype, argtypes) in EXACT_SIGNATURES.items():
+                f = getattr(dll, name)
+                f.restype, f.argtypes = restype, argtypes
+            _exact, exact_why = dll, ""
+        except (OSError, RuntimeError, subprocess.SubprocessError, AttributeError) as e:
+            exact_why = str(e).splitlines()[0] if str(e) else type(e).__name__
+        _exact_tried = True
+    return _exact
 
 
 class SrUnit(ctypes.Structure):
@@ -733,12 +769,14 @@ def main() -> int:
         print(f"built: {build(SEARCH_SOURCE)}")
         print(f"built: {build(LOCATE_SOURCE)}")
         print(f"built: {build(SPAWNS_SOURCE)}")
+        print(f"built: {build(EXACT_SOURCE)}")
     except RuntimeError as e:
         print(f"couldn't build gamelab's native pieces: {e}")
         return 1
     print(f"gamelab's C pieces: {state()}; the monster search's step 1: {search_state()}; her plate's and her body's "
           f"cues: {'in use' if locate_lib() is not None else f'off ({locate_why}): numpy instead'}; the spawn watch: "
-          f"{'in use' if spawns_lib() is not None else f'off ({spawns_why}): left out of the frame step'}")
+          f"{'in use' if spawns_lib() is not None else f'off ({spawns_why}): left out of the frame step'}; the exact "
+          f"finder: {'in use' if exact_lib() is not None else f'off ({exact_why}): the search alone'}")
     return 0
 
 

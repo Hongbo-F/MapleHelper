@@ -2,8 +2,9 @@
 screen (localization.tracking, HIDDEN: hit under her damage numbers, under her own body, or just missed; and from
 2026-11-03 those still LIVE that the look's frame missed, UNSEEN_LIVE; `hidden`), and her memory's of the last moments
 (localization.memory, seen within UNSEEN_S), each where it likeliest is by the look's time. Her decisions take them as
-the look's own: what she shoots and keeps off in a fight, where she lands for a pile, the monsters her trips keep clear
-of (behavior.hunt, control.navigator).
+the look's own: what she keeps off in a fight, where she lands for a pile, the monsters her trips keep clear of
+(behavior.hunt, control.navigator); what she shoots of them goes by what's known of each at each look, from 2026-11-04
+(behavior.presence: these windows say what's about, not what's worth a throw).
 
 Why: the detector is nearly blind near her. Live on 2026-10-25 on Tree Dungeon (23:43-23:54, the service's 10 fps
 records, lab/telemetry/20261025-210747-perceive.jsonl; D:/MapleHelper-scratch/analysis-1025/damage-skeptic occl.py):

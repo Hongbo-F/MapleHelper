@@ -540,7 +540,8 @@ def test_the_service_says_whether_gamelabs_c_is_in_use():
     pub.started(runner, 1)
     assert said == [f"perception: gamelab's C pieces {native.state()}; the monster search's step 1 "
                     f"{native.search_state()}; 15 frames a second, the whole screen in every frame's pass, 1 "
-                    f"strip(s) of drops every 0.2 s by rotation"]
+                    f"strip(s) of drops every 0.2 s by rotation; {runner.step.finder_line()}"]
+    assert "the exact finder off: " in said[0]  # (a drawn runner has none: said, not silently the decisions alone)
     assert ("C pieces" in pub.status(0.0)) == pub.slow
     assert pub.slow == (native.lib() is None or not native.masked_in_c() or native.search_lib() is None)
     assert "noise bound" not in pub.status(0.0)
@@ -644,6 +645,11 @@ def test_perf():
     assert said.startswith("; a pass 12 ms (p90 30, p99 30, max 30): her look 8 and the whole screen 8 at once (p90 8, "
                            "10); 4.0 monsters found and 1.0 followed a frame, 2.5 strips of drops; a state 12 ms old as "
                            "it goes out (p90 20); ")
+    assert "exact" not in said  # (where it doesn't run)
+    perf.state(WorldState(1000, 110.5, True, work={"s": 0.01, "exact s": 0.004, "exact": 3, "bars shared": 1}), 111.0)
+    r2 = perf.record(120.0, {"tracks": 65, "flickers": 11}, fps=15.0)
+    assert r2["exact_ms"] == [4.0, 4.0, 4.0] and r2["exact_finds_a_min"] == 18.0 and r2["bars_shared_a_min"] == 6.0
+    assert "the exact finder 4.0 ms (p90 4.0, max 4.0), 18 added a minute" in service.perf_line(r2)
     empty = perf.record(120.0, {"tracks": 65, "flickers": 11})  # (a window with no frame: none said)
     assert empty["pass_ms"] == [None, None, None, None] and empty["tracks_a_min"] == 0
     assert service.perf_line(empty).startswith("; 0.0 monsters found and 0.0 followed a frame, 0.0 strips of drops; ")

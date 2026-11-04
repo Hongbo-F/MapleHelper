@@ -186,6 +186,7 @@ class Grind(Hunt):
         self._learn_hp(s)
         self._price_hp()
         now, plan = time.monotonic(), self.patrol.plan
+        self.h.exp_made = (self.report.exp, now - self._start)  # (what a throw's lock costs: fight.made_rate)
         if self._promised_at is not None and plan is not None:  # (the loop's rate over the time since the last look)
             self._promised += plan.rate * (now - self._promised_at)
             self._promised_s += now - self._promised_at
