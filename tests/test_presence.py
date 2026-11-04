@@ -86,9 +86,11 @@ def test_each_piece_of_evidence_moves_the_chance_its_way():
     # her reckoned damage should have killed it, with a throw at it that showed nothing: her throws didn't land
     assert chance(Evidence(0.2, LIVE, blank=1, spent=0.9)) < chance(Evidence(0.2, LIVE, blank=1))
     assert chance(Evidence(0.2, LIVE, spent=0.9)) == fresh  # (... and with hits shown, it's a hit monster, no more)
-    # the exact finder's misses: the first few say little (its gaps on the lossless clip), then fast
-    assert chance(Evidence(0.2, LIVE, blind=2)) == fresh
-    assert chance(Evidence(0.3, LIVE, blind=5)) < 0.05 < chance(Evidence(0.3, LIVE, blind=presence.BLIND_FREE))
+    # the exact finder's misses: its first says little, then each its part (fix2/blind_fit.py: 59% came back after one, 23%
+    # after 4, 6% after 8)
+    assert chance(Evidence(0.2, LIVE, blind=presence.BLIND_FREE)) == fresh
+    assert chance(Evidence(0.27, LIVE, blind=4)) == pytest.approx(0.28, abs=0.08)
+    assert chance(Evidence(0.53, LIVE, blind=8)) == pytest.approx(0.06, abs=0.03)
 
 
 def test_a_landing_is_worth_what_it_takes_a_throw_costs_its_mp_and_its_lock():
@@ -115,7 +117,7 @@ def test_one_with_exp_just_gained_isnt_worth_a_cast():
     """A gain of its kind since it went: most likely it (2026-11-04 00:25:02.214: fading, its gain 0.8 s before the key,
     bound to the live #59). Its gain of another kind says nothing."""
     a, _ = _attacks()
-    m = _thrown_at_then_gone(a, ago=0.9)
+    m = _thrown_at_then_gone(a, ago=1.3)
     before = a.chance(m)
     a.heard(time.monotonic(), [(time.monotonic() - 0.2, frozenset({"green-mushroom"}))])
     assert a.chance(m) == pytest.approx(before, abs=0.05)
@@ -188,7 +190,7 @@ def test_one_whose_reckoned_hp_is_exhausted_is_let_go():
     a.on_look(_look([], t + LANDS_S + 0.05, [_track(7, 120.0, t - 0.3, HIDDEN, "green-mushroom")], mp=1.0 - 16 / MAX_MP))
     e = a.evidence(m)
     assert e.blank == 1 and e.spent >= presence.SPENT_DEAD
-    assert a.chance(m) < 0.25
+    assert a.chance(m) < 0.35
     assert not a.worth_a_throw(m) and a.target(RIGHT) is None
 
 
@@ -248,6 +250,66 @@ def test_nothing_there_no_throw():
     assert a.key(LEFT) == KEYS.lucky_seven.name
     assert fight.cast_or_wait(SimpleNamespace(attacks=a), ("throw", RIGHT)) == ("wait",)
     assert fight.cast_or_wait(SimpleNamespace(attacks=a), ("throw", LEFT)) == ("throw", LEFT)
+
+
+def test_a_mark_a_look_still_has_out_of_its_way_goes_by_the_time_since_her_throw(monkeypatch):
+    """One she threw at that a look has, not in a star's way: a target HIDDEN_FOR after her throw, as ever, not later; no
+    evidence weighs one a look has (a cast at it came back at no limit: the review of 2026-11-04)."""
+    a, _ = _attacks()
+    now = time.monotonic()
+    m = _monster("horny-mushroom", 120.0, None, 7)
+    a.on_look(_look([m], now - 0.1, [_track(7, 120.0, now - 0.1, LIVE)]))
+    assert a.key(RIGHT) is not None
+    a.on_throw(now - 0.1, RIGHT)
+    monkeypatch.setattr(attacks_mod, "in_path", lambda s, side, about: [])  # (as a monster out of a star's reach)
+    a.on_look(_look([m], now, [_track(7, 120.0, now, LIVE)]))
+    mk = a._mark_of(m)
+    assert not a._missed(mk.m) and a.target(RIGHT) is not None
+    mk.last = now - attacks_mod.HIDDEN_FOR - 0.1
+    assert a.target(RIGHT) is None
+
+
+def test_a_throw_costs_what_she_makes_not_what_her_plan_promises():
+    """fight.made_rate: what she has made over the grind so far, a minute of the hunt's rate in it, within its band; with
+    nothing made yet (nor a grind) the hunt's."""
+    h = SimpleNamespace(exp_rate=9.0, exp_made=None)
+    assert fight.made_rate(h) == fight.rate_of(h) == 9.0
+    h.exp_made = (0.0, 0.0)
+    assert fight.made_rate(h) == 9.0  # (nothing to go by yet)
+    h.exp_made = (6.0 * 3600.0, 3600.0)  # (an hour at 6 a second)
+    assert fight.made_rate(h) == pytest.approx(6.05, abs=0.01)
+    h.exp_made = (0.0, 3600.0)  # (an hour with nothing)
+    assert fight.made_rate(h) == fight.RATE_PRIOR / fight.RATE_BAND
+    assert fight.made_rate(SimpleNamespace()) == fight.RATE_PRIOR
+
+
+def test_a_jump_away_with_no_attack_is_a_move_not_a_throw():
+    """`Attacks.key` sent no attack (nothing there, none worth one unseen): the jump back is her moving away: not noted as a
+    throw (its attack_at is the last real one's), not counted, and among her moves. The magician's jump away is as ever."""
+    sent = []
+    key = lambda name: SimpleNamespace(name=name)
+    from gamelab.control.actions import Actions
+    act = Actions(SimpleNamespace(left=key("left"), right=key("right"), jump=key("alt"), attack=key("f"), lucky_seven=key("a"),
+                                  pick_up=key("z"), hp_potion=None, chair=None), skill=True)
+    act.play = lambda events, name: sent.append((name, events))
+    act.routed, act.choose = True, lambda side: None
+    assert act.jump_back(RIGHT) is True and act.keyless
+    act.choose = lambda side: "a"
+    act.lock_until = 0.0
+    assert act.throw(RIGHT) is True and not act.keyless  # (a real key: no more)
+    h = SimpleNamespace(actions=SimpleNamespace(keyless=True, attack_at=1.0), report=SimpleNamespace(throws=0), danger=None,
+                        attacks=None)
+    st = FightState()
+    st.moves, st.aimed = 1, [object()]
+    fight.throw_act, was = (lambda h, s, a: True), fight.throw_act
+    try:
+        fight._carry_out(h, st, None, ("jump_back", RIGHT), [], 5.0, 1.0, False)
+        assert st.moves == 2 and h.report.throws == 0 and st.thrown == [] and st.keyed == []
+        h.actions.keyless = False
+        fight._carry_out(h, st, None, ("jump_back", RIGHT), [], 5.0, 1.0, False)
+        assert st.moves == 0 and h.report.throws == 1 and len(st.thrown) == 1
+    finally:
+        fight.throw_act = was
 
 
 def test_the_newest_state_before_the_key_counts():

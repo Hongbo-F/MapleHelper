@@ -676,11 +676,30 @@ HURT_PRIOR = 10    # touches
 
 
 def rate_of(h) -> float:
-    """Her EXP a second as a price goes by it (landing_prices, a throw at the unseen's: behavior.presence): the hunt's
-    (Hunter.exp_rate), RATE_PRIOR where it has none or one not over 0, else within RATE_BAND of it."""
+    """Her EXP a second as a price goes by it (landing_prices; made_rate's start): the hunt's (Hunter.exp_rate), RATE_PRIOR
+    where it has none or one not over 0, else within RATE_BAND of it."""
     rate = getattr(h, "exp_rate", None)
     low, high = RATE_PRIOR / RATE_BAND, RATE_PRIOR * RATE_BAND
     return RATE_PRIOR if rate is None or not rate > 0 else min(max(rate, low), high)
+
+
+# A throw's lock costs what she makes in that time, not what her plan promised: live Plan.rate's median was 426 and 537 EXP a
+# minute against 340 and 428 made so far (2026-11-02 and 11-04: D:/MapleHelper-scratch/unseen/fix2/live2.py). Replayed on the
+# live throws, priced so 134 of 401 are refused, with 21 real effects among them (6 kills on the target), against 155 and 31
+# (10) at Plan.rate. What she made so far with MADE_PRIOR_S of the rate the hunt goes by: her first minute's gains say little.
+MADE_PRIOR_S = 60.0  # s (a guess: a kill's EXP is about 7 s of her rate, so about 8 kills' worth)
+
+
+def made_rate(h) -> float:
+    """Her EXP a second as a throw's lock costs it (behavior.attacks: behavior.presence.cost): what she has made over the run
+    so far (Hunter.exp_made: the grind's; (EXP, s)) with MADE_PRIOR_S of `rate_of`, within RATE_BAND; `rate_of`'s with
+    none."""
+    prior, made = rate_of(h), getattr(h, "exp_made", None)
+    if made is None:
+        return prior
+    exp, seconds = made
+    low, high = RATE_PRIOR / RATE_BAND, RATE_PRIOR * RATE_BAND
+    return min(max((exp + MADE_PRIOR_S * prior) / (max(0.0, seconds) + MADE_PRIOR_S), low), high)
 
 
 def landing_prices(h, danger) -> Prices | None:
@@ -944,9 +963,15 @@ def throw_act(h: "Hunter", s: Scene, act: tuple) -> bool:
     if n is not None and telemetry.recording():
         gap = getattr(h.actions, "key_gap", None)
         telemetry.emit("jump_keys", n=n, thrown=thrown, pressed_ms=gap() if thrown and gap is not None else None)
-    if thrown and FLINCH and getattr(getattr(h, "danger", None), "any", False):
+    if thrown and FLINCH and getattr(getattr(h, "danger", None), "any", False) and not keyless(h):
         _note_aim(h, s, act, plan)
     return thrown
+
+
+def keyless(h: "Hunter") -> bool:
+    """Whether the throw just carried out was her jump away alone (Actions.keyless: `Attacks.key` sent no attack): a move, no
+    throw: nothing noted, not counted, and it counts toward her moves (attack.stance.MAX_MOVES)."""
+    return getattr(h.actions, "keyless", False) is True
 
 
 # Her running attack's target stands a while in her decisions' pace (pace_of: attack.stance.Pace.hold, FLINCH_HOLD_S): the
@@ -1062,6 +1087,9 @@ def _carry_out(h: "Hunter", st: FightState, s: Scene, act: tuple, fight: list[Mo
     if act[0] in THROWS:
         st.calm_since = None
         if throw_act(h, s, act):  # (dropped at its last look: look again)
+            if keyless(h):
+                st.moves += 1
+                return None
             st.note_throw(now, h.actions.attack_at)
             h.report.throws += 1
             st.moves = 0

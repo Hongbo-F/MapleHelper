@@ -9,24 +9,24 @@ attacks.HIDDEN_FOR, renewed by each throw), 1.5 s and 2.0 s for those about (loc
 ended only by a kill placed on it. Nothing in her decisions asked whether it was still there. In the live hours of
 2026-11-02 22:46 and 2026-11-04 00:22 (118.5 minutes; D:/MapleHelper-scratch/unseen/decisions) 430 of her 2,831 throws
 went at a target no look had (13-17%), plus 110 regular attacks at nothing; 53-60% of those throws showed nothing
-against 23-24% for targets seen; 34-43% of the targets were dead or gone by the key (a floor) against 7-11%; 245 casts,
-3,408 MP and 234 s showed nothing.
+against 23-24% for targets seen; 34-43% of the targets were dead or gone by the key (a floor) against 7-11%; 245 of them
+(213 casts, 3,408 MP, and 32 regular attacks), 234 s, showed nothing.
 
 **The chance** a throw shows an effect (`chance`): log-odds, a weight for each piece of evidence, each read again at every
 look and at the key. The weights are a logistic fit on those 401 throws with no seen monster in their path (fitted on one
-hour and tried on the other, out of sample logloss 0.611 and 0.655 against 0.684 and 0.668 for a constant; effect shown
-5-20% of the time where the other hour's fit said under 0.2, 58-70% where it said 0.6-0.8:
-D:/MapleHelper-scratch/unseen/fix/fit3.py). Evidence with no stable sign between the two hours (a hurt bar at the last
+hour and tried on the other, out of sample logloss 0.617 and 0.651 against 0.688 and 0.672 for a constant; effect shown
+5-21% of the time where the other hour's fit said under 0.2, 62-67% where it said 0.6-0.8:
+D:/MapleHelper-scratch/unseen/fix2/live2.py). Evidence with no stable sign between the two hours (a hurt bar at the last
 sighting, off her platform, how far off) has no weight. "Effect" is her EXP up, a bar down that way or her claw (a ground
 cast with no MP): it can hide a real hit, so a chance is a floor on her throws' worth and the refusals an upper bound.
 
 **The price** (`net`, the user's: HP 2 a meso, MP 1 a meso, a meso 0.5 EXP): a landing is worth the share of the monster's
 EXP and drops her attack takes off what it has left (`landing`): a Horny Mushroom's 53 EXP-equivalent, 0.65 of it from a
 Lucky Seven at a whole one, all of it at one with less left than her attack does; a throw costs her attack's MP and its
-lock's time at her EXP a second (`cost`: about 14 EXP-equivalent a cast, 6 a regular attack). So a monster nearly dead is
-worth a throw on thinner evidence than a whole one, and a cheap regular attack on thinner evidence than a cast: no fixed
-window nor rule, the throw goes while chance x landing beats its cost, and beats a throw at a monster she does see
-(`SEEN_CHANCE`, attacks.Attacks.seen_net).
+lock's time at what she makes a second (`cost`, fight.made_rate: about 14 EXP-equivalent a cast, 6 a regular attack). So a
+monster nearly dead is worth a throw on thinner evidence than a whole one, and a cheap regular attack on thinner evidence
+than a cast: no fixed window nor rule, the throw goes while chance x landing beats its cost, and beats a throw at a monster
+she does see (`SEEN_CHANCE`, attacks.Attacks.seen_net).
 
 **Positioning** isn't this: the monsters about her go on counting for her body (the stance's `around`), and one too close
 that isn't worth a throw is still kept off (stance's `unsure`) as long as the chance of its touch outweighs a step's time
@@ -36,36 +36,37 @@ that isn't worth a throw is still kept off (stance's `unsure`) as long as the ch
 import math
 from dataclasses import dataclass
 
-# The weights (log-odds; fit3.py's fit on both hours, the gain's by kind): a monster of the look just missed starts at
-# BASE; each second since its last sighting AGE_S; its track gone from the feed (dropped, or let go) GONE; first seen in
-# SHORT_FRAMES frames or fewer, a flicker's or a dead walker's new id, SHORT; her last throw at it unseen showed nothing
-# BLANK (n 85 of 430: shown 19%, 56% dead or gone; first throw 47% and 35%), and it showed something PROVEN (n 55, 58%
-# and 35%); her EXP up, a gain that can be its kind's, in the GAIN_S before GAIN (n 101, 38%, 61% dead or gone; the fit's
-# by kind is -0.3 to -1.4 by the hour, any kind's -0.4 to -0.5). Her throws at it reckoned to have killed it with none of
-# them having shown anything, SPENT more (n 59: shown 14%, 61% dead or gone, against 26%, 48% for blank throws under it;
-# not with no blank: n 27, shown 56%: those are hits).
-BASE = 0.26
-AGE_S = -0.65
+# The weights (log-odds; live2.py's fit on both hours, her gains as the code hears them, all of them whoever's throw: by
+# hour BASE 0.20, 0.72; AGE_S -0.38, -1.28; GONE -0.75, -0.51; SHORT -0.38, -0.39; BLANK -0.74, -0.41; PROVEN 0.65, 0.43; GAIN
+# -1.02, -0.28; SPENT -0.37, -0.36): a monster of the look just missed starts at BASE; each second since its last sighting
+# AGE_S; its track gone from the feed (dropped, or let go) GONE; first seen in SHORT_FRAMES frames or fewer, a flicker's or a
+# dead walker's new id, SHORT; her last throw at it unseen showed nothing BLANK (n 85 of 430: shown 19%, 56% dead or gone;
+# first throw 47% and 35%), and it showed something PROVEN (n 55, 58% and 35%); her EXP up, a gain that can be its kind's, in
+# the GAIN_S before GAIN (n 69 of 401, 30%, 62% dead or gone; a gain her throw the other way made is one of those, n 1: too
+# few to tell apart). Her throws at it reckoned to have killed it, the last showing nothing, SPENT more (n 59: shown 14%, 61%
+# dead or gone, against 26%, 48% for blank throws under it; not with no blank: n 27, shown 56%: those are hits).
+BASE = 0.39
+AGE_S = -0.63
 GONE = -0.86
-SHORT = -0.45
+SHORT = -0.50
 SHORT_FRAMES = 3
-BLANK = -0.72
-PROVEN = 0.89
-GAIN = -1.31
+BLANK = -0.65
+PROVEN = 0.68
+GAIN = -0.82
 GAIN_S = 1.2
-SPENT = -0.7
+SPENT = -0.35
 SPENT_DEAD = 0.5   # chance dead by her throws, as if her EXP said nothing, from which they count as spent
-# Dying or dead by the feed (n 9: all dead by the key; the 33% shown were others', bystanders'). The fit's weight is
-# small only for those few bystanders; what it says of the target is that it's gone.
+# Dying or dead by the feed: set by hand, not the fit's (n 9: all dead by the key; the 33% shown were others', bystanders',
+# which alone keep the fit's weight small: -0.37; what it says of the target is that it's gone).
 DYING = -2.5
-# A frame the exact finder looked at and didn't find it (perception.exact: tracking.Track.blind): on the lossless clip of
-# 2026-11-02 22:49 (fix/gaps.py) of 945 frames-after-a-sighting within 100 x 70 of her, a sighting came next on 928, and
-# after a miss of 1, 2, 3 and 4 frames 11 of 17, 6 of 11, 1 of 6 and 0 of 1 went on missing, with 6 of those chains ending
-# in a death seen: so about even up to BLIND_FREE frames (0.2 s), then BLIND a frame (log-odds: 0.52 to 0.15 at the 4th,
-# about 0.03 at the 5th). So absence soon says it's gone, as the search's misses (a spell of 0.3-1 s near her, sim.world
-# .NEAR_SPELL_1102) never could. Not in the fit: the two hours ran without the finder.
-BLIND_FREE = 3
-BLIND = -1.7
+# A frame the exact finder looked at and didn't find it (perception.exact: tracking.Track.blind), past the first: fitted on
+# the real step's dumps with the finder (R1-R3 and the lossless clip of 2026-11-02 22:49, tracks last within 100 x 70 of
+# her, D:/MapleHelper-scratch/unseen/fix2/blind_fit.py): after 1, 2, 3, 4, 6, 8 and 10 frames missed 59%, 46%, 32%, 23%, 12%,
+# 6% and 4% came back, the model's 59%, 48%, 37%, 28%, 14%, 6% and 3% (a body there, not an effect shown; each track's frames
+# count, so a few hundred gaps say all this). So absence says it's gone within a second, as the search's misses (a spell of
+# 0.3-1 s near her, sim.world.NEAR_SPELL_1102) never could. Not in the fit above: the two hours ran without the finder.
+BLIND_FREE = 1
+BLIND = -0.39
 # What a throw at a monster seen shows an effect for (live, both hours: 76-77%).
 SEEN_CHANCE = 0.76
 OVER_SEEN = True  # a throw at one unseen must beat a throw at one in reach that a look has (Attacks.worth_a_throw)

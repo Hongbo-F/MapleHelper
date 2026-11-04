@@ -144,6 +144,7 @@ from .looting import expected_worth, worth_for
 from .presence import Evidence
 
 HIDDEN_FOR = 1.8   # s of the doubt's watch (keycheck) and of her hidden wounds (fight.owed): no throw goes by it (`worth_a_throw`)
+SEEN_MARK_S = HIDDEN_FOR  # s after her last throw that one goes at a mark a look has, out of its way (`target`)
 LANDS_S = 0.6      # s after a throw's attack key by which its damage has shown on its target's bar, if it hit: the
                    # server's (actions.DAMAGE_SHOWS_MS), live a Horny Mushroom's bar first lower 0.21-0.55 s after a
                    # cast's key (p10-p90), a kill's gain by 0.46 s. 0.85 until 2026-10-26, when the star's flight was
@@ -435,7 +436,7 @@ class Attacks:
         self._asked = False
         self.thrown: tuple[float, Monster | None] | None = None  # the last throw's key time and what `key` aimed it at
         # What her throws at monsters no look has go by (`worth_a_throw`: behavior.presence): each kind's worth in EXP (its
-        # EXP and expected drops), her EXP a second (the Hunter's: fight.rate_of; None: the prior), whether a monster the
+        # EXP and expected drops), her EXP a second (the Hunter's: fight.made_rate; None: the prior), whether a monster the
         # looks miss has just touched her (the Hunter's: `_nothing_there`), every gain her EXP told lately, kept whoever's
         # kill it was placed on (`_gains` loses those), the feed's tracks as of its newest frame (`newest`), the mark
         # `key` just put a throw at one on, until its throw says when
@@ -1025,8 +1026,9 @@ class Attacks:
     def target(self, side: str) -> Monster | None:
         """The monster a throw that way takes, as she knows it: the likeliest in its way in the last look (and those
         about that it didn't find: `unseen`) that isn't likely dead by her throws (DEAD_LIKELY; the likeliest if all
-        are), else the one she last threw at that way (unseen: under its damage numbers), one not likely dead first, else
-        None; of those a look missed, only one a throw is worth (`worth_a_throw`); never one dying where a kill of hers was
+        are), else the one she last threw at that way (unseen: under its damage numbers; one a look still has, out of its
+        way, within SEEN_MARK_S), one not likely dead first, else None; of those a look missed, only one a throw is worth
+        (`worth_a_throw`), at any age; never one dying where a kill of hers was
         placed (ledger.dying, by all of them: an unseen one nearer the kill is taken for the dying one, not a live one the
         look found beside it). With `picks` (the magician's), `_her_target`'s: a body seen that her search picks, none
         about unseen, no fallback."""
@@ -1042,7 +1044,8 @@ class Attacks:
                 return next((m for m in path if (left := self.reckon(m)) is None or left.dead < DEAD_LIKELY), path[0])
             x = s.where.x
             recent = [mk for mk in self.marks if (mk.m.x > x) == (side == RIGHT) and not self._dying(mk.m, now)
-                      and self.worth_a_throw(mk.m) and (presence.EVIDENCE or now - mk.thrown < HIDDEN_FOR)]
+                      and self.worth_a_throw(mk.m)
+                      and (now - mk.thrown < SEEN_MARK_S or (presence.EVIDENCE and self._missed(mk.m)))]
             alive = [mk for mk in recent if (left := self.reckon(mk.m)) is None or left.dead < DEAD_LIKELY]
             if recent:  # (as the path: one not likely dead first, the likeliest if all are)
                 return max(alive or recent, key=lambda mk: mk.thrown).m
@@ -1448,7 +1451,7 @@ class Attacks:
 
 
 def presence_rate(rate: Callable[[], float] | None) -> float:
-    """Her EXP a second for a throw's price: `rate`'s (the Hunter's: fight.rate_of), else the prior (fight.RATE_PRIOR)."""
+    """Her EXP a second for a throw's price: `rate`'s (the Hunter's: fight.made_rate), else the prior (fight.RATE_PRIOR)."""
     if rate is not None:
         return rate()
     from .fight import RATE_PRIOR

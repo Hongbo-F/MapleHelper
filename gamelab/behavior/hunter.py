@@ -283,6 +283,7 @@ class Hunter:
             log(note)
         self.looter = Looter(self)
         self.report = Report()  # what she did (a tour starts a new one at every stop)
+        self.exp_made: tuple[float, float] | None = None  # EXP she has made over the grind so far, and in how many s (fight.made_rate)
         self.exp_rate: float | None = None  # EXP a second her hunting makes, as the hunt has it (the grind's loop's rate:
                                             # the landings' prices, behavior.fight.landing_prices); None: not known
         # platform -> EXP a second the grind expects of her there now (behavior.grind's, for `top_price`); None: no grind
@@ -350,7 +351,7 @@ class Hunter:
         self.attacks.from_ground = lambda: getattr(self.actions, "keyed_ground", False)
         # (what her throws at monsters no look has go by: behavior.presence)
         self.attacks.next_key = lambda: getattr(self.actions, "lock_until", 0.0)
-        self.attacks.rate = lambda: fight.rate_of(self)
+        self.attacks.rate = lambda: fight.made_rate(self)
         self.attacks.touched = lambda s: fresh_touch(self.senses, s, slack=fight.TOUCH_ROUND_S) is not None
         if mode != "regular":
             self.actions.choose = self.attacks.key
