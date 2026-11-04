@@ -79,6 +79,7 @@ TRACK_GAIN_S = 0.02  # s: a track bound to a gain (tracking.Track.gain) is a kil
 FOLLOW_S = 3.0      # s after a kill that its place follows its track (it walks on until her star lands, and the
                     # tracker may put the gain on another until tracking.REBIND_S + CONFIRM_S)
 DROP_LANDS = 2.0   # s after a kill that its drops lie on the ground (recorded at 2 fps)
+LANDED_S = 0.2     # s past that from which a search of the place with none in it says the kill dropped nothing (`searched_empty`)
 # s a kill's drops are its killer's alone (the game's ownership: nobody else can pick them up meanwhile; looting.
 # cant_pick has seen mesos she stood on twice stay): another's pile is worth a trip once past it. The simulator's
 # (sim.world.Realism.rival_owns), not measured; until 2026-10-30 the hunt loop waited OTHERS_AFTER (30 s, a guess) for
@@ -600,11 +601,13 @@ class DropStore:
             self._sighting(s.t, list(s.loot), s.in_view, ground and not any(st.at == s.t for st in strips))
 
     def searched_empty(self, s: Scene, p: Pile) -> bool:
-        """Whether look `s` has a search of pile `p`'s place from when its drops have settled (SETTLE) that can see it empty, as
-        `on_look`'s sightings have one: a strip sure of it, not for mesos alone; without strips the look's own; and her standing."""
+        """Whether look `s` has a search of pile `p`'s place from when its drops have landed (DROP_LANDS, LANDED_S) that can see
+        it empty, as `on_look`'s sightings have one: a strip sure of it, not for mesos alone; without strips the look's own; and
+        her standing. Not from SETTLE, the sightings': waiting for that kept each kill's pile open 0.8 s longer and cost her 20
+        EXP a minute (dev seeds, t +3.00), and a search too early for drops still showing is undone by a sighting (`revive_s`)."""
         if not standing(s):  # (one look, not two: whatever STANDING_ONLY says of her sightings, none from mid-jump here)
             return False
-        after = p.since + SETTLE
+        after = p.since + DROP_LANDS + LANDED_S
         over = [st for st in getattr(s, "strips", None) or () if st.at is not None and st.platform == p.platform
                 and st.x0 <= p.x <= st.x1]
         if over:

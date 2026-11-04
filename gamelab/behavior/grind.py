@@ -60,13 +60,12 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
-from .ledger import EXPIRE_S, FOLLOW_S, REVIVE_S, dying
-from .looting import SETTLE
+from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
 from .targeting import ASKS, IDLE_S, Targeting
 from .targeting import on as target_on
 
-SEARCH_S = 2.5         # s past a kill's drops' settling (looting.SETTLE) she waits by its pile for a search of it that can say
+SEARCH_S = 2.5         # s past a kill's drops' landing (ledger.DROP_LANDS, LANDED_S) she waits by its pile for a search of it that can say
                        # it's empty (`_none_landed`; the rotation is back on a strip in 1.2-2.4 s: ledger.REVIVE_S)
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go); and from the final
                        # review of 2026-11-02, s waiting there on end (Hunt._wait, nothing shot, no step) with monsters
@@ -359,18 +358,19 @@ class Grind(Hunt):
         return None if self.tp is not None else super()._sweep_most()
 
     def _none_landed(self, s: Scene, pile) -> bool:
-        """With the planner: a kill's drops have settled by now and a search there that could say so has none: it dropped
+        """With the planner: a kill's drops have landed by now and a search there that could say so has none: it dropped
         nothing (0.64 drops a kill; on the dev seeds 2 of 3 of her stands were on nothing, a walk of 60 units and 3 presses
         each, live 43% on the last hours), seen gone as two sightings would have it; drops a monster hid from it have it back as
-        soon as a look sees them (DropStore.revive_s). No stand either before it has settled, or (SEARCH_S) while the next look
+        soon as a look sees them (DropStore.revive_s). No stand either before they've landed, or (SEARCH_S) while the next look
         may have that search; past that, her walk over its spread."""
         if self.tp is None:
             return False
         now = time.monotonic()
-        if now < pile.since + SETTLE:
+        landed = pile.since + DROP_LANDS + LANDED_S
+        if now < landed:
             return True
         if not self.h.drops.searched_empty(s, pile):
-            return now < pile.since + SETTLE + SEARCH_S
+            return now < landed + SEARCH_S
         pile.status, pile.gone_at, pile.none_landed = "gone", s.t, True
         self.tp.counts["none landed"] += 1
         self.log(f"  none landed: {pile.kind}'s kill {s.t - pile.since:.1f} s ago on platform {pile.platform} at x {pile.x:.0f}")
@@ -398,8 +398,7 @@ class Grind(Hunt):
 
     def _pile_first(self, s: Scene):
         """With the planner: the sweep's next stop where it goes before the primary (behavior.targeting.pile_first); None:
-        the primary first, or no piles, or she's by a kill's pile that can't have her stand now (`_none_landed`: she'd stand
-        about with a monster to hit)."""
+        the primary first, or no piles."""
         c = self.tp.choice
         if c is None or c.primary is None:
             return None
@@ -407,9 +406,7 @@ class Grind(Hunt):
         if stop is None:
             return None
         pile = self._pile_of.get(stop.spot.key)
-        if pile is None or not self.tp.pile_first(pile, stop, time.monotonic()):
-            return None
-        return None if pile.status == "expected" and self._at_pile(s, pile) and self._none_landed(s, pile) else stop
+        return stop if pile is not None and self.tp.pile_first(pile, stop, time.monotonic()) else None
 
     def _stance(self, s: Scene, targets, visible, hidden, approach: bool, log: bool = True,
                 goal: float | None = None) -> tuple:

@@ -15,7 +15,7 @@ from gamelab.attack.stance import NO_PACE, Pace, _sizes, _stand_limits
 from gamelab.behavior import grind as grind_mod
 from gamelab.behavior import looting, sweep, targeting
 from gamelab.behavior.grind import Grind
-from gamelab.behavior.ledger import EXPIRE_S, OWN_S, REVIVE_S, DropStore, Pile
+from gamelab.behavior.ledger import DROP_LANDS, EXPIRE_S, LANDED_S, OWN_S, REVIVE_S, DropStore, Pile
 from gamelab.behavior.looting import Looter
 from gamelab.control import notify
 from gamelab.localization.monsters import Monster, bodies, touch_box
@@ -476,6 +476,9 @@ def test_a_far_pile_waits_for_her_way_then_goes_whatever_it_takes_near_the_end_o
     assert tp.loot_allow(_pile(EXPIRE_S - 5.0, platform=7), s, now) >= targeting.LOOT_ALL
 
 
+LANDED = DROP_LANDS + LANDED_S  # (s after a kill from which a search of its place can say it dropped nothing)
+
+
 def _strip(x0=0.0, x1=200.0, at=None, sure=True, mesos_only=False):
     return SimpleNamespace(platform=10, x0=x0, x1=x1, at=time.monotonic() if at is None else at, sure=sure, mesos_only=mesos_only)
 
@@ -493,60 +496,43 @@ def _grind_with(m):
 
 
 def test_a_kill_that_dropped_nothing_has_no_stand(tree):
-    """At a kill's pile no look has seen: until its drops have settled she waits (no walk over its spread); then a search there
-    sure of it with nothing in it says it's gone, said in the log and as an event, a later sighting reviving it. Off, master's."""
+    """At a kill's pile no look has seen: until its drops have landed she waits (no walk over its spread); then a search there
+    sure of it with nothing in it says it's gone, said in the log and as an event, a later sighting reviving it. From their
+    landing, not looting.SETTLE's: keeping each pile open to then cost her 20 EXP a minute. Off, master's."""
     m, _ = tree
     g, said = _grind_with(m)
     s = _stood([_strip()])
     landing = _pile(1.0)
     assert Grind._none_landed(g, s, landing) and landing.status == "expected"
-    landed = _pile(looting.SETTLE + 0.5)
+    assert LANDED < looting.SETTLE
+    landed = _pile((LANDED + looting.SETTLE) / 2)
     with telemetry.captured() as recs:
         assert Grind._none_landed(g, s, landed) and landed.status == "gone" and landed.gone_at == s.t and landed.none_landed
     assert g.tp.counts["none landed"] == 1 and len(said) == 1 and "none landed" in said[0]
     assert [r for r in recs if r.get("kind") == "none_landed" and r["platform"] == 10 and r["x"] == 100]
-    assert not Grind._none_landed(SimpleNamespace(tp=None), s, _pile(looting.SETTLE + 0.5))
+    assert not Grind._none_landed(SimpleNamespace(tp=None), s, _pile(LANDED + 0.5))
 
 
 def test_no_mark_on_a_search_that_cannot_say_so(tree):
-    """A strip not sure of it, one for mesos alone, one from before its drops settled, or her in the air: no mark. She waits a
+    """A strip not sure of it, one for mesos alone, one from before its drops landed, or her in the air: no mark. She waits a
     little for the rotation's next (SEARCH_S), then walks its spread as before."""
     m, _ = tree
     g, _ = _grind_with(m)
     now = time.monotonic()
     for s in (_stood([_strip(sure=False)]), _stood([_strip(mesos_only=True)]), _stood([_strip(at=now - 5.0)]), _stood([_strip(x0=300.0, x1=500.0)])):
-        p = _pile(looting.SETTLE + 0.5)
+        p = _pile(LANDED + 0.5)
         if s.strips[0].x0 == 300.0:
             s.in_view = lambda pid, x: False
             s.looked = []
         assert not g.h.drops.searched_empty(s, p)
         assert Grind._none_landed(g, s, p) and p.status == "expected"  # (the next look may have it)
-        late = _pile(looting.SETTLE + grind_mod.SEARCH_S + 0.5)
+        late = _pile(LANDED + grind_mod.SEARCH_S + 0.5)
         assert not Grind._none_landed(g, s, late) and late.status == "expected"  # (her walk over its spread)
     air = _stood([_strip()])
     air.ground = None
-    assert not g.h.drops.searched_empty(air, _pile(looting.SETTLE + 0.5))
+    assert not g.h.drops.searched_empty(air, _pile(LANDED + 0.5))
     own = _stood([])  # (no strips: the look's own search)
-    assert g.h.drops.searched_empty(own, _pile(looting.SETTLE + 0.5))
-
-
-def test_by_a_kill_s_pile_she_can_t_stand_on_yet_the_primary_goes_first():
-    """Standing by a pile whose drops haven't settled, or not searched yet, she hits her primary meanwhile: no idling by it. On
-    her way there she goes on, and a pile seen, or past that wait, has her stand."""
-    stop = SimpleNamespace(spot=SimpleNamespace(key=1))
-
-    def g(pile, at=True, none=True, first=True):
-        return SimpleNamespace(tp=SimpleNamespace(choice=SimpleNamespace(primary=object()), pile_first=lambda p, st, now: first),
-                               _here=lambda s, say=True: stop, _pile_of={1: pile}, _at_pile=lambda s, p: at,
-                               _none_landed=lambda s, p: none)
-    look = SimpleNamespace()
-    kill = _pile(1.0)
-    assert kill.status == "expected"
-    assert Grind._pile_first(g(kill), look) is None
-    assert Grind._pile_first(g(kill, at=False), look) is stop
-    assert Grind._pile_first(g(kill, none=False), look) is stop
-    assert Grind._pile_first(g(_pile(5.0, status="seen")), look) is stop
-    assert Grind._pile_first(g(kill, first=False), look) is None
+    assert g.h.drops.searched_empty(own, _pile(LANDED + 0.5))
 
 
 def _seen_at(x, platform=10):
