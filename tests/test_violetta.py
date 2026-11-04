@@ -153,7 +153,7 @@ def test_the_live_watcher_clicks_each_rounds_slot_and_the_pass_s_ok(tmp_path, mo
         calls["det"] += 1
         return [boxes[k] if k < len(boxes) else []]
 
-    pushed, clicks, answered = [], [], []
+    clicks, answered = [], []
     ok_at = {"on": False}
 
     def answer(x, y, active):  # (the player's click: only while the buttons are lit)
@@ -162,15 +162,13 @@ def test_the_live_watcher_clicks_each_rounds_slot_and_the_pass_s_ok(tmp_path, mo
 
     w = vl.VioletaLive(alarm=alarm, spotter=_Spotter(), log=lambda m: None, detector=detector,
                        ok=lambda full: (784, 430) if ok_at["on"] else None,
-                       clicker=lambda x, y: clicks.append((x, y)) or True, push=lambda t, x: pushed.append(t),
-                       answer=answer)
+                       clicker=lambda x, y: clicks.append((x, y)) or True, answer=answer)
     now = 1000.0
     for k, t in enumerate(ts):
         now = 1000.0 + t
         w.step(now, (t, lit if k in lit_at else dark, k, 1))
         if w.answering is not None:
             w.answering.join(5)
-    assert pushed == ["Violetta round 1: slot 3", "Violetta round 2: slot 1"]
     assert answered == [(735, 505, True), (527, 505, True)]  # each answer's button clicked (slots 3 and 1)
     assert all(any(x0 <= x < x1 and y0 <= y < y1 for x0, y0, x1, y1 in alarm_mod.LIE_ANSWER_BOXES)
                for x, y in violetta.BUTTON_AT)  # the click-only-on-an-answer plan the player takes

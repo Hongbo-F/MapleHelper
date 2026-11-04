@@ -13,8 +13,9 @@ after each round and clicks that answer's button.
   (perception.violetta.Detector); at each answer window (the buttons lit: buttons_lit, its first frame) the round
   solved from the frames since the one before (perception.violetta.solve_round), the made-up one's slot chained from
   its start (start_slot: the boxes of its face before the first window, at the slots measured then: slots_of), and
-  said: the service's log, a `violetta` telemetry record, and a push to the phone (control.notify's Bark: lab/bark.json)
-  "Violetta round N: slot S"; and that slot's button clicked (perception.violetta.BUTTON_AT) through the elevated
+  said: the service's log and a `violetta` telemetry record, no push a round (the user, 2026-11-04: "let's not send one
+  message per violetta stage": the player's own pushes say the Lie Detector's up and gone); and that slot's button
+  clicked (perception.violetta.BUTTON_AT) through the elevated
   player (client.click_lie_answer: alarm.LIE_CURSOR's click form, one move and one left click), cancelled once the
   buttons go dark.
   The round is solved knowing its window's time (solve_round's `window`), 0.45 s or so.
@@ -49,10 +50,9 @@ class VioletaLive:
     """The service's side (see the top): `saw` from the frame loop, `start` and `close` with the service, `line` for its
     status. For tests: `detector` (perception.violetta.Detector's `detect`), `spotter` (its `over_play`), `ok` (the
     dialog's finder: frame -> (x, y) or None), `clicker` (the pass's OK click), `answer` (x, y, active -> bool: the
-    answer click through the player), `push` (title, text) and `alarm` (the alarm file's path)."""
+    answer click through the player) and `alarm` (the alarm file's path)."""
 
-    def __init__(self, alarm=None, spotter=None, log=None, detector=None, ok=None, clicker=None, push=None,
-                 answer=None):
+    def __init__(self, alarm=None, spotter=None, log=None, detector=None, ok=None, clicker=None, answer=None):
         self.alarm = alarm
         self.spotter = spotter
         self.log = log or (lambda msg: None)
@@ -61,7 +61,6 @@ class VioletaLive:
         self.clicker = clicker or self._click
         self.answer = answer or self._click_answer
         self.answering: threading.Thread | None = None  # the click on the answer's button under way
-        self.push = push or self._push
         self._cond = threading.Condition()
         self._queue: deque = deque()
         self.dropped = 0
@@ -248,10 +247,6 @@ class VioletaLive:
         self._say(f"the Violetta game, round {n}: the made-up one is at slot {slot} ({kind} hop(s), "
                   f"{[p + 1 for p in perm]})")
         self._answer(g, slot)
-        try:
-            self.push(f"Violetta round {n}: slot {slot}", f"the made-up Violetta is at slot {slot} (round {n} of 4)")
-        except Exception as e:  # noqa: BLE001 (the push is a convenience)
-            self._say(f"the Violetta push failed: {type(e).__name__}: {e}")
 
     def _answer(self, g: dict, slot: int) -> None:
         """Click slot's answer button on a thread of its own, cancelled once the buttons go dark or the game ends."""
@@ -310,10 +305,6 @@ class VioletaLive:
     def _click(self, x: int, y: int) -> bool:
         from . import client
         return client.click_lie_ok(int(x), int(y))
-
-    def _push(self, title: str, text: str) -> None:
-        from . import notify
-        notify.bark(notify.load_bark(), title, text, level="timeSensitive", log=self._say)
 
     def _say(self, msg: str) -> None:
         try:
