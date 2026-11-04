@@ -745,6 +745,17 @@ REFUGE_WORTH = False
 # sprite kept). False: her retreat's alone.
 TOUCHER_ALL = False
 TOUCHER_STAND = True  # ... its stand-in standing at her x (False: its walking not known, as her retreat's)
+# ARRIVE_CHECK_POST_HIT (the magician's, attack.magic; a stopgap until the per-step planner, the user, 2026-11-03: "One-line
+# patch for her now, then planner"): in the window after a touch (POST_HIT: no fight, no `until`) an escorted trip's walk
+# on arrival is checked as an unescorted one's (_arrival_clear): a walk a monster would touch after her invulnerability
+# arrives short where she stands. Off, the escort's walk on to its x went unchecked: after a touch on the -80 rope she
+# walked through the Horny Mushroom chasing her to stop 10's x -138, 25 from 10's end, and its next touch knocked her off
+# onto 13, again and again (D:/MapleHelper-scratch/arrival/REPORT.md). Measured (her standard world, 48 paired seeds, 5
+# minutes; D:/MapleHelper-scratch/arrival/vtrace, planner/fix): on 68344b2 her knock-offs 10 -> 13 after a -80 climb 76
+# -> 29 (t -4.00), long falls 213 -> 160, EXP a minute 459.8 -> 475.3 (+3.4%, t +2.87), touches level; on 71620d4
+# 459.7 -> 475.5. The thief's not helped (61 -> 54, EXP -2.8%, t -1.34: kept at the top, his jump throws in place there
+# are knocked off in the air): False for him.
+ARRIVE_CHECK_POST_HIT = False
 
 # How a trip treats monsters (Navigator.go's `mode`).
 AVOID = "avoid"      # no escort: whole-screen looks, ways around, waits, hops, chains planned on the move
@@ -2504,7 +2515,13 @@ class Navigator:
         trip arrived short (Trip.short). With ARRIVE_STAND, for a trip whose x is what it's for (TripState.hold_x), she
         stays only where standing there as long and STAND_PAST_S more is clear (_stand_clear), else walks on regardless;
         with TOUCHER_ALL the monster that touched her last is counted (_toucher). With an escort, the monster in her way
-        is shot first (_clear_the_way): always."""
+        is shot first (_clear_the_way): always; with ARRIVE_CHECK_POST_HIT, in the window after a touch, as without one."""
+        if ARRIVE_CHECK_POST_HIT and self.fight and self._post_hit(st):
+            kept, self._mode = self._mode, AVOID
+            try:
+                return self._arrival_clear(st, s)
+            finally:
+                self._mode = kept
         if self.fight or not WATCH_MOVES or st.x is None or abs(st.x - s.where.x) <= ARRIVE_TOLERANCE:
             return True
         monsters = self.tracker.update(s.t, self._on_platforms(s.monsters) if UNSEEN_AVOID else s.monsters,
