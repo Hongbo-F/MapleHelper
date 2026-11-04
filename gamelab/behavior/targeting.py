@@ -344,7 +344,7 @@ class Targeting:
         d = ZONE_STEP
         while d <= room:
             g = her.x + way * d
-            if not her.lo <= g <= her.hi:
+            if g > her.hi if way > 0 else g < her.lo:  # (the limit ahead of her: the one behind is what she's leaving)
                 return None
             if not knock.flown(model, p, g, knock.GROUND, -way).off(model, p):
                 if reach.can_hit(p, g, p.y_at(g), m, others=her.around, sizes=her.sizes) \
