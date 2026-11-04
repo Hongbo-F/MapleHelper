@@ -32,6 +32,7 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from ..control import client
+from ..control.notify import BackpackPush
 from ..localization import mapdata
 from ..attack import danger
 from ..behavior.hunter import Hunter
@@ -157,6 +158,7 @@ class Sim:
         self.files: dict[str, list[str]] = {}  # what the run wrote (under its stand-in for gamelab/lab)
         self.senses = []  # every hunter's (for the feed's record)
         self.books = []   # ... and their damage books (behavior.damage: none saved past the run, below)
+        self.pushes = []  # the phone's pushes her backpack full would have sent (control.notify.BackpackPush: a stub here)
         self.feed = self._feed()
 
     def _attack_told(self, row: tuple) -> None:
@@ -321,6 +323,7 @@ class Sim:
             self.books.append(h.attacks.book)
         h.config_keys = self.keys
         h.jitter = random.Random(f"jitter:{self.scenario.seed}")  # (her jump attacks' jitter: the same run again)
+        h.looter.push = BackpackPush(lambda title, text: self.pushes.append((title, text)), clock=lambda fmt: "")  # (a stub)
         h.pet = FakePetCare(self.world, h.actions, self.eyes, self.clock, log=self.log)  # (no window, no OCR)
         h.pet.trusted, h.pet.on_doubt = h._pet_key_trusted, h._pet_doubted  # (as Hunter's own: her pet food doubted)
         self.senses.append(h.senses)
@@ -2255,6 +2258,68 @@ def nav_tree_rope_top_10(sim):
     of them up regardless after HANG_S (one of those touched); the 12 trips 54.2 s in all against 48.7."""
     from ..control.navigator import TRANSIT
     return sim.navigator(sim.hunter(), fight=True).go(10, mode=TRANSIT)
+
+
+# The target-first planner's set-piece (behavior.targeting; the arrival study of 2026-11-03, D:/MapleHelper-scratch/arrival/
+# REPORT.md): the grind's climb up the rope at -80 from 11 onto 10 (the camp's way in) with a hurt Horny Mushroom chasing her
+# on 10 by its left part and another walking by the top, as on her seed 28's loop. Her knock-offs 10 -> 13 within 6 s of the
+# climb (`_knock_offs`, from the world's knock and climb logs) are the count.
+_CHASER_WORLD = dict(noise=_CROWD[0], realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"],
+                                                                  **harness.WORLDS["walkers"]))
+
+
+def _knock_offs(tr: dict) -> int:
+    """The set-piece's knock-offs from 10 onto 13 within 6 s after a climb up the rope at -80 onto 10 (and before the
+    next such climb)."""
+    r = tr["result"] if isinstance(tr["result"], dict) else {}
+    climbs, knocks = r.get("climbs", []), r.get("knocks", [])
+    n = 0
+    for i, c in enumerate(climbs):
+        nxt = climbs[i + 1] if i + 1 < len(climbs) else 1e9
+        n += any(c < k[0] <= min(c + 6.0, nxt) and k[1] == 10 and k[2] == 13 for k in knocks)
+    return n
+
+
+@tree((11, -80.0), monsters=[("Horny Mushroom", 10, -110.0), ("Horny Mushroom", 10, -60.0)],
+      seed=2, limit=90, may_die=True, **_CHASER_WORLD,
+      expects=(check("climbed up the rope at -80 onto 10", lambda tr: bool(tr["result"]["climbs"])),
+               check("no knock-off 10 -> 13 within 6 s of the climb", lambda tr: _knock_offs(tr) == 0)))
+def loop_tree_rope_top_chaser(sim):
+    """The grind's arrival at the camp by the rope at -80 (11 -> 10), as on her seed 28 of the standard grind at master
+    68344b2 (8 knock-offs from 10 climbs there): from 11 under the rope's foot, its first stop 10's (Patrol.choose with
+    every other stop's platform skipped, its first time only); on 10 a Horny Mushroom at -110 she has hurt (its bar
+    0.18: Realism's chase, it chases her) and another walking by the top at -60, its walk taking it over the top as she
+    climbs. The grind for 20 s, in the thief's standard world (the detector's misses, the walkers' chase). Master's arrival
+    walks her from -80 on to the stop's x; the target-first planner takes a target from where she tops out instead: on here
+    whatever its default (behavior.targeting.forced_on), GAMELAB_TARGET_SETPIECE=0 for master's arm. The outcome has the
+    world's climbs at -80 onto 10, its knocks (t, from, to, fall), the chaser's death (s) and her touches."""
+    from ..behavior import targeting
+    from ..behavior.grind import Grind
+    w = sim.world
+    hurt = w.monsters[0]
+    hurt.hp = 0.18 * hurt.hp_max
+    hurt.aggro(w.t)
+    make = sim.tour_stack
+
+    def run(sim, tour=None):  # (_grind's, its first stop 10's)
+        g = Grind(tour or make(), log=sim.log)
+        real, first = g.patrol.choose, [True]
+
+        def choose(t, here, x, current=None, skip=(), **kw):
+            if first[0]:
+                first[0] = False
+                skip = [st.platform for st in g.patrol.stops if st.platform != 10]
+            return real(t, here, x, current=current, skip=skip, **kw)
+        g.patrol.choose = choose
+        r = g.run(minutes=1 / 3)
+        return {"report": str(r), "grounds": r.grounds, "kills": r.kills, "stays": [round(x, 1) for x in g.stays]}
+    with targeting.forced_on():
+        out = run(sim)
+    out["climbs"] = [round(c[0], 3) for c in w.climb_log if abs(c[1] + 80) < 1 and c[2] == 10]
+    out["knocks"] = [[round(k[0], 3), k[1], k[2], k[3]] for k in w.knock_log]
+    out["chaser_died"] = None if hurt.alive else round(hurt.died_at, 3)
+    out["touches"] = w.touches
+    return out
 
 
 @tree((24, 231.0), monsters=[("Horny Mushroom", 23, 20.0)], seed=8, limit=60, **_LIVE,
