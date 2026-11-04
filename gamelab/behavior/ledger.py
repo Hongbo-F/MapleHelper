@@ -601,8 +601,8 @@ class DropStore:
 
     def searched_empty(self, s: Scene, p: Pile) -> bool:
         """Whether look `s` has a search of pile `p`'s place from when its drops have settled (SETTLE) that can see it empty, as
-        `on_look`'s sightings have one: her standing, a strip sure of it, not for mesos alone; without strips the look's own."""
-        if looting.STANDING_ONLY and not standing(s):
+        `on_look`'s sightings have one: a strip sure of it, not for mesos alone; without strips the look's own; and her standing."""
+        if not standing(s):  # (one look, not two: whatever STANDING_ONLY says of her sightings, none from mid-jump here)
             return False
         after = p.since + SETTLE
         over = [st for st in getattr(s, "strips", None) or () if st.at is not None and st.platform == p.platform

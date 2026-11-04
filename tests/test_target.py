@@ -8,16 +8,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from gamelab import character
-from gamelab.attack import knock, magic, reach
+from gamelab import character, telemetry
+from gamelab.attack import magic, reach
 from gamelab.attack import target as tg
 from gamelab.attack.stance import NO_PACE, Pace, _sizes, _stand_limits
+from gamelab.behavior import grind as grind_mod
 from gamelab.behavior import looting, sweep, targeting
 from gamelab.behavior.grind import Grind
-from gamelab.behavior.ledger import EXPIRE_S, OWN_S, Pile
+from gamelab.behavior.ledger import EXPIRE_S, OWN_S, REVIVE_S, DropStore, Pile
 from gamelab.behavior.looting import Looter
 from gamelab.control import notify
 from gamelab.localization.monsters import Monster, bodies, touch_box
+from gamelab.motion import physics
 from gamelab.motion.route import Planner
 from gamelab.perception.mobs import Mob
 from gamelab.sim import scenarios
@@ -177,7 +179,8 @@ def _targeting(m, exp=None, attacks=None):
     h = SimpleNamespace(attacks=attacks or SimpleNamespace(picks=False, chance=lambda m: None, reckon=lambda m: None,
                                                            kill_s=lambda m: 2.0),
                         aggro=SimpleNamespace(chasers={}), actions=SimpleNamespace(facing="right", attack_at=0.0), log=lambda text: None,
-                        senses=SimpleNamespace(invulnerable_until=lambda: 0.0))
+                        senses=SimpleNamespace(invulnerable_until=lambda: 0.0), ledger=SimpleNamespace(dead={}),
+                        drops=DropStore())
     g = SimpleNamespace(h=h, model=m, kinds=None, danger=None, tour=SimpleNamespace(exp=exp or {HORNY: 41.0, GREEN: 30.0}),
                         _avg_exp=lambda: 30.0)
     return targeting.Targeting(g)
@@ -190,15 +193,11 @@ def test_a_monster_fading_in_beside_her_enters_the_choice_at_its_first_look(tree
     tp = _targeting(m)
     newborn = _mon(m, HORNY, 120.0, 10, track=7, fading=0.1)
     s = SimpleNamespace(platform=m.platform(10), where=SimpleNamespace(x=0.0, y=m.platform(10).y_at(0.0)), t=50.0, monsters=[newborn],
-                        tracks=[], events=[SimpleNamespace(kind="spawned", track=7, t=50.0, data={"platform": 10, "x": 120})])
-    tp.on_look(s)
+                        tracks=[])
     pace = Pace(0.0)
     foes = tp.foes_of(s, [newborn], [newborn], pace)
     assert foes[0].born and foes[0].solid_s == pytest.approx((1.0 - 0.1) / targeting.FADE_PER_S)
     assert foes[0].hit_s == pytest.approx((tg.HIT_ALPHA - 0.1) / targeting.FADE_PER_S)
-    tp.foes = foes
-    tp._newborns(s)
-    assert tp.delays == [0.0] and tp.delays_near == [0.0]
 
 
 def test_a_newborn_that_beats_her_target_by_the_margin_changes_it_at_once_said_a_respawn(tree):
@@ -236,11 +235,10 @@ def test_while_her_lock_lasts_each_frame_is_read_a_newborn_that_beats_her_target
     tp = _in_her_lock(m)
     tp.h.attacks = SimpleNamespace(picks=False, chance=lambda m: None, reckon=lambda m: None, kill_s=lambda m: 0.5)
     born = _track(m, 7, GREEN, 120.0, 10, fading=0.2, solid_at=50.65)
-    tp.born[7] = 50.0
     st = SimpleNamespace(t=50.0, tracks=[born])
     event = SimpleNamespace(kind="spawned", track=7, t=50.0, data={"platform": 10, "x": 120})
     assert tp._changes(st, [event], 0.4)
-    assert tp.delays == [0.0] and tp.counts["lock: respawn"] == 1
+    assert tp.counts["lock: respawn"] == 1
     weak = _in_her_lock(m, primary_x=-100.0)
     weak.h.attacks = SimpleNamespace(picks=False, chance=lambda m: None, reckon=lambda m: None, kill_s=lambda m: 9.0)
     assert not weak._changes(SimpleNamespace(t=50.0, tracks=[born]), [event], 0.4)
@@ -256,6 +254,19 @@ def test_while_her_lock_lasts_a_monster_coming_at_her_calls_the_attack_off_unles
     assert not tp._changes(SimpleNamespace(t=50.0, tracks=[away]), [], 0.4)
     target = _track(m, 1, HORNY, -150.0, 10, vx=100.0)
     assert not tp._changes(SimpleNamespace(t=50.0, tracks=[target]), [], 0.4)
+
+
+def test_a_monster_arriving_after_she_has_finished_the_primary_does_not_call_her_attack_off(tree):
+    """The kill's time from the look already holds her lock (Way.s): it's not added again."""
+    m, _ = tree
+    tp = _in_her_lock(m)
+    c = tp.choice
+    finish = c.primary.way.s + c.primary.foe.kill_s
+    left = 0.4
+    gap = 150.0 - tg.half_of(GREEN, tp.her.halves) - tg.HER_HALF
+    arrives = finish + left / 2  # (after she's finished; before finish + left, the double count)
+    assert not tp._changes(SimpleNamespace(t=50.0, tracks=[_track(m, 2, GREEN, 150.0, 10, vx=-gap / arrives)]), [], left)
+    assert tp._changes(SimpleNamespace(t=50.0, tracks=[_track(m, 2, GREEN, 150.0, 10, vx=-gap / (finish * 0.8))]), [], left)
 
 
 def test_the_watch_of_her_lock_waits_it_out_and_goes_when_nothing_changes(tree):
@@ -333,26 +344,64 @@ def test_a_monster_fading_in_on_her_counts_from_when_it_is_solid(tree):
 
 # --- the plan's place -----------------------------------------------------------------------------------------------------------
 
-def test_of_two_places_the_one_a_knock_cant_throw_her_off_goes_first(tree):
-    """A monster on 10 with a place to its left and to its right for her attack, one within one knock of the long drop past
-    10's end, the other safe: the lookup's price tells them apart (attack.knock: one a place)."""
-    m, planner = tree
+def test_the_places_for_a_monster_are_the_nearest_each_side_the_nearer_first(tree):
+    """Her attack from the ground lands from either side of it: one place a side, the nearest of its stretch, checked; the
+    walk's the nearer, and a walk her speed from the stats panel takes (read at each ask: physics.set_speed)."""
+    m, _ = tree
+    far = _mon(m, GREEN, 300.0, 10, track=1)
+    her = _her(m, 10, -300.0, [far], False)
+    opts = tg.places(her, far)
+    assert opts and opts == sorted(opts, key=lambda g: abs(g - her.x)) and len(opts) <= 2
+    way = tg.soonest(her, _foe(far, exp=30.0))
+    assert way.how == "walk" and way.place == opts[0]
+
+
+def test_her_walk_is_read_when_asked_not_when_imported(tree, monkeypatch):
+    """Her SPEED from the stats panel (physics.set_speed at a hunter's start) counts in the time to get at a monster."""
+    m, _ = tree
+    far = _mon(m, GREEN, 300.0, 10, track=1)
+    her = _her(m, 10, -300.0, [far], False)
+    was = tg.soonest(her, _foe(far, exp=30.0))
+    monkeypatch.setattr(physics, "WALK_SPEED", physics.WALK_SPEED * 2.0)
+    now = tg.soonest(her, _foe(far, exp=30.0))
+    assert now.place == was.place and now.s < was.s
+
+
+def _look_at(m, x=-300.0, t=50.0):
     p = m.platform(10)
-    best = None
-    for x in range(int(p.left) + 40, int(p.right) - 40, 10):
-        mon = _mon(m, GREEN, float(x), 10, track=1)
-        her = _her(m, 10, float(x), [mon], False)
-        her = tg.Her(p, float(x), p.y_at(float(x)), 0.0, 0.0, "right", True, [mon], None, her.halves, None, NO_PACE, p.left, p.right)
-        opts = tg.places(her, mon)
-        offs = {g: knock.flown(m, p, g, knock.GROUND, -1 if mon.x > g else 1).off(m, p) for g in opts}
-        if any(offs.values()) and not all(offs.values()):
-            best = (mon, her, offs)
-            break
-    assert best is not None, "no such monster on 10"
-    mon, her, offs = best
-    order = tg.best_place(m, planner, her, mon, 8.0, 25.0)
-    assert not offs[order[0]] and offs[order[-1]]
-    assert tg.place_cost(m, planner, her, mon, order[-1], 8.0, 25.0) > tg.place_cost(m, planner, her, mon, order[0], 8.0, 25.0)
+    return SimpleNamespace(platform=p, where=SimpleNamespace(x=x, y=p.y_at(x)), t=t, monsters=[], tracks=[], looked=[], in_view=lambda pid, x: False)
+
+
+def test_the_walk_step_takes_the_nearer_clear_place_with_the_look_s_tracks_taken_once(tree):
+    m, _ = tree
+    tp = _targeting(m)
+    far = _mon(m, GREEN, 0.0, 10, track=1)
+    tp.her = _her(m, 10, -300.0, [far], False)
+    tp.choice = tp.chooser.choose(tp.her, [_foe(far, exp=30.0)])
+    asked = []
+    tp.g.nav = SimpleNamespace(first_clear=lambda s, x0, goals: asked.append(list(goals)) or goals[-1])
+    s = _look_at(m)
+    s.platform = tp.her.platform
+    side, units, place = tp.walk_step(s)
+    assert len(asked) == 1 and place == asked[0][-1] and side == ("right" if place > -300.0 else "left") and units <= tg.WALK_STEP
+    tp.g.nav = SimpleNamespace(first_clear=lambda s, x0, goals: None)  # (none clear: the nearer all the same)
+    assert tp.walk_step(s)[2] == asked[0][0]
+
+
+def test_a_rule_only_asking_what_the_stance_would_do_sets_nothing_aside(tree):
+    """A wait for an answer alone (Hunt._pass's close quarters, no approach) doesn't set the target aside; acting on it does,
+    said in the log."""
+    m, _ = tree
+    tp = _targeting(m)
+    said = []
+    tp.h.log = said.append
+    t = _mon(m, GREEN, 100.0, 10, track=4)
+    tp.her = _her(m, 10, 0.0, [t], False)
+    tp.choice = tp.chooser.choose(tp.her, [_foe(t, exp=30.0)])
+    s = _look_at(m, x=0.0)
+    assert tp.plan(s, ("wait",), False, False) == ("wait",) and not tp.no_way and not said
+    assert tp.plan(s, ("wait",), False, True) == ("wait",) and tp.no_way == {4: s.t + targeting.NO_WAY_S}
+    assert len(said) == 1 and "#4" in said[0] and "set aside" in said[0]
 
 
 def test_a_spot_trip_ends_on_reaching_its_platform_with_the_planner_only():
@@ -387,7 +436,7 @@ def test_her_drops_beside_her_go_first_with_no_monster_in_reach_and_she_takes_th
     p = _pile(5.0, status="seen")
     assert tp.pile_first(p, SimpleNamespace(leave=1.0), time.monotonic())
     s = SimpleNamespace(platform=m.platform(10))
-    assert tp.all_of(p) and tp.loot_allow(p, s, time.monotonic()) >= targeting.LOOT_ALL
+    assert tp.loot_allow(p, s, time.monotonic()) >= targeting.LOOT_ALL
     far_walk = sweep.Spot("far", 10, 900.0, 30.0, 0.5, allow=tp.loot_allow(p, s, time.monotonic()))
     it = sweep.plan([far_walk], (10, 0.0), (7, 0.0), lambda a, ax, b, bx: abs(ax - bx) / 150.0 + (a != b) * 5.0, most=None)
     assert it.keys() == ("far",)
@@ -415,7 +464,7 @@ def test_a_monster_coming_at_her_goes_before_any_drops(tree):
 
 
 def test_a_far_pile_waits_for_her_way_then_goes_whatever_it_takes_near_the_end_of_its_life(tree):
-    """On another platform: LOOT_FRESH s on her way while it's hers alone, more as it lies, whatever it takes near its end."""
+    """On another platform: LOOT_FRESH s on her way, whatever it takes near its end."""
     m, _ = tree
     tp = _targeting(m)
     s = SimpleNamespace(platform=m.platform(10))
@@ -423,24 +472,127 @@ def test_a_far_pile_waits_for_her_way_then_goes_whatever_it_takes_near_the_end_o
     assert tp.loot_allow(_pile(5.0, platform=7), s, now) == pytest.approx(targeting.LOOT_FRESH)
     assert tp.loot_allow(_pile(1.0), s, now) >= targeting.LOOT_ALL  # (on her platform, its drops still landing)
     assert tp.loot_allow(_pile(9.0), s, now) == pytest.approx(targeting.LOOT_FRESH)  # (long landed, no look has seen any)
-    assert tp.loot_allow(_pile(OWN_S + 50.0, platform=7), s, now) == pytest.approx(targeting.LOOT_FRESH + 50.0 * targeting.LOOT_GROW, abs=0.1)
+    assert tp.loot_allow(_pile(OWN_S + 50.0, platform=7), s, now) == pytest.approx(targeting.LOOT_FRESH)
     assert tp.loot_allow(_pile(EXPIRE_S - 5.0, platform=7), s, now) >= targeting.LOOT_ALL
-    assert not tp.all_of(_pile(5.0, hers=False))
+
+
+def _strip(x0=0.0, x1=200.0, at=None, sure=True, mesos_only=False):
+    return SimpleNamespace(platform=10, x0=x0, x1=x1, at=time.monotonic() if at is None else at, sure=sure, mesos_only=mesos_only)
+
+
+def _stood(strips, t=None):
+    """A look with her standing and these strips of drops."""
+    return SimpleNamespace(strips=strips, looked=[(10, 0.0, 200.0)], in_view=lambda pid, x: pid == 10 and 0.0 <= x <= 200.0,
+                           t=time.monotonic() if t is None else t, ground=(0.0, 100.0), geo=SimpleNamespace(fpx=lambda px: px))
+
+
+def _grind_with(m):
+    tp = _targeting(m)
+    said = []
+    return SimpleNamespace(tp=tp, h=tp.h, log=said.append), said
 
 
 def test_a_kill_that_dropped_nothing_has_no_stand(tree):
-    """At a kill's pile no look has seen: while its drops may still be landing she waits (no walk over its spread), and once a
-    look that searched there has none it's gone, a look seeing them later reviving it (ledger.REVIVE_S). Off, master's walk."""
+    """At a kill's pile no look has seen: until its drops have settled she waits (no walk over its spread); then a search there
+    sure of it with nothing in it says it's gone, said in the log and as an event, a later sighting reviving it. Off, master's."""
     m, _ = tree
-    g = SimpleNamespace(tp=_targeting(m))
-    s = SimpleNamespace(looked=[(10, 0.0, 200.0)], in_view=lambda pid, x: pid == 10 and 0.0 <= x <= 200.0, t=time.monotonic())
+    g, said = _grind_with(m)
+    s = _stood([_strip()])
     landing = _pile(1.0)
     assert Grind._none_landed(g, s, landing) and landing.status == "expected"
-    landed = _pile(3.0)
-    assert Grind._none_landed(g, s, landed) and landed.status == "gone" and landed.gone_at == s.t
-    away = _pile(3.0, x=500.0)
-    assert not Grind._none_landed(g, s, away) and away.status == "expected"  # (no look there: it can't tell)
-    assert not Grind._none_landed(SimpleNamespace(tp=None), s, _pile(3.0))
+    landed = _pile(looting.SETTLE + 0.5)
+    with telemetry.captured() as recs:
+        assert Grind._none_landed(g, s, landed) and landed.status == "gone" and landed.gone_at == s.t and landed.none_landed
+    assert g.tp.counts["none landed"] == 1 and len(said) == 1 and "none landed" in said[0]
+    assert [r for r in recs if r.get("kind") == "none_landed" and r["platform"] == 10 and r["x"] == 100]
+    assert not Grind._none_landed(SimpleNamespace(tp=None), s, _pile(looting.SETTLE + 0.5))
+
+
+def test_no_mark_on_a_search_that_cannot_say_so(tree):
+    """A strip not sure of it, one for mesos alone, one from before its drops settled, or her in the air: no mark. She waits a
+    little for the rotation's next (SEARCH_S), then walks its spread as before."""
+    m, _ = tree
+    g, _ = _grind_with(m)
+    now = time.monotonic()
+    for s in (_stood([_strip(sure=False)]), _stood([_strip(mesos_only=True)]), _stood([_strip(at=now - 5.0)]), _stood([_strip(x0=300.0, x1=500.0)])):
+        p = _pile(looting.SETTLE + 0.5)
+        if s.strips[0].x0 == 300.0:
+            s.in_view = lambda pid, x: False
+            s.looked = []
+        assert not g.h.drops.searched_empty(s, p)
+        assert Grind._none_landed(g, s, p) and p.status == "expected"  # (the next look may have it)
+        late = _pile(looting.SETTLE + grind_mod.SEARCH_S + 0.5)
+        assert not Grind._none_landed(g, s, late) and late.status == "expected"  # (her walk over its spread)
+    air = _stood([_strip()])
+    air.ground = None
+    assert not g.h.drops.searched_empty(air, _pile(looting.SETTLE + 0.5))
+    own = _stood([])  # (no strips: the look's own search)
+    assert g.h.drops.searched_empty(own, _pile(looting.SETTLE + 0.5))
+
+
+def _seen_at(x, platform=10):
+    return SimpleNamespace(item=SimpleNamespace(kind="horny-mushroom-cap", coin=None), x=x, y=0.0, platform=platform, mesos=False)
+
+
+def test_a_pile_seen_gone_comes_back_when_seen_however_late_with_the_planner_and_is_counted():
+    """Off (REVIVE_S), a sighting past it makes a pile of another's; with the planner (revive_s: the whole life) it's hers,
+    her age kept, the revive counted and an event for the first live check."""
+    t0 = time.monotonic()
+    late = REVIVE_S + 40.0
+    for revive_s, hers in ((REVIVE_S, False), (EXPIRE_S, True)):
+        store = DropStore(revive_s=revive_s)
+        p = Pile(100.0, 0.0, 10, t0, True, status="gone", gone_at=t0 + 5.0, none_landed=True)
+        store.piles.append(p)
+        with telemetry.captured() as recs:
+            store._sighting(t0 + 5.0 + late, [_seen_at(105.0)], lambda pid, x: True, True)
+        if hers:
+            assert p.status == "seen" and p.gone_at is None and store.revived == 1 and len(store.piles) == 1
+            assert [r for r in recs if r.get("kind") == "pile_revived" and r["none_landed"] and r["platform"] == 10]
+        else:
+            assert p.status == "gone" and store.revived == 0 and not store.piles[-1].hers
+
+
+def _said_for(m, c, tp, x=0.0):
+    said = []
+    tp.h.log = said.append
+    tp.choice = c
+    tp.her = _her(m, 10, x, [], False)
+    tp._say(_look_at(m, x=x), ("throw", "right"))
+    return said
+
+
+def test_the_log_says_what_is_known_of_the_monster_it_left(tree):
+    """Dead, set aside by the plan, or only not in this look (a look misses one now and then): the line tells them apart, with
+    her distance and its score; no bar is "no HP bar", not unhurt."""
+    m, _ = tree
+    a, b = _mon(m, GREEN, 150.0, 10, track=1), _mon(m, GREEN, 170.0, 10, track=2)
+    for known, word in (("dead", "#1 killed"), ("aside", "#1 set aside"), ("", "#1 not in this look")):
+        tp = _targeting(m)
+        her = _her(m, 10, 0.0, [a, b], False)
+        tp.chooser.choose(her, [_foe(a, exp=30.0), _foe(b, exp=30.0)])
+        if known == "dead":
+            tp.h.ledger.dead[1] = 50.0
+        if known == "aside":
+            tp.no_way[1] = 1e9
+        c = tp.chooser.choose(_her(m, 10, 0.0, [b], False), [_foe(b, exp=30.0)])
+        said = _said_for(m, c, tp)
+        assert len(said) == 1 and word in said[0], said
+        assert "at +170" in said[0] and "no HP bar" in said[0] and "score " in said[0] and "unhurt" not in said[0]
+
+
+def test_a_new_next_alone_says_nothing(tree):
+    """One line when her target or her plan changes: not for the next changing under them."""
+    m, _ = tree
+    a, b, d = _mon(m, GREEN, 150.0, 10, track=1), _mon(m, GREEN, 170.0, 10, track=2), _mon(m, GREEN, -170.0, 10, track=3)
+    tp = _targeting(m)
+    her = _her(m, 10, 0.0, [a, b, d], False)
+    said = _said_for(m, tp.chooser.choose(her, [_foe(a, exp=30.0), _foe(b, exp=30.0)]), tp)
+    assert len(said) == 1
+    c = tp.chooser.choose(her, [_foe(a, exp=30.0), _foe(d, exp=30.0)])
+    assert c.next.m is d
+    tp.choice = c
+    tp._say(_look_at(m, x=0.0), ("throw", "right"))
+    assert len(said) == 1
 
 
 def test_a_monster_standing_on_a_pile_is_simply_her_target(tree):
@@ -481,7 +633,7 @@ def test_backpack_full_one_regular_push_naming_the_tab_none_again_until_it_clear
     lo.push = notify.BackpackPush(lambda title, text: sent.append((title, text)), clock=lambda fmt: "12:00:00")
     cap = _loot("horny-mushroom-cap")
     lo.cant_pick([cap])
-    assert len(sent) == 1 and "Etc" in sent[0][1]
+    assert len(sent) == 1 and "Etc" in sent[0][1] and "her" not in sent[0][1].split() and sent[0][0] == "Backpack full"
     assert "Etc" in lo.full and lo.can_take(looting.MESOS) and not lo.can_take("green-mushroom-cap")
     lo.cant_pick([_loot("green-mushroom-cap")])
     lo.full.clear()  # (its TAB_RETRY_S: a guess that it may have room isn't the game saying so)
@@ -510,13 +662,17 @@ def test_a_new_kind_picked_up_clears_the_backpack_push_too():
     assert not lo.push.sent and "topaz-ore" in lo.held
 
 
-def test_items_staying_under_her_without_the_games_word_mark_the_tab_but_send_nothing():
+def test_items_staying_under_her_without_the_games_word_mark_the_tab_and_send_seems_full_once():
+    """The refusal's line lives seconds and fights come between her stands: with no word from the game the guess pushes too
+    (the tab's items aren't stood on again until TAB_RETRY_S, so nothing else would tell)."""
     sent = []
     lo = _looter([""])
     lo.push = notify.BackpackPush(lambda title, text: sent.append(title))
     for k in ("horny-mushroom-cap", "green-mushroom-cap", "topaz-ore"):
         lo.cant_pick([_loot(k)])
-    assert "Etc" in lo.full and not sent
+    assert "Etc" in lo.full and sent == ["Backpack seems full"]
+    lo.cant_pick([_loot("blue-mushroom-cap")])
+    assert sent == ["Backpack seems full"]
 
 
 def test_the_backpack_push_is_bark_at_level_active_with_no_ring_no_text_no_critical_sound(tmp_path, monkeypatch):
