@@ -1159,9 +1159,10 @@ class Hunt:
         toward = 0 if goal is None else (1 if goal > s.where.x else -1)
         edges, up = self._edges(s)
         limits = fight.move_room(self.h, s)  # (where something counts as a danger, as `edges`: fight.MOVE_LIMITS)
+        among = self._among(visible, hidden)
         if log:
             return fight._take_stance(self.h, self.fs, s, targets, visible, hidden, approach, toward=toward,
-                                      jumps=jumps, goal=goal, edges=edges, up=up, limits=limits)
+                                      jumps=jumps, goal=goal, edges=edges, up=up, limits=limits, among=among)
         here = s.platform
         castable = fight.castable_of(self.h)
         return fight.cast_or_wait(self.h, stance(
@@ -1169,8 +1170,12 @@ class Hunt:
             can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
             around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward, goal=goal, edges=edges, up=up,
             pace=fight.pace_of(self.h, s), touch=self.fs.touch, limits=limits, moves=self.fs.moves,
-            castable=castable, clawed=fight.clawed(self.h, s, visible + hidden), unsure=self.fs.unsure,
+            castable=castable, clawed=fight.clawed(self.h, s, visible + hidden), unsure=self.fs.unsure, among=among,
             **fight.wounds_of(self.h, s)), s, castable)
+
+    def _among(self, visible, hidden) -> list[Monster] | None:
+        """The stance's `among` (behavior.grind's target-first planner: the others about her; the hunt loop's none)."""
+        return None
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something
@@ -1468,7 +1473,7 @@ class Hunt:
             # review of 2026-11-01 that one too, SAFER_MARGIN's cap lifted)
             spots_ = [sp if sp.key in self._riskier else replace(sp, allow=max(sp.allow, floor)) for sp in spots_]
         it = self._sweeper.solve(spots_, (s.platform.id, s.where.x), dest, self._arrive, budget,
-                                 None if floor > 0.0 else sweep.MOST_S)  # (a lull's wait its budget alone)
+                                 None if floor > 0.0 else self._sweep_most())  # (a lull's wait its budget alone)
         it.out.update(out)
         self._swept_for, self._swept = key, it.first
         said = (it.keys(), dest)
@@ -1484,6 +1489,11 @@ class Hunt:
                 telemetry.emit("sweep", dest=None if dest is None else [dest[0], round(dest[1])],
                                candidates=len(spots_), **it.record(), **({"to": to} if to else {}))
         return it.first
+
+    def _sweep_most(self) -> float | None:
+        """The s an itinerary may add to her way at most, whatever its spots' allowances come to (sweep.MOST_S; behavior.
+        grind's target-first planner: their sum alone)."""
+        return sweep.MOST_S
 
     def _sweep_to(self, dest: tuple[int, float] | None) -> dict | None:
         """Why the sweep's way goes on to `dest` (its 'sweep' record's `to`, from 2026-11-02: P32 of the recordings'
@@ -1585,12 +1595,23 @@ class Hunt:
             self._pile_of[p.key] = p
             worth = self._worth(p)
             allow = self._allow(p, now) * self._share(p, worth)
-            if here is not None and d.at(p.platform, (lo + hi) / 2, s.monsters) > here + SAFER_MARGIN:
+            if self._all_of(p, s):  # (behavior.grind's target-first planner: her own drops, all of them)
+                allow = self._whole(p, s, now)
+            elif here is not None and d.at(p.platform, (lo + hi) / 2, s.monsters) > here + SAFER_MARGIN:
                 allow = min(allow, ALLOW_OLD)  # (more dangerous there than where she is: on her way only)
                 self._riskier.add(p.key)
             found.append(sweep.Spot(p.key, p.platform, (lo + hi) / 2, worth, stand, lands,
                                     (lambda dt, p=p: p.still(now, dt)), guards, allow))
         return found, out
+
+    def _all_of(self, p: Pile, s: Scene) -> bool:
+        """Whether pile `p` is one of those she takes whatever it adds to her way (behavior.grind's target-first planner:
+        her own drops; the hunt loop's none: `_allow`)."""
+        return False
+
+    def _whole(self, p: Pile, s: Scene, now: float) -> float:
+        """The s such a pile (`_all_of`) may add to her way (behavior.grind's)."""
+        return self._allow(p, now)
 
     def _share(self, p: Pile, worth: float) -> float:
         """The share of pile `p`'s worth (Pile.value) that she can take (`worth`: `_worth`'s, a full tab's items
@@ -1667,6 +1688,9 @@ class Hunt:
             rest = [o for o in rest if o is not m]
         if not met:
             return (), None
+        met = [m for m in met if self._guards_it(s, p, m, any(m is o for o in seen))]
+        if not met:
+            return (), None
         for m in met:
             on_screen = any(m is o for o in seen)
             if not on_screen or not self._hits(s, m):
@@ -1674,6 +1698,11 @@ class Hunt:
         attacks = getattr(self.h, "attacks", None)
         return tuple(sweep.Guard(m, attacks.kill_s(m) if attacks is not None else 1.0,
                                  self.tour.exp.get(m.kind, self._avg_exp())) for m in met), None
+
+    def _guards_it(self, s: Scene, p: Pile, m: Monster, on_screen: bool) -> bool:
+        """Whether monster `m`, that would meet her at pile `p`, counts as guarding it in look `s` (behavior.grind's
+        target-first planner: not all do; the hunt loop's all)."""
+        return True
 
     def _respawn_guard(self, s: Scene, pile: Pile, t0: float) -> str | None:
         """Why her trip to pile `pile` waits for the map's pass to be seen (RESPAWN_GUARD, see its comment), her stand
@@ -2248,7 +2277,7 @@ class Hunt:
         o = self.obj
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
                                 until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o),
-                                vary=o.kind != "pile")
+                                vary=o.kind != "pile", on_arrival=self._ends_on_arrival(o))
         o.trip.weights, o.trip.choice = o.weights, o.choice
         chains = o.trip.trip.chains
         while not o.trip.over:
@@ -2263,6 +2292,11 @@ class Hunt:
             return None  # a rule fired: the next pass decides (OBJECTIVE_S is checked there)
         self.log(f"  {o.text()}: {result}")
         return self._drop_objective(o, result)
+
+    def _ends_on_arrival(self, o: Objective) -> bool:
+        """Whether objective o's trip ends as she reaches its platform, with no walk on to its x (TripState.on_arrival:
+        behavior.grind's target-first planner's spot trips; the hunt loop's none)."""
+        return False
 
     def _on_spot(self, o: Objective) -> bool:
         """Stopped 'in position' where she can stand with targets of the ground in reach: as good as there.
