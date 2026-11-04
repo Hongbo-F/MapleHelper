@@ -1023,6 +1023,7 @@ class TripState:
 
 class Navigator:
     """Gets her onto a platform: plans the route, chains its moves, and replans from wherever she ends up."""
+    _clear_of: tuple = (None, ())  # (`first_clear`: the look its tracks were last taken for, and them)
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
                  health: Callable[[Scene], None] | None = None, escort: Escort | None = None,
@@ -2526,10 +2527,12 @@ class Navigator:
     def first_clear(self, s: Scene, x0: float, goals: list[float]) -> float | None:
         """The first of `goals` a walk along her platform from map x0 to it, set off as soon as her lock lets her, is clear of
         look `s`'s monsters (`_walk_clear`: flow.danger, her invulnerability counted); None: none. The target-first planner's
-        check of a walk (behavior.targeting), the look's tracks taken once (a second update in one look has no time gone:
-        no heading)."""
-        monsters = self.tracker.update(s.t, s.monsters, seen_at=s.t - time.monotonic())
-        self._tracks_at = time.monotonic()
+        check of a walk (behavior.targeting), the look's tracks taken once however often it asks (a second update in one look
+        has no time gone: no heading)."""
+        if self._clear_of[0] is not s:
+            self._clear_of = (s, self.tracker.update(s.t, s.monsters, seen_at=s.t - time.monotonic()))
+            self._tracks_at = time.monotonic()
+        monsters = self._clear_of[1]
         lock = max(getattr(self.actions, "lock_until", 0.0), getattr(self.actions, "arrow_until", 0.0))
         self._immunity(max(time.monotonic(), lock) + PLAN_START_S)
         clear = self._walk_clear(s, monsters)
