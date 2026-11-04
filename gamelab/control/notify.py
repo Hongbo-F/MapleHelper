@@ -4,22 +4,21 @@ push from whoever drove gamelab came late, after a monitor saw the player's log 
 a better notification method, I didn't catch the notification in time to solve this").
 
 What goes out (Pusher, kept by the player's Watchdog): at a cycle's first sight, an alert ("Lie Detector up", its
-form); while a form she can answer (all but the Truth Booth's) is still seen, the same again every REPEAT_S; the
-Truth Booth's timer, once ("missed: in the Truth Booth"); the cycle's end, once, an ordinary one. The text is only
-that: the form, the time and how long it has been up. Never a screenshot, her name or the map.
+form); the Truth Booth's timer, once ("missed: in the Truth Booth"); the cycle's end, once, an ordinary one. It isn't
+repeated while it's up (every 30 s until the user, 2026-11-04: "let's also remove the 'still up' reminder"). The text
+is only that: the form, the time and how long it has been up. Never a screenshot, her name or the map.
 
 The iPhone, through Bark (the user, 2026-10-29: "switch to something that can actually send urgent alert on iPhone";
 asked which, "Bark"; then "Let's remove ntfy notification all along"): ntfy's iOS app, used before, can't break through
 Focus or the mute switch (no Critical Alerts entitlement); Bark's `level=critical` is meant to
 (https://github.com/Finb/Bark: "Critical alerts will ignore silent and do not disturb modes"). By lab/bark.json
 ({"server": "https://api.day.app", "key": "<the device key>"}, git-ignored with the lab: the key is the only secret;
-`notify --setup-bark KEY`, `--test-bark`): the first sight, the repeats and the Truth Booth critical, each its alarm sound
+`notify --setup-bark KEY`, `--test-bark`): the first sight and the Truth Booth critical, each its alarm sound
 once (a few seconds; Bark's `call`, its sound again and again for 30 s, was too much: the user, "just 5s is enough"),
 the cycle's end an ordinary one.
 
 A text message too (the user, 2026-10-29 ~02:00: "Send lie detector alert to <their carrier's email-to-text address>
-also"; asked how, "My email via SMTP"): the cycle's first sight and the Truth Booth's, once each (not the repeats: a
-text a Lie Detector), mailed through the user's own account to the addresses in lab/smtp.json (git-ignored with the
+also"; asked how, "My email via SMTP"): the cycle's first sight and the Truth Booth's, once each, mailed through the user's own account to the addresses in lab/smtp.json (git-ignored with the
 lab: {"host", "port", "starttls", "user", "password", "from", "to": [...]}), which `notify --setup-sms ADDRESS` makes
 with the login left for the user to fill in themselves; `notify --test-sms` sends one. Short (a carrier's gateway
 keeps about 160 characters).
@@ -49,7 +48,6 @@ BARK_SERVER = "https://api.day.app"
 BARK_VOLUME = 10         # a critical alert's volume, Bark's 0-10
 BARK_SOUND = "alarm"     # one of Bark's sounds
 MAIL_TIMEOUT_S = 20.0    # s a text's mail may take
-REPEAT_S = 30.0          # s between pushes while a form she can answer is still seen
 SEND_TIMEOUT_S = 10.0    # s a push may take
 MISSED = "truth booth"   # the Lie Detector's form that means it went unanswered (perception.lie_detector.FORMS)
 NO_PUSH_ENV = "GAMELAB_NO_PUSH"  # set (tests/conftest.py): no push or text from the lab's own files, ever
@@ -209,12 +207,10 @@ class Pusher:
     push(title, text, priority, text_too): `priority` urgent, high or default; `text_too` the cycle's first sight and
     the Truth Booth's, a text as well."""
 
-    def __init__(self, push_fn=None, every_s: float = REPEAT_S, clock=time.strftime):
+    def __init__(self, push_fn=None, clock=time.strftime):
         self.push = push_fn
-        self.every_s = every_s
         self.clock = clock
         self.t0: float | None = None      # the cycle's first sight (the Watchdog's monotonic s), None between cycles
-        self.last: float | None = None    # the last push of the cycle
         self.missed = False               # the Truth Booth's push gone
 
     @classmethod
@@ -234,28 +230,22 @@ class Pusher:
         """`cause`: the watchdog's lie_recorder.UNKNOWN_CAUSE for a cycle first seen as the Truth Booth with no test
         seen before it, said in its first push."""
         if self.t0 is None:
-            self.t0, self.last, self.missed = now, now, form == MISSED
+            self.t0, self.missed = now, form == MISSED
             booth = "she's in the Truth Booth" + (" with no test seen before it: its cause unknown (a check missed?), "
                                                   "the 5 minutes before it saved" if cause else "")
             self.push("Lie Detector up" if form != MISSED else "Lie Detector missed",
                       f"{form or 'the Lie Detector'} seen at {self.clock('%H:%M:%S')}: "
                       + ("answer it in the game now" if form != MISSED else booth), "urgent", True)
             return
-        if form == MISSED:
-            if not self.missed:
-                self.missed, self.last = True, now
-                self.push("Lie Detector missed", f"the Truth Booth at {self.clock('%H:%M:%S')}, "
-                                                 f"{now - self.t0:.0f} s after it was first seen", "high", True)
-            return
-        if now - self.last >= self.every_s:
-            self.last = now
-            self.push("Lie Detector still up", f"{form or 'the Lie Detector'}, up {now - self.t0:.0f} s: answer it in "
-                                               "the game now", "urgent", False)
+        if form == MISSED and not self.missed:
+            self.missed = True
+            self.push("Lie Detector missed", f"the Truth Booth at {self.clock('%H:%M:%S')}, "
+                                             f"{now - self.t0:.0f} s after it was first seen", "high", True)
 
     def ended(self, now: float) -> None:
         if self.t0 is None:
             return
         self.push("Lie Detector gone", f"off the screen at {self.clock('%H:%M:%S')} after {now - self.t0:.0f} s",
                   "default", False)
-        self.t0 = self.last = None
+        self.t0 = None
         self.missed = False

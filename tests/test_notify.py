@@ -10,32 +10,27 @@ from gamelab.control.notify import Pusher
 from tests.test_lie_recording import Screen, make_dog, play
 
 
-def pusher(every_s=30.0):
+def pusher():
     sent = []
     return Pusher(lambda title, text, priority, text_too=False: sent.append((title, priority, text) + (("text",)
                                                                                                     if text_too else ())),
-                  every_s=every_s, clock=lambda fmt: "01:35:32"), sent
+                  clock=lambda fmt: "01:35:32"), sent
 
 
-def test_a_cycle_pushes_at_its_first_sight_again_every_30_s_while_it_can_be_answered_and_once_at_its_end():
+def test_a_cycle_pushes_at_its_first_sight_and_once_at_its_end_with_no_reminder_between():
     p, sent = pusher()
     p.seen(0.0, "mini-game notice")
     assert sent == [("Lie Detector up", "urgent", "mini-game notice seen at 01:35:32: answer it in the game now",
                      "text")]
-    for t in (0.25, 10.0, 29.9):
+    # (the user, 2026-11-04: "let's also remove the 'still up' reminder")
+    for t in (0.25, 10.0, 30.0, 45.0, 60.0, 300.0):
         p.seen(t, "mini-game")
     assert len(sent) == 1
-    p.seen(30.0, "mini-game")
-    p.seen(45.0, "mini-game")
-    p.seen(60.0, "quiz")
-    assert [s[:2] for s in sent[1:]] == [("Lie Detector still up", "urgent")] * 2
-    assert sent[1][2] == "mini-game, up 30 s: answer it in the game now"
-    assert all(len(s) == 3 for s in sent[1:])  # (the repeats: no text)
     p.ended(75.0)
     assert sent[-1] == ("Lie Detector gone", "default", "off the screen at 01:35:32 after 75 s")
     p.ended(80.0)  # (once)
     p.seen(100.0, "countdown")  # a new cycle: pushed afresh
-    assert len(sent) == 5 and sent[-1][:2] == ("Lie Detector up", "urgent")
+    assert len(sent) == 3 and sent[-1][:2] == ("Lie Detector up", "urgent")
 
 
 def test_the_truth_booth_is_pushed_once_as_missed_and_not_repeated():
@@ -125,8 +120,8 @@ def test_bark_gets_a_critical_alert_at_the_first_sight_critical_repeats_and_an_o
     p.seen(60.0, "truth booth")
     p.ended(90.0)
     # (no `call`, Bark's 30 s of ringing: the user, "Don't ring 30s that feels a lot, just 5s is enough")
-    assert went == [("Lie Detector up", "critical", False), ("Lie Detector still up", "critical", False),
-                    ("Lie Detector missed", "critical", False), ("Lie Detector gone", "active", False)]
+    assert went == [("Lie Detector up", "critical", False), ("Lie Detector missed", "critical", False),
+                    ("Lie Detector gone", "active", False)]
 
 
 def test_a_bark_push_that_fails_or_is_refused_is_said_and_never_raised(monkeypatch):
@@ -152,15 +147,14 @@ def test_a_bark_push_that_fails_or_is_refused_is_said_and_never_raised(monkeypat
 
 def test_the_watchdog_pushes_a_cycle_from_its_first_sight_to_its_end(tmp_path):
     screen = Screen()
-    p, sent = pusher(every_s=0.5)
+    p, sent = pusher()
     dog, flag, said, alarms = make_dog(tmp_path, screen, pusher=p)
     t = play(dog, screen, [0, 0])
     assert sent == []
     t = play(dog, screen, [1, 1, 1, 2, 2], t)  # the countdown 0.75 s, then the mini-game's notice
-    assert flag.is_set() and [s[0] for s in sent] == ["Lie Detector up", "Lie Detector still up",
-                                                       "Lie Detector still up"]
+    assert flag.is_set() and [s[0] for s in sent] == ["Lie Detector up"]
     t = play(dog, screen, [0] * 5, t)  # gone 1 s (make_dog's end_s): the cycle's over
-    assert dog.cycle_t0 is None and sent[-1][0] == "Lie Detector gone" and len(sent) == 4
+    assert dog.cycle_t0 is None and [s[0] for s in sent] == ["Lie Detector up", "Lie Detector gone"]
 
 
 def test_a_watchdog_without_a_pusher_pushes_nothing_and_a_pusher_that_raises_is_only_said(tmp_path):
