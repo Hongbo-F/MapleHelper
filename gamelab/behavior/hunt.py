@@ -800,6 +800,9 @@ class Hunt:
         targets, visible, hidden = self._targets(s, now)
         if self._close_quarters(s, targets):
             return self._shoot(s, targets, visible, hidden, now, "close quarters", approach=False)
+        if self.fs.unsure and self._close_quarters(s, self.fs.unsure) \
+                and self._stance(s, targets, visible, hidden, approach=False, log=False)[0] != "wait":
+            return self._shoot(s, targets, visible, hidden, now, "close quarters", approach=False)  # (kept off, unshot)
         if (pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, targets):
             self.log(f"  {_contents(pile)} on platform {pile.platform} at x {pile.x:.0f} (worth {pile.value:.0f}): "
                      f"picking it up now")
@@ -990,8 +993,9 @@ class Hunt:
         """Her targets, the monsters seen and the hidden ones (fight._targets'), with the monsters about her that look `s`
         didn't find (`_unseen`: the feed's hidden tracks, her memory's of the last UNSEEN_S, none she threw at already):
         among the hidden ones, so the stance's danger and moves go by them (its `around`), and those on her platform of
-        a kind that counts as a danger among the targets too, so a fight keeps off them and shoots them (rule 1 and
-        stance: one on her platform that can touch her first). Not those on other platforms: thrown at where they were
+        a kind that counts as a danger among the targets too where a throw is worth it (fight.shots_at), so a fight keeps
+        off them and shoots them (rule 1 and stance: one on her platform that can touch her first; where no throw is, it
+        keeps off them alone: fs.unsure). Not those on other platforms: thrown at where they were
         last seen, they'd be the throws at what's dead or gone that the live hunt of 2026-10-25 wasted 52 of 325 on
         (jumps-perception-skeptic). And the monsters seen on a platform just under or over hers whose bodies meet hers
         (stance's `beside`, BESIDE) among the targets, whatever her ground: her fights keep off them as off one on hers
@@ -1010,7 +1014,9 @@ class Hunt:
             return targets, visible, hidden
         mine = [m for m in more if m.platform == here.id and d.share(m.kind) > 0
                 and not any(_same(m, t) for t in targets)]
-        return targets + mine, visible, hidden + more
+        shot, unsure = fight.shots_at(self.h, s, mine, [m for m in targets if any(m is v for v in visible)])
+        self.fs.unsure = [*self.fs.unsure, *unsure]
+        return targets + shot, visible, hidden + more
 
     def _unseen_here(self, s: Scene) -> list[Monster]:
         """Those of `_unseen` on her platform in look `s` whose kind counts as a danger (her throws' attack goes by them:
@@ -1163,8 +1169,8 @@ class Hunt:
             can_jump=lambda a, b: open_above(self.model, here, a, b), tops=self._tops, halves=self._halves,
             around=visible + hidden, danger=self.danger, jumps=jumps, toward=toward, goal=goal, edges=edges, up=up,
             pace=fight.pace_of(self.h, s), touch=self.fs.touch, limits=limits, moves=self.fs.moves,
-            castable=castable, clawed=fight.clawed(self.h, s, visible + hidden), **fight.wounds_of(self.h, s)), s,
-            castable)
+            castable=castable, clawed=fight.clawed(self.h, s, visible + hidden), unsure=self.fs.unsure,
+            **fight.wounds_of(self.h, s)), s, castable)
 
     def _edges(self, s: Scene) -> tuple:
         """The stance's `edges` and `up` for her in look `s` (attack.stance: drop_limits, overhead): where something
@@ -2562,7 +2568,12 @@ class Hunt:
 
 
 def _same(a: Monster, b: Monster) -> bool:
-    """Whether monsters `a` and `b` are one: of a kind, on a platform, within memory.MATCH_SLACK."""
+    """Whether monsters `a` and `b` are one: of one track where the feed says each's (two of a track wherever each is
+    had: 2026-11-04 at 00:25:14.839 one track counted twice, -52 and -152; two of two tracks never); else of a kind, on a
+    platform, within memory.MATCH_SLACK."""
+    ta, tb = getattr(a, "track", None), getattr(b, "track", None)
+    if ta is not None and tb is not None:
+        return ta == tb
     return a.kind == b.kind and a.platform == b.platform and abs(a.x - b.x) <= 40.0
 
 

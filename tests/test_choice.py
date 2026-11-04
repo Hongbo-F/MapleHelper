@@ -87,7 +87,8 @@ def test_lucky_sevens_mp_a_cast_is_the_game_datas():
 
 KEYS7 = dataclasses.replace(KEYS, lucky_seven=K("g"))  # (test_sim's keys, with Lucky Seven on g)
 MODEL = SimpleNamespace(mob_hp={"Green Mushroom": 233.0, "Horny Mushroom": 403.0},
-                        mob_pdd={"Green Mushroom": 0.0, "Horny Mushroom": 10.0})
+                        mob_pdd={"Green Mushroom": 0.0, "Horny Mushroom": 10.0},
+                        mob_exp={"Green Mushroom": 26, "Horny Mushroom": 41}, spawns=[], id=10002073)
 
 
 def _look(monsters, mp=1.0, t=None):
@@ -190,7 +191,9 @@ def test_the_regular_attack_with_mp_under_a_cast_and_with_nothing_in_the_way():
     assert a.key("right") == KEYS7.attack.name and a.counts["MP"] == 1
     assert "MP 6 < a cast's 11" in said[-1]
     a.on_look(_look([("green-mushroom", 250.0, None)]))  # MP back
-    assert a.key("left") == KEYS7.attack.name and a.counts["nothing in its way"] == 1  # nothing that way
+    assert a.key("left") is None and a.counts["no throw: nothing there"] == 1  # nothing that way: no throw at all
+    a.touched = lambda s: True  # (a fresh touch: what's on her, her claw may take)
+    assert a.key("left") == KEYS7.attack.name and a.counts["nothing in its way"] == 1
     r, _ = _attacks("regular")
     r.on_look(_look([("green-mushroom", 250.0, None)]))
     assert r.key("right") == KEYS7.attack.name
@@ -350,7 +353,7 @@ def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked(
     """Live on 2026-10-25 the dying monster stayed drawn 0.6-1.3 s after its kill was placed (its bar None, or as it
     was), and was taken from the path again whole: 18 casts and 4 regular throws at the dead in 11 minutes. One of a
     placed kill's kind on its platform within DYING_DX of it (ledger.dying) isn't the target: the next in the path is,
-    or none (the regular attack: nothing in its way), and no mark is made on it; nor is it the target once it's gone
+    or none (no throw: nothing there), and no mark is made on it; nor is it the target once it's gone
     (the hidden fallback), and the fallback takes a mark not likely dead (DEAD_LIKELY) first, the likeliest if all are,
     as the path does."""
     from gamelab.behavior.ledger import Kill
@@ -364,10 +367,12 @@ def test_a_monster_dying_where_a_kill_was_placed_is_no_throws_target_nor_marked(
     assert a.marks == []  # (the kill dropped its mark)
     assert a.target("right").kind == "horny-mushroom"
     a.on_look(_look([("green-mushroom", 262.0, None)], t=now))  # alone in the path, dying
-    assert a.key("right") == KEYS7.attack.name and a.counts["nothing in its way"] == 1 and a.marks == []
+    assert a.key("right") is None and a.counts["no throw: nothing there"] == 1 and a.marks == []
     a.aimed = a._last.monsters[0]  # a jump's own target: dying too
-    assert a.key("right") == KEYS7.attack.name and a.marks == []
+    assert a.key("right") is None and a.marks == []
+
     b, said = _attacks()
+    b.worth_a_throw = lambda m, than=None: True
     b.on_look(_look([("horny-mushroom", 240.0, None)]))
     b.key("right")  # a cast at the Horny
     b.on_look(_look([("green-mushroom", 250.0, None)]))  # the Horny unseen: hidden
@@ -413,6 +418,7 @@ def test_a_throw_takes_a_last_look_before_its_key_and_a_kill_come_in_of_a_kind_i
         h.senses._feed = Feed([] if gain is None else
                               [Event("exp_gain", t - 0.1, None, {"exp": 1000 + gain, "levels": [25]})])
         h.attacks.on_look(_look([] if kind_in_way is None else [(kind_in_way, 250.0, None)]))
+        h.attacks.touched = lambda s: True  # (with nothing in its way a throw goes only for what's on her: `key`)
         sent = []
         h.actions.play = lambda events, name, kind=None: sent.append(name)
         h.actions.facing = "right"
@@ -439,11 +445,11 @@ def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_t
 def test_a_monster_about_that_the_look_missed_takes_a_throw_its_way_as_the_looks_own():
     """Attacks.unseen (the hunt loop's Hunt._unseen_here, hunt.UNSEEN_ATTACK): a monster under her body the look didn't
     find (none within 25 units in 1317 live looks) is in the throw's way, so it's Lucky Seven at it; with nothing about
-    either, the regular attack ("nothing seen in its way", no MP thrown at nothing). The dead ones' tracks aren't among
-    them (localization.unseen.hidden: tests/test_hunt.py)."""
+    either, no throw (behavior.attacks._nothing_there). The dead ones' tracks aren't among them
+    (localization.unseen.hidden: tests/test_hunt.py)."""
     a, said = _attacks()
     a.on_look(_look([]))
-    assert a.key("right") == KEYS7.attack.name and a.counts["nothing in its way"] == 1
+    assert a.key("right") is None
     under = _look([("horny-mushroom", 15.0, None)]).monsters[0]
     a.unseen = lambda s: [under]
     assert a.target("right") is under and a.target("left") is None
@@ -551,14 +557,16 @@ def test_a_throws_pending_time_is_its_attack_keys_and_the_next_look_waits_for_it
     assert a.shown_by() == t + 0.3 + KILL_SHOWN_S and len(mk.pending) == 1
 
 
-def test_the_attack_is_chosen_with_the_chance_its_target_is_dead():
+def test_the_attack_is_chosen_with_the_chance_its_target_is_dead(monkeypatch):
     """Attacks.key, DEAD_CHOICE: choice.finishes on the whole reckoning (what Lucky Seven saves counts only if it's
     alive): at a Green Mushroom 85% dead after three casts, unseen since, the regular attack; by what it has if alive
     alone (as until 2026-10-26), Lucky Seven. Heard alive, Lucky Seven either way."""
     import copy
 
     from gamelab.behavior import attacks as attacks_mod
+    from gamelab.behavior import presence
     from gamelab.behavior.attacks import KILL_SHOWN_S
+    monkeypatch.setattr(presence, "EVIDENCE", False)  # (the choice alone, whatever's known of one unseen: test_presence's)
     a, said = _attacks()
     t0 = time.monotonic()
     a.on_look(_look([("green-mushroom", 250.0, None)], t=t0))

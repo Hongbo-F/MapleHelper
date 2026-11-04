@@ -43,14 +43,16 @@ from ..localization.tracking import HIDDEN, LIVE
 from ..localization.unseen import STILL_VX
 from ..motion import physics
 from .looting import DropSpot
+from . import presence
+from .presence import STEP_S
 
 if TYPE_CHECKING:
     from .hunter import Hunter
 
 LOST_AFTER = 3.0   # s a target may stay unseen (without an EXP message) before she gives up on it
-HIDDEN_FOR = 1.8   # s she keeps throwing at a monster she was throwing at once it can't be seen: a hit
-                   # one flinches under its damage numbers and the detector loses it for 1-3 s, and
-                   # she used to stop throwing until it showed again
+HIDDEN_FOR = 1.8   # s a monster she threw at stays about her once it can't be seen, for her body (the stance's `around`:
+                   # a hit one flinches under its damage numbers and the detector loses it for 1-3 s), and for the kills
+                   # her EXP tells of. Whether she throws at it meanwhile is the evidence's (shots_at: behavior.presence)
 EMPTY_PATIENCE = 0.4  # s a fight waits when no monster is seen at all (not even out of reach)
 FADING = 1.2       # s a killed monster may still be seen fading out where it died (not thrown at), for a kind
                    # whose death animation the game data lacks; else as long as that runs (fade_s)
@@ -195,6 +197,9 @@ class FightState:
     moves: int = 0  # her moves away up close since her last throw (attack.stance.MAX_MOVES: then she throws)
     stand_ins: dict = field(default_factory=dict)  # the last look's hidden ones walked on (hidden's `place`): id ->
                                                    # (the stand-in, its entry of `thrown`)
+    unsure: list[Monster] = field(default_factory=list)  # hidden, not worth a throw, on her body's mind (shots_at, the
+                                                         # stance's `unsure`)
+    sightings: dict = field(default_factory=dict)  # the last look's tracks it didn't find: their last sightings
 
     def forget_faded(self, now: float, body: dict[str, MobBody] | None = None) -> None:
         """Forgets the kills that have faded out by `now`: counted as long ago as their kind's death
@@ -245,12 +250,13 @@ class FightState:
     def note_throw(self, now: float, keyed_at: float | None = None) -> None:
         """A throw at the monsters in its path (`aimed`): each is kept (once) among those thrown at, seen `now`; and
         the throw, its attack key down at `keyed_at` (Actions.attack_at), with its path (`keyed`). A hidden one's
-        stand-in (`hidden`'s `place`) is its entry, kept as it was."""
+        stand-in (`hidden`'s `place`) is its entry, kept as it was; one about that the look missed, new here, is as of its
+        track's last sighting (`sightings`: until 2026-11-04 stamped `now`, a stand-in stayed hidden 3.3-3.8 s after it)."""
         def kept(m: Monster) -> bool:
             stand_in = self.stand_ins.get(id(m))
             return any(e[0] is m or (stand_in is not None and stand_in[0] is m and stand_in[1] is e)
                        for e in self.thrown)
-        self.thrown += [[m, now] for m in self.aimed if not kept(m)]
+        self.thrown += [[m, self.sightings.get(getattr(m, "track", None), now)] for m in self.aimed if not kept(m)]
         if keyed_at is not None:
             self.keyed = [k for k in self.keyed if keyed_at - k[0] <= KEYED_KEEP_S] + [(keyed_at, list(self.aimed))]
 
@@ -283,8 +289,8 @@ def clear(h: "Hunter", kinds=None, ground: set[int] | None = None, max_kills: in
     Kills are her EXP going up. Targets: monsters (of `kinds`) on the `ground` platforms, or
     anywhere if None, and any on her own platform. Stops after `max_kills`, after `seconds`, or
     when nothing has been in reach for `patience` seconds (`EMPTY_PATIENCE` when none is seen at
-    all). A monster she was throwing at that goes out of sight is still thrown at for
-    `HIDDEN_FOR` seconds: hit, it flinches under its damage numbers, and the detector loses it.
+    all). A monster she was throwing at that goes out of sight stays about her for `HIDDEN_FOR` seconds (hit, it
+    flinches under its damage numbers), and is thrown at while what's known of it says so (shots_at: behavior.presence).
     With `finish`, reaching `max_kills` doesn't end the fight while monsters are still in reach:
     she finishes those (without walking after others), as stopping halfway gave up a good spot.
     Nor, `finish` or not, while one she had hurt by then (owed) is in reach or a short walk from it
@@ -379,7 +385,8 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
              now: float) -> tuple[list[Monster], list[Monster], list[Monster]]:
     """What's there to fight: the monsters wanted and seen (not fading out where a kill died: this fight's, or one
     the ledger placed, ledger.dying), less
-    the kills her EXP tells of; plus those she threw at that are hidden now. Returns those, the
+    the kills her EXP tells of; plus those she threw at that are hidden now and a throw is worth (shots_at; those it
+    isn't, her body's to keep off: st.unsure). Returns those, the
     monsters seen (but those fading out), and the hidden ones. Those hit lately (st.flinching: their HP bar new or
     lower, or hidden under their damage numbers) may still flinch when her next attack picks. One the ledger takes for
     dying is taken so by where it is (the nearest of its kind to where a kill was placed): with the dead one unseen, a
@@ -403,7 +410,45 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     hidden = st.hidden(now, hidden_place(h, s))
     st.flinching = hit + hidden
     st.touch = _unsure_by_her(h, s)
-    return wanted + hidden, visible, hidden
+    st.sightings = {tr.id: tr.last_seen for tr in (getattr(s, "tracks", None) or ()) if tr.last_seen < s.t}
+    shot, st.unsure = shots_at(h, s, hidden, wanted)
+    return wanted + shot, visible, hidden
+
+
+def shots_at(h: "Hunter", s: Scene, missed: list[Monster], seen: list[Monster]) -> tuple[list[Monster], list[Monster]]:
+    """Of the monsters look `s` missed (`missed`), those a throw is worth by what's known of them now, a throw at one she
+    sees and wants (`seen`, in a star's reach) included (behavior.attacks.Attacks.worth_a_throw: behavior.presence), and of the
+    others those her body still keeps off (_not_thrown_at). All of them, none, where her attacks don't ask (a hunter
+    without them: the tests'; with `picks`, the magician's, whose casts have their own checks)."""
+    attacks = getattr(h, "attacks", None)
+    worth = getattr(attacks, "worth_a_throw", None)
+    if worth is None or not missed or getattr(attacks, "picks", False) or s.where is None or s.platform is None \
+            or not presence.EVIDENCE:
+        return missed, []
+    x, y = s.where.x, s.where.y
+    than = None
+    for m in seen:
+        if reach.can_hit(s.platform, x, y, m, others=s.monsters):
+            net = attacks.seen_net(m)
+            than = net if than is None else max(than, net)
+    shot, left = [], []
+    for m in missed:
+        (shot if worth(m, than) else left).append(m)
+    return shot, [m for m in left if _not_thrown_at(h, attacks, m)]
+
+
+def _not_thrown_at(h: "Hunter", attacks, m: Monster) -> bool:
+    """Whether her body keeps off monster `m`, no look has it and no throw is worth it (the stance's `unsure`): its touch at
+    the user's prices (landing_prices) by the chance it's there outweighs a step's time at her EXP a second; a kind that
+    counts as no danger, not. Before her max HP is read, every one of a kind that counts."""
+    danger = getattr(h, "danger", None)
+    if danger is None or not danger.any or danger.share(m.kind) <= 0:
+        return False
+    prices = landing_prices(h, danger)
+    if prices is None:
+        return True
+    p = attacks.chance(m)
+    return p is None or p * prices.hurt * prices.touch(m.kind) >= STEP_S * prices.rate
 
 
 def _unsure_by_her(h: "Hunter", s: Scene) -> list[Monster]:
@@ -630,6 +675,14 @@ RATE_BAND = 4.0    # guess: her EXP a second taken between RATE_PRIOR / 4 and 4 
 HURT_PRIOR = 10    # touches
 
 
+def rate_of(h) -> float:
+    """Her EXP a second as a price goes by it (landing_prices, a throw at the unseen's: behavior.presence): the hunt's
+    (Hunter.exp_rate), RATE_PRIOR where it has none or one not over 0, else within RATE_BAND of it."""
+    rate = getattr(h, "exp_rate", None)
+    low, high = RATE_PRIOR / RATE_BAND, RATE_PRIOR * RATE_BAND
+    return RATE_PRIOR if rate is None or not rate > 0 else min(max(rate, low), high)
+
+
 def landing_prices(h, danger) -> Prices | None:
     """Her landings' prices (OWN_PRICES): None until her max HP is read (stance's constants meanwhile); her EXP a
     second RATE_PRIOR where the hunt has none or one not over 0, else within RATE_BAND of it."""
@@ -637,9 +690,7 @@ def landing_prices(h, danger) -> Prices | None:
     most = getattr(h, "max_hp", None)
     if most is None:
         return None
-    rate = getattr(h, "exp_rate", None)
-    low, high = RATE_PRIOR / RATE_BAND, RATE_PRIOR * RATE_BAND
-    rate = RATE_PRIOR if rate is None or not rate > 0 else min(max(rate, low), high)
+    rate = rate_of(h)
     rep = getattr(h, "report", None)
     touches, misses = getattr(rep, "touches", 0), getattr(rep, "misses", 0)
     hurt = (touches - misses + HURT_PRIOR * HURT_SHARE) / (touches + HURT_PRIOR)
@@ -698,7 +749,7 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves, castable=castable, clawed=clawed(h, s, around), **wounds_of(h, s))
+                 moves=st.moves, castable=castable, clawed=clawed(h, s, around), unsure=st.unsure, **wounds_of(h, s))
     act, refused = _cast_or_wait(h, act, s, castable)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):
@@ -1085,17 +1136,21 @@ def _wanted(s: Scene, kinds, ground: set[int] | None, far: bool) -> list[Monster
 def owed(h: "Hunter", s: Scene, st: FightState | None = None, hurt_by: float | None = None) -> list[Monster]:
     """The monsters she has hurt and not killed (Hunter.wounds) around her at look `s` (first hurt by `hurt_by`,
     if given): as seen in it, or unseen in it (hit, under their damage numbers) where last seen, for HIDDEN_FOR at
-    most. Not one seen fading out where a kill of the fight `st` died."""
+    most, while a throw at it is worth it (Attacks.worth_a_throw). Not one seen fading out where a kill of the fight `st`
+    died."""
     now = time.monotonic()
     wounds = h.wounds.seen_within(now, HIDDEN_FOR, hurt_by)
     if not wounds:
         return []
     visible = s.monsters if st is None else [m for m in s.monsters if m not in st.fading(s.monsters)]
     out = []
+    worth = getattr(getattr(h, "attacks", None), "worth_a_throw", None)
     for w in wounds:
         again = seen_again(w, visible)
         if again is None and any(seen_again(w, [m]) is not None for m in s.monsters):
             continue  # seen fading out where it died
+        if again is None and worth is not None and not worth(w):
+            continue  # unseen, and not worth a throw by what's known of it now (behavior.presence)
         if (again or w) not in out:
             out.append(again or w)
     return out
@@ -1156,7 +1211,14 @@ def _cast_or_wait(h: "Hunter", act: tuple, s: Scene | None = None, castable=None
     'stance': choice.THROW_S apart at most, her casts' pace): before, only `key`'s refusals were, and live the stance
     mostly decides first. Anything else as it is (the thief's always: `picks` off)."""
     attacks = getattr(h, "attacks", None)
-    if attacks is None or not getattr(attacks, "picks", False):
+    if attacks is None:
+        return act, None
+    if not getattr(attacks, "picks", False):
+        # (the thief's: a throw with nothing it could take, what she threw at gone since the stance's list: `key` would
+        # send none, and the look after would ask again)
+        nothing = getattr(attacks, "nothing_to_throw_at", None)
+        if act[0] in ("throw", "jump_throw") and nothing is not None and plan_of(act) is None and nothing(act[1]):
+            return ("wait",), None
         return act, None
     if act[0] in ("throw", "jump_throw"):
         side = act[1]
