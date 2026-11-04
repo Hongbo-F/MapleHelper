@@ -212,6 +212,14 @@ def shows(hwnd: int, area: dict, inset: int = 8, grid: tuple[int, int] | None = 
     return all(user32.GetAncestor(user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) == hwnd for x, y in points)
 
 
+def pointer_on(hwnd: int) -> bool:
+    """Whether window `hwnd` is the window under the pointer (no other window over that point): a click there is its."""
+    here = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(here)):
+        return False
+    return user32.GetAncestor(user32.WindowFromPoint(here), GA_ROOT) == hwnd
+
+
 def over(hwnd: int, area: dict) -> int | None:
     """A window of another program over any of window `hwnd`'s client area `area` (screen px), or None: the windows
     above it in the z-order, one by one to the top, that are shown (visible, not minimized, not hidden by the

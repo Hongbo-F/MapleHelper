@@ -3,8 +3,9 @@
 recorded beside the answer. Submit a plan and wait for its result, or send it, watch for it to be
 done and cut it short, or (a player that takes them: can_splice) hand it a plan that takes over from the running one at
 a moment of its own, the keys held then kept held (`splice`: the navigator's plans replanned as she goes,
-control.navigator.REPLAN). No plan goes out while the Lie Detector alarm is up (control.alarm), but the three kinds the
-player still takes then (alarm.PLAN_KINDS: her pet's food, her retreat's moves, the mini-game's mouse-only cursor),
+control.navigator.REPLAN). No plan goes out while the Lie Detector alarm is up (control.alarm), but the four kinds the
+player still takes then (alarm.PLAN_KINDS: her pet's food, her retreat's moves, the mini-game's mouse-only cursor,
+the pass's OK click),
 sent with their `kind`.
 """
 
@@ -16,9 +17,10 @@ import uuid
 import numpy as np
 
 from ..paths import ALARM, INBOX, OUTBOX, PLAYER_INFO, PLAYER_LOG
-from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, PLAN_KINDS
+from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, LIE_OK, PLAN_KINDS
 
 POLL_S = 0.01  # how often `wait` looks for the result
+LIE_OK_DOWN_AT, LIE_OK_HOLD = 1000, 80  # the pass's OK click: pressed (its pointer's trail done by then) and held, ms
 _KINDS: set[str] = set()  # plans sent with a kind, not answered yet: the alarm doesn't withdraw them (`wait`)
 SPLICED = "spliced"  # a plan's result's problem when another took over from it (`splice`)
 _SPLICES: dict[str, str] = {}  # a splice's plan id -> the plan it takes over from, until it's known taken or not (`taken`)
@@ -129,6 +131,19 @@ def move_lie_cursor(x: int, y: int, active, trail: list | None = None) -> bool:
     if not result.get("sent"):
         raise PlayerError(f"the Lie Detector cursor plan sent no movement: {result!r}")
     return True
+
+
+def click_lie_ok(x: int, y: int, timeout: float = 10.0) -> bool:
+    """Click the Lie Detector's pass dialog's OK button at client pixel x, y through the elevated player (alarm.LIE_OK:
+    a move there, the left button down at LIE_OK_DOWN_AT ms and up LIE_OK_HOLD ms later; the player refuses anything
+    else, or a point off the button). Whether it was clicked."""
+    events = [[0, "mouse", x, y], [LIE_OK_DOWN_AT, "lbutton", "down"], [LIE_OK_DOWN_AT + LIE_OK_HOLD, "lbutton", "up"]]
+    plan_id = send(events, focus=False, lead_ms=0, name="lie_ok", kind=LIE_OK)
+    result = wait(plan_id, timeout=timeout)
+    if result.get("error"):
+        raise PlayerError(f"the pass's OK click was refused: {result['error']}")
+    clicked = [e[1:] for e in result.get("sent", [])][-2:] == [["lbutton", "down"], ["lbutton", "up"]]
+    return clicked and not result.get("problems")
 
 
 def _plan_id(name: str) -> str:

@@ -41,10 +41,17 @@ PAGE = ("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer 
 PET_FOOD = "pet_food"  # one tap of her pet food key and nothing else, PET_FOOD_PER_MIN a minute at most
 RETREAT = "retreat"    # her moves to a safe place (behavior.retreat), up to RETREAT_WINDOW_S after the sighting
 LIE_CURSOR = "lie_cursor"  # one mouse move inside the mini-game's board, no button or key (control.lie_tracking)
-PLAN_KINDS = (PET_FOOD, RETREAT, LIE_CURSOR)
+LIE_OK = "lie_ok"  # one click on the pass's dialog's OK button and nothing else (control.violetta_live)
+PLAN_KINDS = (PET_FOOD, RETREAT, LIE_CURSOR, LIE_OK)
 # Client-pixel bounds of the mini-game's board (perception.lie_target.BOARD_AT_NATIVE, which the elevated player's
 # dependencies don't import). A lie_cursor plan may move only here; it can't point at other game controls.
 LIE_CURSOR_BOX = (308, 180, 1058, 680)
+# Client-pixel bounds of the OK button of the Lie Detector's "You have successfully passed" dialog (perception.violetta:
+# its template at (560, 325) on every passed game's frames, the button 762-807 x 423-437, a few px around it). A lie_ok
+# plan clicks only here: never the Violetta game's answer buttons (y 505-540) or anything else.
+LIE_OK_BOX = (758, 419, 812, 442)
+LIE_OK_DOWN_MS = (1, 1500)  # its button pressed this long after the plan's start (its pointer's trail first) ...
+LIE_OK_HOLD_MS = (30, 300)  # ... and let go this long after
 PET_FOOD_PER_MIN = 3   # a food is given at most every 75 s or so (behavior.pet: a point of fullness a TICK_S)
 RETREAT_S = 10.0       # s from the sighting by which she's on a safe place (behavior.retreat plans for it) ...
 RETREAT_WINDOW_S = 12.0  # ... and the player takes her retreat's moves this long after it, then none
