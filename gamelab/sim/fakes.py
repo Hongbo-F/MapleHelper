@@ -800,6 +800,11 @@ class FakeEyes(Eyes):
     def keep_heading(self, obs: Observation, path) -> bool:
         return False  # no pixels of her to keep
 
+    @property
+    def exact_sees(self) -> bool:
+        """Whether the feed's misses count as the exact finder's (Noise.exact: localization.worldstate's `_exact_sees`)."""
+        return self.noise.exact
+
     def _pose_wrong(self, m) -> bool:
         """Whether monster `m`'s pose reads wrong now (Noise.pose_wrong), drawn per monster for each spell."""
         w = self.world

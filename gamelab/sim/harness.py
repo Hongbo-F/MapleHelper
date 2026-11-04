@@ -194,7 +194,8 @@ from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
 from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
-                    INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025,
+                    INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025, NEAR_SEEN_1104,
+                    NEAR_SPELL_1104, OFF_SEEN_1104, OFF_SPELL_1104,
                     NEAR_SPELL, OFF_SEEN, OFF_SEEN_1025, OFF_SPELL, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND,
                     SPAWN_FOUND_WIDE, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
@@ -303,6 +304,11 @@ WORLDS["near-misses"] = {"near_seen": NEAR_SEEN, "off_seen": OFF_SEEN, "near_spe
 WORLDS["near-misses-1102"] = dict(WORLDS["near-misses"])
 WORLDS["near-misses-1025"] = {"near_seen": NEAR_SEEN_1025, "off_seen": OFF_SEEN_1025, "near_spell": (),
                               "off_spell": 0.0}
+# ... or as the frame step finds them with the exact finder beside the search (`near-misses-exact`: world.NEAR_SEEN_1104;
+# from 2026-11-04, measured on frames, not yet the default): nearly every monster, wherever it is, and a hit one not lost
+# under its numbers, the feed's misses counting as evidence (Noise.exact: tracking.Track.blind).
+WORLDS["near-misses-exact"] = {"near_seen": NEAR_SEEN_1104, "off_seen": OFF_SEEN_1104, "near_spell": NEAR_SPELL_1104,
+                               "off_spell": OFF_SPELL_1104, "hit_hidden": (), "exact": True}
 # ... and the monsters the map spawns fading in, seen as late as live sees them (`spawn-fade`: world.SPAWN_FOUND, the
 # frame step's spawn watch on, as from 2026-11-01; Noise.spawn_found) or as the whole screen alone saw them before
 # (`spawn-fade-wide`: SPAWN_FOUND_WIDE, a median 0.53 s later), where every other world finds a newborn from its birth.
@@ -416,11 +422,11 @@ WORLDS["hang-rules"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", T
                                   ("gamelab.control.navigator", "HANG_TAKE", True))}
 WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "near_spell", "off_spell",  # WORLDS' fields that are
-                "spawn_found")                                                         # world.Noise's
+                "spawn_found", "hit_hidden", "exact")                                  # world.Noise's
 # Worlds that set again a field another sets (`walkers`' invulnerability, `near-misses`' bands): applied after the
 # others whatever the order they're given in (scenario), so `--world walkers --world invulnerable-1.45` and the reverse
 # are one.
-LAST_WORLDS = ("near-misses-1102", "near-misses-1025", "invulnerable-1.5", "invulnerable-1.45")
+LAST_WORLDS = ("near-misses-1102", "near-misses-1025", "near-misses-exact", "invulnerable-1.5", "invulnerable-1.45")
 # Her with `--attack` (any mode, so the three compare in one world): her Lucky Seven key's attack Lucky Seven as thrown
 # live (world.LUCKY_SEVEN; her own stars where the map's Her has them, Her.star and skill_star: LEVEL_25's), her cast's
 # MP (Her.cast_mp: LEVEL_25's 14 of 623) and nothing with less, her attack

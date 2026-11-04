@@ -938,6 +938,18 @@ OFF_SEEN_1102 = 0.91
 # 5-11), 8 on another platform (0.53 s; 7-8).
 NEAR_SPELL_1102 = ((25.0, 0.33), (50.0, 0.73), (100.0, 0.93), (150.0, 1.07), (float("inf"), 0.47))
 OFF_SPELL_1102 = 0.53
+# ... and with the exact finder beside the search (perception.exact; the harness's `near-misses-exact`, Noise.exact: not
+# the default until the finder has run live): by the same definition (the touch study's detect_bands.py, its D shares,
+# master's the same numbers again) on the frame step's replays of R1-R3 with the finder on (D:/MapleHelper-scratch/unseen/
+# fix/bands.txt, her own frames): 100%, 100%, 99.3%, 99.4%, 100%, another platform 98.6%, its misses in spells of a frame
+# near her, 0.6 s on another platform. On BugBaby's lossless clip of 2026-11-02 22:49 (fix/gaps.py, by chains of its
+# finds): within 100 x 70 of her 96.4% of the monster-frames, a miss 2 frames on average; farther 92%, 6 frames. Pooled by
+# their frames, what's below. The search's misses it fills in; a monster hit isn't lost under its numbers or her effect
+# (those cover part of it, 14 of 14 found in the hand sample: Noise.hit_hidden off with it). Not measured live.
+NEAR_SEEN_1104 = ((100.0, 0.98), (float("inf"), 0.97))
+OFF_SEEN_1104 = 0.97
+NEAR_SPELL_1104 = ((100.0, 0.13), (float("inf"), 0.4))
+OFF_SPELL_1104 = 0.5
 # The detector's misses near her as live (the harness's `near-misses`, the scenarios' _NEAR): today's perception's.
 NEAR_SEEN, OFF_SEEN, NEAR_SPELL, OFF_SPELL = NEAR_SEEN_1102, OFF_SEEN_1102, NEAR_SPELL_1102, OFF_SPELL_1102
 # The air pick's noise on Tree Dungeon (Noise.air_squash, air_short, air_short_ramp, air_under, air_turn_lost), fitted by
@@ -1021,6 +1033,7 @@ class Noise:
                                  # drawn per monster), not per look: live's misses come in runs (NEAR_SPELL_1102); ()
                                  # per look
     off_spell: float = 0.0       # ... and on another platform, with off_seen (OFF_SPELL_1102); 0 per look
+    exact: bool = False          # the feed has the exact finder (its misses count: tracking.Track.blind): NEAR_SEEN_1104
     spawn_found: tuple = ()      # ((alpha, share), ...): a monster back at its spawn point fades in (SPAWN_FADE_S) and
                                  # isn't found before its alpha reaches one drawn from this table, its alpha in what's
                                  # seen while it fades (SPAWN_FOUND: as live with the spawn watch; SPAWN_FOUND_WIDE: the

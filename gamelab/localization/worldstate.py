@@ -49,7 +49,7 @@ import numpy as np
 
 from ..character import THIEF_SHAPE
 from .. import native
-from ..perception import deaths, exp_number, hp_number, lv_number, spawns, touches
+from ..perception import deaths, exact, exp_number, gates, hp_number, lv_number, spawns, touches
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
@@ -156,6 +156,15 @@ DEATHS = True
 # The step counts 'newborns' only where the watch runs. The simulator's eyes have none: its newborns are seen as its
 # noise says (sim.world.Noise.spawn_found).
 SPAWNS = True
+# Whether the whole screen's search has the exact finder beside it (perception.exact: its pictures' exact pixels, whatever
+# covers the rest; on the search's thread, HALVES, where the look's frame is the game's own 1366x768, with the real
+# detector and the finder's C): its finds where no detection lies, its die1 finds that track's death seen. The numbers:
+# the README's "Monsters near her: the exact finder". The simulator's eyes have none (sim.world.NEAR_SEEN_1104 is what it
+# finds, a table). False: the search alone, as before.
+EXACT = True
+DIE_NEAR = 25.0    # units: a die1 find is the track's of its kind, not found alive in the frame, last seen this near it ...
+DIE_WALK = 100.0   # ... and what it can have walked since (units/s; a mushroom's walk) ...
+DIE_WALK_S = 0.4   # ... for this long at most: it walks on unseen until her star lands, then stops where it dies
 # The drops searched without being asked: DROPS_STRIPS strips in view (scene.drop_strips: one over each stretch of level
 # ground of every platform) at most every DROPS_EVERY_S, by rotation (the one searched longest ago first, her platform's
 # taken as DROPS_HER times as old), each strip's last search kept with when it was (`WorldState.drops`): at 12 strips in
@@ -317,6 +326,11 @@ class WorldStep:
     """Frame after frame of the game, turned into WorldStates, one pass a frame (see the top). `senses`: placing her (its
     eyes look at the frames, its map places what they see); `throws`: whether her throws will be told (`throw`, for
     whose kills are whose: localization.tracking); `schedule`: what it does unasked (the drops' rotation)."""
+    # (the exact finder's: see __init__; here too for a step made without it, as the tests' stand-ins are)
+    finder = None
+    _finds: list = []
+    _exact_sees = False
+    _exact_mobs: set = frozenset()
 
     def __init__(self, senses: Senses, throws: bool = True, schedule: Schedule = Schedule()):
         self.senses, self.eyes, self.model = senses, senses.eyes, senses.model
@@ -329,6 +343,11 @@ class WorldStep:
         if real and DEATHS and (geo := getattr(self.eyes, "geo", None)) is not None:
             self._watch_of = (geo.frame_scale, self._death_watch(geo.frame_scale))  # (made now: 0.5 s, not mid-hunt)
         self.spawns = self._spawn_watch() if real and SPAWNS else None  # (made now: 0.4 s; None where it can't be)
+        self.finder = self._exact_finder() if real and EXACT else None  # (made now: about 20 ms; None where it can't be)
+        self._finds: list[exact.Find] = []  # the finder's on the frame in hand (on the search's thread: _search_ahead)
+        # whether it can see on the frames (exact.confirmed); the simulator's eyes say (FakeEyes.exact_sees: its table's)
+        self._exact_sees = bool(getattr(self.eyes, "exact_sees", False))
+        self._exact_mobs: set[int] = set()  # the detections it added on the frame before (the spawn watch goes without)
         self.schedule = schedule
         self.seq = 0
         self.owed: Asks | None = None    # drops asked for and not searched yet (no frame shown at their time yet)
@@ -358,6 +377,8 @@ class WorldStep:
                        "touches": 0, "misses": 0, "touches by HP": 0}
         if self.spawns is not None:
             self.counts["newborns"] = 0  # (where the watch runs: the simulator's traces are as before it)
+        if self.finder is not None:
+            self.counts["exact finds"] = self.counts["exact deaths"] = 0  # (... and where the finder does)
 
     def throw(self, t: float, side: str, attack: str | None = None, aim: tuple | None = None) -> None:
         """She threw toward `side` at t (with `attack`: its id, if told; `aim`: the monster her attack choice aimed it
@@ -395,6 +416,7 @@ class WorldStep:
         mobs = self._wide(s, ahead, placed, work)
         if born:
             mobs = mobs + self._handed(s, born, mobs, work)
+        mobs = mobs + self._exact_added(mobs, placed, work)
         view = self._view(s) if placed else None
         found = [s.place(m, self.model, None) for m in mobs]
         her = (s.where.x, s.where.y) if placed else None
@@ -404,7 +426,8 @@ class WorldStep:
         made = self.tracker.counts["tracks"]
         events += self.tracker.update(t, found, view, her, s.players,
                                       self._reader(s, t, unread, work) if placed else None,
-                                      self._dying(s, t, work) if placed and DEATHS else None)
+                                      self._dying(s, t, work) if placed and DEATHS else None,
+                                      exact=self._exact_sees)
         seen: list[Monster] = []
         for tid, m in self.tracker.matched.items():
             self._bar_read.setdefault(tid, t)  # (a new one's bar was read)
@@ -448,19 +471,28 @@ class WorldStep:
         full, geo = getattr(look, "full", None), getattr(self.eyes, "geo", None)
         if full is None or geo is None or geo.look_scale != 1 or (full.shape[1], full.shape[0]) != geo.client:
             return None
-        rows, detector = (0, int(full.shape[0] * geo.hud_top)), self.eyes.detector
+        rows, detector, finder = (0, int(full.shape[0] * geo.hud_top)), self.eyes.detector, self.finder
 
         def search():
             began = time.perf_counter()
-            return detector.detect_wide(full, rows), time.perf_counter() - began
+            mobs = detector.detect_wide(full, rows)
+            took = time.perf_counter() - began
+            if finder is None:
+                return mobs, took, [], 0.0
+            began = time.perf_counter()
+            finds = finder.find(full, rows)
+            return mobs, took, finds, time.perf_counter() - began
         return self._halves.submit(search)
 
     def _wide(self, s: Scene, ahead: Future | None, placed: bool, work: dict) -> list[Mob]:
         """The whole screen's monsters in look `s`'s frame: the search begun beside her look (its answer waited for,
         whatever it is: it holds the frame's picture), or searched now; none where she isn't placed (nothing to place
-        them by)."""
+        them by). The exact finder's finds on the frame go to `_finds` (`_exact_added`, `_dying`)."""
+        self._finds = []
         if ahead is not None:
-            mobs, took = ahead.result()  # (a search that failed raises here, in the frame loop)
+            mobs, took, finds, finding = ahead.result()  # (a search that failed raises here, in the frame loop)
+            if self.finder is not None:
+                self._finds, work["exact s"] = finds, finding
         elif placed:
             began = time.perf_counter()
             mobs = self.eyes.monsters_wide(s)
@@ -476,8 +508,10 @@ class WorldStep:
     def _newborns(self, s: Scene, t: float, placed: bool, work: dict) -> list[spawns.Sighting]:
         """The monsters fading in at their spawn points in look `s`'s frame (shown at t), by the spawn watch (SPAWNS):
         on a frame of the game as expected, her placed, its view registered on it; her box and those of the monsters
-        the frame before found (the tracker's `matched`, not the watch's own newborns) left out of the fits. Else the
-        newborns it follows missed a frame. `work` gets its time ('spawns s')."""
+        the frame before found (the tracker's `matched`, not the watch's own newborns, nor the exact finder's: with a
+        covered monster's box left out of it, what's left of the fit took a monster standing on a spawn point for a newborn,
+        R1's frame 3301, where the zero false onsets of the labelled clips are the user's rule) left out of the fits. Else
+        the newborns it follows missed a frame. `work` gets its time ('spawns s')."""
         watch = self.spawns
         if watch is None:
             return []
@@ -487,7 +521,8 @@ class WorldStep:
             watch.missed()
             return []
         began = time.perf_counter()
-        others = [(m.x, m.y) for m in self.tracker.matched.values() if m.mob.fading is None]
+        others = [(m.x, m.y) for m in self.tracker.matched.values()
+                  if m.mob.fading is None and id(m.mob) not in self._exact_mobs]
         got = watch.look(frame, (int(s.view[0]), int(s.view[1])), t, (s.where.x, s.where.y), others)
         work["spawns s"] = time.perf_counter() - began
         return got
@@ -525,6 +560,65 @@ class WorldStep:
         except (ImportError, FileNotFoundError, OSError, KeyError):  # (no game data here)
             return None
 
+    def _exact_finder(self) -> "exact.ExactFinder | None":
+        """The exact finder for this map's monsters (perception.exact: the detector's pictures, the death watch's die1
+        frames, its anchors by the map's background where one is kept), where the look frame is the game's own 1366x768
+        and its C is built; None elsewhere. On any map: a find is 200 exact pixels of a picture of its monsters."""
+        geo = getattr(self.eyes, "geo", None)
+        if geo is None or geo.look_scale != 1 or native.exact_lib() is None:
+            return None
+        watch = None if self._watch_of is None else self._watch_of[1]
+        pictures = exact.pictures_of(self.eyes.detector.templates, None if watch is None else watch.pictures)
+        if not pictures:
+            return None
+        back = gates.load_background(getattr(self.model, "id", None))
+        try:
+            return exact.ExactFinder(pictures, exact.density(back))
+        except RuntimeError:  # (more pictures than its C takes: the search alone)
+            return None
+
+    def _exact_added(self, mobs: list[Mob], placed: bool, work: dict) -> list[Mob]:
+        """The monsters the exact finder found on this frame that no detection of `mobs` lies at (exact.fresh), and
+        whether it can see on the frames (`_exact_sees`). `work` gets how many ('exact')."""
+        if self.finder is None:
+            return []
+        self._exact_sees = exact.confirmed(self._finds, mobs, self._exact_sees)
+        if not placed:
+            return []
+        added = exact.fresh(self._finds, mobs)
+        self._exact_mobs = {id(m) for m in added}
+        work["exact"] = len(added)
+        self.counts["exact finds"] += len(added)
+        return added
+
+    def _died_seen(self, s: Scene, t: float, matched: dict[int, Monster]) -> list[int]:
+        """The tracks whose death the exact finder saw in look `s`'s frame (shown at t): for each die1 picture found, the
+        track the search found on it with no picture of it alive there (the shut eyes of die1/0 score as a stand: exact
+        pixels tell them apart, each pixel a find's only), else the track of its kind nearest it not found alive in the
+        frame, within DIE_NEAR of where it was last seen and what it can have walked since (a live one beside it is found
+        alive, under the search or the finder)."""
+        out: list[int] = []
+        alive = [f for f in self._finds if not f.picture.die]
+        for f in self._finds:
+            if not f.picture.die:
+                continue
+            on_it = [tid for tid, m in matched.items() if m.kind == f.picture.kind and tid not in out
+                     and abs(m.mob.foot_x - f.foot_x) <= exact.NEAR_PX and abs(m.mob.feet_y - f.feet_y) <= exact.NEAR_PX]
+            if on_it and not any(o.picture.kind == f.picture.kind and abs(o.foot_x - f.foot_x) <= exact.NEAR_PX
+                                 and abs(o.feet_y - f.feet_y) <= exact.NEAR_PX for o in alive):
+                out.append(on_it[0])
+                continue
+            x, y = s.map_x(f.foot_x), s.map_y(f.feet_y)
+            near = [(abs(x - (tr.seen_x if tr.seen_x is not None else tr.x)), tr.id) for tr in self.tracker.live()
+                    if tr.kind == f.picture.kind and tr.id not in matched and tr.id not in out
+                    and tr.state in (LIVE, HIDDEN, DYING) and tr.died_seen is None and abs(y - tr.y) <= DIE_NEAR
+                    and abs(x - (tr.seen_x if tr.seen_x is not None else tr.x))
+                    <= DIE_NEAR + DIE_WALK * min(DIE_WALK_S, max(0.0, t - tr.last_seen))]
+            if near:
+                out.append(min(near)[1])
+        self.counts["exact deaths"] += len(out)
+        return out
+
     def _reader(self, s: Scene, t: float, unread: set[int], work: dict) -> Callable[[Monster, Track | None], Monster]:
         """How the tracker takes a detection of look `s` (its `read`): with its HP bar read if that's due for the track
         it is (`_bar_due`; a new one's always), else none (`unread` gets the track's id: its bar as last read goes in
@@ -548,13 +642,15 @@ class WorldStep:
         deaths.EVERY_S, its die1 frames where its feet are, or were when last seen); those seen dying. `work` gets how
         many were looked at and how long it took (real clock)."""
         def dying(matched: dict[int, Monster]) -> list[int]:
+            told = self._died_seen(s, t, matched) if self._finds else []  # (the exact finder's die1 finds)
             watch = self._watch(s)
             if watch is None:
-                return []
+                return told
             began = time.perf_counter()
             asks = []
             for tr in self.tracker.live():
-                if tr.state not in (LIVE, HIDDEN, DYING) or tr.died_seen is not None or tr.kind not in watch.pictures:
+                if tr.state not in (LIVE, HIDDEN, DYING) or tr.died_seen is not None or tr.kind not in watch.pictures \
+                        or tr.id in told:
                     continue
                 if t - self._death_at.get(tr.id, -1e18) < deaths.EVERY_S - 1e-9:
                     continue
@@ -569,8 +665,8 @@ class WorldStep:
                 self._death_at[tr.id] = t
                 asks.append((tr.id, tr.kind, fx, fy, score))
             if not asks:
-                return []
-            out = [a[0] for a in asks if watch.dying(s, a[1], a[2], a[3], a[4])]
+                return told
+            out = told + [a[0] for a in asks if watch.dying(s, a[1], a[2], a[3], a[4])]
             work["deaths"], work["deaths_s"] = len(asks), time.perf_counter() - began
             self.counts["death looks"] = self.counts.get("death looks", 0) + len(asks)
             return out
