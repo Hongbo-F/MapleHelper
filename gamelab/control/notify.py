@@ -158,10 +158,13 @@ def setup_bark(key: str, path: Path | None = None) -> dict:
     return cfg
 
 
-def bark_url(cfg: dict, title: str, text: str, level: str = "critical", call: bool = False) -> str:
+def bark_url(cfg: dict, title: str, text: str, level: str = "critical", call: bool = False,
+             sound: str | None = BARK_SOUND) -> str:
     """The Bark push's URL (its GET form, /:key/:title/:body?...): `level` critical at BARK_VOLUME, `call` its sound
-    again and again for 30 s; grouped as gamelab's."""
-    q = {"level": level, "sound": BARK_SOUND, "group": "gamelab"}
+    again and again for 30 s, `sound` one of Bark's (None: the phone's own); grouped as gamelab's."""
+    q = {"level": level, "group": "gamelab"}
+    if sound is not None:
+        q["sound"] = sound
     if level == "critical":
         q["volume"] = BARK_VOLUME
     if call:
@@ -170,9 +173,10 @@ def bark_url(cfg: dict, title: str, text: str, level: str = "critical", call: bo
     return f"{cfg['server']}/{part(cfg['key'])}/{part(title)}/{part(text)}?{urllib.parse.urlencode(q)}"
 
 
-def send_bark(cfg: dict, title: str, text: str, level: str = "critical", call: bool = False) -> None:
+def send_bark(cfg: dict, title: str, text: str, level: str = "critical", call: bool = False,
+              sound: str | None = BARK_SOUND) -> None:
     """One Bark push, now, on this thread (raises on failure, or if Bark's answer isn't its code 200)."""
-    with urllib.request.urlopen(urllib.request.Request(bark_url(cfg, title, text, level, call), method="GET"),
+    with urllib.request.urlopen(urllib.request.Request(bark_url(cfg, title, text, level, call, sound), method="GET"),
                                 timeout=SEND_TIMEOUT_S) as r:
         body = r.read()
     try:
@@ -184,7 +188,7 @@ def send_bark(cfg: dict, title: str, text: str, level: str = "critical", call: b
 
 
 def bark(cfg: dict | None, title: str, text: str, level: str = "critical", call: bool = False,
-         log=None) -> threading.Thread | None:
+         log=None, sound: str | None = BARK_SOUND) -> threading.Thread | None:
     """`send_bark` on a thread of its own, its failure said through `log` (if given), never raised; None without
     `cfg`."""
     if cfg is None:
@@ -192,13 +196,49 @@ def bark(cfg: dict | None, title: str, text: str, level: str = "critical", call:
 
     def go():
         try:
-            send_bark(cfg, title, text, level, call)
+            send_bark(cfg, title, text, level, call, **({} if sound == BARK_SOUND else {"sound": sound}))
         except Exception as e:  # (no network, a key Bark doesn't know: the text and the PC's beeps still go)
-            if log is not None:
-                log(f"the Bark push failed: {type(e).__name__}: {e}")
+            if log is not None:  # (an exception may quote the URL: never the key)
+                log(f"the Bark push failed: {type(e).__name__}: {str(e).replace(cfg['key'], '<key>')}")
     t = threading.Thread(target=go, name="bark-push", daemon=True)
     t.start()
     return t
+
+
+class BackpackPush:
+    """Her backpack full, on the phone as a regular push (the user, 2026-11-04: "if backpack is full, send a regular push
+    notification"): Bark at level 'active', the phone's own sound, no ring and no text, the moment the game says a tab of hers
+    is full (`full`: behavior.looting's, perception.loot.says_full), once a tab, and not again until it has been clear in
+    between (`clear`: an item that didn't fit earned into it, or a kind she held none of picked up since: looting's evidence;
+    its TAB_RETRY_S, a guess that it may have room, isn't). Never in the way of the hunt (`bark`: a thread of its own, its
+    timeout at most, never raises), nothing under NO_PUSH_ENV or without lab/bark.json; the simulator's a stub (`push_fn`:
+    sim.scenarios.Sim.hunter). The key is never logged."""
+
+    def __init__(self, push_fn=None, clock=time.strftime):
+        self.push = push_fn
+        self.clock = clock
+        self.sent: set[str] = set()       # the tabs told of, not seen clear since
+
+    @classmethod
+    def from_lab(cls, log=None, bark_path: Path | None = None) -> "BackpackPush":
+        """Pushes to lab/bark.json's iPhone, the file read at each push (none while there's none)."""
+        def go(title, text):
+            bark(load_bark(bark_path), title, text, "active", log=log, sound=None)
+        return cls(go)
+
+    def full(self, tab: str) -> bool:
+        """The game says tab `tab` is full: the push, if it hasn't gone since the tab was last clear; whether it went."""
+        if tab in self.sent:
+            return False
+        self.sent.add(tab)
+        if self.push is not None:
+            self.push("Backpack full", f"her {tab} tab at {self.clock('%H:%M:%S')}: its items left, mesos and what still "
+                                       f"fits taken; the hunt goes on")
+        return True
+
+    def clear(self, tab: str) -> None:
+        """Tab `tab` has room again, as the game shows: the next time it's full is told again."""
+        self.sent.discard(tab)
 
 
 class Pusher:

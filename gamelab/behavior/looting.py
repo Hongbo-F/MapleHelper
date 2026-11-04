@@ -278,6 +278,9 @@ class Looter:
         # alone. Live on 2026-10-25 her pickup walk on Tree Dungeon's 23 went through a Horny Mushroom two looks had
         # missed (localization.unseen).
         self.unseen: Callable[[Scene], list[Monster]] | None = None
+        # The phone's push when the game says a tab is full (control.notify.BackpackPush: `full`, `clear`; the command's,
+        # a stub in the simulator; None: none)
+        self.push = None
 
     @property
     def inventory_full(self) -> bool:
@@ -328,6 +331,9 @@ class Looter:
                 kept.append((pile, kinds, at))
         self._stands = kept
         if took:
+            if self.push is not None:  # (a kind she held none of took a slot: that tab has room, as the game shows)
+                for k in took - self.held:
+                    self.push.clear(tab_of(k))
             self.held.update(took)
             self._failed_picks = 0
 
@@ -558,6 +564,9 @@ class Looter:
             if kind is not None:
                 self.held.add(kind)  # (a stack of it with room, hers or her pets')
                 self.refused.pop(kind, None)
+        if self.push is not None:
+            for tab in room:
+                self.push.clear(tab)
         for tab in sorted(room & set(self.full)):  # (one that didn't fit earned into it: it has room)
             del self.full[tab]
             for k in [k for k in self.refused if tab_of(k) == tab]:
@@ -576,6 +585,8 @@ class Looter:
                     self.refused[k] = now
             self._failed_picks = 0  # (the row that marked it: the next counted afresh)
             self._tell(tab, True, why, tuple(k for k in kinds if tab_of(k) == tab))
+            if refusal >= 0 and self.push is not None:  # (the game's own word: the phone's, once: BackpackPush)
+                self.push.full(tab)
 
 
 def _earned(line: str) -> tuple[str, str | None] | None:
