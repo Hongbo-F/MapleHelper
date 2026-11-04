@@ -2263,28 +2263,28 @@ def nav_tree_rope_top_10(sim):
 
 # The target-first planner's set-piece (behavior.targeting; the arrival study of 2026-11-03, D:/MapleHelper-scratch/arrival/
 # REPORT.md): the grind's climb up the rope at -80 from 11 onto 10 (the camp's way in) with a hurt Horny Mushroom chasing her
-# on 10 by its left part and another walking by the top, as on her seed 28's loop. Her knock-offs 10 -> 13 within 6 s of the
-# climb (`_knock_offs`, from the world's knock and climb logs) are the count.
+# on 10 by its left part and another walking by the top, as on her seed 28's loop. Her knock-offs off 10 within 6 s of the climb
+# (`_knock_offs`, from the world's knock and climb logs: to anywhere, 13 being only the longest fall) are the count.
 _CHASER_WORLD = dict(noise=_CROWD[0], realism=dataclasses.replace(_CROWD[1], **harness.WORLDS["zero-walls"],
                                                                   **harness.WORLDS["walkers"]))
 
 
 def _knock_offs(tr: dict) -> int:
-    """The set-piece's knock-offs from 10 onto 13 within 6 s after a climb up the rope at -80 onto 10 (and before the
+    """The set-piece's knock-offs off 10, to anywhere, within 6 s after a climb up the rope at -80 onto 10 (and before the
     next such climb)."""
     r = tr["result"] if isinstance(tr["result"], dict) else {}
     climbs, knocks = r.get("climbs", []), r.get("knocks", [])
     n = 0
     for i, c in enumerate(climbs):
         nxt = climbs[i + 1] if i + 1 < len(climbs) else 1e9
-        n += any(c < k[0] <= min(c + 6.0, nxt) and k[1] == 10 and k[2] == 13 for k in knocks)
+        n += any(c < k[0] <= min(c + 6.0, nxt) and k[1] == 10 for k in knocks)
     return n
 
 
 @tree((11, -80.0), monsters=[("Horny Mushroom", 10, -110.0), ("Horny Mushroom", 10, -60.0)],
       seed=2, limit=90, may_die=True, **_CHASER_WORLD,
       expects=(check("climbed up the rope at -80 onto 10", lambda tr: bool(tr["result"]["climbs"])),
-               check("no knock-off 10 -> 13 within 6 s of the climb", lambda tr: _knock_offs(tr) == 0)))
+               check("no knock-off off 10 within 6 s of the climb", lambda tr: _knock_offs(tr) == 0)))
 def loop_tree_rope_top_chaser(sim):
     """The grind's arrival at the camp by the rope at -80 (11 -> 10), as on her seed 28 of the standard grind at master
     68344b2 (8 knock-offs from 10 climbs there): from 11 under the rope's foot, its first stop 10's (Patrol.choose with

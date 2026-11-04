@@ -398,7 +398,8 @@ class Grind(Hunt):
 
     def _pile_first(self, s: Scene):
         """With the planner: the sweep's next stop where it goes before the primary (behavior.targeting.pile_first); None:
-        the primary first, or no piles."""
+        the primary first, or no piles, or she's by a kill's pile that can't have her stand now (`_none_landed`: she'd stand
+        about with a monster to hit)."""
         c = self.tp.choice
         if c is None or c.primary is None:
             return None
@@ -406,7 +407,9 @@ class Grind(Hunt):
         if stop is None:
             return None
         pile = self._pile_of.get(stop.spot.key)
-        return stop if pile is not None and self.tp.pile_first(pile, stop, time.monotonic()) else None
+        if pile is None or not self.tp.pile_first(pile, stop, time.monotonic()):
+            return None
+        return None if pile.status == "expected" and self._at_pile(s, pile) and self._none_landed(s, pile) else stop
 
     def _stance(self, s: Scene, targets, visible, hidden, approach: bool, log: bool = True,
                 goal: float | None = None) -> tuple:
