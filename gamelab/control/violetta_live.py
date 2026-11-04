@@ -1,8 +1,9 @@
 """The Lie Detector's Violetta game followed live, on the perception service's own frames (the user, 2026-11-03: "wire
 in the code to run this live when the violetta mini game shows up in game", and "at the end of the success, click the
 ok button of 'you have successfully passed'"). It says where the made-up Violetta is after each round, for whoever
-answers it; it never presses an answer button (it would be the program, not a person, passing the game's check on
-bots).
+answers it, and points the cursor at that answer's button (the user: "can you also move cursor to the 1/2/3/4 button
+(but DO NOT click)"); it never presses an answer button (it would be the program, not a person, passing the game's
+check on bots).
 
 - While the Lie Detector's alarm is up (its file, paths.ALARM, looked at once in ALARM_POLL_S at most) and for
   AFTER_S after, the service's frames go to a thread of its own (`saw`: by reference, the frame loop never waits; at
@@ -15,7 +16,9 @@ bots).
   solved from the frames since the one before (perception.violetta.solve_round), the made-up one's slot chained from
   its start (start_slot: the boxes of its face before the first window, at the slots measured then: slots_of), and
   said: the service's log, a `violetta` telemetry record, and a push to the phone (control.notify's Bark: lab/bark.json)
-  "Violetta round N: slot S".
+  "Violetta round N: slot S"; and the pointer moved onto that slot's button (perception.violetta.BUTTON_AT) through the
+  elevated player (client.move_lie_cursor: alarm.LIE_CURSOR, one move and no button or key), withdrawn once the buttons
+  go dark. The round is solved knowing its window's time (solve_round's `window`), 0.45 s or so.
 - The pass's dialog ("You have successfully passed the Lie Detector Test", perception.violetta.OkDialog), looked for
   every OK_CHECK_S while the alarm is up or AFTER_S after it went: seen on OK_SEEN looks in a row, its OK button is
   clicked through the elevated player (client.click_lie_ok: one click, inside the button's box, the game the window
@@ -46,16 +49,19 @@ OK_TRIES = 3
 class VioletaLive:
     """The service's side (see the top): `saw` from the frame loop, `start` and `close` with the service, `line` for its
     status. For tests: `detector` (perception.violetta.Detector's `detect`), `spotter` (its `over_play`), `ok` (the
-    dialog's finder: frame -> (x, y) or None), `clicker` (x, y -> bool: the click through the player), `push`
-    (title, text) and `alarm` (the alarm file's path)."""
+    dialog's finder: frame -> (x, y) or None), `clicker` (x, y -> bool: the click through the player), `pointer`
+    (x, y, active -> bool: the move through the player), `push` (title, text) and `alarm` (the alarm file's path)."""
 
-    def __init__(self, alarm=None, spotter=None, log=None, detector=None, ok=None, clicker=None, push=None):
+    def __init__(self, alarm=None, spotter=None, log=None, detector=None, ok=None, clicker=None, push=None,
+                 pointer=None):
         self.alarm = alarm
         self.spotter = spotter
         self.log = log or (lambda msg: None)
         self.detector = detector
         self.ok = ok
         self.clicker = clicker or self._click
+        self.pointer = pointer or self._point_at
+        self.pointing: threading.Thread | None = None  # the move to the answer's button under way
         self.push = push or self._push
         self._cond = threading.Condition()
         self._queue: deque = deque()
@@ -183,9 +189,10 @@ class VioletaLive:
         g["ts"].append(t)
         g["boxes"].append(boxes)
         lit = violetta.buttons_lit(full)
-        if lit and not g["lit"]:
+        opened = lit and not g["lit"]
+        g["lit"] = lit  # (before the round's pointer looks at it)
+        if opened:
             self._round(len(g["ts"]) - 1)
-        g["lit"] = lit
 
     def _load(self) -> None:
         try:
@@ -222,7 +229,8 @@ class VioletaLive:
             g["where"] = g["start"]
         prev = g["windows"][-1] if g["windows"] else 0
         g["windows"].append(k)
-        perm, kind, info = violetta.solve_round(g["ts"][prev:k + 1], g["boxes"][prev:k + 1], g["slots"])
+        perm, kind, info = violetta.solve_round(g["ts"][prev:k + 1], g["boxes"][prev:k + 1], g["slots"],
+                                                window=g["ts"][k])
         n = len(g["answers"]) + 1
         if g["where"] is not None:
             g["where"] = perm[g["where"]]
@@ -240,10 +248,33 @@ class VioletaLive:
             return
         self._say(f"the Violetta game, round {n}: the made-up one is at slot {slot} ({kind} hop(s), "
                   f"{[p + 1 for p in perm]})")
+        self._point(g, slot)
         try:
             self.push(f"Violetta round {n}: slot {slot}", f"the made-up Violetta is at slot {slot} (round {n} of 4)")
         except Exception as e:  # noqa: BLE001 (the push is a convenience)
             self._say(f"the Violetta push failed: {type(e).__name__}: {e}")
+
+    def _point(self, g: dict, slot: int) -> None:
+        """The pointer onto slot's answer button, on a thread of its own (the player plays its trail), withdrawn once
+        the buttons go dark or the game ends. Never a click."""
+        from ..perception import violetta
+        x, y = violetta.BUTTON_AT[slot - 1]
+        active = lambda: self.game is g and g["lit"]  # noqa: E731
+
+        def go():
+            try:
+                done = self.pointer(x, y, active)
+            except Exception as e:  # noqa: BLE001 (no player, a refusal: the answer's said all the same)
+                done = False
+                self._say(f"the pointer to slot {slot}'s button failed: {type(e).__name__}: {e}")
+            telemetry.emit("violetta", event="point", slot=slot, x=x, y=y, moved=bool(done))
+
+        self.pointing = threading.Thread(target=go, name="violetta-point", daemon=True)
+        self.pointing.start()
+
+    def _point_at(self, x: int, y: int, active) -> bool:
+        from . import client
+        return client.move_lie_cursor(int(x), int(y), active)
 
     def _end(self, why: str) -> None:
         g, self.game = self.game, None

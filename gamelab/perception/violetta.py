@@ -43,10 +43,20 @@ SX, SL = 16.0, 0.14  # a prediction's spread: x px, log-size
 SX_STAY = 22.0       # a staying one's x spread (its lunge: within 30 of its slot)
 LUNGE = (140.0, 70.0)  # its size at the lunge's height (%): in front (120-159) or behind (50-89)
 TWO_MARGIN = 1.03    # two hops must beat one by this much (they fit more)
+# The round's answer window opens ROUND_END_S after its motion (the round's end: start + D + 0x14d ms, FUN_142231970):
+# with the window's time known, the motion's start is it less D less that, give or take T0_SLACK (the fits on the
+# recorded games: within 0.12 s), and only the frames from LOOK_BACK_S before it are scored (round 1's from the window's
+# first sight had been 218 frames and 20 s to solve; the answer window lasts 4 s).
+ROUND_END_S = 0.333
+T0_SLACK = 0.4
+LOOK_BACK_S = 1.0
 PERMS = np.array(list(itertools.permutations(range(4))))
 # The answer window's cue: the button row lit cyan (its share of the row's pixels); off it's grey.
 BUTTONS = (480, 505, 900, 540)  # x0, y0, x1, y1 (client px)
 BUTTONS_LIT = 0.3
+# The answer buttons' middles (client px), slots 1 to 4 (lit: x 479-576, 583-680, 687-784, 791-888, y 487-522), for the
+# pointer to rest on (never clicked: control.violetta_live).
+BUTTON_AT = ((527, 505), (631, 505), (735, 505), (839, 505))
 # The pass's dialog: its template's top-left at OK_AT (the same pixel in all 7 passed games' clips), searched within
 # OK_NEAR; the OK button's middle OK_CLICK from it; seen from OK_MATCH (1.000 on those, at most 0.58 on every other
 # frame of the 29 alarm clips, the mouse mini-game's and the Truth Booth's among them).
@@ -156,10 +166,15 @@ def _support(px, pls, sx, X, L, W) -> np.ndarray:
     return best.sum((1, 2))
 
 
-def solve_round(ts, frames: list[list[dict]], slots, step: int = 2):
+def solve_round(ts, frames: list[list[dict]], slots, step: int = 2, window: float | None = None):
     """The round's permutation (slot i's Violetta to slot perm[i]) from its frames' boxes (`ts` their times, s) from
-    before its motion to its answer window, and how (`kind`: "one" or "two" hops; `info`: the best of each)."""
+    before its motion to its answer window, and how (`kind`: "one" or "two" hops; `info`: the best of each). `window`:
+    the answer window's time (s), which pins the motion's start (ROUND_END_S, T0_SLACK) and the frames scored."""
     ts = np.asarray(ts, dtype=float)
+    if window is not None:
+        keep = ts >= window - max(DS) - ROUND_END_S - T0_SLACK - LOOK_BACK_S
+        ts, frames = ts[keep], [f for f, k in zip(frames, keep) if k]
+        step = 1
     m = max(1, max((len(b) for b in frames), default=1))
     X = np.full((len(frames), m), -1e4)
     L = np.zeros((len(frames), m))
@@ -172,6 +187,8 @@ def solve_round(ts, frames: list[list[dict]], slots, step: int = 2):
     for t0 in ts[::step]:
         for D in DS:
             if t0 + D > ts[-1] + 0.4:
+                continue
+            if window is not None and abs(t0 - (window - D - ROUND_END_S)) > T0_SLACK:
                 continue
             s1 = _support(*_predict(slots, t0, D, ts), X, L, W)
             k = int(np.argmax(s1))

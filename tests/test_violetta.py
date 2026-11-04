@@ -153,16 +153,29 @@ def test_the_live_watcher_says_each_rounds_slot_and_clicks_the_pass_s_ok(tmp_pat
         calls["det"] += 1
         return [boxes[k] if k < len(boxes) else []]
 
-    pushed, clicks = [], []
+    pushed, clicks, pointed = [], [], []
     ok_at = {"on": False}
+
+    def pointer(x, y, active):  # (the player's move: only while the buttons are lit)
+        pointed.append((x, y, active()))
+        return True
+
     w = vl.VioletaLive(alarm=alarm, spotter=_Spotter(), log=lambda m: None, detector=detector,
                        ok=lambda full: (784, 430) if ok_at["on"] else None,
-                       clicker=lambda x, y: clicks.append((x, y)) or True, push=lambda t, x: pushed.append(t))
+                       clicker=lambda x, y: clicks.append((x, y)) or True, push=lambda t, x: pushed.append(t),
+                       pointer=pointer)
     now = 1000.0
     for k, t in enumerate(ts):
         now = 1000.0 + t
         w.step(now, (t, lit if k in lit_at else dark, k, 1))
+        if w.pointing is not None:
+            w.pointing.join(5)
     assert pushed == ["Violetta round 1: slot 3", "Violetta round 2: slot 1"]
+    # the pointer onto each answer's button (slots 3 and 1), never a click there
+    assert pointed == [(735, 505, True), (527, 505, True)]
+    assert all(not (vl_y0 <= 505 < vl_y1) for vl_y0, vl_y1 in [(alarm_mod.LIE_OK_BOX[1], alarm_mod.LIE_OK_BOX[3])])
+    x0, y0, x1, y1 = alarm_mod.LIE_CURSOR_BOX
+    assert all(x0 <= x < x1 and y0 <= y < y1 for x, y in violetta.BUTTON_AT)  # (the move-only plan the player takes)
     rounds = [kw for topic, kw in events if topic == "violetta" and kw["event"] == "round"]
     assert [r["slot"] for r in rounds] == [3, 1] and rounds[0]["start"] == 2
     # the window gone: the game over; the pass's dialog seen twice in a row: its OK clicked once, not again at once

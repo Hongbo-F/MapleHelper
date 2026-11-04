@@ -40,11 +40,14 @@ PAGE = ("MapleStory Lie Detector on screen", "gamelab stopped all input. Answer 
 # within 10s".
 PET_FOOD = "pet_food"  # one tap of her pet food key and nothing else, PET_FOOD_PER_MIN a minute at most
 RETREAT = "retreat"    # her moves to a safe place (behavior.retreat), up to RETREAT_WINDOW_S after the sighting
-LIE_CURSOR = "lie_cursor"  # one mouse move inside the mini-game's board, no button or key (control.lie_tracking)
+LIE_CURSOR = "lie_cursor"  # one mouse move inside the mini-game's board, no button or key (control.lie_tracking; and
+#                            control.violetta_live's pointer on the Violetta game's answer button, never clicked)
 LIE_OK = "lie_ok"  # one click on the pass's dialog's OK button and nothing else (control.violetta_live)
 PLAN_KINDS = (PET_FOOD, RETREAT, LIE_CURSOR, LIE_OK)
 # Client-pixel bounds of the mini-game's board (perception.lie_target.BOARD_AT_NATIVE, which the elevated player's
-# dependencies don't import). A lie_cursor plan may move only here; it can't point at other game controls.
+# dependencies don't import). A lie_cursor plan may move only here; it can't point at other game controls but the
+# Violetta game's answer buttons inside it (x 479-888, y 487-522: control.violetta_live rests the pointer on one; a
+# lie_cursor plan never clicks).
 LIE_CURSOR_BOX = (308, 180, 1058, 680)
 # Client-pixel bounds of the OK button of the Lie Detector's "You have successfully passed" dialog (perception.violetta:
 # its template at (560, 325) on every passed game's frames, the button 762-807 x 423-437, a few px around it). A lie_ok
