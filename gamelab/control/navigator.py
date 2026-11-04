@@ -2523,15 +2523,17 @@ class Navigator:
             return f"a {hit[0].kind or 'monster'} on {hit[0].platform} by the walk from x {x0:.0f} to {x1:.0f}"
         return clear
 
-    def walk_clear(self, s: Scene, x0: float, x1: float) -> str | None:
-        """Why a walk along her platform from map x0 to x1, set off as soon as her lock lets her, isn't clear of look `s`'s
-        monsters (`_walk_clear`: flow.danger, her invulnerability counted), or None: the target-first planner's one check of
-        a walk (behavior.targeting)."""
+    def first_clear(self, s: Scene, x0: float, goals: list[float]) -> float | None:
+        """The first of `goals` a walk along her platform from map x0 to it, set off as soon as her lock lets her, is clear of
+        look `s`'s monsters (`_walk_clear`: flow.danger, her invulnerability counted); None: none. The target-first planner's
+        check of a walk (behavior.targeting), the look's tracks taken once (a second update in one look has no time gone:
+        no heading)."""
         monsters = self.tracker.update(s.t, s.monsters, seen_at=s.t - time.monotonic())
         self._tracks_at = time.monotonic()
         lock = max(getattr(self.actions, "lock_until", 0.0), getattr(self.actions, "arrow_until", 0.0))
         self._immunity(max(time.monotonic(), lock) + PLAN_START_S)
-        return self._walk_clear(s, monsters)(x0, x1)
+        clear = self._walk_clear(s, monsters)
+        return next((g for g in goals if clear(x0, g) is None), None)
 
     def _arrival_clear(self, st: TripState, s: Scene) -> bool:
         """Without an escort (WATCH_MOVES), whether the walk to where she's sent on the trip's platform (look `s`) keeps

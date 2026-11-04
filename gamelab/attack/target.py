@@ -25,10 +25,8 @@ attack after kill"): the same score as if the primary were dead, from where she'
 (the others walked on that long). Gone from the look, the primary's next is the primary at once, not chosen again, unless a
 newborn beats it by MARGIN or `coming` says otherwise.
 
-**Where** (`places`, `place_cost`): where her attack doesn't land from where she stands, the places along her platform from
-which it does, each side of the monster: the nearest and two more inside the stretch, each priced once: its walk at what
-she makes a second, the knock's price there (attack.knock: one table lookup, TOUCH_P of it: her touches a kill) and a small
-term for having the next in reach from there (NEXT_S).
+**Where** (`places`): where her attack doesn't land from where she stands, the nearest place along her platform from which it
+does, each side of the monster, the nearer first.
 """
 
 import math
@@ -37,12 +35,11 @@ from dataclasses import dataclass, field, replace
 
 from maplehelper.engine import LEFT, RIGHT
 
-from ..localization.mapdata import MapModel, Platform
+from ..localization.mapdata import Platform
 from ..localization.monsters import Monster
 from ..motion import physics
 from ..motion.bodies import HER_HALF
-from ..motion.physics import WALK_SPEED
-from . import knock, reach
+from . import reach
 from .danger import Danger
 from .stance import (GROUND_PICK_S, NO_PACE, STEP_SETTLE_S, TAP_S, Pace, beside, half_of, jump_pick_s, too_close,
                      walks_on)
@@ -52,12 +49,7 @@ MATCH_DX = 45.0      # units: the last look's monster is a look's of its kind an
                      # by (stance.HOLD_MATCH's: the tracks' match and her hit's push)
 FAR_SLACK = 20.0     # units inside her attack's farthest a place to walk to is (a band of the search: a monster walks on)
 NEAR_SLACK = 12.0    # ... and past its nearest (reach.CLAW_MARGIN's: the same reason)
-PLACE_STEP = 40.0    # units between the places tried inside a stretch (`places`): a knock's zone is 68-97 wide ...
-PLACE_TRIES = 3      # ... this many a stretch: the nearest, and two more
 WALK_STEP = 100.0    # units she walks at once at most, a look after each (hunt.WAIT_STEP's: 0.7 s at her 149 units/s)
-TOUCH_P = 0.5        # the chance a place's knock price comes due: her touches a kill in the standard grind (master, dev
-                     # seeds 101-148: 0.5 hers, 1.2 the thief's; a share, not fitted)
-NEXT_S = 0.15        # s of her walk a place is worth for having the next in reach from it (the design's small term)
 JUMP_S = jump_pick_s(physics.JUMP_ATTACK_MS)  # s from her keys to an attack from a jump picking
 HIT_ALPHA = 0.36     # a newborn can be hit from about this alpha (perception.spawns: its HP bar shows from then)
 
@@ -84,8 +76,8 @@ class Her:
     """Her at this look, as the choice needs her: her platform, feet, s until her next keys can go (`lead`), her
     invulnerability left, the way she faces, whether her attack goes from a jump (`jumps`, the thief's), every monster about
     her (`around`), bodies (`sizes`: the magician's search by the game's; `halves`, half each kind's width), the map's danger,
-    the stance's pace, where she keeps to (`lo`, `hi`), her walk, and what says a jump's attack surely takes one that no
-    attack from the ground does (`jump_hits`: stance.jump_hits, asked only where it decides)."""
+    the stance's pace, where she keeps to (`lo`, `hi`), and what says a jump's attack surely takes one that no attack from the
+    ground does (`jump_hits`: stance.jump_hits, asked only where it decides)."""
     platform: Platform
     x: float
     y: float
@@ -100,7 +92,6 @@ class Her:
     pace: Pace = NO_PACE
     lo: float = -math.inf
     hi: float = math.inf
-    walk: float = WALK_SPEED
     jump_hits: Callable[[Monster], bool] | None = None
     can_jump: bool = True
 
@@ -150,7 +141,7 @@ class Choice:
     why: str = ""
     top: tuple = ()
     coming: Coming | None = None
-    how: str = ""   # what kind of a change: 'first', 'next', 'gone', 'beaten', 'respawn', 'coming', 'no way', 'first taken'
+    how: str = ""   # what kind of a change: 'first', 'next', 'gone', 'beaten', 'respawn', 'coming', 'no way'
     left: Monster | None = None  # with 'next' and 'gone': the one it left, not among this look's foes
 
 
@@ -174,10 +165,9 @@ def near_far(her: Her, m: Monster, y: float | None = None) -> tuple[float, float
 
 
 def places(her: Her, m: Monster) -> list[float]:
-    """The places along her platform from which her attack from the ground lands on monster `m`: on each side of it, the
-    nearest of its stretch to her, and up to PLACE_TRIES - 1 more inside the stretch toward the monster (a knock from it
-    throws her the other way: the far ones of a stretch are nearer the end behind her), each checked (reach.can_hit, at the
-    platform's height there: walls, what the attack takes first). None where there's none."""
+    """The places along her platform from which her attack from the ground lands on monster `m`: on each side of it the
+    nearest of its stretch to her, checked (reach.can_hit, at the platform's height there: walls, what the attack takes
+    first), the nearer first. None where there's none."""
     p, x, out = her.platform, her.x, []
     y = p.y_at(min(max(m.x, p.left), p.right))
     near, far = near_far(her, m, y)
@@ -193,13 +183,9 @@ def places(her: Her, m: Monster) -> list[float]:
         if u > v:
             continue
         g = min(max(x, u), v)
-        to = 1.0 if m.x > g else -1.0
-        for i in range(PLACE_TRIES):
-            c = min(max(g + to * i * PLACE_STEP, u), v)
-            if (i == 0 or abs(c - g) >= PLACE_STEP * i - 1e-6) and reach.can_hit(p, c, p.y_at(c), m, others=her.around,
-                                                                                  sizes=her.sizes):
-                out.append(c)
-    return out
+        if reach.can_hit(p, g, p.y_at(g), m, others=her.around, sizes=her.sizes):
+            out.append(g)
+    return sorted(out, key=lambda g: abs(g - x))
 
 
 def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, lead: float | None = None,
@@ -222,7 +208,7 @@ def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, le
             return Way(lead + (TAP_S if turn else 0.0), "now")  # (her search picks it from here: nearer than she'd like)
         gap = abs(her.pace.at(m, x, lead + GROUND_PICK_S, walks_on(m, p)) - x)
         step = max(0.0, near_far(her, m)[0] + NEAR_SLACK - gap)
-        return Way(lead + step / her.walk + STEP_SETTLE_S, "close")
+        return Way(lead + step / physics.WALK_SPEED + STEP_SETTLE_S, "close")
     if reach.can_hit(p, x, y, m, others=her.around, sizes=her.sizes):
         return Way(lead + (TAP_S if turn else 0.0), "now")
     if not far:
@@ -238,11 +224,11 @@ def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, le
         options = places(her, m)
         if not options:
             return None
-        goal = min(options, key=lambda g: abs(g - x))
+        goal = options[0]
         dist = abs(goal - x)
     else:  # (the next's: from where she'll stand, by the distance alone)
         dist = max(0.0, near + NEAR_SLACK - dx, dx - (far - FAR_SLACK))
-    return Way(lead + dist / her.walk + STEP_SETTLE_S, "walk", goal)
+    return Way(lead + dist / physics.WALK_SPEED + STEP_SETTLE_S, "walk", goal)
 
 
 def score(f: Foe, way: Way) -> float:
@@ -306,33 +292,6 @@ def coming(her: Her, foes: list[Foe], finish: float) -> Coming | None:
         if best is None or s < best.arrives:
             best = Coming(f, s)
     return best
-
-
-def first_taken(her: Her, t: Terms, foes: list[Foe]) -> Foe | None:
-    """The monster her attack from the ground that way from where she stands takes before `t`'s (reach.ground_pick: the
-    claw first, then the star's search's first band), if another of `foes` is: her attack goes by the bodies, whichever she
-    has in mind. None: `t`'s own."""
-    if t.way.how != "now":
-        return None
-    m, x, y = t.m, her.x, her.y
-    d = 1 if m.x > x else -1
-
-    def order(o: Monster) -> tuple | None:
-        top, half = reach.body_of(o.kind, her.sizes)
-        return reach.ground_pick((o.x - x) * d, o.y - y, top, half)
-
-    mine = order(m)
-    if mine is None:
-        return None
-    best = None
-    for f in foes:
-        o = f.m
-        if o is m or (o.x - x) * d <= 0:
-            continue
-        k = order(o)
-        if k is not None and k[0] < mine[0] and (best is None or k < best[0]):
-            best = (k, f)
-    return None if best is None else best[1]
 
 
 def after(her: Her, t: Terms, foes: list[Foe]) -> Terms | None:
@@ -440,32 +399,7 @@ class Chooser:
             if t is not None:
                 pick, why, how = t, f"coming at her: {come.arrives:.1f} s" + (" (a respawn)" if come.foe.born else ""), "coming"
         nxt = after(her, pick, foes)
-        first = first_taken(her, pick, foes)
-        if first is not None:  # (her attack takes that one first, whoever she has in mind)
-            t = next((t for t in ranked if t.foe is first), None) or terms_of(her, first)
-            if t is not None:
-                pick, nxt = t, pick
-                if not why:
-                    why, how = "her attack takes it first", "first taken"
         self.primary, self.next = pick.m, None if nxt is None else nxt.m
         return Choice(pick, nxt, why, tuple(ranked[:3]), come, how, had if how in ("next", "gone") else None)
 
 
-def place_cost(model: MapModel, planner, her: Her, m: Monster, g: float, rate: float, touch_exp: float,
-               busy=None, nxt: Monster | None = None) -> float:
-    """What going to place `g` for monster `m` costs in EXP: its walk at her `rate`, the knock's price there at TOUCH_P (a
-    table lookup, attack.knock: a touch from `m` throws her away from it, and what getting back costs; nothing where it
-    doesn't take her off her platform), less NEXT_S of her time for having the next in reach from there."""
-    side = -1 if m.x > g else 1
-    price = knock.cost(model, planner, her.platform, g, knock.flown(model, her.platform, g, knock.GROUND, side), rate,
-                       touch_exp, busy=busy)
-    c = abs(g - her.x) / her.walk * rate + TOUCH_P * price.exp
-    if nxt is not None and reach.can_hit(her.platform, g, her.platform.y_at(g), nxt, others=her.around, sizes=her.sizes):
-        c -= NEXT_S * rate
-    return c
-
-
-def best_place(model: MapModel, planner, her: Her, m: Monster, rate: float, touch_exp: float, busy=None,
-               nxt: Monster | None = None) -> list[float]:
-    """`places` for monster `m`, the cheapest first (`place_cost`)."""
-    return sorted(places(her, m), key=lambda g: place_cost(model, planner, her, m, g, rate, touch_exp, busy, nxt))

@@ -1,8 +1,8 @@
 """The target-first planner at a grind's stop (`Targeting`): what perception says at each look turned into attack.target's
 Her and Foes, its choice narrowing the hunt's targets to the one monster to hit, and the plan against it: the stance's
 own answer for that monster (attack.stance: up close, a jump attack, a step to range; a jump's shot), or the walk to the
-place along her platform that works (attack.target.best_place: its knock priced, its way checked once, flow.danger, by the
-navigator). On by default since its gate of 2026-11-04; off (GAMELAB_TARGET=0: `on`) none of this runs, and the grind is the
+nearest place along her platform that works (attack.target.places: its way checked once, flow.danger, by the navigator). On
+by default since its gate of 2026-11-04; off (GAMELAB_TARGET=0: `on`) none of this runs, and the grind is the
 one before it to the digit. README: "The target-first planner".
 
 Everything else about a stop stays the grind's: where she goes next (Grind._leaving, Patrol.choose), her potions and the
@@ -24,8 +24,7 @@ from time import perf_counter_ns
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
-from ..attack import knock, reach
-from .ledger import EXPIRE_S, OWN_S, SETTLE
+from .ledger import EXPIRE_S, SETTLE
 from ..attack import target as tg
 from ..attack.stance import MIN_MOVE, _sizes, _stand_limits, open_above
 from ..localization.monsters import Monster, speeds
@@ -36,13 +35,11 @@ from . import fight
 FRAME_S = 1.0 / HZ    # s between two frames perception looks at: `watch_lock`'s step
 HELD_P = 0.25         # (her casts) a monster her cast won't go at for now (a hold: rule 3): this much less likely to be hit
 # Her drops (the user, 2026-11-04: "you should aim for 100% pick up rate"): every pile of hers is gone for: on her platform at
-# once whatever it adds to her way (none is left behind as she leaves it), on another by what it adds to her way against
-# how long it has lain: LOOT_FRESH s while it's hers alone (OWN_S), LOOT_GROW s more for each s after, whatever it takes
-# once LOOT_DUE_S are left of its life (ledger.EXPIRE_S, the game's). A far pile waits for her way to come near it, and goes
-# before its life ends.
+# once whatever it adds to her way (none is left behind as she leaves it), on another LOOT_FRESH s on her way, whatever it
+# takes once LOOT_DUE_S are left of its life (ledger.EXPIRE_S, the game's). A far pile waits for her way to come near it, and
+# goes before its life ends.
 LOOT_ALL = 1e6        # s: no bound
-LOOT_FRESH = 3.0      # s (hunt.ALLOW_FRESH's)
-LOOT_GROW = 0.05      # s (of 0, 0.05, 0.1, 0.2 and no bound on the dev seeds: README, the arms)
+LOOT_FRESH = 3.0      # s (hunt.ALLOW_FRESH's): what far piles may cost her, the user's to choose (README: what it costs her)
 LOOT_DUE_S = 30.0     # s of a pile's life left, its way there and its stand aside, from which it comes before the primary
 ASKS = 4              # targets the plan is asked for at most at a pass (the rest wait for the next look)
 NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the stance's answer a wait, no place to walk to) is
@@ -157,8 +154,8 @@ class Targeting:
         if key != self._asked_at:  # (a monster the choice stayed away from isn't asked about again until her next key)
             self._asked_at = key
             self.asked.clear()
-        finish = max(0.0, c.primary.way.s + c.primary.foe.kill_s - (now - self._chose_at))
-        come = tg.coming(her2, foes, left + finish)
+        finish = max(0.0, c.primary.way.s + c.primary.foe.kill_s - (now - self._chose_at))  # (way.s holds her lock)
+        come = tg.coming(her2, foes, finish)
         if come is not None and come.foe.m.track not in self.asked and tg.terms_of(her2, come.foe) is not None:
             self.asked.add(come.foe.m.track)
             self.counts["lock: coming"] += 1
@@ -193,13 +190,13 @@ class Targeting:
     def loot_allow(self, p, s, now: float) -> float:
         """The s a pile of hers may add to her way (see LOOT_ALL ...): whatever it takes near its end or on her platform, one
         no look has seen yet only while its drops may still be landing (a kill drops nothing as often as not: a look tells
-        from nearer by, or the wide look past its landing); else by how long it has lain."""
+        from nearer by, or the wide look past its landing); else LOOT_FRESH."""
         age = now - p.born
         if EXPIRE_S - age <= LOOT_DUE_S:
             return LOOT_ALL
         if s.platform is not None and p.platform == s.platform.id and (p.status == "seen" or age < SETTLE):
             return LOOT_ALL
-        return 0.0 if self.here_only else LOOT_FRESH + max(0.0, age - OWN_S) * LOOT_GROW
+        return 0.0 if self.here_only else LOOT_FRESH
 
     def pile_first(self, p, stop, now: float) -> bool:
         """Whether the sweep's first pile `p` (its `stop`) goes before the primary: never against a monster coming at her;
@@ -314,23 +311,17 @@ class Targeting:
     # --- the plan ------------------------------------------------------------------------------------------
 
     def walk_step(self, s) -> tuple[str, float, float] | None:
-        """The walk to the place that works for the primary (attack.target.best_place: the cheapest whose way is clear,
-        flow.danger, checked once a place by the navigator; with none clear the cheapest all the same: EXP over touches, the
-        user's, and a look after WALK_STEP at most): (the way, how far, the place). None: none (or she's there)."""
+        """The walk to the place that works for the primary (attack.target.places: the nearer whose way is clear, flow.danger,
+        by the navigator; with neither clear the nearer all the same: EXP over touches, the user's, and a look after WALK_STEP
+        at most): (the way, how far, the place). None: none (or she's there)."""
         c, her = self.choice, self.her
         if c is None or c.primary is None or her is None or her.platform is not s.platform:
             return None
-        h, g, m = self.h, self.g, c.primary.m
-        rate = fight.rate_of(h)
-        prices = fight.landing_prices(h, g.danger) if g.danger is not None else None
-        touch = 0.0 if prices is None else prices.hurt * prices.touch(m.kind)
-        busy = knock.busy_tops(g.model, s.monsters)
-        nxt = c.next.m if c.next is not None else None
-        opts = tg.best_place(g.model, g.nav.planner, her, m, rate, touch, busy, nxt)
-        far = [p for p in opts if abs(p - her.x) >= MIN_MOVE]
+        far = [p for p in tg.places(her, c.primary.m) if abs(p - her.x) >= MIN_MOVE]
         if not far:
             return None
-        pick = next((p for p in far if g.nav.walk_clear(s, her.x, p) is None), far[0])
+        clear = self.g.nav.first_clear(s, her.x, far)
+        pick = far[0] if clear is None else clear
         return (RIGHT if pick > her.x else LEFT), min(abs(pick - her.x), tg.WALK_STEP), pick
 
     def mine(self, targets) -> bool:
@@ -338,12 +329,15 @@ class Targeting:
         c = self.choice
         return c is not None and c.primary is not None and len(targets) == 1 and targets[0] is c.primary.m
 
-    def plan(self, s, act: tuple, approach: bool) -> tuple:
+    def plan(self, s, act: tuple, approach: bool, acting: bool = True) -> tuple:
         """The act for the primary: the stance's for it (`act`, asked with no closing in), or with nothing from where she
-        stands and `approach` the walk to its place; said when it changes."""
+        stands and `approach` the walk to its place; said when it changes. Not `acting` and no `approach` (a rule only asking
+        what the stance would do: Hunt._pass's close quarters): its answer alone, nothing set aside."""
         c = self.choice
         if act[0] == "wait" and approach and (step := self.walk_step(s)) is not None:
             act = ("approach", step[0], step[1])
+        if act[0] == "wait" and not approach and not acting:
+            return act
         if act[0] == "wait":  # (nothing against it for now: set aside, another taken at once: Grind._targets)
             m = c.primary.m
             if m.track is not None:

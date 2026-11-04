@@ -418,7 +418,7 @@ class Grind(Hunt):
             act = super()._stance(s, targets, visible, hidden, False, log, goal)
         finally:
             self._planned = False
-        act = self.tp.plan(s, act, approach)
+        act = self.tp.plan(s, act, approach, log)
         if not log:
             self._asked = (s, targets[0], approach, act)
         return act
