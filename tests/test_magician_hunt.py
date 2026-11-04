@@ -111,14 +111,18 @@ def test_magic_claws_search_in_the_attack_layer_and_the_thiefs_back_after():
 
 
 def test_her_walk_on_arrival_is_checked_in_the_window_after_a_touch(monkeypatch):
-    """The stopgap of 2026-11-03 (navigator.ARRIVE_CHECK_POST_HIT): hers alone; in the window after a touch her escorted
-    trip's walk on arrival is checked as an unescorted one's (the call again without the escort), the escort's mode
-    put back after; the thief's, off, walks on unchecked as before."""
+    """The stopgap of 2026-11-03 (navigator.ARRIVE_CHECK_POST_HIT): hers alone (her profile's close quarters); in the
+    window after a touch her escorted trip's walk on arrival is checked as an unescorted one's (the call again without
+    the escort), the escort's mode put back after; the thief's, off, walks on unchecked as before."""
     from gamelab.control import navigator as nv
-    assert not nv.ARRIVE_CHECK_POST_HIT
-    with magic.swapped(MAGE):
-        assert nv.ARRIVE_CHECK_POST_HIT
-    assert not nv.ARRIVE_CHECK_POST_HIT
+    assert nv.ARRIVE_CHECK_POST_HIT is None  # (by the character playing)
+    with character.using(MAGE):
+        assert nv._arrive_check_post_hit()
+    with character.using(character.load("thief")):
+        assert not nv._arrive_check_post_hit()
+        monkeypatch.setattr(nv, "ARRIVE_CHECK_POST_HIT", True)
+        assert nv._arrive_check_post_hit()  # (forced, for anyone)
+        monkeypatch.setattr(nv, "ARRIVE_CHECK_POST_HIT", False)
     modes = []
     nav = SimpleNamespace(_mode=nv.TRANSIT, fight=True, _post_hit=lambda st: True)
     nav._arrival_clear = lambda st, s: modes.append(nav._mode) or "checked"

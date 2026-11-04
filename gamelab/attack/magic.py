@@ -73,10 +73,6 @@ def swaps(c: Character) -> dict:
            # Mushroom 50-60 off with for a jump with none; R8 was measured on the thief only, the simulator having no
            # Magic Claw: the integration of 2026-10-29)
            (stance, "FIGHT_CLEAR"): False}
-    # (her walk on arrival checked in the window after a touch, a stopgap until the per-step planner: navigator's
-    # ARRIVE_CHECK_POST_HIT; measured on her alone, 2026-11-03)
-    from ..control import navigator
-    out[(navigator, "ARRIVE_CHECK_POST_HIT")] = True
     return out
 
 
