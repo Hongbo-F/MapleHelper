@@ -556,6 +556,7 @@ class DropStore:
     piles: list[Pile] = field(default_factory=list)  # the piles not gone, and those gone in the last GONE_KEEP_S
     gone_tried: int = 0  # piles the hunt loop went for that looks have seen gone, ever (dropped ones too)
     revived: int = 0     # piles of hers seen gone that a sighting showed were only missed (`_sighting`), ever
+    revive_s: float = REVIVE_S  # how long after it's seen gone a sighting does that (the target-first planner: its whole life)
     _strips: dict = field(default_factory=dict, repr=False)  # each strip of drops' last search taken: (platform, x0) -> t
 
     @property
@@ -598,6 +599,18 @@ class DropStore:
         if s.looked:
             self._sighting(s.t, list(s.loot), s.in_view, ground and not any(st.at == s.t for st in strips))
 
+    def searched_empty(self, s: Scene, p: Pile) -> bool:
+        """Whether look `s` has a search of pile `p`'s place from when its drops have settled (SETTLE) that can see it empty, as
+        `on_look`'s sightings have one: her standing, a strip sure of it, not for mesos alone; without strips the look's own."""
+        if looting.STANDING_ONLY and not standing(s):
+            return False
+        after = p.since + SETTLE
+        over = [st for st in getattr(s, "strips", None) or () if st.at is not None and st.platform == p.platform
+                and st.x0 <= p.x <= st.x1]
+        if over:
+            return any(st.at >= after and st.sure and not st.mesos_only for st in over)
+        return s.t >= after and bool(s.looked) and s.in_view(p.platform, p.x)
+
     def _sighting(self, t: float, seen: list[Loot], in_view, ground: bool) -> None:
         """Drops seen at t where `in_view(platform, x)` was searched: each in one pile, the nearest within LOOT_REACH of
         it, which they confirm (or, none, piles of their own, a LOOT_REACH of them from the left: another's, or one no
@@ -610,7 +623,7 @@ class DropStore:
         hunt)."""
         known = self.known
         again = [p for p in self.piles if p.status == "gone" and p.hers and p.gone_at is not None
-                 and 0.0 <= t - p.gone_at <= REVIVE_S]
+                 and 0.0 <= t - p.gone_at <= self.revive_s]
         mine: dict[int, list[Loot]] = {}
         loose = []
         for d in seen:

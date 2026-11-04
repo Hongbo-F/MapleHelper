@@ -60,12 +60,14 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
-from .ledger import DROP_LANDS, FOLLOW_S, dying
+from .ledger import EXPIRE_S, FOLLOW_S, REVIVE_S, dying
+from .looting import SETTLE
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
 from .targeting import ASKS, IDLE_S, Targeting
 from .targeting import on as target_on
 
-LANDED_S = 0.2         # s past a kill's drops' landing (ledger.DROP_LANDS) by which a look has them (`_none_landed`)
+SEARCH_S = 2.5         # s past a kill's drops' settling (looting.SETTLE) she waits by its pile for a search of it that can say
+                       # it's empty (`_none_landed`; the rotation is back on a strip in 1.2-2.4 s: ledger.REVIVE_S)
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go); and from the final
                        # review of 2026-11-02, s waiting there on end (Hunt._wait, nothing shot, no step) with monsters
                        # held: on the thief's seed 19 of the standard grind she stood 123 s at 16 for a Horny on 15 the
@@ -169,6 +171,7 @@ class Grind(Hunt):
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
         if self.tp is not None:
             self.h.actions.lock_watch = self.tp.watch_lock
+            self.h.drops.revive_s = EXPIRE_S  # (a pile of hers seen gone and then seen again is hers, however late: 100%)
 
     def run(self, minutes: float):
         try:
@@ -176,6 +179,7 @@ class Grind(Hunt):
         finally:
             if self.tp is not None:
                 self.h.actions.lock_watch = None
+                self.h.drops.revive_s = REVIVE_S
                 self.tp.end()
         self._log_grind()
         return report
@@ -358,16 +362,18 @@ class Grind(Hunt):
         return None if self.tp is not None else super()._sweep_most()
 
     def _none_landed(self, s: Scene, pile) -> bool:
-        """With the planner: a kill's drops have landed by now and the look that searched there has none: it dropped nothing
-        (0.64 drops a kill; on the dev seeds 2 of 3 of her stands were on nothing, a walk of 60 units and 3 presses each, live
-        43% on the last hours), seen gone as a look seeing it empty twice would have it; drops a monster hid from this look
-        have it back as soon as one sees them (ledger.REVIVE_S). Just landed, no stand either: the next look tells."""
+        """With the planner: a kill's drops have settled by now and a search there that could say so has none: it dropped
+        nothing (0.64 drops a kill; on the dev seeds 2 of 3 of her stands were on nothing, a walk of 60 units and 3 presses
+        each, live 43% on the last hours), seen gone as two sightings would have it; drops a monster hid from it have it back as
+        soon as a look sees them (DropStore.revive_s). No stand either before it has settled, or (SEARCH_S) while the next look
+        may have that search; past that, her walk over its spread."""
         if self.tp is None:
             return False
-        if time.monotonic() < pile.since + DROP_LANDS + LANDED_S:
+        now = time.monotonic()
+        if now < pile.since + SETTLE:
             return True
-        if not s.looked or not s.in_view(pile.platform, pile.x):
-            return False
+        if not self.h.drops.searched_empty(s, pile):
+            return now < pile.since + SETTLE + SEARCH_S
         pile.status, pile.gone_at, pile.none_landed = "gone", s.t, True
         self.tp.counts["none landed"] += 1
         self.log(f"  none landed: {pile.kind}'s kill {s.t - pile.since:.1f} s ago on platform {pile.platform} at x {pile.x:.0f}")
