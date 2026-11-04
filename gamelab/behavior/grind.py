@@ -603,10 +603,13 @@ class Grind(Hunt):
                        spot={"platform": stop.platform, "x": round(stop.x, 1), "coverage": 1.0})
 
     def _leave_ground(self) -> None:
-        """A stop's stay is kept (`stays`); the value map isn't written (see the top)."""
+        """A stop's stay is kept (`stays`), and with kills there her handling of them (Patrol.handled: from getting there
+        to her last kill); the value map isn't written (see the top)."""
         v = self.visit
         if v is None or v.arrived is None:
             return
+        if v.kills:
+            self.patrol.handled(max(0.0, max(v.kills) - v.arrived), len(v.kills))
         self._left[v.ground] = time.monotonic()
         self.stays.append(time.monotonic() - v.arrived)
 
@@ -633,7 +636,22 @@ class Grind(Hunt):
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
                        if p.hp_time[pid] >= HP_LOG_S},
-                "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}, **self._promise()}
+                "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}, **self._census(), **self._promise()}
+
+    def _census(self) -> dict:
+        """The census and its trips (Patrol.choose; the 'grind' records 'state' and 'end'): trips taken, her view's
+        occupancy against the map's average (the gate: Belief.ratio), her kills a minute as the trips' bar (None: the
+        gate shut), her handling time a kill, the newborns she saw fading in against her kills' passes, and what the
+        census believes by platform (in view and out)."""
+        p, b = self.patrol, self.patrol.belief
+        r, bar, h = b.ratio(b.t), p.bar(b.t), p.handle_s()
+        by: dict[str, float] = {}
+        for q in list(b.points) + b.extra:
+            by[str(q.platform)] = by.get(str(q.platform), 0.0) + b.census.get(q.id, 0.0)
+        return {"trips": p.trips, "occupancy": None if r is None else round(r, 3),
+                "trip_bar": None if bar is None else round(bar * 60, 2), "handle_s": None if h is None else round(h, 2),
+                "births_seen": b.births_seen, "births_due": b.due_n,
+                "census": {pid: round(v, 2) for pid, v in by.items() if v >= 0.01}}
 
     def _promise(self) -> dict:
         """The loop's promise against what it delivered so far (the 'grind' records 'state' and 'end', from 2026-11-02:

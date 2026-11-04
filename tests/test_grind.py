@@ -26,6 +26,13 @@ from gamelab.sim import scenarios
 HORNY, GREEN = "horny-mushroom", "green-mushroom"
 
 
+@pytest.fixture(autouse=True)
+def _no_census(monkeypatch):
+    """The refill's, the loop's and the pulls' own tests: the census and its trips off (patrol.CENSUS), as their
+    synthetic looks cover no point (tests/test_census.py has them on)."""
+    monkeypatch.setattr(patrol, "CENSUS", False)
+
+
 def _map(plats, spawns):
     """A map of flat platforms (x from, x to, y; each its own foothold group: none walks onto another) and spawn
     points ((x, y, kind): "h" a Horny Mushroom, 41 EXP, "g" a Green Mushroom, 26)."""

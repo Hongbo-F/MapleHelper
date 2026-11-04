@@ -895,6 +895,55 @@ Her table against R1-R3 and the hour (The final review's fixes had 426 and 7.45 
 
 **Not done.** The stack's own `INVULNERABLE_S` at 1.5 (a live change, its own measurement). What stays of the excess (above): the touchers' turning back and the cornered touches (the study's next offline check: on R1-R3, what the live bot does as a monster walks from the inside toward the end she stands at, against the simulator's bot), the hunter's finishing of hurt touchers, the thief's profile at his level. Why the 1.5 s gives the thief touches back.
 
+## Grinding that follows the spawns: the census, the user's gate, trips (work/pile-plan, from 2026-11-03)
+
+The user, 2026-11-03: a grind that sweeps only Tree Dungeon's upper and middle tower should leave the bottom piling up
+with monsters when nobody else is killing, "if the answer is not 'yes', then something wrong with simulator. Also this
+idea should also drive motion planner to not confine to a sub area of the map when no other player is killing on the
+map". In the simulator, alone, it does: the bottom went from 6 to 15 of the map's cap of 22 in 40 minutes, and
+grinding's EXP a minute fell 19% (thief) and 37% (magician) over them. Checked against the game (the spawn watch's
+telemetry of 2026-11-02 and 03): the server's 100-unit clear rule held for 90% of 2,279 newborns, and the bottom's points
+were blocked as often as in the simulator, platform by platform.
+
+`behavior/patrol.py` (its doc has each piece and where it was measured; `CENSUS` False: as before):
+
+1. **The census** (`Belief.census`): the monsters by every spawn point of the map, a kind she doesn't hunt too. In
+   view, what her look sees; out of view, what she last saw there, and each kill of hers whose monster she didn't see
+   fade back in (the spawn watch's `Mob.fading`) is one born out of view, spread by how likely each point is clear;
+   the whole held to the map's cap; another player's dot by a point takes its monsters. Her kills count births alone,
+   one back a kill: the cap less what she sees, without them, put the bottom 1-4 monsters off and lost 3%.
+2. **The gate**, the user's ("if all the visible spawn points have a low spawn rate, it probably means the mobs are
+   piling elsewhere"; over a minute, "3 min feels too long"): trips only while her view's spawn points held 0.55 or
+   less of the map's average a point (its cap over its spawn points) over the last minute (`Belief.ratio`, `OCC_MAX`).
+   0.40-0.60 on Tree Dungeon alone, 0.67-0.75 on the first map, 0.77-0.88 with others killing. Births at the clear
+   points she sees don't tell it: the server's draw is even over the clear points, wherever the piles are.
+3. **Trips** (`Patrol.choose`): from a stop off her round the census believes holds a monster, on to the next nearest
+   while each raises the trip's monsters a second, taken when those reach 1.25 times her kills a second over the last 3
+   minutes over the detour, each monster at her handling time a kill (getting to a stop to her last kill there:
+   `Patrol.handle_s`, from `Grind._leave_ground`). Counts and seconds alone: the same on any map and for either
+   character.
+
+The 'grind' telemetry's 'state' has `trips`, `occupancy` (the gate's ratio), `trip_bar` (her kills a minute; None: the
+gate shut), `handle_s`, `births_seen` against `births_due`, and the census by platform; a trip's choice says so
+("trip of 3 stops: 6.8 monsters over a 30 s detour", then "trip (2 to go)").
+
+Measured (the simulator, 24 seeds paired against `CENSUS` False, endless potions; the study's scripts and runs in
+D:/MapleHelper-scratch/pileup, the built-in version the study's v_occ.py to the digit on 24 runs of four worlds):
+
+| | Tree Dungeon thief, 40 min | Tree Dungeon magician, 40 min | first map, 25 min | Tree Dungeon with others, 20 min |
+|---|---|---|---|---|
+| EXP a minute | 249.3 -> 287.0 (+15.1%, 24 of 24 better) | 302.3 -> 375.8 (+24.3%, 24 of 24) | +0.6% | +0.1% |
+| by 10 minutes | 286, 252, 235, 221 -> 289, 282, 288, 286 | 340, 305, 294, 268 -> 379, 376, 374, 370 | | |
+| HP lost (bars) | 22.1 -> 25.2 | 14.7 -> 19.2 | 1.3 -> 1.3 | 18.2 -> 19.8 |
+| drops picked up | 94.9% -> 91.6% | 95.2% -> 93.4% | 86.9% -> 87.3% | 91.3% -> 91.1% |
+
+No death, safety stop or out of darts in the 192 runs. Goldens: the 15 grind scenarios' traces change (her trips),
+the 32 others the same; test_sim's scenario checks with --slow pass.
+
+**Not done:** a supervised solo live grind (the gate's ratio and the census against what she finds at the bottom);
+West Rocky Mountain II's grinding falls off over 40 minutes with or without it (108 -> 30 EXP a minute), a problem of
+its own.
+
 ## Cornered, by respawns, with monsters on her: the cornered study's three fixes together (work/cornered-all, from 2026-11-03)
 
 The user flagged a live clip on 2026-11-02 at 22:51, BugBaby "cornered ... making bad attack move" (D:/MapleHelper-scratch/golden-clips/bugbaby-cornered-bad-attack-2251; the study: D:/MapleHelper-scratch/cornered/REPORT.md), and of the study's four fixes, 2026-11-03: "No need [for the key-binding check], i think current doubt-based retrigger is fine. The other 3 items are good to merge." The three were built side by side on work/sim-defaults b7f7308 (the simulator's 1.5 s invulnerability and the 11-02 detector misses) and merged here: her aim up close by a wall (work/cornered-aim b4a5f16: R6 and R8, the section below), the spawn guard (work/cornered-respawn 8de21ed: R3, the section after it), and R1 extended (work/cornered-r1 c453469: A touch with no monster seen by her, further down). Each section says what its fix does alone; this one says what she does with all three, how they meet, and what they measure together.
