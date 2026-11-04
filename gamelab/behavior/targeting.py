@@ -34,8 +34,9 @@ from . import fight
 
 FRAME_S = 1.0 / HZ    # s between two frames perception looks at: `watch_lock`'s step
 HELD_P = 0.25         # (her casts) a monster her cast won't go at for now (a hold: rule 3): this much less likely to be hit
-# Her drops (the user, 2026-11-04: "you should aim for 100% pick up rate"): every pile of hers is gone for: on her platform at
-# once whatever it adds to her way (none is left behind as she leaves it), on another LOOT_FRESH s on her way, whatever it
+# Her drops (the user, 2026-11-04: "you should aim for 100% pick up rate"): every pile she may take is gone for, whether a kill
+# of hers explains it or the store only found it (Hunt._candidate: a kill it couldn't place, a drop past LOOT_REACH of its
+# kill: of her lost drops the 15-minute runs had most were those): on her platform at once whatever it adds to her way (none is left behind as she leaves it), on another LOOT_FRESH s on her way, whatever it
 # takes once LOOT_DUE_S are left of its life (ledger.EXPIRE_S, the game's). A far pile waits for her way to come near it, and
 # goes before its life ends.
 LOOT_ALL = 1e6        # s: no bound
@@ -188,7 +189,7 @@ class Targeting:
     # --- her drops ------------------------------------------------------------------------------------------
 
     def loot_allow(self, p, s, now: float) -> float:
-        """The s a pile of hers may add to her way (see LOOT_ALL ...): whatever it takes near its end or on her platform, one
+        """The s a pile may add to her way (see LOOT_ALL ...): whatever it takes near its end or on her platform, one
         no look has seen yet only while its drops may still be landing (a kill drops nothing as often as not: a look tells
         from nearer by, or the wide look past its landing); else LOOT_FRESH."""
         age = now - p.born

@@ -352,11 +352,8 @@ class Grind(Hunt):
         """(With the planner no place at a stop she comes back to: her piles' way goes on to nowhere.)"""
         return None if self.tp is not None else super()._home()
 
-    def _all_of(self, p, s: Scene) -> bool:
-        return self.tp is not None and p.hers
-
-    def _whole(self, p, s: Scene, now: float) -> float:
-        return self.tp.loot_allow(p, s, now)
+    def _whole(self, p, s: Scene, now: float) -> float | None:
+        return None if self.tp is None else self.tp.loot_allow(p, s, now)
 
     def _sweep_most(self) -> float | None:
         return None if self.tp is not None else super()._sweep_most()
@@ -383,10 +380,10 @@ class Grind(Hunt):
         return True
 
     def _guards_it(self, s: Scene, p, m: Monster, on_screen: bool) -> bool:
-        """With the planner a monster guards a pile of hers only as her target can: seen, on the platform she's on with it
-        (it's among her targets there: "a monster guarding a pile is simply the next target"). She goes to one elsewhere
-        whoever is by it now, and who's there then is her target then."""
-        if self.tp is None or not p.hers:
+        """With the planner a monster guards a pile only as her target can: seen, on the platform she's on with it (it's among
+        her targets there: "a monster guarding a pile is simply the next target"). She goes to one elsewhere whoever is by it
+        now, and who's there then is her target then."""
+        if self.tp is None:
             return True
         return on_screen and s.platform is not None and p.platform == s.platform.id
 

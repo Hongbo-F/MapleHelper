@@ -1595,8 +1595,8 @@ class Hunt:
             self._pile_of[p.key] = p
             worth = self._worth(p)
             allow = self._allow(p, now) * self._share(p, worth)
-            if self._all_of(p, s):  # (behavior.grind's target-first planner: her own drops, all of them)
-                allow = self._whole(p, s, now)
+            if (whole := self._whole(p, s, now)) is not None:  # (behavior.grind's target-first planner: all of them)
+                allow = whole
             elif here is not None and d.at(p.platform, (lo + hi) / 2, s.monsters) > here + SAFER_MARGIN:
                 allow = min(allow, ALLOW_OLD)  # (more dangerous there than where she is: on her way only)
                 self._riskier.add(p.key)
@@ -1604,14 +1604,10 @@ class Hunt:
                                     (lambda dt, p=p: p.still(now, dt)), guards, allow))
         return found, out
 
-    def _all_of(self, p: Pile, s: Scene) -> bool:
-        """Whether pile `p` is one of those she takes whatever it adds to her way (behavior.grind's target-first planner:
-        her own drops; the hunt loop's none: `_allow`)."""
-        return False
-
-    def _whole(self, p: Pile, s: Scene, now: float) -> float:
-        """The s such a pile (`_all_of`) may add to her way (behavior.grind's)."""
-        return self._allow(p, now)
+    def _whole(self, p: Pile, s: Scene, now: float) -> float | None:
+        """The s pile `p` may add to her way whatever it's worth (behavior.grind's target-first planner); None: by its worth
+        and the danger there (the hunt loop's: `_allow`)."""
+        return None
 
     def _share(self, p: Pile, worth: float) -> float:
         """The share of pile `p`'s worth (Pile.value) that she can take (`worth`: `_worth`'s, a full tab's items
