@@ -42,6 +42,7 @@ from ..control import client
 from ..control.actions import Actions
 from ..control.mover import STILL, Mover
 from ..control.navigator import Navigator, TopPrice, rope_at_top
+from ..localization.aggro import Aggro
 from ..localization.gains import ExpMeter, Gain
 from ..localization.mapdata import MapModel
 from ..localization.memory import Memory
@@ -159,6 +160,7 @@ MISS_SAID_S = 1.5    # her attack's MISS popup said once in this long (a look's 
 STARS_WAIT_S = 15.0  # ... that check put off (no quiet moment: keycheck) this long at the most, then the stop (her Lucky
                      # Seven held meanwhile, the regular attack instead)
 CLOCK_RECORD_S = 60.0  # s between the map's spawn clock's 'spawn_clock' telemetry records (_births; recording only)
+AGGRO_RECORD_S = 30.0  # s between her aggro belief's 'aggro' telemetry records (_aggro; recording only)
 
 
 def _throws_stars() -> bool:
@@ -321,6 +323,11 @@ class Hunter:
         # The map's spawn pass (localization.spawnclock), learned from the births every look's feed saw: when a free
         # spawn point of a monster that hurts is about to fill (the hunt loop's spawn guard: behavior.hunt)
         self.spawn_clock = SpawnClock()
+        # The monsters she has hurt that chase her (localization.aggro), from every look's feed and her throws: kept for
+        # the 3-4 minutes a hit draws, with where each likeliest is and who touched her. Passive: nothing reads it yet
+        # (the planner's, to come)
+        shape = getattr(self.senses, "shape", None)
+        self.aggro = Aggro(model, reach=None if shape is None else (shape.near, shape.ahead, shape.up, shape.down))
         # Her attack a throw (behavior.attacks): every throw's key is its choice, but in mode 'regular'. Her skill cast
         # only at a body seen that her search picks, not dead, not again where it took no effect, where her profile
         # casts nothing at nothing (Policy.unseen 'none': the magician's Magic Claw; Attacks.picks)
@@ -404,8 +411,9 @@ class Hunter:
         self.senses.listeners += [self._vitals, self._heading, self._others, self._publish, self.ledger.on_look,
                                   self.drops.on_look, self.looter.on_look, self.wounds.on_look, self.memory.on_look,
                                   self._misses,
-                                  self.attacks.on_look, self._chat_seen, self._births]
+                                  self.attacks.on_look, self._chat_seen, self._births, self._aggro]
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
+                                         self.aggro.throw,
                                          self.attacks.on_throw,  # (a cast's MP)
                                          self._tell_feed]  # (the feed's: whose kills are whose, tracking)
         self._feed_throw = self.senses.feed.throw  # (the feed she was made with, as the listener was before)
@@ -1049,6 +1057,21 @@ class Hunter:
             if now - getattr(self, "_clock_said", -math.inf) >= CLOCK_RECORD_S:
                 self._clock_said = now
                 telemetry.emit("spawn_clock", **self.spawn_clock.record())
+
+    def _aggro(self, s: Scene) -> None:
+        """The look to her aggro belief (localization.aggro.Aggro.on_look); its state as an 'aggro' telemetry record once
+        every AGGRO_RECORD_S and at every touch it placed (recording only)."""
+        aggro = self.aggro
+        touched = aggro.counts["touches"]
+        aggro.on_look(s)
+        if telemetry.recording():
+            now = time.monotonic()
+            if now - getattr(self, "_aggro_said", -math.inf) >= AGGRO_RECORD_S or aggro.counts["touches"] > touched:
+                self._aggro_said = now
+                rec = aggro.record(s.t)
+                if aggro.touches:
+                    rec["touch"] = aggro.touches[-1].record()
+                telemetry.emit("aggro", t_look=round(s.t, 3), **rec)
 
     def _misses(self, s: Scene) -> None:
         """Her attack's MISS popups in look `s`'s frame over the targets of her presses waiting to be judged
