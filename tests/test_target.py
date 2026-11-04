@@ -2,6 +2,7 @@
 both characters where it differs. Which monster, the next, a respawn, a monster coming at her, the plan's place, her drops
 against her target, and the backpack's push (control.notify.BackpackPush)."""
 
+import dataclasses
 import contextlib
 import time
 from types import SimpleNamespace
@@ -520,7 +521,7 @@ def test_no_step_off_when_it_would_lose_the_shot_or_the_way_is_not_clear_or_she_
     tp, s = _zone_tp(m, -135.0, -110.0)
     assert tp.off_zone(s) is None
     tp, s = _zone_tp(m, -135.0, 60.0)
-    tp.her.hi = -120.0
+    tp.her = dataclasses.replace(tp.her, hi=-120.0)
     assert tp.off_zone(s) is None
     tp, s = _zone_tp(m, -135.0, 60.0, clear=False)
     assert tp.off_zone(s) is None and tp.plan(s, ("throw", "right"), True) == ("throw", "right")
