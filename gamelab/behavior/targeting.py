@@ -2,8 +2,8 @@
 Her and Foes, its choice narrowing the hunt's targets to the one monster to hit, and the plan against it: the stance's
 own answer for that monster (attack.stance: up close, a jump attack, a step to range; a jump's shot), or the walk to the
 place along her platform that works (attack.target.best_place: its knock priced, its way checked once, flow.danger, by the
-navigator). Off (GAMELAB_TARGET=0: `on`) none of this runs, and the grind is master's to the digit. README: "The target-first
-planner".
+navigator). On by default since its gate of 2026-11-04; off (GAMELAB_TARGET=0: `on`) none of this runs, and the grind is the
+one before it to the digit. README: "The target-first planner".
 
 Everything else about a stop stays the grind's: where she goes next (Grind._leaving, Patrol.choose), her potions and the
 safety stop, the Lie Detector's stop. Her drops come in as they're due (`pile_first`, `loot_allow`: LOOT_ALL ...). The choice
@@ -52,19 +52,19 @@ NEAR_BORN = 300.0     # units from her: a newborn's delay is counted only within
 HIST_MS = 0.05        # ms a bin of the decision's time (`Targeting.ms`) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
 
-_FORCED = [False]    # (`forced_on`: a set-piece's)
+_FORCED: list[bool | None] = [None]    # (`forced_on`: a set-piece's)
 
 
 def on() -> bool:
-    """Whether the grind's fights go by the target-first planner (GAMELAB_TARGET: '1' on; anything else off, the default until
-    its gate says otherwise)."""
-    return _FORCED[0] or os.environ.get("GAMELAB_TARGET", "0") == "1"
+    """Whether the grind's fights go by the target-first planner (GAMELAB_TARGET: '0' off, master's to the digit; on by default
+    since its gate, 2026-11-04: README)."""
+    return _FORCED[0] if _FORCED[0] is not None else os.environ.get("GAMELAB_TARGET", "1") != "0"
 
 
 @contextlib.contextmanager
 def forced_on():
-    """On within the block, whatever GAMELAB_TARGET says (a set-piece's: sim.scenarios.loop_tree_rope_top_chaser), unless
-    GAMELAB_TARGET=0 says it's master's arm that's measured."""
+    """On within the block, whatever GAMELAB_TARGET says (a set-piece's: sim.scenarios.loop_tree_rope_top_chaser), off with
+    GAMELAB_TARGET_SETPIECE=0 (master's arm, measured)."""
     was, _FORCED[0] = _FORCED[0], os.environ.get("GAMELAB_TARGET_SETPIECE", "1") == "1"
     try:
         yield
