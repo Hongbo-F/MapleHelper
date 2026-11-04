@@ -12,10 +12,11 @@ runs normally and talks to it through files. To keep that safe it only ever:
 - watches the game for the Lie Detector (the game's anti-bot check) the whole time it runs; if it
   appears, input stops at once (all that goes out after is letting go of the keys and buttons a plan
   held), the player pages whoever is at the PC, records the Lie Detector's whole cycle
-  (control.lie_recorder) while refusing every plan but three kinds (alarm_refusal: a tap of her pet food key,
+  (control.lie_recorder) while refusing every plan but four kinds (alarm_refusal: a tap of her pet food key,
   a few a minute; her retreat's moves, arrows, jump, up and down, for alarm.RETREAT_WINDOW_S after the
-  sighting; neither with the mouse; and the mini-game tracker's mouse moves alone, inside its board, no focus, click,
-  key or recording; all three held to it with the alarm file up too, raised by another program; her keys for the first
+  sighting; neither with the mouse; the mini-game tracker's mouse moves alone, inside its board, no focus, click,
+  key or recording; and the pass's dialog's OK clicked, on its button alone (lie_ok_refusal); all held to it
+  with the alarm file up too, raised by another program; her keys for the first
   two config.toml's, or where the running commands follow them to, paths.ALARM_KEYS: alarm.AlarmKeys), and
   stops once a person has run `python -m gamelab clear-alarm` and the Lie Detector has been off the screen for a
   minute; it won't start again until the alarm is cleared (it never clicks or types an answer, and never moves her by
@@ -55,7 +56,8 @@ from maplehelper.keys import parse as parse_key
 
 from .. import window
 from ..paths import ALARM, ALARM_KEYS, CONFIG, INBOX, LAB, LIE_RECORDINGS, OUTBOX, PLAYER_INFO, PLAYER_LOG, STOP
-from .alarm import (ALARM_UNSAFE, LIE_CURSOR, LIE_CURSOR_BOX, LIE_DETECTOR_ERROR, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS,
+from .alarm import (ALARM_UNSAFE, LIE_CURSOR, LIE_CURSOR_BOX, LIE_DETECTOR_ERROR, LIE_OK, LIE_OK_BOX, LIE_OK_DOWN_MS,
+                    LIE_OK_HOLD_MS, PET_FOOD, PET_FOOD_PER_MIN, PLAN_KINDS,
                     RETREAT, RETREAT_WINDOW_S, AlarmKeys)
 
 # It used to stop after 3 idle hours; on 2026-10-23 the user asked that it not be exited proactively (starting it
@@ -138,10 +140,34 @@ def validate(plan: dict, allowed: dict[str, Key]) -> None:
         raise ValueError("crop must be [x, y, width, height] in client pixels")
 
 
+def lie_ok_refusal(plan: dict) -> str | None:
+    """Why a `lie_ok` plan isn't the pass's dialog's OK click (None: it is): a move to a point inside LIE_OK_BOX at
+    0 ms, the left button down within LIE_OK_DOWN_MS and up LIE_OK_HOLD_MS after, and nothing else; no focus change,
+    lead, wait at its end, resize or recording. Its kind is checked whatever the alarm (it clicks: held to this)."""
+    events = plan.get("events", [])
+    cap = plan.get("capture", {})
+    if plan.get("window_client") is not None or cap.get("fps", 0):
+        return "no window resize or recording in the pass's OK click"
+    if plan.get("focus") or cap.get("lead_ms", 100) != 0 or plan.get("end_ms") not in (None, 0):
+        return "the pass's OK click goes at once, without focus or a wait at the plan's end"
+    if (len(events) != 3 or len(events[0]) != 4 or events[0][:2] != [0, "mouse"]
+            or [e[1:] for e in events[1:]] != [["lbutton", "down"], ["lbutton", "up"]]):
+        return "the pass's OK click is a move at 0 ms, then the left button down and up, and nothing else"
+    _, _, x, y = events[0]
+    x0, y0, x1, y1 = LIE_OK_BOX
+    if not (isinstance(x, int) and isinstance(y, int) and x0 <= x < x1 and y0 <= y < y1):
+        return f"the pass's OK click stays on its button ({x0} <= x < {x1}, {y0} <= y < {y1})"
+    down, up = events[1][0], events[2][0]
+    if not (LIE_OK_DOWN_MS[0] <= down <= LIE_OK_DOWN_MS[1] and LIE_OK_HOLD_MS[0] <= up - down <= LIE_OK_HOLD_MS[1]):
+        return (f"the pass's OK button is pressed {LIE_OK_DOWN_MS[0]}-{LIE_OK_DOWN_MS[1]} ms in and let go "
+                f"{LIE_OK_HOLD_MS[0]}-{LIE_OK_HOLD_MS[1]} ms later")
+    return None
+
+
 def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: list[float], now: float) -> str | None:
     """Why the player won't run `plan` with the Lie Detector alarm up (None: it will), `since` s after the sighting
     (None: when isn't known), the pet food plans it ran with the alarm up having started at `fed` (time.monotonic(), as
-    `now`). Three kinds go (alarm.PLAN_KINDS), and only as their kind says:
+    `now`). Four kinds go (alarm.PLAN_KINDS), and only as their kind says:
     - `pet_food`: one tap of her pet food key (config.toml [keys] pet_food) and nothing else, the whole plan over within
       TAP_MAX_MS of its start (its key down and up, its end: it holds the player no longer); PET_FOOD_PER_MIN in any
       minute at most;
@@ -149,15 +175,20 @@ def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: l
       presses let go by its end, until RETREAT_WINDOW_S after the sighting;
     - `lie_cursor`: one immediate mouse move inside the mini-game's board, no focus change, button, key, or wait at its
       end. The ordinary perception process needs the elevated player for this (Windows blocks its input to the game).
+    - `lie_ok`: the pass's dialog's OK button clicked (control.violetta_live): a move to a point inside LIE_OK_BOX at
+      0 ms, the left button down within LIE_OK_DOWN_MS and up LIE_OK_HOLD_MS later, nothing else, no focus change;
+      the button pressed only with the game the window under the pointer (`_press_refusal`).
     None resizes the window or records; the first two neither move the mouse nor click. Every plan starts within
     TAP_MAX_MS (its lead). `plan` is well-formed already (`validate`)."""
     kind = plan.get("kind")
     if kind not in PLAN_KINDS:
-        return "only her pet's food, her retreat and the mini-game's cursor go with the alarm up"
+        return "only her pet's food, her retreat, the mini-game's cursor and the pass's OK go with the alarm up"
     events = plan.get("events", [])
     cap = plan.get("capture", {})
     if plan.get("window_client") is not None or cap.get("fps", 0):
         return "no window resize or recording with the alarm up"
+    if kind == LIE_OK:
+        return lie_ok_refusal(plan)
     if kind != LIE_CURSOR and any(len(e) != 3 or e[1] in MOUSE_BUTTONS for e in events):
         return "no mouse with the alarm up"
     # Its start bounded: `validate` bounds a plan's lead only by the frames it records, and with none a plan let
@@ -690,6 +721,9 @@ class Player:
             return {"error": LIE_DETECTOR_ERROR}
         filed = not during and kind in PLAN_KINDS and alarm_up()
         validate(plan, self.allowed)
+        if kind == LIE_OK and (why := lie_ok_refusal(plan)) is not None:  # (it clicks: held to its one click always)
+            self.log(f"refused {plan.get('id', '?')} ({kind}): {why}")
+            return {"error": why}
         cutoff = None  # (perf_counter) when a retreat's window ends: its keys stop there
         if during or filed:
             at = getattr(self.alarm, "at", None)  # (a plain Event: when isn't known, and no retreat goes)
@@ -849,6 +883,10 @@ class Player:
                             return
                     else:
                         _, name, kind = event
+                        if (cur["plan"].get("kind") == LIE_OK and name in MOUSE_BUTTONS and kind == "down"
+                                and not window.pointer_on(hwnd)):  # (the click lands on the game's dialog or nowhere)
+                            cur["problems"].append("another window is under the pointer; the OK not clicked")
+                            return
                         if not (kind == "down" and name in held):  # (held already: a splice's held key, left down)
                             _press(self.allowed, name, kind == "down")
                             (held.add if kind == "down" else held.discard)(name)
@@ -1004,8 +1042,9 @@ def _answer(path, result: dict) -> str:
 def serve() -> None:
     """The player: take plans from the inbox in name order and answer each, until STOP, 24 idle hours (not counting
     a Lie Detector's recording, at most lie_recorder.CAP_S) or a Lie Detector dealt with. From a Lie Detector's
-    sight it refuses every plan (Player.run: the alarm Event) but the three kinds alarm_refusal lets through (her pet's
-    food; her retreat's moves, for alarm.RETREAT_WINDOW_S; the mini-game's mouse-only cursor) while the watchdog records
+    sight it refuses every plan (Player.run: the alarm Event) but the four kinds alarm_refusal lets through (her pet's
+    food; her retreat's moves, for alarm.RETREAT_WINDOW_S; the mini-game's mouse-only cursor; the pass's OK) while the
+    watchdog records
     it, and it stops once a
     person has cleared the alarm and the screen has been clear since (Watchdog.cleared): plans are taken again only
     by a player started again, which takes the user's UAC click, as when it shut down at the alarm. It won't start
