@@ -93,6 +93,46 @@ counts a monster her memory has only where she gets at it from there (on the sto
 somewhere along it: `gets`), and not one she left the stop with nothing in reach since (`left_at`: she'd been there to
 see it); a point her memory has none at, by the share of it a star reaches from the stop.
 
+The census (Belief.census, from 2026-11-03; off with CENSUS False): a grind that keeps to part of the map leaves the
+rest to fill up, the map's cap held there, and her own part starves (the user, 2026-11-03: a grind confined to Tree
+Dungeon's upper and middle tower "would cause bottom of the tower pile up with mobs"; in the simulator, alone, the
+bottom went from 6 to 15 of its cap of 22 in 40 minutes and grinding's EXP a minute fell 19% for the thief, 37% for
+the magician). So a count of the monsters by every spawn point of the map, a kind she doesn't hunt too (`extra`: on
+the first map her unhunted snails grow from 6 to 11 of its 26): a point in view (her look covered it: Memory.
+holds_body) holds the monsters seen by it; one out of view what it held when last seen; and each kill of hers, whose
+monster the map's next pass brings back somewhere, is one born out of view unless she saw a newborn fade in (Mob.fading,
+the spawn watch's) by then, spread over the points out of view by how likely each is clear (no monster within
+CENSUS_NEAR: by the monsters believed on its platform). Her kills count births alone (one back a kill within a pass):
+"the cap less what she sees", without them, made every monster her looks missed in view (under her hits' damage
+numbers, fading in, her kill not back yet) one out of view, the bottom 1-4 off where with them within 1, and 3% less
+EXP (D:/MapleHelper-scratch/pileup: v_ledger_occ.py). The whole is held to the map's cap less her kills not back yet
+(down whenever over it; up only with no other player seen within CENSUS_RIVAL_S), and another player's dot by a point
+out of view takes its monsters. Out of view with none remembered, a point's stock is the census's (Belief.stock); a
+stop's expected EXP counts her memory's monsters in view only, the census's out of it (Patrol.expect).
+
+The gate, the user's (2026-11-03: "if all the visible spawn points have a low spawn rate, it probably means the mobs
+are piling elsewhere"): her view's spawn points' monsters a point over the last OCC_S of looks against the map's average
+(its cap over its spawn points: Belief.ratio). In the simulator (D:/MapleHelper-scratch/pileup/sig.py, a respawn pass
+at a time) 0.40-0.60 on Tree Dungeon alone, falling as the bottom fills, 0.67-0.75 on the first map, 0.77-0.88 with
+other players killing; in a minute's windows OCC_MAX or under 75% of the time on Tree Dungeon alone (the thief), 35% on
+the first map, 10% with others. Births don't tell it: the server's draw is even over the clear points, so the clear
+points she sees spawn at the map's rate for clear points wherever the piles are, and fewer each only as her kills slow.
+
+A trip (Patrol.choose, `trip`), with the gate open: from a stop off her round the census believes holds TRIP_MIN_N
+monsters or more, the nearest stops after it one by one while each raises the trip's monsters a second; its detour the
+travel there, between its stops and on to her round's next stop beyond going there straight, STOP_S a stop and each
+monster at her handling time a kill (handle_s: getting to a stop to her last kill there, over its kills, her last
+HANDLE_N stops pooled; the planner's kill time until HANDLE_MIN kills); taken when its monsters reach PULL_GAIN times
+her kills a second over the last BAR_S (Patrol.bar) over that detour, the trip that leaves the most over her rate. On
+it her next stop is its next (a stop believed under TRIP_GONE_N dropped, a pile seen on the way may still pull her).
+In counts and seconds alone, so the same on any map and for either character (EXP only in the planner's kill time).
+In the simulator, 24 seeds paired against CENSUS False (D:/MapleHelper-scratch/pileup: c24_*), alone: Tree Dungeon's
+thief 249.3 -> 287.0 EXP a minute over 40 minutes (+15.1%, better on 24 of 24, the worst +2%), by 10-minute block 286,
+252, 235, 221 -> 289, 282, 288, 286; its magician 302.3 -> 375.8 (+24.3%, 24 of 24, the worst +12%); the first map over
+25 minutes +0.6% (11 of 24); with others, Tree Dungeon over 20 minutes +0.1%. Its cost there: HP lost 22.1 -> 25.2 bars
+and 14.7 -> 19.2, touches 290 -> 340 and 151 -> 202, drops picked up 94.9% -> 91.6% and 95.2% -> 93.4%; no death, safety
+stop or out of darts in the 192 runs.
+
 The danger hook (`Patrol.danger(platform, x)`): how badly she can be touched fighting at a place, in the positioning
 model's unit (attack.danger.Danger.at: the share of her HP touches would take there, each monster or spawn point weighed
 by how soon it gets to her), which grinding plugs in (behavior.grind: the hunter's, Hunter.danger); she loses
@@ -294,6 +334,25 @@ PULL_GAIN = 1.25       # guess: a quarter over the loop's (the pile seen may be 
 REACH_ROUND = 5.0      # units: a remembered monster's x to this for whether a stop gets at it (Patrol.gets, kept; a
                        # resolution)
 DUE_S = 2.0            # guess: s of a wait at a stop for the respawns in reach (Patrol.wait_gain)
+# The census (Belief.census, see the top): the server's clear rule (sim.world.SPAWN_CLEAR) for a point of a kind she
+# doesn't hunt (its monsters seen within this of it), and her unseen respawns spread by it; with another player seen
+# within CENSUS_RIVAL_S the total out of view isn't held up to the cap (their kills empty points she doesn't see).
+CENSUS = True          # False: the belief and the next stop as before 2026-11-03 (no census, no trips)
+CENSUS_NEAR = 100.0
+CENSUS_RIVAL_S = 60.0  # guess
+CENSUS_SEEN_S = 0.5    # a point in view holds the monsters by it seen this lately (a look's)
+# Trips (Patrol.choose, see the top): one starts at a stop off her round believed to hold TRIP_MIN_N monsters or more,
+# and drops a stop believed to hold under TRIP_GONE_N; its monsters a second against her kills a second over BAR_S (none
+# before half of it), her handling time a kill pooled over her last HANDLE_N stops with kills (the planner's kill time
+# until HANDLE_MIN kills); none unless her view's spawn points held OCC_MAX or less of the map's average (its cap over
+# its spawn points) over the last OCC_S (the user, 2026-11-03: "Over 1 minute, 3 min feels too long").
+TRIP_MIN_N = 1.0
+TRIP_GONE_N = 0.2
+BAR_S = 180.0          # guess
+HANDLE_N = 20          # guess
+HANDLE_MIN = 8         # guess
+OCC_S = 60.0
+OCC_MAX = 0.55
 
 
 @dataclass(frozen=True)
@@ -304,6 +363,16 @@ class Point:
     x: float
     kind: str
     exp: float
+
+
+@dataclass(frozen=True)
+class Extra:
+    """A spawn point of a kind she doesn't hunt (the census's: its monsters take the map's cap like any); `id` ("x",
+    its index among the map's spawns)."""
+    id: tuple
+    platform: int
+    x: float
+    kind: str
 
 
 @dataclass(frozen=True)
@@ -538,6 +607,28 @@ class Belief:
         self._events = 0
         self._kept_ids: set[int] = set()
         self._covered_t = -1e18                  # the latest look's cover taken (Memory.covers)
+        # The census (see the top): every spawn point of the map, hunted or not (`extra`), and what it holds
+        hunted = {(q.platform, round(q.x)) for q in points}
+        self.extra: list[Extra] = []
+        for k, sp in enumerate(model.spawns):
+            p = model.platform_under(sp.x, sp.y, reach=SPAWN_REACH)
+            if p is None or not sp.name or (p.id, round(sp.x)) in hunted:
+                continue
+            self.extra.append(Extra(("x", k), p.id, float(sp.x), kind_of(sp.name)))
+        self._extra_by = {q.id: q for q in self.extra}
+        per = self.cap / max(1, len(points) + len(self.extra))
+        self.census: dict = {q.id: per for q in list(points) + self.extra}  # point id -> monsters believed by it
+        self.in_view: set = set()                # the points her latest look covered
+        self.pending: list[float] = []           # her kills whose pass hasn't come yet
+        self.births_seen = 0                     # newborns seen fading in (Mob.fading), in all ...
+        self.due_n = 0                           # ... her kills whose pass came, in all ...
+        self.assigned = 0.0                      # ... and the births out of view spread so far
+        self.last_t: float | None = None         # the latest update
+        self.t0: float | None = None             # the first
+        self._seen_ids: set[int] = set()
+        self.rival_t = -1e18                     # another player last seen
+        self.all_kills: list[float] = []         # her kills over BAR_S (Patrol.bar)
+        self.occ: list[tuple[float, float, float]] = []  # (t, points in view, monsters by them) x s, over OCC_S
 
     # --- what it holds ---------------------------------------------------------------------------------
 
@@ -594,8 +685,16 @@ class Belief:
             self.watched_s += gap
 
     def stock(self, i: int, t: float) -> float:
-        """How many monsters point `i` is expected to have at time `t` (now or ahead): for one empty, what's back by
-        then since the latest look that saw it empty (`back`, at the rate learned)."""
+        """How many monsters point `i` is expected to have at time `t` (now or ahead): out of view with none remembered,
+        the census's if it has any there (see the top); else `refilled`."""
+        if not CENSUS or self.at.get(i) or i in self.in_view:
+            return self.refilled(i, t)
+        c = self.census.get(i, 0.0)
+        return c if c > 0 else self.refilled(i, t)
+
+    def refilled(self, i: int, t: float) -> float:
+        """How many monsters point `i` is expected to have at time `t` by her memory and the refill: for one empty,
+        what's back by then since the latest look that saw it empty (`back`, at the rate learned)."""
         es = self.at.get(i)
         if es:
             return sum(e.p(t) for e in es)
@@ -641,7 +740,8 @@ class Belief:
     def update(self, t: float, memory, players: list[Player] | None = None) -> None:
         """At a look at time `t`: the monsters her memory has (localization.memory.Memory) put at their points, her
         kills and the looks that searched a point's monster (since the last update: Memory.covers) emptying points,
-        other players by them."""
+        other players by them; then the census (see the top) and her view's occupancy (`ratio`)."""
+        prev_t = self.last_t
         self.t = t
         self._take_events(t, memory)
         at: dict[int, list] = {}
@@ -695,6 +795,96 @@ class Belief:
             if e.live and e.rival and e.id not in self._kept_ids and e.seen - e.first >= TAKE_KEEP_S:
                 self._kept_ids.add(e.id)
                 self.kept_by[e.kind] += 1
+        self._census(t, memory, players, prev_t)
+        if self.t0 is None:
+            self.t0 = t
+        ks = self.all_kills
+        newest = ks[-1] if ks else -1e18
+        ks.extend(k for k in self.kills if k > newest)
+        while ks and ks[0] < t - BAR_S:
+            ks.pop(0)
+        if prev_t is not None and t > prev_t and self.in_view:  # (a look weighed by the time to it, a second at most)
+            dt = min(t - prev_t, 1.0)
+            self.occ.append((t, dt * len(self.in_view), dt * sum(self.census.get(i, 0.0) for i in self.in_view)))
+        while self.occ and self.occ[0][0] < t - OCC_S:
+            self.occ.pop(0)
+
+    def _census(self, t: float, memory, players: list[Player] | None, last: float | None) -> None:
+        """The census at a look at time `t` (see the top), the latest update's at `last`."""
+        self.pending += [k for k in self.kills if last is None or k > last]
+        every = list(self.points) + self.extra
+        view = set()
+        for cover in memory.covers:
+            if last is not None and cover.t <= last:
+                continue
+            for q in every:
+                if memory.holds_body(cover, q.platform, q.x, q.kind):
+                    view.add(q.id)
+        if view:
+            self.in_view = view
+        for i in self.in_view:  # what's there: the monsters by it seen in this look
+            if isinstance(i, tuple):
+                q = self._extra_by[i]
+                self.census[i] = float(sum(1 for e in memory.entries if e.live and e.platform == q.platform
+                                           and e.kind == q.kind and abs(e.x - q.x) <= CENSUS_NEAR
+                                           and t - e.seen <= CENSUS_SEEN_S))
+            else:
+                self.census[i] = float(sum(1 for e in self.at.get(i, ()) if e.live and t - e.seen <= CENSUS_SEEN_S))
+        for e in memory.entries:  # the newborns she saw: a monster first seen fading in
+            if e.id in self._seen_ids:
+                continue
+            self._seen_ids.add(e.id)
+            if getattr(e.monster.mob, "fading", None) is not None:
+                self.births_seen += 1
+        due = [k for k in self.pending if k + TICK_S <= t]
+        self.pending = [k for k in self.pending if k + TICK_S > t]
+        self.due_n += len(due)
+        unseen = max(0.0, self.due_n - self.births_seen) - self.assigned  # her respawns she didn't see: out of view
+        if unseen > 0:
+            self.assigned += unseen
+            self._spread(unseen)
+        if players:
+            self.rival_t = t
+        for q in self.points:  # another player by a point takes its monsters
+            if t - self.rival_at.get(q.id, -1e18) <= RIVAL_KEEP_S and q.id not in self.in_view:
+                self.census[q.id] = 0.0
+        out = [i for i in self.census if i not in self.in_view]  # the map holds its cap: out of view what's left
+        held = sum(self.census[i] for i in self.in_view)
+        target = max(0.0, self.cap - len(self.pending) - held)
+        total = sum(self.census[i] for i in out)
+        if total > 0 and (total > target or t - self.rival_t > CENSUS_RIVAL_S):
+            k = target / total
+            for i in out:
+                self.census[i] *= k
+        self.last_t = t
+
+    def _spread(self, n: float) -> None:
+        """`n` monsters born out of view, onto the points there by how likely each is clear (no monster within
+        CENSUS_NEAR: by the monsters believed on its platform)."""
+        every = list(self.points) + self.extra
+        on: dict[int, float] = {}
+        for q in every:
+            on[q.platform] = on.get(q.platform, 0.0) + self.census.get(q.id, 0.0)
+        w = {}
+        for q in every:
+            if q.id in self.in_view:
+                continue
+            p = self.model.platform(q.platform)
+            w[q.id] = math.exp(-on[q.platform] * min(1.0, 2 * CENSUS_NEAR / max(1.0, p.right - p.left)))
+        total = sum(w.values())
+        if total > 0:
+            for i, v in w.items():
+                self.census[i] += n * v / total
+
+    def ratio(self, t: float) -> float | None:
+        """Her view's spawn points' monsters a point over the map's average (its cap over its spawn points, every
+        kind's), over the last OCC_S of looks; None before half of it, or with nothing in view (see the top)."""
+        if not self.occ or self.t0 is None or self.t0 > t - OCC_S / 2:
+            return None
+        pts = sum(p for _, p, _ in self.occ)
+        if pts <= 0:
+            return None
+        return (sum(m for _, _, m in self.occ) / pts) / (self.cap / (len(self.points) + len(self.extra)))
 
     def _take_events(self, t: float, memory) -> None:
         """Her memory's new events since the last update: her kills empty their points, and so do another player's
@@ -780,6 +970,9 @@ class Patrol:
         self.hp_time: Counter = Counter()  # ... over this many s there
         self.hp_price = HP_PRICE           # EXP a bar of her HP (behavior.grind sets it from her max HP as read)
         self._legs: dict[tuple[int, int], float | None] = {}
+        self.trip: list[int] | None = None  # a trip's stops still to go (choose)
+        self.trips = 0                       # trips taken
+        self._handles: list[tuple[float, int]] = []  # her stops' handling: (s getting there to her last kill, kills)
 
     def platform_of(self, i: int) -> int:
         return self.stops[i].platform
@@ -822,6 +1015,45 @@ class Patrol:
     def learn_kills(self, throws: int, exp: float) -> None:
         """Her kill time a point of EXP from the throws she made and the EXP her kills gave (KILL_PRIOR_EXP)."""
         self.kill_s = (KILL_S_PER_EXP * KILL_PRIOR_EXP + THROW_S * throws) / (KILL_PRIOR_EXP + exp)
+
+    def handled(self, seconds: float, kills: int) -> None:
+        """A stop she left: `seconds` from getting there to her last kill there, `kills` kills (handle_s)."""
+        self._handles.append((seconds, kills))
+        del self._handles[:-HANDLE_N]
+
+    def handle_s(self) -> float | None:
+        """Her handling time a kill (see the top): the s from getting to a stop to her last kill there over its kills,
+        pooled over her last HANDLE_N stops with kills; None under HANDLE_MIN kills."""
+        n = sum(k for _, k in self._handles)
+        return sum(d for d, _ in self._handles) / n if n >= HANDLE_MIN else None
+
+    def bar(self, t: float) -> float | None:
+        """Her kills a second over the last BAR_S, the bar a trip's monsters a second must beat (see the top); None
+        before half of it, or with her view's spawn points not under OCC_MAX of the map's average (Belief.ratio): then
+        no trip."""
+        b = self.belief
+        r = b.ratio(t)
+        if r is None or r > OCC_MAX or b.t0 is None or t - b.t0 < BAR_S / 2:
+            return None
+        return sum(1 for k in b.all_kills if k > t - BAR_S) / min(BAR_S, t - b.t0)
+
+    def counts(self, stops: Iterable[int], t: float) -> tuple[float, float]:
+        """The monsters believed in reach of `stops` (each point once, at its best cover: her memory's in view, else
+        the census's, her share) and the s of handling them (handle_s, else her kill time)."""
+        b, best = self.belief, {}
+        for j in stops:
+            for q, c in self.stops[j].cover:
+                if c > best.get(q, 0.0):
+                    best[q] = c
+        h = self.handle_s()
+        n = shoot = 0.0
+        for q, c in best.items():
+            es = b.at.get(q)
+            m = sum(e.p(t) for e in es) if es and q in b.in_view else c * b.census.get(q, 0.0)
+            m *= b.share(q, t)
+            n += m
+            shoot += m * (h if h is not None else self.kill_s * self.points[q].exp)
+        return n, shoot
 
     # --- a round's worth in the long run ---------------------------------------------------------------
 
@@ -966,20 +1198,22 @@ class Patrol:
 
     def expect(self, i: int, t: float) -> tuple[float, float, float, float]:
         """At stop i at time `t`: the EXP expected in reach (hers: share), of it the EXP of monsters she has seen, the s
-        of shooting it takes, and the EXP it holds full (a monster at each point). A point's monsters her memory has
-        count each as sure as it is, where she gets at it from the stop (`gets`) and it was seen since she last left
-        the stop with nothing in reach (`left_at`); a point it has none at, by its stock and the share of it in reach."""
+        of shooting it takes, and the EXP it holds full (a monster at each point). A point in view's monsters her memory
+        has count each as sure as it is, where she gets at it from the stop (`gets`) and it was seen since she last left
+        the stop with nothing in reach (`left_at`); any other, by the census's out of view (see the top), else its
+        stock, and the share of it in reach."""
         b, left = self.belief, self.left_at.get(i, -1e18)
         exp = seen = full = 0.0
         for q, c in self.stops[i].cover:
             g = b.share(q, t) * self.points[q].exp
             es = b.at.get(q)
-            if es:
+            if es and (not CENSUS or q in b.in_view):
                 got = g * sum(e.p(t) for e in es if e.seen > left and self.gets(i, e))
                 exp += got
                 seen += got
             else:
-                exp += g * c * b.stock(q, t)
+                n = b.census.get(q, 0.0) if CENSUS and q not in b.in_view else 0.0
+                exp += g * c * (n if n > 0 else b.stock(q, t))
             full += g * c
         return exp, seen, exp * self.kill_s, full
 
@@ -1019,7 +1253,103 @@ class Patrol:
         on her way to, which stands in for the loop's next (only a pull takes her elsewhere); `peek`: what she'd do,
         her place in the loop left as it is (a check on the way, a replay); `bonus(j)`: EXP a visit to stop j gives
         beside its monsters (behavior.grind: her drops a sweep from its place would pick up), counted in what it's
-        expected to give and in what she has seen there."""
+        expected to give and in what she has seen there. On a trip its next stop (`trip`), a pile seen on the way
+        aside; else the stop's choice (`_choose`), and a trip off her round in its place when one beats her bar."""
+        if not CENSUS:
+            return self._choose(t, here, x, current=current, skip=skip, heading=heading, peek=peek, bonus=bonus)
+        skip = set(skip)
+        trip = list(self.trip or [])
+        if trip and current is not None and current == trip[0]:
+            trip.pop(0)
+        while trip and (self.stops[trip[0]].platform in skip or self.counts([trip[0]], t)[0] < TRIP_GONE_N):
+            trip.pop(0)  # (nothing left there, as she sees it now)
+        if not peek:
+            self.trip = trip or None
+        if trip and (heading is None or heading == trip[0]):
+            j, info = self._choose(t, here, x, current=current, skip=skip, heading=trip[0], peek=peek, bonus=bonus)
+            if info.get("why") == "pulled" and j != trip[0]:
+                return j, info
+            st = self.stops[trip[0]]
+            return trip[0], {**info, "why": f"trip ({len(trip)} to go)", "stop": st.platform, "x": st.x,
+                             "trip": [self.stops[k].platform for k in trip]}
+        j, info = self._choose(t, here, x, current=current, skip=skip, heading=heading, peek=peek, bonus=bonus)
+        if j is None or heading is not None or here is None or self.plan is None or info.get("why") == "pulled":
+            return j, info
+        found = self._trip(t, here, x, j, current, skip)
+        if found is None:
+            return j, info
+        route, n, d, rate = found
+        if not peek:
+            self.trip = list(route)
+            self.trips += 1
+        _, info = self._choose(t, here, x, current=current, skip=skip, heading=route[0], peek=True, bonus=bonus)
+        st = self.stops[route[0]]
+        return route[0], {**info, "why": f"trip of {len(route)} stops: {n:.1f} monsters over a {d:.0f} s detour",
+                          "stop": st.platform, "x": st.x, "trip": [self.stops[k].platform for k in route],
+                          "monsters": round(n, 2), "detour": round(d, 1), "bar": round(rate * 60, 2)}
+
+    def _trip(self, t: float, here: int, x: float, nxt: int, current: int | None,
+              skip: set) -> tuple[list[int], float, float, float] | None:
+        """A trip off her round on her way to stop `nxt` (see the top): (its stops, its monsters, its detour's s, her
+        bar), or None: none beats her bar (Patrol.bar), or there's none (the gate shut)."""
+        rate = self.bar(t)
+        if rate is None:
+            return None
+        loop = set(self.plan.stops)
+
+        def far_to(k: int) -> float | None:
+            s = self.stops[k]
+            return abs(s.x - x) / WALK_SPEED if here == s.platform else self.travel(here, x, s.platform, s.x)
+        far_next = far_to(nxt)
+        if far_next is None:
+            return None
+        off = [k for k in range(len(self.stops))
+               if k not in loop and k != current and self.stops[k].platform not in skip]
+        alone = {k: self.counts([k], t)[0] for k in off}
+
+        def cost(route: list[int], far: float) -> tuple[float | None, float | None]:
+            legs = sum(self.leg(a, b) or 0.0 for a, b in zip(route, route[1:]))
+            on = self.leg(route[-1], nxt)
+            if on is None:
+                return None, None
+            n, shoot = self.counts(route, t)
+            return n, (far + legs + on - far_next) + shoot + STOP_S * len(route)
+        best = None
+        for a in off:
+            if alone[a] < TRIP_MIN_N:
+                continue
+            far = far_to(a)
+            if far is None:
+                continue
+            route = [a]
+            n, d = cost(route, far)
+            if n is None or d <= 0:
+                continue
+            while True:  # on to the next stop while the trip's monsters a second rise
+                add = None
+                for k in off:
+                    if k in route or alone[k] <= 0.0 or self.leg(route[-1], k) is None:
+                        continue
+                    n2, d2 = cost(route + [k], far)
+                    if n2 is not None and d2 > 0 and n2 / d2 > n / d and (add is None or n2 / d2 > add[1] / add[2]):
+                        add = (k, n2, d2)
+                if add is None:
+                    break
+                route.append(add[0])
+                n, d = add[1], add[2]
+            if n < PULL_GAIN * rate * d:
+                continue
+            gain = n - rate * d
+            if best is None or gain > best[0]:
+                best = (gain, route, d, n)
+        if best is None:
+            return None
+        return best[1], best[3], best[2], rate
+
+    def _choose(self, t: float, here: int | None, x: float | None, current: int | None = None,
+                skip: Iterable[int] = (), heading: int | None = None, peek: bool = False,
+                bonus: Callable[[int], float] | None = None) -> tuple[int | None, dict]:
+        """The stop's choice (choose's, but its trips: see the top)."""
         skip = set(skip)
         if self.plan is None:
             self.replan(t, force=True)
