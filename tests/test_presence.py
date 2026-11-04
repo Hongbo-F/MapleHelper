@@ -328,11 +328,11 @@ def test_her_body_doesnt_keep_off_what_counts_as_no_danger():
 
 
 def test_one_track_twice_is_one():
-    """2026-11-04 00:25:14.839: one track counted twice, -52 and -152: the same by track wherever each has it; two tracks
-    side by side are two."""
+    """2026-11-04 00:25:14.839: one track counted twice, -52 and -152: the same by track wherever each has it; by place
+    as ever otherwise."""
     a, b = _monster("horny-mushroom", -52.0, track=68), _monster("horny-mushroom", -152.0, track=68)
     assert _same(a, b)
-    assert not _same(a, _monster("horny-mushroom", -52.0, track=69))
+    assert not _same(a, _monster("horny-mushroom", -152.0, track=69))
     assert _same(_monster("horny-mushroom", -52.0), _monster("horny-mushroom", -30.0))  # (no feed: by place)
     assert not _same(_monster("horny-mushroom", -52.0), _monster("horny-mushroom", -130.0))
 

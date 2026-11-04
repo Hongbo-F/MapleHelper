@@ -2568,12 +2568,12 @@ class Hunt:
 
 
 def _same(a: Monster, b: Monster) -> bool:
-    """Whether monsters `a` and `b` are one: of one track where the feed says each's (two of a track wherever each is
-    had: 2026-11-04 at 00:25:14.839 one track counted twice, -52 and -152; two of two tracks never); else of a kind, on a
-    platform, within memory.MATCH_SLACK."""
-    ta, tb = getattr(a, "track", None), getattr(b, "track", None)
-    if ta is not None and tb is not None:
-        return ta == tb
+    """Whether monsters `a` and `b` are one: of one track wherever each has it (2026-11-04 at 00:25:14.839 one track counted
+    twice, -52 and -152), or of a kind, on a platform, within memory.MATCH_SLACK (two tracks that near mostly one monster
+    the tracker lost and found again under a new id)."""
+    ta = getattr(a, "track", None)
+    if ta is not None and ta == getattr(b, "track", None):
+        return True
     return a.kind == b.kind and a.platform == b.platform and abs(a.x - b.x) <= 40.0
 
 
