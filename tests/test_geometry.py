@@ -167,6 +167,7 @@ STRETCHED_ON_PURPOSE = {
 PX_ON_PURPOSE = {
     ("localization/senses.py", "ROPE_MATCH_PX"): "ROPE_PAD, a sum of px converted where it's used",
     ("localization/tracking.py", "EDGE_PX"): "View.edge's default, 1920x1080's; worldstate sets it per look",
+    ("perception/exact.py", "NEAR_PX"): "the exact finder's: it runs at the game's own size alone",
 }
 
 

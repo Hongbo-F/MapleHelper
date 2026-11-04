@@ -11,7 +11,7 @@ from gamelab import native
 from gamelab.localization.monsters import Monster
 from gamelab.localization.tracking import HIDDEN, LIVE, MonsterTracker, Track, View
 from gamelab.localization.worldstate import WorldStep
-from gamelab.perception import exact
+from gamelab.perception import deaths, exact, hud
 from gamelab.perception.exact import MIN_EXACT, ExactFinder, Find, Picture
 from gamelab.perception.mobs import Mob
 
@@ -102,7 +102,9 @@ def test_a_find_adds_a_detection_only_where_none_lies_and_never_a_dying_one():
     far = Mob(p.kind, 400, 130, 56, 60, 0.9, 400.0, 160.0, 1, "move")
     assert exact.fresh([_find(p)], [near]) == []
     got = exact.fresh([_find(p)], [far])
-    assert len(got) == 1 and got[0].score == 0.5 and got[0].foot_x == 100 + p.ox and got[0].kind == p.kind
+    # (score 1, whatever share of it showed: no death watch on a monster its exact pixels say is alive: deaths.wants)
+    assert len(got) == 1 and got[0].score == 1.0 and got[0].foot_x == 100 + p.ox and got[0].kind == p.kind
+    assert not deaths.wants(got[0].score, 0.0)
     assert got[0].pose == "move" and got[0].facing == 1 and got[0].fading is None
     assert exact.fresh([_find(die)], []) == []
     assert len(exact.fresh([_find(p), _find(p, 102, 101)], [])) == 1  # (one body, two of its pictures)
@@ -155,6 +157,7 @@ def _step(tracks, finds):
     step = object.__new__(WorldStep)
     step.tracker = SimpleNamespace(live=lambda: tracks)
     step._finds = finds
+    step._deaths_told = []
     step.counts = {"exact deaths": 0}
     return step
 
@@ -182,3 +185,65 @@ def test_a_die1_find_is_the_death_of_the_track_not_found_alive_there():
     # ... unless a picture of it alive is found there too: two bodies
     alive = Find(_picture(seed=6), 472, 70, 900, 0.5)
     assert _step([_at(4, 500.0, t, LIVE)], [find, alive])._died_seen(s, t, on_it) == []
+
+
+def test_one_animation_tells_one_death():
+    """A monster's die1 runs about 12 frames, found in each: the first's is its death, the rest are that animation, not the
+    nearest of its kind that a frame missed (R2's frame 425: #10 marked dead, walking on as #12). Another's, farther off or
+    later, tells its own."""
+    s = SimpleNamespace(map_x=lambda x: x, map_y=lambda y: y)
+    die = _picture(die=True, seed=5, h=30)
+    find = Find(die, 472, 100, 800, 0.8)  # (its feet at 500, 130)
+    t = 10.0
+    dead, beside = _at(1, 505.0, t - 0.1), _at(2, 520.0, t - 0.1)
+    step = _step([dead, beside], [find])
+    assert step._died_seen(s, t, {}) == [1]
+    dead.died_seen = t
+    assert step._died_seen(s, t + 0.067, {}) == []  # (the next frame of it: `beside` is alive)
+    assert step._died_seen(s, t + 0.8, {}) == []
+    step.tracker = SimpleNamespace(live=lambda: [_at(2, 520.0, t + 1.0)])
+    assert step._died_seen(s, t + 1.1, {}) == [2]  # (past DIE_ONE_S: another's)
+    step = _step([beside], [find])
+    step._deaths_told = [(t, "horny-mushroom", 500.0, 130.0)]  # (the death watch told it: its animation goes on)
+    assert step._died_seen(s, t + 0.1, {}) == []
+    step = _step([dead, beside], [find, Find(die, 572, 100, 800, 0.8)])  # (and one farther off, the same frame)
+    dead.died_seen = None
+    step.tracker = SimpleNamespace(live=lambda: [dead, _at(3, 600.0, t - 0.1)])
+    assert sorted(step._died_seen(s, t, {})) == [1, 3]
+
+
+def test_a_bar_two_monsters_could_share_is_left_as_last_read():
+    """hud.bar_shared: another detection's bar would lie where this one's is looked for (BAR_SLACK): whose it is can't be
+    told. Beside it by more than the slack, or well under it, its own."""
+    geo = SimpleNamespace(frame_scale=1.0)
+    a = Mob("horny-mushroom", 500, 100, 56, 60, 1.0, 500.0, 130.0, 1, "move")
+    near = Mob("horny-mushroom", 515, 100, 56, 60, 1.0, 515.0, 130.0, 1, "move")  # (R2's frame 375: 15 px off, one bar on both)
+    far = Mob("horny-mushroom", 520, 100, 56, 60, 1.0, 520.0, 130.0, 1, "move")
+    under = Mob("horny-mushroom", 505, 200, 56, 60, 1.0, 505.0, 230.0, 1, "move")
+    assert hud.bar_shared(a, [a, near], geo) and hud.bar_shared(near, [a, near], geo)
+    assert not hud.bar_shared(a, [a], geo) and not hud.bar_shared(a, [a, far], geo) and not hud.bar_shared(a, [a, under], geo)
+    # the reader with the finder on: none read for either; a track's stays as last read
+    s = SimpleNamespace(geo=geo)
+    step = object.__new__(WorldStep)
+    step.finder, step.counts = object(), {"bars": 0}
+    step._bar_due = lambda tr, t: True
+    step._bar_read = {}
+    step.eyes = SimpleNamespace(bar=lambda s, mob: 0.15)
+    unread, work = set(), {}
+    read = step._reader(s, 1.0, unread, work, [a, near])
+    m = Monster(a, 500.0, 130.0, None)
+    assert read(m, SimpleNamespace(id=3)) is m and unread == {3} and work["bars"] == 0 and work["bars shared"] == 1
+    assert read(m, None).bar is None
+    read = step._reader(s, 1.0, unread, work, [a])
+    assert read(m, SimpleNamespace(id=4)).bar == 0.15
+    # ... and with the search alone as ever (two that near it doesn't find)
+    step.finder = None
+    assert step._reader(s, 1.0, unread, work, [a, near])(m, SimpleNamespace(id=5)).bar == 0.15
+
+
+def test_the_step_says_whether_the_finder_is_on():
+    step = object.__new__(WorldStep)
+    step.finder, step.finder_why = None, "its C: no compiler"
+    assert step.finder_line() == "the exact finder off: its C: no compiler"
+    step.finder = SimpleNamespace(pictures=[1, 2], anchors=30)
+    assert step.finder_line() == "the exact finder on (2 pictures, 30 anchors)"

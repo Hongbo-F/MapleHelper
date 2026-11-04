@@ -19,10 +19,12 @@ monster (exact.c). The frame's other pixels stop at a colour table, so a frame t
 
 What it can't see: a monster fading in (the spawn watch's), one under a shade, a frame that isn't the game's own pixels
 (another size, JPEG): it finds nothing on those, and the search carries on as it always did. So it's beside the search,
-not instead of it: its finds are added only where no detection lies within NEAR_PX. Its score is the share of the picture
-that's exact, which only the death watch reads (perception.deaths.wants: a track found under REFOUND_UNDER is looked at
-for its death). A find of a die1 picture (the map's monsters' death frames: deaths.DeathWatch) is that monster's death
-seen (localization.worldstate: tracking.seen_dying), about at once, not 1.4 s on.
+not instead of it: its finds are added only where no detection lies within NEAR_PX, as detections of score 1: the exact
+pixels of a live picture, however little shows, which the death watch (perception.deaths.wants: a track found under
+REFOUND_UNDER is looked at for its death) has no business doubting (with the share as its score, every monster partly
+covered had its corpse's neighbours looked at: R3's #35 marked dead at frame 1073, still being hit at 1085). A find of a die1
+picture (the map's monsters' death frames: deaths.DeathWatch) is that monster's death seen (localization.worldstate:
+tracking.seen_dying), about at once, not 1.4 s on.
 
 Measured: the README's "Monsters near her: the exact finder".
 """
@@ -89,9 +91,9 @@ class Find:
         return self.y0 + self.picture.oy
 
     def mob(self) -> Mob:
-        """As a detection of the search: the share its score (only the death watch reads it)."""
+        """As a detection of the search, of score 1 (see the top: `share` says how much of it showed)."""
         p = self.picture
-        return Mob(p.kind, self.x0 + p.w // 2, self.y0 + p.h // 2, p.w, p.h, self.share, self.foot_x, self.feet_y,
+        return Mob(p.kind, self.x0 + p.w // 2, self.y0 + p.h // 2, p.w, p.h, 1.0, self.foot_x, self.feet_y,
                    p.facing, p.pose, p.frame, p.name)
 
 

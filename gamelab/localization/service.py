@@ -905,6 +905,8 @@ class Perf:
     - the whole screen's detections, the monsters followed (alive) and the strips of drops searched, a frame;
     - the spawn watch's time a frame ('spawns s': perception.spawns, after her look, beside the search), where it runs,
       and the newborns it found fading in (worldstate's 'newborns found': first found in the frame), a minute;
+    - the exact finder's time a frame ('exact s': perception.exact, on the search's thread), where it runs, what it added
+      a minute ('exact'), and the bars left unread as another's could be there ('bars shared': hud.bar_shared), a minute;
     - how old each frame's state is as it goes out: its time then less the frame's (the pass, and the capture's wait for
       a frame; a look takes it 0.13-0.25 ms later down the pipe);
     - the process's CPU (time.process_time: all its threads), and the tracker's tracks made and flickers (a track
@@ -923,8 +925,9 @@ class Perf:
         self.looks: list[float] = []   # ... her look in it ...
         self.wides: list[float] = []   # ... and the whole screen's search
         self.spawns: list[float] = []  # ... and the spawn watch (where it runs)
+        self.exacts: list[float] = []  # ... and the exact finder (where it runs)
         self.ages: list[float] = []    # s: each frame's state's age as it went out
-        self.detections = self.followed = self.strips = self.newborns = 0
+        self.detections = self.followed = self.strips = self.newborns = self.exact_finds = self.bars_shared = 0
 
     def state(self, st: WorldState, now: float) -> None:
         if not st.visible:
@@ -932,13 +935,15 @@ class Perf:
         w = st.work or {}
         self.frames += 1
         for key, into in (("s", self.passes), ("look s", self.looks), ("wide s", self.wides),
-                          ("spawns s", self.spawns)):
+                          ("spawns s", self.spawns), ("exact s", self.exacts)):
             if key in w:
                 into.append(w[key])
         self.detections += w.get("detections", 0)
         self.followed += sum(1 for tr in st.tracks if tr.state != "dead")
         self.strips += w.get("strips", 0)
         self.newborns += w.get("newborns found", 0)
+        self.exact_finds += w.get("exact", 0)
+        self.bars_shared += w.get("bars shared", 0)
         self.ages.append(now - st.t)
 
     def record(self, now: float, tracker_counts: dict, fps: float | None = None) -> dict:
@@ -957,6 +962,10 @@ class Perf:
         if self.spawns:
             out["spawns_ms"] = [_ms(_q(self.spawns, 0.5)), _ms(_q(self.spawns, 0.9)), _ms(max(self.spawns))]
             out["newborns_a_min"] = round(60 * self.newborns / dt, 1)
+        if self.exacts:
+            out["exact_ms"] = [_ms(_q(self.exacts, 0.5)), _ms(_q(self.exacts, 0.9)), _ms(max(self.exacts))]
+            out["exact_finds_a_min"] = round(60 * self.exact_finds / dt, 1)
+            out["bars_shared_a_min"] = round(60 * self.bars_shared / dt, 1)
         if self.tracks is not None:
             for k in ("tracks", "flickers"):
                 out[f"{k}_a_min"] = round(60 * (tracker_counts.get(k, 0) - self.tracks.get(k, 0)) / dt, 1)
@@ -980,6 +989,10 @@ def perf_line(r: dict) -> str:
         sp = r["spawns_ms"]
         out += (f"; the spawn watch {sp[0]:.1f} ms (p90 {sp[1]:.1f}, max {sp[2]:.1f}), {r['newborns_a_min']:.0f} "
                 f"newborns found a minute")
+    if r.get("exact_ms"):
+        ex = r["exact_ms"]
+        out += (f"; the exact finder {ex[0]:.1f} ms (p90 {ex[1]:.1f}, max {ex[2]:.1f}), {r['exact_finds_a_min']:.0f} added a "
+                f"minute")
     if age[0] is not None:
         out += f"; a state {ms(age[0])} ms old as it goes out (p90 {ms(age[1])})"
     return out + f"; {r['cores']:.2f} cores"
@@ -1006,10 +1019,11 @@ class Publisher:
         self.native = f"{native.state()}; the monster search's step 1 {native.search_state()}"
         self.slow = not native.masked_in_c() or native.search_lib() is None
         sch = runner.step.schedule
-        telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native,
+        finder = runner.step.finder_line()
+        telemetry.emit("session", map=map_id, command="perceive", mode="watch", native=self.native, finder=finder,
                        schedule={"hz": HZ, "drops_strips": sch.drops_strips, "drops_every_s": sch.drops_every_s})
         self.log(f"perception: gamelab's C pieces {self.native}; {HZ:g} frames a second, the whole screen in every "
-                 f"frame's pass, {sch.drops_strips} strip(s) of drops every {sch.drops_every_s:g} s by rotation")
+                 f"frame's pass, {sch.drops_strips} strip(s) of drops every {sch.drops_every_s:g} s by rotation; {finder}")
 
     def state(self, st: WorldState) -> None:
         if self.runner is None:

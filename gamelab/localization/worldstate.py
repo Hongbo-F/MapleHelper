@@ -53,7 +53,7 @@ from ..perception import deaths, exact, exp_number, gates, hp_number, lv_number,
 from ..perception.eyes import Observation, band_rows
 from ..perception.exp_number import ExpReading
 from ..perception.framecheck import Problem
-from ..perception.hud import exp_changed
+from ..perception.hud import bar_shared, exp_changed
 from ..perception.kinds import kind_of
 from ..perception.minimap import minimap_box
 from ..perception.mobs import Mob, MobDetector, _one_opencv_thread
@@ -165,6 +165,9 @@ EXACT = True
 DIE_NEAR = 25.0    # units: a die1 find is the track's of its kind, not found alive in the frame, last seen this near it ...
 DIE_WALK = 100.0   # ... and what it can have walked since (units/s; a mushroom's walk) ...
 DIE_WALK_S = 0.4   # ... for this long at most: it walks on unseen until her star lands, then stops where it dies
+DIE_ONE_NEAR = 12.0  # units: a die1 find this near one that told a death, of its kind ...
+DIE_ONE_S = 0.9    # ... this soon after, is that death's animation (about 12 frames), not another monster's: each of its frames
+                   # went to the nearest of its kind missed for a frame (R2's frame 425: #10 marked dead, walking on as #12)
 # The drops searched without being asked: DROPS_STRIPS strips in view (scene.drop_strips: one over each stretch of level
 # ground of every platform) at most every DROPS_EVERY_S, by rotation (the one searched longest ago first, her platform's
 # taken as DROPS_HER times as old), each strip's last search kept with when it was (`WorldState.drops`): at 12 strips in
@@ -331,6 +334,8 @@ class WorldStep:
     _finds: list = []
     _exact_sees = False
     _exact_mobs: set = frozenset()
+    _deaths_told: list = []
+    finder_why = "not asked for"
 
     def __init__(self, senses: Senses, throws: bool = True, schedule: Schedule = Schedule()):
         self.senses, self.eyes, self.model = senses, senses.eyes, senses.model
@@ -343,11 +348,13 @@ class WorldStep:
         if real and DEATHS and (geo := getattr(self.eyes, "geo", None)) is not None:
             self._watch_of = (geo.frame_scale, self._death_watch(geo.frame_scale))  # (made now: 0.5 s, not mid-hunt)
         self.spawns = self._spawn_watch() if real and SPAWNS else None  # (made now: 0.4 s; None where it can't be)
+        self.finder_why = "the search alone (worldstate.EXACT off, or not the real detector)"  # why there's no finder
         self.finder = self._exact_finder() if real and EXACT else None  # (made now: about 20 ms; None where it can't be)
         self._finds: list[exact.Find] = []  # the finder's on the frame in hand (on the search's thread: _search_ahead)
         # whether it can see on the frames (exact.confirmed); the simulator's eyes say (FakeEyes.exact_sees: its table's)
         self._exact_sees = bool(getattr(self.eyes, "exact_sees", False))
         self._exact_mobs: set[int] = set()  # the detections it added on the frame before (the spawn watch goes without)
+        self._deaths_told: list[tuple[float, str, float, float]] = []  # die1 animations told, `_died_seen`'s: (t, kind, x, y)
         self.schedule = schedule
         self.seq = 0
         self.owed: Asks | None = None    # drops asked for and not searched yet (no frame shown at their time yet)
@@ -425,7 +432,7 @@ class WorldStep:
             self.counts["placed"] += 1
         made = self.tracker.counts["tracks"]
         events += self.tracker.update(t, found, view, her, s.players,
-                                      self._reader(s, t, unread, work) if placed else None,
+                                      self._reader(s, t, unread, work, mobs) if placed else None,
                                       self._dying(s, t, work) if placed and DEATHS else None,
                                       exact=self._exact_sees)
         seen: list[Monster] = []
@@ -565,17 +572,30 @@ class WorldStep:
         frames, its anchors by the map's background where one is kept), where the look frame is the game's own 1366x768
         and its C is built; None elsewhere. On any map: a find is 200 exact pixels of a picture of its monsters."""
         geo = getattr(self.eyes, "geo", None)
-        if geo is None or geo.look_scale != 1 or native.exact_lib() is None:
+        if geo is None or geo.look_scale != 1:
+            self.finder_why = "its frames aren't the game's own size"
+            return None
+        if native.exact_lib() is None:
+            self.finder_why = f"its C: {native.exact_why}"
             return None
         watch = None if self._watch_of is None else self._watch_of[1]
         pictures = exact.pictures_of(self.eyes.detector.templates, None if watch is None else watch.pictures)
         if not pictures:
+            self.finder_why = "no pictures of this map's monsters from the game data"
             return None
         back = gates.load_background(getattr(self.model, "id", None))
         try:
             return exact.ExactFinder(pictures, exact.density(back))
-        except RuntimeError:  # (more pictures than its C takes: the search alone)
+        except RuntimeError as e:  # (more pictures than its C takes: the search alone)
+            self.finder_why = str(e)
             return None
+
+    def finder_line(self) -> str:
+        """Whether the exact finder is on, for the service's first line: off, a live run is the decisions alone, near her as
+        blind as before."""
+        f = self.finder
+        return (f"the exact finder off: {self.finder_why}" if f is None
+                else f"the exact finder on ({len(f.pictures)} pictures, {f.anchors} anchors)")
 
     def _exact_added(self, mobs: list[Mob], placed: bool, work: dict) -> list[Mob]:
         """The monsters the exact finder found on this frame that no detection of `mobs` lies at (exact.fresh), and
@@ -596,19 +616,23 @@ class WorldStep:
         track the search found on it with no picture of it alive there (the shut eyes of die1/0 score as a stand: exact
         pixels tell them apart, each pixel a find's only), else the track of its kind nearest it not found alive in the
         frame, within DIE_NEAR of where it was last seen and what it can have walked since (a live one beside it is found
-        alive, under the search or the finder)."""
+        alive, under the search or the finder). One animation tells one death (DIE_ONE_NEAR, DIE_ONE_S, `_animation_told`)."""
         out: list[int] = []
         alive = [f for f in self._finds if not f.picture.die]
+        self._deaths_told = [d for d in self._deaths_told if t - d[0] <= DIE_ONE_S]
         for f in self._finds:
             if not f.picture.die:
+                continue
+            x, y = s.map_x(f.foot_x), s.map_y(f.feet_y)
+            if self._animation_told(f.picture.kind, x, y):
                 continue
             on_it = [tid for tid, m in matched.items() if m.kind == f.picture.kind and tid not in out
                      and abs(m.mob.foot_x - f.foot_x) <= exact.NEAR_PX and abs(m.mob.feet_y - f.feet_y) <= exact.NEAR_PX]
             if on_it and not any(o.picture.kind == f.picture.kind and abs(o.foot_x - f.foot_x) <= exact.NEAR_PX
                                  and abs(o.feet_y - f.feet_y) <= exact.NEAR_PX for o in alive):
                 out.append(on_it[0])
+                self._deaths_told.append((t, f.picture.kind, x, y))
                 continue
-            x, y = s.map_x(f.foot_x), s.map_y(f.feet_y)
             near = [(abs(x - (tr.seen_x if tr.seen_x is not None else tr.x)), tr.id) for tr in self.tracker.live()
                     if tr.kind == f.picture.kind and tr.id not in matched and tr.id not in out
                     and tr.state in (LIVE, HIDDEN, DYING) and tr.died_seen is None and abs(y - tr.y) <= DIE_NEAR
@@ -616,18 +640,31 @@ class WorldStep:
                     <= DIE_NEAR + DIE_WALK * min(DIE_WALK_S, max(0.0, t - tr.last_seen))]
             if near:
                 out.append(min(near)[1])
+                self._deaths_told.append((t, f.picture.kind, x, y))
         self.counts["exact deaths"] += len(out)
         return out
 
-    def _reader(self, s: Scene, t: float, unread: set[int], work: dict) -> Callable[[Monster, Track | None], Monster]:
+    def _animation_told(self, kind: str, x: float, y: float) -> bool:
+        """Whether a die1 picture of `kind` found at map (x, y) is an animation whose death was told already (`_deaths_told`)."""
+        return any(k == kind and abs(x - a) <= DIE_ONE_NEAR and abs(y - b) <= DIE_ONE_NEAR for _, k, a, b in self._deaths_told)
+
+    def _reader(self, s: Scene, t: float, unread: set[int], work: dict,
+                mobs: list[Mob] = ()) -> Callable[[Monster, Track | None], Monster]:
         """How the tracker takes a detection of look `s` (its `read`): with its HP bar read if that's due for the track
         it is (`_bar_due`; a new one's always), else none (`unread` gets the track's id: its bar as last read goes in
-        the state)."""
+        the state). With the exact finder two monsters can stand one on the other, the search never found them so: where
+        another detection's bar lies where this one's is looked for (hud.bar_shared), none is read, its bar as last read
+        (on R1-R3 125 of 1,596 such pair-frames had one value on both, a healthy one's the neighbour's)."""
         work["bars"] = 0
 
         def read(m: Monster, tr: Track | None) -> Monster:
             if tr is not None and not self._bar_due(tr, t):
                 unread.add(tr.id)
+                return m
+            if self.finder is not None and bar_shared(m.mob, mobs, s.geo):  # (whose it is can't be told: as last read)
+                work["bars shared"] = work.get("bars shared", 0) + 1
+                if tr is not None:
+                    unread.add(tr.id)
                 return m
             work["bars"] += 1
             self.counts["bars"] += 1
@@ -666,7 +703,10 @@ class WorldStep:
                 asks.append((tr.id, tr.kind, fx, fy, score))
             if not asks:
                 return told
-            out = told + [a[0] for a in asks if watch.dying(s, a[1], a[2], a[3], a[4])]
+            saw = [a for a in asks if watch.dying(s, a[1], a[2], a[3], a[4])]
+            out = told + [a[0] for a in saw]
+            if self.finder is not None:  # (the watch's too: `_died_seen` goes by them)
+                self._deaths_told = [*self._deaths_told, *((t, a[1], s.map_x(a[2]), s.map_y(a[3])) for a in saw)]
             work["deaths"], work["deaths_s"] = len(asks), time.perf_counter() - began
             self.counts["death looks"] = self.counts.get("death looks", 0) + len(asks)
             return out
