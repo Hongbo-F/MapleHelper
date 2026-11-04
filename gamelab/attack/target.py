@@ -151,6 +151,7 @@ class Choice:
     top: tuple = ()
     coming: Coming | None = None
     how: str = ""   # what kind of a change: 'first', 'next', 'gone', 'beaten', 'respawn', 'coming', 'no way', 'first taken'
+    left: Monster | None = None  # with 'next' and 'gone': the one it left, not among this look's foes
 
 
 def _side(m: Monster, x: float) -> str:
@@ -425,14 +426,14 @@ class Chooser:
         elif had is not None and (n := kept) is not None:
             pick = next((t for t in ranked if t.foe is n), None)
             if pick is not None:
-                why, how = "next, the last one dead or gone", "next"
+                why, how = "next", "next"
                 if top.foe.born and beats(pick):  # (a newborn beats it: the user's rule, each frame)
                     why, how = f"respawn at {top.m.x:.0f}: {_text(top)} over {_text(pick)}", "respawn"
                     pick = None
         if pick is None:
             pick = top
             if not why:
-                why, how = ("dead or gone", "gone") if had is not None else ("first", "first")
+                why, how = ("gone", "gone") if had is not None else ("first", "first")
         come = coming(her, foes, pick.way.s + pick.foe.kill_s)
         if come is not None and come.foe is not pick.foe:
             t = next((t for t in ranked if t.foe is come.foe), None) or terms_of(her, come.foe)
@@ -447,7 +448,7 @@ class Chooser:
                 if not why:
                     why, how = "her attack takes it first", "first taken"
         self.primary, self.next = pick.m, None if nxt is None else nxt.m
-        return Choice(pick, nxt, why, tuple(ranked[:3]), come, how)
+        return Choice(pick, nxt, why, tuple(ranked[:3]), come, how, had if how in ("next", "gone") else None)
 
 
 def place_cost(model: MapModel, planner, her: Her, m: Monster, g: float, rate: float, touch_exp: float,

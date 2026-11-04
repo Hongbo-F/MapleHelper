@@ -585,8 +585,8 @@ class Looter:
                     self.refused[k] = now
             self._failed_picks = 0  # (the row that marked it: the next counted afresh)
             self._tell(tab, True, why, tuple(k for k in kinds if tab_of(k) == tab))
-            if refusal >= 0 and self.push is not None:  # (the game's own word: the phone's, once: BackpackPush)
-                self.push.full(tab)
+            if self.push is not None:  # (the phone's, once: BackpackPush; a guess too: `can_take` has no more stands to ask)
+                self.push.full(tab, refusal >= 0)
 
 
 def _earned(line: str) -> tuple[str, str | None] | None:

@@ -512,6 +512,7 @@ class Pile:
     kind: str | None = None       # the kind of the monster whose drops they are (her kill's), if known
     aged: float | None = None     # an older pile of hers' `born`, whose drops it holds (HELD_AGE) while a look sees one
     aged_xs: tuple[float, ...] = ()  # ... where they lie
+    none_landed: bool = False     # the target-first planner marked it gone at one look (Grind._none_landed)
     key: int = field(default_factory=lambda: next(_PILE_KEYS), compare=False)  # its own, never another's (the sweep's)
 
     @property
@@ -554,6 +555,7 @@ class DropStore:
     value: Worth = FIRST  # what drops are worth on her map (looting.worth_for)
     piles: list[Pile] = field(default_factory=list)  # the piles not gone, and those gone in the last GONE_KEEP_S
     gone_tried: int = 0  # piles the hunt loop went for that looks have seen gone, ever (dropped ones too)
+    revived: int = 0     # piles of hers seen gone that a sighting showed were only missed (`_sighting`), ever
     _strips: dict = field(default_factory=dict, repr=False)  # each strip of drops' last search taken: (platform, x0) -> t
 
     @property
@@ -619,6 +621,10 @@ class DropStore:
                 loose.append(d)
         for p in again:
             if id(p) in mine and t > p.gone_at:
+                self.revived += 1
+                if telemetry.recording():  # (the first live check of Grind._none_landed: its marks against these)
+                    telemetry.emit("event", kind="pile_revived", gone_at=round(p.gone_at, 2), at=round(t, 2),
+                                   platform=p.platform, x=round(p.x), none_landed=p.none_landed)
                 p.status, p.gone_at, p.empty_since = "seen", None, None  # (missed, not taken: hers again, below)
                 known.append(p)
         for p in known:

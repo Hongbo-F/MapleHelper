@@ -46,7 +46,6 @@ telemetry topic 'grind' (what "loop", "next", and "end" with the run's stays, pu
 import math
 import time
 from statistics import median
-from time import perf_counter_ns
 
 from maplehelper.engine import LEFT, RIGHT
 
@@ -169,7 +168,6 @@ class Grind(Hunt):
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
         if self.tp is not None:
-            self.h.senses.listeners.append(self.tp.on_look)
             self.h.actions.lock_watch = self.tp.watch_lock
 
     def run(self, minutes: float):
@@ -177,7 +175,6 @@ class Grind(Hunt):
             report = super().run(minutes)
         finally:
             if self.tp is not None:
-                self.h.senses.listeners.remove(self.tp.on_look)
                 self.h.actions.lock_watch = None
                 self.tp.end()
         self._log_grind()
@@ -352,7 +349,7 @@ class Grind(Hunt):
         return None if self.tp is not None else super()._home()
 
     def _all_of(self, p, s: Scene) -> bool:
-        return self.tp is not None and self.tp.all_of(p)
+        return self.tp is not None and p.hers
 
     def _whole(self, p, s: Scene, now: float) -> float:
         return self.tp.loot_allow(p, s, now)
@@ -371,15 +368,19 @@ class Grind(Hunt):
             return True
         if not s.looked or not s.in_view(pile.platform, pile.x):
             return False
-        pile.status, pile.gone_at = "gone", s.t
+        pile.status, pile.gone_at, pile.none_landed = "gone", s.t, True
         self.tp.counts["none landed"] += 1
+        self.log(f"  none landed: {pile.kind}'s kill {s.t - pile.since:.1f} s ago on platform {pile.platform} at x {pile.x:.0f}")
+        if telemetry.recording():
+            telemetry.emit("event", kind="none_landed", killed=round(pile.since, 2), platform=pile.platform, x=round(pile.x),
+                           monster=pile.kind)
         return True
 
     def _guards_it(self, s: Scene, p, m: Monster, on_screen: bool) -> bool:
         """With the planner a monster guards a pile of hers only as her target can: seen, on the platform she's on with it
         (it's among her targets there: "a monster guarding a pile is simply the next target"). She goes to one elsewhere
         whoever is by it now, and who's there then is her target then."""
-        if self.tp is None or not self.tp.all_of(p):
+        if self.tp is None or not p.hers:
             return True
         return on_screen and s.platform is not None and p.platform == s.platform.id
 
@@ -412,14 +413,12 @@ class Grind(Hunt):
             return super()._stance(s, targets, visible, hidden, approach, log, goal)
         if not log and self._asked[0] is s and self._asked[1] is targets[0] and self._asked[2] == approach:
             return self._asked[3]
-        t0 = perf_counter_ns()
         self._planned = True
         try:
             act = super()._stance(s, targets, visible, hidden, False, log, goal)
         finally:
             self._planned = False
         act = self.tp.plan(s, act, approach)
-        self.tp.stance_time(perf_counter_ns() - t0)
         if not log:
             self._asked = (s, targets[0], approach, act)
         return act
@@ -465,7 +464,7 @@ class Grind(Hunt):
         wide = self._wide(s)
         if (stop := self._here(wide)) is not None:
             return self._sweep_act(wide, stop, visible, hidden, now)
-        reason = self._leaving(wide, [m for m in self._held(wide) if self.tp.can_act_on(m)])
+        reason = self._leaving(wide, [m for m in self._held(wide) if m.track not in self.tp.no_way])
         if reason is not None:
             return self._leave(wide, reason, visible, hidden, now)
         if self._idle_since is not None and now - self._idle_since >= IDLE_S:

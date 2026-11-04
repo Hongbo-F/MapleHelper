@@ -207,9 +207,9 @@ def bark(cfg: dict | None, title: str, text: str, level: str = "critical", call:
 
 class BackpackPush:
     """Her backpack full, on the phone as a regular push (the user, 2026-11-04: "if backpack is full, send a regular push
-    notification"): Bark at level 'active', the phone's own sound, no ring and no text, the moment the game says a tab of hers
-    is full (`full`: behavior.looting's, perception.loot.says_full), once a tab, and not again until it has been clear in
-    between (`clear`: an item that didn't fit earned into it, or a kind she held none of picked up since: looting's evidence;
+    notification"): Bark at level 'active', the phone's own sound, no ring and no text, the moment the game says a tab is full
+    (`full`: behavior.looting's, perception.loot.says_full), or items staying on the ground have it taken for full with no word
+    from the game (`sure` False: "seems full"), once a tab, and not again until it has been clear in between (`clear`: an item that didn't fit earned into it, or a kind she held none of picked up since: looting's evidence;
     its TAB_RETRY_S, a guess that it may have room, isn't). Never in the way of the hunt (`bark`: a thread of its own, its
     timeout at most, never raises), nothing under NO_PUSH_ENV or without lab/bark.json; the simulator's a stub (`push_fn`:
     sim.scenarios.Sim.hunter). The key is never logged."""
@@ -226,14 +226,15 @@ class BackpackPush:
             bark(load_bark(bark_path), title, text, "active", log=log, sound=None)
         return cls(go)
 
-    def full(self, tab: str) -> bool:
-        """The game says tab `tab` is full: the push, if it hasn't gone since the tab was last clear; whether it went."""
+    def full(self, tab: str, sure: bool = True) -> bool:
+        """Tab `tab` is full, as the game says (`sure`) or as items that stayed on the ground suggest: the push, if it hasn't
+        gone since the tab was last clear; whether it went."""
         if tab in self.sent:
             return False
         self.sent.add(tab)
         if self.push is not None:
-            self.push("Backpack full", f"her {tab} tab at {self.clock('%H:%M:%S')}: its items left, mesos and what still "
-                                       f"fits taken; the hunt goes on")
+            self.push("Backpack full" if sure else "Backpack seems full",
+                      f"{tab} tab at {self.clock('%H:%M:%S')}: its items left, mesos and what still fits taken; the hunt goes on")
         return True
 
     def clear(self, tab: str) -> None:

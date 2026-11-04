@@ -10,8 +10,8 @@ safety stop, the Lie Detector's stop. Her drops come in as they're due (`pile_fi
 is made at each pass's look, and at each frame while her lock is waited out her plan is read against that frame's tracks and
 newborns (`watch_lock`, a glance at the feed's newest state: nothing can be keyed meanwhile, and a look there would be the
 wrong one to decide on: her own spell's effect is over the body just then, and "no effect" judged at 0.6 s on the dot holds a
-whole side: arms e3, e4). Every look, whoever took it, is seen for its newborns (`on_look`: Senses.listeners, where
-Scene.events is what the feed saw up to that look's frame, drained there; a glance reads them undrained: pending_events).
+whole side: arms e3, e4). A newborn is in the choice from the first look that has it (Mob.fading, its track's solid_at:
+`foes_of`), and in a glance from the feed's events not drained yet (`pending_events`).
 """
 
 import contextlib
@@ -48,8 +48,7 @@ ASKS = 4              # targets the plan is asked for at most at a pass (the res
 NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the stance's answer a wait, no place to walk to) is
                       # set aside: another's taken at the next look, and she never idles on one
 IDLE_S = 1.5          # s with nothing she can act on (a wait, no pile) after which she goes on to the next stop
-NEAR_BORN = 300.0     # units from her: a newborn's delay is counted only within this on her platform (`on_look`)
-HIST_MS = 0.05        # ms a bin of the decision's time (`Targeting.ms`) ...
+HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
 
 _FORCED: list[bool | None] = [None]    # (`forced_on`: a set-piece's)
@@ -101,8 +100,6 @@ class Targeting:
         self.foes: list[tg.Foe] = []
         self._said = None
         self._walking = speeds(g.model)
-        self.born: dict[int, float] = {}    # a newborn's track -> its 'spawned' event's frame, till the choice has it
-        self.near: dict[int, float] = {}    # ... those on her platform by her (NEAR_BORN) as first seen
         self.no_way: dict[int, float] = {}  # a target's track -> until when it's set aside (`plan`)
         self.glanced: set[int] = set()      # newborns the glances have taken in (`_changes`)
         self.asked: set[int] = set()        # those it called her attack off for, since her last key (`_changes`) ...
@@ -110,25 +107,7 @@ class Targeting:
         self.here_only = False              # (`Grind._here`: the sweep asked for what's on her platform or due alone)
         self._chose_at = 0.0                # when the last choice was made
         self.counts: Counter = Counter()
-        self.delays: list[float] = []       # s from a newborn's first frame to the choice taking it in
-        self.delays_near: list[float] = []  # ... those on her platform by her
-        self.ms = {"choice": _hist(), "pass": _hist(), "glance": _hist()}
-        self._pass_ns = 0                   # the running pass's decision so far: its choice and its stances' time
-
-    # --- what she sees -------------------------------------------------------------------------------------
-
-    def on_look(self, s) -> None:
-        """Every look, whoever took it: the newborns the feed saw since the last (Senses drains its events each look, so
-        they're this look's or never), kept until the choice has them."""
-        for e in getattr(s, "events", None) or ():
-            if getattr(e, "kind", None) == "spawned" and e.track is not None and e.track not in self.glanced:
-                self.born[e.track] = e.t
-                self.counts["born"] += 1
-                d = e.data or {}
-                if s.platform is not None and s.where is not None and d.get("platform") == s.platform.id \
-                        and abs(d.get("x", 1e9) - s.where.x) <= NEAR_BORN:
-                    self.near[e.track] = e.t
-                    self.counts["born near"] += 1
+        self.ms = {"choice": _hist(), "glance": _hist()}
 
     # --- while her lock lasts --------------------------------------------------------------------------------
 
@@ -162,7 +141,6 @@ class Targeting:
             if e.kind == "spawned" and e.track is not None and e.track not in self.glanced:
                 self.glanced.add(e.track)
                 fresh.append(e.track)
-                self.taken(e.track, st.t)
         foes = []
         primary = c.primary.m
         now = time.monotonic()
@@ -184,14 +162,19 @@ class Targeting:
         if come is not None and come.foe.m.track not in self.asked and tg.terms_of(her2, come.foe) is not None:
             self.asked.add(come.foe.m.track)
             self.counts["lock: coming"] += 1
+            self._called_off(come.foe.m, f"coming at her: {come.arrives:.1f} s")
             return True
         for f in foes:
             if f.born and f.m.track not in self.asked and (t := tg.terms_of(her2, f, far=False)) is not None \
                     and t.score > c.primary.score * self.chooser.margin:
                 self.asked.add(f.m.track)
                 self.counts["lock: respawn"] += 1
+                self._called_off(f.m, f"a respawn, {t.score:.1f} over {c.primary.score:.1f}")
                 return True
         return False
+
+    def _called_off(self, m: Monster, why: str) -> None:
+        self.h.log(f"  target: attack at #{self.choice.primary.m.track} called off: {m.kind} #{m.track} {why}")
 
     def _glance_foe(self, m: Monster, tr, t: float, born: bool) -> tg.Foe:
         a = tr.fading
@@ -205,18 +188,7 @@ class Targeting:
         until = getattr(self.h.senses, "invulnerable_until", None)
         return 0.0 if until is None else until()
 
-    def taken(self, track: int, t: float) -> None:
-        """A newborn's choice has taken it in: how long after its first frame."""
-        if track in self.born:
-            self.delays.append(t - self.born.pop(track))
-        if track in self.near:
-            self.delays_near.append(t - self.near.pop(track))
-
     # --- her drops ------------------------------------------------------------------------------------------
-
-    def all_of(self, p) -> bool:
-        """Whether pile `p` is one she takes whatever it adds to her way: hers (a kill of hers explains it)."""
-        return p.hers
 
     def loot_allow(self, p, s, now: float) -> float:
         """The s a pile of hers may add to her way (see LOOT_ALL ...): whatever it takes near its end or on her platform, one
@@ -320,7 +292,6 @@ class Targeting:
         (she has an objective, and shoots in passing or keeps off what's on her, master's rules) no walk goes for a target,
         and one too close is the target, as master's rule 1 has it first."""
         t0 = perf_counter_ns()
-        self._close_pass()
         pace = fight.pace_of(self.h, s)
         her = self.her = self.her_at(s, pace, visible, hidden)
         self.foes = self.foes_of(s, targets, visible, pace)
@@ -334,35 +305,11 @@ class Targeting:
         self._chose_at = time.monotonic()
         self.counts["decisions"] += 1
         self.counts["decisions on a trip"] += trip
-        self._newborns(s)
-        ns = perf_counter_ns() - t0
-        _bin(self.ms["choice"], ns)
-        self._pass_ns = ns
+        _bin(self.ms["choice"], perf_counter_ns() - t0)
         if c.why and c.primary is not None:
             self.counts["changes"] += 1
             self.counts[c.how] += 1
         return [] if c.primary is None else [c.primary.m]
-
-    def _newborns(self, s) -> None:
-        """How long each newborn took from its first frame to the choice's having it."""
-        if not self.born:
-            return
-        had = {f.m.track for f in self.foes}
-        for track in [k for k in self.born if k in had]:
-            self.taken(track, s.t)
-        if len(self.born) > 32:  # (those out of her choice's reach: never hers to take in)
-            for k in sorted(self.born, key=self.born.get)[:16]:
-                self.near.pop(k, None)
-                del self.born[k]
-
-    def _close_pass(self) -> None:
-        """The pass before this one's decision time, done: its choice and its stances'."""
-        if self._pass_ns:
-            _bin(self.ms["pass"], self._pass_ns)
-            self._pass_ns = 0
-
-    def stance_time(self, ns: int) -> None:
-        self._pass_ns += ns
 
     # --- the plan ------------------------------------------------------------------------------------------
 
@@ -398,47 +345,50 @@ class Targeting:
         if act[0] == "wait" and approach and (step := self.walk_step(s)) is not None:
             act = ("approach", step[0], step[1])
         if act[0] == "wait":  # (nothing against it for now: set aside, another taken at once: Grind._targets)
-            if c.primary.m.track is not None:
-                self.no_way[c.primary.m.track] = s.t + NO_WAY_S
+            m = c.primary.m
+            if m.track is not None:
+                self.no_way[m.track] = s.t + NO_WAY_S
             self.counts["set aside"] += 1
+            self.h.log(f"  target: {m.kind} #{m.track} at {m.x - s.where.x:+.0f} set aside for {NO_WAY_S} s: nothing to do "
+                       f"against it from here")
             return act
         self._say(s, act)
         return act
-
-    def can_act_on(self, m: Monster) -> bool:
-        """Whether a monster she might stay for isn't one the plan has nothing against for now (`plan`)."""
-        return m.track not in self.no_way
 
     def _say(self, s, act: tuple) -> None:
         """One log line and one 'target' record when the target or the plan changes."""
         c = self.choice
         p, n = c.primary, c.next
-        key = (p.m.track, None if n is None else n.m.track, act[0], act[1] if len(act) > 1 else None)
+        key = (p.m.track, act[0], act[1] if len(act) > 1 else None)
         if key == self._said:
             return
         self._said = key
         x = s.where.x
         m = p.m
-        hits = max(1, round(p.foe.kill_s / 0.84))
-        text = (f"{m.kind} #{m.track} {('%d%% HP' % round(m.bar * 100)) if m.bar is not None else 'unhurt'}"
-                f"{', chasing' if p.foe.chasing else ''}{', fading in' if p.foe.born else ''}, {hits} hit{'s' * (hits > 1)}"
-                + ("" if n is None else f", next {n.m.kind} #{n.m.track}"))
+        why = self._why(c)
+        text = (f"{m.kind} #{m.track} at {m.x - x:+.0f}, {('%d%% HP' % round(m.bar * 100)) if m.bar is not None else 'no HP bar'}"
+                f"{', chasing' if p.foe.chasing else ''}{', fading in' if p.foe.born else ''}, score {p.score:.1f} "
+                f"({p.foe.exp:.0f} EXP in {p.way.s + p.foe.kill_s:.1f} s)" + ("" if n is None else f", next {n.m.kind} #{n.m.track}"))
         what = _act_text(act)
-        self.h.log(f"  target: {text}: {what}" + (f" ({c.why})" if c.why else ""))
+        self.h.log(f"  target: {text}: {what}" + (f" ({why})" if why else ""))
         self.counts["said"] += 1
         if telemetry.recording():
-            telemetry.emit("target", why=c.why, act=act[0], side=act[1] if len(act) > 1 else None, x=round(x, 1),
+            telemetry.emit("target", why=why, act=act[0], side=act[1] if len(act) > 1 else None, x=round(x, 1),
                            platform=s.platform.id, lead=round(self.her.lead, 3), inv=round(self.her.invulnerable, 3),
                            primary=p.record(x), next=None if n is None else n.record(x),
                            top=[t.record(x) for t in c.top], coming=None if c.coming is None else
                            {"track": c.coming.foe.m.track, "kind": c.coming.foe.m.kind, "s": round(c.coming.arrives, 2)})
 
+    def _why(self, c: tg.Choice) -> str:
+        """Why the choice changed, said as far as it's known: the one it left may be dead, set aside by the plan, or only not
+        in this look (a look misses a monster now and then: about a quarter of those left so were back within 5 s)."""
+        if c.how not in ("next", "gone") or c.left is None:
+            return c.why
+        tr = c.left.track
+        was = ("set aside" if tr in self.no_way else "killed" if tr in self.h.ledger.dead else "not in this look")
+        return f"#{tr} {was}" + (", the next" if c.how == "next" else "")
+
     def end(self) -> None:
-        """The run's numbers: the 'target_end' record."""
-        self._close_pass()
-        d = sorted(self.delays)
-        pct = (lambda q: None if not d else round(d[min(len(d) - 1, int(q * len(d)))], 3))
-        telemetry.emit("target_end", counts=dict(self.counts), newborn_delay={"n": len(d), "p50": pct(.5), "p90": pct(.9),
-                                                                              "max": d[-1] if d else None},
-                       delays=[round(v, 3) for v in d], delays_near=[round(v, 3) for v in self.delays_near],
+        """The run's numbers: the 'target_end' record (`revived`: piles a sighting brought back, DropStore.revived)."""
+        telemetry.emit("target_end", counts=dict(self.counts), revived=self.h.drops.revived,
                        ms={k: {str(i): v for i, v in enumerate(h) if v} for k, h in self.ms.items()}, bin_ms=HIST_MS)
