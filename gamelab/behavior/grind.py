@@ -61,11 +61,12 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
-from .ledger import FOLLOW_S, dying
+from .ledger import DROP_LANDS, FOLLOW_S, dying
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
 from .targeting import ASKS, IDLE_S, Targeting
 from .targeting import on as target_on
 
+LANDED_S = 0.2         # s past a kill's drops' landing (ledger.DROP_LANDS) by which a look has them (`_none_landed`)
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go); and from the final
                        # review of 2026-11-02, s waiting there on end (Hunt._wait, nothing shot, no step) with monsters
                        # held: on the thief's seed 19 of the standard grind she stood 123 s at 16 for a Horny on 15 the
@@ -358,6 +359,21 @@ class Grind(Hunt):
 
     def _sweep_most(self) -> float | None:
         return None if self.tp is not None else super()._sweep_most()
+
+    def _none_landed(self, s: Scene, pile) -> bool:
+        """With the planner: a kill's drops have landed by now and the look that searched there has none: it dropped nothing
+        (0.64 drops a kill; on the dev seeds 2 of 3 of her stands were on nothing, a walk of 60 units and 3 presses each, live
+        43% on the last hours), seen gone as a look seeing it empty twice would have it; drops a monster hid from this look
+        have it back as soon as one sees them (ledger.REVIVE_S). Just landed, no stand either: the next look tells."""
+        if self.tp is None:
+            return False
+        if time.monotonic() < pile.since + DROP_LANDS + LANDED_S:
+            return True
+        if not s.looked or not s.in_view(pile.platform, pile.x):
+            return False
+        pile.status, pile.gone_at = "gone", s.t
+        self.tp.counts["none landed"] += 1
+        return True
 
     def _guards_it(self, s: Scene, p, m: Monster, on_screen: bool) -> bool:
         """With the planner a monster guards a pile of hers only as her target can: seen, on the platform she's on with it

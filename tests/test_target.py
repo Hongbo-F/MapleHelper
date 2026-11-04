@@ -428,6 +428,21 @@ def test_a_far_pile_waits_for_her_way_then_goes_whatever_it_takes_near_the_end_o
     assert not tp.all_of(_pile(5.0, hers=False))
 
 
+def test_a_kill_that_dropped_nothing_has_no_stand(tree):
+    """At a kill's pile no look has seen: while its drops may still be landing she waits (no walk over its spread), and once a
+    look that searched there has none it's gone, a look seeing them later reviving it (ledger.REVIVE_S). Off, master's walk."""
+    m, _ = tree
+    g = SimpleNamespace(tp=_targeting(m))
+    s = SimpleNamespace(looked=[(10, 0.0, 200.0)], in_view=lambda pid, x: pid == 10 and 0.0 <= x <= 200.0, t=time.monotonic())
+    landing = _pile(1.0)
+    assert Grind._none_landed(g, s, landing) and landing.status == "expected"
+    landed = _pile(3.0)
+    assert Grind._none_landed(g, s, landed) and landed.status == "gone" and landed.gone_at == s.t
+    away = _pile(3.0, x=500.0)
+    assert not Grind._none_landed(g, s, away) and away.status == "expected"  # (no look there: it can't tell)
+    assert not Grind._none_landed(SimpleNamespace(tp=None), s, _pile(3.0))
+
+
 def test_a_monster_standing_on_a_pile_is_simply_her_target(tree):
     """Seen on her platform by the pile, it guards it (the sweep leaves the pile out for this look) and it's a foe like any:
     her target. One on another platform by a pile there, or one the look missed, doesn't keep her from going."""

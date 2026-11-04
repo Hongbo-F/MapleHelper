@@ -1896,6 +1896,8 @@ class Hunt:
                     bunches.append([d])
             goals = [(sum(b) / len(b), len(b) + 1) for b in bunches]
         elif pile.status == "expected" and not stood:
+            if self._none_landed(s, pile):
+                return None
             lo, hi = self._extent(pile)
             goals = [(lo, 1), (hi, 2)]
         else:  # (seen there before, none seen now from by it: gone, as the store will have it)
@@ -1921,6 +1923,11 @@ class Hunt:
             telemetry.emit("event", kind="pick", platform=here, x=round(pile.x), drops=len(seen),
                            stood=[round(g) for g, _ in goals], tries=pile.tries)
         return None
+
+    def _none_landed(self, s: Scene, pile: Pile) -> bool:
+        """Whether look `s`, by a kill's pile no look has seen yet, says its kill dropped nothing and so no stand is made there
+        (behavior.grind's target-first planner; the hunt loop's stands walk its spread all the same)."""
+        return False
 
     def _ran(self, x0: float, goal: float) -> None:
         """A stand's walk of RUN_UNITS or more from map x0 to `goal`, told to her moves' watch (keycheck.MoveWatch, as the
