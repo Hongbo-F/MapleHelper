@@ -23,7 +23,7 @@ cast with no MP): it can hide a real hit, so a chance is a floor on her throws' 
 **The price** (`net`, the user's: HP 2 a meso, MP 1 a meso, a meso 0.5 EXP): a landing is worth the share of the monster's
 EXP and drops her attack takes off what it has left (`landing`): a Horny Mushroom's 53 EXP-equivalent, 0.65 of it from a
 Lucky Seven at a whole one, all of it at one with less left than her attack does; a throw costs her attack's MP and its
-lock's time at her EXP a second (`cost`: 13 EXP-equivalent a cast, 5 a regular attack). So a monster nearly dead is
+lock's time at her EXP a second (`cost`: about 14 EXP-equivalent a cast, 6 a regular attack). So a monster nearly dead is
 worth a throw on thinner evidence than a whole one, and a cheap regular attack on thinner evidence than a cast: no fixed
 window nor rule, the throw goes while chance x landing beats its cost, and beats a throw at a monster she does see
 (`SEEN_CHANCE`, attacks.Attacks.seen_net).
@@ -70,7 +70,7 @@ BLIND = -1.7
 SEEN_CHANCE = 0.76
 OVER_SEEN = True  # a throw at one unseen must beat a throw at one in reach that a look has (Attacks.worth_a_throw)
 # Whether her throws at what no look has go by all this. False: as until 2026-11-04, every one of them a target for the fixed
-# times, and a regular attack at nothing with none (for the harness's sides: fix/README's arms).
+# times, and a regular attack at nothing with none (the harness's arm with it off: the README's numbers).
 EVIDENCE = True
 MESO_EXP = 0.5       # a meso in EXP, and an MP point (MP 1 a meso): the user's reference prices of 2026-10-31 (behavior.hunt)
 MP_EXP = MESO_EXP
