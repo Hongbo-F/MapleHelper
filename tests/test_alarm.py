@@ -668,12 +668,18 @@ def test_with_the_alarm_up_the_lie_cursor_is_one_mouse_move_inside_the_mini_game
     assert alarm_refusal(cursor([[0, "mouse", 1057, 679]]), keys, None, [], 100.0) is None
     for x, y in ((307, 180), (1058, 180), (308, 179), (308, 680), (10, 10)):
         assert "inside its board" in alarm_refusal(cursor([[0, "mouse", x, y]]), keys, None, [], 100.0)
-    for events in ([[0, "lbutton", "down"]], [[0, "mouse", 309, 182], [10, "lbutton", "down"]],
-                   [[10, "mouse", 309, 182]], [[0, "mouse", 309, 182], [0, "mouse", 400, 300]], []):
+    for events in ([[10, "mouse", 309, 182]], [[0, "mouse", 309, 182], [0, "mouse", 400, 300]], []):
         assert "one mouse move" in alarm_refusal(cursor(events), keys, None, [], 100.0), events
     for plan in (cursor(focus=True), cursor(capture={"lead_ms": 1}), cursor(end_ms=100),
                  cursor(capture={"lead_ms": 0, "fps": 1}), cursor(window_client=[1366, 768])):
         assert alarm_refusal(plan, keys, None, [], 100.0) is not None, plan
+
+    # Any mouse-button event selects Violetta's strict click form, never the move-only form's board-wide allowance.
+    for events in ([[0, "lbutton", "down"]], [[0, "mouse", 309, 182], [10, "lbutton", "down"]],
+                   [[0, "mouse", 580, 505], [1000, "lbutton", "down"], [1080, "lbutton", "up"]]):
+        assert alarm_refusal(cursor(events), keys, None, [], 100.0) is not None, events
+    click = [[0, "mouse", 527, 505], [1000, "lbutton", "down"], [1080, "lbutton", "up"]]
+    assert alarm_refusal(cursor(click), keys, None, [], 100.0) is None
 
 
 def test_the_alarm_keeps_when_the_lie_detector_was_first_seen():

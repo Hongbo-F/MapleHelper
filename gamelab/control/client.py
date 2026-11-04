@@ -4,9 +4,8 @@ recorded beside the answer. Submit a plan and wait for its result, or send it, w
 done and cut it short, or (a player that takes them: can_splice) hand it a plan that takes over from the running one at
 a moment of its own, the keys held then kept held (`splice`: the navigator's plans replanned as she goes,
 control.navigator.REPLAN). No plan goes out while the Lie Detector alarm is up (control.alarm), but the four kinds the
-player still takes then (alarm.PLAN_KINDS: her pet's food, her retreat's moves, the mini-game's mouse-only cursor,
-the pass's OK click),
-sent with their `kind`.
+player still takes then (alarm.PLAN_KINDS: her pet's food, her retreat's moves, the mini-game/Violetta cursor and the
+pass's OK click), sent with their `kind`.
 """
 
 import json
@@ -20,7 +19,7 @@ from ..paths import ALARM, INBOX, OUTBOX, PLAYER_INFO, PLAYER_LOG
 from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, LIE_OK, PLAN_KINDS
 
 POLL_S = 0.01  # how often `wait` looks for the result
-LIE_OK_DOWN_AT, LIE_OK_HOLD = 1000, 80  # the pass's OK click: pressed (its pointer's trail done by then) and held, ms
+LIE_CLICK_DOWN_AT, LIE_CLICK_HOLD = 1000, 80  # pressed (its pointer's trail done by then) and held, ms
 _KINDS: set[str] = set()  # plans sent with a kind, not answered yet: the alarm doesn't withdraw them (`wait`)
 SPLICED = "spliced"  # a plan's result's problem when another took over from it (`splice`)
 _SPLICES: dict[str, str] = {}  # a splice's plan id -> the plan it takes over from, until it's known taken or not (`taken`)
@@ -73,8 +72,9 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
          end_ms: int | None = None, window_client=None, kind: str | None = None) -> str:
     """Hand a plan to the running player without waiting; returns its id (for wait / cancel).
     `end_ms`: the plan lasts this long even after its last key (the next plan starts then). `kind`: one of
-    alarm.PLAN_KINDS (her pet's food, her retreat's moves, the mini-game's mouse-only cursor), which goes out with the
-    Lie Detector alarm up too, for the player to take or refuse by what the kind allows (player.alarm_refusal); any
+    alarm.PLAN_KINDS (her pet's food, her retreat's moves, the Lie Detector cursor, the pass's OK),
+    which goes out with the Lie Detector alarm up too, for the player to take or refuse by what the kind allows
+    (player.alarm_refusal); any
     other plan is refused here then."""
     if kind is None:
         check_alarm()
@@ -104,7 +104,7 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
 def move_lie_cursor(x: int, y: int, active, trail: list | None = None) -> bool:
     """Move to client pixel x, y through the elevated player while `active()` says the mini-game's round is still on.
 
-    This is the only mouse plan allowed with the alarm up: no focus, click, key, capture or final wait. The player
+    This is the move-only mouse plan allowed with the alarm up: no focus, click, key, capture or final wait. The player
     generates and plays the trail (window.move_cursor). Returns False when the round ends and the plan is cancelled.
     `trail`, a list: where the player's pointer went, [clock time (s), client x, client y] (its result's `trail`), as
     far as it went.
@@ -133,17 +133,46 @@ def move_lie_cursor(x: int, y: int, active, trail: list | None = None) -> bool:
     return True
 
 
-def click_lie_ok(x: int, y: int, timeout: float = 10.0) -> bool:
-    """Click the Lie Detector's pass dialog's OK button at client pixel x, y through the elevated player (alarm.LIE_OK:
-    a move there, the left button down at LIE_OK_DOWN_AT ms and up LIE_OK_HOLD ms later; the player refuses anything
-    else, or a point off the button). Whether it was clicked."""
-    events = [[0, "mouse", x, y], [LIE_OK_DOWN_AT, "lbutton", "down"], [LIE_OK_DOWN_AT + LIE_OK_HOLD, "lbutton", "up"]]
-    plan_id = send(events, focus=False, lead_ms=0, name="lie_ok", kind=LIE_OK)
-    result = wait(plan_id, timeout=timeout)
+def _lie_click_events(x: int, y: int) -> list:
+    return [[0, "mouse", x, y], [LIE_CLICK_DOWN_AT, "lbutton", "down"],
+            [LIE_CLICK_DOWN_AT + LIE_CLICK_HOLD, "lbutton", "up"]]
+
+
+def _lie_click_result(result: dict, what: str) -> bool:
     if result.get("error"):
-        raise PlayerError(f"the pass's OK click was refused: {result['error']}")
+        raise PlayerError(f"{what} was refused: {result['error']}")
     clicked = [e[1:] for e in result.get("sent", [])][-2:] == [["lbutton", "down"], ["lbutton", "up"]]
     return clicked and not result.get("problems")
+
+
+def click_lie_ok(x: int, y: int, timeout: float = 10.0) -> bool:
+    """Click the Lie Detector's pass dialog's OK button at client pixel x, y through the elevated player (alarm.LIE_OK:
+    a move there, the left button down at LIE_CLICK_DOWN_AT ms and up LIE_CLICK_HOLD ms later; the player refuses
+    anything else, or a point off the button). Whether it was clicked."""
+    plan_id = send(_lie_click_events(x, y), focus=False, lead_ms=0, name="lie_ok", kind=LIE_OK)
+    return _lie_click_result(wait(plan_id, timeout=timeout), "the pass's OK click")
+
+
+def click_lie_answer(x: int, y: int, active, timeout: float = 10.0) -> bool:
+    """Click Violetta's answer button at client pixel x, y while `active()` says its answer window is still open.
+
+    The elevated player takes only alarm.LIE_CURSOR's click form: one move and left click on an answer button. Returns
+    False when the window closes first and the plan is withdrawn or cancelled; no focus, key, capture or final wait.
+    """
+    plan_id = send(_lie_click_events(x, y), focus=False, lead_ms=0, name="lie_answer", kind=LIE_CURSOR)
+    try:
+        while not done(plan_id):
+            if not active():
+                if cancel(plan_id):  # not picked up: withdrawn, and no result will come
+                    return False
+                result = wait(plan_id, timeout=5)  # already running: collect its result after cancellation
+                return _lie_click_result(result, "the Violetta answer click")
+            time.sleep(POLL_S)
+        result = wait(plan_id, timeout=timeout)
+    except BaseException:
+        cancel(plan_id)  # also withdraw it if the service is closing or the clicker failed
+        raise
+    return _lie_click_result(result, "the Violetta answer click")
 
 
 def _plan_id(name: str) -> str:

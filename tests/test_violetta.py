@@ -1,6 +1,6 @@
 """The Lie Detector's Violetta game: the rules solver, the answer window's cue, the pass's dialog, the model on real
-frames, the live watcher, and the pass's OK click through the elevated player (perception.violetta,
-control.violetta_live, alarm.LIE_OK)."""
+frames, the live watcher, and the answer and pass's OK clicks through the elevated player (perception.violetta,
+control.violetta_live, alarm.LIE_CURSOR and alarm.LIE_OK)."""
 
 import json
 import threading
@@ -129,7 +129,7 @@ class _Spotter:
         return "countdown" if self.window else None
 
 
-def test_the_live_watcher_says_each_rounds_slot_and_clicks_the_pass_s_ok(tmp_path, monkeypatch):
+def test_the_live_watcher_clicks_each_rounds_slot_and_the_pass_s_ok(tmp_path, monkeypatch):
     from gamelab.control import violetta_live as vl
     from gamelab import telemetry
     alarm = tmp_path / "ALARM.json"
@@ -153,16 +153,30 @@ def test_the_live_watcher_says_each_rounds_slot_and_clicks_the_pass_s_ok(tmp_pat
         calls["det"] += 1
         return [boxes[k] if k < len(boxes) else []]
 
-    pushed, clicks = [], []
+    pushed, clicks, answered = [], [], []
     ok_at = {"on": False}
+
+    def answer(x, y, active):  # (the player's click: only while the buttons are lit)
+        answered.append((x, y, active()))
+        return True
+
     w = vl.VioletaLive(alarm=alarm, spotter=_Spotter(), log=lambda m: None, detector=detector,
                        ok=lambda full: (784, 430) if ok_at["on"] else None,
-                       clicker=lambda x, y: clicks.append((x, y)) or True, push=lambda t, x: pushed.append(t))
+                       clicker=lambda x, y: clicks.append((x, y)) or True, push=lambda t, x: pushed.append(t),
+                       answer=answer)
     now = 1000.0
     for k, t in enumerate(ts):
         now = 1000.0 + t
         w.step(now, (t, lit if k in lit_at else dark, k, 1))
+        if w.answering is not None:
+            w.answering.join(5)
     assert pushed == ["Violetta round 1: slot 3", "Violetta round 2: slot 1"]
+    assert answered == [(735, 505, True), (527, 505, True)]  # each answer's button clicked (slots 3 and 1)
+    assert all(any(x0 <= x < x1 and y0 <= y < y1 for x0, y0, x1, y1 in alarm_mod.LIE_ANSWER_BOXES)
+               for x, y in violetta.BUTTON_AT)  # the click-only-on-an-answer plan the player takes
+    ox0, oy0, ox1, oy1 = alarm_mod.LIE_OK_BOX
+    assert all(not (ox0 <= x < ox1 and oy0 <= y < oy1) for x, y in violetta.BUTTON_AT)
+    assert [kw["clicked"] for topic, kw in events if kw.get("event") == "answer"] == [True, True]
     rounds = [kw for topic, kw in events if topic == "violetta" and kw["event"] == "round"]
     assert [r["slot"] for r in rounds] == [3, 1] and rounds[0]["start"] == 2
     # the window gone: the game over; the pass's dialog seen twice in a row: its OK clicked once, not again at once
@@ -288,3 +302,74 @@ def test_the_client_hands_the_ok_click_to_the_player(tmp_path, monkeypatch):
     monkeypatch.setattr(client, "wait", lambda pid, timeout: {"error": "Lie Detector: refused"})
     with pytest.raises(client.PlayerError, match="refused"):
         client.click_lie_ok(784, 430)
+
+
+# --- the Violetta answer click -------------------------------------------------------------------------------------
+
+def _answer_plan(events=None, **kw):
+    return {"kind": alarm_mod.LIE_CURSOR, "focus": False, "capture": {"lead_ms": 0},
+            "events": [[0, "mouse", 527, 505], [1000, "lbutton", "down"], [1080, "lbutton", "up"]]
+            if events is None else events, **kw}
+
+
+def test_the_answer_click_is_one_click_on_one_of_the_four_buttons_and_nothing_else():
+    from gamelab.control.player import alarm_refusal, lie_answer_refusal, lie_cursor_refusal
+    for x, y in violetta.BUTTON_AT:
+        plan = _answer_plan([[0, "mouse", x, y], [1000, "lbutton", "down"], [1080, "lbutton", "up"]])
+        assert lie_answer_refusal(plan) is None
+        assert lie_cursor_refusal(plan) is None
+        assert alarm_refusal(plan, None, None, [], 100.0) is None
+    for x, y in ((478, 505), (889, 505), (580, 505), (527, 486), (527, 522), (784, 430)):
+        plan = _answer_plan([[0, "mouse", x, y], [1000, "lbutton", "down"], [1080, "lbutton", "up"]])
+        for check in (lie_answer_refusal, lie_cursor_refusal):
+            assert "stays on its button" in check(plan), (x, y, check.__name__)
+        # Even a point inside the mini-game board may not use the move-only form's wider allowance for a click.
+        assert "stays on its button" in alarm_refusal(plan, None, None, [], 100.0), (x, y)
+    for events in ([[0, "mouse", 527, 505], [1000, "lbutton", "down"]],
+                   [[0, "mouse", 527, 505], [1000, "rbutton", "down"], [1080, "rbutton", "up"]],
+                   [[0, "mouse", 527, 505], [1000, "lbutton", "down"], [1080, "lbutton", "up"], [1100, "1", "down"]]):
+        assert "nothing else" in lie_cursor_refusal(_answer_plan(events)), events
+    for plan in (_answer_plan(focus=True), _answer_plan(capture={"lead_ms": 50}), _answer_plan(end_ms=2000),
+                 _answer_plan(capture={"lead_ms": 0, "fps": 1}), _answer_plan(window_client=[1366, 768])):
+        assert lie_cursor_refusal(plan) is not None, plan
+
+
+def test_the_player_clicks_an_answer_only_with_the_game_under_the_pointer(monkeypatch, tmp_path):
+    from test_alarm import _Game, _alarmed_player
+    from gamelab.control import player as player_mod
+    game = _Game(monkeypatch, tmp_path)
+    p, said = _alarmed_player()
+    monkeypatch.setattr(player_mod.window, "move_cursor", lambda x, y, wait, played: True)
+    monkeypatch.setattr(player_mod.window, "pointer_on", lambda hwnd: True)
+    result = p.run(dict(_answer_plan(), id="answer1"))
+    assert "error" not in result and game.sent == [("lbutton", True), ("lbutton", False)] and game.fronted == []
+    game.sent.clear()
+    monkeypatch.setattr(player_mod.window, "pointer_on", lambda hwnd: False)
+    result = p.run(dict(_answer_plan(), id="answer2"))
+    assert game.sent == [] and result["problems"] == ["another window is under the pointer; the answer not clicked"]
+
+
+def test_the_client_hands_the_answer_click_to_the_player(tmp_path, monkeypatch):
+    monkeypatch.setattr(client, "INBOX", tmp_path)
+    monkeypatch.setattr(client, "done", lambda pid: True)
+    monkeypatch.setattr(client, "wait", lambda pid, timeout: {
+        "sent": [[0, "mouse", 527, 505], [1001, "lbutton", "down"], [1081, "lbutton", "up"]], "problems": []})
+    assert client.click_lie_answer(527, 505, active=lambda: True) is True
+    plan = json.loads(next(tmp_path.glob("*lie_answer*.json")).read_text(encoding="utf-8"))
+    assert plan == {"events": [[0, "mouse", 527, 505], [1000, "lbutton", "down"], [1080, "lbutton", "up"]],
+                    "capture": {"fps": 0, "duration_ms": 0, "scale": 1, "lead_ms": 0},
+                    "focus": False, "kind": alarm_mod.LIE_CURSOR}
+    from gamelab.control.player import lie_cursor_refusal
+    assert lie_cursor_refusal(plan) is None
+
+
+def test_an_inactive_answer_click_is_withdrawn_before_it_is_picked_up(monkeypatch):
+    monkeypatch.setattr(client, "send", lambda *a, **kw: "answer1")
+    monkeypatch.setattr(client, "done", lambda pid: False)
+    monkeypatch.setattr(client, "cancel", lambda pid: True)
+
+    def no_wait(pid, timeout):
+        raise AssertionError("a plan never picked up has no result to wait for")
+
+    monkeypatch.setattr(client, "wait", no_wait)
+    assert client.click_lie_answer(527, 505, active=lambda: False) is False
