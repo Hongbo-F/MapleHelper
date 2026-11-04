@@ -2,7 +2,6 @@
 both characters where it differs. Which monster, the next, a respawn, a monster coming at her, the plan's place, her drops
 against her target, and the backpack's push (control.notify.BackpackPush)."""
 
-import dataclasses
 import contextlib
 import time
 from types import SimpleNamespace
@@ -10,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from gamelab import character, telemetry
-from gamelab.attack import knock, magic, reach
+from gamelab.attack import magic, reach
 from gamelab.attack import target as tg
 from gamelab.attack.stance import NO_PACE, Pace, _sizes, _stand_limits
 from gamelab.behavior import grind as grind_mod
@@ -475,64 +474,6 @@ def test_a_far_pile_waits_for_her_way_then_goes_whatever_it_takes_near_the_end_o
     assert tp.loot_allow(_pile(9.0), s, now) == pytest.approx(targeting.LOOT_FRESH)  # (long landed, no look has seen any)
     assert tp.loot_allow(_pile(OWN_S + 50.0, platform=7), s, now) == pytest.approx(targeting.LOOT_FRESH)
     assert tp.loot_allow(_pile(EXPIRE_S - 5.0, platform=7), s, now) >= targeting.LOOT_ALL
-
-
-def _zone_tp(m, x, tx, clear=True):
-    """Her on 10 at x, her primary on 10 at tx, her way to a place clear or not."""
-    tp = _targeting(m)
-    t = _mon(m, GREEN, tx, 10, track=4)
-    tp.her = _her(m, 10, x, [t], False)
-    tp.choice = tp.chooser.choose(tp.her, [_foe(t, exp=30.0)])
-    tp.g.nav = SimpleNamespace(first_clear=lambda s, x0, goals: goals[-1] if clear else None)
-    s = _look_at(m, x=x)
-    s.platform = tp.her.platform
-    return tp, s
-
-
-def test_her_attack_goes_from_where_a_touch_from_its_side_leaves_her_on_her_platform(tree):
-    """On 10 a touch from the right throws her off left of about -90 (attack.knock's table): her primary on her right, she
-    walks out of there, as far as she must, then attacks; said once, why."""
-    m, _ = tree
-    p = m.platform(10)
-    assert knock.flown(m, p, -135.0, knock.GROUND, -1).off(m, p)
-    tp, s = _zone_tp(m, -135.0, 60.0)
-    act = tp.plan(s, ("throw", "right"), True)
-    assert act[0] == "approach" and act[1] == "right" and act[2] <= 60.0
-    assert not knock.flown(m, p, -135.0 + act[2], knock.GROUND, -1).off(m, p)
-    assert tp.counts["off a knock's zone"] == 1
-    tp, s = _zone_tp(m, 165.0, 0.0)  # (the other end, the same)
-    act = tp.plan(s, ("throw", "left"), True)
-    assert act[0] == "approach" and act[1] == "left" and not knock.flown(m, p, 165.0 - act[2], knock.GROUND, 1).off(m, p)
-
-
-def test_no_step_off_where_a_touch_from_her_primary_s_side_keeps_her_on(tree):
-    m, _ = tree
-    tp, s = _zone_tp(m, 0.0, 100.0)  # (the middle of 10)
-    assert reach.can_hit(tp.her.platform, 0.0, tp.her.y, tp.choice.primary.m, others=tp.her.around, sizes=tp.her.sizes)
-    assert tp.off_zone(s) is None and tp.plan(s, ("throw", "right"), True) == ("throw", "right")
-    tp, s = _zone_tp(m, -100.0, -160.0)  # (by the left end, her primary further left: a touch throws her along it)
-    assert tp.off_zone(s) is None
-
-
-def test_no_step_off_when_it_would_lose_the_shot_or_the_way_is_not_clear_or_she_is_only_asking(tree, monkeypatch):
-    """A primary too close to walk towards, her attack not landing from the first place off it, her limit ahead of her before
-    that place, a monster on the way, a rule asking what she would do, a primary elsewhere: she attacks from where she is."""
-    m, _ = tree
-    tp, s = _zone_tp(m, -135.0, -110.0)
-    assert tp.off_zone(s) is None
-    tp, s = _zone_tp(m, -135.0, 60.0)
-    tp.her = dataclasses.replace(tp.her, hi=-120.0)
-    assert tp.off_zone(s) is None
-    tp, s = _zone_tp(m, -135.0, 60.0, clear=False)
-    assert tp.off_zone(s) is None and tp.plan(s, ("throw", "right"), True) == ("throw", "right")
-    tp, s = _zone_tp(m, -135.0, 60.0)
-    assert tp.off_zone(s) is not None and tp.plan(s, ("throw", "right"), False, False) == ("throw", "right")
-    tp, s = _zone_tp(m, -135.0, 60.0)
-    tp.choice = SimpleNamespace(primary=SimpleNamespace(m=_mon(m, GREEN, 100.0, 13, track=5)))
-    assert tp.off_zone(s) is None
-    tp, s = _zone_tp(m, -135.0, 60.0)
-    monkeypatch.setattr(reach, "can_hit", lambda *a, **k: False)
-    assert tp.off_zone(s) is None
 
 
 def _strip(x0=0.0, x1=200.0, at=None, sure=True, mesos_only=False):

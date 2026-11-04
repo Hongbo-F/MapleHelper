@@ -25,7 +25,6 @@ from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
 from .ledger import EXPIRE_S, SETTLE
-from ..attack import knock, reach
 from ..attack import target as tg
 from ..attack.stance import MIN_MOVE, _sizes, _stand_limits, open_above
 from ..localization.monsters import Monster, speeds
@@ -46,7 +45,6 @@ LOOT_DUE_S = 30.0     # s of a pile's life left, its way there and its stand asi
 ASKS = 4              # targets the plan is asked for at most at a pass (the rest wait for the next look)
 NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the stance's answer a wait, no place to walk to) is
                       # set aside: another's taken at the next look, and she never idles on one
-ZONE_STEP = 20.0      # units between the places tried for a step off a knock's zone (`off_zone`)
 IDLE_S = 1.5          # s with nothing she can act on (a wait, no pile) after which she goes on to the next stop
 HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
@@ -327,33 +325,6 @@ class Targeting:
         pick = far[0] if clear is None else clear
         return (RIGHT if pick > her.x else LEFT), min(abs(pick - her.x), tg.WALK_STEP), pick
 
-    def off_zone(self, s) -> tuple[str, float] | None:
-        """The user on the -80 rope: "go to a side that is less likely to get knocked down the platform". Her attack on the
-        primary, on her platform with her, would go from where a touch from its side knocks her off it (attack.knock: a table
-        lookup; on the dev seeds 26 of 31 touches on 10 left of -95 did, none of 180 right of it): the step toward it (way, how
-        far) to the nearest place where one doesn't, if her attack still lands on it from there and the way is clear. None:
-        she isn't there, or no such step."""
-        c, her = self.choice, self.her
-        m, p, model = c.primary.m, her.platform, self.g.model
-        if m.platform != p.id or her.platform is not s.platform:
-            return None
-        way = 1 if m.x > her.x else -1
-        if not knock.flown(model, p, her.x, knock.GROUND, -way).off(model, p):
-            return None
-        room = abs(m.x - her.x) - tg.near_far(her, m)[0] - tg.NEAR_SLACK
-        d = ZONE_STEP
-        while d <= room:
-            g = her.x + way * d
-            if g > her.hi if way > 0 else g < her.lo:  # (the limit ahead of her: the one behind is what she's leaving)
-                return None
-            if not knock.flown(model, p, g, knock.GROUND, -way).off(model, p):
-                if reach.can_hit(p, g, p.y_at(g), m, others=her.around, sizes=her.sizes) \
-                        and self.g.nav.first_clear(s, her.x, [g]) is not None:
-                    return (RIGHT if way > 0 else LEFT), d
-                return None
-            d += ZONE_STEP
-        return None
-
     def mine(self, targets) -> bool:
         """Whether `targets` are the primary alone (the stance asked is for it)."""
         c = self.choice
@@ -364,12 +335,8 @@ class Targeting:
         stands and `approach` the walk to its place; said when it changes. Not `acting` and no `approach` (a rule only asking
         what the stance would do: Hunt._pass's close quarters): its answer alone, nothing set aside."""
         c = self.choice
-        note = ""
         if act[0] == "wait" and approach and (step := self.walk_step(s)) is not None:
             act = ("approach", step[0], step[1])
-        elif approach and act[0] in fight.THROWS and (off := self.off_zone(s)) is not None:
-            act, note = ("approach", off[0], off[1]), "off a knock's zone"
-            self.counts[note] += acting
         if act[0] == "wait" and not approach and not acting:
             return act
         if act[0] == "wait":  # (nothing against it for now: set aside, another taken at once: Grind._targets)
@@ -380,10 +347,10 @@ class Targeting:
             self.h.log(f"  target: {m.kind} #{m.track} at {m.x - s.where.x:+.0f} set aside for {NO_WAY_S} s: nothing to do "
                        f"against it from here")
             return act
-        self._say(s, act, note)
+        self._say(s, act)
         return act
 
-    def _say(self, s, act: tuple, note: str = "") -> None:
+    def _say(self, s, act: tuple) -> None:
         """One log line and one 'target' record when the target or the plan changes."""
         c = self.choice
         p, n = c.primary, c.next
@@ -393,7 +360,7 @@ class Targeting:
         self._said = key
         x = s.where.x
         m = p.m
-        why = note or self._why(c)
+        why = self._why(c)
         text = (f"{m.kind} #{m.track} at {m.x - x:+.0f}, {('%d%% HP' % round(m.bar * 100)) if m.bar is not None else 'no HP bar'}"
                 f"{', chasing' if p.foe.chasing else ''}{', fading in' if p.foe.born else ''}, score {p.score:.1f} "
                 f"({p.foe.exp:.0f} EXP in {p.way.s + p.foe.kill_s:.1f} s)" + ("" if n is None else f", next {n.m.kind} #{n.m.track}"))
