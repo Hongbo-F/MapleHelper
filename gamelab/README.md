@@ -7693,7 +7693,7 @@ What it can and can't say. Its monsters the look misses are alive (90% against 5
 - **Not used:** the aggro memory (ends with the deaths the feed has, no evidence of its own; its place for a stand-in not tried), damage numbers over the place (the same fill as Tree Dungeon's platforms and leaves), `Attacks._corpse` for the thief (a dead walker's new id when seen: the finder's die1 on a search's detection covers part: seen targets dead or gone 7-11% live, not measured with it).
 - **First binding of her kills** on R1-R3: 142 against 144 of 151 right first (65 against 67 of the 71 strong), final the same: more bodies near her to bind to, let go sooner.
 
-## The target-first planner (from 2026-11-04; off by default, its second gate not passed; `GAMELAB_TARGET=1` on)
+## The target-first planner (from 2026-11-04; on by default, the user's call with its second gate not passed; `GAMELAB_TARGET=0` off)
 
 The user, 2026-11-04: "I think on a short term, planner should just decide which mob to hit and plan against that. This is simple, less costly, and easy to follow." And: "you should watch for respawns at each frame. You should also change target if a mob is moving towards you and can knock you back, if you are not already attacking that mob. While you pick the primary target, it's also good to think about what's your next target". On loot: "you should aim for 100% pick up rate and if backpack is full, send a regular push notification". It replaces nothing but the grind's fights and loot on a platform, arrivals included; the platform choice (`Patrol.choose`), trips between platforms, rope hangs, the Lie Detector stop, the low-HP stop and pet feeding are as they were. Off, the grind is the one before it to the digit (harness: 20 runs of both characters in both worlds; goldens: 47 of 47 to the byte).
 
@@ -7797,7 +7797,7 @@ Two reviews of the code above found what's listed under "How it works" as it now
 
 The 3 s hold cost her 20.4 EXP a minute against 2.2 s (t +3.00), the thief's side -8.0 (t -1.27). How isn't shown: her kill-to-key time rises (p90 7.2 to 7.9 s), and a guess that she stood idle by the pile was tested (the gate by the pile) and was wrong. It fits piles staying open longer, keeping her on her platform. The step and that gate did nothing measurable (the code without them: +0.4, +1.4).
 
-**The second gate** (written first: `D:/MapleHelper-scratch/target-plan/gate2_prereg.txt`; 40bddff, seeds 401-496, 5 minutes, both characters, paired against 9060ff7, run once; `gate2_result.txt`). **FAIL**, so the switch went off by default, as written beforehand.
+**The second gate** (written first: `D:/MapleHelper-scratch/target-plan/gate2_prereg.txt`; 40bddff, seeds 401-496, 5 minutes, both characters, paired against 9060ff7, run once; `gate2_result.txt`). **FAIL**, so the switch went off by default on the branch, as written beforehand. Told all of it, the user, 2026-11-04: "Merge with switch on". So it's on by default on master, on this gate's numbers: no t reached +2, and her knock-offs off 10 are up.
 
 | | Her master | Her planner | diff (t) | Thief master | Thief planner | diff (t) |
 |---|---|---|---|---|---|---|
@@ -7844,7 +7844,7 @@ So her EXP gain is the no-stand rule, not the choice of target, which buys her n
 | landed by 120 s, picked up | .821 -> .985 | .753 -> .957 |
 | at piles, hurt | 1.6 -> 11.9 | 0.7 -> 10.0 |
 
-On, as the user's "aim for 100% pick up rate" has it. Off would be two lines in `Targeting.loot_allow`. There's no meso-to-EXP rate to settle it by, and off has had no gate.
+On: the user, asked, 2026-11-04: "RiceBaby should keep fetching far piles." Off would be two lines in `Targeting.loot_allow`. There's no meso-to-EXP rate to settle it by, and off has had no gate.
 
 ### Left as they are, for the user to know
 
@@ -7853,19 +7853,18 @@ On, as the user's "aim for 100% pick up rate" has it. Off would be two lines in 
 - **A switch for a respawn is rare**: 0.1 a run though 8-12 newborns appear near her a run. The rule the user asked for is there and seldom decides.
 - **Hurt at piles more than doubles** (second gate: 4.6 -> 11.0, 4.4 -> 10.9 a run; total touches +2.2, +3.4; HP lost about flat on the first gate). This goes against the user's 2026-10-30 "try not to hit by mobs just for picking up loots", by their newer "aim for 100%"; far piles off takes it to 1.6 and 0.7 (dev seeds).
 - **The backpack push** is once a tab per process (a grind's): a new grind may tell again. A kind newly picked up can clear it after `TAB_RETRY_S`, so a few extra at most.
-- **With the switch on, `--attack regular` stops out of darts a little less**: seeds 21-44, on the second gate's code, 22 of 24 stop on, 24 of 24 off (a median run of 136 and 126 s). On seed 28 the run ends in "no kill, pick-up or new ground for 120 s: standing by" before it; seed 22 also ends with no stop at 259 s. Off is the default, and the user's grinds use `choice`.
+- **With the switch on, `--attack regular` stops out of darts a little less**: seeds 21-44, on the second gate's code, 22 of 24 stop on, 24 of 24 off (a median run of 136 and 126 s). On seed 28 the run ends in "no kill, pick-up or new ground for 120 s: standing by" before it; seed 22 also ends with no stop at 259 s. On is the default; the user's grinds use `choice`.
 
 ### Goldens and tests
 
-On the second gate's code with the switch off: 47 of 47 of master's own recorded traces to the byte (`golden check --folder` on the main checkout's), so off this is master. Recorded so here, with the set-piece's (forced on): 48 of 48. Her `loop_tree_attack_no_darts` is back on seed 29 (with the switch on it needs 31, as below). The suite: 3325 pass, and test_geometry's one failure on `perception/lie_target.py`, master's, not touched here.
+On the second gate's code with the switch off: 47 of 47 of master's own recorded traces to the byte (`golden check --folder` on the main checkout's), so `GAMELAB_TARGET=0` is the grind before it. Recorded on, the default: 15 of those 47 differ, all grinds, all 15 showing what they're there for; with the set-piece's, 48 of 48 on a second run. Her `loop_tree_attack_no_darts` is on seed 31 (with the switch off it needs 29, as below). `nav_tree_landing_shot_first` and `nav_tree_landing_no_shot` don't show what they're there for, on master too, with the same traces: `check` doesn't look at `expects`, only `record` says so. The suite: 3325 pass, and test_geometry's one failure on `perception/lie_target.py`, master's, not touched here.
 
-At the first gate, switch off: 47 of 47 to the byte. On: 15 differ, all grinds; 32 not. First diverging events: the target's own log line, or her stance's list down to one, then a key: `loop_tree_grind`: a throw at 34.2 s turns into a jump attack; `loop_tree_grind_drops`: a jump attack at 1.56 s into a throw; `loop_tree_lie_detector_grind`: a walk at 4.03 s into a stand on her drops at 4.23; `loop_tree_attack_no_darts`: a new seed (of seeds 21-44 her stars' test comes before out of darts' stop on 31 and 34). The set-piece's added then. On the second gate's code, on: 16 differ, 6 by the log's wording, all 16 still meeting what they're there for. `tests/test_target.py`.
+At the first gate, switch off: 47 of 47 to the byte. On: 15 differ, all grinds; 32 not. First diverging events: the target's own log line, or her stance's list down to one, then a key: `loop_tree_grind`: a throw at 34.2 s turns into a jump attack; `loop_tree_grind_drops`: a jump attack at 1.56 s into a throw; `loop_tree_lie_detector_grind`: a walk at 4.03 s into a stand on her drops at 4.23; `loop_tree_attack_no_darts`: a new seed (of seeds 21-44 her stars' test comes before out of darts' stop on 31 and 34). The set-piece's added then. `tests/test_target.py`.
 
 ### Not done
 
-- **Off by default, and not merged.** Whether to run it anyway (+8 to +12 EXP a minute and clearly more loot in every set of seeds, with more touches, and her knock-offs off 10 up), or to gate it further, is the user's.
 - **Not live.** Nothing here has seen the game. The first grind is its check: the 'target' records, "none landed" in 'target_end' against the pickup log (a drop a search misses comes back when seen: the `pile_revived` events), and the push.
-- **100% isn't reached in a 5-minute run:** far piles wait for her way (a 5-minute run's cut). What they cost is the user's to choose, below.
+- **100% isn't reached in a 5-minute run:** far piles wait for her way (a 5-minute run's cut). What they cost her is above; the user keeps them on.
 - **A knock-zone step** before attacking (the user on the -80 rope: "or go to a side that is less likely to get knocked down") was tried twice and dropped: as a knock price on each place (gone with the review's simplifications: those together moved EXP -4.6, t -0.93, and +2.0, t +0.32, on the dev seeds; the price alone wasn't measured); as a step off the zone before attacking (`attack.knock`'s table), it fired 0.19 and 0.54 a run with her knock-offs off 10 no lower (24 against 22). The monster that knocked her along the platform is mostly on her way back, so there's no clear step. The thief's knock-offs fell without it; hers didn't.
 - **Pets** aren't in these worlds (`pet-loot`); they'd pick up what she walks past, which only helps.
 - **Attacks at the dead** rose for her (+1.4 a run, t +2.9): worth a look with the first live hour.

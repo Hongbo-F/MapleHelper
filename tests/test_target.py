@@ -724,9 +724,9 @@ def test_the_backpack_push_sends_nothing_under_no_push_and_never_logs_the_key(tm
     assert said and "SECRETKEY" not in said[0] and "<key>" in said[0]
 
 
-def test_the_switch_is_off_by_default_its_second_gate_not_passed_and_on_with_1(monkeypatch):
+def test_the_switch_is_on_by_default_the_users_call_and_off_with_0(monkeypatch):
     monkeypatch.delenv("GAMELAB_TARGET", raising=False)
-    assert not targeting.on()
+    assert targeting.on()
     monkeypatch.setenv("GAMELAB_TARGET", "0")
     assert not targeting.on()
     monkeypatch.setenv("GAMELAB_TARGET", "1")
