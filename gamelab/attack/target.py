@@ -66,6 +66,8 @@ HIT_ALPHA = 0.36     # a newborn can be hit from about this alpha (perception.sp
 PILE_MOST = 3        # guess: the monsters at a place she'd really kill before they've walked off (a kill 2-3 s, a walk 40-125 units/s)
 ABOVE_MOST = 150.0   # units: her search reaches no higher over her feet (reach.window's at STAR_RANGE: 129), the quick check of a place
 BELOW_MOST = 70.0    # ... and no lower under them (reach.SHOT_DOWN 60)
+JUMP_ABOVE = 230.0   # units: ... and from a jump no higher than this over where she stands (77 up, ABOVE_MOST)
+JUMP_ASKS = 2        # (`_rank_screen`) monsters a jump's search is asked of at a look at most, the nearest (3 ms each, the dear part)
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,8 @@ class Her:
     # top): s from (platform, x) to anywhere on another platform from lo to hi, and where: Planner.arrive_within; None: her
     # platform alone, as before
     stands: dict = field(default_factory=dict)  # (with `routes`) `in_height`: the platforms an attack can land on one on each
+    known: dict = field(default_factory=dict)   # (with `routes`) `near_far`'s answers so far, by kind and height (behavior.targeting's
+    # kept from look to look: the same for each until her danger changes)
 
 
 @dataclass(frozen=True)
@@ -180,19 +184,28 @@ def near_far(her: Her, m: Monster, y: float | None = None, on: Platform | None =
     (Danger.keep_off); to her attack's farthest (reach.SHOT_RANGE, which magic.apply sets for hers). `near` inf: no attack
     from that height takes it."""
     y = her.y if y is None else y
+    same = m.platform == (her.platform if on is None else on).id
+    key = None
+    if her.routes is not None:
+        key = (m.kind, round(m.y - y), same)
+        if (got := her.known.get(key)) is not None:
+            return got
     top_half = reach.body_of(m.kind, her.sizes)
     near = reach.shot_dx(m.y - y, m.kind, her.sizes)
-    if m.platform == (her.platform if on is None else on).id:
+    if same:
         near = max(near, reach.ground_sure(half_of(m.kind, her.halves))[0])
         if her.danger is not None:
             near = max(near, her.danger.keep_off(m.kind))
-    return near, min(float(reach.SHOT_RANGE), reach.max_dx(top_half[1]))
+    out = near, min(float(reach.SHOT_RANGE), reach.max_dx(top_half[1]))
+    if key is not None:
+        her.known[key] = out
+    return out
 
 
-def bands(her: Her, m: Monster, p: Platform, lo: float, hi: float) -> list[tuple[float, float]]:
+def bands(her: Her, m: Monster, p: Platform, lo: float, hi: float, y: float | None = None) -> list[tuple[float, float]]:
     """The stretches of platform `p` within `lo` to `hi` from which her attack from the ground lands on monster `m`, one each
-    side of it at most, walls and what the attack takes first aside (`near_far`, at the platform's height under it)."""
-    near, far = near_far(her, m, p.y_at(min(max(m.x, p.left), p.right)), p)
+    side of it at most, walls and what the attack takes first aside (`near_far`, at the platform's height under it, `y`)."""
+    near, far = near_far(her, m, p.y_at(min(max(m.x, p.left), p.right)) if y is None else y, p)
     out = []
     if not math.isfinite(near):
         return out
@@ -236,9 +249,12 @@ def _ways(her: Her, f: Foe, on: Platform, x: float, lead: float) -> list[Way]:
         g = min(max(x, u), v)
         out.append(Way(lead + abs(g - x) / physics.WALK_SPEED + STEP_SETTLE_S, "walk", g))
     for q in her.stands.get(m.platform, ()):
-        if q.id == on.id or not -ABOVE_MOST <= m.y - q.y_at(min(max(m.x, q.left), q.right)) <= BELOW_MOST:
+        if q.id == on.id:
             continue
-        for u, v in bands(her, m, q, *_stand_limits(q, crowded=True)):
+        y = q.y_at(min(max(m.x, q.left), q.right))
+        if not -ABOVE_MOST <= m.y - y <= BELOW_MOST:
+            continue
+        for u, v in bands(her, m, q, *_stand_limits(q, crowded=True), y):
             got = her.routes(on.id, x, q.id, u, v)
             if got is not None:
                 out.append(Way(lead + got[0] + STEP_SETTLE_S, "trip", got[1], q.id))
@@ -320,23 +336,19 @@ def _rate(f: Foe, base: float, others: list[Foe]) -> float:
     return (f.p * f.exp + sum(o.p * o.exp for o in others)) / max(1e-3, base + f.kill_s + sum(o.kill_s for o in others))
 
 
-def place_score(her: Her, f: Foe, way: Way, foes: list[Foe], memo: dict | None = None) -> tuple[float, list[Foe]]:
+def place_score(her: Her, f: Foe, way: Way, foes: list[Foe]) -> tuple[float, list[Foe]]:
     """What going for it makes her, by the place her way ends at (see the top): the kind's EXP over the way and the kill as
-    `score`, and each other monster her attack from there may land on (`near_far`; `memo`: those worked out so far at this look),
-    best first by its own EXP over its kill, PILE_MOST in all, so long as it raises that rate; and those others."""
+    `score`, and each other monster her attack from there may land on (`near_far`), best first by its own EXP over its kill,
+    PILE_MOST in all, so long as it raises that rate; and those others."""
     base = max(way.s, f.hit_s)
-    memo = {} if memo is None else memo
     on, g, y = _place_of(her, way)
     near = []
     for o in foes:
         dy = o.m.y - y
         if o is f or o.p <= 0.0 or o.spent or not -ABOVE_MOST <= dy <= BELOW_MOST or abs(o.m.x - g) > reach.SHOT_RANGE:
             continue
-        key = (o.m.kind, round(dy), o.m.platform == on.id)
-        got = memo.get(key)
-        if got is None:
-            got = memo[key] = near_far(her, o.m, y, on)
-        if got[0] <= abs(o.m.x - g) <= got[1]:
+        lo, hi = near_far(her, o.m, y, on)
+        if lo <= abs(o.m.x - g) <= hi:
             near.append(o)
     near.sort(key=lambda o: -o.p * o.exp / max(1e-3, o.kill_s))
     pile: list[Foe] = []
@@ -369,37 +381,36 @@ def _rank_screen(her: Her, foes: list[Foe], keep: tuple) -> list[Terms]:
     """`rank` with Her.routes: every monster by its best place's score (`place_score`). Those in reach first; for the rest, best
     first, what stops her attack (`_checked`) and a jump's search (the dear parts) asked only where they can decide: `keep` (her
     target and her next), and those that would beat the best so far."""
-    memo: dict = {}
     out, rest = [], []
     for f in foes:
         way = soonest(her, f, far=False)
         if way is None:
             rest.append(f)
         else:
-            s, pile = place_score(her, f, way, foes, memo)
-            out.append(_checked(her, f, way, pile) or Terms(f, way, score(f, way)))
+            out.append(_checked(her, f, way, place_score(her, f, way, foes)[1]) or Terms(f, way, score(f, way)))
+    near = bool(out)
     best = max((t.score for t in out), default=0.0)
-    at_once = her.lead + JUMP_S if her.jumps else her.lead
+    if her.jumps and her.jump_hits is not None:  # (a jump's shot from where she stands: the nearest in height, with none in reach)
+        at_once = Way(her.lead + JUMP_S, "jump")
+        for f in sorted((f for f in rest if (f in keep or not near) and abs(f.m.x - her.x) <= reach.SHOT_RANGE
+                         and -JUMP_ABOVE <= f.m.y - her.y <= BELOW_MOST), key=lambda f: abs(f.m.x - her.x) + abs(f.m.y - her.y))[:JUMP_ASKS]:
+            if her.jump_hits(f.m):
+                out.append(Terms(f, at_once, score(f, at_once)))
+                best = max(best, out[-1].score)
+                rest.remove(f)
     places = []
     for f in rest:
-        ways = sorted(((*place_score(her, f, w, foes, memo), w) for w in _ways(her, f, her.platform, her.x, her.lead)),
-                      key=lambda o: -o[0])
+        ways = sorted(((*place_score(her, f, w, foes), w) for w in _ways(her, f, her.platform, her.x, her.lead)), key=lambda o: -o[0])
         places.append((ways[0][0] if ways else 0.0, f, ways))
     places.sort(key=lambda o: -o[0])
     for top, f, ways in places:
-        decides = f in keep or top > best
-        t = None
-        if decides and her.jumps and her.jump_hits is not None and score(f, Way(at_once, "")) > best and her.jump_hits(f.m):
-            t = Terms(f, Way(at_once, "jump"), score(f, Way(at_once, "")))
-        elif decides:
-            for _, pile, w in ways:
-                if (t := _checked(her, f, w, pile)) is not None:
-                    break
-        elif ways:
-            t = Terms(f, replace(ways[0][2], pile=tuple(o.m for o in ways[0][1])), top)
-        if t is not None:
-            out.append(t)
-            best = max(best, t.score) if decides else best
+        if f in keep or top > best:
+            t = next(filter(None, (_checked(her, f, w, pile) for _, pile, w in ways)), None)
+            if t is not None:
+                out.append(t)
+                best = max(best, t.score)
+        elif ways:  # (it can't be chosen: its terms as they are)
+            out.append(Terms(f, replace(ways[0][2], pile=tuple(o.m for o in ways[0][1])), top))
     return sorted(out, key=lambda t: -t.score)
 
 

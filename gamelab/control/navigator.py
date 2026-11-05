@@ -999,6 +999,10 @@ class TripState:
     # The target-first planner's trip (behavior.targeting: a grind's spot trip): over as she reaches its platform, wherever
     # she is on it: no walk on to x, no shot clearing it; what she does there is the planner's
     on_arrival: bool = False
+    # (the target-first planner's whole screen) Asked of her look before she stands and waits for a monster to move off a move
+    # or a landing of this trip: True ends the trip there, 'in position', and the hunt has something else for her
+    instead_of_waiting: Callable[[Scene], bool] | None = None
+    stop_waiting: bool = False
 
     def __post_init__(self):
         self.evade_s = EVADE_S if self.evade_s is None else self.evade_s
@@ -1135,7 +1139,8 @@ class Navigator:
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
               scene: Scene | None = None, keep_off=(), vary: bool = True, evade_s: float | None = None,
-              refuge_s: float | None = None, on_arrival: bool = False) -> TripState:
+              refuge_s: float | None = None, on_arrival: bool = False,
+              instead_of_waiting: Callable[[Scene], bool] | None = None) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
@@ -1148,7 +1153,7 @@ class Navigator:
                               # has it from the map's cache since)
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, self.health, mode,
                        keep_off=frozenset(keep_off), vary=vary, evade_s=evade_s, refuge_s=refuge_s,
-                       on_arrival=on_arrival)
+                       on_arrival=on_arrival, instead_of_waiting=instead_of_waiting)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -1200,6 +1205,8 @@ class Navigator:
         if getattr(self.actions, "kind", None) is None:
             client.check_alarm()
         # Look, and deal with what's here.
+        if st.stop_waiting:  # (the hunt has something else for her: `instead_of_waiting`)
+            return st.end("in position")
         s, looked = self._look(st)
         st.last = s
         st.health(s)  # her potions, and the safety stop (a hunter's health_check raises it: behavior.safety)
@@ -1757,6 +1764,9 @@ class Navigator:
                 # (the same landing `delay` later: the monsters walked on, their sightings as old as they are; no
                 # monster seen making it priced then, what the looks don't have aside)
                 if judge(replace(last, end=replace(last.end, t=last.end.t + delay)))[1] is None:
+                    if st.instead_of_waiting is not None and st.instead_of_waiting(s):
+                        st.stop_waiting = True
+                        return True
                     st.land_waits += 1
                     st.trip.waits += 1
                     self.log(f"  waiting for the {kind} by her landing on {q.id} to move off ({st.land_waits})")
@@ -1823,6 +1833,9 @@ class Navigator:
         if st.waited < WAIT_LOOKS:
             safe = self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
             worth = self._worth_waiting(move, start, monsters, linger, mo) if safe else None  # (None: not asked)
+            if worth and st.instead_of_waiting is not None and st.instead_of_waiting(s):
+                st.stop_waiting = True
+                return True
             if worth:
                 st.waited += 1
                 st.trip.waits += 1

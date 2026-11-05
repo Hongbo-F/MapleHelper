@@ -608,7 +608,7 @@ class Attacks:
         if not self.picks:
             return None
         s = self._last
-        if s is None or not any(o is m for o in s.monsters):
+        if s is None or not any(o is m for o in s.monsters) and not any(o is m for o in s.swept):
             return "unseen"
         if self._dying(m, time.monotonic(), s.monsters) or self._corpse(m, s.monsters):
             return "dead"

@@ -169,6 +169,8 @@ class Grind(Hunt):
         self.tp: Targeting | None = Targeting(self) if target_on() else None
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
+        if self.tp is not None and self.tp.screen and self.nav.escort is not None:
+            self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)
         if self.tp is not None:
             self.h.actions.lock_watch = self.tp.watch_lock
             self.h.drops.revive_s = EXPIRE_S  # (a pile of hers seen gone and then seen again is hers, however late: 100%)
@@ -333,7 +335,7 @@ class Grind(Hunt):
         targets, visible, hidden = self._with_unseen(s, targets, visible, hidden)
         if self.tp is not None:  # (one monster to hit: behavior.targeting)
             wanted = targets
-            free = screen and self.obj is not None and self.obj.kind == "spot"  # (a trip the choice can end)
+            free = self._free_trip(self.obj)
             targets = self.tp.decide(s, wanted, visible, hidden, self.obj is not None and not free, free)
             if self.obj is None or free:  # (none she has nothing against for now: set aside at once)
                 for _ in range(ASKS):
@@ -367,6 +369,22 @@ class Grind(Hunt):
 
     def _varies(self, o) -> bool:
         return o.why != TO_TARGET and super()._varies(o)
+
+    def _instead_of_waiting(self, o):
+        if self.tp is None or not self.tp.screen or o.why not in (TO_TARGET, "sweep"):
+            return None  # (a stop's trip: she waits, and any monster on the screen ends it)
+        return lambda s: self.tp.rather(s, o.platform)
+
+    def _may_stop_her(self, s: Scene) -> list[Monster]:
+        if self.tp is None or not self.tp.screen:
+            return super()._may_stop_her(s)
+        return self.tp.targets_of(s, s.monsters)  # (else she stops for one the pass won't have, look after look, no move made)
+
+    def _free_trip(self, o) -> bool:
+        """Whether a trip's next pass may take any target on the screen (the whole screen: `_while_travelling`): any but one to a
+        pile, unless what's blocked the way to that pile (Targeting.rather)."""
+        return (self.tp is not None and self.tp.screen and o is not None
+                and (o.kind == "spot" or (o.why == "sweep" and self.tp.is_blocked(o.platform))))
 
     def _home(self) -> tuple[int, float] | None:
         """(With the planner no place at a stop she comes back to: her piles' way goes on to nowhere.)"""
@@ -427,7 +445,7 @@ class Grind(Hunt):
         if stop is None:
             return None
         pile = self._pile_of.get(stop.spot.key)
-        if pile is None or not self.tp.pile_first(pile, stop, time.monotonic()):
+        if pile is None or not self.tp.pile_first(pile, stop, time.monotonic()) or self.tp.is_blocked(pile.platform):
             return None
         if self.tp.screen and self._at_pile(s, pile) and (stop.spot.lands > 0.0 or (
                 pile.status == "expected" and not any(d.platform == pile.platform for d in s.loot) and self._none_landed(s, pile))):
@@ -519,7 +537,7 @@ class Grind(Hunt):
         """To where her target can be hit from: a trip of the navigator's (its legs against every monster, as any), her drops on
         the way first (the sweep's, within what each may add to her way). Decided again as `_interrupt` says."""
         _, platform, x = act
-        if (stop := self._sweep(s, (platform, x))) is not None:
+        if (stop := self._sweep(s, (platform, x))) is not None and not self.tp.is_blocked(stop.spot.platform):
             return self._sweep_act(s, stop, visible, hidden, now)
         spot = Spot(platform, x, 1.0, self.model.safe(platform))
         self.obj = Objective("spot", platform, x, ground=platform, spot=spot, why=TO_TARGET)
@@ -755,7 +773,7 @@ class Grind(Hunt):
         """The hunt loop's, on its way to the pile `_interrupt` saw (or back to the loop) if it did. With the whole screen, a
         trip to her target's place is decided again here, and a trip to a stop ends for any monster on the screen."""
         o = self.obj
-        if self.tp is not None and self.tp.screen and o.kind == "spot" and (o.why == TO_TARGET or targets):
+        if self._free_trip(o) and (o.why == TO_TARGET or targets):
             self.obj = None
             self.stack.clear()
             return self._planned_step(s, targets, visible, hidden, now)

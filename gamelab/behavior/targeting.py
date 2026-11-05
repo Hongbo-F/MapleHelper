@@ -52,6 +52,7 @@ ASKS = 4              # targets the plan is asked for at most at a pass (the res
 NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the stance's answer a wait, no place to walk to) is
                       # set aside: another's taken at the next look, and she never idles on one
 IDLE_S = 1.5          # s with nothing she can act on (a wait, no pile) after which she goes on to the next stop
+BLOCKED_S = 1.0       # guess: s a platform a trip would have stood and waited to go to isn't gone to, if another target can be
 ROUTE_STEP = 8.0      # units her x is rounded to for a route's time: 53 ms of her walk at most, and the searches kept (Planner.times)
 HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
@@ -145,6 +146,9 @@ class Targeting:
         self.ms = {"choice": _hist(), "glance": _hist(), "peek": _hist()}
         self.screen = screen_on()
         self.quiet = False                  # (`Grind._planned_step`: no monster on the screen, her drops whatever they take)
+        self.blocked: dict[int, float] = {}  # a platform a trip to it would have waited for a monster -> until when (`rather`)
+        self._known: tuple = (None, {})      # the danger Her.known is for, and it
+        self.chose_on = None                 # the look the last choice was made on (a trip's first look has no more to say)
         self._stands = tg.in_height(g.model.places) if self.screen else {}
 
     # --- while her lock lasts --------------------------------------------------------------------------------
@@ -268,13 +272,17 @@ class Targeting:
         lo, hi = _stand_limits(here, crowded=True)
         attacks = getattr(h, "attacks", None)
         picks = getattr(attacks, "picks", False)
+        if self._known[0] is not g.danger:
+            self._known = (g.danger, {})
         return tg.Her(here, x, y, pace.lead, pace.window, h.actions.facing, fight._air() and fight.JUMP_SHOTS, around,
                       _sizes(g._tops, g._halves) if picks else None, g._halves, g.danger, pace, lo, hi,
                       jump_hits=lambda m: g._jump_hits(s, m), can_jump=open_above(g.model, here, x, x),
-                      routes=self._route if self.screen else None, stands=self._stands)
+                      routes=self._route if self.screen else None, stands=self._stands, known=self._known[1])
 
     def _route(self, src: int, x: float, dst: int, lo: float, hi: float) -> tuple[float, float] | None:
         """Her.routes: the navigator's route times (Planner.arrive_within), her x rounded (ROUTE_STEP) so its searches are kept."""
+        if dst in self.blocked and self.blocked[dst] > time.monotonic():
+            return None
         return self.g.nav.planner.arrive_within(src, round(x / ROUTE_STEP) * ROUTE_STEP, dst, lo, hi)
 
     def foes_of(self, s, targets, visible, pace, more=()) -> list[tg.Foe]:
@@ -357,6 +365,7 @@ class Targeting:
         if trip or free:
             foes = self._close_first(her, foes)
         c = self.choice = self.chooser.choose(her, foes, walks=not trip)
+        self.chose_on = s
         self._chose_at = time.monotonic()
         self.counts["decisions"] += 1
         self.counts["decisions on a trip"] += trip
@@ -371,7 +380,7 @@ class Targeting:
         t0 = perf_counter_ns()
         g, chooser = self.g, self.chooser
         pace = fight.pace_of(self.h, s)
-        her = self.her_at(s, pace, s.monsters, [])
+        her = replace(self.her_at(s, pace, s.monsters, []), jump_hits=None)  # (a jump's search, the dear part, is the next pass's)
         now = time.monotonic()
         foes = self.foes_of(s, g._alive(s, s.monsters, now), s.monsters, pace, g._rest_of_screen(s, now))
         kept = chooser.primary, chooser.next
@@ -384,14 +393,32 @@ class Targeting:
     def changed(self, s) -> bool:
         """On a trip to her target's place: whether look `s` has something else for her than going on with it: another
         target, or this one no more a trip. A look made up from another (Scene.what_if) has nothing to say."""
-        if getattr(s, "what_if", False):
+        if getattr(s, "what_if", False) or s is self.chose_on:
             return False
         c, p = self.peek(s), self.chooser.primary
         return c.primary is None or p is None or not tg.same(p, c.primary.m) or c.primary.way.how != "trip"
 
+    def rather(self, s, dst: int) -> bool:
+        """A trip to platform `dst` would stand and wait for a monster: whether the choice has something to go at meanwhile, with
+        that platform off for BLOCKED_S (Her.routes). If it hasn't she waits, the platform as it was."""
+        self.blocked[dst] = time.monotonic() + BLOCKED_S
+        if self.peek(s).primary is not None:
+            self.counts["rather than wait"] += 1
+            return True
+        del self.blocked[dst]
+        return False
+
+    def targets_of(self, s, monsters: list) -> list:
+        """Of `monsters` those she may have as a target now: not set aside (`no_way`), nor ignored by her attacks."""
+        ignored = getattr(self.h.attacks, "ignored", None) or ()
+        return [m for m in monsters if getattr(m, "track", None) not in self.no_way and getattr(m, "track", None) not in ignored]
+
+    def is_blocked(self, dst: int) -> bool:
+        return self.blocked.get(dst, 0.0) > time.monotonic()
+
     def on_screen(self, s) -> bool:
         """On her way somewhere else: whether look `s` has a monster on the screen she can get at."""
-        return not getattr(s, "what_if", False) and self.peek(s).primary is not None
+        return not getattr(s, "what_if", False) and s is not self.chose_on and self.peek(s).primary is not None
 
     # --- the plan ------------------------------------------------------------------------------------------
 

@@ -1694,6 +1694,7 @@ class FightOnTheWay:
         self.h = h
         self.kinds: set[str] | None = None  # shoot monsters in reach of these kinds only (None: all); any
                                             # in her way is shot
+        self.not_ignored = False  # (behavior.grind's whole screen) `reaches` says no of one her attacks ignore (Attacks.ignored)
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice), else one she
@@ -1769,6 +1770,8 @@ class FightOnTheWay:
         stance would make at it from there (jump_reaches: what the hunt loop's Hunt._jump_hits counts). The seam S1's
         aim facade replaces for another character's attack, with stance.place_to_shoot's search along her platform."""
         if s.platform is None or s.where is None:
+            return False
+        if self.not_ignored and getattr(m, "track", None) in (getattr(self.h.attacks, "ignored", None) or ()):
             return False
         if reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters):
             return True
