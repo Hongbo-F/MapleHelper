@@ -691,3 +691,49 @@ def test_throws_at_a_monster_that_show_nothing_have_the_next_tap_the_arrow():
     kills[0] += 1                 # (a kill told: they're counted from here)
     a._landing(m), a._landing(m)
     assert acts.faces("left")
+
+
+def test_four_attacks_that_hit_nothing_have_their_monster_ignored_for_a_while():
+    """The user, 2026-11-04: 4 throws or casts without hitting any mob: the recording saved, the target ignored for 15 s."""
+    a, _ = _attacks()
+    told, gains = [], [0]
+    a.no_hit = lambda s, thrown, tracks, until: told.append((len(thrown), tracks, round(until - s.t, 3)))
+    a.gains = lambda: gains[0]
+    t0 = time.monotonic()
+
+    def look(t, bar=None, track=7):
+        s = _look([("Green Mushroom", 100.0, bar)], t=t)
+        s.monsters = [dataclasses.replace(s.monsters[0], track=track)]
+        a._watch_hits(s)
+
+    def throws(n, at):
+        for i in range(n):
+            a._target, a._asked = Monster(Mob("Green Mushroom", 0, 0, 0, 0, 1.0), 100.0, 0.0, 1, track=7), True
+            a.on_throw(at + i, "left")
+
+    throws(4, t0)
+    look(t0 + 3.5)            # (the 4th not shown yet)
+    assert not told and not a.ignored
+    look(t0 + 4.1)
+    assert told == [(4, {7}, 15.0)] and 7 in a.ignored
+    look(t0 + 4.1 + 14.0)
+    assert 7 in a.ignored
+    look(t0 + 4.1 + 15.1)
+    assert not a.ignored
+    told.clear()
+    t1 = t0 + 30.0            # a bar new on any monster is a hit ...
+    throws(4, t1)
+    look(t1 + 3.5, bar=0.9, track=8)
+    look(t1 + 4.1)
+    assert not told
+    throws(4, t1 + 10.0)      # ... the same bar as before isn't, a lower one is
+    look(t1 + 15.0, bar=0.9, track=8)
+    assert len(told) == 1
+    told.clear()
+    throws(4, t1 + 20.0)
+    look(t1 + 25.0, bar=0.8, track=8)
+    assert not told
+    throws(4, t1 + 30.0)      # a kill her EXP told of is a hit
+    gains[0] += 1
+    look(t1 + 35.0)
+    assert not told

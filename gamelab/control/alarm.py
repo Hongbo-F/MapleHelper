@@ -7,6 +7,7 @@ The elevated key player loads this module: it imports nothing else of gamelab bu
 
 import json
 import subprocess
+import threading
 import time
 
 import numpy as np
@@ -269,6 +270,15 @@ def keep_recent(seconds: float, name: str) -> str:
     if "error" in out:
         return f"the recording not saved: {out['error']}"
     return f"the recording's last {out.get('seconds', seconds):g} s saved: {out.get('folder')}"
+
+
+def keep_recent_after(delay: float, seconds: float, name: str, then) -> None:
+    """`keep_recent` `delay` s from now, beside whoever asks (a thread: a hunt doesn't wait for the recorder), what came of
+    it told to `then`."""
+    def run():
+        time.sleep(delay)
+        then(keep_recent(seconds, name))
+    threading.Thread(target=run, daemon=True, name="keep-recent").start()
 
 
 def _write(info: dict) -> None:

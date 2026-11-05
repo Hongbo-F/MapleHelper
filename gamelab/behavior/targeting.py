@@ -241,6 +241,7 @@ class Targeting:
         attacks = h.attacks
         avg = g._avg_exp()
         now = s.t
+        self.no_way.update(getattr(attacks, "ignored", None) or {})  # (her attacks hit nothing: Attacks._watch_hits)
         if self.no_way:
             self.no_way = {k: v for k, v in self.no_way.items() if v > now}
         chasers = {c.track for c in h.aggro.chasers.values() if c.track is not None and not c.dying}

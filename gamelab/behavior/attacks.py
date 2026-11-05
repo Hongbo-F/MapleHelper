@@ -231,6 +231,16 @@ WAIT_FIRST = False
 # Throws at one monster with no HP bar on it and no EXP since the first, whose results should have shown by now: then the
 # next throw taps the arrow, as she may not be facing the way she's thought to (the user, 2026-11-04: Actions.retap).
 UNLANDED_THROWS = 2
+# The failsafe past that (the user, 2026-11-04: "if throwing 4 times (or casting 4 times) without hitting any mob, save a
+# recording of the episode for later analysis, from 3s before to 3s after. And ignore the target for attack target for 15s
+# (you should still try to runaway or dodge it)"): NO_HIT_ATTACKS in a row with no monster hit (no HP bar new or lower on any,
+# no EXP), NO_HIT_SHOWN_S after the last's key: `_watch_hits`, Hunter._no_hit.
+NO_HIT_ATTACKS = 4
+NO_HIT_SHOWN_S = 1.0  # s after an attack's key by which it has shown (a star's flight at her longest reach, LANDS_S on)
+NO_HIT_BAR = 0.02     # a bar this much lower is a hit (fight.FightState.just_hit's)
+IGNORE_S = 15.0       # s her attacks don't go at the monsters of such a run (her body still keeps off them: fight._targets)
+NO_HIT_PAD_S = 3.0    # s of the recording either side of it
+NO_HIT_CLIPS = 30     # recordings a run at most (about 25 MB each; control.rolling's recent/ keeps 20 GB, the oldest going)
 
 
 @dataclass(frozen=True)
@@ -434,6 +444,11 @@ class Attacks:
         self.retap: Callable[[], None] | None = None  # (Actions.retap)
         self.gains: Callable[[], int] | None = None   # (her kills her EXP told of, ever: the Hunter's exp_gains)
         self._unlanded: tuple = (None, 0, 0)          # (`_landing`: the track, her throws at it, her gains at the first)
+        self.ignored: dict[int, float] = {}           # a track -> until when her attacks don't go at it (`_watch_hits`)
+        self.no_hit: Callable | None = None           # (Hunter._no_hit)
+        self._misses: list[tuple] = []                # her attacks since one last hit: (its key's time, its target's track)
+        self._bars_seen: dict[int, float] = {}        # each track's HP bar as last read
+        self._gains_seen = 0                          # ... and `gains` as last read
         self.casts = None  # ... and her Lucky Seven casts so (keycheck.RegularWatch, `kind` "casts": the Hunter's)
         self.roped: Callable[[], bool] | None = None
         self.forced: str | None = None
@@ -487,6 +502,7 @@ class Attacks:
         if not s.searched or s.where is None or s.platform is None:
             return
         prev, self._last = self._last, s
+        self._watch_hits(s)
         self._corpses = [(t, m) for t, m in self._corpses if s.t - t < FADE_S]
         found = [seen_again(mk.m, s.monsters) for mk in self.marks]
         if self.picks:  # (her spots' holds lifted by what this look sees, her marks the feed lost carried: rule 3)
@@ -969,6 +985,7 @@ class Attacks:
         `key` chose takes its MP off now (looks shown before it could show still read it: on_look). Its regular
         attack's press, or its cast at a target, told to the doubt's watch (`watch`)."""
         self.thrown = (at, self._target if self._asked else None)  # (its aim, told to the feed: Hunter._tell_feed)
+        self._misses.append((at, getattr(self.thrown[1], "track", None)))  # (`_watch_hits`)
         if self.watch is not None:
             if not self._asked:  # (the regular attack alone: her Actions keyed it, its target as a throw that way takes)
                 self._watch_regular(at, self.target(side))
@@ -1444,6 +1461,33 @@ class Attacks:
             if self.retap is not None:
                 self.retap()
             self.log(f"    {n} throws at {target.kind} #{track} show nothing: the next one taps the arrow first")
+
+    def _watch_hits(self, s: Scene) -> None:
+        """The failsafe (NO_HIT_ATTACKS): look `s` against her attacks since one last hit. Any monster's HP bar new or lower,
+        or a kill her EXP told of, is a hit. NO_HIT_ATTACKS with none, the monsters they went at are `ignored` for IGNORE_S
+        and the Hunter told (`no_hit`: the look, the attacks, their tracks, until when)."""
+        if self.ignored:
+            self.ignored = {k: v for k, v in self.ignored.items() if v > s.t}
+        gains = 0 if self.gains is None else self.gains()
+        hit = gains != self._gains_seen
+        self._gains_seen = gains
+        for m in s.monsters:
+            if m.bar is None:
+                continue
+            track = getattr(m, "track", None)
+            if track is None or track not in self._bars_seen or m.bar < self._bars_seen[track] - NO_HIT_BAR:
+                hit = True
+            if track is not None:
+                self._bars_seen[track] = m.bar
+        if hit:
+            self._misses.clear()
+        elif len(self._misses) >= NO_HIT_ATTACKS and s.t >= self._misses[NO_HIT_ATTACKS - 1][0] + NO_HIT_SHOWN_S:
+            thrown, self._misses = self._misses, []
+            tracks = {tr for _, tr in thrown if tr is not None}
+            until = s.t + IGNORE_S
+            self.ignored.update(dict.fromkeys(tracks, until))
+            if self.no_hit is not None:
+                self.no_hit(s, thrown, tracks, until)
 
     def _mark_of(self, m: Monster) -> Mark | None:
         return next((mk for mk in self.marks if mk.m is m or seen_again(mk.m, [m]) is m), None)
