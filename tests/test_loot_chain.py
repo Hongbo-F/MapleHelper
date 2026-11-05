@@ -336,6 +336,9 @@ def test_a_pile_a_look_sees_empty_is_no_stop(monkeypatch):
     assert not g._candidate(p)
     p.empty_since = None
     assert g._candidate(p)
+    q = _pile(50.0, status="expected", xs=())  # (a kill's no look has seen: `_none_landed` says, from by it)
+    q.empty_since = 1.0
+    assert g._candidate(q)
 
 
 def test_the_plan_goes_on_past_a_pile_with_nothing_to_take():

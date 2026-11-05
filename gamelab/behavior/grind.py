@@ -555,9 +555,9 @@ class Grind(Hunt):
     # --- the loot chain (behavior.lootchain) ------------------------------------------------------------------------
 
     def _candidate(self, p, s: Scene | None = None) -> bool:
-        """The hunt loop's, and with the chain not a pile a look has seen empty: no stop for it while the store's second sighting comes
-        (a look that sees drops there has it back at once)."""
-        if self.tp is not None and self.tp.chain and p.empty_since is not None:
+        """The hunt loop's, and with the chain not a pile seen before that a look has seen empty: no stop for it while the store's second
+        sighting comes (a look that sees drops there has it back at once). (A kill's no look has seen: `_none_landed` says.)"""
+        if self.tp is not None and self.tp.chain and p.status == "seen" and p.empty_since is not None:
             return False
         return super()._candidate(p, s)
 
