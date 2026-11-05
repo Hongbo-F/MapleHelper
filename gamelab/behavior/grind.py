@@ -52,6 +52,7 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import telemetry
 from ..attack.spots import Spot
 from ..attack.danger import level
+from ..attack.target import same as tg_same
 from ..attack.stance import CONTACT_SLACK, beside, half_of
 from ..localization.memory import SURE
 from ..localization.monsters import Monster, bodies
@@ -62,7 +63,7 @@ from . import fight, lootchain
 from ..perception.loot import MESOS
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
-from .looting import LOOT_REACH, STOOD_ON
+from .looting import STOOD_ON
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
 from .targeting import ASKS, IDLE_S, NO_WAY_S, REACT_AHEAD_S, ROUTE_STEP, Targeting
 from .targeting import on as target_on
@@ -172,6 +173,8 @@ class Grind(Hunt):
         self._chain_off = -1e18  # until when her drops go the old way: a monster stood in a chain's first walk (lootchain.BLOCKED_S)
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
+        if self.tp is not None and self.tp.chain:
+            self.nav.keep_avoid = True
         if self.tp is not None and self.tp.screen:
             self.nav.react_ahead = REACT_AHEAD_S
             self.h.attacks.whole_screen = True
@@ -602,26 +605,25 @@ class Grind(Hunt):
         return lootchain.LootChain(stretches, self._sweeper.dest, s, est, time.monotonic())
 
     def _stretch(self, s: Scene, p) -> "lootchain.Stretch | None":
-        """Pile `p` as a stretch of a chain: where its drops she can take lie, as look `s` shows them (Looter.wanted; a drop she has been
-        at twice that's still there: looting.cant_pick, as a stand's), else as last seen. None, with its try spent, if the look has it
-        with nothing to take."""
+        """Pile `p` as a stretch of a chain: where its drops she can take lie as the store last saw them, each in one pile (Pile.xs, kept to
+        date by every look that sees them: DropStore._sighting; Looter.wanted's; a drop she has been at twice that's still there:
+        looting.cant_pick, as a stand's). None if a look has found it empty since (its second sighting says if it's gone); or, with its try
+        spent, it has nothing to take."""
+        if p.empty_since is not None:
+            return None
         looter = self.h.looter
-        near = [d for d in s.loot if d.platform == p.platform and abs(d.x - p.x) <= LOOT_REACH]
-        if near:
-            seen = looter.wanted(near)
-            kept = self._stood.get(id(p))
-            if kept is not None and kept[0] is p:
-                stuck = [d for d in seen if sum(abs(sx - d.x) <= STOOD_ON for sx in kept[1]) >= 2]
-                if stuck:
-                    looter.cant_pick(stuck)
-                    seen = [d for d in seen if not any(d is k for k in stuck)]
-            xs, kinds = [d.x for d in seen], tuple(d.item.kind for d in seen if not d.mesos)
-        else:
-            can = getattr(looter, "can_take", None)
-            items = p.items if len(p.items) == len(p.xs) else (None,) * len(p.xs)
-            drops = [(x, k) for x, k in zip(p.xs, items) if k is None or k == MESOS or can is None or can(k)]
-            drops = [(x, k) for x, k in drops if not any(q == p.platform and abs(x - ux) <= STOOD_ON for ux, q, _ in looter.unpickable)]
-            xs, kinds = [x for x, _ in drops], tuple(k for _, k in drops if k is not None and k != MESOS)
+        can = getattr(looter, "can_take", None)
+        items = p.items if len(p.items) == len(p.xs) else (None,) * len(p.xs)
+        drops = [(x, k) for x, k in zip(p.xs, items) if k is None or k == MESOS or can is None or can(k)]
+        drops = [(x, k) for x, k in drops if not any(q == p.platform and abs(x - ux) <= STOOD_ON for ux, q, _ in looter.unpickable)]
+        kept = self._stood.get(id(p))
+        if kept is not None and kept[0] is p:
+            stuck = [d for d in s.loot if d.platform == p.platform and any(abs(d.x - x) < 1.0 for x, _ in drops)
+                     and sum(abs(sx - d.x) <= STOOD_ON for sx in kept[1]) >= 2]
+            if stuck:
+                looter.cant_pick(stuck)
+                drops = [(x, k) for x, k in drops if not any(abs(d.x - x) < 1.0 for d in stuck)]
+        xs, kinds = [x for x, _ in drops], tuple(k for _, k in drops if k is not None and k != MESOS)
         if not xs:
             self._tried(p)
             return None
@@ -646,9 +648,9 @@ class Grind(Hunt):
 
     def _chain_over(self, o, result: str) -> bool:
         """Her trip through her drops over, one plan: each stretch she ran over taken as stood on (its try, what a stand tells: `_stand`'s
-        end; what's left the next look says), its 'loot_chain' record, and the objective done with where it's all behind her or nothing was
-        sent for it; else it stays, the next pass's (a shot in passing first, then `_on_sweep`). A failed trip (`_travel`'s) is as any
-        pile's."""
+        end; what's left the next look says), its 'loot_chain' record, and the objective done with: the next pass's step is the
+        planner's, with what the look has then (`_planned_step`: a monster in reach, a new chain through what's left). A failed trip
+        (`_travel`'s) is as any pile's."""
         chain, st = o.chain, o.trip
         chain.book(st.ran)
         looter = self.h.looter
@@ -680,8 +682,7 @@ class Grind(Hunt):
             self._chain_off = time.monotonic() + lootchain.BLOCKED_S
         if result not in ("arrived", "in position"):
             return False  # (`_travel`: said, and dropped as any trip that failed)
-        if chain.done or st.walk_blocked or result == "arrived":
-            self.obj = self.stack.pop() if self.stack else None
+        self.obj = self.stack.pop() if self.stack else None
         return True
 
     def _chain_stops(self, s: Scene, o) -> bool:
@@ -699,18 +700,8 @@ class Grind(Hunt):
             return True
         if getattr(s, "what_if", False):
             return False
-        c = self.tp.peek(s)
-        return c.primary is not None and c.primary.way.how not in ("walk", "trip")
-
-    def _on_sweep(self, s: Scene, visible, hidden, now: float) -> None:
-        """(A chain's objective, still on after a trip that stopped short, its passing shots taken: the sweep solved again, a new chain.)"""
-        o = self.obj
-        if o.chain is None:
-            return super()._on_sweep(s, visible, hidden, now)
-        after = self._after_pile()
-        self.obj = self.stack.pop() if self.stack else None
-        stop = self._sweep(s, after)
-        return None if stop is None else self._sweep_act(s, stop, visible, hidden, now)
+        c, p = self.tp.peek(s), self.tp.chooser.primary  # (her target or none: a monster the pass doesn't have, the ledger's dead, stopped her look after look)
+        return c.primary is not None and c.primary.way.how not in ("walk", "trip") and (p is None or tg_same(p, c.primary.m))
 
     def _to_place(self, s: Scene, act: tuple, visible, hidden, now: float) -> None:
         """To where her target can be hit from: a trip of the navigator's (its legs against every monster, as any), her drops on

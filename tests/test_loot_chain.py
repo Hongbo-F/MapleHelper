@@ -293,12 +293,18 @@ def test_a_drop_by_a_platforms_end_is_walked_to_short_of_it():
     assert g._stretch(_look(), _pile(50.0, xs=(98.0,))).bunches == [(100.0 - lc.END_ROOM, 1)]
 
 
-def test_a_stretch_goes_by_the_look_where_it_shows_the_drops_else_by_their_last_sighting():
+def test_a_stretch_goes_by_the_drops_as_the_store_has_them():
     g = _grind()
-    p = _pile(50.0, xs=(30.0, 70.0))
-    assert g._stretch(_look(), p).bunches == [(30.0, 1), (70.0, 1)]
-    st = g._stretch(_look([_drop(66.0, "horny-cap")]), p)  # (the other's gone since)
-    assert st.bunches == [(66.0, 1)] and st.kinds == ("horny-cap",)
+    p = _pile(50.0, xs=(30.0, 70.0), items=("mesos", "horny-cap"))
+    st = g._stretch(_look(), p)
+    assert st.bunches == [(30.0, 1), (70.0, 1)] and st.kinds == ("horny-cap",)
+
+
+def test_a_pile_a_look_has_found_empty_is_no_stretch_for_now_and_no_try():
+    g = _grind()
+    p = _pile(50.0)
+    p.empty_since = 1.0
+    assert g._stretch(_look(), p) is None and p.tries == 0
 
 
 def test_a_stretch_leaves_out_a_full_tabs_items_and_says_so_with_nothing_left():
@@ -347,12 +353,12 @@ def test_over_each_stretch_run_over_is_told_as_a_stand_tells_and_the_objective_d
     assert g.tp.counts["loot stops done"] == 2 and g._idle_since is None
 
 
-def test_over_short_of_its_end_the_objective_stays_for_the_next_pass_and_a_part_of_a_stretch_isnt_a_try():
+def test_over_short_of_its_end_a_part_of_a_stretch_isnt_a_try_and_the_objective_is_done_with_all_the_same():
     g = _grind()
     a, b = _pile(50.0, xs=(40.0, 90.0)), _pile(200.0)
     chain = lc.LootChain([lc.Stretch(a, lc.bunches(a.xs)), lc.Stretch(b, lc.bunches(b.xs))])
     assert _over(g, chain, [(9, 0.0, 45.0)]) is True
-    assert g.obj is not None and a.tries == 0 and b.tries == 0
+    assert g.obj is None and a.tries == 0 and b.tries == 0
 
 
 def test_a_monster_in_its_first_walk_sends_her_the_old_way_for_a_moment():

@@ -77,6 +77,7 @@ from .mover import MoveCut, MoveRefused, Mover, platform_text
 
 ON_WAY_TRIES = 5    # monsters engaged per platform while passing through (respawns could keep her forever)
 MAX_FIGHTS = 3      # fights in a row clearing the way, without a move between: then she moves on regardless
+UNSHOT_S = 2.0      # guess: s a monster the shot first threw nothing at isn't tried again by a trip through her drops (_meet)
 AVOID_SECONDS = 6.0  # extra route cost of a move a monster is in the way of (so a way around wins) ...
 AVOID_MEMORY_S = 4   # ... for this long after the monster was seen there
 # The extra route cost of a move the mover couldn't do from where she stood (TripState.cannot), for the rest of the trip:
@@ -1088,6 +1089,9 @@ class Navigator:
         self._late_in_row: dict[int, int] = {}  # the feed's track id -> its replans dropped late in a row, no room
         self._came = None  # the feed's track of the monster the last cut was for (REACT: _coming), for TripState.came
         self._cut_plan: tuple | None = None  # where the last cut cut: (the running plan's legs, its plan time then)
+        self._unshot: dict = {}  # a track the shot first threw nothing at, on a trip through her drops -> until when it isn't tried again
+        self.keep_avoid = False  # whether where moves were in a monster's way goes on from one trip to the next (the loot chain's: a trip's a plan)
+        self._avoided: dict = {}  # ... those moves -> when
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
         # (None: it moved, or no glance had it): _rope_top
@@ -1166,6 +1170,8 @@ class Navigator:
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, self.health, mode,
                        keep_off=frozenset(keep_off), vary=vary, evade_s=evade_s, refuge_s=refuge_s,
                        on_arrival=on_arrival, instead_of_waiting=instead_of_waiting, through=through)
+        if self.keep_avoid:
+            st.avoid = dict(self._avoided)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -1356,6 +1362,8 @@ class Navigator:
         if there is one."""
         now = time.monotonic()
         st.avoid = {key: t for key, t in st.avoid.items() if now - t < AVOID_MEMORY_S}
+        if self.keep_avoid:
+            self._avoided = st.avoid
         path, offered = self._route(st, s.where.platform.id, s.where.x, dst)
         if path and telemetry.recording():
             telemetry.emit("route", **_route_record(st, dst, path, s.where.platform.id, s.where.x, offered))
@@ -1860,6 +1868,8 @@ class Navigator:
         seen = next((m for t, m in st.sighted if t is mo), None)  # as the look saw it (none just after a touch)
         for step in ("shoot", "around"):
             if step == "shoot" and seen is not None and st.shots < MAX_FIGHTS:
+                if st.through is not None and (self.escort.dying(s, seen) or self._unshot.get(seen.track, -1e18) > time.monotonic()):
+                    continue  # (a chain through her drops: no 0.4 s for "nothing in reach": the fights' own look won't have it)
                 thrown = self.escort.throws() if st.through is not None else 0
                 kills = self.escort.clear_for(s, seen, finish=st.mode != TRANSIT)
                 place = getattr(self.escort, "shot_place", None) if kills is None and MEET_WALK else None
@@ -1869,7 +1879,7 @@ class Navigator:
                     st.shots += 1
                     st.trip.kills += kills
                     if st.through is not None and self.escort.throws() == thrown:
-                        st.shots = MAX_FIGHTS  # (the fight's own look said nothing in reach: 0.4 s each, not again on this trip)
+                        self._unshot[seen.track] = time.monotonic() + UNSHOT_S
                     return True
             if step == "around" and _key(move) not in st.avoid and move.kind != "walk":
                 self.log(f"  a {kind} could touch her on {move.kind} -> {move.dst}: looking for a way around")
