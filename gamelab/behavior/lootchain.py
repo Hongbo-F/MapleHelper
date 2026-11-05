@@ -84,8 +84,8 @@ class LootChain:
     def way(self, platform: int, x: float, enter) -> list[tuple[int, float, float]]:
         """What's left of the way from (platform, x), for the navigator's `through`: (platform, x, s standing there), each stretch from
         its nearer end as she'll come onto it (`enter(platform, x, onto, lo, hi)`: the x she comes onto that stretch at, or None: no
-        way), a bunch she'll only run past merged into the walk that goes on past it. A stand where she already is, if nothing else
-        would press."""
+        way), a bunch she'll only run past merged into the walk that goes on past it. A stand where she already is: a walk of nothing has
+        no keys."""
         out, at, here = [], x, platform
         for st in self.stretches:
             left = [b for i, b in enumerate(st.bunches) if i not in st.ran]
@@ -101,7 +101,7 @@ class LootChain:
         if self.dest is not None:
             out.append((self.dest[0], self.dest[1], 0.0))
         out = _run_through(out, platform, x)
-        if out and out[0][0] == platform and abs(out[0][1] - x) < 1.0 and out[0][2] <= 0.0 and len(out) == 1:
+        if out and out[0][0] == platform and abs(out[0][1] - x) < 1.0 and out[0][2] <= 0.0:
             out[0] = (platform, out[0][1], PRESS_S)
         return out
 

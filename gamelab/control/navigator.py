@@ -1294,6 +1294,9 @@ class Navigator:
 
         # Move: the chain in one plan, or else the first move on its own.
         hp = s.hp
+        if legs and st.through is not None and not keys.sorted():  # (walks of nothing: no plan to send)
+            st.walk_blocked = True
+            return st.end("in position")
         if legs:
             # With an escort the chain keeps clear only of the monsters whose touch counts (on the first map none: it
             # fights them instead), but its run on past its end (follow's tail) mustn't take her into any.
@@ -3190,7 +3193,7 @@ class Navigator:
         # 11's end: flow.chain's `held`. Cut and sent, every key is let go and the chain presses its own.)
         legs, keys, why_c = self.flow.chain(path, body, monsters, keep_going=True, hops=not self.fight, price=price,
                                             alts=alts, goal=goal, spread=False, held=body.run if spliced else 0)
-        if not legs:
+        if not legs or (st.through is not None and not keys.sorted()):
             return None
         if kind == "better" and same:
             done = sum(1 for leg in legs if leg.move.kind != "hop")
@@ -4169,7 +4172,7 @@ class Navigator:
         legs, keys, why = self.flow.chain(path, Body(0.0, x, p, end.run, False, QUEUE_SLACK), tracks,
                                           keep_going=True, hops=not self.fight, price=price, alts=alts, goal=goal,
                                           spread=QUEUE_SPREAD)
-        if not legs:
+        if not legs or (st.through is not None and not keys.sorted()):
             return None  # (a monster whose touch counts in the way of the next move: the next pass meets it, _meet)
         # With an escort, chains keep clear only of the monsters whose touch counts (it fights the others instead, at
         # the stops). One that follows on skips a stop: only where none of the monsters seen can get near it. (Queued

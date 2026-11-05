@@ -17,6 +17,8 @@ The whole screen (`screen_on`, GAMELAB_SCREEN: '0' off, the planner before it to
 the screen is a candidate (`foes_of`: Scene.swept, the look's missed by presence's chance), its way across platforms by the
 navigator's moves and its score its place's (attack.target: see its top), the trip itself the navigator's (`Grind._to_place`). With
 none on the screen her drops whatever they take (`quiet`), then another area. README: "The target-first planner".
+
+Her drops as one chain through a few (`chain`, GAMELAB_LOOT_CHAIN: behavior.lootchain, Grind._sweep_act). README: "The loot chain".
 """
 
 import contextlib

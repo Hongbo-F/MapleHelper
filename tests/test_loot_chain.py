@@ -93,6 +93,7 @@ def test_where_she_goes_on_to_is_the_last_of_the_way():
 
 def test_under_her_already_it_presses_all_the_same():
     assert _chain(_pile(0.0)).way(9, 0.0, _enter) == [(9, 0.0, pytest.approx(lc.PRESS_S))]
+    assert _chain(_pile(0.0), _pile(-50.0)).way(9, 0.0, _enter) == [(9, -50.0, 0.0)]  # (with a walk on, that walk's first press)
 
 
 def test_a_stretch_run_over_is_off_the_way_and_what_was_cut_short_stays():
