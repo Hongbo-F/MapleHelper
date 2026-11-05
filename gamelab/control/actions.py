@@ -187,6 +187,7 @@ class Actions:
         self._blind = False       # a plan went out around play (a navigator chain): its arrows aren't known here
         self._doubted = False     # a frame has told the other way from her last arrow (told once: see)
         self.saw = ""             # what came of the last frame `see` was given (for the hunter's counts)
+        self._retap = False       # her throws aren't landing: the next throw taps the arrow first, whatever `heading` says
         self.turns = 0            # throws that tapped the arrow to turn her first, and the time it added (ms)
         self.turn_ms = 0
         self.pressed = False  # keys sent since the last look (then a move isn't a knockback)
@@ -237,7 +238,7 @@ class Actions:
         now = time.monotonic()
         self._facing, self._keys_at = side, now
         if arrow:
-            self.keys_facing, self._arrow_at, self._doubted = side, now, False
+            self.keys_facing, self._arrow_at, self._doubted, self._retap = side, now, False, False
         if self._blind:
             self._blind = False
             self.arrows_at = max(self.arrows_at, now)
@@ -542,8 +543,15 @@ class Actions:
         """Whether she faces `direction` surely enough for a throw that way to go without the tap that turns her: her
         `heading` is that way by her keys, or by a strong frame (heading.Reading.strong). A frame that isn't strong
         can add a tap (where it tells otherwise: see) but never take one away: every frame read the wrong way on
-        2026-10-24 (README, Her heading) was weaker than that, and a star the wrong way costs more than a tap."""
-        return self.heading == direction and (self.facing_by == "keys" or self.seen_strong)
+        2026-10-24 (README, Her heading) was weaker than that, and a star the wrong way costs more than a tap. Not after
+        `retap`, until an arrow has gone."""
+        return not self._retap and self.heading == direction and (self.facing_by == "keys" or self.seen_strong)
+
+    def retap(self) -> None:
+        """Her throws aren't landing (behavior.attacks.Attacks._landing): the next throw taps the arrow first. On
+        2026-11-04 at 22:35:08 a strong frame read her facing left, wrongly: no tap, her keys then said left too, and 85
+        attacks went into the wall behind her over 71 s, with nothing to tell otherwise."""
+        self._retap = True
 
     def _turn(self, direction: str) -> tuple[list, int]:
         """The tap that turns her toward `direction` (none if she surely faces it already: `faces`), and when it's

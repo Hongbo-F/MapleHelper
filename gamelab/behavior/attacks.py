@@ -228,6 +228,9 @@ OTHERS_DY = 250.0
 # that did (84 against 67), the second cast at a new target mostly waiting where its first had hit; her spot's hold
 # (Spot) already stops a stand's casts after the first two.
 WAIT_FIRST = False
+# Throws at one monster with no HP bar on it and no EXP since the first, whose results should have shown by now: then the
+# next throw taps the arrow, as she may not be facing the way she's thought to (the user, 2026-11-04: Actions.retap).
+UNLANDED_THROWS = 2
 
 
 @dataclass(frozen=True)
@@ -428,6 +431,9 @@ class Attacks:
         # throw: its target, whether it's the regular attack, and whether `key` was asked at all (with the regular attack
         # alone her Actions key it themselves)
         self.watch = None
+        self.retap: Callable[[], None] | None = None  # (Actions.retap)
+        self.gains: Callable[[], int] | None = None   # (her kills her EXP told of, ever: the Hunter's exp_gains)
+        self._unlanded: tuple = (None, 0, 0)          # (`_landing`: the track, her throws at it, her gains at the first)
         self.casts = None  # ... and her Lucky Seven casts so (keycheck.RegularWatch, `kind` "casts": the Hunter's)
         self.roped: Callable[[], bool] | None = None
         self.forced: str | None = None
@@ -953,6 +959,7 @@ class Attacks:
         self.counts[attack.key] += 1
         self.counts[why] += 1
         self._say(attack, why, target, left, alive, hp, side)
+        self._landing(target)
         return getattr(self.keys, attack.key).name
 
     def on_throw(self, at: float, side: str) -> None:
@@ -1420,6 +1427,23 @@ class Attacks:
         hi = max(0.0, read - sum(mp for at, mp in self._casts if at > t - MP_FIRST_S))
         lo = max(0.0, hi - sum(mp for at, mp in self._casts if at <= t - MP_FIRST_S))
         return hi if self.mp is None else min(max(self.mp, lo), hi)
+
+    def _landing(self, target: Monster | None) -> None:
+        """A throw at `target`: where UNLANDED_THROWS before it at that monster show nothing (no HP bar on it, no EXP
+        since), the next throw taps the arrow (`retap`), and they're counted again from there."""
+        track, gains = getattr(target, "track", None), 0 if self.gains is None else self.gains()
+        last, n, at = self._unlanded
+        if track is None or target.bar is not None:
+            self._unlanded = (None, 0, gains)
+        elif track != last or gains != at:
+            self._unlanded = (track, 1, gains)
+        elif n < UNLANDED_THROWS:
+            self._unlanded = (track, n + 1, at)
+        else:
+            self._unlanded = (track, 0, at)
+            if self.retap is not None:
+                self.retap()
+            self.log(f"    {n} throws at {target.kind} #{track} show nothing: the next one taps the arrow first")
 
     def _mark_of(self, m: Monster) -> Mark | None:
         return next((mk for mk in self.marks if mk.m is m or seen_again(mk.m, [m]) is m), None)
