@@ -7706,6 +7706,63 @@ At 22:35 that evening a frame read her facing left, wrongly, and 85 attacks went
 
 **Not done:** why the frame read her wrong; a throw the other way at a monster behind the ignored one still hits the ignored one, as stars take the first in their way.
 
+### The whole screen and the move before the kill (from 2026-11-04; `GAMELAB_SCREEN=0` off, the planner before it to the digit; on by default on this branch)
+
+The user, reviewing the first 10 s of the 18:18 recording: "when you are preparing 2nd target after 1st target died, you are only considering reachable targets from current position. You aren't really looking at all mobs on the screen and proactively plan move to be able to hit that mob after current target dies. When making the selection you should also factor in piled up mobs and lean towards going to a place where you can hit a bunch of piled up mobs. When no other mobs on screen you should prioritize going to pick up loots. If no loots no mobs, the last thing to try is to navigate to a different area on the map." The planner's rule stands: one monster to hit, no pre-defined places, no rollouts; a place is worked out from the look.
+
+- **Every monster on the screen is a candidate** (`Grind._rest_of_screen`: `Scene.swept`, the frame's whole-screen search; `Targeting.foes_of`, with those the look missed by presence's chance as before; her attacks' `ignored` none of them).
+- **Its way** (`attack.target._ways`): at once if it's in reach; else every place, one each side of it on each platform in height of it (`in_height`, made once for the map), a walk along hers or a trip by the navigator's moves (`Planner.arrive_within`, the route times it keeps from where she stands: the walk into the stretch from each landing). The trip is the navigator's as any (`Grind._to_place`, `TO_TARGET`: its legs planned against every monster, her shots in passing and the drops on her way as on any trip), decided again whenever a look has something else for her (`Targeting.changed`, `peek`).
+- **Piles** (`place_score`): a place's score is what her attack lands on from there, `p` x EXP over the way and their kills, `PILE_MOST` (3, a guess) at most, each only if it raises the rate. So a pile draws her over a lone monster as far off, and one in reach still wins by its time; `MARGIN` keeps the plan from flipping. What stops an attack (`reach.can_hit`, 44 us) and a jump's search (2-3 ms) are asked only where they can decide (`_rank_screen`, `_checked`).
+- **The move before the kill**: the next is scored from the primary's place, across platforms (`after`); where she has a choice of where to stand the place also reaches the next (`also_next`); the primary her throws reckon dead (`Foe.spent`, `DEAD_LIKELY`) gives way to the next on the look after the key, so her lock ends on the next's plan with nothing to decide. If it shows alive it's just decided again.
+- **With nothing in reach**: monsters on the screen, then with none on the screen her drops whatever they take (`Targeting.quiet`), then another area (`Grind._leaving`, `Patrol.choose`, unchanged), with no `IDLE_S` wait unless her memory has a monster there. A trip to a stop ends for any monster on the screen (`Targeting.on_screen`). Her drops on her platform and those due (`LOOT_DUE_S`) go as before; by a pile not landed yet she goes at her target, not waits (`gave_way_at`).
+- **No standing for a monster in the way** (`TripState.instead_of_waiting`, `Targeting.rather`): where a target's or a pile's trip would stand and wait for a monster to move off (`Navigator._meet`, `_clear_landing`), that move's platform is kept off for `BLOCKED_S` (1 s, a guess; `KEEP_OFF_S` more on routes through it) if the choice has another thing to go at; else she waits as before. A running chain stops for a monster coming into its way at most `REACT_AHEAD_S` (1.5 s, a guess) ahead: one 3 s ahead stopped her at each try, look after look. Nothing about the trips' safety is bypassed.
+- **Readable**: the 'target' line says "pile of 3 on 23 at x -121: 3.7 s away" and "next: horny-mushroom #5, trip to 23 x 133 as #1 dies"; 'target' records carry `place`, `on`, `pile`; `target_end` has the counts ("rather than wait") and `ms` (choice, glance, peek).
+
+**Found on the way**: on master a monster in reach the pass won't have (set aside, or `ignored` by the no-hit failsafe) stops a trip "in position" on its first look, look after look, no move made, and the navigator's shot first at an ignored one says "nothing in reach" (0.4 s each). With the switch on neither (`Hunt._may_stop_her`, `FightOnTheWay.not_ignored`); off, as master.
+
+**The metric** (`idle` in every harness result, `World._idleness`: standing, no speed, 0.85 s or more past her last attack's key, the live clip's measure; `--metric idle.s_min`, `idle.other`, `idle.here`, `idle.none`, `idle.rules`). Live, the 18:18 clip, the thief: 17.6 s a minute (9.6 monsters only on other platforms, 3.4 one on her platform, 4.5 none). The simulator at master's code, 24 seeds: the thief 14.4 (9.9, 4.4, 0.1), her 14.9 (11.5, 3.0, 0.4): near in all and in the first class, short on "none on the screen", which live had 4.5 of.
+
+**Arms, every one tried** (12 seeds, 5 minutes, the worlds of the second gate, paired against master's code with the metric, 92a2b1f; the last also on 24):
+
+| Arm | Thief EXP diff (t), idle | Her EXP diff (t), idle | What it was |
+|---|---|---|---|
+| Base | 321.3, 13.88 | 532.0, 14.80 | |
+| a1 bf3c342 | +21.9 (+1.76), 13.94 | -94.0 (-4.39), 18.25 | first build; bug: her casts took the rest of the screen for unseen, so she saw none on it and went for far drops at any cost |
+| a2 866222c | +31.5 (+1.61), 13.11 | -29.3 (-1.75), 15.02 | that fixed; what stops her attack asked only where it decides; a trip that would wait gives way, keyed on where the trip ends; no spin on the look just decided on |
+| a3 988fb1e | +7.1 (+0.68), 12.34 | -14.3 (-0.75), 13.55 | keyed on the blocked move's platform, off for 1 s; chains stop for a monster 1.5 s ahead at most; no wait by a pile not landed |
+| a4 e879c52 | +4.6 (+0.42), 12.62 | -14.3 (-0.75), 13.55 | a jump's search of the best alone (the thief's; hers the same to the digit) |
+| a5 4d6bbd4 | the same as a4 on 12 | the same | cleanups, her casts' switch: **this table** |
+
+The thief's a2 to a3 fall in EXP is within the seeds' noise (se 11-20 on 12), and no arm was kept for its EXP.
+
+| 24 seeds, a5 against 92a2b1f | Thief base | cand | diff (t) | Her base | cand | diff (t) |
+|---|---|---|---|---|---|---|
+| **idle, s a minute** | 14.39 | **12.60** | -1.79 (-5.4) | 14.95 | **13.72** | -1.23 (-4.2) |
+| monsters only on other platforms | 9.85 | 8.03 | -1.83 (-5.9) | 11.50 | 10.26 | -1.25 (-3.6) |
+| one on her platform | 4.40 | 4.43 | +0.02 (+0.1) | 3.04 | 2.98 | -0.06 (-0.3) |
+| none on the screen | 0.13 | 0.15 | +0.01 (+0.2) | 0.40 | 0.48 | +0.07 (+0.6) |
+| **EXP a minute** | 329.7 | **338.7** | +9.0 (+1.15) | 523.4 | **509.3** | -14.1 (-1.24) |
+| kills | 46.8 | 48.8 | +2.0 (+1.6) | 73.0 | 71.4 | -1.6 (-1.1) |
+| touches | 54.8 | 52.2 | -2.6 (-0.9) | 28.6 | 28.5 | -0.1 (-0.05) |
+| knock-offs | 9.75 | 9.21 | -0.54 (-0.8) | 7.58 | 6.54 | -1.04 (-1.4) |
+| deaths, falls, stops | 0 | 0 | | 0 | 0 | |
+| drops_share | .974 | .976 | +.002 (+0.2) | .981 | .977 | -.004 (-0.5) |
+| value_share | .974 | .975 | +.001 (+0.1) | .981 | .981 | .000 |
+| loot's worth a minute | 153.1 | 157.9 | +4.9 (+0.6) | 269.9 | 256.7 | -13.2 (-1.3) |
+| on a trip, s a run | 75.4 | 82.8 | +7.4 (+2.7) | 86.7 | 95.2 | +8.5 (+3.0) |
+
+Idle by the rule, s a minute (thief, her; base then this): sweep 6.07 -> 5.21, 7.97 -> 7.23; on trips (travel, advance, wait, to target) 4.07 -> 3.47, 3.70 -> 4.30; close quarters 2.54 -> 2.53, 0.87 -> 0.62. Idle is down, significantly; EXP isn't told apart from master's on either character: she moves more for about the same kills, and in this crowd other players take most of what she goes to (70-100 kills a run against her 45-75).
+
+**The switch off**: `spot` of the base's seeds 3 and 9, both characters: the same to the digit; master 6b6b07f's seeds 1-3, both characters, differ from the base's only in `idle`. Goldens: Tree Dungeon's 48 recorded at master 6b6b07f into a scratch folder, `check --folder` with the switch off: 46 of 48 to the byte, the other two the set pieces moved to new seeds for the switch on (`loop_tree_attack_misses` 5 -> 1, `loop_tree_attack_no_darts` 31 -> 2). With it on the goldens aren't recorded again: a merge has that to do.
+
+**The choice's time**, on the real clock (`Targeting.ms`, seeds 5-7, Idle priority beside other jobs: the thief's a median 1.8-2.2 ms, p99 9.7-14.9; hers 0.85-1.1, p99 2.35-2.5; a trip's look, `peek`, 1.1-1.5, p99 2.6-3.0, one of 31). The aim was a median under 1 ms and p99 under 5. Met for her but her median by a hair; not for the thief: a third of his is a jump's search (profiled), master's own, asked at most looks now (at the first gate his choice's p99 was 5.35). It's far under a frame's 66 ms, and left so.
+
+**What's left of her idle is her drops**: the sweep's rule has 5.2 of the thief's 12.6 and 7.2 of her 13.7 (a stand's presses, its second stop, trips waiting): the loot half, not built here. A trip's 3.5-4.2 are the navigator's looks, its waits with nothing else to do, and rope hangs.
+
+**Pick-up rate**: monsters on the screen don't starve her drops: thief .974 -> .976, her .981 -> .977 (t -0.5), value .974 -> .975 and .981 -> .981; median age at pick-up 9.0 -> 8.2 s and 4.2 -> 5.7 s (t +2.0). Nothing done about it: `LOOT_DUE_S` and her platform's rule hold. A 5-minute run cuts off far piles still waiting; the longer view wasn't measured.
+
+**Not done**: the loot half of the user's words ("plan for a few loot targets in advance"); attacking out of a run; live check of any of it; goldens recorded again with the switch on (off, as below); other maps.
+
 ### How it works
 
 - **Which monster** (`attack/target.py`, `Chooser.choose`, `score`): EXP of the kind over (time to get an attack on it + time to kill it), weighted by the chance it's there (`behavior/presence.py`, her throws' reckoning). A hurt or chasing one has no term: it's close and quick to kill. Kept until dead, gone, or beaten by `MARGIN` (1.3).

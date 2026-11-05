@@ -984,3 +984,64 @@ def test_the_log_says_the_pile_and_the_next_s_move(tree):
     assert text.startswith(", pile of ") and " on 23 at x " in text and text.endswith(" s away")
     rec = c.primary.record(her.x)
     assert rec["on"] == 23 and rec["place"] == pytest.approx(c.primary.way.place, abs=0.1) and len(rec["pile"]) >= 1
+
+
+def test_a_trip_that_would_wait_gives_way_only_to_something_it_can_go_at(tree):
+    """A monster in the way of a trip's move: that move's platform kept off for BLOCKED_S, the trip ended, if the choice has a
+    target from here or a trip that doesn't go through it (under KEEP_OFF_S); else she waits, nothing kept off."""
+    m, _ = tree
+    tp = _targeting(m)
+    far = _foe(_mon(m, HORNY, 0.0, 23, track=1))
+    c = tg.Choice(tg.Terms(far, tg.Way(2.0, "walk", 10.0), 5.0))
+    tp.peek = lambda s: c
+    assert tp.rather(object(), 24) and tp.blocked[24] > 0.0 and tp.piles_wait()
+    tp.blocked.clear()
+    tp.gave_way_at = -1e18
+    c = tg.Choice(tg.Terms(far, tg.Way(targeting.KEEP_OFF_S + 2.0, "trip", 10.0, 23), 5.0))  # (only through it)
+    assert not tp.rather(object(), 24) and 24 not in tp.blocked and not tp.piles_wait()
+    c = tg.Choice()
+    assert not tp.rather(object(), 24) and 24 not in tp.blocked
+
+
+def test_a_look_the_choice_was_made_on_has_nothing_more_to_say_to_the_trip(tree):
+    """Else the trip stops 'in position' on its first look, no move made, and the next pass sends her off again, look after look."""
+    m, _ = tree
+    tp = _targeting(m)
+    asked = []
+    tp.peek = lambda s: asked.append(s) or tg.Choice()
+    tp.chose_on = s = _look_at(m)
+    assert not tp.changed(s) and not tp.on_screen(s) and not asked
+    s.what_if = True
+    other = _look_at(m)
+    other.what_if = True
+    assert not tp.changed(other) and not tp.on_screen(other) and not asked
+    third = _look_at(m)
+    assert tp.changed(third) and not tp.on_screen(third) and len(asked) == 2
+
+
+def test_on_her_way_a_monster_set_aside_or_ignored_stops_no_trip(tree):
+    m, _ = tree
+    tp = _targeting(m)
+    tp.h.attacks.ignored = {2: 99.0}
+    tp.no_way[3] = 99.0
+    mons = [_mon(m, HORNY, x, 10, track=t) for t, x in ((1, 0.0), (2, 50.0), (3, 90.0))]
+    assert [o.track for o in tp.targets_of(mons)] == [1]
+
+
+def test_the_rest_of_the_screen_is_seen_for_her_casts_only_with_the_switch_on(tree):
+    from gamelab.behavior.attacks import Attacks
+    m, _ = tree
+    far = _mon(m, HORNY, 0.0, 23, track=1)
+    a = Attacks.__new__(Attacks)
+    a.picks, a._last = True, SimpleNamespace(monsters=[], swept=[far], where=None)
+    assert a.refused(far) == "unseen"
+    a.whole_screen = True
+    a._dying, a._corpse, a._mark_of = (lambda *k: True), (lambda *k: False), (lambda m: None)
+    assert a.refused(far) == "dead"  # (past 'unseen': on to what it asks of one she sees)
+
+
+def test_the_stands_table_has_the_platforms_in_height_of_each(tree):
+    m, _ = tree
+    table = tg.in_height(m.places)
+    assert 23 in {q.id for q in table[22]} and 24 in {q.id for q in table[23]}
+    assert 33 not in {q.id for q in table[7]}
