@@ -655,8 +655,8 @@ class Grind(Hunt):
         return o.chain.way(s.platform.id, s.where.x, enter)
 
     def _chain_over(self, o, result: str) -> bool:
-        """Her trip through her drops over, one plan: each stretch she ran over taken as stood on (its try, what a stand tells: `_stand`'s
-        end; what's left the next look says), its 'loot_chain' record, and the objective done with: the next pass's step is the
+        """Her trip through her drops over, one plan: each stretch she ran over told as a stand tells it (its try, `stood_on`; a drop stood at
+        counted towards `cant_pick` only where she stood, `Stretch.again`; what's left the next look says), its 'loot_chain' record, and the objective done with: the next pass's step is the
         planner's, with what the look has then (`_planned_step`: a monster in reach, a new chain through what's left). A failed trip
         (`_travel`'s) is as any pile's."""
         chain, st = o.chain, o.trip
