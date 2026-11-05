@@ -64,7 +64,7 @@ from .hunt import PASSING_S, TRIP_AHEAD_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .looting import STOOD_ON
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
-from .targeting import ASKS, IDLE_S, NO_WAY_S, REACT_AHEAD_S, ROUTE_STEP, Targeting
+from .targeting import ASKS, IDLE_S, NO_WAY_S, ROUTE_STEP, Targeting
 from .targeting import on as target_on
 
 SEARCH_S = 2.5         # s past a kill's drops' landing (ledger.DROP_LANDS, LANDED_S) she waits by its pile for a search of it that can say
@@ -178,7 +178,6 @@ class Grind(Hunt):
             self.nav.keep_avoid = True
             self.h.looter.store_has_them = True
         if self.tp is not None and self.tp.screen:
-            self.nav.react_ahead = REACT_AHEAD_S
             self.h.attacks.whole_screen = True
             if self.nav.escort is not None:
                 self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)

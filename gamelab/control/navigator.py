@@ -1087,7 +1087,6 @@ class Navigator:
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
         self._siblings: dict[tuple[int, int], list[Move]] | None = None  # (src, dst) -> the route's moves (_pricing)
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
-        self.react_ahead: float | None = None  # s ahead a monster coming into a chain's way stops it at most (None: anywhere: _coming)
         self._replanned = False  # whether the last _switch replanned with nothing to take (REPLAN: _watching marks so)
         self._late = None  # the last _switch's replan dropped as too late: (why, its ms, s late), said by _dropped
         self._late_in_row: dict[int, int] = {}  # the feed's track id -> its replans dropped late in a row, no room
@@ -3989,8 +3988,6 @@ class Navigator:
             if leg.end.t < t + REACT_LEAD_S:
                 continue
             if (hit := self.flow.danger(leg, tracks, after=t + REACT_LEAD_S)) is not None:
-                if self.react_ahead is not None and hit[1] - t > self.react_ahead:
-                    continue  # (too far ahead to stop for now: she'll have looked again by then)
                 i = next(i for i, mo in enumerate(tracks) if mo is hit[0])
                 self._came = raw[i]  # (the next chain keeps clear of it: TripState.came)
                 return hit[0], hit[1], ids[i]

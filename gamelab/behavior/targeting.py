@@ -55,8 +55,6 @@ NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the sta
                       # set aside: another's taken at the next look, and she never idles on one
 IDLE_S = 1.5          # s with nothing she can act on (a wait, no pile) after which she goes on to the next stop
 BLOCKED_S = 1.0       # guess: s a platform a trip would have stood and waited to go to is kept off, if another target can be gone at
-REACT_AHEAD_S = 1.5   # guess: s ahead a monster coming into a running chain's way stops it at most (Navigator.react_ahead): one 3 s ahead
-                      # stopped her at each try, look after look, and she looks again long before it counts
 ROUTE_STEP = 8.0      # units her x is rounded to for a route's time: 53 ms of her walk at most, and the searches kept (Planner.times)
 HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
