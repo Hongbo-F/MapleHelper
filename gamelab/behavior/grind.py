@@ -62,7 +62,7 @@ from . import fight
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
-from .targeting import ASKS, IDLE_S, NO_WAY_S, Targeting
+from .targeting import ASKS, IDLE_S, NO_WAY_S, REACT_AHEAD_S, Targeting
 from .targeting import on as target_on
 
 SEARCH_S = 2.5         # s past a kill's drops' landing (ledger.DROP_LANDS, LANDED_S) she waits by its pile for a search of it that can say
@@ -169,8 +169,10 @@ class Grind(Hunt):
         self.tp: Targeting | None = Targeting(self) if target_on() else None
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
-        if self.tp is not None and self.tp.screen and self.nav.escort is not None:
-            self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)
+        if self.tp is not None and self.tp.screen:
+            self.nav.react_ahead = REACT_AHEAD_S
+            if self.nav.escort is not None:
+                self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)
         if self.tp is not None:
             self.h.actions.lock_watch = self.tp.watch_lock
             self.h.drops.revive_s = EXPIRE_S  # (a pile of hers seen gone and then seen again is hers, however late: 100%)
@@ -373,7 +375,7 @@ class Grind(Hunt):
     def _instead_of_waiting(self, o):
         if self.tp is None or not self.tp.screen or o.why not in (TO_TARGET, "sweep"):
             return None  # (a stop's trip: she waits, and any monster on the screen ends it)
-        return lambda s: self.tp.rather(s, o.platform)
+        return self.tp.rather
 
     def _may_stop_her(self, s: Scene) -> list[Monster]:
         if self.tp is None or not self.tp.screen:
@@ -384,7 +386,7 @@ class Grind(Hunt):
         """Whether a trip's next pass may take any target on the screen (the whole screen: `_while_travelling`): any but one to a
         pile, unless what's blocked the way to that pile (Targeting.rather)."""
         return (self.tp is not None and self.tp.screen and o is not None
-                and (o.kind == "spot" or (o.why == "sweep" and self.tp.is_blocked(o.platform))))
+                and (o.kind == "spot" or (o.why == "sweep" and self.tp.piles_wait())))
 
     def _home(self) -> tuple[int, float] | None:
         """(With the planner no place at a stop she comes back to: her piles' way goes on to nowhere.)"""
@@ -396,6 +398,12 @@ class Grind(Hunt):
     def _sweep_most(self) -> float | None:
         return None if self.tp is not None else super()._sweep_most()
 
+    def _landing_wait(self, lands: float) -> None:
+        if self.tp is None or not self.tp.screen:
+            return super()._landing_wait(lands)
+        self.tp.gave_way_at = time.monotonic()  # (her target now if she has one: the next pass)
+        return super()._landing_wait(lands)
+
     def _none_landed(self, s: Scene, pile) -> bool:
         """With the planner: a kill's drops have landed by now and a search there that could say so has none: it dropped
         nothing (0.64 drops a kill; on the dev seeds 2 of 3 of her stands were on nothing, a walk of 60 units and 3 presses
@@ -406,10 +414,12 @@ class Grind(Hunt):
             return False
         now = time.monotonic()
         landed = pile.since + DROP_LANDS + LANDED_S
-        if now < landed:
+        if now < landed or (not self.h.drops.searched_empty(s, pile) and now < landed + SEARCH_S):
+            if self.tp.screen:  # (nothing to press yet: her target now if she has one, and no wait for it)
+                self.tp.gave_way_at = now
             return True
         if not self.h.drops.searched_empty(s, pile):
-            return now < landed + SEARCH_S
+            return False
         pile.status, pile.gone_at, pile.none_landed = "gone", s.t, True
         self.tp.counts["none landed"] += 1
         self.log(f"  none landed: {pile.kind}'s kill {s.t - pile.since:.1f} s ago on platform {pile.platform} at x {pile.x:.0f}")
@@ -445,7 +455,7 @@ class Grind(Hunt):
         if stop is None:
             return None
         pile = self._pile_of.get(stop.spot.key)
-        if pile is None or not self.tp.pile_first(pile, stop, time.monotonic()) or self.tp.is_blocked(pile.platform):
+        if pile is None or not self.tp.pile_first(pile, stop, time.monotonic()) or self.tp.piles_wait():
             return None
         if self.tp.screen and self._at_pile(s, pile) and (stop.spot.lands > 0.0 or (
                 pile.status == "expected" and not any(d.platform == pile.platform for d in s.loot) and self._none_landed(s, pile))):
@@ -537,7 +547,7 @@ class Grind(Hunt):
         """To where her target can be hit from: a trip of the navigator's (its legs against every monster, as any), her drops on
         the way first (the sweep's, within what each may add to her way). Decided again as `_interrupt` says."""
         _, platform, x = act
-        if (stop := self._sweep(s, (platform, x))) is not None and not self.tp.is_blocked(stop.spot.platform):
+        if not self.tp.piles_wait() and (stop := self._sweep(s, (platform, round(x)))) is not None:
             return self._sweep_act(s, stop, visible, hidden, now)
         spot = Spot(platform, x, 1.0, self.model.safe(platform))
         self.obj = Objective("spot", platform, x, ground=platform, spot=spot, why=TO_TARGET)
@@ -754,8 +764,9 @@ class Grind(Hunt):
         if self.tp is not None and self.tp.screen and o is not None and o.kind == "spot":
             if o.why == TO_TARGET:
                 wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
-                return (self.tp.changed(s) or self._sweep_calls(s)
-                        or ((pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)))
+                return s is not self.tp.chose_on and (
+                    self.tp.changed(s) or (not self.tp.piles_wait() and self._sweep_calls(s))
+                    or ((pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)))
             if self.tp.on_screen(s):
                 return True
         if super()._interrupt(s):

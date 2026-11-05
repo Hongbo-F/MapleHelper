@@ -999,9 +999,10 @@ class TripState:
     # The target-first planner's trip (behavior.targeting: a grind's spot trip): over as she reaches its platform, wherever
     # she is on it: no walk on to x, no shot clearing it; what she does there is the planner's
     on_arrival: bool = False
-    # (the target-first planner's whole screen) Asked of her look before she stands and waits for a monster to move off a move
-    # or a landing of this trip: True ends the trip there, 'in position', and the hunt has something else for her
-    instead_of_waiting: Callable[[Scene], bool] | None = None
+    # (the target-first planner's whole screen) Asked of her look and the platform a move or a landing of this trip goes to,
+    # before she stands and waits for a monster to move off it: True ends the trip there, 'in position', and the hunt has
+    # something else for her
+    instead_of_waiting: Callable[[Scene, int], bool] | None = None
     stop_waiting: bool = False
 
     def __post_init__(self):
@@ -1073,6 +1074,7 @@ class Navigator:
         self._threat_kinds: frozenset | None = None  # the map's kinds whose touch counts (_threats), once worked out
         self._siblings: dict[tuple[int, int], list[Move]] | None = None  # (src, dst) -> the route's moves (_pricing)
         self._reacted: dict[int, float] = {}  # the feed's track id -> when a plan was last cut for it (REACT)
+        self.react_ahead: float | None = None  # s ahead a monster coming into a chain's way stops it at most (None: anywhere: _coming)
         self._replanned = False  # whether the last _switch replanned with nothing to take (REPLAN: _watching marks so)
         self._late = None  # the last _switch's replan dropped as too late: (why, its ms, s late), said by _dropped
         self._late_in_row: dict[int, int] = {}  # the feed's track id -> its replans dropped late in a row, no room
@@ -1140,7 +1142,7 @@ class Navigator:
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
               scene: Scene | None = None, keep_off=(), vary: bool = True, evade_s: float | None = None,
               refuge_s: float | None = None, on_arrival: bool = False,
-              instead_of_waiting: Callable[[Scene], bool] | None = None) -> TripState:
+              instead_of_waiting: Callable[[Scene, int], bool] | None = None) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
@@ -1764,7 +1766,7 @@ class Navigator:
                 # (the same landing `delay` later: the monsters walked on, their sightings as old as they are; no
                 # monster seen making it priced then, what the looks don't have aside)
                 if judge(replace(last, end=replace(last.end, t=last.end.t + delay)))[1] is None:
-                    if st.instead_of_waiting is not None and st.instead_of_waiting(s):
+                    if st.instead_of_waiting is not None and st.instead_of_waiting(s, q.id):
                         st.stop_waiting = True
                         return True
                     st.land_waits += 1
@@ -1833,7 +1835,7 @@ class Navigator:
         if st.waited < WAIT_LOOKS:
             safe = self._safe_to_stand(s.where.x, s.where.platform, move, monsters)
             worth = self._worth_waiting(move, start, monsters, linger, mo) if safe else None  # (None: not asked)
-            if worth and st.instead_of_waiting is not None and st.instead_of_waiting(s):
+            if worth and st.instead_of_waiting is not None and st.instead_of_waiting(s, move.dst):
                 st.stop_waiting = True
                 return True
             if worth:
@@ -3888,6 +3890,8 @@ class Navigator:
             if leg.end.t < t + REACT_LEAD_S:
                 continue
             if (hit := self.flow.danger(leg, tracks, after=t + REACT_LEAD_S)) is not None:
+                if self.react_ahead is not None and hit[1] - t > self.react_ahead:
+                    continue  # (too far ahead to stop for now: she'll have looked again by then)
                 i = next(i for i, mo in enumerate(tracks) if mo is hit[0])
                 self._came = raw[i]  # (the next chain keeps clear of it: TripState.came)
                 return hit[0], hit[1], ids[i]

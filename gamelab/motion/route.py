@@ -952,13 +952,13 @@ class Planner:
         at = self._kept_landings(src, x, frozenset(keep_off) - {dst}).get(dst)
         return None if not at else min(t + abs(px - dst_x) / WALK_SPEED for px, t in at)
 
-    def arrive_within(self, src: int, x: float, dst: int, lo: float, hi: float) -> tuple[float, float] | None:
+    def arrive_within(self, src: int, x: float, dst: int, lo: float, hi: float, off: frozenset = frozenset()) -> tuple[float, float] | None:
         """`arrive` to anywhere on platform dst from map x `lo` to `hi`: (seconds, where she stands then): the quickest of its
-        landings there with the walk from each into that stretch. None if there's no way there. The target-first planner's
-        (attack.target.by_trip)."""
+        landings there with the walk from each into that stretch, KEEP_OFF_S more for each move onto a platform of `off`, dst too.
+        None if there's no way there. The target-first planner's (attack.target._ways)."""
         src, dst = self.model.place_of(src), self.model.place_of(dst)
         best = None
-        for px, t in self._kept_landings(src, x, frozenset()).get(dst, ()):
+        for px, t in self._kept_landings(src, x, off).get(dst, ()):
             g = min(max(px, lo), hi)
             c = t + abs(px - g) / WALK_SPEED
             if best is None or c < best[0]:

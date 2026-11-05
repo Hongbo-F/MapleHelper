@@ -1847,11 +1847,15 @@ class Hunt:
         if self._at_pile(s, pile):
             if sp.lands > 0.0:
                 self._note("sweep: landing")
-                time.sleep(min(sp.lands, 0.1))
+                self._landing_wait(sp.lands)
                 return None
             self._note("sweep")
             return self._stand(s, pile)
         return self._go_for(pile, "sweep", s, after=self._sweeper.dest)
+
+    def _landing_wait(self, lands: float) -> None:
+        """By a pile whose drops land in `lands` s: a moment's wait (behavior.grind's whole screen: her target meanwhile)."""
+        time.sleep(min(lands, 0.1))
 
     def _stand(self, s: Scene, pile: Pile) -> None:
         """Pick up pile `p` from where look `s` has her by it: only if nothing would meet her there now (`_guards`, from

@@ -35,6 +35,7 @@ from ..attack import target as tg
 from ..attack.stance import MIN_MOVE, _sizes, _stand_limits, open_above
 from ..localization.monsters import Monster, speeds
 from ..localization.rate import HZ
+from ..motion.route import KEEP_OFF_S
 from ..perception.spawns import FADE_PER_S
 from . import fight
 
@@ -52,7 +53,9 @@ ASKS = 4              # targets the plan is asked for at most at a pass (the res
 NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the stance's answer a wait, no place to walk to) is
                       # set aside: another's taken at the next look, and she never idles on one
 IDLE_S = 1.5          # s with nothing she can act on (a wait, no pile) after which she goes on to the next stop
-BLOCKED_S = 1.0       # guess: s a platform a trip would have stood and waited to go to isn't gone to, if another target can be
+BLOCKED_S = 1.0       # guess: s a platform a trip would have stood and waited to go to is kept off, if another target can be gone at
+REACT_AHEAD_S = 1.5   # guess: s ahead a monster coming into a running chain's way stops it at most (Navigator.react_ahead): one 3 s ahead
+                      # stopped her at each try, look after look, and she looks again long before it counts
 ROUTE_STEP = 8.0      # units her x is rounded to for a route's time: 53 ms of her walk at most, and the searches kept (Planner.times)
 HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
@@ -149,6 +152,7 @@ class Targeting:
         self.blocked: dict[int, float] = {}  # a platform a trip to it would have waited for a monster -> until when (`rather`)
         self._known: tuple = (None, {})      # the danger Her.known is for, and it
         self.chose_on = None                 # the look the last choice was made on (a trip's first look has no more to say)
+        self.gave_way_at = -1e18             # when a trip last gave way for a monster in its way (`rather`)
         self._stands = tg.in_height(g.model.places) if self.screen else {}
 
     # --- while her lock lasts --------------------------------------------------------------------------------
@@ -281,9 +285,8 @@ class Targeting:
 
     def _route(self, src: int, x: float, dst: int, lo: float, hi: float) -> tuple[float, float] | None:
         """Her.routes: the navigator's route times (Planner.arrive_within), her x rounded (ROUTE_STEP) so its searches are kept."""
-        if dst in self.blocked and self.blocked[dst] > time.monotonic():
-            return None
-        return self.g.nav.planner.arrive_within(src, round(x / ROUTE_STEP) * ROUTE_STEP, dst, lo, hi)
+        off = frozenset(k for k, until in self.blocked.items() if until > time.monotonic()) if self.blocked else frozenset()
+        return self.g.nav.planner.arrive_within(src, round(x / ROUTE_STEP) * ROUTE_STEP, dst, lo, hi, off)
 
     def foes_of(self, s, targets, visible, pace, more=()) -> list[tg.Foe]:
         """This look's Foes: her targets, those about her of any kind on or beside her platform (they can touch her:
@@ -402,8 +405,10 @@ class Targeting:
         """A trip to platform `dst` would stand and wait for a monster: whether the choice has something to go at meanwhile, with
         that platform off for BLOCKED_S (Her.routes). If it hasn't she waits, the platform as it was."""
         self.blocked[dst] = time.monotonic() + BLOCKED_S
-        if self.peek(s).primary is not None:
+        t = self.peek(s).primary
+        if t is not None and (t.way.how != "trip" or t.way.s < KEEP_OFF_S):
             self.counts["rather than wait"] += 1
+            self.gave_way_at = time.monotonic()
             return True
         del self.blocked[dst]
         return False
@@ -413,8 +418,9 @@ class Targeting:
         ignored = getattr(self.h.attacks, "ignored", None) or ()
         return [m for m in monsters if getattr(m, "track", None) not in self.no_way and getattr(m, "track", None) not in ignored]
 
-    def is_blocked(self, dst: int) -> bool:
-        return self.blocked.get(dst, 0.0) > time.monotonic()
+    def piles_wait(self) -> bool:
+        """Whether a trip just gave way for a monster in its way (`rather`): her drops wait as long as that way's kept off."""
+        return time.monotonic() - self.gave_way_at < BLOCKED_S
 
     def on_screen(self, s) -> bool:
         """On her way somewhere else: whether look `s` has a monster on the screen she can get at."""
