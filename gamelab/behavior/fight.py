@@ -748,7 +748,7 @@ def jump_cover(model: MapModel, s: Scene, targets: list[Monster], around: list[M
 def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], visible: list[Monster],
                  hidden: list[Monster], approach: bool, toward: int = 0, jumps=None,
                  goal: float | None = None, edges: tuple[float, float] | None = None, up=None,
-                 limits: tuple[float, float] | None = None) -> tuple:
+                 limits: tuple[float, float] | None = None, among: list[Monster] | None = None) -> tuple:
     """What to do about the monsters to `fight` (attack.stance, by each kind's size, with what her jumps' attacks
     reach: jump_cover, or `jumps` if given), walking up to them only if `approach`; `toward`: she's travelling that
     way, to map x `goal` on her platform if given; `edges`, `up`, `limits`: stance's, and her moves away since her last
@@ -768,7 +768,8 @@ def _take_stance(h: "Hunter", st: FightState, s: Scene, fight: list[Monster], vi
                  around=around, danger=h.danger,
                  jumps=jumps if jumps is not None else jump_cover(h.model, s, fight, around), toward=toward,
                  goal=goal, edges=edges, up=up, pace=pace_of(h, s), touch=st.touch, limits=limits,
-                 moves=st.moves, castable=castable, clawed=clawed(h, s, around), unsure=st.unsure, **wounds_of(h, s))
+                 moves=st.moves, castable=castable, clawed=clawed(h, s, around), unsure=st.unsure, among=among,
+                 **wounds_of(h, s))
     act, refused = _cast_or_wait(h, act, s, castable)
     # Logged when it changes, and when monsters she was throwing at have just gone hidden.
     if act[:2] != (st.last_act or ())[:2] or (hidden and act[0] != "wait" and not st.last_hidden):

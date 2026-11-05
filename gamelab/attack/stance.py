@@ -815,7 +815,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
            pace: Pace = NO_PACE, touch: list[Monster] = (), limits: tuple[float, float] | None = None,
            moves: int = 0, castable: Callable[[Monster], bool] | None = None,
            hurt: Callable[[Monster], float | None] | None = None, hidden_hurt: list[Monster] = (),
-           clawed: bool = False, unsure: list[Monster] = ()) -> tuple:
+           clawed: bool = False, unsure: list[Monster] = (), among: list[Monster] | None = None) -> tuple:
     """What to do from map (x, y) on `platform` with these monsters around: ('throw', side),
     ('jump_back', side) at one too close for a throw from the ground (jump away, throw back from the
     air), ('jump_throw', side) the same when cornered (straight up), ('back', side, units[, AWAY]) to step away,
@@ -863,16 +863,20 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     that no throw is worth (behavior.fight.shots_at), not among `wanted`, that her body keeps off all the same: with none
     of `wanted` too close, one of them too close has her step away or jump away as from one she'd throw at (a jump back's
     key sends no star at it: behavior.attacks), never a throw at it, and with no such move she goes on as if it weren't
-    there."""
+    there. `among`: with `wanted` the one monster she's after (the target-first planner: attack.target), the others about
+    her: on her platform they count for where she keeps to and for what's behind her as `wanted` ones do, but no answer goes
+    for them."""
     can_jump = can_jump or (lambda a, b: True)
     counts = danger is not None and danger.any
     moves = moves if counts else 0
     around = wanted if around is None else around
     body = around + [m for m in touch if not any(m is o for o in around)]
     mine = [t for t in wanted if beside(t, platform, x, danger)]  # (hers, and one under or over her: BESIDE)
-    lo, hi = _stand_limits(platform, crowded=bool(mine))
     # a throw from the ground would be a claw swipe, or it hits too hard, as it will be when the attack starts
     close = [t for t in mine if too_close(t, x, halves, danger, pace, platform, _side_of(t, x) != facing)]
+    if among:  # (those she isn't after, for her room: the target-first planner's)
+        mine = mine + [t for t in among if not any(t is o for o in wanted) and beside(t, platform, x, danger)]
+    lo, hi = _stand_limits(platform, crowded=bool(mine))
     sizes = _sizes(tops, halves) if castable is not None else None  # (her casts' search: the game's bodies)
     reachable = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around, sizes=sizes)]
     if close:

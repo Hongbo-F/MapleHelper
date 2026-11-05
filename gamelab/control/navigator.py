@@ -996,6 +996,9 @@ class TripState:
     # 'trip' record (`_trip_end`: where she was as it ended)
     walked: list | None = None
     walked_to: Scene | None = None
+    # The target-first planner's trip (behavior.targeting: a grind's spot trip): over as she reaches its platform, wherever
+    # she is on it: no walk on to x, no shot clearing it; what she does there is the planner's
+    on_arrival: bool = False
 
     def __post_init__(self):
         self.evade_s = EVADE_S if self.evade_s is None else self.evade_s
@@ -1020,6 +1023,7 @@ class TripState:
 
 class Navigator:
     """Gets her onto a platform: plans the route, chains its moves, and replans from wherever she ends up."""
+    _clear_of: tuple = (None, ())  # (`first_clear`: the look its tracks were last taken for, and them)
 
     def __init__(self, senses: Senses, actions: Actions, model: MapModel, *, log=print,
                  health: Callable[[Scene], None] | None = None, escort: Escort | None = None,
@@ -1131,7 +1135,7 @@ class Navigator:
     def begin(self, dst: int, x: float | None = None, seconds: float = 180, max_misses: int = 6,
               until: Callable[[Scene], bool] | None = None, *, mode: str | None = None,
               scene: Scene | None = None, keep_off=(), vary: bool = True, evade_s: float | None = None,
-              refuge_s: float | None = None) -> TripState:
+              refuge_s: float | None = None, on_arrival: bool = False) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
@@ -1143,7 +1147,8 @@ class Navigator:
                               # Dungeon, a chain then planned from a look that old: review, 2026-10-24; Hunter.danger
                               # has it from the map's cache since)
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, self.health, mode,
-                       keep_off=frozenset(keep_off), vary=vary, evade_s=evade_s, refuge_s=refuge_s)
+                       keep_off=frozenset(keep_off), vary=vary, evade_s=evade_s, refuge_s=refuge_s,
+                       on_arrival=on_arrival)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
         # sets off. Only a look with the monsters the mode looks for (whole screen when avoiding them), and
         # one that shows her standing (_onto_platform).
@@ -1204,6 +1209,8 @@ class Navigator:
         s = self._onto_platform(s)
         if s.where.platform is None:
             return st.end("lost: not on any platform")
+        if s.where.platform.id == st.dst and st.on_arrival:
+            return st.end("arrived")
         if s.where.platform.id == st.dst:
             # There: only a monster between her and the x she's sent to is shot first. Bursts at
             # whatever is in reach here (as on the way) took whole trips: a 60 s trip to drops on the
@@ -2516,6 +2523,20 @@ class Navigator:
                 return None
             return f"a {hit[0].kind or 'monster'} on {hit[0].platform} by the walk from x {x0:.0f} to {x1:.0f}"
         return clear
+
+    def first_clear(self, s: Scene, x0: float, goals: list[float]) -> float | None:
+        """The first of `goals` a walk along her platform from map x0 to it, set off as soon as her lock lets her, is clear of
+        look `s`'s monsters (`_walk_clear`: flow.danger, her invulnerability counted); None: none. The target-first planner's
+        check of a walk (behavior.targeting), the look's tracks taken once however often it asks (a second update in one look
+        has no time gone: no heading)."""
+        if self._clear_of[0] is not s:
+            self._clear_of = (s, self.tracker.update(s.t, s.monsters, seen_at=s.t - time.monotonic()))
+            self._tracks_at = time.monotonic()
+        monsters = self._clear_of[1]
+        lock = max(getattr(self.actions, "lock_until", 0.0), getattr(self.actions, "arrow_until", 0.0))
+        self._immunity(max(time.monotonic(), lock) + PLAN_START_S)
+        clear = self._walk_clear(s, monsters)
+        return next((g for g in goals if clear(x0, g) is None), None)
 
     def _arrival_clear(self, st: TripState, s: Scene) -> bool:
         """Without an escort (WATCH_MOVES), whether the walk to where she's sent on the trip's platform (look `s`) keeps

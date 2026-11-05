@@ -1052,6 +1052,9 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
         warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
     hunter.config_keys = cfg.keys  # (the game's Attack on no key when last read: said, the regular attack tried again)
+    if throws and not viewer and hasattr(hunter, "looter"):  # (her backpack full, on the phone: a regular push)
+        from .control import notify
+        hunter.looter.push = notify.BackpackPush.from_lab(log=_log)
     if not viewer and hasattr(hunter, "actions") and not keymap.publish(keys, why=f"`{args.cmd}` at its start"):
         _log("  her keys for the Lie Detector's allowance not written (the player keeps the ones it has)")
     hunts = throws and not viewer and hasattr(args, "low_hp")  # (`nav`'s trips have the stop as it is)

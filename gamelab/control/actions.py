@@ -169,6 +169,7 @@ class Actions:
         # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
         # decided on drops it). None: every throw goes.
         self.still: Callable[[str], bool] | None = None
+        self.lock_watch: Callable[[], bool] | None = None  # (`_lock_for_attack`)
         self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
                             # retreat's moves); None: refused then
         # Which way she faces (None: unknown). `facing`: by her keys, the way her last plan turned her or threw
@@ -376,6 +377,14 @@ class Actions:
         if (left := self.lock_until - time.monotonic()) > 0:
             time.sleep(left)
 
+    def _lock_for_attack(self) -> bool:
+        """Wait out her lock before an attack's key: as `wait_lock`, with `lock_watch` frame by frame if she has one
+        (behavior.targeting: a monster fading in or coming at her calls her attack off, the next pass decides again): False."""
+        if self.lock_watch is not None:
+            return self.lock_watch()
+        self.wait_lock()
+        return True
+
     # --- attacks ------------------------------------------------------------------------------
 
     def throw(self, direction: str) -> bool:
@@ -385,8 +394,7 @@ class Actions:
         her off the end of a platform after nine throws the same way. False: dropped once her lock was waited out
         (`still`), or no attack to throw (her regular attack held and no Lucky Seven to throw instead: `choose`
         says None), no key sent."""
-        self.wait_lock()
-        if not self._still(direction):
+        if not self._lock_for_attack() or not self._still(direction):
             return False
         events, t = self._turn(direction)
         key = self._attack_key(direction, ground=True)  # (chosen first, as jump_throw's: its MP goes with its own key)
@@ -417,8 +425,7 @@ class Actions:
         magician's), a throw from the ground instead."""
         if self.ground_only:
             return self.throw(direction)
-        self.wait_lock()
-        if not self._still(direction):
+        if not self._lock_for_attack() or not self._still(direction):
             return False
         key_ms = JUMP_ATTACK_MS if key_ms is None else key_ms
         key, jump = self._attack_key(direction), self.keys.jump.name
