@@ -353,6 +353,8 @@ class Hunter:
         self.attacks.next_key = lambda: getattr(self.actions, "lock_until", 0.0)
         self.attacks.rate = lambda: fight.made_rate(self)
         self.attacks.touched = lambda s: fresh_touch(self.senses, s, slack=fight.TOUCH_ROUND_S) is not None
+        self.attacks.retap = lambda: self.actions.retap()
+        self.attacks.gains = lambda: self.exp_gains
         if mode != "regular":
             self.actions.choose = self.attacks.key
             self.senses.shows = self.attacks.shown_by  # (the look a throw is decided on has the last one's kill)

@@ -666,3 +666,28 @@ def test_with_the_feed_the_dead_are_known_by_their_tracks_and_a_live_neighbour_k
     dead.add(2)  # 2 found dead (another player's kill seen): no target, its mark closed, seen as it is
     a.on_look(look([("green-mushroom", 251.0, None, 1), ("green-mushroom", 262.0, None, 2)], t=now + 0.1))
     assert a.marks == [] and a.target("right") is None
+
+
+def test_throws_at_a_monster_that_show_nothing_have_the_next_tap_the_arrow():
+    """2026-11-04, 22:35:08: a strong frame read her facing left, wrongly, and 85 attacks went into the wall behind her."""
+    said = []
+    a = Attacks(MODEL, KEYS7, "choice", max_mp=623.0, level=16, log=said.append)
+    acts = Actions(KEYS7, skill=True)
+    a.retap, kills = acts.retap, [0]
+    a.gains = lambda: kills[0]
+    acts.facing = "left"
+    m = Monster(Mob("green-mushroom", 0, 0, 0, 0, 1.0), 0.0, 0.0, 1, track=7)
+    a._landing(m), a._landing(m)
+    assert acts.faces("left")
+    a._landing(m)
+    assert not acts.faces("left") and "2 throws" in said[-1]
+    assert acts._turn("left")[0]  # (the tap)
+    acts.facing = "left"          # (its arrow gone)
+    assert acts.faces("left")
+    a._landing(dataclasses.replace(m, bar=0.5)), a._landing(m), a._landing(m), a._landing(m)
+    assert not acts.faces("left")
+    acts.facing = "left"
+    a._landing(m), a._landing(m)
+    kills[0] += 1                 # (a kill told: they're counted from here)
+    a._landing(m), a._landing(m)
+    assert acts.faces("left")
