@@ -94,6 +94,8 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    of hers gives: the simulator's Orange Potion 125 mesos, Meat 80 with `--world meat`, its Blue
                    100); pick_age, the median age of her drops as she picked them up (s from their landing);
                    drops_expired, those of hers that lay their whole life
+  loot             how she goes through her drops (loot_visits: visits, per_visit, stops_per, stops_per_drop, still_per,
+                   still_s_min, and of the loot chains chains, chain_stops, chain_done)
   pet_picks        of her drops taken by her, those her pets took (`--world pet-loot`: world.Realism.pets), pet_share
                    of them, pet_value_per_min their worth a minute and her_value_per_min her own key's (value_per_min
                    both); taken_from, where she was when her drops were taken (units from them on their platform,
@@ -167,6 +169,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    'shot first', 'waited' out, or 'went' past); moves_away, her stances that moved her away ('back': a
                    step, 'jump_back'; 'away': the steps from a close monster of the 'back', a stack's fights that tell),
                    once a run of looks deciding it
+  idle             her idle time, s a minute (`idle`: standing, no attack's lock on her, the live clip's measure): `s_min`
+                   in all; `other`, `here`, `none`: monsters on the screen only on other platforms, one on her platform,
+                   none; `rules`: by the hunt's rule then
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -193,7 +198,7 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
+from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
                     INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025, NEAR_SEEN_1104,
                     NEAR_SPELL_1104, OFF_SEEN_1104, OFF_SPELL_1104,
                     NEAR_SPELL, OFF_SEEN, OFF_SEEN_1025, OFF_SPELL, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND,
@@ -862,6 +867,8 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         # kind 'landing', control.navigator._clear_landing)
         "landing_events": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "landing")),
         "moves_away": _moves_away(records, end),
+        "idle": idle(world, records, end),
+        "loot": loot_visits(world, drops, records, end),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
         **(_magic(world, end) if world.character.magic is not None else {}),
     }
@@ -939,6 +946,78 @@ def _moves_away(records: list[dict], end: float) -> dict:
             out["away"] += act == "back" and bool(r.get("away"))
         last = act
     return dict(out)
+
+
+def idle(world, records: list[dict], end: float) -> dict:
+    """Her idle time, s a minute of the run (World._idleness: standing, no attack's lock on her), as the live clip's measure
+    has it (D:/MapleHelper-scratch/stiff/pause_prize.py): `s_min` in all, by what's on the screen (`other`: monsters only on
+    other platforms, `here`: one on her platform, `none`: none) and by the hunt's rule at the time (`rules`, the 'hunt'
+    records'), so `ab --metric idle.s_min --metric idle.other` compares them."""
+    log = [(t, kind) for t, kind in getattr(world, "idle_log", ()) if t <= end]
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    rules = [(r["t"] - start, r.get("rule")) for r in records if r.get("topic") == "hunt"] if start is not None else []
+    per = 60.0 / max(end, 1e-9) * IDLE_EVERY_MS / 1000
+    kinds, by = Counter(), Counter()
+    i = 0
+    for t, kind in log:
+        kinds[kind] += 1
+        while i + 1 < len(rules) and rules[i + 1][0] <= t:
+            i += 1
+        by[rules[i][1] if rules and rules[i][0] <= t else None] += 1
+    return {"s_min": round(len(log) * per, 2), **{k: round(kinds[k] * per, 2) for k in ("other", "here", "none")},
+            "rules": {str(k): round(v * per, 2) for k, v in by.most_common()}}
+
+
+VISIT_GAP_S = 3.0     # (loot_visits) s between two of her pick-ups at most for them to be of one visit ...
+VISIT_BEFORE_S = 1.0  # ... which starts this long before its first ...
+STOP_LEAST_S = 0.1    # ... and a stop in it is a stand this long at least
+
+
+def loot_visits(world, drops: list, records: list[dict], end: float) -> dict:
+    """How she goes through her drops (World.still_log, her pick-ups, the 'loot_chain' records): her visits (`visits`: her own key's
+    pick-ups VISIT_GAP_S apart at most), `per_visit` drops in each, `stops_per` stands of STOP_LEAST_S or more in each from VISIT_BEFORE_S
+    before its first drop to its last, `stops_per_drop` the same a drop, `still_per` the s she stood in each, `still_s_min` those s a minute;
+    `chains` the loot chains (behavior.lootchain), `chain_stops` the piles planned a chain, `chain_done` the share of them she got through;
+    `by_120`, `by_end` of her drops landed by 120 s, and by 15 s before the end, the share she picked up (where drops_share counts only fates known
+    by the end, a far pile still lying isn't in it)."""
+    taken = sorted(d.taken_at for d in drops if d.taken_by == "her" and not getattr(d, "pet", False)
+                   and d.taken_at is not None and d.taken_at <= end)
+    visits: list[list[float]] = []
+    for t in taken:
+        if visits and t - visits[-1][-1] <= VISIT_GAP_S:
+            visits[-1].append(t)
+        else:
+            visits.append([t])
+    stands: list[list[float]] = []
+    every = IDLE_EVERY_MS / 1000 * 1.5
+    for t in getattr(world, "still_log", ()):
+        if stands and t - stands[-1][1] <= every:
+            stands[-1][1] = t
+        else:
+            stands.append([t, t])
+    stops = still = 0.0
+    i = 0
+    for v in visits:
+        a, b = v[0] - VISIT_BEFORE_S, v[-1]
+        while i < len(stands) and stands[i][1] < a:
+            i += 1
+        for s0, s1 in stands[i:]:
+            if s0 > b:
+                break
+            still += max(0.0, min(s1, b) - max(s0, a))
+            stops += s1 - s0 >= STOP_LEAST_S
+    chains = [r for r in records if r.get("topic") == "loot_chain"]
+    n, picks = len(visits), len(taken)
+    planned = sum(c["planned"] for c in chains)
+
+    def share(by: float) -> float:
+        hers = [d for d in drops if d.owner == "her" and d.since <= by]
+        return round(sum(d.taken_by == "her" and d.taken_at <= end for d in hers) / len(hers), 3) if hers else 0.0
+    return {"visits": n, "per_visit": round(picks / n, 3) if n else 0.0, "stops_per": round(stops / n, 3) if n else 0.0,
+            "stops_per_drop": round(stops / picks, 3) if picks else 0.0, "still_per": round(still / n, 3) if n else 0.0,
+            "still_s_min": round(still * 60.0 / max(end, 1e-9), 2), "chains": len(chains), "chain_stops": planned,
+            "chain_done": round(sum(c["done"] for c in chains) / planned, 3) if planned else 0.0,
+            "by_120": share(120.0), "by_end": share(end - 15.0)}
 
 
 LANDING_MOVED = 30.0  # (landings) units along her platform a landing on it moved her at least, as the live diagnosis's

@@ -1694,6 +1694,8 @@ class FightOnTheWay:
         self.h = h
         self.kinds: set[str] | None = None  # shoot monsters in reach of these kinds only (None: all); any
                                             # in her way is shot
+        self.not_ignored = False  # (behavior.grind's whole screen) `reaches` and `in_way` say no of one her attacks ignore (Attacks.ignored)
+        self.set_aside: Callable[[], dict] | None = None  # (behavior.grind's) the tracks the plan has set aside now: `wont_have`
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice), else one she
@@ -1717,8 +1719,18 @@ class FightOnTheWay:
         """The monster nearest her standing on her platform between her and map x (where her next move
         starts, or where she's sent to), or too close to her, whatever its kind (None if there's none)."""
         lo, hi = sorted((s.where.x, x))
-        in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE]
+        in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE
+                  and not (self.not_ignored and self._ignored(m))]
         return min(in_way, key=lambda m: abs(m.x - s.where.x)) if in_way else None
+
+    def _ignored(self, m: Monster) -> bool:
+        return getattr(m, "track", None) in (getattr(self.h.attacks, "ignored", None) or ())
+
+    def wont_have(self, s: Scene, m: Monster) -> bool:
+        """Whether no fight would take monster `m` of look `s` as things are: taken for dying by the ledger (`dying`), ignored by her
+        attacks (Attacks.ignored), set aside by the plan (`set_aside`: behavior.grind's, Targeting.no_way): a fight says "nothing in reach"."""
+        aside = self.set_aside() if self.set_aside is not None else ()
+        return self.dying(s, m) or self._ignored(m) or getattr(m, "track", None) in aside
 
     def clear_way(self, s: Scene, x: float, finish: bool = True) -> int | None:
         """Shoot the monster in her way to map x (in_way). Returns the kills, or None if nothing was in
@@ -1769,6 +1781,8 @@ class FightOnTheWay:
         stance would make at it from there (jump_reaches: what the hunt loop's Hunt._jump_hits counts). The seam S1's
         aim facade replaces for another character's attack, with stance.place_to_shoot's search along her platform."""
         if s.platform is None or s.where is None:
+            return False
+        if self.not_ignored and self._ignored(m):
             return False
         if reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters):
             return True

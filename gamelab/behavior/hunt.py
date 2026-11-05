@@ -424,6 +424,7 @@ class Objective:
     finishing: float = 0.0     # s spent finishing what she had hurt (rule 4b)
     why: str = ""              # the rule that set it ("valuable pile", "sweep", ...)
     after: tuple | None = None  # a sweep's pile: where its itinerary goes on to after it (platform, x)
+    chain: object | None = None  # a sweep's pile: the chain through it and the next ones (behavior.lootchain), its trip one plan
     detours: int = 0           # piles taken on the way (rule 5b) while it was suspended
 
     def text(self) -> str:
@@ -1320,12 +1321,12 @@ class Hunt:
 
     def _candidate(self, p: Pile, s: Scene | None = None) -> bool:
         """Whether pile `p` is one to go for as of look `s` (None: her last pass's): not seen gone, on a platform,
-        stood on or gone for fewer than PILE_TRIES times, hers or past its killer's ownership (OWN_S), something in it
+        stood on or gone for fewer than PILE_TRIES times (a run through it with no stand not counted), hers or past its killer's ownership (OWN_S), something in it
         she can take (`_takes`: her inventory by tab), not another player's (PLAYER_PILES), likely to lie there still
         (Pile.still, SURVIVE_MIN: ledger.SURVIVAL, where until 2026-10-30 a pile was left at DROP_LIFE, 90 s, and
         another's waited OTHERS_AFTER, 30 s), and not left to her pets for now (`_pets_first`)."""
         now = time.monotonic()
-        return (p.status != "gone" and p.platform is not None and p.tries < PILE_TRIES
+        return (p.status != "gone" and p.platform is not None and p.tries - p.runs < PILE_TRIES
                 and (p.hers or now - p.since >= OWN_S) and self._takes(p)
                 and not self._theirs(p) and p.still(now) >= SURVIVE_MIN and not self._pets_first(p, now, s))
 
@@ -1519,7 +1520,7 @@ class Hunt:
         row on the harness's seed 9 (60 s on 19, the objective's clock its end)."""
         o = self.obj
         if o is None or o.kind not in ("spot", "pile") or (o.kind == "pile" and o.why != "sweep") \
-                or o.why == "back to spot":
+                or o.why == "back to spot" or getattr(o, "chain", None) is not None:
             return False
         keep = None
         if getattr(s, "what_if", False) and hasattr(self, "_sweeper"):
@@ -1847,11 +1848,15 @@ class Hunt:
         if self._at_pile(s, pile):
             if sp.lands > 0.0:
                 self._note("sweep: landing")
-                time.sleep(min(sp.lands, 0.1))
+                self._landing_wait(sp.lands)
                 return None
             self._note("sweep")
             return self._stand(s, pile)
         return self._go_for(pile, "sweep", s, after=self._sweeper.dest)
+
+    def _landing_wait(self, lands: float) -> None:
+        """By a pile whose drops land in `lands` s: a moment's wait (behavior.grind's whole screen: her target meanwhile)."""
+        time.sleep(min(lands, 0.1))
 
     def _stand(self, s: Scene, pile: Pile) -> None:
         """Pick up pile `p` from where look `s` has her by it: only if nothing would meet her there now (`_guards`, from
@@ -2022,7 +2027,7 @@ class Hunt:
         any wanted monster in reach, the pile under her waiting)."""
         return self._shoot_rate(s, s.monsters)[0] > 0.0
 
-    def _go_for(self, pile: Pile, rule: str, s: Scene, after: tuple | None = None) -> None:
+    def _go_for(self, pile: Pile, rule: str, s: Scene, after: tuple | None = None, chain=None) -> None:
         """A trip to pile `pile` for rule `rule` (the sweep's, a valuable pile's): its objective, the one she was on
         suspended under it; or, where her stand there would meet the map's next pass by a free spawn point (the spawn
         guard: `_respawn_guard`), nothing yet ('<rule>: the pass'), the next look deciding again."""
@@ -2045,7 +2050,7 @@ class Hunt:
             self.stack.append(parent)  # suspended
         if rule == "valuable pile":
             pile.rushed += 1
-        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule, after=after)
+        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule, after=after, chain=chain)
         if rule == "sweep" and parent is not None:
             # A stop on the way shoots in passing out of the trip's own budget, and leaves finishing to it (once
             # it's done she owes them still): with budgets of their own, its stops shot on and on, and in the
@@ -2280,7 +2285,9 @@ class Hunt:
         o = self.obj
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
                                 until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o),
-                                vary=o.kind != "pile", on_arrival=self._ends_on_arrival(o))
+                                vary=self._varies(o), on_arrival=self._ends_on_arrival(o),
+                                instead_of_waiting=self._instead_of_waiting(o), through=self._through(o),
+                                land_near=self._land_near(o))
         o.trip.weights, o.trip.choice = o.weights, o.choice
         chains = o.trip.trip.chains
         while not o.trip.over:
@@ -2289,12 +2296,35 @@ class Hunt:
             if o.trip.trip.chains > chains:
                 chains = o.trip.trip.chains
         result = o.trip.trip.result
+        if o.chain is not None and self._chain_over(o, result):
+            return None
         if result == "arrived" or (result == "in position" and o.kind == "spot" and self._on_spot(o)):
             return self._arrived(o)
         if result == "in position":
             return None  # a rule fired: the next pass decides (OBJECTIVE_S is checked there)
         self.log(f"  {o.text()}: {result}")
         return self._drop_objective(o, result)
+
+    def _through(self, o: Objective):
+        """What objective o's trip asks for the way on through her drops (TripState.through; behavior.grind's loot chain; the hunt loop's: nothing)."""
+        return None
+
+    def _chain_over(self, o: Objective, result: str) -> bool:
+        """A trip through her drops over (behavior.grind's loot chain): whether that's dealt with."""
+        return False
+
+    def _land_near(self, o: Objective) -> bool:
+        """Whether objective o's trip lands for its x (TripState.land_near; behavior.grind's trip to her target's place)."""
+        return False
+
+    def _instead_of_waiting(self, o: Objective):
+        """What's asked before objective o's trip stands and waits for a monster (TripState.instead_of_waiting; behavior.grind's
+        whole screen; the hunt loop's: nothing, she waits)."""
+        return None
+
+    def _varies(self, o: Objective) -> bool:
+        """Whether objective o's trips may vary their way (route.ROUTES; behavior.grind's trips to a target's place: never)."""
+        return o.kind != "pile"
 
     def _ends_on_arrival(self, o: Objective) -> bool:
         """Whether objective o's trip ends as she reaches its platform, with no walk on to its x (TripState.on_arrival:
@@ -2322,14 +2352,14 @@ class Hunt:
         on the spot's platform, above her, held her 107 s, the pass deciding 2,373 times and never moving (found
         offline, 2026-10-25)."""
         here = s.platform.id
-        if self._close_quarters(s, s.monsters):
+        if self._close_quarters(s, self._may_stop_her(s)):
             return True
         o = self.obj
         if o is not None and o.kind == "pile" and o.pile is not None and self._worthless(o.pile):
             return True  # not worth it any more (`_pass` drops it)
         if o is not None and o.why == "valuable pile" and o.pile is not None and self._unsafe(s, o.pile):
             return True  # a monster would meet her there now (`_pass` calls it off)
-        wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]
+        wanted = [m for m in self._may_stop_her(s) if self.kinds is None or m.kind in self.kinds]
         if o is not None and o.why == "valuable pile":
             # At once: nothing else stops her, but something in reach that goes first now (`_loot_first`)
             return not self._loot_first(s, o.pile, wanted, say=False)
@@ -2354,6 +2384,10 @@ class Hunt:
             if spot and any(m.platform == o.ground for m in in_reach):
                 return True
         return self._sweep_calls(s)
+
+    def _may_stop_her(self, s: Scene) -> list[Monster]:
+        """The monsters that can stop a trip (`_interrupt`; behavior.grind's whole screen: those it can have as a target)."""
+        return s.monsters
 
     def _arrived(self, o: Objective) -> None:
         if o.kind == "spot":

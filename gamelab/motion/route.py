@@ -218,7 +218,7 @@ SIDES = tuple((d, directions.sign(d)) for d in (RIGHT, LEFT))  # a direction and
 class Move:
     """One move from platform src to platform dst. flow adds 'hop' (a running jump over a monster,
     landing on the same platform) to the kinds below."""
-    kind: str            # climb | climb_down | jump_up | jump | walk_off | drop | rope_jump
+    kind: str            # climb | climb_down | jump_up | jump | walk_off | drop | rope_jump (the map's); walk: flow's
     src: int             # platform ids
     dst: int
     x: float             # where on src she starts the move
@@ -790,12 +790,12 @@ class Planner:
             self._into.setdefault(node, []).append(m)
 
     def plan(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
-             weight: Callable[[Move], float] | None = None) -> list[Move] | None:
+             weight: Callable[[Move], float] | None = None, dst_x: float | None = None) -> list[Move] | None:
         """Quickest list of moves from (platform src, x) onto platform dst (None: there's no way): the
-        route ends wherever she lands on dst.
+        route ends wherever she lands on dst, or with `dst_x` the quickest with her walk on to that x from where she lands.
         `penalty(move)` adds seconds to a move (e.g. one a monster is in the way of); `weight(move)`
         scales its cost (a little randomness lets near-equal routes take turns)."""
-        found = self._search(self.model.place_of(src), x, self.model.place_of(dst), penalty, weight)
+        found = self._search(self.model.place_of(src), x, self.model.place_of(dst), penalty, weight, dst_x)
         return None if found is None else found[0]
 
     def quickest(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None = None,
@@ -949,7 +949,24 @@ class Planner:
         if dst_x is None:
             return self.travel(src, x, dst, keep_off)
         src, dst = self.model.place_of(src), self.model.place_of(dst)
-        off = frozenset(keep_off) - {dst}
+        at = self._kept_landings(src, x, frozenset(keep_off) - {dst}).get(dst)
+        return None if not at else min(t + abs(px - dst_x) / WALK_SPEED for px, t in at)
+
+    def arrive_within(self, src: int, x: float, dst: int, lo: float, hi: float, off: frozenset = frozenset()) -> tuple[float, float] | None:
+        """`arrive` to anywhere on platform dst from map x `lo` to `hi`: (seconds, where she stands then): the quickest of its
+        landings there with the walk from each into that stretch, KEEP_OFF_S more for each move onto a platform of `off`, dst too.
+        None if there's no way there. The target-first planner's (attack.target._ways)."""
+        src, dst = self.model.place_of(src), self.model.place_of(dst)
+        best = None
+        for px, t in self._kept_landings(src, x, off).get(dst, ()):
+            g = min(max(px, lo), hi)
+            c = t + abs(px - g) / WALK_SPEED
+            if best is None or c < best[0]:
+                best = (c, g)
+        return best
+
+    def _kept_landings(self, src: int, x: float, off: frozenset) -> dict[int, list[tuple[int, float]]]:
+        """`_landed`'s search from (platform src, x), kept as `arrive` says."""
         start = (src, round(x), off)
         found = self._landings.pop(start, None)
         if found is None:
@@ -957,8 +974,7 @@ class Planner:
             if len(self._landings) >= TIMES_KEPT:
                 del self._landings[next(iter(self._landings))]
         self._landings[start] = found
-        at = found.get(dst)
-        return None if not at else min(t + abs(px - dst_x) / WALK_SPEED for px, t in at)
+        return found
 
     def _landed(self, src: int, px: int, off: frozenset = frozenset()) -> dict[int, list[tuple[int, float]]]:
         """`_every`'s search, keeping every landing: each platform's [(x landed at, cost)], the start among
@@ -1004,15 +1020,24 @@ class Planner:
         return out
 
     def _search(self, src: int, x: float, dst: int, penalty: Callable[[Move], float] | None,
-                weight: Callable[[Move], float] | None) -> tuple[list[Move], float] | None:
-        """Dijkstra over (platform, x) nodes: the quickest moves to dst and their cost in seconds."""
+                weight: Callable[[Move], float] | None, dst_x: float | None = None) -> tuple[list[Move], float] | None:
+        """Dijkstra over (platform, x) nodes: the quickest moves to dst and their cost in seconds (`plan`'s `dst_x`: with her walk
+        on to it from where she lands)."""
         start = (src, round(x))
         best = {start: 0.0}
         back: dict[tuple, tuple] = {}
         heap = [(0.0, start)]
+        walked: tuple[float, tuple] | None = None  # (`dst_x`) the quickest with the walk on so far, and its node
         while heap:
             t, (pid, px) = heapq.heappop(heap)
             if t > best.get((pid, px), math.inf):
+                continue
+            if walked is not None and t >= walked[0]:
+                break
+            if pid == dst and dst_x is not None:
+                cost = t + abs(px - dst_x) / WALK_SPEED
+                if walked is None or cost < walked[0]:
+                    walked = (cost, (pid, px))
                 continue
             if pid == dst:
                 path, node = [], (pid, px)
@@ -1030,7 +1055,13 @@ class Planner:
                     best[node] = cost
                     back[node] = ((pid, px), m)
                     heapq.heappush(heap, (cost, node))
-        return None
+        if walked is None:
+            return None
+        path, node = [], walked[1]
+        while node in back:
+            node, move = back[node]
+            path.append(move)
+        return path[::-1], walked[0]
 
     def reachable(self, src: int) -> set[int]:
         """The platforms some route leads to from src (src included), their twins with them."""

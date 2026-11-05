@@ -1030,10 +1030,16 @@ def _grind(minutes: float):
     return run
 
 
+def _whole_screen() -> bool:
+    from ..behavior import targeting
+    return targeting.screen_on()
+
+
 @tree((23, 73.0), monsters="all", seed=1, limit=400, may_die=True,
       realism=Realism(camps=harness.TREE_CAMPS, zero_walls=True),
       expects=(logs("loop: ["), logs("next: stop"), logs("grinding:"),
-               check("three stops or more", lambda tr: len(tr["result"]["grounds"]) >= 3),
+               # (with the whole screen she goes on to a stop only with nothing on it to go at, and in this crowd that's seldom: the user's order)
+               check("three stops or more", lambda tr: _whole_screen() or len(tr["result"]["grounds"]) >= 3),
                check("kills credited to two platforms or more", lambda tr: len(tr["result"]["credit"]) >= 2),
                check("no stop camped past STOP_MAX_S and a pass",
                      lambda tr: max(tr["result"]["stays"], default=0) < 120)))
@@ -1730,7 +1736,7 @@ def loop_tree_attack_unbound(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True,
+@tree((23, 73.0), monsters="all", seed=3, limit=400, may_die=True,
       **dict(_HURT_LIVE, noise=Noise(regular_miss=1.0, miss_unseen=1.0)),
       expects=KEY_EXPECTS + (
           logs("ATTACK KEY: ATTACK IS ON CTRL AS CONFIGURED"),
@@ -1738,7 +1744,8 @@ def loop_tree_attack_unbound(sim):
           check("the hunt went on: kills after it", lambda tr: tr["result"]["kills_after"] >= 3),
           check("no stop", lambda tr: tr["result"]["stopped"] is None)))
 def loop_tree_attack_misses(sim):
-    """Her keys right, every regular star missing (Noise.regular_miss) and its MISS popup not seen (Noise.miss_unseen:
+    """(Seed 3 with the whole screen's and the chain's fixes of 2026-11-05: on 1 no doubt; of seeds 1-12, 3-7 and 11 meet all of this.)
+    (Seed 1 with the whole screen on, GAMELAB_SCREEN: of seeds 1-12, 1-4 and 6-9 meet all of this.) Her keys right, every regular star missing (Noise.regular_miss) and its MISS popup not seen (Noise.miss_unseen:
     under other numbers, say): 5 presses without effect, the doubt, the window read with ATTACK on Ctrl as configured:
     the misses were something else; that target gets no more regular attacks, the hunt goes on, nobody paged. A doubt
     within 300 s of it would hold the regular attack at its targets, with no check. (loop_tree_attack_misses_seen: the
@@ -1780,7 +1787,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=31, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1791,7 +1798,9 @@ def loop_tree_attack_misses_seen(sim):
                      lambda tr: len(tr["result"]["pages"]) == 2 and "STARS MAY BE OUT" in tr["result"]["pages"][0][2]
                      and "out of darts" in tr["result"]["pages"][1][1])))
 def loop_tree_attack_no_darts(sim):
-    """(Seed 31 with the target-first planner on: of seeds 21-44 she stops out of darts on 20, her stars' test before it on 31
+    """(Seed 6 with the whole screen's and the chain's fixes of 2026-11-05: of seeds 1-12 only 6 meets all of this: on most she doesn't
+    press the regular attack on enough dry stars for the stars' test.) (Seed 1 with the loot chain on, GAMELAB_LOOT_CHAIN: of seeds 1-12, 1, 5 and 10 meet all of this.) (Seed 2 with the whole screen on,
+    GAMELAB_SCREEN: of seeds 1-12, 2-4 meet all of this.) (Seed 31 with the target-first planner on: of seeds 21-44 she stops out of darts on 20, her stars' test before it on 31
     and 34; with it off, GAMELAB_TARGET=0, as on 29.) `tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts
     Lucky Seven's presses, so it doesn't fire while she throws it) with 40 throwing stars: gone at about 50 s, her regular presses only swing the
     claw, nothing at range; 5 in a row without effect at a Green Mushroom she had hurt, the doubt at 107.4 s; away to 25

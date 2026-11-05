@@ -566,6 +566,8 @@ AIR_PICK = "search"
 AIR_TURN_SAME_STEP = True
 DROP_DELAY = 2.0
 CLOSE_DX = 60.0          # (World.close_ms) a monster this near her, middle to middle: the live diagnosis's close episodes
+IDLE_EVERY_MS = 50       # (World._idleness) how often it's sampled ...
+IDLE_LOCK_S = 0.85       # ... and the s after an attack's key she isn't counted idle: the live clip's measure (stiff/pause_prize.py)
 # s from a kill until the monster is back at its spawn point (a guess; Realism.respawn). Not the game's, by its live
 # telemetry of 2026-10-19 to 21 (analysis.respawn: README, Respawns and drop life): there a platform she emptied,
 # watched with no gap over 2 s, had a monster again within 12.56 s on an estimated 20% (95% interval 12-33%; 12 of 77
@@ -2289,6 +2291,9 @@ class World:
         # width, middle to middle: a mushroom 93), and within CLOSE_DX
         self.claw_ms = 0
         self.close_ms = 0
+        self.idle_log: list[tuple[float, str]] = []  # (`_idleness`)
+        self.still_log: list[float] = []             # (`_idleness`) when she stood, every IDLE_EVERY_MS, whatever for
+        self.screen: Callable[[], tuple[float, float, float, float]] | None = None  # the camera's view (FakeEyes)
         # Every attack's pick (_aim), with what came of it (_attack): (key s, plan, "ground" or "air", turned in the air
         # in this flight before it, the attack key's ms after her lift-off, the nearest live monster on the platform she
         # last stood on ahead of her then the way the stack threw it (`meant`; her facing where no throw listener
@@ -2538,6 +2543,8 @@ class World:
             self._through_portal()
         self._touch()
         self._closeness()
+        if self.ms % IDLE_EVERY_MS == 0:
+            self._idleness()
         if self.character.mp > 0 and self.mp < 1.0:
             self.mp = min(1.0, self.mp + self.character.mp_regen * dt / self.character.mp)
         self.ms += TICK_MS
@@ -3132,6 +3139,26 @@ class World:
                 close = close or dx < CLOSE_DX
         self.claw_ms += TICK_MS * claw
         self.close_ms += TICK_MS * close
+
+    def _idleness(self) -> None:
+        """Whether she stands idle now: on the ground, no speed, her last attack's key IDLE_LOCK_S ago or more (the live
+        clip's measure, its 'stand' frames: D:/MapleHelper-scratch/stiff/pause_prize.py), kept with what's on the screen:
+        'none' no live monster, 'here' one on her platform, 'other' only on other platforms (the harness's `idle`)."""
+        if self.mode != "ground" or self.vx or self.glide or self.dead:
+            return
+        self.still_log.append(self.t)  # (standing, whatever for: the harness's `loot`)
+        if self.screen is None or self.origin + self.t - self.attack_key_at < IDLE_LOCK_S:
+            return
+        x0, y0, x1, y1 = self.screen()
+        here = self.plat.id if self.plat is not None else None
+        kind = "none"
+        for m, mx, my, alive in self.visible_monsters():
+            if alive and x0 <= mx <= x1 and y0 <= my <= y1:
+                kind = "other"
+                if m.platform.id == here:
+                    kind = "here"
+                    break
+        self.idle_log.append((self.t, kind))
 
     def _touch(self) -> None:
         if self.ms < self.invulnerable_ms or not self.monsters or self.dead:

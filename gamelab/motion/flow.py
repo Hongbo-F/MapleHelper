@@ -56,6 +56,11 @@ SLACK_PER_LEG = 0.025  # s of timing error each predicted landing may add
 MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only makes her sluggish)
 TAP = 0.04           # s a jump/down tap is held
 PICK_EVERY = 0.15    # s between pick-up presses while she runs
+WALK_PICK_EVERY = 0.12  # ... and on a walk through her drops (a 'walk' leg: the loot chain's), a press as often as a stand's (actions.PILE_EVERY_MS)
+WALK_ON_ROOM = 50.0  # units of platform she keeps past a drop she runs through: a run on and a turn from there stay on it (the navigator's
+                     # REACT_ROOM: her stop takes 24.3 in the simulator, 24.0 +- 2 and up to 28.1 in game, and a look to see it; at 20 the review's
+                     # 48 seeds had her fall off 0.42 and 0.46 times a run, against 0.12 and 0.21 without the chain)
+WALK_ENDS_IN = 3.0   # units in from a platform's end a walk may end at the least (as _landing's slide)
 MIN_RUNUP = 15.0     # units of run before a running jump from standing (keyed 155 ms after the arrow: full speed)
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
 # A chained jump lands with room to spare from where she really leaves the ground (Flow.sure_takeoff), or it's
@@ -335,12 +340,15 @@ def _via(a: Platform, b: "Body", start: "Body", t1: float, x1: float) -> list[Sp
 
 def _tap_pick_up(k: Keys, legs: list[Leg]) -> None:
     """Pick up whatever she runs over, as a player taps the key all the way."""
+    last = -math.inf  # (along a walk's legs one beat, whatever they're cut into: a tap too near the next merges with it)
     for leg in legs:
+        walk = leg.move.kind == "walk"
+        every = WALK_PICK_EVERY if walk else PICK_EVERY
         for sp in leg.spans:
-            t = sp.t0
+            t = max(sp.t0, last + every) if walk else sp.t0
             while t < sp.t1:
                 k.tap(t, "pick")
-                t += PICK_EVERY
+                last, t = t, t + every
 
 
 class Flow:
@@ -417,7 +425,7 @@ class Flow:
         if b.platform.id != m.src:
             return None
         plan = {"jump": self._jump, "walk_off": self._walk_off, "jump_up": self._jump_up, "drop": self._drop,
-                "climb": self._climb}.get(m.kind)
+                "climb": self._climb, "walk": self._walk}.get(m.kind)
         return None if plan is None else plan(m, b, k, variant)
 
     def _landing(self, m: Move, b: Body, k: Keys, variant: str, t_land: float, lx: float, land: Platform,
@@ -460,6 +468,49 @@ class Flow:
         if step is None:
             return None
         return Body(step[0], step[1], a, slack=b.slack)
+
+    def _walk(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
+        """A walk along her platform to m.land_x (the loot chain's way through her drops, control.navigator's `through`; no
+        move of the route's), pick-up pressed all the way (`_tap_pick_up`): the 'run' way she's at full speed there with the arrow
+        held, for what follows on, as long as the platform has WALK_ON_ROOM past it; the 'stop' way she stands there, m.seconds
+        more with a stand asked for (the presses a run past it wouldn't give). None either way where, running already (from a landing, a
+        walk before it), a turn or a slide would leave the platform."""
+        if variant == "stand":
+            return None
+        a, goal = b.platform, m.land_x
+        d = _sign(goal - b.x) or b.run
+        if b.run and b.run != d and not a.covers(b.x + b.run * WALK_ON_ROOM):
+            return None  # (her turn from there runs off its end: the leg before is done the way that stops: `follows`)
+        if variant == "run":
+            if m.seconds > 0.0 or not d or not a.covers(goal + d * WALK_ON_ROOM):
+                return None
+            t1 = self.run_to(b, d, goal)
+            if t1 is None:
+                return None
+            k.set_arrow(b.t, d)
+            return Leg(m, b, Body(t1, goal, a, run=d, slack=b.slack, v=_ground(b, d, t1)[1]), [Span(a.id, b.t, t1, b.x, goal)])
+        start = b
+        if b.run and b.run != d:  # (running away from it: a stop first)
+            k.set_arrow(b.t, 0)
+            start = Body(b.t + body.stop_time(b.v, SHOE, LAGS), b.x + b.run * body.stop_distance(b.v, SHOE, LAGS), a, slack=b.slack)
+        stopped = None
+        if start.run and (goal - (start.x + start.run * body.stop_distance(start.v, SHOE, LAGS))) * start.run > 0:
+            stopped = self._stop_at(start, goal, k)
+        if stopped is not None:
+            t1, x1 = stopped
+        elif start.run:  # (too near to stop short of it: let go now, a slide past it)
+            k.set_arrow(start.t, 0)
+            t1, x1 = start.t + body.stop_time(start.v, SHOE, LAGS), start.x + start.run * body.stop_distance(start.v, SHOE, LAGS)
+        elif abs(goal - start.x) >= 1.0:
+            t1, x1 = self._step(start, goal, k)
+        else:
+            t1, x1 = start.t, start.x
+        if not a.covers(x1, -WALK_ENDS_IN):
+            return None  # (a slide off its end: as above)
+        spans = _via(a, b, start, t1, x1) if t1 > b.t else []
+        if m.seconds > 0.0:
+            spans.append(Span(a.id, t1, t1 + m.seconds, x1, x1))
+        return Leg(m, b, Body(t1 + m.seconds, x1, a, slack=b.slack), spans)
 
     def _jump(self, m: Move, b: Body, k: Keys, variant: str) -> Leg | None:
         """A running jump, from the first of its takeoffs (_takeoffs) that lands with room to spare where she
@@ -1056,7 +1107,7 @@ class Flow:
                 leg = self.leg(m, b, trial, v)
                 if leg is not None and not self.danger(leg, monsters, linger=linger):
                     options.append((leg, trial))
-            if price is not None and options and (nxt is None or PRICE_EVERY_MOVE):
+            if price is not None and options and (nxt is None or PRICE_EVERY_MOVE) and m.kind != "walk":
                 options = self._priced(m, b, k, order, options, monsters, linger, price, alts,
                                        goal if nxt is None else (m.dst, nxt.takeoff if nxt.takeoff is not None
                                                                  else nxt.x),

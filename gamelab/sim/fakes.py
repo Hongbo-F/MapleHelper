@@ -408,6 +408,7 @@ class FakeEyes(Eyes):
         self.world, self.clock, self.model = world, clock, model
         # the game's camera: the default offset, or where it was seen keeping her on this map (CAMERA_DOWN)
         self.camera = Camera(model.bounds, (CAMERA_OFFSET[0], CAMERA_DOWN.get(model.id, CAMERA_OFFSET[1])))
+        world.screen = self._screen
         self.loc = Localizer(model)
         self.detector = FakeDetector(detector_kinds(model), clock=clock)
         self._loot = FakeLoot(clock)
@@ -432,6 +433,11 @@ class FakeEyes(Eyes):
             self.guard()
         self.clock.charge()
         self.world.advance(self.clock.now)
+
+    def _screen(self) -> tuple[float, float, float, float]:
+        """What the camera shows now in map units, above the bottom bar: left, top, right, bottom (World._idleness)."""
+        cx, cy = self.camera.corner(*self.world.her())
+        return cx, cy, cx + FRAME[1] * UNITS_PER_HALF_PX, cy + PLAY_BOTTOM * UNITS_PER_HALF_PX
 
     def her_on_screen(self) -> tuple[int, int]:
         """Her name tag's centre (half-size px), where the camera puts her."""

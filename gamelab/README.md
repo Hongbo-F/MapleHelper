@@ -7706,6 +7706,188 @@ At 22:35 that evening a frame read her facing left, wrongly, and 85 attacks went
 
 **Not done:** why the frame read her wrong; a throw the other way at a monster behind the ignored one still hits the ignored one, as stars take the first in their way.
 
+### The whole screen and the move before the kill (from 2026-11-04; `GAMELAB_SCREEN=0` off, the planner before it to the digit; on by default on this branch)
+
+The user, reviewing the first 10 s of the 18:18 recording: "when you are preparing 2nd target after 1st target died, you are only considering reachable targets from current position. You aren't really looking at all mobs on the screen and proactively plan move to be able to hit that mob after current target dies. When making the selection you should also factor in piled up mobs and lean towards going to a place where you can hit a bunch of piled up mobs. When no other mobs on screen you should prioritize going to pick up loots. If no loots no mobs, the last thing to try is to navigate to a different area on the map." The planner's rule stands: one monster to hit, no pre-defined places, no rollouts; a place is worked out from the look.
+
+- **Every monster on the screen is a candidate** (`Grind._rest_of_screen`: `Scene.swept`, the frame's whole-screen search; `Targeting.foes_of`, with those the look missed by presence's chance as before; her attacks' `ignored` none of them).
+- **Its way** (`attack.target._ways`): at once if it's in reach; else every place, one each side of it on each platform in height of it (`in_height`, made once for the map), a walk along hers or a trip by the navigator's moves (`Planner.arrive_within`, the route times it keeps from where she stands: the walk into the stretch from each landing). The trip is the navigator's as any (`Grind._to_place`, `TO_TARGET`: its legs planned against every monster, her shots in passing and the drops on her way as on any trip), decided again whenever a look has something else for her (`Targeting.changed`, `peek`).
+- **Piles** (`place_score`): a place's score is what her attack lands on from there, `p` x EXP over the way and their kills, `PILE_MOST` (3, a guess) at most, each only if it raises the rate. So a pile draws her over a lone monster as far off, and one in reach still wins by its time; `MARGIN` keeps the plan from flipping. What stops an attack (`reach.can_hit`, 44 us) and a jump's search (2-3 ms) are asked only where they can decide (`_rank_screen`, `_checked`).
+- **The move before the kill**: the next is scored from the primary's place, across platforms (`after`), and her lock ends on its plan with nothing to decide; where she has a choice of where to stand, on the side of the primary she's going to, the place also reaches the next if that scores better (`also_next`: its way and its pile asked again from there).
+- **With nothing in reach**: monsters on the screen, then with none on the screen her drops whatever they take (`Targeting.quiet`), then another area (`Grind._leaving`, `Patrol.choose`, unchanged), with no `IDLE_S` wait unless her memory has a monster there. A trip to a stop ends for any monster on the screen (`Targeting.on_screen`). Her drops on her platform and those due (`LOOT_DUE_S`) go as before; by a pile not landed yet she goes at her target, not waits (`gave_way_at`).
+- **No standing for a monster in the way** (`TripState.instead_of_waiting`, `Targeting.rather`): where a target's or a pile's trip would stand and wait for a monster to move off (`Navigator._meet`, `_clear_landing`), that move's platform is kept off for `BLOCKED_S` (1 s, a guess; `KEEP_OFF_S` more on routes through it) if the choice has another thing to go at; else she waits as before. Nothing about the trips' safety is bypassed.
+- **Readable**: the 'target' line says "pile of 3 on 23 at x 113: 2.2 s away" and "next: horny-mushroom #5, trip to 23 x 133 as #1 dies"; 'target' records carry `place`, `on`, `pile`; `target_end` has the counts ("rather than wait") and `ms` (choice, glance, peek).
+
+**Found on the way**: on master a monster in reach the pass won't have (set aside, or `ignored` by the no-hit failsafe) stops a trip "in position" on its first look, look after look, no move made, and the navigator's shot first at an ignored one says "nothing in reach" (0.4 s each). With the switch on neither (`Hunt._may_stop_her`, `FightOnTheWay.not_ignored`: `reaches` and `in_way`); off, as master.
+
+**The metric** (`idle` in every harness result, `World._idleness`: standing, no speed, 0.85 s or more past her last attack's key, the live clip's measure; `--metric idle.s_min`, `idle.other`, `idle.here`, `idle.none`, `idle.rules`). Live, the 18:18 clip, the thief: 17.6 s a minute (9.6 monsters only on other platforms, 3.4 one on her platform, 4.5 none). The simulator at master's code, 24 seeds: the thief 14.4 (9.9, 4.4, 0.1), her 14.9 (11.5, 3.0, 0.4): near in all and in the first class, short on "none on the screen", which live had 4.5 of.
+
+**Arms, every one tried** (12 seeds, 5 minutes, the worlds of the second gate, paired against master's code with the metric, 92a2b1f; the last also on 24):
+
+| Arm | Thief EXP diff (t), idle | Her EXP diff (t), idle | What it was |
+|---|---|---|---|
+| Base | 321.3, 13.88 | 532.0, 14.80 | |
+| a1 bf3c342 | +21.9 (+1.76), 13.94 | -94.0 (-4.39), 18.25 | first build; bug: her casts took the rest of the screen for unseen, so she saw none on it and went for far drops at any cost |
+| a2 866222c | +31.5 (+1.61), 13.11 | -29.3 (-1.75), 15.02 | that fixed; what stops her attack asked only where it decides; a trip that would wait gives way, keyed on where the trip ends; no spin on the look just decided on |
+| a3 988fb1e | +7.1 (+0.68), 12.34 | -14.3 (-0.75), 13.55 | keyed on the blocked move's platform, off for 1 s; chains stop for a monster 1.5 s ahead at most; no wait by a pile not landed |
+| a4 e879c52 | +4.6 (+0.42), 12.62 | -14.3 (-0.75), 13.55 | a jump's search of the best alone (the thief's; hers the same to the digit) |
+| a5 4d6bbd4 | the same as a4 on 12 | the same | cleanups, her casts' switch: **this table** |
+
+The thief's a2 to a3 fall in EXP is within the seeds' noise (se 11-20 on 12), and no arm was kept for its EXP.
+
+| 24 seeds, a5 against 92a2b1f | Thief base | cand | diff (t) | Her base | cand | diff (t) |
+|---|---|---|---|---|---|---|
+| **idle, s a minute** | 14.39 | **12.60** | -1.79 (-5.4) | 14.95 | **13.72** | -1.23 (-4.2) |
+| monsters only on other platforms | 9.85 | 8.03 | -1.83 (-5.9) | 11.50 | 10.26 | -1.25 (-3.6) |
+| one on her platform | 4.40 | 4.43 | +0.02 (+0.1) | 3.04 | 2.98 | -0.06 (-0.3) |
+| none on the screen | 0.13 | 0.15 | +0.01 (+0.2) | 0.40 | 0.48 | +0.07 (+0.6) |
+| **EXP a minute** | 329.7 | **338.7** | +9.0 (+1.15) | 523.4 | **509.3** | -14.1 (-1.24) |
+| kills | 46.8 | 48.8 | +2.0 (+1.6) | 73.0 | 71.4 | -1.6 (-1.1) |
+| touches | 54.8 | 52.2 | -2.6 (-0.9) | 28.6 | 28.5 | -0.1 (-0.05) |
+| knock-offs | 9.75 | 9.21 | -0.54 (-0.8) | 7.58 | 6.54 | -1.04 (-1.4) |
+| deaths, falls, stops | 0 | 0 | | 0 | 0 | |
+| drops_share | .974 | .976 | +.002 (+0.2) | .981 | .977 | -.004 (-0.5) |
+| value_share | .974 | .975 | +.001 (+0.1) | .981 | .981 | .000 |
+| loot's worth a minute | 153.1 | 157.9 | +4.9 (+0.6) | 269.9 | 256.7 | -13.2 (-1.3) |
+| on a trip, s a run | 75.4 | 82.8 | +7.4 (+2.7) | 86.7 | 95.2 | +8.5 (+3.0) |
+
+Idle by the rule, s a minute (thief, her; base then this): sweep 6.07 -> 5.21, 7.97 -> 7.23; on trips (travel, advance, wait, to target) 4.07 -> 3.47, 3.70 -> 4.30; close quarters 2.54 -> 2.53, 0.87 -> 0.62. Idle is down, significantly; EXP isn't told apart from master's on either character: she moves more for about the same kills, and in this crowd other players take most of what she goes to (70-100 kills a run against her 45-75).
+
+**The switch off**: `spot` of the base's seeds 3 and 9, both characters: the same to the digit; master 6b6b07f's seeds 1-3, both characters, differ from the base's only in `idle`. Goldens: Tree Dungeon's 48 recorded at master 6b6b07f into a scratch folder, `check --folder` with the switch off: 46 of 48 to the byte, the other two the set pieces moved to new seeds for the switch on (`loop_tree_attack_misses` 5 -> 1, `loop_tree_attack_no_darts` 31 -> 2). With it on the goldens aren't recorded again: a merge has that to do.
+
+**The choice's time**, on the real clock (`Targeting.ms`, seeds 5-7, Idle priority beside other jobs: the thief's a median 1.8-2.2 ms, p99 9.7-14.9; hers 0.85-1.1, p99 2.35-2.5; a trip's look, `peek`, 1.1-1.5, p99 2.6-3.0, one of 31). The aim was a median under 1 ms and p99 under 5. Met for her but her median by a hair; not for the thief: a third of his is a jump's search (profiled), master's own, asked at most looks now (at the first gate his choice's p99 was 5.35). It's far under a frame's 66 ms, and left so.
+
+**What's left of her idle is her drops**: the sweep's rule has 5.2 of the thief's 12.6 and 7.2 of her 13.7 (a stand's presses, its second stop, trips waiting): the loot half, built next (below). A trip's 3.5-4.2 are the navigator's looks, its waits with nothing else to do, and rope hangs.
+
+**Pick-up rate**: monsters on the screen don't starve her drops: thief .974 -> .976, her .981 -> .977 (t -0.5), value .974 -> .975 and .981 -> .981; median age at pick-up 9.0 -> 8.2 s and 4.2 -> 5.7 s (t +2.0). Nothing done about it: `LOOT_DUE_S` and her platform's rule hold. A 5-minute run cuts off far piles still waiting; the longer view wasn't measured.
+
+**Not done**: attacking out of a run; live check of any of it; goldens recorded again with the switch on (off, as below); other maps.
+
+### The loot chain (from 2026-11-05; `GAMELAB_LOOT_CHAIN=0` off, the whole screen alone to the digit; on by default on this branch)
+
+The user, 2026-11-04: "You should also apply similar concept for loot pickup, don't just go to the first target, pickup, then wait, plan for next target, move, then pickup. You should instead plan for a few loot targets in advance so you don't need to have this 'pauses'". The sweep (`behavior/sweep.py`) still says which piles and in what order, and what each may add to her way; `behavior/lootchain.py` and `Grind._sweep_act` say how she goes through them.
+
+- **One chain** (`Grind._loot_plan`, `LootChain.way`, `Navigator._way_through`): the itinerary's next `MOST_PILES` (4), the route's moves and a `walk` leg (`Flow._walk`) to each, in one key plan. It's the navigator's chain as any: every leg against every monster, her whole box over the whole way (`flow.danger`), a monster coming into its way replanned and spliced (`_switch`, `client.splice`), a touch cuts it, the Lie Detector stops it. A chain cut for length runs on into the next, planned on the move (`_look_ahead`, `_queue_next`). No stand, no settle (`_after_through`: her last glance, not a look's wait) and no look between the drops.
+- **At the drops as seen, not at `pile.x`** (`Grind._stretch`: `Pile.xs`, the store's, each drop in one pile): from the end of a pile nearer where she comes onto it to the far one; a walk she only runs past merges into the one that goes on past it. The walk's press every 120 ms (`WALK_PICK_EVERY`, a stand's), one beat along the legs.
+- **Presses only as needed** (`stand_s`): she passes a drop's 30 units of reach in 0.2-0.24 s, so a run gives a bunch 2 presses (`RUN_PRESSES`, read from the simulator's reach and her speed: live reach isn't measured apart from `STOOD_ON`'s "within 15"); she stands for the rest, not for those. The stand's redundant presses (11 of 13 live visits: her pet loots what she walks past) go with no time lost: pressed on the run, they cost nothing.
+- **100% stays the aim**: a drop still there once she's passed it, a look says so (`Pile.tries`, `Stretch.again`), and it's a stop of the next plan with a stand's presses, at once. A pile she's been at a look sees empty is no stop (`Grind._candidate`, while the store's second sighting comes); a kill's drops no look has seen yet end a chain at their middle, and the look there or `_stand` says (`_none_landed`, the walk over their spread). What a stand told the hunt, a run tells: its try, `stood_on` (`Grind._chain_over`). A run isn't a stand: two real stands a drop stays under say `cant_pick`, and the backpack's push, as ever (`_stretch`), and her first run through a pile leaves her as many stands (`Pile.runs`, `PILE_TRIES`).
+- **Part of the whole**: a chain ends for what ends chains (a monster in the way: as far as it's clear, and a monster in its first walk has her go the old way for `CHAIN_OFF_S`; a touch; her HP; the Lie Detector), and for a monster the choice has in reach (`_chain_stops`: as the pass has them, not a star's reach alone). Her target first as before: before it only the piles `pile_first` allows, and on a trip to its place the piles on her way and on to the place in one plan (`_to_place`, `LootChain.dest`). The drops done, the planner's next step at once (`_planned_step`): no objective left to carry out.
+- **Readable**: 'loot: 3 stops, x -33 on 9, x 100 on 8, x 148 on 8: 2.9 s, then on to x 80 on 16' in the log, a `loot_chain` record (`stops`, `planned`, `done`, `why` it ended, `s`, `est_s`), `loot chains`, `loot stops planned`, `loot stops done` in `target_end`'s counts.
+
+Beside it, with the switch on only: a fight on a trip leaves its kills' drops to the store (`Looter.store_has_them`: no walk and stands of its own, 0.3-0.5 s a minute); where moves were in a monster's way goes on from trip to trip, and the look that found it plans the way around (`Navigator.keep_avoid`: a look less each); a trip's `peek` has the monsters as the pass has them (a monster the ledger takes for dead, in a star's reach, stopped her look after look); the shot first and the fight in her way aren't tried at one the fights won't have (`FightOnTheWay.wont_have`, `Navigator._no_shot`, `UNSHOT_S`: 0.4 s each of "nothing in reach").
+
+**The metric** (`loot` in every harness result, `loot_visits`): her visits (her own key's pick-ups 3 s apart at most), `stops_per` stands of 0.1 s or more in one from 1 s before its first drop to its last, `stops_per_drop`, `still_per`; `chains`, `chain_stops`, `chain_done`; `by_120`, `by_end`: of her drops landed by 120 s and by 15 s before the end, the share she picked up.
+
+**Arms, every one tried** (12 seeds, 5 minutes, the worlds of the second gate, paired against master's code with the metric, 92a2b1f; EXP's difference from it, her idle, the idle under the rule sweep). Base: the thief 321.3, 13.88, 6.19; her 532.0, 14.80, 8.02.
+
+| Arm | Thief | Her | What it was |
+|---|---|---|---|
+| The whole screen alone (a5, the switch off) | +4.6 (t +0.42), 12.62, 5.06 | -14.3 (-0.75), 13.55, 7.57 | |
+| b1 c5b4b7a | +33.9 (+1.99), 11.38, 4.20 | -22.2 (-1.09), 12.60, 5.84 | first build; bug: two piles near each other each took the other's drops, and she walked back and forth over them |
+| b2 3b8a5f1 | +36.8 (+2.89), 11.73, 4.36 | -47.0 (-2.93), 13.08, 6.54 | that fixed (`Pile.xs`, each drop in one pile); over with its plan, the planner's next step; where moves were blocked kept; a chain's stop asked of the primary alone: bad for her (walking past what's in reach) |
+| b3 ac1006a | +36.0 (+2.61), 11.05, 3.66 | +24.1 (+2.40), 11.48, 5.69 | `peek` as the pass has them, so any monster in reach stops it; on to her target's place only; no second look for a way around; a fight's drops the store's |
+| b4 0f2259d | +30.0 (+1.66), 10.72, 3.58 | -2.5 (-0.15), 10.79, 4.70 | a kill's drops not seen yet a chain's last; bug for 100%: every pile a look saw empty no stop, a kill's too (drops .967, .965) |
+| b5 70e203f | +19.6 (+1.06), 10.33, 3.13 | +1.1 (+0.08), 10.92, 5.09 | only those seen before: **this table** (cfbd264 moves a set piece's seed, 16cc041 no plan for walks of nothing: `spot` the same to the digit) |
+| b6 fefab6f, reverted | +37.1 (+2.74), 10.00, 3.17 | -21.8 (-1.41), 10.41, 4.00 | a fight on a trip only where a star reaches and no `GUARD_PATIENCE`. On 48 seeds against b5, paired: the thief's EXP +7.4 (t +0.94), idle -0.76 (-3.9), her EXP -17.4 (-2.2), kills -3.1 (-2.8), idle 0.00: a star's reach isn't what her casts reach, and nothing gained for her |
+
+The spread of her EXP from b2 to b3 (71) is over 4 standard errors of one arm, and neither arm's her EXP held on more seeds: no arm was kept for its EXP, and the table below has 36 seeds none of these arms saw.
+
+| 48 seeds, b5 against 92a2b1f | Thief base | cand | diff (t) | Her base | cand | diff (t) |
+|---|---|---|---|---|---|---|
+| **idle, s a minute** | 14.71 | **10.73** | -3.98 (-21.9) | 14.97 | **11.00** | -3.97 (-16.5) |
+| monsters only on other platforms | 9.79 | 6.48 | -3.31 (-14.8) | 11.43 | 8.08 | -3.35 (-12.9) |
+| one on her platform | 4.81 | 4.18 | -0.63 (-3.1) | 3.12 | 2.76 | -0.37 (-2.5) |
+| none on the screen | 0.10 | 0.06 | -0.04 (-1.0) | 0.42 | 0.17 | -0.25 (-4.2) |
+| **idle under the rule sweep** | 6.10 | **3.62** | -2.48 (-9.8) | 7.99 | **4.80** | -3.19 (-15.4) |
+| **EXP a minute** | 327.2 | **356.5** | +29.2 (+3.56) | 514.1 | **527.8** | +13.7 (+1.45) |
+| kills | 46.5 | 51.1 | +4.5 (+4.2) | 72.0 | 74.5 | +2.4 (+2.0) |
+| touches | 55.8 | 54.6 | -1.1 (-0.7) | 29.8 | 30.0 | +0.1 (+0.1) |
+| knock-offs | 9.31 | 9.31 | 0.00 (0.0) | 7.65 | 8.19 | +0.54 (+1.0) |
+| deaths, falls, stops | 0 | 0 | | 0 | 0 | |
+| drops_share | .975 | .974 | -.001 (-0.2) | .985 | .979 | -.005 (-0.9) |
+| value_share | .979 | .974 | -.005 (-0.8) | .985 | .982 | -.003 (-0.5) |
+| loot's worth a minute | 155.0 | 166.0 | +11.1 (+1.8) | 264.8 | 254.2 | -10.5 (-1.1) |
+
+On the 36 seeds no arm saw (13-48): the thief's EXP +32.5 (t +3.56), idle -4.12; hers +17.9 (+1.52), -4.00.
+
+| 24 seeds: master's code / the whole screen alone / with the chain | Thief | Her |
+|---|---|---|
+| **stops a pile visit** | 1.54 / 1.54 / **0.90** | 1.68 / 1.63 / **0.99** |
+| stops a drop | .80 / .76 / .44 | .77 / .78 / .45 |
+| s standing a visit | .69 / .65 / .40 | .81 / .70 / .49 |
+| drops landed by 120 s picked up (`by_120`) | .955 / .956 / .962 | .959 / .979 / .983 |
+| by 15 s before the end (`by_end`) | .894 / .875 / .891 | .917 / .907 / .893 |
+| median age at pick-up, s | 9.0 / 8.2 / 6.5 | 4.2 / 5.7 / 4.5 |
+| idle, s a minute | 14.39 / 12.60 / 10.60 | 14.95 / 13.72 / 11.20 |
+
+A chain's plan on the real clock: its way 0.08-0.54 ms at the median for 1-4 stops, 2.1 at p99; `flow.chain` 0.2-0.8, p99 1.6-4.1 (no monsters, 300 of each, Idle priority beside other jobs). In these runs 47 chains a run the thief, 71 hers, 1.3 piles a chain; half the piles planned are got through in their chain (`chain_done` .47, .48): most end for a monster, in reach or in the way, and what's left is the next plan's.
+
+**Pick-up rate**: not told apart from master's (the shares above, t -0.16 to -0.9, all a little under; `by_120` a little over). Of the drops she lost on 8 seeds of each (thief 1 of 215, her 8 of 325; 28 and 47 more still lying at the end), none did she pass within reach of: none is a run's miss; 6 were on a platform she never set foot on. Her loot's worth is up for the thief and down for her, neither beyond 2 standard errors: an item's worth has a long tail.
+
+**The switch off**: the whole screen alone: `a5`'s 24 seeds both characters against the switch off, only the new `loot` key differs; `GAMELAB_SCREEN=0 GAMELAB_LOOT_CHAIN=0`: 92a2b1f's 24 seeds both characters, the same EXP and touches, `spot` of seeds 3 and 9 the same to the digit but for `loot`.
+
+**Goldens**: with the chain, Tree Dungeon's 48: 32 the same to the byte as with both switches off (they don't reach her drops by the planner, or aren't the grind's), 16 differ: `D:/MapleHelper-scratch/next-move/lc/golden_lines.txt` has a line for each. Not recorded again in any lab: a merge has that to do. `loop_tree_attack_no_darts` moved to seed 1 (2 no longer met its checks; of 1-12, 1, 5, 10 do).
+
+**Open at this table, fixed below**: a fight on a trip that finds nothing to throw at says "nothing in reach" and waits `GUARD_PATIENCE`: about 0.4 s each, the thief 23 a run, her 44 (of 8 seeds each; 15 and 28 with the switch off), some after a real fight: at most 1.8 and 3.5 s a minute of what's left of her idle. In `loop_tree_remembered_keys` it's 101 in 126 s: her trips stopped by it, her kills 32 -> 11 (its checks met). b6 above was the try at it.
+
+**Not done**: the 15 fps look between her chains and what's next isn't gone (a chain's end to the next key is a slide, a look, a decision: about 0.1-0.2 s); nothing checked live: a run through a drop's reach is the simulator's reach and her speed, and the live pet isn't in these worlds; `MOST_PILES`, `RUN_PRESSES`, `END_ROOM`, `CHAIN_OFF_S`, `UNSHOT_S`, `BOUND_LASTS_S` are guesses, not tuned; a valuable pile's trip (rule 6a) and a kill's drops she's by still go the old way.
+
+### The reviews' fixes of both (2026-11-05)
+
+Two reviews of the two sections above (the user's words, safety). Every table above is of the code before these; the last table here is the code as it stands.
+
+- **Her walks stay on the platform** (safety, major). `WALK_ON_ROOM` was 20; her stop takes 24.3 in the simulator, 24.0 +- 2 and up to 28.1 in game, so with a goal 20-24 from a platform's end the plan itself ran 0.6-4.6 past it, and neither the turn back nor the slide asked. Her trips' falls (`nav.falls`: off a platform on a trip, not out of the map) at 48 seeds were 0.12 -> 0.42 (thief, t +2.75), 0.21 -> 0.46 (her, +2.50), most of the kind 'walk->8, walk->8 plans x 42 to 18, the end is 22'. Now 50 (`REACT_ROOM`'s value), and a turn or a slide off the end isn't a way (`Flow._walk`: None, so `follows` has the leg before done the way that stops). Tests sweep the first goal 10-60 units from each end, walk then walk and jump then walk.
+- **No fight in a chain's way at a monster no fight will have** (both, major). `MAX_FIGHTS` is a trip's and a chain's a trip, so it never ran out: `_clear_the_way` at a monster taken for dying, ignored or set aside said "nothing in reach", 0.46 s a time, for ever. Now skipped on chains (`Navigator._no_shot`, `FightOnTheWay.wont_have`: dying, `ignored`, `Targeting.no_way`; a fight that threw nothing, `UNSHOT_S`), and with the whole screen an ignored monster isn't in the way of any trip's fight (`in_way`). A leg it could touch her on still stops the chain (`flow.danger`).
+- **A kill bound to a track that lives on** (words, major; master's rule). `ledger.dying` had `any(k.track == track for k in kills[-8:])`: a kill bound to a live track took it off the screen's candidates until 8 more kills: a horny-mushroom walked on, never a target and in her way, for 70 s of `loop_tree_remembered_keys`. With the whole screen, of a monster this look has, only for its death animation and `BOUND_LASTS_S` (1 s, a guess; `_says_dying`), unless the feed has it dead. One only her memory has stays as it was (2026-11-02's 123 s at a stop held by such a ghost). That set piece with these two: kills 11 -> 27, "nothing in reach" 101 -> 6, idle 26.8 -> 10.1 s a minute.
+- **A chain sent regardless** (safety): `_regardless` went past the monster it let go on walk legs too. Cut at the first walk now: the route's moves past it, never a walk.
+- **The spawn guard past a chain's first pile** (safety): `_loot_plan` ends short of a later pile it would hold.
+- **A run isn't a stand** (safety): one run and one stand said `cant_pick`, so the backpack's push, where master takes two stands, and `RUN_PRESSES` isn't proven live. Only stands count (`Stretch.again`), and her first run isn't one of `PILE_TRIES` (`Pile.runs`), so the look that says it still comes.
+- **`also_next`** (words): it moved the place, kept the old pile and added a walk, and it crossed the primary: frame 773 said "trip to 23 x -121, 3.7 s, pile of 3", where x -121 is 1.5 s with a pile of 2 and x 113 is 2.2 s with a pile of 3. Now the same side of the primary only, its way and pile asked again there, taken if its score beats the place's it has.
+- **`Foe.spent`** (words) never fired, 0 of 919 looks: her casts drop "likely dead" before it's read, and the thief's EXP shows first. Gone.
+- **A trip to her target's place lands for that place** (words): `TripState.land_near`, `Planner.plan`'s `dst_x`, as her chains have. The clip's replay had 633 trips a mean 0.12 s over the estimate, 9 by 1 s or more.
+- **Small** (safety's notes): a pick-only plan leaves her facing and the throw's retap as they were (`_arrows_in`); a replanned chain never taken ran her over nothing (`_cut_plan`); an unseen pile's goal `END_ROOM` off the end (`_off_end`); twins' stops and piles by the platform they lie on (`_way_through`, `LootChain.book`); `again` in the `loot_chain` record, for the first live run's count of drops a run left; `lootchain.BLOCKED_S` renamed `CHAIN_OFF_S`.
+- **Set pieces**: `loop_tree_attack_misses` seed 1 -> 3, `loop_tree_attack_no_darts` 1 -> 6 (of 1-12 only 6), each docstring saying why. `loop_tree_grind`'s "three stops or more" holds only with the switch off: with the whole screen she goes on to a stop only with nothing on it to go at, the user's order, and in this crowd that's seldom (unmet with or without the chain before these).
+
+**Arms, every one tried** (12 seeds, the same worlds; the rule of each written before it ran: `D:/MapleHelper-scratch/next-move/fx/m3_rule.txt`, `m5_rule.txt`). Against c1:
+
+| Arm | Thief: EXP diff (t), idle diff (t) | Her: EXP diff (t), idle diff (t) | Outcome |
+|---|---|---|---|
+| c1 a7a8684, against 92a2b1f | +35.3 (+3.37), -3.76 (-7.3) | -7.9 (-0.53), -3.80 (-15.6) | the fixes above |
+| no `rather` (a trip gives way rather than wait) | -0.6 (-0.04), +0.71 (+2.93) | -3.7 (-0.25), +0.29 (+0.72) | **stays**: idle up on the thief |
+| no `keep_avoid` (blocked moves remembered trip to trip) | -4.9 (-0.36), +1.37 (+2.20) | -33.9 (-1.67), +0.75 (+1.14) | **stays**: idle up on the thief |
+| no `react_ahead` (a chain stops for a monster at most 1.5 s ahead) | +23.1 (+1.88), +0.28 (+0.84) | +27.9 (+2.08), -0.10 (-0.60) | **gone**: within noise on idle, EXP not down (c831eed) |
+| a kill's pile not seen yet, landed by when she's there, run over and on (the words review's m5), against that | -8.1 (-0.54), -0.01 (-0.05) | -30.4 (-2.87), -0.12 (-0.32) | **reverted**: chains planned longer (+10, +23 stops a run), no idle gained, falls +0.42 (+1.8, +2.2) |
+
+The removal rule favours simple code on 12 seeds: it took out `react_ahead`, not chose it for its EXP. Its 12-seed EXP gain isn't a claim.
+
+| 48 seeds, c831eed's code against 92a2b1f | Thief base | cand | diff (t) | Her base | cand | diff (t) |
+|---|---|---|---|---|---|---|
+| **idle, s a minute** | 14.71 | **10.51** | -4.20 (-16.8) | 14.97 | **11.22** | -3.75 (-16.5) |
+| monsters only on other platforms | 9.79 | 6.64 | -3.15 (-11.3) | 11.43 | 8.31 | -3.12 (-14.0) |
+| one on her platform | 4.81 | 3.80 | -1.01 (-5.1) | 3.12 | 2.64 | -0.48 (-3.0) |
+| none on the screen | 0.10 | 0.06 | -0.04 (-1.0) | 0.42 | 0.27 | -0.15 (-2.6) |
+| **EXP a minute** | 327.2 | **365.8** | +38.5 (+4.54) | 514.1 | **521.3** | +7.2 (+1.10) |
+| kills | 46.5 | 52.4 | +5.9 (+5.0) | 72.0 | 73.4 | +1.4 (+1.6) |
+| touches | 55.8 | 52.9 | -2.8 (-1.5) | 29.8 | 30.4 | +0.6 (+0.6) |
+| knock-offs | 9.31 | 8.52 | -0.79 (-1.6) | 7.65 | 8.27 | +0.63 (+1.3) |
+| deaths, falls out of the map, stops | 0 | 0 | | 0 | 0 | |
+| falls off a platform on a trip (`nav.falls`) | .125 | .188 | +.06 (+0.7) | .208 | .208 | .000 |
+| drops_share | .975 | .971 | -.004 (-0.5) | .985 | .982 | -.002 (-0.4) |
+| value_share | .979 | .967 | -.012 (-1.2) | .985 | .985 | .000 (0.0) |
+| loot's worth a minute | 155.0 | 166.6 | +11.6 (+1.6) | 264.8 | 261.2 | -3.6 (-0.4) |
+
+Against the chain as first built (b5, the table above; same 48 seeds, paired): `nav.falls` .417 -> .188 (t -2.4), .458 -> .208 (t -2.1); the thief's knock-offs -0.79 (-1.8), touches -1.7 (-0.9), EXP +9.3 (+1.1), idle -0.22 (-1.2); hers EXP -6.5 (-0.7), idle +0.22 (+0.9). What the room cost: stops a visit .88 -> .99 (t +3.3), .97 -> 1.05 (t +2.1).
+
+Stops a pile visit, 24 seeds, both switches off (master's code) against this: thief 1.54 -> 1.00 (t -9.2), her 1.68 -> 1.07 (t -8.3). Landed by 120 s picked up (`by_120`): .955 -> .969, .959 -> .973; by 15 s before the end (`by_end`): .894 -> .884, .917 -> .916; none told apart.
+
+**The choice's time**, on the real clock (`Targeting.ms`, seeds 5-7, Idle priority, nothing else running): the thief's a median 1.4-2.0 ms, p99 6.9-7.5; hers 0.65-1.05, p99 2.35-2.95; a trip's look (`peek`) 0.85-1.65, p99 2.7-3.15. Far under a frame's 66 ms; the thief's still misses the first section's aim (median under 1, p99 under 5).
+
+**The switch off**: `GAMELAB_SCREEN=0 GAMELAB_LOOT_CHAIN=0`, `spot` of `base2`'s seeds 3 and 9, both characters, at a7a8684: the same to the digit (the later commits don't reach it: `react_ahead` was the whole screen's).
+
+**Goldens**: Tree Dungeon's 48, recorded in scratch at c401a90 with both switches off and with them on, re-checking 48 of 48: 31 the same to the byte, 17 differ, all meeting their checks (`D:/MapleHelper-scratch/next-move/fx/golden_lines.txt` has a line each; the two set pieces on new seeds are among them). Not recorded again in any lab: a merge has that to do.
+
+**Not fixed, and why**: the unseen first pile that ends a chain (m5 above, tried, reverted); the removal of `rather` and `keep_avoid` (they earn it by the rule; six timers remain for "a monster in the way"); the fake player's leftovers the safety review found (`fakes.py:1159`'s arrow on a late splice, `played` not trimmed: master's, not this branch's); the idle metric reading `visible_monsters` (monsters' walks are drawn lazily, so reading them can change a run; both sides of the pair have it); `END_ROOM` 10 is thin after a flight: watch for "ended on ... instead of" in the first live run.
+
 ### How it works
 
 - **Which monster** (`attack/target.py`, `Chooser.choose`, `score`): EXP of the kind over (time to get an attack on it + time to kill it), weighted by the chance it's there (`behavior/presence.py`, her throws' reckoning). A hurt or chasing one has no term: it's close and quick to kill. Kept until dead, gone, or beaten by `MARGIN` (1.3).
