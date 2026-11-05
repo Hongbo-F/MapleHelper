@@ -167,6 +167,9 @@ What a run gave is read from the simulated world, not from the bot's own reports
                    'shot first', 'waited' out, or 'went' past); moves_away, her stances that moved her away ('back': a
                    step, 'jump_back'; 'away': the steps from a close monster of the 'back', a stack's fights that tell),
                    once a run of looks deciding it
+  idle             her idle time, s a minute (`idle`: standing, no attack's lock on her, the live clip's measure): `s_min`
+                   in all; `other`, `here`, `none`: monsters on the screen only on other platforms, one on her platform,
+                   none; `rules`: by the hunt's rule then
 
 Saved runs go to gamelab/lab/harness/<name>.json (git-ignored, like all game data). Runs are made with
 PYTHONHASHSEED=0 and her stats as measured (physics.FIXED_STATS), as golden traces are.
@@ -193,7 +196,7 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
-from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
+from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
                     INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025, NEAR_SEEN_1104,
                     NEAR_SPELL_1104, OFF_SEEN_1104, OFF_SPELL_1104,
                     NEAR_SPELL, OFF_SEEN, OFF_SEEN_1025, OFF_SPELL, POTIONS, ROPE_REACH_CLIENT, SPAWN_FOUND,
@@ -862,6 +865,7 @@ def outcomes(world, records: list[dict], horizon: float) -> dict:
         # kind 'landing', control.navigator._clear_landing)
         "landing_events": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "landing")),
         "moves_away": _moves_away(records, end),
+        "idle": idle(world, records, end),
         "backstops": dict(Counter(r.get("text", "").split(":")[0] for r in events if r.get("kind") == "backstop")),
         **(_magic(world, end) if world.character.magic is not None else {}),
     }
@@ -939,6 +943,26 @@ def _moves_away(records: list[dict], end: float) -> dict:
             out["away"] += act == "back" and bool(r.get("away"))
         last = act
     return dict(out)
+
+
+def idle(world, records: list[dict], end: float) -> dict:
+    """Her idle time, s a minute of the run (World._idleness: standing, no attack's lock on her), as the live clip's measure
+    has it (D:/MapleHelper-scratch/stiff/pause_prize.py): `s_min` in all, by what's on the screen (`other`: monsters only on
+    other platforms, `here`: one on her platform, `none`: none) and by the hunt's rule at the time (`rules`, the 'hunt'
+    records'), so `ab --metric idle.s_min --metric idle.other` compares them."""
+    log = [(t, kind) for t, kind in getattr(world, "idle_log", ()) if t <= end]
+    start = next((r["t"] for r in records if r.get("topic") == "session"), None)
+    rules = [(r["t"] - start, r.get("rule")) for r in records if r.get("topic") == "hunt"] if start is not None else []
+    per = 60.0 / max(end, 1e-9) * IDLE_EVERY_MS / 1000
+    kinds, by = Counter(), Counter()
+    i = 0
+    for t, kind in log:
+        kinds[kind] += 1
+        while i + 1 < len(rules) and rules[i + 1][0] <= t:
+            i += 1
+        by[rules[i][1] if rules and rules[i][0] <= t else None] += 1
+    return {"s_min": round(len(log) * per, 2), **{k: round(kinds[k] * per, 2) for k in ("other", "here", "none")},
+            "rules": {str(k): round(v * per, 2) for k, v in by.most_common()}}
 
 
 LANDING_MOVED = 30.0  # (landings) units along her platform a landing on it moved her at least, as the live diagnosis's
