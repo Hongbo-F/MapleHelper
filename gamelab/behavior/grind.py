@@ -593,13 +593,18 @@ class Grind(Hunt):
         it, c, now = self._sweeper.current, self.tp.choice, time.monotonic()
         before = self._sweeper.dest is None and c is not None and c.primary is not None
         stretches, est = [], 0.0
-        for stop in it.stops:
+        for i, stop in enumerate(it.stops):
             p = self._pile_of.get(stop.spot.key)
             if len(stretches) >= lootchain.MOST_PILES or p is None or stop.spot.guards \
                     or (before and stretches and not self.tp.pile_first(p, stop, now)) \
                     or (stretches and stop.arrive <= TRIP_AHEAD_S and self._respawn_guard(s, p, stop.arrive) is not None):
                 break  # (the guard on her first pile's `_go_for`'s, as ever)
             if p.status != "seen" or stop.spot.lands > 0.0:  # (nothing to run over for sure: the look there has it)
+                if stop.arrive > stop.spot.lands and i + 1 < len(it.stops):  # (landed by when she's there and more to go on to: over its spread, what's left a look says)
+                    lo, hi = self._extent(p)
+                    stretches.append(lootchain.Stretch(p, [(self._off_end(p, x), 1) for x in sorted({lo, hi})], seen=False))
+                    est = stop.leave
+                    continue
                 last = lootchain.Stretch(p, [(self._off_end(p, p.x), 1)], seen=False)
                 return lootchain.LootChain([*stretches, last], None, s, stop.leave, now)
             st = self._stretch(s, p)

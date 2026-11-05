@@ -360,15 +360,27 @@ def test_the_plan_ends_short_of_a_monster_to_shoot_first():
     assert [st.pile for st in g._loot_plan(_look()).stretches] == piles[:1]
 
 
-def test_a_pile_not_seen_yet_or_not_landed_is_the_plans_last_to_its_middle():
-    for odd in ({"status": "expected"}, {"lands": 0.5}):
+def test_a_pile_not_landed_when_shes_there_or_with_nothing_after_it_is_the_plans_last_to_its_middle():
+    for status, lands, last in (("seen", 1.5, False), ("expected", 1.5, False), ("expected", 0.0, True)):
         g = _grind()
-        piles = [_pile(50.0), _pile(100.0, status=odd.get("status", "seen"), xs=()), _pile(150.0)]
-        _with_itinerary(g, piles, [_stop(piles[0]), _stop(piles[1], lands=odd.get("lands", 0.0)), _stop(piles[2])], dest=(8, 0.0))
+        piles = [_pile(50.0), _pile(100.0, status=status, xs=()), *([] if last else [_pile(150.0)])]
+        _with_itinerary(g, piles, [_stop(piles[0]), _stop(piles[1], lands=lands), *([] if last else [_stop(piles[2])])], dest=(8, 0.0))
         g._target_place = (8, 0.0)
         c = g._loot_plan(_look())
         assert [st.pile for st in c.stretches] == piles[:2] and c.dest is None
         assert c.stretches[1].bunches == [(100.0, 1)] and not c.stretches[1].seen
+
+
+def test_a_pile_not_seen_yet_landed_when_shes_there_is_run_over_and_the_plan_goes_on():
+    """(The words review's m5: right after a kill her chain ended at the first such pile on 19-27% of its plans.) Over the spread its drops may
+    lie on (`_extent`), no try and no stand of it (`_chain_over`): what's left, a look says."""
+    g = _grind()
+    piles = [_pile(100.0, status="expected", xs=()), _pile(200.0)]
+    _with_itinerary(g, piles)
+    c = g._loot_plan(_look())
+    assert [st.pile for st in c.stretches] == piles and not c.stretches[0].seen
+    assert c.stretches[0].bunches == [(100.0 - 30.0, 1), (100.0 + 30.0, 1)]
+    assert _over(g, c, [(9, 0.0, 200.0)]) is True and piles[0].tries == 0 and piles[1].tries == 1
 
 
 def test_the_plan_ends_short_of_a_later_pile_the_spawn_guard_would_hold():
