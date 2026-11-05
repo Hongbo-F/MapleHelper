@@ -3,6 +3,7 @@
 navigator's `through`), a monster in the way, what a stand told the hunt told by a run instead, and the switch."""
 
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -421,3 +422,39 @@ def test_over_a_stretch_not_seen_yet_isnt_a_try_nor_a_stand():
     chain = lc.LootChain([lc.Stretch(a, [(50.0, 1)], seen=False)])
     assert _over(g, chain, [(9, 0.0, 50.0)]) is True
     assert a.tries == 0 and id(a) not in g._stood and g.h.report.loot_runs == 0
+
+
+# --- in the simulator, the whole way -------------------------------------------------------------------------------
+
+def _grind_scene(drops, start=(10, -120.0), limit=40.0):
+    sc = replace(scenarios.SCENARIOS["loop_tree_grind"], name="loot_chain_scene", start=start, monsters=None, drops=drops, limit=limit,
+                 realism=None, expects=(), noise=None)
+    trace, sim = scenarios.run_sim(sc)
+    return trace, sim.world
+
+
+@pytest.mark.parametrize("switch", ["1", "0"])
+def test_her_drops_along_a_platform_she_runs_through_or_stops_at_each(monkeypatch, switch):
+    """No monster about: her drops are all she has to do. With the chain, one run through them: no stand from the first drop she picks up to
+    the last. Without, a stop at each."""
+    monkeypatch.setenv("GAMELAB_LOOT_CHAIN", switch)
+    drops = (("mesos", 10, -60.0), ("mesos", 10, 0.0), ("mesos", 10, 90.0))
+    trace, world = _grind_scene(drops)
+    taken = sorted(d.taken_at for d in world.drops if d.taken_by == "her")
+    assert len(taken) == 3
+    still = [t for t in world.still_log if taken[0] <= t <= taken[-1]]
+    if switch == "1":
+        assert any("loot: " in line for line in trace["log"])
+        assert not still and taken[-1] - taken[0] < 1.6  # (150 units at her 125-150 a second)
+    else:
+        assert still and taken[-1] - taken[0] > 1.6
+
+
+def test_a_move_and_two_stops_are_one_plan():
+    """(The drop on 8 she runs over early on, on a trip: pick-up pressed on every run. The two on 10, once they're past another's ownership (OWN_S): from
+    11, a climb and two walks, one plan, with no stand between them.)"""
+    trace, world = _grind_scene((("mesos", 10, -60.0), ("mesos", 10, 60.0), ("mesos", 8, 100.0)))
+    taken = sorted(d.taken_at for d in world.drops if d.taken_by == "her")
+    assert len(taken) == 3
+    assert any("loot: 2 stops" in line for line in trace["log"]) and any("climb->10, walk->10, walk->10" in line for line in trace["log"])
+    assert not any(taken[-2] <= t <= taken[-1] for t in world.still_log)

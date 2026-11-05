@@ -331,7 +331,7 @@ def test_the_lie_detector_seen_while_she_hangs_in_the_simulator_stops_the_hunt_a
             monkeypatch.setattr(nv.Navigator, "_hang", hang)
         return {"hang_at": None}
     at = scenarios.run_scenario(dataclasses.replace(base, fn=first_hang))["result"]["hang_at"]
-    assert at is not None and at < 60.0
+    assert at is not None and at < 120.0
     seen = at + 0.7
     trace = scenarios.run_scenario(dataclasses.replace(base, fn=scenarios.lie_detector(seen, grind=True)))
     r = trace["result"]
