@@ -1884,6 +1884,8 @@ class Navigator:
             if step == "around" and _key(move) not in st.avoid and move.kind != "walk":
                 self.log(f"  a {kind} could touch her on {move.kind} -> {move.dst}: looking for a way around")
                 self._around(st, s, move, monsters, planned_at)
+                if self.keep_avoid:  # (no new look for it: this one plans the way around, a look's wait less)
+                    st.fresh = s
                 return True
         hopped = self._chain(st, s, path, monsters, looked, hops=True)
         if hopped[0]:
@@ -4110,6 +4112,8 @@ class Navigator:
         s = self.senses.look(mobs=True, wide=not self.fight)
         if s.where is None:
             return None
+        if st.through is not None and s.where.platform is not None and not self._post_hit(st) and st.until is not None and st.until(s):
+            return _no_follow("the trip's until, as she goes")
         p = end.platform
         there = replace(s, where=replace(s.where, x=end.x, y=p.y_at(end.x), platform=p), what_if=True)
         threats = self.fight and self._threats()  # (where the next chain's legs go: trip_monsters)

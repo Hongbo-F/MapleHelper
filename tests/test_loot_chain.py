@@ -171,10 +171,10 @@ def test_a_monster_in_the_way_of_the_second_walk_ends_the_chain_short_of_it(tree
     """Her whole box over the whole way: a walk's legs are checked as any leg (flow.danger): the chain stops short, standing clear."""
     f, p = _flow(tree), tree.platform(10)
     a = p.left + 20.0
-    mo = MonsterTrack(9, a + 130.0, 0.0, 0, 20.0, 0.0, 0.0, 40.0, 0, "horny-mushroom", 40.0)
-    legs, k, why = f.chain([_walk(10, a + 40.0), _walk(10, a + 110.0), _walk(10, a + 180.0)], Body(0.0, a, p), [mo])
+    mo = MonsterTrack(10, a + 240.0, 0.0, 0, 20.0, 0.0, 0.0, 40.0, 0, "horny-mushroom", 40.0)
+    legs, k, why = f.chain([_walk(10, a + 40.0), _walk(10, a + 110.0), _walk(10, a + 220.0)], Body(0.0, a, p), [mo], hops=False)
     assert why == "monster"
-    assert len(legs) <= 2 and legs[-1].end.x < a + 130.0 - 20.0 - 10.0
+    assert 1 <= len(legs) <= 2 and legs[-1].end.x <= a + 110.0 + 15.0
 
 
 # --- the way through (the navigator) ------------------------------------------------------------------------------

@@ -52,7 +52,6 @@ from maplehelper.engine import LEFT, RIGHT
 from .. import telemetry
 from ..attack.spots import Spot
 from ..attack.danger import level
-from ..attack.target import same as tg_same
 from ..attack.stance import CONTACT_SLACK, beside, half_of
 from ..localization.memory import SURE
 from ..localization.monsters import Monster, bodies
@@ -142,6 +141,7 @@ class Grind(Hunt):
     the tour's kinds worth hunting and their EXP, the navigator's route times, and for the danger hook the hunter's
     map danger, the positioning model's: Hunter.danger, attack.danger; patrol's default for a hunter without one)."""
     tp: Targeting | None = None  # (none: tests make a grind without __init__)
+    _target_place: tuple | None = None
 
     def __init__(self, tour, log=print, rng=None, patrol: Patrol | None = None):
         super().__init__(tour, log=log, rng=rng)
@@ -171,10 +171,12 @@ class Grind(Hunt):
         # The target-first planner (behavior.targeting; GAMELAB_TARGET): the fights at a stop, arrivals included
         self.tp: Targeting | None = Targeting(self) if target_on() else None
         self._chain_off = -1e18  # until when her drops go the old way: a monster stood in a chain's first walk (lootchain.BLOCKED_S)
+        self._target_place: tuple | None = None  # where her last trip to a target went (`_to_place`): a chain goes on to it
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
         if self.tp is not None and self.tp.chain:
             self.nav.keep_avoid = True
+            self.h.looter.store_has_them = True
         if self.tp is not None and self.tp.screen:
             self.nav.react_ahead = REACT_AHEAD_S
             self.h.attacks.whole_screen = True
@@ -602,7 +604,8 @@ class Grind(Hunt):
             est = stop.leave
         if not stretches:
             return None
-        return lootchain.LootChain(stretches, self._sweeper.dest, s, est, time.monotonic())
+        dest = self._sweeper.dest if self._sweeper.dest == self._target_place else None  # (a next stop's: the next look's to say)
+        return lootchain.LootChain(stretches, dest, s, est, time.monotonic())
 
     def _stretch(self, s: Scene, p) -> "lootchain.Stretch | None":
         """Pile `p` as a stretch of a chain: where its drops she can take lie as the store last saw them, each in one pile (Pile.xs, kept to
@@ -700,13 +703,14 @@ class Grind(Hunt):
             return True
         if getattr(s, "what_if", False):
             return False
-        c, p = self.tp.peek(s), self.tp.chooser.primary  # (her target or none: a monster the pass doesn't have, the ledger's dead, stopped her look after look)
-        return c.primary is not None and c.primary.way.how not in ("walk", "trip") and (p is None or tg_same(p, c.primary.m))
+        c = self.tp.peek(s)
+        return c.primary is not None and c.primary.way.how not in ("walk", "trip")
 
     def _to_place(self, s: Scene, act: tuple, visible, hidden, now: float) -> None:
         """To where her target can be hit from: a trip of the navigator's (its legs against every monster, as any), her drops on
         the way first (the sweep's, within what each may add to her way). Decided again as `_interrupt` says."""
         _, platform, x = act
+        self._target_place = (platform, round(x))
         if not self.tp.piles_wait() and (stop := self._sweep(s, (platform, round(x)))) is not None:
             return self._sweep_act(s, stop, visible, hidden, now)
         spot = Spot(platform, x, 1.0, self.model.safe(platform))

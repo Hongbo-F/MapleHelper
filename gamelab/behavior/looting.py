@@ -264,6 +264,7 @@ class Looter:
     def __init__(self, hunter: "Hunter"):
         self.h = hunter
         self.pending: list[DropSpot] = []  # drops off her platform, left for later (the tour collects them)
+        self.store_has_them = False        # (the loot chain's: behavior.grind) a fight's kills' drops are the drop store's, for the sweep's chain
         self.full: dict[str, tuple[float, str]] = {}  # tab -> (when she learned it's full, why): its items left
         self.held: set[str] = set()  # item kinds she has a stack of (see ITEM_TABS): taken from a full tab still ...
         self.refused: dict[str, float] = {}  # ... but these: kind -> when one stayed under her with its tab full
@@ -446,7 +447,10 @@ class Looter:
     def sweep_after(self, spots: list[DropSpot]) -> None:
         """Sweep up a fight's drops once it's over. The fight often ends mid-jump (a jump-throw), where
         a look finds her on no platform, and the sweep used to be skipped: those drops were left. Looks
-        again until she has landed; drops on another platform than hers are left to the tour."""
+        again until she has landed; drops on another platform than hers are left to the tour. With `store_has_them` nothing: they're
+        the sweep's."""
+        if self.store_has_them:
+            return
         for _ in range(8):
             s = self.h.look(mobs=False)
             if s.where is not None and s.platform is not None:
@@ -458,7 +462,9 @@ class Looter:
 
     def sweep_through(self, s: Scene, spots: list[DropSpot], margin: float = LOOT_REACH) -> None:
         """Pick up the drops on her platform (`walk_piles`), then look again for any still there and go
-        back for them (`mop_up`)."""
+        back for them (`mop_up`). With `store_has_them` nothing: they're the sweep's."""
+        if self.store_has_them:
+            return
         self.mop_up(self.walk_piles(s, spots, margin))
 
     def walk_piles(self, s: Scene, spots: list[DropSpot], margin: float) -> list[float]:

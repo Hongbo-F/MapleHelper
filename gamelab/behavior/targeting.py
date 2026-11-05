@@ -386,7 +386,8 @@ class Targeting:
         pace = fight.pace_of(self.h, s)
         her = replace(self.her_at(s, pace, s.monsters, []), jump_hits=None)  # (a jump's search, the dear part, is the next pass's)
         now = time.monotonic()
-        foes = self.foes_of(s, g._alive(s, s.monsters, now), s.monsters, pace, g._rest_of_screen(s, now))
+        alive = g._alive(s, s.monsters, now)
+        foes = self.foes_of(s, alive, alive if self.chain else s.monsters, pace, g._rest_of_screen(s, now))  # (with the chain, as the pass has them: fight._targets' visible)
         kept = chooser.primary, chooser.next
         try:
             return chooser.choose(her, self._close_first(her, foes))
