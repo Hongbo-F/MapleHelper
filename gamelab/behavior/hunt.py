@@ -2280,7 +2280,7 @@ class Hunt:
         o = self.obj
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
                                 until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o),
-                                vary=o.kind != "pile", on_arrival=self._ends_on_arrival(o))
+                                vary=self._varies(o), on_arrival=self._ends_on_arrival(o))
         o.trip.weights, o.trip.choice = o.weights, o.choice
         chains = o.trip.trip.chains
         while not o.trip.over:
@@ -2295,6 +2295,10 @@ class Hunt:
             return None  # a rule fired: the next pass decides (OBJECTIVE_S is checked there)
         self.log(f"  {o.text()}: {result}")
         return self._drop_objective(o, result)
+
+    def _varies(self, o: Objective) -> bool:
+        """Whether objective o's trips may vary their way (route.ROUTES; behavior.grind's trips to a target's place: never)."""
+        return o.kind != "pile"
 
     def _ends_on_arrival(self, o: Objective) -> bool:
         """Whether objective o's trip ends as she reaches its platform, with no walk on to its x (TripState.on_arrival:

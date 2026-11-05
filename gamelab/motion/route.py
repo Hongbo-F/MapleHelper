@@ -949,7 +949,24 @@ class Planner:
         if dst_x is None:
             return self.travel(src, x, dst, keep_off)
         src, dst = self.model.place_of(src), self.model.place_of(dst)
-        off = frozenset(keep_off) - {dst}
+        at = self._kept_landings(src, x, frozenset(keep_off) - {dst}).get(dst)
+        return None if not at else min(t + abs(px - dst_x) / WALK_SPEED for px, t in at)
+
+    def arrive_within(self, src: int, x: float, dst: int, lo: float, hi: float) -> tuple[float, float] | None:
+        """`arrive` to anywhere on platform dst from map x `lo` to `hi`: (seconds, where she stands then): the quickest of its
+        landings there with the walk from each into that stretch. None if there's no way there. The target-first planner's
+        (attack.target.by_trip)."""
+        src, dst = self.model.place_of(src), self.model.place_of(dst)
+        best = None
+        for px, t in self._kept_landings(src, x, frozenset()).get(dst, ()):
+            g = min(max(px, lo), hi)
+            c = t + abs(px - g) / WALK_SPEED
+            if best is None or c < best[0]:
+                best = (c, g)
+        return best
+
+    def _kept_landings(self, src: int, x: float, off: frozenset) -> dict[int, list[tuple[int, float]]]:
+        """`_landed`'s search from (platform src, x), kept as `arrive` says."""
         start = (src, round(x), off)
         found = self._landings.pop(start, None)
         if found is None:
@@ -957,8 +974,7 @@ class Planner:
             if len(self._landings) >= TIMES_KEPT:
                 del self._landings[next(iter(self._landings))]
         self._landings[start] = found
-        at = found.get(dst)
-        return None if not at else min(t + abs(px - dst_x) / WALK_SPEED for px, t in at)
+        return found
 
     def _landed(self, src: int, px: int, off: frozenset = frozenset()) -> dict[int, list[tuple[int, float]]]:
         """`_every`'s search, keeping every landing: each platform's [(x landed at, cost)], the start among

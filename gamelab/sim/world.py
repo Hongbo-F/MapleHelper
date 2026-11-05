@@ -3143,7 +3143,8 @@ class World:
         """Whether she stands idle now: on the ground, no speed, her last attack's key IDLE_LOCK_S ago or more (the live
         clip's measure, its 'stand' frames: D:/MapleHelper-scratch/stiff/pause_prize.py), kept with what's on the screen:
         'none' no live monster, 'here' one on her platform, 'other' only on other platforms (the harness's `idle`)."""
-        if self.mode != "ground" or self.vx or self.glide or self.dead or self.screen is None                 or self.origin + self.t - self.attack_key_at < IDLE_LOCK_S:
+        if self.mode != "ground" or self.vx or self.glide or self.dead or self.screen is None \
+                or self.origin + self.t - self.attack_key_at < IDLE_LOCK_S:
             return
         x0, y0, x1, y1 = self.screen()
         here = self.plat.id if self.plat is not None else None

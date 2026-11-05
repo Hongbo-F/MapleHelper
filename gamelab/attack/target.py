@@ -27,6 +27,17 @@ newborn beats it by MARGIN or `coming` says otherwise.
 
 **Where** (`places`): where her attack doesn't land from where she stands, the nearest place along her platform from which it
 does, each side of the monster, the nearer first.
+
+**The whole screen** (`Her.routes` set: behavior.targeting's GAMELAB_SCREEN; the user, 2026-11-04: "You aren't really looking at
+all mobs on the screen and proactively plan move to be able to hit that mob after current target dies. When making the selection
+you should also factor in piled up mobs and lean towards going to a place where you can hit a bunch of piled up mobs."): every
+monster on the screen is a candidate, on any platform. Its ways (`_ways`) are the places, one each side of it on every platform
+she can get to by the navigator's moves (motion.route.Planner.arrive_within: the route times it keeps), from which her attack
+lands (`bands`), and the one it goes by is the place with the best score (`place_score`): what her attack lands on from there
+(`Foe.p` x EXP over the way there and their kills, PILE_MOST at most, each only if it raises the rate), so a pile draws her from
+afar and a monster in reach still wins by its time. Walls and what the attack takes first (reach.can_hit, the dear part) are asked
+of a place only where it can decide (`_rank_screen`, `_checked`). The primary reckoned dead by her throws (`Foe.spent`) gives way to
+the next at once, and where she has a choice of where to stand for the primary, the place also reaches the next (`also_next`).
 """
 
 import math
@@ -41,8 +52,8 @@ from ..motion import physics
 from ..motion.bodies import HER_HALF
 from . import reach
 from .danger import Danger
-from .stance import (GROUND_PICK_S, NO_PACE, STEP_SETTLE_S, TAP_S, Pace, beside, half_of, jump_pick_s, too_close,
-                     walks_on)
+from .stance import (GROUND_PICK_S, NO_PACE, STEP_SETTLE_S, TAP_S, Pace, _stand_limits, beside, half_of, jump_pick_s,
+                     too_close, walks_on)
 
 MARGIN = 1.3         # guess: another must beat the target's score by this share to take over (the plan doesn't flip)
 MATCH_DX = 45.0      # units: the last look's monster is a look's of its kind and platform within this, with no track to go
@@ -52,6 +63,9 @@ NEAR_SLACK = 12.0    # ... and past its nearest (reach.CLAW_MARGIN's: the same r
 WALK_STEP = 100.0    # units she walks at once at most, a look after each (hunt.WAIT_STEP's: 0.7 s at her 149 units/s)
 JUMP_S = jump_pick_s(physics.JUMP_ATTACK_MS)  # s from her keys to an attack from a jump picking
 HIT_ALPHA = 0.36     # a newborn can be hit from about this alpha (perception.spawns: its HP bar shows from then)
+PILE_MOST = 3        # guess: the monsters at a place she'd really kill before they've walked off (a kill 2-3 s, a walk 40-125 units/s)
+ABOVE_MOST = 150.0   # units: her search reaches no higher over her feet (reach.window's at STAR_RANGE: 129), the quick check of a place
+BELOW_MOST = 70.0    # ... and no lower under them (reach.SHOT_DOWN 60)
 
 
 @dataclass(frozen=True)
@@ -69,6 +83,7 @@ class Foe:
     solid_s: float = 0.0
     hit_s: float = 0.0
     born: bool = False
+    spent: bool = False  # her throws have it reckoned dead (attacks.DEAD_LIKELY): the next goes (see the top)
 
 
 @dataclass(frozen=True)
@@ -94,15 +109,22 @@ class Her:
     hi: float = math.inf
     jump_hits: Callable[[Monster], bool] | None = None
     can_jump: bool = True
+    routes: Callable[[int, float, int, float, float], tuple[float, float] | None] | None = None  # the whole screen (see the
+    # top): s from (platform, x) to anywhere on another platform from lo to hi, and where: Planner.arrive_within; None: her
+    # platform alone, as before
+    stands: dict = field(default_factory=dict)  # (with `routes`) `in_height`: the platforms an attack can land on one on each
 
 
 @dataclass(frozen=True)
 class Way:
     """How she gets an attack on it: s until an attack can pick it, how ('now', 'close': a jump attack or a step to range,
-    'jump': a jump's shot, 'walk'), and where she walks to (None: from where she stands)."""
+    'jump': a jump's shot, 'walk', 'trip': to another platform), where she walks to (None: from where she stands), the
+    platform that's on (None: hers), and the others her attack lands on from there, killed after it (`place_score`)."""
     s: float
     how: str
     place: float | None = None
+    platform: int | None = None
+    pile: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -122,6 +144,8 @@ class Terms:
                 "bar": None if m.bar is None else round(m.bar, 2), "exp": round(f.exp, 1), "reach_s": round(self.way.s, 2),
                 "kill_s": round(f.kill_s, 2), "p": round(f.p, 2), "how": self.way.how, "score": round(self.score, 2),
                 **({"place": round(self.way.place, 1)} if self.way.place is not None else {}),
+                **({"on": self.way.platform} if self.way.platform is not None else {}),
+                **({"pile": [o.track for o in self.way.pile]} if self.way.pile else {}),
                 **({"chasing": True} if f.chasing else {}), **({"born": True} if f.born else {})}
 
 
@@ -149,19 +173,38 @@ def _side(m: Monster, x: float) -> str:
     return RIGHT if m.x > x else LEFT
 
 
-def near_far(her: Her, m: Monster, y: float | None = None) -> tuple[float, float]:
-    """How near and how far off (middle to middle) her attack from the ground lands on monster `m`, from her platform's
-    height `y` (where she stands by default): reach.shot_dx by its body (the claw's edge or her search's first band, on her
-    level; a star's search off it), and no nearer than its danger warrants on her platform (Danger.keep_off); to her attack's
-    farthest (reach.SHOT_RANGE, which magic.apply sets for hers). `near` inf: no attack from her height takes it."""
+def near_far(her: Her, m: Monster, y: float | None = None, on: Platform | None = None) -> tuple[float, float]:
+    """How near and how far off (middle to middle) her attack from the ground lands on monster `m`, from height `y` on
+    platform `on` (where she stands, her platform, by default): reach.shot_dx by its body (the claw's edge or her search's
+    first band, on her level; a star's search off it), and no nearer than its danger warrants on that platform
+    (Danger.keep_off); to her attack's farthest (reach.SHOT_RANGE, which magic.apply sets for hers). `near` inf: no attack
+    from that height takes it."""
     y = her.y if y is None else y
     top_half = reach.body_of(m.kind, her.sizes)
     near = reach.shot_dx(m.y - y, m.kind, her.sizes)
-    if m.platform == her.platform.id:
+    if m.platform == (her.platform if on is None else on).id:
         near = max(near, reach.ground_sure(half_of(m.kind, her.halves))[0])
         if her.danger is not None:
             near = max(near, her.danger.keep_off(m.kind))
     return near, min(float(reach.SHOT_RANGE), reach.max_dx(top_half[1]))
+
+
+def bands(her: Her, m: Monster, p: Platform, lo: float, hi: float) -> list[tuple[float, float]]:
+    """The stretches of platform `p` within `lo` to `hi` from which her attack from the ground lands on monster `m`, one each
+    side of it at most, walls and what the attack takes first aside (`near_far`, at the platform's height under it)."""
+    near, far = near_far(her, m, p.y_at(min(max(m.x, p.left), p.right)), p)
+    out = []
+    if not math.isfinite(near):
+        return out
+    a, b = near + NEAR_SLACK, far - FAR_SLACK
+    if a > b:
+        a = b = (near + far) / 2
+    for d in (-1, 1):
+        u, v = sorted((m.x + d * a, m.x + d * b))
+        u, v = max(u, lo), min(v, hi)
+        if u <= v:
+            out.append((u, v))
+    return out
 
 
 def places(her: Her, m: Monster) -> list[float]:
@@ -169,34 +212,67 @@ def places(her: Her, m: Monster) -> list[float]:
     nearest of its stretch to her, checked (reach.can_hit, at the platform's height there: walls, what the attack takes
     first), the nearer first. None where there's none."""
     p, x, out = her.platform, her.x, []
-    y = p.y_at(min(max(m.x, p.left), p.right))
-    near, far = near_far(her, m, y)
-    if not math.isfinite(near):
-        return out
-    a, b = near + NEAR_SLACK, far - FAR_SLACK
-    if a > b:
-        a = b = (near + far) / 2
-    lo, hi = max(p.left, her.lo), min(p.right, her.hi)
-    for d in (-1, 1):
-        u, v = sorted((m.x + d * a, m.x + d * b))
-        u, v = max(u, lo), min(v, hi)
-        if u > v:
-            continue
+    for u, v in bands(her, m, p, max(p.left, her.lo), min(p.right, her.hi)):
         g = min(max(x, u), v)
         if reach.can_hit(p, g, p.y_at(g), m, others=her.around, sizes=her.sizes):
             out.append(g)
     return sorted(out, key=lambda g: abs(g - x))
 
 
+def in_height(platforms) -> dict[int, tuple[Platform, ...]]:
+    """(Her.stands, made once for a map) Each platform's id, the platforms in height of it: from somewhere on them an attack may
+    land on a monster on it (ABOVE_MOST, BELOW_MOST)."""
+    span = {p.id: (min(min(s.y1, s.y2) for s in p.segments), max(max(s.y1, s.y2) for s in p.segments)) for p in platforms}
+    return {p.id: tuple(q for q in platforms if span[p.id][1] - span[q.id][0] >= -ABOVE_MOST
+                        and span[p.id][0] - span[q.id][1] <= BELOW_MOST) for p in platforms}
+
+
+def _ways(her: Her, f: Foe, on: Platform, x: float, lead: float) -> list[Way]:
+    """Every place from which her attack may land on it, from map x on platform `on`: a walk along `on`, a trip to any other
+    in height of it (Her.routes: the navigator's moves): one each side of it on each, the nearest of each `bands`; walls and what
+    the attack takes first aside (`_lands`)."""
+    m, out = f.m, []
+    for u, v in bands(her, m, on, *_stand_limits(on, crowded=True)):
+        g = min(max(x, u), v)
+        out.append(Way(lead + abs(g - x) / physics.WALK_SPEED + STEP_SETTLE_S, "walk", g))
+    for q in her.stands.get(m.platform, ()):
+        if q.id == on.id or not -ABOVE_MOST <= m.y - q.y_at(min(max(m.x, q.left), q.right)) <= BELOW_MOST:
+            continue
+        for u, v in bands(her, m, q, *_stand_limits(q, crowded=True)):
+            got = her.routes(on.id, x, q.id, u, v)
+            if got is not None:
+                out.append(Way(lead + got[0] + STEP_SETTLE_S, "trip", got[1], q.id))
+    return out
+
+
+def _place_of(her: Her, way: Way, on: Platform | None = None) -> tuple[Platform, float, float]:
+    """The platform a way ends on, her x and feet there (from platform `on`, hers by default)."""
+    p = (her.platform if on is None else on) if way.platform is None else her.platform.peer(way.platform)
+    g = her.x if way.place is None else way.place
+    return p, g, p.y_at(min(max(g, p.left), p.right))
+
+
+def _lands(her: Her, m: Monster, way: Way, on: Platform | None = None) -> bool:
+    """Whether her attack lands on `m` from where `way` ends (reach.can_hit: walls, what the attack takes first)."""
+    p, g, y = _place_of(her, way, on)
+    return reach.can_hit(p, g, y, m, others=her.around, sizes=her.sizes)
+
+
+def _quickest(her: Her, f: Foe, on: Platform, x: float, lead: float) -> Way | None:
+    """The soonest of `_ways` from which her attack does land on it."""
+    return next((w for w in sorted(_ways(her, f, on, x, lead), key=lambda w: w.s) if _lands(her, f.m, w, on)), None)
+
+
 def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, lead: float | None = None,
-            far: bool = True) -> Way | None:
-    """How she gets an attack on it soonest from map (x, y) (where she stands by default), her next keys `lead` s on (her
-    lock's by default): at once if her attack from the ground lands on it there; up close (stance.too_close: it can't, by
-    where it will be then) a two-key jump attack, or a step to range where her attack doesn't go from a jump; a jump's shot
-    (`her.jump_hits`, asked only from where she stands); else the walk to the nearest place from which it lands (`places`).
+            far: bool = True, on: Platform | None = None, jump: bool = True) -> Way | None:
+    """How she gets an attack on it soonest from map (x, y) (where she stands by default) on platform `on` (hers by default),
+    her next keys `lead` s on (her lock's by default): at once if her attack from the ground lands on it there; up close
+    (stance.too_close: it can't, by where it will be then) a two-key jump attack, or a step to range where her attack doesn't
+    go from a jump; a jump's shot (`her.jump_hits`, asked only from where she stands, and `jump`); else the walk to the nearest
+    place from which it lands (`places`), or with `her.routes` the soonest of that and a trip to another platform (`_quickest`).
     None where none does, or (`far` False: `Chooser.rank`, the search for a jump's or a walk's left out) where it would take
     one."""
-    m, p = f.m, her.platform
+    m, p = f.m, her.platform if on is None else on
     here = x is None
     x, y, lead = her.x if x is None else x, her.y if y is None else y, her.lead if lead is None else lead
     side = _side(m, x)
@@ -213,8 +289,10 @@ def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, le
         return Way(lead + (TAP_S if turn else 0.0), "now")
     if not far:
         return None
-    if here and her.jumps and her.jump_hits is not None and her.jump_hits(m):
+    if here and jump and her.jumps and her.jump_hits is not None and her.jump_hits(m):
         return Way(lead + JUMP_S, "jump")
+    if her.routes is not None:
+        return _quickest(her, f, p, x, lead)
     near, far = near_far(her, m, y)
     if not math.isfinite(near):
         return None
@@ -237,17 +315,101 @@ def score(f: Foe, way: Way) -> float:
     return f.p * f.exp / max(1e-3, max(way.s, f.hit_s) + f.kill_s)
 
 
+def _rate(f: Foe, base: float, others: list[Foe]) -> float:
+    """EXP a second of her way there (`base` s) and killing it and `others`, each by the chance it's there."""
+    return (f.p * f.exp + sum(o.p * o.exp for o in others)) / max(1e-3, base + f.kill_s + sum(o.kill_s for o in others))
+
+
+def place_score(her: Her, f: Foe, way: Way, foes: list[Foe], memo: dict | None = None) -> tuple[float, list[Foe]]:
+    """What going for it makes her, by the place her way ends at (see the top): the kind's EXP over the way and the kill as
+    `score`, and each other monster her attack from there may land on (`near_far`; `memo`: those worked out so far at this look),
+    best first by its own EXP over its kill, PILE_MOST in all, so long as it raises that rate; and those others."""
+    base = max(way.s, f.hit_s)
+    memo = {} if memo is None else memo
+    on, g, y = _place_of(her, way)
+    near = []
+    for o in foes:
+        dy = o.m.y - y
+        if o is f or o.p <= 0.0 or o.spent or not -ABOVE_MOST <= dy <= BELOW_MOST or abs(o.m.x - g) > reach.SHOT_RANGE:
+            continue
+        key = (o.m.kind, round(dy), o.m.platform == on.id)
+        got = memo.get(key)
+        if got is None:
+            got = memo[key] = near_far(her, o.m, y, on)
+        if got[0] <= abs(o.m.x - g) <= got[1]:
+            near.append(o)
+    near.sort(key=lambda o: -o.p * o.exp / max(1e-3, o.kill_s))
+    pile: list[Foe] = []
+    best = _rate(f, base, pile)
+    for o in near[:PILE_MOST - 1]:
+        more = _rate(f, base, [*pile, o])
+        if more <= best:
+            break
+        best = more
+        pile.append(o)
+    return best, pile
+
+
+def _checked(her: Her, f: Foe, way: Way, pile: list[Foe]) -> "Terms | None":
+    """The terms of going for it by `way`, with what stops her attack asked (`_lands`): None if it does at the monster, and the
+    pile without those it does at."""
+    if way.place is not None and not _lands(her, f.m, way):
+        return None
+    kept = [o for o in pile if _lands(her, o.m, way)]
+    return Terms(f, replace(way, pile=tuple(o.m for o in kept)), _rate(f, max(way.s, f.hit_s), kept))
+
+
 def terms_of(her: Her, f: Foe, far: bool = True) -> Terms | None:
     """Monster `f`'s score at this look (`soonest`, `score`); None: her attack can't get at it."""
     way = soonest(her, f, far=far)
     return None if way is None else Terms(f, way, score(f, way))
 
 
+def _rank_screen(her: Her, foes: list[Foe], keep: tuple) -> list[Terms]:
+    """`rank` with Her.routes: every monster by its best place's score (`place_score`). Those in reach first; for the rest, best
+    first, what stops her attack (`_checked`) and a jump's search (the dear parts) asked only where they can decide: `keep` (her
+    target and her next), and those that would beat the best so far."""
+    memo: dict = {}
+    out, rest = [], []
+    for f in foes:
+        way = soonest(her, f, far=False)
+        if way is None:
+            rest.append(f)
+        else:
+            s, pile = place_score(her, f, way, foes, memo)
+            out.append(_checked(her, f, way, pile) or Terms(f, way, score(f, way)))
+    best = max((t.score for t in out), default=0.0)
+    at_once = her.lead + JUMP_S if her.jumps else her.lead
+    places = []
+    for f in rest:
+        ways = sorted(((*place_score(her, f, w, foes, memo), w) for w in _ways(her, f, her.platform, her.x, her.lead)),
+                      key=lambda o: -o[0])
+        places.append((ways[0][0] if ways else 0.0, f, ways))
+    places.sort(key=lambda o: -o[0])
+    for top, f, ways in places:
+        decides = f in keep or top > best
+        t = None
+        if decides and her.jumps and her.jump_hits is not None and score(f, Way(at_once, "")) > best and her.jump_hits(f.m):
+            t = Terms(f, Way(at_once, "jump"), score(f, Way(at_once, "")))
+        elif decides:
+            for _, pile, w in ways:
+                if (t := _checked(her, f, w, pile)) is not None:
+                    break
+        elif ways:
+            t = Terms(f, replace(ways[0][2], pile=tuple(o.m for o in ways[0][1])), top)
+        if t is not None:
+            out.append(t)
+            best = max(best, t.score) if decides else best
+    return sorted(out, key=lambda t: -t.score)
+
+
 def rank(her: Her, foes: list[Foe], walks: bool = True, keep: tuple = ()) -> list[Terms]:
     """The monsters her attack can get at by score, best first (`walks` False: none she'd have to walk for): those in reach
     first; a jump's or a walk's search (`soonest`: the dear part of a look's choice) with one in reach only for those it
     decides anyway (`keep`: her target and her next), with none for one that could still beat the best so far if its attack
-    went at once."""
+    went at once. With Her.routes and `walks`, all of them (`_rank_screen`)."""
+    if her.routes is not None and walks:
+        return _rank_screen(her, foes, keep)
     near, rest = [], []
     for f in foes:
         t = terms_of(her, f, far=False)
@@ -299,9 +461,10 @@ def after(her: Her, t: Terms, foes: list[Foe]) -> Terms | None:
     that kill takes (each walked on that long by its Foe.vx, within its platform); None with no other."""
     m = t.m
     x = her.x if t.way.place is None else t.way.place
-    p = her.platform
+    p = her.platform if t.way.platform is None else her.platform.peer(t.way.platform)
     y = p.y_at(min(max(x, p.left), p.right))
     done = t.way.s + t.foe.kill_s
+    options = []
     best = None
     for f in foes:
         o = f.m
@@ -312,13 +475,45 @@ def after(her: Her, t: Terms, foes: list[Foe]) -> Terms | None:
             mx = o.x + f.vx * done
             own = walks_on(o, p)
             moved = replace(o, x=min(max(mx, own.left), own.right) if own is not None else mx)
+        if her.routes is not None:  # (what stops her attack asked of the best alone)
+            g = replace(f, m=moved)
+            way = soonest(her, g, x, y, 0.0, far=False, on=p)
+            options += [(score(f, way), f, g, way, False)] if way is not None else [
+                (score(f, w), f, g, w, True) for w in _ways(her, g, p, x, 0.0)]
+            continue
         way = soonest(her, replace(f, m=moved), x, y, 0.0)
         if way is None:
             continue
         s = score(f, way)
         if best is None or s > best.score:
             best = Terms(f, Way(done + way.s, way.how, way.place), s)
+    for s, f, g, w, ask in sorted(options, key=lambda o: -o[0]):
+        if not ask or _lands(her, g.m, w, p):
+            return Terms(f, Way(done + w.s, w.how, w.place, w.platform), s)
     return best
+
+
+def also_next(her: Her, t: Terms, nxt: Terms | None) -> Terms:
+    """The primary's terms, its place moved where she has a choice of it ('walk', 'trip') to the nearest of it that also lands
+    on the next (`bands` of both on that platform; what stops her attack asked there, `_lands`), so she goes at the next at once
+    when the primary dies; as they were where none does."""
+    w = t.way
+    if nxt is None or w.place is None or w.how not in ("walk", "trip"):
+        return t
+    p = _place_of(her, w)[0]
+    lo, hi = _stand_limits(p, crowded=True)
+    best = None
+    for u, v in bands(her, t.m, p, lo, hi):
+        for a, b in bands(her, nxt.m, p, lo, hi):
+            c, d = max(u, a), min(v, b)
+            if c <= d:
+                g = min(max(w.place, c), d)
+                if best is None or abs(g - w.place) < abs(best - w.place):
+                    best = g
+    if best is None or best == w.place:
+        return t
+    moved = replace(w, place=best, s=w.s + abs(best - w.place) / physics.WALK_SPEED)
+    return replace(t, way=moved) if _lands(her, t.m, moved) else t
 
 
 def same(a: Monster, b: Monster) -> bool:
@@ -361,6 +556,8 @@ class Chooser:
         """The primary and the next at this look (see the top). `walks` False: none that she'd have to walk for (on her way
         somewhere: what's in reach from where she stands)."""
         had, had_next = self.primary, self.next
+        if her.routes is not None and walks:  # (the primary reckoned dead by her throws: the next's at once, see the top)
+            foes = [f for f in foes if not f.spent] or foes
         cur = _find(had, foes)
         kept = _find(had_next, foes)
         ranked = rank(her, foes, walks, tuple(f for f in (cur, kept) if f is not None))
@@ -399,6 +596,8 @@ class Chooser:
             if t is not None:
                 pick, why, how = t, f"coming at her: {come.arrives:.1f} s" + (" (a respawn)" if come.foe.born else ""), "coming"
         nxt = after(her, pick, foes)
+        if her.routes is not None:
+            pick = also_next(her, pick, nxt)
         self.primary, self.next = pick.m, None if nxt is None else nxt.m
         return Choice(pick, nxt, why, tuple(ranked[:3]), come, how, had if how in ("next", "gone") else None)
 
