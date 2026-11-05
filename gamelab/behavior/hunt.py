@@ -1321,12 +1321,12 @@ class Hunt:
 
     def _candidate(self, p: Pile, s: Scene | None = None) -> bool:
         """Whether pile `p` is one to go for as of look `s` (None: her last pass's): not seen gone, on a platform,
-        stood on or gone for fewer than PILE_TRIES times, hers or past its killer's ownership (OWN_S), something in it
+        stood on or gone for fewer than PILE_TRIES times (a run through it with no stand not counted), hers or past its killer's ownership (OWN_S), something in it
         she can take (`_takes`: her inventory by tab), not another player's (PLAYER_PILES), likely to lie there still
         (Pile.still, SURVIVE_MIN: ledger.SURVIVAL, where until 2026-10-30 a pile was left at DROP_LIFE, 90 s, and
         another's waited OTHERS_AFTER, 30 s), and not left to her pets for now (`_pets_first`)."""
         now = time.monotonic()
-        return (p.status != "gone" and p.platform is not None and p.tries < PILE_TRIES
+        return (p.status != "gone" and p.platform is not None and p.tries - p.runs < PILE_TRIES
                 and (p.hers or now - p.since >= OWN_S) and self._takes(p)
                 and not self._theirs(p) and p.still(now) >= SURVIVE_MIN and not self._pets_first(p, now, s))
 
@@ -2286,7 +2286,8 @@ class Hunt:
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
                                 until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o),
                                 vary=self._varies(o), on_arrival=self._ends_on_arrival(o),
-                                instead_of_waiting=self._instead_of_waiting(o), through=self._through(o))
+                                instead_of_waiting=self._instead_of_waiting(o), through=self._through(o),
+                                land_near=self._land_near(o))
         o.trip.weights, o.trip.choice = o.weights, o.choice
         chains = o.trip.trip.chains
         while not o.trip.over:
@@ -2310,6 +2311,10 @@ class Hunt:
 
     def _chain_over(self, o: Objective, result: str) -> bool:
         """A trip through her drops over (behavior.grind's loot chain): whether that's dealt with."""
+        return False
+
+    def _land_near(self, o: Objective) -> bool:
+        """Whether objective o's trip lands for its x (TripState.land_near; behavior.grind's trip to her target's place)."""
         return False
 
     def _instead_of_waiting(self, o: Objective):

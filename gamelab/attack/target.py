@@ -36,8 +36,8 @@ she can get to by the navigator's moves (motion.route.Planner.arrive_within: the
 lands (`bands`), and the one it goes by is the place with the best score (`place_score`): what her attack lands on from there
 (`Foe.p` x EXP over the way there and their kills, PILE_MOST at most, each only if it raises the rate), so a pile draws her from
 afar and a monster in reach still wins by its time. Walls and what the attack takes first (reach.can_hit, the dear part) are asked
-of a place only where it can decide (`_rank_screen`, `_checked`). The primary reckoned dead by her throws (`Foe.spent`) gives way to
-the next at once, and where she has a choice of where to stand for the primary, the place also reaches the next (`also_next`).
+of a place only where it can decide (`_rank_screen`, `_checked`). Where she has a choice of where to stand for the primary, the
+place also reaches the next if that scores better (`also_next`).
 """
 
 import math
@@ -84,7 +84,6 @@ class Foe:
     solid_s: float = 0.0
     hit_s: float = 0.0
     born: bool = False
-    spent: bool = False  # her throws have it reckoned dead (attacks.DEAD_LIKELY): the next goes (see the top)
 
 
 @dataclass(frozen=True)
@@ -344,7 +343,7 @@ def place_score(her: Her, f: Foe, way: Way, foes: list[Foe]) -> tuple[float, lis
     near = []
     for o in foes:
         dy = o.m.y - y
-        if o is f or o.p <= 0.0 or o.spent or not -ABOVE_MOST <= dy <= BELOW_MOST or abs(o.m.x - g) > reach.SHOT_RANGE:
+        if o is f or o.p <= 0.0 or not -ABOVE_MOST <= dy <= BELOW_MOST or abs(o.m.x - g) > reach.SHOT_RANGE:
             continue
         lo, hi = near_far(her, o.m, y, on)
         if lo <= abs(o.m.x - g) <= hi:
@@ -504,10 +503,11 @@ def after(her: Her, t: Terms, foes: list[Foe]) -> Terms | None:
     return best
 
 
-def also_next(her: Her, t: Terms, nxt: Terms | None) -> Terms:
-    """The primary's terms, its place moved where she has a choice of it ('walk', 'trip') to the nearest of it that also lands
-    on the next (`bands` of both on that platform; what stops her attack asked there, `_lands`), so she goes at the next at once
-    when the primary dies; as they were where none does."""
+def also_next(her: Her, t: Terms, nxt: Terms | None, foes: list[Foe]) -> Terms:
+    """The primary's terms, its place moved where she has a choice of it ('walk', 'trip'), on the same side of it, to the nearest of
+    it that also lands on the next (`bands` of both on that platform), so she goes at the next at once when the primary dies: its way
+    (the route's, asked again) and its pile as they are from there, if its score (`place_score`, what stops her attack asked there)
+    beats the place's it has; as they were where none does."""
     w = t.way
     if nxt is None or w.place is None or w.how not in ("walk", "trip"):
         return t
@@ -515,6 +515,8 @@ def also_next(her: Her, t: Terms, nxt: Terms | None) -> Terms:
     lo, hi = _stand_limits(p, crowded=True)
     best = None
     for u, v in bands(her, t.m, p, lo, hi):
+        if not u <= w.place <= v:
+            continue
         for a, b in bands(her, nxt.m, p, lo, hi):
             c, d = max(u, a), min(v, b)
             if c <= d:
@@ -523,8 +525,16 @@ def also_next(her: Her, t: Terms, nxt: Terms | None) -> Terms:
                     best = g
     if best is None or best == w.place:
         return t
-    moved = replace(w, place=best, s=w.s + abs(best - w.place) / physics.WALK_SPEED)
-    return replace(t, way=moved) if _lands(her, t.m, moved) else t
+    if w.how == "walk":
+        s = w.s + (abs(best - her.x) - abs(w.place - her.x)) / physics.WALK_SPEED
+    else:
+        got = her.routes(her.platform.id, her.x, p.id, best, best)
+        if got is None:
+            return t
+        s = her.lead + got[0] + STEP_SETTLE_S
+    moved = replace(w, place=best, s=s)
+    there = _checked(her, t.foe, moved, place_score(her, t.foe, moved, foes)[1])
+    return there if there is not None and there.score > place_score(her, t.foe, w, foes)[0] else t
 
 
 def same(a: Monster, b: Monster) -> bool:
@@ -567,8 +577,6 @@ class Chooser:
         """The primary and the next at this look (see the top). `walks` False: none that she'd have to walk for (on her way
         somewhere: what's in reach from where she stands)."""
         had, had_next = self.primary, self.next
-        if her.routes is not None and walks:  # (the primary reckoned dead by her throws: the next's at once, see the top)
-            foes = [f for f in foes if not f.spent] or foes
         cur = _find(had, foes)
         kept = _find(had_next, foes)
         ranked = rank(her, foes, walks, tuple(f for f in (cur, kept) if f is not None))
@@ -608,7 +616,7 @@ class Chooser:
                 pick, why, how = t, f"coming at her: {come.arrives:.1f} s" + (" (a respawn)" if come.foe.born else ""), "coming"
         nxt = after(her, pick, foes)
         if her.routes is not None:
-            pick = also_next(her, pick, nxt)
+            pick = also_next(her, pick, nxt, foes)
         self.primary, self.next = pick.m, None if nxt is None else nxt.m
         return Choice(pick, nxt, why, tuple(ranked[:3]), come, how, had if how in ("next", "gone") else None)
 

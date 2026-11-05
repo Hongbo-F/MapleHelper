@@ -10,11 +10,11 @@ import pytest
 
 from gamelab.behavior import grind as grind_mod
 from gamelab.behavior import lootchain as lc
-from gamelab.behavior.grind import Grind
-from gamelab.behavior.hunt import Objective
+from gamelab.behavior.grind import TO_TARGET, Grind
+from gamelab.behavior.hunt import PILE_TRIES, Objective
 from gamelab.behavior.ledger import Pile
 from gamelab.control import navigator as nv
-from gamelab.control.navigator import Navigator, TripState, _ran_over
+from gamelab.control.navigator import Navigator, TripState, _arrows_in, _ran_over
 from gamelab.localization.monsters import MonsterTrack
 from gamelab.motion import flow as fl
 from gamelab.motion.flow import Body, Flow
@@ -169,6 +169,58 @@ def test_a_run_through_a_drop_by_the_platforms_end_stops_rather_than_runs_off(tr
     assert why == "done" and legs[0].end.run == 0 and p.covers(legs[0].end.x)
 
 
+def _stays_on(legs, p):
+    """Every span and where a leg's run stops (its turn, its slide) on platform `p` or the platform it's on."""
+    for leg in legs:
+        for sp in leg.spans:
+            on = tree_of(leg, sp.platform)
+            assert on.left <= min(sp.x0, sp.x1) and max(sp.x0, sp.x1) <= on.right, (leg.move, sp)
+        e = leg.end
+        if e.run:
+            stop = e.x + e.run * fl.body.stop_distance(e.v, fl.SHOE, fl.LAGS)
+            assert e.platform.left <= stop <= e.platform.right, (leg.move, stop)
+
+
+def tree_of(leg, pid):
+    return leg.start.platform if leg.start.platform.id == pid else leg.end.platform
+
+
+@pytest.mark.parametrize("gap", range(10, 61, 5))
+@pytest.mark.parametrize("side", [1, -1], ids=["right", "left"])
+def test_a_walk_then_a_walk_stays_on_the_platform_however_near_its_end_the_first_goal(tree, gap, side):
+    """(The safety review of 2026-11-05: at WALK_ON_ROOM 20 the plan itself ran 0.6-4.6 past the end with a first goal 20-24 from it.)"""
+    f, p = _flow(tree), tree.platform(10)
+    end = p.right if side > 0 else p.left
+    goal = end - side * gap
+    for second in (goal - side * 60.0, goal + side * min(gap - 3.0, 5.0)):  # (back from it, and on towards the end)
+        legs, _, why = f.chain([_walk(10, goal), _walk(10, second)], Body(0.0, goal - side * 80.0, p))
+        assert legs and why in ("done", "unpredictable")
+        _stays_on(legs, p)
+
+
+@pytest.mark.parametrize("gap", range(10, 61, 10))
+def test_a_landing_running_into_a_walk_stays_on_the_platform_however_near_its_end_the_goal(tree, planner, gap):
+    """Her route's jump, then a walk near the end of the platform it lands on, ahead of her landing and behind it."""
+    f = _flow(tree)
+    moves = planner.plan(9, 0.0, 8)
+    q = tree.platform(8)
+    start = Body(0.0, 0.0, tree.platform(9))
+    for goal in (q.right - gap, q.left + gap):
+        legs, _, why = f.chain([*moves, _walk(8, goal)], start)
+        assert legs
+        _stays_on(legs, q)
+
+
+def test_running_with_no_room_for_her_turn_a_walk_back_isnt_on(tree):
+    """A landing running at the end: a walk the other way isn't a way from there (the leg before is done the way that stops, `follows`)."""
+    f, p = _flow(tree), tree.platform(10)
+    b = Body(0.0, p.right - 12.0, p, run=1, landed=True, v=fl.WALK_SPEED)
+    assert f.leg(_walk(10, p.right - 100.0), b, fl.Keys(KEYS), "stop") is None
+    assert f.leg(_walk(10, p.right - 100.0), b, fl.Keys(KEYS), "run") is None
+    far = Body(0.0, p.left + 200.0, p, run=1, landed=True, v=fl.WALK_SPEED)
+    assert f.leg(_walk(10, p.left + 100.0), far, fl.Keys(KEYS), "stop") is not None
+
+
 def test_a_monster_in_the_way_of_the_second_walk_ends_the_chain_short_of_it(tree):
     """Her whole box over the whole way: a walk's legs are checked as any leg (flow.danger): the chain stops short, standing clear."""
     f, p = _flow(tree), tree.platform(10)
@@ -214,6 +266,40 @@ def test_a_walk_made_is_its_stop_off_the_trips_way():
     assert st.stops == [(8, 100.0, 0.0)]
 
 
+def test_a_twins_pile_is_booked_and_its_stop_made_by_the_platform_it_lies_on():
+    """(Map 10004021 has twins; her moves and spans have the platform they lie on, `MapModel.place_of`.)"""
+    c = _chain(_pile(50.0, platform=77))
+    c.book([(7, 0.0, 60.0)])
+    assert not c.done
+    c.book([(7, 0.0, 60.0)], lambda p: 7 if p == 77 else p)
+    assert c.done
+    nav = Navigator.__new__(Navigator)
+    nav.model = SimpleNamespace(place_of=lambda p: 7 if p == 77 else p)
+    nav._penalty = lambda st: None
+    st = TripState(7, stops=[(77, 60.0, 0.0)], through=lambda s: [])
+    path = nav._way_through(st, 77, 0.0)
+    assert path[0].src == 7
+    Navigator._gone_by(st, path)
+    assert st.stops == []
+
+
+def test_a_stand_where_she_is_leaves_her_facing_as_it_was(tree):
+    """No arrow in the plan: `Actions.facing` isn't told of a move, and the throw's retap stands (the safety review's note)."""
+    f, p = _flow(tree), tree.platform(10)
+    a = (p.left + p.right) / 2
+    still, _, _ = f.chain([_walk(10, a, 0.12)], Body(0.0, a, p))
+    assert not _arrows_in(still)
+    moved, _, _ = f.chain([_walk(10, a + 60.0)], Body(0.0, a, p))
+    assert _arrows_in(moved)
+
+
+def test_a_replanned_chain_never_taken_ran_her_over_nothing(tree):
+    f, p = _flow(tree), tree.platform(10)
+    a = p.left + 20.0
+    legs, _, _ = f.chain([_walk(10, a + 50.0), _walk(10, a + 120.0)], Body(0.0, a, p))
+    assert _ran_over(legs, (legs, 0.0)) == []
+
+
 def test_what_a_chain_ran_her_over_cut_short_is_only_as_far_as_then(tree):
     f, p = _flow(tree), tree.platform(10)
     a = p.left + 20.0
@@ -240,12 +326,13 @@ def _grind():
     g._stood, g._pile_of = {}, {}
     g._chain_off = -1e18
     g._idle_since = 1.0
-    g.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(left=-1000.0, right=1000.0))
+    g.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(left=-1000.0, right=1000.0), place_of=lambda pid: pid)
+    g._respawn_guard = lambda s, p, at: None
     return g
 
 
 def _stop(p, leave=1.0, guards=(), lands=0.0):
-    return SimpleNamespace(spot=SimpleNamespace(key=p.key, guards=guards, lands=lands), leave=leave)
+    return SimpleNamespace(spot=SimpleNamespace(key=p.key, guards=guards, lands=lands), leave=leave, arrive=max(0.0, leave - 0.2))
 
 
 def _look(loot=()):
@@ -282,6 +369,23 @@ def test_a_pile_not_seen_yet_or_not_landed_is_the_plans_last_to_its_middle():
         c = g._loot_plan(_look())
         assert [st.pile for st in c.stretches] == piles[:2] and c.dest is None
         assert c.stretches[1].bunches == [(100.0, 1)] and not c.stretches[1].seen
+
+
+def test_the_plan_ends_short_of_a_later_pile_the_spawn_guard_would_hold():
+    """(The safety review: the guard asked only of a chain's first, at `_go_for`.)"""
+    g = _grind()
+    piles = [_pile(50.0), _pile(100.0), _pile(150.0)]
+    _with_itinerary(g, piles)
+    g._respawn_guard = lambda s, p, at: "a pass" if p is piles[1] else None
+    assert [st.pile for st in g._loot_plan(_look()).stretches] == piles[:1]
+
+
+def test_a_pile_not_seen_yet_by_a_platforms_end_is_walked_to_short_of_it():
+    g = _grind()
+    g.model = SimpleNamespace(platform=lambda pid: SimpleNamespace(left=-100.0, right=100.0))
+    p = _pile(98.0, status="expected", xs=())
+    _with_itinerary(g, [p])
+    assert g._loot_plan(_look()).stretches[0].bunches == [(100.0 - lc.END_ROOM, 1)]
 
 
 def test_before_her_target_only_the_piles_that_may_go_before_it():
@@ -363,8 +467,33 @@ def test_over_each_stretch_run_over_is_told_as_a_stand_tells_and_the_objective_d
     chain = lc.LootChain([lc.Stretch(a, lc.bunches(a.xs), ("cap",)), lc.Stretch(b, lc.bunches(b.xs))])
     assert _over(g, chain, [(9, 0.0, 100.0)]) is True
     assert a.tries == b.tries == 1 and g.h.report.loot_runs == 2 and g.obj is None
-    assert g._stood[id(a)][1] == [40.0, 60.0] and (["cap"], a) in g.said
+    assert (["cap"], a) in g.said
     assert g.tp.counts["loot stops done"] == 2 and g._idle_since is None
+
+
+def test_a_run_through_isnt_a_stand_towards_cant_pick_up_nor_one_of_her_tries():
+    """(The safety review of 2026-11-05: one run and one stand said "can't pick up", the backpack's push after it, where master took two
+    stands; RUN_PRESSES isn't proven live.) A run, then two stands a drop stays under: only then `cant_pick`, and the pile's still one to
+    go for at that look, as after two stands it has always been."""
+    g = _grind()
+    a = _pile(50.0, xs=(50.0,), items=("cap",))
+    drop = SimpleNamespace(platform=9, x=50.0)
+
+    def through():
+        st = g._stretch(_look([drop]), a)
+        chain = lc.LootChain([st])
+        assert _over(g, chain, [(9, 0.0, 60.0)]) is True
+        return st
+
+    first = through()
+    assert not first.again and a.tries == 1 and a.runs == 1 and id(a) not in g._stood
+    assert through().again and a.tries == 2 and g._stood[id(a)][1] == [50.0]
+    assert not any(s[0] == "stuck" for s in g.said)
+    assert through().again and a.tries == 3 and g._stood[id(a)][1] == [50.0, 50.0]
+    assert not any(s[0] == "stuck" for s in g.said)
+    assert a.tries - a.runs < PILE_TRIES  # (Hunt._candidate's: the look that has it stuck still comes)
+    assert g._stretch(_look([drop]), a) is None and any(s[0] == "stuck" for s in g.said)
+    assert _pile(9.0, tries=PILE_TRIES).tries - _pile(9.0).runs >= PILE_TRIES  # (no run: as ever)
 
 
 def test_over_short_of_its_end_a_part_of_a_stretch_isnt_a_try_and_the_objective_is_done_with_all_the_same():
@@ -459,3 +588,111 @@ def test_a_move_and_two_stops_are_one_plan():
     assert len(taken) == 3
     assert any("loot: 2 stops" in line for line in trace["log"]) and any("climb->10, walk->10, walk->10" in line for line in trace["log"])
     assert not any(taken[-2] <= t <= taken[-1] for t in world.still_log)
+
+
+# --- a monster in the way of a chain (the reviews of 2026-11-05: 101 "nothing in reach" in 126 s of loop_tree_remembered_keys) --------
+
+def _nav_for_way(wont=False, throws=(0, 0), unshot=None):
+    nav = Navigator.__new__(Navigator)
+    nav._mode = "transit"
+    calls = []
+    counts = iter(throws)
+    nav.escort = SimpleNamespace(in_way=lambda s, x: SimpleNamespace(track=8), wont_have=lambda s, m: wont,
+                                 throws=lambda: next(counts), clear_way=lambda s, x, finish=True: calls.append(x) or 0)
+    nav._unshot = dict(unshot or {})
+    return nav, calls
+
+
+def _trip_through():
+    st = TripState(9, stops=[(9, 60.0, 0.0)], through=lambda s: [], mode="transit")
+    st.trip = SimpleNamespace(kills=0)
+    return st
+
+
+def test_no_fight_in_a_chains_way_at_a_monster_no_fight_will_have():
+    nav, calls = _nav_for_way(wont=True)
+    assert nav._clear_the_way(_trip_through(), object(), 60.0) is False and not calls
+
+
+def test_a_fight_in_a_chains_way_that_threw_nothing_isnt_tried_again_for_a_moment():
+    nav, calls = _nav_for_way(throws=(3, 3))
+    st = _trip_through()
+    assert nav._clear_the_way(st, object(), 60.0) is True and calls == [60.0] and nav._unshot[8] > time.monotonic()
+    assert nav._clear_the_way(st, object(), 60.0) is False and calls == [60.0]
+
+
+def test_a_fight_in_a_chains_way_that_threw_is_no_reason_to_hold_off():
+    nav, calls = _nav_for_way(throws=(3, 4, 4, 5))
+    st = _trip_through()
+    assert nav._clear_the_way(st, object(), 60.0) is True and 8 not in nav._unshot
+    assert nav._clear_the_way(st, object(), 60.0) is True and calls == [60.0, 60.0]
+
+
+def test_a_chain_sent_regardless_goes_as_far_as_the_routes_moves_never_its_walks():
+    nav = Navigator.__new__(Navigator)
+    asked = []
+    nav._chain = lambda st, s, path, *a, **k: asked.append(list(path)) or ([1], None, "done")
+    nav._pass_record = lambda *a, **k: {}
+    look = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=9)))
+    st = _trip_through()
+    jump, walk = Move("jump", 9, 8, 0.0, 0.0), _walk(8, 60.0)
+    assert nav._regardless(st, look, [jump, walk, _walk(8, 90.0)], [], 0.0, None, "why")[0] == [1]
+    assert asked == [[jump]]
+    asked.clear()
+    assert nav._regardless(st, look, [walk], [], 0.0, None, "why", blind=True) is None and not asked
+    st.through = None
+    assert nav._regardless(st, look, [jump, walk], [], 0.0, None, "why")[0] == [1] and asked == [[jump, walk]]
+
+
+def test_a_monster_her_attacks_ignore_isnt_in_her_way_with_the_whole_screen(tree):
+    from gamelab.behavior import fight
+    from gamelab.perception.mobs import Mob
+    from gamelab.localization.monsters import Monster
+    p = tree.platform(10)
+    a = (p.left + p.right) / 2
+    m = Monster(Mob("horny-mushroom", 0, 0, 30, 30, 0.9), a + 40.0, p.y_at(a + 40.0), 10, track=8)
+    s = SimpleNamespace(where=SimpleNamespace(x=a), platform=p, monsters=[m])
+    esc = fight.FightOnTheWay(SimpleNamespace(attacks=SimpleNamespace(ignored={8: 1e18}), ledger=None, model=tree))
+    assert esc.in_way(s, a + 100.0) is m  # (the switch off: as master)
+    esc.not_ignored = True
+    assert esc.in_way(s, a + 100.0) is None and esc.wont_have(s, m)
+    esc.h.attacks.ignored = {}
+    assert esc.in_way(s, a + 100.0) is m and not esc.wont_have(s, m)
+    esc.set_aside = lambda: {8: 1e18}
+    assert esc.wont_have(s, m)
+
+
+def test_a_kill_bound_to_a_track_that_lives_on_says_dying_only_for_its_death(monkeypatch):
+    """(ledger.py's `kills[-8:]` had no limit: a live horny-mushroom walked on, no target, for 70 s of loop_tree_remembered_keys.)"""
+    from gamelab.behavior.ledger import BOUND_LASTS_S, Kill, dying
+    from gamelab.perception.mobs import Mob
+    from gamelab.localization.monsters import Monster
+    m = Monster(Mob("horny-mushroom", 0, 0, 30, 30, 0.9), 40.0, 0.0, 10, track=8)
+    k = Kill(100.0, "horny-mushroom", 10, 40.0, 0.0, 10, track=8)
+    die = {"horny-mushroom": 0.7}
+    monkeypatch.delenv("GAMELAB_SCREEN", raising=False)
+    monkeypatch.delenv("GAMELAB_TARGET", raising=False)
+    assert dying([k], m, 100.0 + 0.7 + BOUND_LASTS_S - 0.01, [m], die)
+    assert not dying([k], m, 100.0 + 0.7 + BOUND_LASTS_S + 0.01, [m], die)
+    assert dying([k], m, 500.0, [m], die, dead={8})  # (the feed has it dead: however long)
+    assert dying([k], m, 500.0, [], die)  # (only her memory has it: till 8 more kills, as ever)
+    for off in ("GAMELAB_SCREEN", "GAMELAB_TARGET"):
+        monkeypatch.setenv(off, "0")
+        assert dying([k], m, 500.0, [m], die)  # (the switch off: till 8 more kills, as master)
+        monkeypatch.delenv(off)
+
+
+def test_a_trip_to_her_targets_place_lands_for_that_place():
+    """(The words review's m4: 633 trips of the clip's replay, 0.12 s over the estimate on average, 9 by 1 s or more.)"""
+    nav = Navigator.__new__(Navigator)
+    asked = {}
+    nav.planner = SimpleNamespace(plan=lambda src, x, dst, **k: asked.update(k) or [])
+    nav.weight = None
+    nav._penalty = lambda st: None
+    st = TripState(8, 120.0, vary=False, land_near=True)
+    nav._route(st, 9, 0.0, 8)
+    assert asked["dst_x"] == 120.0
+    nav._route(replace(st, land_near=False), 9, 0.0, 8)
+    assert asked["dst_x"] is None
+    g = Grind.__new__(Grind)
+    assert g._land_near(SimpleNamespace(why=TO_TARGET)) and not g._land_near(SimpleNamespace(why="sweep"))

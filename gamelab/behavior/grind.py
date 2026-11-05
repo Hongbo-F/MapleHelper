@@ -60,7 +60,7 @@ from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
 from . import fight, lootchain
 from ..perception.loot import MESOS
-from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
+from .hunt import PASSING_S, TRIP_AHEAD_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .looting import STOOD_ON
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
@@ -170,7 +170,7 @@ class Grind(Hunt):
         self._promised_at: float | None = None
         # The target-first planner (behavior.targeting; GAMELAB_TARGET): the fights at a stop, arrivals included
         self.tp: Targeting | None = Targeting(self) if target_on() else None
-        self._chain_off = -1e18  # until when her drops go the old way: a monster stood in a chain's first walk (lootchain.BLOCKED_S)
+        self._chain_off = -1e18  # until when her drops go the old way: a monster stood in a chain's first walk (lootchain.CHAIN_OFF_S)
         self._target_place: tuple | None = None  # where her last trip to a target went (`_to_place`): a chain goes on to it
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
@@ -182,6 +182,7 @@ class Grind(Hunt):
             self.h.attacks.whole_screen = True
             if self.nav.escort is not None:
                 self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)
+                self.nav.escort.set_aside = lambda: self.tp.no_way
         if self.tp is not None:
             self.h.actions.lock_watch = self.tp.watch_lock
             self.h.drops.revive_s = EXPIRE_S  # (a pile of hers seen gone and then seen again is hers, however late: 100%)
@@ -380,6 +381,9 @@ class Grind(Hunt):
 
     def _varies(self, o) -> bool:
         return o.why != TO_TARGET and super()._varies(o)
+
+    def _land_near(self, o) -> bool:
+        return o.why == TO_TARGET
 
     def _instead_of_waiting(self, o):
         if self.tp is None or not self.tp.screen or o.why not in (TO_TARGET, "sweep"):
@@ -593,10 +597,12 @@ class Grind(Hunt):
         for stop in it.stops:
             p = self._pile_of.get(stop.spot.key)
             if len(stretches) >= lootchain.MOST_PILES or p is None or stop.spot.guards \
-                    or (before and stretches and not self.tp.pile_first(p, stop, now)):
-                break
+                    or (before and stretches and not self.tp.pile_first(p, stop, now)) \
+                    or (stretches and stop.arrive <= TRIP_AHEAD_S and self._respawn_guard(s, p, stop.arrive) is not None):
+                break  # (the guard on her first pile's `_go_for`'s, as ever)
             if p.status != "seen" or stop.spot.lands > 0.0:  # (nothing to run over for sure: the look there has it)
-                return lootchain.LootChain([*stretches, lootchain.Stretch(p, [(p.x, 1)], seen=False)], None, s, stop.leave, now)
+                last = lootchain.Stretch(p, [(self._off_end(p, p.x), 1)], seen=False)
+                return lootchain.LootChain([*stretches, last], None, s, stop.leave, now)
             st = self._stretch(s, p)
             if st is not None:
                 stretches.append(st)
@@ -626,9 +632,13 @@ class Grind(Hunt):
         if not xs:
             self._tried(p)
             return None
-        q = self.model.platform(p.platform)
-        bunches = [(min(max(x, q.left + lootchain.END_ROOM), q.right - lootchain.END_ROOM), n) for x, n in lootchain.bunches(xs)]
+        bunches = [(self._off_end(p, x), n) for x, n in lootchain.bunches(xs)]
         return lootchain.Stretch(p, bunches, kinds, p.tries > 0)
+
+    def _off_end(self, p, x: float) -> float:
+        """Where a chain walks to for a drop at x of pile `p`: END_ROOM in from its platform's ends at the most."""
+        q = self.model.platform(p.platform)
+        return min(max(x, q.left + lootchain.END_ROOM), q.right - lootchain.END_ROOM)
 
     def _through(self, o):
         return None if o.chain is None else self._loot_way
@@ -651,19 +661,21 @@ class Grind(Hunt):
         planner's, with what the look has then (`_planned_step`: a monster in reach, a new chain through what's left). A failed trip
         (`_travel`'s) is as any pile's."""
         chain, st = o.chain, o.trip
-        chain.book(st.ran)
+        chain.book(st.ran, self.model.place_of)
         looter = self.h.looter
         for part in chain.stretches:
             if part.ran and not part.booked and part.seen:
                 part.booked = True
-                kept = self._stood.get(id(part.pile))
-                if kept is None or kept[0] is not part.pile:
-                    kept = self._stood[id(part.pile)] = (part.pile, [])
-                kept[1].extend(part.bunches[i][0] for i in sorted(part.ran))
+                if part.again:  # (stood at: a run past it isn't, and two of those a drop stays under are `cant_pick`'s, as a stand's)
+                    kept = self._stood.get(id(part.pile))
+                    if kept is None or kept[0] is not part.pile:
+                        kept = self._stood[id(part.pile)] = (part.pile, [])
+                    kept[1].extend(part.bunches[i][0] for i in sorted(part.ran))
                 if (seen := getattr(looter, "stood_on", None)) is not None:
                     seen(list(part.kinds), part.pile)
                 if part.done:  # (a try's the whole of it: cut short halfway, it's as if she'd been stopped on her way there)
                     self._tried(part.pile)
+                    part.pile.runs += not part.again  # (... and her first run through it leaves her as many stands: PILE_TRIES)
                 self.h.report.loot_runs += 1
                 if telemetry.recording():
                     telemetry.emit("event", kind="pick", platform=part.platform, x=round(part.pile.x), drops=sum(n for _, n in part.bunches),
@@ -678,7 +690,7 @@ class Grind(Hunt):
         if telemetry.recording():
             telemetry.emit("loot_chain", why=why, result=result, s=round(time.monotonic() - chain.started, 2), **chain.record())
         if st.walk_blocked:
-            self._chain_off = time.monotonic() + lootchain.BLOCKED_S
+            self._chain_off = time.monotonic() + lootchain.CHAIN_OFF_S
         if result not in ("arrived", "in position"):
             return False  # (`_travel`: said, and dropped as any trip that failed)
         self.obj = self.stack.pop() if self.stack else None

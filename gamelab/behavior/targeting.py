@@ -31,7 +31,6 @@ from time import perf_counter_ns
 from maplehelper.engine import LEFT, RIGHT
 
 from .. import telemetry
-from .attacks import DEAD_LIKELY
 from .ledger import EXPIRE_S, SETTLE
 from ..attack import target as tg
 from ..attack.stance import MIN_MOVE, _sizes, _stand_limits, open_above
@@ -329,10 +328,8 @@ class Targeting:
                 if c is not None:
                     p *= c
             left = attacks.reckon(m)
-            spent = False
             if left is not None:
                 p *= max(0.0, 1.0 - left.dead)
-                spent = self.screen and left.dead >= DEAD_LIKELY
             v = pace.walk(m) if pace.walk is not None else None
             chasing = m.track is not None and m.track in chasers
             if chasing and not v:
@@ -346,7 +343,7 @@ class Targeting:
                 solid = max(0.0, tr.solid_at - s.t)
                 a = 1.0 - solid * FADE_PER_S
             hit = 0.0 if a is None else max(0.0, (tg.HIT_ALPHA - a) / FADE_PER_S)
-            out.append(tg.Foe(m, g.tour.exp.get(m.kind, avg), attacks.kill_s(m), p, v, chasing, solid, hit, solid > 0.0, spent))
+            out.append(tg.Foe(m, g.tour.exp.get(m.kind, avg), attacks.kill_s(m), p, v, chasing, solid, hit, solid > 0.0))
         return out
 
     @staticmethod
@@ -512,8 +509,7 @@ class Targeting:
         if c.how not in ("next", "gone") or c.left is None:
             return c.why
         tr = c.left.track
-        was = ("set aside" if tr in self.no_way else "killed" if tr in self.h.ledger.dead else "reckoned dead"
-               if any(f.spent and f.m.track == tr for f in self.foes) else "not in this look")
+        was = "set aside" if tr in self.no_way else "killed" if tr in self.h.ledger.dead else "not in this look"
         return f"#{tr} {was}" + (", the next" if c.how == "next" else "")
 
     def end(self) -> None:

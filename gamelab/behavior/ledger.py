@@ -42,6 +42,7 @@ ledger against its world (tests/test_ledger.py), and the hunt loop reads the dro
 
 import itertools
 import math
+import os
 from dataclasses import dataclass, field
 
 from maplehelper.engine import RIGHT
@@ -70,6 +71,7 @@ STAR_WINDOW = 2.5  # s after a throw's attack key that an EXP gain can still be 
 # nearest only, 317; the animation and 0.15 s more, 351; the animation alone, 390, as at 0.8 s; master's stack in the
 # branch's world 361).
 DIE_S = 0.66
+BOUND_LASTS_S = 1.0  # s past its kind's death animation a kill bound to a track still says that track is dying (`_says_dying`; a guess)
 DYING_DX = 40.0
 # The feed's tracks taken for dead (`Ledger.dead`): those a look's tracks have bound to a kill or a share of hers, or
 # found dead (tracking.Track.killed), kept this long after a look last had them so (a track's id is never used again;
@@ -451,17 +453,28 @@ def _bound(s: Scene, gained: float | None):
                  and abs(tr.gain - gained) < TRACK_GAIN_S and not tr.share), None)
 
 
+def _says_dying(age: float, window: float, m: Monster, seen) -> bool:
+    """Whether a kill of hers `age` s old still says the track it's bound to is dying (its kind's death animation `window`): under the
+    whole screen's switch (GAMELAB_SCREEN, GAMELAB_TARGET), of a monster this look has (`seen`), only till that animation and
+    BOUND_LASTS_S are over: a track still walking after that is alive, and the kill was bound to the wrong one. Without it, until 8
+    more kills: in loop_tree_remembered_keys a horny-mushroom walked on, never a target and in her way, for 70 s of the 126. (One only
+    her memory has stays as it was: held by that, the final review of 2026-11-02's seed 19 stood 123 s at 16.)"""
+    if os.environ.get("GAMELAB_SCREEN", "1") == "0" or os.environ.get("GAMELAB_TARGET", "1") == "0":
+        return True
+    return age < window + BOUND_LASTS_S or not any(o is m for o in seen)
+
+
 def dying(kills: list[Kill], m: Monster, t: float, seen: list[Monster] = (),
           die: dict[str, float] | None = None, dead=()) -> bool:
     """Whether monster `m`, seen at t, is taken for dead or dying: its track (Monster.track) one the feed has dead or
-    dying (`dead`: Ledger.dead) or a kill of hers is on (Kill.track); else, by where a kill of hers with no track was
+    dying (`dead`: Ledger.dead) or a kill of hers is on (Kill.track, as long as `_says_dying` says); else, by where a kill of hers with no track was
     placed (or for a monster with none): within its kind's death animation (`die`: kind -> MobBody.die_s, the map's game
     data; DIE_S without) of the look that placed it, and of the monsters of its kind on its platform seen with it
     (`seen`), the nearest the kill, within DYING_DX: one only, not a live one beside it."""
     track = getattr(m, "track", None)
-    if track is not None and (track in dead or any(k.track == track for k in kills[-8:])):
-        return True
     window = (die or {}).get(m.kind, DIE_S)
+    if track is not None and (track in dead or any(k.track == track and _says_dying(t - k.t, window, m, seen) for k in kills[-8:])):
+        return True
     near = [k for k in kills[-8:] if k.placed and (k.track is None or track is None) and 0.0 <= t - k.t < window
             and k.kind == m.kind and k.platform == m.platform and abs(k.x - m.x) < DYING_DX]
     if not near:
@@ -501,6 +514,7 @@ class Pile:
     empty_since: float | None = None  # when a look first saw it empty (see EMPTY_LOOKS)
     status: str = "expected"  # expected (a kill's, not seen yet) | seen | gone (seen empty twice)
     tries: int = 0            # times the hunt loop went for it (DropStore.tried)
+    runs: int = 0             # ... of those, a run through it with no stand (behavior.grind's loot chain)
     rushed: int = 0           # ... of those, at once for what it's worth (hunt's rule 6a)
     gone_at: float | None = None  # when it was seen gone
     items: tuple[str, ...] = ()   # what the latest look that saw it saw in it (one kind per drop) ...

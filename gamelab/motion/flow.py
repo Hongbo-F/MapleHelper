@@ -57,7 +57,10 @@ MAX_SLACK = 0.15     # ... counted up to this (beyond it waiting longer only mak
 TAP = 0.04           # s a jump/down tap is held
 PICK_EVERY = 0.15    # s between pick-up presses while she runs
 WALK_PICK_EVERY = 0.12  # ... and on a walk through her drops (a 'walk' leg: the loot chain's), a press as often as a stand's (actions.PILE_EVERY_MS)
-WALK_ON_ROOM = 20.0  # units of platform she keeps past a drop she runs through: a run on and a turn from there stay on it
+WALK_ON_ROOM = 50.0  # units of platform she keeps past a drop she runs through: a run on and a turn from there stay on it (the navigator's
+                     # REACT_ROOM: her stop takes 24.3 in the simulator, 24.0 +- 2 and up to 28.1 in game, and a look to see it; at 20 the review's
+                     # 48 seeds had her fall off 0.42 and 0.46 times a run, against 0.12 and 0.21 without the chain)
+WALK_ENDS_IN = 3.0   # units in from a platform's end a walk may end at the least (as _landing's slide)
 MIN_RUNUP = 15.0     # units of run before a running jump from standing (keyed 155 ms after the arrow: full speed)
 JUMP_FROM_FAR = 45.0  # running jumps take off between JUMP_FROM and this far before the end
 # A chained jump lands with room to spare from where she really leaves the ground (Flow.sure_takeoff), or it's
@@ -470,11 +473,14 @@ class Flow:
         """A walk along her platform to m.land_x (the loot chain's way through her drops, control.navigator's `through`; no
         move of the route's), pick-up pressed all the way (`_tap_pick_up`): the 'run' way she's at full speed there with the arrow
         held, for what follows on, as long as the platform has WALK_ON_ROOM past it; the 'stop' way she stands there, m.seconds
-        more with a stand asked for (the presses a run past it wouldn't give)."""
+        more with a stand asked for (the presses a run past it wouldn't give). None either way where, running already (from a landing, a
+        walk before it), a turn or a slide would leave the platform."""
         if variant == "stand":
             return None
         a, goal = b.platform, m.land_x
         d = _sign(goal - b.x) or b.run
+        if b.run and b.run != d and not a.covers(b.x + b.run * WALK_ON_ROOM):
+            return None  # (her turn from there runs off its end: the leg before is done the way that stops: `follows`)
         if variant == "run":
             if m.seconds > 0.0 or not d or not a.covers(goal + d * WALK_ON_ROOM):
                 return None
@@ -499,6 +505,8 @@ class Flow:
             t1, x1 = self._step(start, goal, k)
         else:
             t1, x1 = start.t, start.x
+        if not a.covers(x1, -WALK_ENDS_IN):
+            return None  # (a slide off its end: as above)
         spans = _via(a, b, start, t1, x1) if t1 > b.t else []
         if m.seconds > 0.0:
             spans.append(Span(a.id, t1, t1 + m.seconds, x1, x1))

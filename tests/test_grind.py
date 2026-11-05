@@ -943,7 +943,7 @@ def test_a_monster_the_fight_takes_for_dead_holds_her_not_and_waiting_on_end_for
     m = replace(_sight(model, HORNY, 250, 0), track=7)
     g, s = _at_stop(model, p, ids[0], 150.0, [m], 1.0)
     assert [e.track for e in g._held(s)] == [7]
-    g.h.ledger = SimpleNamespace(kills=[Kill(0.5, HORNY, ids[0], 250.0, 0.0, ids[0], track=7)], die={}, dead={})
+    g.h.ledger = SimpleNamespace(kills=[Kill(clock[0] - 0.5, HORNY, ids[0], 250.0, 0.0, ids[0], track=7)], die={}, dead={})
     assert g._held(s) == []
     g.h.ledger.kills = []
     held = g._held(s)

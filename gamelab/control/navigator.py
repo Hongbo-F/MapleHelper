@@ -804,6 +804,9 @@ class Escort(Protocol):
         """Her throws so far: a shot first that threw tells apart from one that didn't (the kills don't: a hit isn't
         one, and a fight's looks may not have it in reach after all)."""
 
+    def wont_have(self, s: Scene, m: Monster) -> bool:
+        """Whether no fight would take monster `m` as things are (taken for dying, ignored by her attacks, set aside by the plan)."""
+
     def shoot_from(self, s: Scene, m: Monster, most: float, finish: bool = True) -> int | None:
         """Walk along her platform, `most` units at most, to the nearest place a star reaches monster `m` from, and
         shoot it there: the kills, or None if there's no such place."""
@@ -1005,6 +1008,7 @@ class TripState:
     # something else for her
     instead_of_waiting: Callable[[Scene, int], bool] | None = None
     stop_waiting: bool = False
+    land_near: bool = False  # (the whole screen's trip to her target's place) the quickest with her walk on to x, as that place's time was reckoned
     # (the loot chain, behavior.lootchain) Asked of her look: the way on, her drops in order ((platform, x, s to stand there), ...), or
     # [] for done. The trip is one chain of the route's moves and walks ('walk', flow.Flow._walk) through them, cut, or spliced as her
     # other trips' are; it's over with that plan, 'in position', and what's left is the hunt's next look's to say.
@@ -1156,7 +1160,7 @@ class Navigator:
               scene: Scene | None = None, keep_off=(), vary: bool = True, evade_s: float | None = None,
               refuge_s: float | None = None, on_arrival: bool = False,
               instead_of_waiting: Callable[[Scene, int], bool] | None = None,
-              through: Callable[[Scene], list] | None = None) -> TripState:
+              through: Callable[[Scene], list] | None = None, land_near: bool = False) -> TripState:
         """A trip to platform `dst`, as go() makes it, to be carried out one step() at a time. A twin is the platform
         it lies on (mapdata.MapModel.twins): she's there on either."""
         dst = self.model.place_of(dst)
@@ -1169,7 +1173,7 @@ class Navigator:
                               # has it from the map's cache since)
         st = TripState(dst, x, time.monotonic() + seconds, max_misses, until, self.health, mode,
                        keep_off=frozenset(keep_off), vary=vary, evade_s=evade_s, refuge_s=refuge_s,
-                       on_arrival=on_arrival, instead_of_waiting=instead_of_waiting, through=through)
+                       on_arrival=on_arrival, instead_of_waiting=instead_of_waiting, through=through, land_near=land_near)
         if self.keep_avoid:
             st.avoid = dict(self._avoided)
         # Her last look will do for the first pass if nothing has moved her since: one look less before she
@@ -1390,7 +1394,7 @@ class Navigator:
             return self._way_through(st, src, x), None
         penalty = self._penalty(st)
         if route.ROUTES <= 1 or not st.vary:
-            return self.planner.plan(src, x, dst, weight=self.weight, penalty=penalty), None
+            return self.planner.plan(src, x, dst, weight=self.weight, penalty=penalty, dst_x=st.x if st.land_near else None), None
         c = st.choice
         if not c.made:
             c.made = True
@@ -1419,8 +1423,8 @@ class Navigator:
         way. A walk's x is its goal, as a move's is where it starts (what her way to the route's next move is asked of it)."""
         path, place = [], self.model.place_of
         src, penalty = place(src), self._penalty(st)
+        st.stops = [(place(p), g, w) for p, g, w in st.stops]  # (a twin's the platform it lies on: as her moves have it, `_gone_by`)
         for pid, goal, stand in st.stops:
-            pid = place(pid)
             if pid != src:
                 moves = self.planner.plan(src, x, pid, penalty, self.weight, dst_x=goal)
                 if moves is None:
@@ -1488,9 +1492,15 @@ class Navigator:
         seed 10.)"""
         if not self.fight:
             return False
+        m = self.escort.in_way(s, x) if st.through is not None else None
+        if m is not None and self._no_shot(s, m):  # (MAX_FIGHTS is a trip's and a chain's a trip: without this for ever, 0.46 s a time)
+            return False
+        thrown = self.escort.throws() if m is not None else 0
         if st.fights < MAX_FIGHTS and (kills := self.escort.clear_way(s, x, finish=st.mode != TRANSIT)) is not None:
             st.fights += 1
             st.trip.kills += kills
+            if m is not None and m.track is not None and self.escort.throws() == thrown:
+                self._unshot[m.track] = time.monotonic() + UNSHOT_S
             return True
         if st.fights == MAX_FIGHTS:
             telemetry.emit("event", kind="backstop", text="MAX_FIGHTS: moving on past the monster in the way")
@@ -1498,6 +1508,11 @@ class Navigator:
         elif st.fights < MAX_FIGHTS:
             st.fights = 0  # nothing in her way
         return False
+
+    def _no_shot(self, s: Scene, m: Monster) -> bool:
+        """On a trip through her drops: whether a fight for monster `m` would say "nothing in reach" and cost her 0.4 s for nothing: the
+        fights won't have it (Escort.wont_have), or one has just thrown nothing at it (UNSHOT_S)."""
+        return self.escort.wont_have(s, m) or self._unshot.get(m.track, -1e18) > time.monotonic()
 
     def _chain_monsters(self, st: TripState, s: Scene, path: list[Move],
                         start: float | None = None) -> tuple[list, list | None]:
@@ -1871,7 +1886,7 @@ class Navigator:
         seen = next((m for t, m in st.sighted if t is mo), None)  # as the look saw it (none just after a touch)
         for step in ("shoot", "around"):
             if step == "shoot" and seen is not None and st.shots < MAX_FIGHTS:
-                if st.through is not None and (self.escort.dying(s, seen) or self._unshot.get(seen.track, -1e18) > time.monotonic()):
+                if st.through is not None and self._no_shot(s, seen):
                     continue  # (a chain through her drops: no 0.4 s for "nothing in reach": the fights' own look won't have it)
                 thrown = self.escort.throws() if st.through is not None else 0
                 kills = self.escort.clear_for(s, seen, finish=st.mode != TRANSIT)
@@ -1881,7 +1896,7 @@ class Navigator:
                 if kills is not None:
                     st.shots += 1
                     st.trip.kills += kills
-                    if st.through is not None and self.escort.throws() == thrown:
+                    if st.through is not None and seen.track is not None and self.escort.throws() == thrown:
                         self._unshot[seen.track] = time.monotonic() + UNSHOT_S
                     return True
             if step == "around" and _key(move) not in st.avoid and move.kind != "walk":
@@ -1980,6 +1995,10 @@ class Navigator:
         hunt loop's trips were touched 14% more often than with only `mo` left out: harness, 20 seeds.)
         Its backstop event says why it came to this too (`_pass_record`; `why_not`: why _meet didn't wait, as far as it
         asked: safe to stand, worth waiting, and whether its last shot was tried)."""
+        if st.through is not None:  # (her drops: a move past it regardless but no walk: as far as the route's moves, the next plan from there)
+            path = path[:next((i for i, m in enumerate(path) if m.kind == "walk"), len(path))]
+            if not path:
+                return None
         telemetry.emit("event", kind="backstop", text=why, **self._pass_record(st, s, path[0] if path else None, mo,
                                                                                why_not))
         st.waited = 0
@@ -2463,7 +2482,8 @@ class Navigator:
         cut, legs = self.follow(legs, keys, s.hp, dst, why, st.trip, st, path, monsters, since=s.t, replan=replan)
         st.trip.time["move"] += time.monotonic() - t2
         st.moved_at = time.monotonic()
-        self.actions.facing = None
+        if st.through is None or _arrows_in(legs):  # (a stand's presses alone: her facing, and the throw's retap, as they were)
+            self.actions.facing = None
         if st.through is not None:
             st.ran += _ran_over(legs, self._cut_plan if cut else None)
             st.chain_why = cut or why
@@ -2994,6 +3014,7 @@ class Navigator:
                     self.log("    the replanned chain wasn't taken in time (its plan was over): she stops there")
                     telemetry.emit("event", kind="replan", text="not taken: the plan it was for was over first")
                     self._ended(current.plan_id, cut=True)
+                    self._cut_plan = (current.legs, 0.0)  # (none of it ran)
                     cut = "off the path (the replanned chain wasn't taken in time)"
                     break
                 current = current._replace(parent=None)
@@ -4274,6 +4295,11 @@ def _route_record(st: TripState, dst: int, path: list[Move], src: int, x: float,
     the ways it chose among (`offered`: Navigator._route's), if it did."""
     return route_record(dst, path, start=(src, x), keep_off=st.keep_off - {dst}, avoid=sorted(st.avoid),
                         ways=offered)
+
+
+def _arrows_in(legs: list[Leg]) -> bool:
+    """Whether a chain's `legs` have her move at all (a 'walk' leg with its goal where she stands has no arrow in its keys)."""
+    return any(leg.move.kind != "walk" or abs(leg.end.x - leg.start.x) >= 1.0 or leg.start.run for leg in legs)
 
 
 def _ran_over(legs: list[Leg], cut: tuple | None = None) -> list[tuple[int, float, float]]:

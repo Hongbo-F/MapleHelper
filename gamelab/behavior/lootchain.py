@@ -24,7 +24,7 @@ MOST_PILES = 4      # piles a chain goes through at most ("a few": the rest are 
 # "within 15"), not tried live.
 RUN_PRESSES = 2
 PRESS_S = PILE_EVERY_MS / 1000.0
-BLOCKED_S = 0.5     # guess: s she goes the old way (a trip, a stand) after a monster stood in a chain's first walk
+CHAIN_OFF_S = 0.5   # guess: s she goes the old way (a trip, a stand) after a monster stood in a chain's first walk
 END_ROOM = 10.0     # units a drop by a platform's end is walked to short of it (under her reach: no slide off for it; a guess)
 
 
@@ -105,11 +105,13 @@ class LootChain:
             out[0] = (platform, out[0][1], PRESS_S)
         return out
 
-    def book(self, ran: list[tuple[int, float, float]]) -> None:
-        """Her chain ran her over these stretches (platform, x from, x to): the bunches within STOOD_ON of them are behind her."""
+    def book(self, ran: list[tuple[int, float, float]], place=lambda p: p) -> None:
+        """Her chain ran her over these stretches (platform, x from, x to; `place`: a twin's the platform it lies on, as her moves have
+        it: MapModel.place_of): the bunches within STOOD_ON of them are behind her."""
         for st in self.stretches:
+            on = place(st.platform)
             for i, (bx, _) in enumerate(st.bunches):
-                if i not in st.ran and any(p == st.platform and min(a, b) - STOOD_ON <= bx <= max(a, b) + STOOD_ON for p, a, b in ran):
+                if i not in st.ran and any(p == on and min(a, b) - STOOD_ON <= bx <= max(a, b) + STOOD_ON for p, a, b in ran):
                     st.ran.add(i)
 
     @property
@@ -124,8 +126,9 @@ class LootChain:
                 + ("" if self.dest is None else f", then on to x {self.dest[1]:.0f} on {self.dest[0]}"))
 
     def record(self) -> dict:
-        """The 'loot_chain' record's: each stretch's platform, bunches (x, drops), whether she ran over all of it."""
-        return {"stops": [[st.platform, [[round(x), n] for x, n in st.bunches], st.done] for st in self.stretches],
+        """The 'loot_chain' record's: each stretch's platform, bunches (x, drops), whether she ran over all of it, and whether she'd been
+        through it before (`again`: what a run through drops left behind, the first live runs' count of RUN_PRESSES)."""
+        return {"stops": [[st.platform, [[round(x), n] for x, n in st.bunches], st.done, st.again] for st in self.stretches],
                 "planned": len(self.stretches), "done": sum(st.done for st in self.stretches),
                 "est_s": round(self.est_s, 2), "dest": None if self.dest is None else [self.dest[0], round(self.dest[1])]}
 

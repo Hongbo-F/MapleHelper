@@ -814,7 +814,8 @@ def test_clip_frame_773_the_pile_on_23_below_her_with_nothing_on_her_platform(tr
                                                 (HORNY, -4.0, 23), (GREEN, -133.0, 23), (GREEN, -208.0, 15)])
     c = tg.Chooser().choose(her, foes)
     w = c.primary.way
-    assert c.primary.m.platform in (23, 24) and w.how == "trip" and w.s < 4.5
+    assert c.primary.m.platform in (23, 24) and w.how == "trip"
+    assert w.s == pytest.approx(her.lead + planner.arrive_within(22, her.x, w.platform, w.place, w.place)[0] + tg.STEP_SETTLE_S)  # (what it says is what it takes)
     assert w.pile and {o.platform for o in w.pile} <= {23, 24}
     assert c.next.m.platform in (23, 24) and c.next.m is not c.primary.m
 
@@ -838,44 +839,49 @@ def test_a_monster_in_reach_wins_by_its_time_over_a_far_pile(tree):
     assert c.primary.m is close and c.primary.way.how == "now"
 
 
-def test_the_primary_reckoned_dead_gives_way_to_the_next_at_once_and_comes_back_if_it_shows_alive(tree):
-    """Her attack choice's reckoning has it dead by her throw: the next is the plan at once, a trip if that's what it takes, said
-    'next'; if it turns out alive it's just decided again."""
-    m, planner = tree
-    a, b = _mon(m, HORNY, 200.0, 10, track=1), _mon(m, HORNY, -4.0, 23, track=2)
-    her = _screen(m, planner, 10, 0.0, [a, b])
-    ch = tg.Chooser()
-    assert ch.choose(her, [_foe(a), _foe(b)]).primary.m is a and ch.next is b
-    c = ch.choose(her, [replace(_foe(a), spent=True, p=0.2), _foe(b)])
-    assert c.primary.m is b and c.how == "next" and c.primary.way.how == "trip"
-    assert ch.choose(her, [_foe(a), _foe(b)]).primary.m in (a, b)
-
-
-def test_the_primary_reckoned_dead_with_none_other_stays(tree):
-    m, planner = tree
-    a = _mon(m, HORNY, 200.0, 10, track=1)
-    her = _screen(m, planner, 10, 0.0, [a])
-    ch = tg.Chooser()
-    ch.choose(her, [_foe(a)])
-    assert ch.choose(her, [replace(_foe(a), spent=True, p=0.2)]).primary.m is a
+def _two_on_10(m, planner, ax, bx, her_x, **next_of):
+    a, b = _mon(m, HORNY, ax, 10, track=1), _mon(m, HORNY, bx, 10, track=2)
+    her = _screen(m, planner, 10, her_x, [a, b])
+    p = m.platform(10)
+    foes = [_foe(a), _foe(b, **next_of)]
+    return her, a, b, p, _stand_limits(p, crowded=True), foes
 
 
 def test_where_she_has_a_choice_of_place_she_stands_where_the_next_is_in_reach_too(tree):
-    """The primary's stretch on her right starts where the next, on 9 above her, is still under her attack's reach: she goes the
-    little farther to where both land."""
+    """Her place for the primary is too close to the next for her attack: she goes on, on the same side of it, to where both land, its
+    way and its pile as they are from there, the score saying it's worth it."""
     m, planner = tree
-    a, b = _mon(m, HORNY, 40.0, 10, track=1), _mon(m, HORNY, 60.0, 9, track=2)
-    her = _screen(m, planner, 10, 100.0, [a, b])
-    p = m.platform(10)
-    lo, hi = _stand_limits(p, crowded=True)
-    start = next(u for u, v in tg.bands(her, a, p, lo, hi) if u > a.x)  # (the nearest of the primary's stretch on her right)
+    her, a, b, p, (lo, hi), foes = _two_on_10(m, planner, 150.0, -100.0, -80.0)
+    place = -60.0
+    assert any(u <= place <= v for u, v in tg.bands(her, a, p, lo, hi)) and not any(u <= place <= v for u, v in tg.bands(her, b, p, lo, hi))
+    t = tg.Terms(foes[0], tg.Way(1.0, "walk", place), 10.0)
+    moved = tg.also_next(her, t, tg.Terms(foes[1], tg.Way(4.0, "walk", 0.0), 5.0), foes)
+    assert moved.way.place > place and any(u <= moved.way.place <= v for u, v in tg.bands(her, b, p, lo, hi))
+    assert moved.way.s == pytest.approx(1.0 + (abs(moved.way.place + 80.0) - abs(place + 80.0)) / physics.WALK_SPEED)
+    assert b in moved.way.pile and moved.score == pytest.approx(tg._rate(foes[0], moved.way.s, [foes[1]]))
+    assert tg.also_next(her, t, None, foes) is t
+
+
+def test_a_longer_way_for_the_next_is_taken_only_if_the_score_says_so(tree):
+    """A next worth little isn't worth the walk: the place stays."""
+    m, planner = tree
+    her, a, b, p, _, foes = _two_on_10(m, planner, 150.0, -100.0, -80.0, exp=0.5, kill=9.0)
+    t = tg.Terms(foes[0], tg.Way(1.0, "walk", -60.0), 10.0)
+    assert tg.also_next(her, t, tg.Terms(foes[1], tg.Way(4.0, "walk", 0.0), 5.0), foes) is t
+
+
+def test_she_doesnt_cross_the_primary_to_a_place_that_also_reaches_the_next(tree):
+    """Only the stretch of the primary's she was going to: on its other side she'd cross it (frame 773 as first built: x 113 to x -121
+    across the horny at -4)."""
+    m, planner = tree
+    her, a, b, p, (lo, hi), foes = _two_on_10(m, planner, 40.0, -150.0, 100.0)
+    left, right = tg.bands(her, a, p, lo, hi)
     spots = tg.bands(her, b, p, lo, hi)
-    assert spots and not any(u <= start <= v for u, v in spots)
-    t = tg.Terms(_foe(a), tg.Way(1.0, "walk", start), 10.0)
-    moved = tg.also_next(her, t, tg.Terms(_foe(b), tg.Way(4.0, "walk", 0.0), 5.0))
-    assert moved.way.place > start and any(u <= moved.way.place <= v for u, v in spots)
-    assert moved.way.s > t.way.s
-    assert tg.also_next(her, t, None) is t
+    place = left[1]  # (from the left of it: the next, too close there; its stretch that reaches the next is on the right alone)
+    assert not any(u <= x <= v for u, v in spots for x in left)
+    assert any(u <= x <= v for u, v in spots for x in right)
+    t = tg.Terms(foes[0], tg.Way(1.0, "walk", place), 10.0)
+    assert tg.also_next(her, t, tg.Terms(foes[1], tg.Way(4.0, "walk", 0.0), 5.0), foes) is t
 
 
 def test_the_next_on_another_platform_has_its_trip_from_where_she_will_stand(tree):
