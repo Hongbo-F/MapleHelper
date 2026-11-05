@@ -171,6 +171,7 @@ class Grind(Hunt):
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
         if self.tp is not None and self.tp.screen:
             self.nav.react_ahead = REACT_AHEAD_S
+            self.h.attacks.whole_screen = True
             if self.nav.escort is not None:
                 self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)
         if self.tp is not None:
@@ -380,7 +381,7 @@ class Grind(Hunt):
     def _may_stop_her(self, s: Scene) -> list[Monster]:
         if self.tp is None or not self.tp.screen:
             return super()._may_stop_her(s)
-        return self.tp.targets_of(s, s.monsters)  # (else she stops for one the pass won't have, look after look, no move made)
+        return self.tp.targets_of(s.monsters)  # (else she stops for one the pass won't have, look after look, no move made)
 
     def _free_trip(self, o) -> bool:
         """Whether a trip's next pass may take any target on the screen (the whole screen: `_while_travelling`): any but one to a
@@ -537,7 +538,7 @@ class Grind(Hunt):
         if reason is not None:
             return self._leave(wide, reason, visible, hidden, now)
         if self.tp.screen and not targets and not held:  # (nothing on the screen and no drops: another area, no wait)
-            return self._leave(wide, "nothing on the screen", visible, hidden, now)
+            return self._leave(wide, "nothing left in reach", visible, hidden, now)
         if self._idle_since is not None and now - self._idle_since >= IDLE_S:
             self._idle_since = None
             return self._leave(wide, "nothing she can get at here", visible, hidden, now)
@@ -554,11 +555,13 @@ class Grind(Hunt):
         return self._travel(TO_TARGET)
 
     def _drop_objective(self, o, why: str) -> None:
-        if o.why == TO_TARGET and self.tp is not None:  # (no way there as things are: another target at the next look)
-            m = self.tp.chooser.primary
-            if m is not None and m.track is not None:
-                self.tp.no_way[m.track] = time.monotonic() + NO_WAY_S
-        return super()._drop_objective(o, why)
+        if o.why != TO_TARGET:
+            return super()._drop_objective(o, why)
+        m = self.tp.chooser.primary  # (no way there as things are: another target at the next look)
+        if m is not None and m.track is not None:
+            self.tp.no_way[m.track] = time.monotonic() + NO_WAY_S
+        self.obj = self.stack.pop() if self.stack else None
+        return None
 
     def _back_due(self, s: Scene) -> bool:
         """Whether she goes back to the stop she's at (see the top): she got to it, she's on another platform (a

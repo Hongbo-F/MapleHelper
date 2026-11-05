@@ -971,7 +971,7 @@ def test_the_order_with_nothing_in_reach_monsters_then_drops_then_another_area_a
     o = _Order(m, False, here="a pile")
     assert o.step() == ["drops"] and o.quiet_seen is True and o.tp.quiet is False
     assert _Order(m, False, leaving="its reason").step() == ["leave: its reason"]
-    assert _Order(m, False).step() == ["leave: nothing on the screen"]
+    assert _Order(m, False).step() == ["leave: nothing left in reach"]
     assert _Order(m, False, held=[SimpleNamespace(track=1)]).step() == ["wait"]  # (a hit one under its numbers: not gone for that)
     assert _Order(m, True, first="a due pile", act=("trip", 23, 0.0)).step() == ["drops"]
 

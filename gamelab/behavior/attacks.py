@@ -470,6 +470,8 @@ class Attacks:
 
     # --- after every look ------------------------------------------------------------------------
 
+    whole_screen = False  # (`refused`) the rest of the look's screen (Scene.swept) is seen too (behavior.targeting.screen_on)
+
     def on_look(self, s: Scene) -> None:
         """Her MP; the marks followed, their bars read, forgotten when unseen LOST_S, untouched FORGET_S or killed."""
         self._newest = None  # (this look's tracks are as new)
@@ -608,7 +610,7 @@ class Attacks:
         if not self.picks:
             return None
         s = self._last
-        if s is None or not any(o is m for o in s.monsters) and not any(o is m for o in s.swept):
+        if s is None or not (any(o is m for o in s.monsters) or self.whole_screen and any(o is m for o in s.swept)):
             return "unseen"
         if self._dying(m, time.monotonic(), s.monsters) or self._corpse(m, s.monsters):
             return "dead"

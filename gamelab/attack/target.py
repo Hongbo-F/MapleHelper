@@ -279,11 +279,11 @@ def _quickest(her: Her, f: Foe, on: Platform, x: float, lead: float) -> Way | No
 
 
 def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, lead: float | None = None,
-            far: bool = True, on: Platform | None = None, jump: bool = True) -> Way | None:
+            far: bool = True, on: Platform | None = None) -> Way | None:
     """How she gets an attack on it soonest from map (x, y) (where she stands by default) on platform `on` (hers by default),
     her next keys `lead` s on (her lock's by default): at once if her attack from the ground lands on it there; up close
     (stance.too_close: it can't, by where it will be then) a two-key jump attack, or a step to range where her attack doesn't
-    go from a jump; a jump's shot (`her.jump_hits`, asked only from where she stands, and `jump`); else the walk to the nearest
+    go from a jump; a jump's shot (`her.jump_hits`, asked only from where she stands); else the walk to the nearest
     place from which it lands (`places`), or with `her.routes` the soonest of that and a trip to another platform (`_quickest`).
     None where none does, or (`far` False: `Chooser.rank`, the search for a jump's or a walk's left out) where it would take
     one."""
@@ -304,7 +304,7 @@ def soonest(her: Her, f: Foe, x: float | None = None, y: float | None = None, le
         return Way(lead + (TAP_S if turn else 0.0), "now")
     if not far:
         return None
-    if here and jump and her.jumps and her.jump_hits is not None and her.jump_hits(m):
+    if here and her.jumps and her.jump_hits is not None and her.jump_hits(m):
         return Way(lead + JUMP_S, "jump")
     if her.routes is not None:
         return _quickest(her, f, p, x, lead)

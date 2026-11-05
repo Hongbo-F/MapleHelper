@@ -413,7 +413,7 @@ class Targeting:
         del self.blocked[dst]
         return False
 
-    def targets_of(self, s, monsters: list) -> list:
+    def targets_of(self, monsters: list) -> list:
         """Of `monsters` those she may have as a target now: not set aside (`no_way`), nor ignored by her attacks."""
         ignored = getattr(self.h.attacks, "ignored", None) or ()
         return [m for m in monsters if getattr(m, "track", None) not in self.no_way and getattr(m, "track", None) not in ignored]
