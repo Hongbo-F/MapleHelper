@@ -264,12 +264,22 @@ def test_the_plan_takes_the_itinerarys_first_few_piles():
     assert [st.pile for st in c.stretches] == piles[:lc.MOST_PILES] and c.est_s == 1.0 + lc.MOST_PILES - 1
 
 
-def test_the_plan_ends_at_a_pile_not_seen_yet_not_landed_or_with_a_monster_to_shoot_first():
-    for odd in ({"status": "expected"}, {"guards": (object(),)}, {"lands": 0.5}):
+def test_the_plan_ends_short_of_a_monster_to_shoot_first():
+    g = _grind()
+    piles = [_pile(50.0), _pile(100.0), _pile(150.0)]
+    _with_itinerary(g, piles, [_stop(piles[0]), _stop(piles[1], guards=(object(),)), _stop(piles[2])])
+    assert [st.pile for st in g._loot_plan(_look()).stretches] == piles[:1]
+
+
+def test_a_pile_not_seen_yet_or_not_landed_is_the_plans_last_to_its_middle():
+    for odd in ({"status": "expected"}, {"lands": 0.5}):
         g = _grind()
-        piles = [_pile(50.0), _pile(100.0, status=odd.get("status", "seen")), _pile(150.0)]
-        _with_itinerary(g, piles, [_stop(piles[0]), _stop(piles[1], guards=odd.get("guards", ()), lands=odd.get("lands", 0.0)), _stop(piles[2])])
-        assert [st.pile for st in g._loot_plan(_look()).stretches] == piles[:1]
+        piles = [_pile(50.0), _pile(100.0, status=odd.get("status", "seen"), xs=()), _pile(150.0)]
+        _with_itinerary(g, piles, [_stop(piles[0]), _stop(piles[1], lands=odd.get("lands", 0.0)), _stop(piles[2])], dest=(8, 0.0))
+        g._target_place = (8, 0.0)
+        c = g._loot_plan(_look())
+        assert [st.pile for st in c.stretches] == piles[:2] and c.dest is None
+        assert c.stretches[1].bunches == [(100.0, 1)] and not c.stretches[1].seen
 
 
 def test_before_her_target_only_the_piles_that_may_go_before_it():
@@ -300,13 +310,6 @@ def test_a_stretch_goes_by_the_drops_as_the_store_has_them():
     assert st.bunches == [(30.0, 1), (70.0, 1)] and st.kinds == ("horny-cap",)
 
 
-def test_a_pile_a_look_has_found_empty_is_no_stretch_for_now_and_no_try():
-    g = _grind()
-    p = _pile(50.0)
-    p.empty_since = 1.0
-    assert g._stretch(_look(), p) is None and p.tries == 0
-
-
 def test_a_stretch_leaves_out_a_full_tabs_items_and_says_so_with_nothing_left():
     g = _grind()
     g.h.looter.can_take = lambda k: False
@@ -325,16 +328,22 @@ def test_a_drop_she_has_been_at_twice_that_stays_is_told_as_a_stand_tells_it():
     assert ("stuck", [d]) in g.said
 
 
-def test_a_pile_shes_been_through_that_a_look_sees_empty_is_no_stop(monkeypatch):
+def test_a_pile_a_look_sees_empty_is_no_stop(monkeypatch):
     g = _grind()
-    p = _pile(50.0, tries=1)
+    p = _pile(50.0)
     p.empty_since = 1.0
     monkeypatch.setattr(grind_mod.Hunt, "_candidate", lambda self, p, s=None: True)
     assert not g._candidate(p)
     p.empty_since = None
     assert g._candidate(p)
-    p.empty_since, p.tries = 1.0, 0  # (another's, never been to: the store's second sighting says)
-    assert g._candidate(p)
+
+
+def test_the_plan_goes_on_past_a_pile_with_nothing_to_take():
+    g = _grind()
+    g.h.looter.can_take = lambda k: False
+    piles = [_pile(50.0, xs=(50.0,), items=("cap",)), _pile(100.0)]
+    _with_itinerary(g, piles)
+    assert [st.pile for st in g._loot_plan(_look()).stretches] == piles[1:] and piles[0].tries == 1
 
 
 def _over(g, chain, ran, result="in position", why="done", blocked=False):
@@ -385,11 +394,12 @@ def test_the_switch(monkeypatch):
     assert lc.on()
 
 
-def test_with_it_off_or_no_chain_her_drops_go_the_old_way(monkeypatch):
+def test_with_it_off_by_a_kills_drops_not_seen_yet_or_with_a_guard_her_drops_go_the_old_way(monkeypatch):
     g = _grind()
     g.tp.chain = False
     called = []
     monkeypatch.setattr(grind_mod.Hunt, "_sweep_act", lambda self, *a: called.append("old"))
+    monkeypatch.setattr(grind_mod.Hunt, "_at_pile", lambda self, s, p: True)
     p = _pile(50.0)
     _with_itinerary(g, [p])
     g._sweep_act(_look(), _stop(p), [], [], 0.0)
@@ -400,3 +410,11 @@ def test_with_it_off_or_no_chain_her_drops_go_the_old_way(monkeypatch):
         p.status = status
         g._sweep_act(_look(), stop, [], [], 0.0)
         assert called == ["old"]
+
+
+def test_over_a_stretch_not_seen_yet_isnt_a_try_nor_a_stand():
+    g = _grind()
+    a = _pile(50.0, status="expected", xs=())
+    chain = lc.LootChain([lc.Stretch(a, [(50.0, 1)], seen=False)])
+    assert _over(g, chain, [(9, 0.0, 50.0)]) is True
+    assert a.tries == 0 and id(a) not in g._stood and g.h.report.loot_runs == 0

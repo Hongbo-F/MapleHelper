@@ -58,6 +58,7 @@ class Stretch:
     bunches: list[tuple[float, int]]
     kinds: tuple[str, ...] = ()
     again: bool = False
+    seen: bool = True   # (False: drops no look has seen yet, or not landed: a chain ends there, and a look says)
     ran: set[int] = field(default_factory=set)
     booked: bool = False
 

@@ -977,7 +977,9 @@ def loot_visits(world, drops: list, records: list[dict], end: float) -> dict:
     """How she goes through her drops (World.still_log, her pick-ups, the 'loot_chain' records): her visits (`visits`: her own key's
     pick-ups VISIT_GAP_S apart at most), `per_visit` drops in each, `stops_per` stands of STOP_LEAST_S or more in each from VISIT_BEFORE_S
     before its first drop to its last, `stops_per_drop` the same a drop, `still_per` the s she stood in each, `still_s_min` those s a minute;
-    `chains` the loot chains (behavior.lootchain), `chain_stops` the piles planned a chain, `chain_done` the share of them she got through."""
+    `chains` the loot chains (behavior.lootchain), `chain_stops` the piles planned a chain, `chain_done` the share of them she got through;
+    `by_120`, `by_end` of her drops landed by 120 s, and by 15 s before the end, the share she picked up (where drops_share counts only fates known
+    by the end, a far pile still lying isn't in it)."""
     taken = sorted(d.taken_at for d in drops if d.taken_by == "her" and not getattr(d, "pet", False)
                    and d.taken_at is not None and d.taken_at <= end)
     visits: list[list[float]] = []
@@ -1007,10 +1009,15 @@ def loot_visits(world, drops: list, records: list[dict], end: float) -> dict:
     chains = [r for r in records if r.get("topic") == "loot_chain"]
     n, picks = len(visits), len(taken)
     planned = sum(c["planned"] for c in chains)
+
+    def share(by: float) -> float:
+        hers = [d for d in drops if d.owner == "her" and d.since <= by]
+        return round(sum(d.taken_by == "her" and d.taken_at <= end for d in hers) / len(hers), 3) if hers else 0.0
     return {"visits": n, "per_visit": round(picks / n, 3) if n else 0.0, "stops_per": round(stops / n, 3) if n else 0.0,
             "stops_per_drop": round(stops / picks, 3) if picks else 0.0, "still_per": round(still / n, 3) if n else 0.0,
             "still_s_min": round(still * 60.0 / max(end, 1e-9), 2), "chains": len(chains), "chain_stops": planned,
-            "chain_done": round(sum(c["done"] for c in chains) / planned, 3) if planned else 0.0}
+            "chain_done": round(sum(c["done"] for c in chains) / planned, 3) if planned else 0.0,
+            "by_120": share(120.0), "by_end": share(end - 15.0)}
 
 
 LANDING_MOVED = 30.0  # (landings) units along her platform a landing on it moved her at least, as the live diagnosis's
