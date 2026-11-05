@@ -294,6 +294,7 @@ class Hunter:
         self.exp_events: list[tuple[float, str | None]] = []
         self.told: deque[tuple[float, str | None]] = deque(maxlen=64)
         self.exp_gains = 0  # kills her EXP told of, ever (reports are replaced; this isn't)
+        self.exp_rises = 0  # her EXP's gains of any size, ever: a share of a kill with a stranger is no kill's size (Attacks.gains)
         self._no_hit_clips = 0  # recordings of her attacks hitting nothing this run (_no_hit)
         self.meter = ExpMeter(model.mob_exp)  # her EXP as read off its number, and what each gain was
         self._exp: np.ndarray | None = None  # the last look's EXP number (text pixels)
@@ -355,7 +356,7 @@ class Hunter:
         self.attacks.rate = lambda: fight.made_rate(self)
         self.attacks.touched = lambda s: fresh_touch(self.senses, s, slack=fight.TOUCH_ROUND_S) is not None
         self.attacks.retap = lambda: self.actions.retap()
-        self.attacks.gains = lambda: self.exp_gains
+        self.attacks.gains = lambda: self.exp_rises
         self.attacks.no_hit = self._no_hit
         if mode != "regular":
             self.actions.choose = self.attacks.key
@@ -1677,6 +1678,7 @@ class Hunter:
     def _gained(self, g: Gain, s: Scene) -> None:
         """A gain of her EXP: its kills counted (exp_events, told, the report), each at its time, or, if no kill
         explains it, logged; with her EXP as read, for the mini-map and the run's record (telemetry 'exp')."""
+        self.exp_rises += 1
         for i, kind in enumerate(g.kinds):
             self.darts.kill(g.when(i))  # (her presses did something: out of darts' stretch starts again)
             self.exp_events.append((g.when(i), kind))
