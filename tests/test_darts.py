@@ -260,7 +260,7 @@ def test_her_casts_and_her_bar_reach_the_watch_through_her_attack_choice():
     a = object.__new__(Attacks)
     a.darts, a._cast, a.mp, a._casts, a._read, a._warned = DartWatch(), 0.02, 0.5, [], None, False
     a.counts, a._keyed, a._swipe = Counter(), None, False  # (no throw at a target chosen: on_throw's pending time)
-    a._ground = True
+    a._ground, a._misses = True, []
     a.on_throw(1.0, "left")
     assert a.darts.keys == [1.0]
     a.on_throw(2.0, "left")  # the regular attack (no cast chosen): not a press of Lucky Seven
