@@ -37,7 +37,7 @@ from ..localization.monsters import Monster, speeds
 from ..localization.rate import HZ
 from ..motion.route import KEEP_OFF_S
 from ..perception.spawns import FADE_PER_S
-from . import fight
+from . import fight, lootchain
 
 FRAME_S = 1.0 / HZ    # s between two frames perception looks at: `watch_lock`'s step
 HELD_P = 0.25         # (her casts) a monster her cast won't go at for now (a hold: rule 3): this much less likely to be hit
@@ -148,6 +148,7 @@ class Targeting:
         self.counts: Counter = Counter()
         self.ms = {"choice": _hist(), "glance": _hist(), "peek": _hist()}
         self.screen = screen_on()
+        self.chain = self.screen and lootchain.on()  # her drops as one chain through a few (behavior.lootchain)
         self.quiet = False                  # (`Grind._planned_step`: no monster on the screen, her drops whatever they take)
         self.blocked: dict[int, float] = {}  # a platform a trip to it would have waited for a monster -> until when (`rather`)
         self._known: tuple = (None, {})      # the danger Her.known is for, and it

@@ -2292,6 +2292,7 @@ class World:
         self.claw_ms = 0
         self.close_ms = 0
         self.idle_log: list[tuple[float, str]] = []  # (`_idleness`)
+        self.still_log: list[float] = []             # (`_idleness`) when she stood, every IDLE_EVERY_MS, whatever for
         self.screen: Callable[[], tuple[float, float, float, float]] | None = None  # the camera's view (FakeEyes)
         # Every attack's pick (_aim), with what came of it (_attack): (key s, plan, "ground" or "air", turned in the air
         # in this flight before it, the attack key's ms after her lift-off, the nearest live monster on the platform she
@@ -3143,8 +3144,10 @@ class World:
         """Whether she stands idle now: on the ground, no speed, her last attack's key IDLE_LOCK_S ago or more (the live
         clip's measure, its 'stand' frames: D:/MapleHelper-scratch/stiff/pause_prize.py), kept with what's on the screen:
         'none' no live monster, 'here' one on her platform, 'other' only on other platforms (the harness's `idle`)."""
-        if self.mode != "ground" or self.vx or self.glide or self.dead or self.screen is None \
-                or self.origin + self.t - self.attack_key_at < IDLE_LOCK_S:
+        if self.mode != "ground" or self.vx or self.glide or self.dead:
+            return
+        self.still_log.append(self.t)  # (standing, whatever for: the harness's `loot`)
+        if self.screen is None or self.origin + self.t - self.attack_key_at < IDLE_LOCK_S:
             return
         x0, y0, x1, y1 = self.screen()
         here = self.plat.id if self.plat is not None else None

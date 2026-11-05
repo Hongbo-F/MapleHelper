@@ -58,11 +58,13 @@ from ..localization.monsters import Monster, bodies
 from ..localization.scene import Scene
 from ..motion.bodies import HER_HALF
 from ..motion.physics import WALK_SPEED
-from . import fight
+from . import fight, lootchain
+from ..perception.loot import MESOS
 from .hunt import PASSING_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
+from .looting import LOOT_REACH, STOOD_ON
 from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
-from .targeting import ASKS, IDLE_S, NO_WAY_S, REACT_AHEAD_S, Targeting
+from .targeting import ASKS, IDLE_S, NO_WAY_S, REACT_AHEAD_S, ROUTE_STEP, Targeting
 from .targeting import on as target_on
 
 SEARCH_S = 2.5         # s past a kill's drops' landing (ledger.DROP_LANDS, LANDED_S) she waits by its pile for a search of it that can say
@@ -167,6 +169,7 @@ class Grind(Hunt):
         self._promised_at: float | None = None
         # The target-first planner (behavior.targeting; GAMELAB_TARGET): the fights at a stop, arrivals included
         self.tp: Targeting | None = Targeting(self) if target_on() else None
+        self._chain_off = -1e18  # until when her drops go the old way: a monster stood in a chain's first walk (lootchain.BLOCKED_S)
         self._planned = False  # (the stance being asked is the planner's, for the primary: `_among`)
         self._asked = (None, None, None, None)  # (the look, target, approach and act of the stance last asked unsaid: `_stance`)
         if self.tp is not None and self.tp.screen:
@@ -544,6 +547,168 @@ class Grind(Hunt):
             return self._leave(wide, "nothing she can get at here", visible, hidden, now)
         return self._wait(wide, targets)
 
+    # --- the loot chain (behavior.lootchain) ------------------------------------------------------------------------
+
+    def _candidate(self, p, s: Scene | None = None) -> bool:
+        """The hunt loop's, and with the chain not a pile she's been through that a look since has seen empty: no stop for it while the
+        store's second sighting comes (a look that sees drops there has it back at once)."""
+        if self.tp is not None and self.tp.chain and p.tries and p.empty_since is not None:
+            return False
+        return super()._candidate(p, s)
+
+    def _stand_s(self, p) -> float:
+        """With the chain, seen drops: the walk over their stretch and only the presses a run through them won't give."""
+        if self.tp is None or not self.tp.chain or not p.xs:
+            return super()._stand_s(p)
+        lo, hi = self._extent(p)
+        return sum(lootchain.stand_s(n, p.tries > 0) for _, n in lootchain.bunches(p.xs)) + (hi - lo) / WALK_SPEED
+
+    def _sweep_act(self, s: Scene, stop, visible, hidden, now: float) -> None:
+        """The sweep's next stop carried out: as a chain through it and the ones after (`_loot_plan`) where its drops have been seen and
+        have landed; else as the hunt loop's: its guards first, a kill's drops not seen yet, the walk over their spread."""
+        sp = stop.spot
+        if self.tp is None or not self.tp.chain or sp.guards or sp.lands > 0.0 or time.monotonic() < self._chain_off:
+            return super()._sweep_act(s, stop, visible, hidden, now)
+        pile = self._pile_of.get(sp.key)
+        if pile is None or pile.status != "seen":
+            return super()._sweep_act(s, stop, visible, hidden, now)
+        chain = self._loot_plan(s)
+        if chain is None:
+            return None  # (nothing to take where it was: said so, the next look's sweep goes on)
+        self.log(f"  loot: {chain.text()}")
+        return self._go_for(chain.stretches[0].pile, "sweep", s, after=self._sweeper.dest, chain=chain)
+
+    def _loot_plan(self, s: Scene) -> "lootchain.LootChain | None":
+        """The chain through the first MOST_PILES of the sweep's itinerary as look `s` has them, up to a pile not seen yet or not
+        landed, or with a monster to shoot first; before her target only those that may go before it (Targeting.pile_first);
+        on to where the sweep's way goes on to. None: nothing to take at the first."""
+        it, c, now = self._sweeper.current, self.tp.choice, time.monotonic()
+        before = self._sweeper.dest is None and c is not None and c.primary is not None
+        stretches, est = [], 0.0
+        for stop in it.stops:
+            p = self._pile_of.get(stop.spot.key)
+            if len(stretches) >= lootchain.MOST_PILES or p is None or p.status != "seen" or stop.spot.guards \
+                    or stop.spot.lands > 0.0 or (before and stretches and not self.tp.pile_first(p, stop, now)):
+                break
+            st = self._stretch(s, p)
+            if st is None:
+                if not stretches:
+                    return None
+                continue
+            stretches.append(st)
+            est = stop.leave
+        if not stretches:
+            return None
+        return lootchain.LootChain(stretches, self._sweeper.dest, s, est, time.monotonic())
+
+    def _stretch(self, s: Scene, p) -> "lootchain.Stretch | None":
+        """Pile `p` as a stretch of a chain: where its drops she can take lie, as look `s` shows them (Looter.wanted; a drop she has been
+        at twice that's still there: looting.cant_pick, as a stand's), else as last seen. None, with its try spent, if the look has it
+        with nothing to take."""
+        looter = self.h.looter
+        near = [d for d in s.loot if d.platform == p.platform and abs(d.x - p.x) <= LOOT_REACH]
+        if near:
+            seen = looter.wanted(near)
+            kept = self._stood.get(id(p))
+            if kept is not None and kept[0] is p:
+                stuck = [d for d in seen if sum(abs(sx - d.x) <= STOOD_ON for sx in kept[1]) >= 2]
+                if stuck:
+                    looter.cant_pick(stuck)
+                    seen = [d for d in seen if not any(d is k for k in stuck)]
+            xs, kinds = [d.x for d in seen], tuple(d.item.kind for d in seen if not d.mesos)
+        else:
+            can = getattr(looter, "can_take", None)
+            items = p.items if len(p.items) == len(p.xs) else (None,) * len(p.xs)
+            drops = [(x, k) for x, k in zip(p.xs, items) if k is None or k == MESOS or can is None or can(k)]
+            drops = [(x, k) for x, k in drops if not any(q == p.platform and abs(x - ux) <= STOOD_ON for ux, q, _ in looter.unpickable)]
+            xs, kinds = [x for x, _ in drops], tuple(k for _, k in drops if k is not None and k != MESOS)
+        if not xs:
+            self._tried(p)
+            return None
+        return lootchain.Stretch(p, lootchain.bunches(xs), kinds, p.tries > 0)
+
+    def _through(self, o):
+        return None if o.chain is None else self._loot_way
+
+    def _loot_way(self, s: Scene) -> list:
+        """The chain's way on as of look `s` (TripState.through). Its first look's what it was planned on."""
+        o = self.obj
+        if o is None or o.chain is None:
+            return []
+        planner = self.nav.planner
+
+        def enter(a, ax, b, lo, hi):
+            got = planner.arrive_within(a, round(ax / ROUTE_STEP) * ROUTE_STEP, b, lo, hi)
+            return None if got is None else got[1]
+        return o.chain.way(s.platform.id, s.where.x, enter)
+
+    def _chain_over(self, o, result: str) -> bool:
+        """Her trip through her drops over, one plan: each stretch she ran over taken as stood on (its try, what a stand tells: `_stand`'s
+        end; what's left the next look says), its 'loot_chain' record, and the objective done with where it's all behind her or nothing was
+        sent for it; else it stays, the next pass's (a shot in passing first, then `_on_sweep`). A failed trip (`_travel`'s) is as any
+        pile's."""
+        chain, st = o.chain, o.trip
+        chain.book(st.ran)
+        looter = self.h.looter
+        for part in chain.stretches:
+            if part.ran and not part.booked:
+                part.booked = True
+                kept = self._stood.get(id(part.pile))
+                if kept is None or kept[0] is not part.pile:
+                    kept = self._stood[id(part.pile)] = (part.pile, [])
+                kept[1].extend(part.bunches[i][0] for i in sorted(part.ran))
+                if (seen := getattr(looter, "stood_on", None)) is not None:
+                    seen(list(part.kinds), part.pile)
+                self._tried(part.pile)
+                self.h.report.loot_runs += 1
+                if telemetry.recording():
+                    telemetry.emit("event", kind="pick", platform=part.platform, x=round(part.pile.x), drops=sum(n for _, n in part.bunches),
+                                   stood=[round(part.bunches[i][0]) for i in sorted(part.ran)], tries=part.pile.tries)
+        looter.pending.clear()
+        self._idle_since = None
+        counts = self.tp.counts
+        counts["loot chains"] += 1
+        counts["loot stops planned"] += len(chain.stretches)
+        counts["loot stops done"] += sum(p.done for p in chain.stretches)
+        why = st.chain_why or ("a monster in its first walk" if st.walk_blocked else result)
+        if telemetry.recording():
+            telemetry.emit("loot_chain", why=why, result=result, s=round(time.monotonic() - chain.started, 2), **chain.record())
+        if st.walk_blocked:
+            self._chain_off = time.monotonic() + lootchain.BLOCKED_S
+        if result not in ("arrived", "in position"):
+            return False  # (`_travel`: said, and dropped as any trip that failed)
+        if chain.done or st.walk_blocked or result == "arrived":
+            self.obj = self.stack.pop() if self.stack else None
+        return True
+
+    def _chain_stops(self, s: Scene, o) -> bool:
+        """Whether look `s` ends a chain that's about to go on (asked before it sets off and at its look ahead): a monster on her,
+        its first pile gone, a valuable pile that goes first, one she has hurt to finish, or the choice has a monster in reach now. Not the
+        look it was planned on: that's said its say. Asked of the choice rather than of a star's reach as a trip's are (`Hunt._interrupt`): a
+        monster the ledger takes for dead, in a star's reach, has no shot from the pass that follows, and stopped her look after look
+        (the harness's seed 3 at 62 s)."""
+        if s is o.chain.planned_on:
+            return False
+        wanted = self._may_stop_her(s)
+        if self._close_quarters(s, wanted) or self._worthless(o.pile) or self._owed(s, s.monsters) is not None:
+            return True
+        if (pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False):
+            return True
+        if getattr(s, "what_if", False):
+            return False
+        c = self.tp.peek(s)
+        return c.primary is not None and c.primary.way.how not in ("walk", "trip")
+
+    def _on_sweep(self, s: Scene, visible, hidden, now: float) -> None:
+        """(A chain's objective, still on after a trip that stopped short, its passing shots taken: the sweep solved again, a new chain.)"""
+        o = self.obj
+        if o.chain is None:
+            return super()._on_sweep(s, visible, hidden, now)
+        after = self._after_pile()
+        self.obj = self.stack.pop() if self.stack else None
+        stop = self._sweep(s, after)
+        return None if stop is None else self._sweep_act(s, stop, visible, hidden, now)
+
     def _to_place(self, s: Scene, act: tuple, visible, hidden, now: float) -> None:
         """To where her target can be hit from: a trip of the navigator's (its legs against every monster, as any), her drops on
         the way first (the sweep's, within what each may add to her way). Decided again as `_interrupt` says."""
@@ -764,6 +929,8 @@ class Grind(Hunt):
         the whole screen (Targeting.screen): a trip to her target's place stops when the choice has something else for her,
         or for a pile that goes first; a trip to a stop, for any monster on the screen."""
         o = self.obj
+        if o is not None and o.chain is not None:
+            return self._chain_stops(s, o)
         if self.tp is not None and self.tp.screen and o is not None and o.kind == "spot":
             if o.why == TO_TARGET:
                 wanted = [m for m in s.monsters if self.kinds is None or m.kind in self.kinds]

@@ -424,6 +424,7 @@ class Objective:
     finishing: float = 0.0     # s spent finishing what she had hurt (rule 4b)
     why: str = ""              # the rule that set it ("valuable pile", "sweep", ...)
     after: tuple | None = None  # a sweep's pile: where its itinerary goes on to after it (platform, x)
+    chain: object | None = None  # a sweep's pile: the chain through it and the next ones (behavior.lootchain), its trip one plan
     detours: int = 0           # piles taken on the way (rule 5b) while it was suspended
 
     def text(self) -> str:
@@ -1519,7 +1520,7 @@ class Hunt:
         row on the harness's seed 9 (60 s on 19, the objective's clock its end)."""
         o = self.obj
         if o is None or o.kind not in ("spot", "pile") or (o.kind == "pile" and o.why != "sweep") \
-                or o.why == "back to spot":
+                or o.why == "back to spot" or getattr(o, "chain", None) is not None:
             return False
         keep = None
         if getattr(s, "what_if", False) and hasattr(self, "_sweeper"):
@@ -2026,7 +2027,7 @@ class Hunt:
         any wanted monster in reach, the pile under her waiting)."""
         return self._shoot_rate(s, s.monsters)[0] > 0.0
 
-    def _go_for(self, pile: Pile, rule: str, s: Scene, after: tuple | None = None) -> None:
+    def _go_for(self, pile: Pile, rule: str, s: Scene, after: tuple | None = None, chain=None) -> None:
         """A trip to pile `pile` for rule `rule` (the sweep's, a valuable pile's): its objective, the one she was on
         suspended under it; or, where her stand there would meet the map's next pass by a free spawn point (the spawn
         guard: `_respawn_guard`), nothing yet ('<rule>: the pass'), the next look deciding again."""
@@ -2049,7 +2050,7 @@ class Hunt:
             self.stack.append(parent)  # suspended
         if rule == "valuable pile":
             pile.rushed += 1
-        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule, after=after)
+        self.obj = Objective("pile", pile.platform, pile.x, pile=pile, why=rule, after=after, chain=chain)
         if rule == "sweep" and parent is not None:
             # A stop on the way shoots in passing out of the trip's own budget, and leaves finishing to it (once
             # it's done she owes them still): with budgets of their own, its stops shot on and on, and in the
@@ -2285,7 +2286,7 @@ class Hunt:
         o.trip = self.nav.begin(o.platform, o.x, seconds=max(5.0, OBJECTIVE_S - o.age()),
                                 until=self._interrupt, mode=TRANSIT, scene=self._seen, keep_off=_keep_off(o),
                                 vary=self._varies(o), on_arrival=self._ends_on_arrival(o),
-                                instead_of_waiting=self._instead_of_waiting(o))
+                                instead_of_waiting=self._instead_of_waiting(o), through=self._through(o))
         o.trip.weights, o.trip.choice = o.weights, o.choice
         chains = o.trip.trip.chains
         while not o.trip.over:
@@ -2294,12 +2295,22 @@ class Hunt:
             if o.trip.trip.chains > chains:
                 chains = o.trip.trip.chains
         result = o.trip.trip.result
+        if o.chain is not None and self._chain_over(o, result):
+            return None
         if result == "arrived" or (result == "in position" and o.kind == "spot" and self._on_spot(o)):
             return self._arrived(o)
         if result == "in position":
             return None  # a rule fired: the next pass decides (OBJECTIVE_S is checked there)
         self.log(f"  {o.text()}: {result}")
         return self._drop_objective(o, result)
+
+    def _through(self, o: Objective):
+        """What objective o's trip asks for the way on through her drops (TripState.through; behavior.grind's loot chain; the hunt loop's: nothing)."""
+        return None
+
+    def _chain_over(self, o: Objective, result: str) -> bool:
+        """A trip through her drops over (behavior.grind's loot chain): whether that's dealt with."""
+        return False
 
     def _instead_of_waiting(self, o: Objective):
         """What's asked before objective o's trip stands and waits for a monster (TripState.instead_of_waiting; behavior.grind's
