@@ -177,6 +177,8 @@ class Grind(Hunt):
         if self.tp is not None and self.tp.chain:
             self.nav.keep_avoid = True
             self.h.looter.store_has_them = True
+            if self.nav.escort is not None:
+                self.nav.escort.quick = True  # (a fight on a trip only where it can throw, and over the moment there's nothing to throw at)
         if self.tp is not None and self.tp.screen:
             self.nav.react_ahead = REACT_AHEAD_S
             self.h.attacks.whole_screen = True

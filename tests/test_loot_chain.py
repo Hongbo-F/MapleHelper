@@ -459,3 +459,28 @@ def test_a_move_and_two_stops_are_one_plan():
     assert len(taken) == 3
     assert any("loot: 2 stops" in line for line in trace["log"]) and any("climb->10, walk->10, walk->10" in line for line in trace["log"])
     assert not any(taken[-2] <= t <= taken[-1] for t in world.still_log)
+
+
+def _way_fight(m):
+    from gamelab.behavior.fight import FightOnTheWay
+    f = FightOnTheWay.__new__(FightOnTheWay)
+    f.quick, f.not_ignored = True, False
+    f.cleared = []
+    f.h = SimpleNamespace(log=lambda text: None, report=SimpleNamespace(exp_kills=0),
+                          clear=lambda *a, **k: f.cleared.append(k), attacks=SimpleNamespace(ignored=()))
+    f.in_way = lambda s, x: m
+    f.dying = lambda s, q: False
+    return f
+
+
+def test_a_fight_on_a_trip_only_where_it_can_throw_and_no_patience():
+    far = SimpleNamespace(x=300.0)
+    s = SimpleNamespace(where=SimpleNamespace(x=0.0))
+    f = _way_fight(far)
+    f.reaches = lambda s, m, jump=False: False
+    assert f.clear_way(s, 400.0) is None and not f.cleared  # (no 0.4 s of "nothing in reach": the chain goes as far as it's clear)
+    f.reaches = lambda s, m, jump=False: True
+    assert f.clear_way(s, 400.0) == 0 and f.cleared[0]["patience"] == 0.0
+    f.dying = lambda s, q: True
+    f.cleared.clear()
+    assert f.clear_way(s, 400.0) is None and not f.cleared
