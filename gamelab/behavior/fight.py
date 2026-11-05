@@ -1695,7 +1695,6 @@ class FightOnTheWay:
         self.kinds: set[str] | None = None  # shoot monsters in reach of these kinds only (None: all); any
                                             # in her way is shot
         self.not_ignored = False  # (behavior.grind's whole screen) `reaches` says no of one her attacks ignore (Attacks.ignored)
-        self.quick = False  # (behavior.grind's loot chain) a fight on a trip only where it can throw, over the moment there's nothing to throw at (no GUARD_PATIENCE)
 
     def target(self, s: Scene) -> Monster | None:
         """The monster to shoot from where she stands, if any is in reach (pick_target's choice), else one she
@@ -1730,11 +1729,9 @@ class FightOnTheWay:
         respawns never stop, ran to their GUARD_SECONDS twice as often as before it, and some trips ran out."""
         if (m := self.in_way(s, x)) is None:
             return None
-        if self.quick and (self.dying(s, m) or (abs(m.x - s.where.x) > TOO_CLOSE and not self.reaches(s, m))):
-            return None  # (no fight to be had from here: the chain goes as far as it's clear of it)
         self.h.log(f"  {m.kind} in the way at x {m.x:.0f}: shooting it first")
         before = self.h.report.exp_kills
-        self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=0.0 if self.quick else GUARD_PATIENCE, approach=False, finish_wounds=finish)
+        self.h.clear(max_kills=2, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE, approach=False, finish_wounds=finish)
         return self.h.report.exp_kills - before
 
     def threat(self, kind: str) -> bool:
@@ -1755,7 +1752,7 @@ class FightOnTheWay:
             return None
         self.h.log(f"  {m.kind} on platform {m.platform} at x {m.x:.0f} could touch her on the way: shooting it first")
         before = self.h.report.exp_kills
-        self.h.clear({m.kind}, ground={m.platform}, max_kills=1, seconds=GUARD_SECONDS, patience=0.0 if self.quick else GUARD_PATIENCE,
+        self.h.clear({m.kind}, ground={m.platform}, max_kills=1, seconds=GUARD_SECONDS, patience=GUARD_PATIENCE,
                      approach=False, far=True, finish_wounds=finish)
         return self.h.report.exp_kills - before
 

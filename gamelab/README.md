@@ -7788,6 +7788,7 @@ Beside it, with the switch on only: a fight on a trip leaves its kills' drops to
 | b3 ac1006a | +36.0 (+2.61), 11.05, 3.66 | +24.1 (+2.40), 11.48, 5.69 | `peek` as the pass has them, so any monster in reach stops it; on to her target's place only; no second look for a way around; a fight's drops the store's |
 | b4 0f2259d | +30.0 (+1.66), 10.72, 3.58 | -2.5 (-0.15), 10.79, 4.70 | a kill's drops not seen yet a chain's last; bug for 100%: every pile a look saw empty no stop, a kill's too (drops .967, .965) |
 | b5 70e203f | +19.6 (+1.06), 10.33, 3.13 | +1.1 (+0.08), 10.92, 5.09 | only those seen before: **this table** (cfbd264 moves a set piece's seed, 16cc041 no plan for walks of nothing: `spot` the same to the digit) |
+| b6 fefab6f, reverted | +37.1 (+2.74), 10.00, 3.17 | -21.8 (-1.41), 10.41, 4.00 | a fight on a trip only where a star reaches and no `GUARD_PATIENCE`. On 48 seeds against b5, paired: the thief's EXP +7.4 (t +0.94), idle -0.76 (-3.9), her EXP -17.4 (-2.2), kills -3.1 (-2.8), idle 0.00: a star's reach isn't what her casts reach, and nothing gained for her |
 
 The spread of her EXP from b2 to b3 (71) is over 4 standard errors of one arm, and neither arm's her EXP held on more seeds: no arm was kept for its EXP, and the table below has 36 seeds none of these arms saw.
 
@@ -7826,6 +7827,8 @@ A chain's plan on the real clock: its way 0.08-0.54 ms at the median for 1-4 sto
 **The switch off**: the whole screen alone: `a5`'s 24 seeds both characters against the switch off, only the new `loot` key differs; `GAMELAB_SCREEN=0 GAMELAB_LOOT_CHAIN=0`: 92a2b1f's 24 seeds both characters, the same EXP and touches, `spot` of seeds 3 and 9 the same to the digit but for `loot`.
 
 **Goldens**: with the chain, Tree Dungeon's 48: 32 the same to the byte as with both switches off (they don't reach her drops by the planner, or aren't the grind's), 16 differ: `D:/MapleHelper-scratch/next-move/lc/golden_lines.txt` has a line for each. Not recorded again in any lab: a merge has that to do. `loop_tree_attack_no_darts` moved to seed 1 (2 no longer met its checks; of 1-12, 1, 5, 10 do).
+
+**Open**: a fight on a trip that finds nothing to throw at says "nothing in reach" and waits `GUARD_PATIENCE`: about 0.4 s each, the thief 23 a run, her 44 (of 8 seeds each; 15 and 28 with the switch off), some after a real fight: at most 1.8 and 3.5 s a minute of what's left of her idle. In `loop_tree_remembered_keys` it's 101 in 126 s: her trips stopped by it, her kills 32 -> 11 (its checks met). b6 above was the try at it.
 
 **Not done**: the 15 fps look between her chains and what's next isn't gone (a chain's end to the next key is a slide, a look, a decision: about 0.1-0.2 s); nothing checked live: a run through a drop's reach is the simulator's reach and her speed, and the live pet isn't in these worlds; `MOST_PILES`, `RUN_PRESSES`, `END_ROOM`, `BLOCKED_S`, `UNSHOT_S` are guesses, not tuned; a valuable pile's trip (rule 6a) and a kill's drops she's by still go the old way.
 
