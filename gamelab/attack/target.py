@@ -67,7 +67,6 @@ PILE_MOST = 3        # guess: the monsters at a place she'd really kill before t
 ABOVE_MOST = 150.0   # units: her search reaches no higher over her feet (reach.window's at STAR_RANGE: 129), the quick check of a place
 BELOW_MOST = 70.0    # ... and no lower under them (reach.SHOT_DOWN 60)
 JUMP_ABOVE = 230.0   # units: ... and from a jump no higher than this over where she stands (77 up, ABOVE_MOST)
-JUMP_ASKS = 2        # (`_rank_screen`) monsters a jump's search is asked of at a look at most, the nearest (3 ms each, the dear part)
 
 
 @dataclass(frozen=True)
@@ -390,27 +389,28 @@ def _rank_screen(her: Her, foes: list[Foe], keep: tuple) -> list[Terms]:
             out.append(_checked(her, f, way, place_score(her, f, way, foes)[1]) or Terms(f, way, score(f, way)))
     near = bool(out)
     best = max((t.score for t in out), default=0.0)
-    if her.jumps and her.jump_hits is not None:  # (a jump's shot from where she stands: the nearest in height, with none in reach)
-        at_once = Way(her.lead + JUMP_S, "jump")
-        for f in sorted((f for f in rest if (f in keep or not near) and abs(f.m.x - her.x) <= reach.SHOT_RANGE
-                         and -JUMP_ABOVE <= f.m.y - her.y <= BELOW_MOST), key=lambda f: abs(f.m.x - her.x) + abs(f.m.y - her.y))[:JUMP_ASKS]:
-            if her.jump_hits(f.m):
-                out.append(Terms(f, at_once, score(f, at_once)))
-                best = max(best, out[-1].score)
-                rest.remove(f)
     places = []
     for f in rest:
         ways = sorted(((*place_score(her, f, w, foes), w) for w in _ways(her, f, her.platform, her.x, her.lead)), key=lambda o: -o[0])
         places.append((ways[0][0] if ways else 0.0, f, ways))
     places.sort(key=lambda o: -o[0])
+    asks = 0 if near or not her.jumps or her.jump_hits is None else 1  # (a jump's shot from where she stands: the best alone)
     for top, f, ways in places:
-        if f in keep or top > best:
+        t = None
+        if (f in keep and her.jumps and her.jump_hits is not None or asks) and abs(f.m.x - her.x) <= reach.SHOT_RANGE \
+                and -JUMP_ABOVE <= f.m.y - her.y <= BELOW_MOST and her.jump_hits(f.m):
+            way = Way(her.lead + JUMP_S, "jump")
+            t = Terms(f, way, score(f, way))
+        elif f in keep or top > best:
             t = next(filter(None, (_checked(her, f, w, pile) for _, pile, w in ways)), None)
-            if t is not None:
-                out.append(t)
-                best = max(best, t.score)
         elif ways:  # (it can't be chosen: its terms as they are)
-            out.append(Terms(f, replace(ways[0][2], pile=tuple(o.m for o in ways[0][1])), top))
+            t = Terms(f, replace(ways[0][2], pile=tuple(o.m for o in ways[0][1])), top)
+            out.append(t)
+            continue
+        asks = 0
+        if t is not None:
+            out.append(t)
+            best = max(best, t.score)
     return sorted(out, key=lambda t: -t.score)
 
 

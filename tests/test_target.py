@@ -4,6 +4,7 @@ against her target, and the backpack's push (control.notify.BackpackPush)."""
 
 import contextlib
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -740,3 +741,246 @@ def test_the_switch_is_on_by_default_the_users_call_and_off_with_0(monkeypatch):
     with targeting.forced_on():
         assert not targeting.on()
     assert targeting.on()
+
+
+# --- the whole screen (GAMELAB_SCREEN): every monster a candidate, across platforms, her place's pile, the next ready ------------
+
+def _screen(m, planner, pf, x, around, magician=False, lead=0.0, facing="right"):
+    """Her as `_her`, with the navigator's route times and every platform's stand (Targeting.her_at's, GAMELAB_SCREEN on)."""
+    her = _her(m, pf, x, around, magician, lead=lead, facing=facing)
+    return replace(her, routes=lambda src, sx, dst, lo, hi: planner.arrive_within(src, sx, dst, lo, hi), stands=tg.in_height(m.places))
+
+
+def _scene(m, planner, pf, x, monsters, exp=None, kill=None, magician=False):
+    """A frame of the 18:18:04 review clip: her on `pf` at `x`, `monsters` (kind, x, platform) on the screen."""
+    mons = [_mon(m, k, mx, p, track=i + 1) for i, (k, mx, p) in enumerate(monsters)]
+    foes = [_foe(o, exp={HORNY: 41.0, GREEN: 26.0}[o.kind], kill={HORNY: 2.4, GREEN: 1.4}[o.kind]) for o in mons]
+    return _screen(m, planner, pf, x, mons, magician), foes
+
+
+def test_arrive_within_is_the_quickest_landing_with_the_walk_into_the_stretch(tree):
+    m, planner = tree
+    t, g = planner.arrive_within(10, 0.0, 9, -40.0, 60.0)
+    assert -40.0 <= g <= 60.0 and t == pytest.approx(planner.arrive(10, 0.0, 9, g))
+    assert planner.arrive_within(10, 0.0, 10, 40.0, 40.0) == (pytest.approx(40.0 / physics.WALK_SPEED), 40.0)
+    assert planner.arrive_within(10, 0.0, 9, 1e3, 1e3 + 1)[1] == 1e3  # (the stretch taken as given: bands keep it on the platform)
+
+
+def test_clip_frame_20_a_walk_along_9_to_where_she_hits_the_two_on_other_platforms(tree):
+    """18:18:05.9: on 9 at -24, three on the screen, none on her platform: she stood 0.47 s (master: 'sweep', then a jump attack at
+    the Green Mushroom on 8). The choice has one of those two, and walks to where her attack lands on both."""
+    m, planner = tree
+    her, foes = _scene(m, planner, 9, -24.5, [(GREEN, 148.0, 8), (HORNY, -195.0, 7), (HORNY, 286.0, 6)])
+    c = tg.Chooser().choose(her, foes)
+    assert c.primary is not None and c.primary.m.platform in (7, 8)
+    w = c.primary.way
+    assert w.how == "walk" and w.place is not None
+    p = m.platform(9)
+    assert reach.can_hit(p, w.place, p.y_at(w.place), c.primary.m)
+    assert c.next is not None and c.next.m is not c.primary.m
+
+
+@both
+def test_clip_frame_40_nothing_in_reach_she_sets_off_for_one_on_the_screen(tree, magician):
+    """18:18:07.2: on 9 at -24, a Horny Mushroom on 7 right above, too close sideways to hit, another on 6, a Green on 8. Master
+    walked 115 'to shoot it first', stopped 'out of her attack's reach', and went on for the stop. The choice goes where her attack
+    lands, and has the next before it's there."""
+    m, planner = tree
+    with _as(magician):
+        her, foes = _scene(m, planner, 9, -24.5, [(HORNY, -66.0, 7), (HORNY, 286.0, 6), (GREEN, 148.0, 8)], magician=magician)
+        c = tg.Chooser().choose(her, foes)
+        w = c.primary.way
+        assert c.next is not None
+        if magician:  # (her search picks it from here)
+            assert w.how == "now"
+            return
+        assert w.how in ("walk", "trip") and w.place is not None
+        q = m.platform(w.platform if w.how == "trip" else 9)
+        assert reach.can_hit(q, w.place, q.y_at(w.place), c.primary.m, sizes=her.sizes)
+
+
+def test_clip_frame_125_no_monster_on_the_screen_no_target(tree):
+    """18:18:12.9: on 8 at 144 with no monster on the screen: no target (her drops are next: `Grind._planned_step`)."""
+    m, planner = tree
+    her, foes = _scene(m, planner, 8, 143.6, [])
+    assert tg.Chooser().choose(her, foes).primary is None
+
+
+def test_clip_frame_773_the_pile_on_23_below_her_with_nothing_on_her_platform(tree):
+    """18:18:56.2: 3.42 s standing on 22 at -110 (master: the sweep, 'leaving stop', 'waiting for the horny-mushroom to move off'),
+    seven on the screen, none on 22, the two on 23 under her out of reach of it. The choice sets off for those two at once."""
+    m, planner = tree
+    her, foes = _scene(m, planner, 22, -110.4, [(GREEN, 102.0, 16), (GREEN, 127.0, 18), (HORNY, -217.0, 20), (GREEN, 249.0, 24),
+                                                (HORNY, -4.0, 23), (GREEN, -133.0, 23), (GREEN, -208.0, 15)])
+    c = tg.Chooser().choose(her, foes)
+    w = c.primary.way
+    assert c.primary.m.platform in (23, 24) and w.how == "trip" and w.s < 4.5
+    assert w.pile and {o.platform for o in w.pile} <= {23, 24}
+    assert c.next.m.platform in (23, 24) and c.next.m is not c.primary.m
+
+
+def test_a_pile_draws_her_over_a_lone_monster_as_far_off(tree):
+    """Two trips as long, one to one monster, one to a place that reaches three: the three, by the place's score."""
+    m, planner = tree
+    her = _screen(m, planner, 10, 0.0, [])
+    lone = _foe(_mon(m, HORNY, -100.0, 13, track=1), kill=2.4)
+    pile = [_foe(_mon(m, HORNY, x, 7, track=t), kill=2.4) for t, x in ((2, -120.0), (3, -80.0), (4, -40.0))]
+    t = tg.rank(her, [lone, *pile])[0]
+    assert t.m.platform == 7 and len(t.way.pile) == 2 and t.score > tg.score(t.foe, t.way)
+
+
+def test_a_monster_in_reach_wins_by_its_time_over_a_far_pile(tree):
+    m, planner = tree
+    close = _mon(m, HORNY, 200.0, 10, track=9)
+    her = _screen(m, planner, 10, 0.0, [close])
+    pile = [_foe(_mon(m, HORNY, x, 23, track=t), kill=2.4) for t, x in ((2, -120.0), (3, -80.0), (4, -40.0))]
+    c = tg.Chooser().choose(her, [_foe(close, kill=2.4), *pile])
+    assert c.primary.m is close and c.primary.way.how == "now"
+
+
+def test_the_primary_reckoned_dead_gives_way_to_the_next_at_once_and_comes_back_if_it_shows_alive(tree):
+    """Her attack choice's reckoning has it dead by her throw: the next is the plan at once, a trip if that's what it takes, said
+    'next'; if it turns out alive it's just decided again."""
+    m, planner = tree
+    a, b = _mon(m, HORNY, 200.0, 10, track=1), _mon(m, HORNY, -4.0, 23, track=2)
+    her = _screen(m, planner, 10, 0.0, [a, b])
+    ch = tg.Chooser()
+    assert ch.choose(her, [_foe(a), _foe(b)]).primary.m is a and ch.next is b
+    c = ch.choose(her, [replace(_foe(a), spent=True, p=0.2), _foe(b)])
+    assert c.primary.m is b and c.how == "next" and c.primary.way.how == "trip"
+    assert ch.choose(her, [_foe(a), _foe(b)]).primary.m in (a, b)
+
+
+def test_the_primary_reckoned_dead_with_none_other_stays(tree):
+    m, planner = tree
+    a = _mon(m, HORNY, 200.0, 10, track=1)
+    her = _screen(m, planner, 10, 0.0, [a])
+    ch = tg.Chooser()
+    ch.choose(her, [_foe(a)])
+    assert ch.choose(her, [replace(_foe(a), spent=True, p=0.2)]).primary.m is a
+
+
+def test_where_she_has_a_choice_of_place_she_stands_where_the_next_is_in_reach_too(tree):
+    """The primary's stretch on her right starts where the next, on 9 above her, is still under her attack's reach: she goes the
+    little farther to where both land."""
+    m, planner = tree
+    a, b = _mon(m, HORNY, 40.0, 10, track=1), _mon(m, HORNY, 60.0, 9, track=2)
+    her = _screen(m, planner, 10, 100.0, [a, b])
+    p = m.platform(10)
+    lo, hi = _stand_limits(p, crowded=True)
+    start = next(u for u, v in tg.bands(her, a, p, lo, hi) if u > a.x)  # (the nearest of the primary's stretch on her right)
+    spots = tg.bands(her, b, p, lo, hi)
+    assert spots and not any(u <= start <= v for u, v in spots)
+    t = tg.Terms(_foe(a), tg.Way(1.0, "walk", start), 10.0)
+    moved = tg.also_next(her, t, tg.Terms(_foe(b), tg.Way(4.0, "walk", 0.0), 5.0))
+    assert moved.way.place > start and any(u <= moved.way.place <= v for u, v in spots)
+    assert moved.way.s > t.way.s
+    assert tg.also_next(her, t, None) is t
+
+
+def test_the_next_on_another_platform_has_its_trip_from_where_she_will_stand(tree):
+    m, planner = tree
+    a, b = _mon(m, GREEN, 150.0, 10, track=1), _mon(m, HORNY, -4.0, 23, track=2)
+    her = _screen(m, planner, 10, 0.0, [a, b])
+    c = tg.Chooser().choose(her, [_foe(a), _foe(b)])
+    assert c.primary.m is a and c.next.m is b and c.next.way.how == "trip" and c.next.way.platform in (22, 23, 24, 21, 25)
+    assert "trip to" in targeting._next_text(c.next, a) and "as #1 dies" in targeting._next_text(c.next, a)
+
+
+def test_off_a_monster_out_of_reach_of_her_platform_is_no_candidate(tree):
+    """No routes (GAMELAB_SCREEN=0): the planner before it."""
+    m, _ = tree
+    far = _mon(m, HORNY, -4.0, 23, track=2)
+    her = _her(m, 10, 0.0, [far], False)
+    assert tg.Chooser().choose(her, [_foe(far)]).primary is None
+
+
+def test_the_switch(monkeypatch):
+    monkeypatch.delenv("GAMELAB_SCREEN", raising=False)
+    assert targeting.screen_on()
+    monkeypatch.setenv("GAMELAB_SCREEN", "0")
+    assert not targeting.screen_on()
+
+
+def test_with_no_monster_on_the_screen_her_drops_whatever_they_take(tree):
+    m, _ = tree
+    tp = _targeting(m)
+    s = _look_at(m)
+    s.platform = m.platform(10)
+    far = _pile(10.0, platform=23)
+    far.status = "seen"
+    assert tp.loot_allow(far, s, far.born + 10.0) == targeting.LOOT_FRESH
+    tp.quiet = True
+    assert tp.loot_allow(far, s, far.born + 10.0) == targeting.LOOT_ALL
+
+
+class _Order(Grind):
+    """`_planned_step` with what it asks stubbed: which of her options it takes."""
+
+    def __init__(self, m, targets=False, act=("wait",), here=None, leaving=None, first=None, held=()):
+        self.tp = _targeting(m)
+        self.tp.chooser, self.acts = tg.Chooser(), []
+        self.h = self.tp.h
+        self._targets_, self._act, self._here_, self._leaving_, self._first, self._held_ = targets, act, here, leaving, first, list(held)
+        self._idle_since = None
+        self.quiet_seen = None
+
+    def _pile_first(self, s):
+        return self._first
+
+    def _stance(self, s, targets, visible, hidden, approach, log=True, goal=None):
+        return self._act
+
+    def _here(self, s, say=True):
+        self.quiet_seen = self.tp.quiet
+        return self._here_
+
+    def _wide(self, s):
+        return s
+
+    def _held(self, s):
+        return self._held_
+
+    def _leaving(self, s, held):
+        return self._leaving_
+
+    def _sweep_act(self, s, stop, visible, hidden, now):
+        self.acts.append("drops")
+
+    def _to_place(self, s, act, visible, hidden, now):
+        self.acts.append("to place")
+
+    def _shoot(self, s, targets, visible, hidden, now, rule, approach):
+        self.acts.append("shoot")
+
+    def _leave(self, s, reason, visible=(), hidden=(), now=None):
+        self.acts.append("leave: " + reason)
+
+    def _wait(self, s, targets):
+        self.acts.append("wait")
+
+    def step(self):
+        self._planned_step(object(), ["a target"] if self._targets_ else [], [], [], 0.0)
+        return self.acts
+
+
+def test_the_order_with_nothing_in_reach_monsters_then_drops_then_another_area_and_no_wait(tree):
+    m, _ = tree
+    assert _Order(m, True, ("trip", 23, 0.0), here="a pile").step() == ["to place"]
+    assert _Order(m, True, ("throw", "right"), here="a pile").step() == ["shoot"]
+    o = _Order(m, False, here="a pile")
+    assert o.step() == ["drops"] and o.quiet_seen is True and o.tp.quiet is False
+    assert _Order(m, False, leaving="its reason").step() == ["leave: its reason"]
+    assert _Order(m, False).step() == ["leave: nothing on the screen"]
+    assert _Order(m, False, held=[SimpleNamespace(track=1)]).step() == ["wait"]  # (a hit one under its numbers: not gone for that)
+    assert _Order(m, True, first="a due pile", act=("trip", 23, 0.0)).step() == ["drops"]
+
+
+def test_the_log_says_the_pile_and_the_next_s_move(tree):
+    m, planner = tree
+    her, foes = _scene(m, planner, 22, -110.4, [(HORNY, -4.0, 23), (GREEN, -133.0, 23), (GREEN, -90.0, 23)])
+    c = tg.Chooser().choose(her, foes)
+    text = targeting._pile_text(c.primary)
+    assert text.startswith(", pile of ") and " on 23 at x " in text and text.endswith(" s away")
+    rec = c.primary.record(her.x)
+    assert rec["on"] == 23 and rec["place"] == pytest.approx(c.primary.way.place, abs=0.1) and len(rec["pile"]) >= 1
