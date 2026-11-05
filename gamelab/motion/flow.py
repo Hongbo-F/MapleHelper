@@ -337,13 +337,15 @@ def _via(a: Platform, b: "Body", start: "Body", t1: float, x1: float) -> list[Sp
 
 def _tap_pick_up(k: Keys, legs: list[Leg]) -> None:
     """Pick up whatever she runs over, as a player taps the key all the way."""
+    last = -math.inf  # (along a walk's legs one beat, whatever they're cut into: a tap too near the next merges with it)
     for leg in legs:
-        every = WALK_PICK_EVERY if leg.move.kind == "walk" else PICK_EVERY
+        walk = leg.move.kind == "walk"
+        every = WALK_PICK_EVERY if walk else PICK_EVERY
         for sp in leg.spans:
-            t = sp.t0
+            t = max(sp.t0, last + every) if walk else sp.t0
             while t < sp.t1:
                 k.tap(t, "pick")
-                t += every
+                last, t = t, t + every
 
 
 class Flow:

@@ -25,6 +25,7 @@ MOST_PILES = 4      # piles a chain goes through at most ("a few": the rest are 
 RUN_PRESSES = 2
 PRESS_S = PILE_EVERY_MS / 1000.0
 BLOCKED_S = 0.5     # guess: s she goes the old way (a trip, a stand) after a monster stood in a chain's first walk
+END_ROOM = 10.0     # units a drop by a platform's end is walked to short of it (under her reach: no slide off for it; a guess)
 
 
 def on() -> bool:

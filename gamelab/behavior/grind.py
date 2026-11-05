@@ -625,7 +625,9 @@ class Grind(Hunt):
         if not xs:
             self._tried(p)
             return None
-        return lootchain.Stretch(p, lootchain.bunches(xs), kinds, p.tries > 0)
+        q = self.model.platform(p.platform)
+        bunches = [(min(max(x, q.left + lootchain.END_ROOM), q.right - lootchain.END_ROOM), n) for x, n in lootchain.bunches(xs)]
+        return lootchain.Stretch(p, bunches, kinds, p.tries > 0)
 
     def _through(self, o):
         return None if o.chain is None else self._loot_way
@@ -659,7 +661,8 @@ class Grind(Hunt):
                 kept[1].extend(part.bunches[i][0] for i in sorted(part.ran))
                 if (seen := getattr(looter, "stood_on", None)) is not None:
                     seen(list(part.kinds), part.pile)
-                self._tried(part.pile)
+                if part.done:  # (a try's the whole of it: cut short halfway, it's as if she'd been stopped on her way there)
+                    self._tried(part.pile)
                 self.h.report.loot_runs += 1
                 if telemetry.recording():
                     telemetry.emit("event", kind="pick", platform=part.platform, x=round(part.pile.x), drops=sum(n for _, n in part.bunches),
