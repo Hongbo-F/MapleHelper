@@ -7697,6 +7697,15 @@ What it can and can't say. Its monsters the look misses are alive (90% against 5
 
 The user, 2026-11-04: "I think on a short term, planner should just decide which mob to hit and plan against that. This is simple, less costly, and easy to follow." And: "you should watch for respawns at each frame. You should also change target if a mob is moving towards you and can knock you back, if you are not already attacking that mob. While you pick the primary target, it's also good to think about what's your next target". On loot: "you should aim for 100% pick up rate and if backpack is full, send a regular push notification". It replaces nothing but the grind's fights and loot on a platform, arrivals included; the platform choice (`Patrol.choose`), trips between platforms, rope hangs, the Lie Detector stop, the low-HP stop and pet feeding are as they were. Off, the grind is the one before it to the digit (harness: 20 runs of both characters in both worlds; goldens: 47 of 47 to the byte).
 
+### When her attacks hit nothing (2026-11-04)
+
+At 22:35 that evening a frame read her facing left, wrongly, and 85 attacks went into the wall behind her over 71 s. There are two failsafes.
+
+- **The arrow again** (`Attacks._landing`, `Actions.retap`): two throws at one monster with no HP bar on it and no EXP since, and the next throw taps the arrow first.
+- **No hit** (`Attacks._watch_hits`, `Hunter._no_hit`). The user: "if throwing 4 times (or casting 4 times) without hitting any mob, save a recording of the episode for later analysis, from 3s before to 3s after. And ignore the target for attack target for 15s (you should still try to runaway or dodge it)". A hit is any monster's HP bar new or lower, or a kill her EXP told of. It's judged a second after the 4th attack's key, so a 5th may go first. The monsters those attacks went at aren't targets for 15 s, and go to the stance's `unsure`, which her body keeps off with no throw. The recording goes to `lab/recent/<time>-no-hit`, 30 a run at most; the log and a telemetry `no_hit` event say each one.
+
+**Not done:** why the frame read her wrong; a throw the other way at a monster behind the ignored one still hits the ignored one, as stars take the first in their way.
+
 ### How it works
 
 - **Which monster** (`attack/target.py`, `Chooser.choose`, `score`): EXP of the kind over (time to get an attack on it + time to kill it), weighted by the chance it's there (`behavior/presence.py`, her throws' reckoning). A hurt or chasing one has no term: it's close and quick to kill. Kept until dead, gone, or beaten by `MARGIN` (1.3).

@@ -38,7 +38,7 @@ from .. import paths, telemetry
 from ..attack import danger
 from ..attack.choice import Attack
 from ..attack.reach import LOOK_DOWN, LOOK_UP
-from ..control import client
+from ..control import alarm, client
 from ..control.actions import Actions
 from ..control.mover import STILL, Mover
 from ..control.navigator import Navigator, TopPrice, fresh_touch, rope_at_top
@@ -60,7 +60,7 @@ from ..perception.heading import Reading
 from ..perception.hud import exp_changed
 from ..perception.touches import DAMAGE, HP, MISS, POPUP
 from . import damage, fight
-from .attacks import Attacks
+from .attacks import NO_HIT_CLIPS, NO_HIT_PAD_S, Attacks
 from .darts import DartWatch, MpWatch, presses_for
 from .fight import Report
 from .keycheck import CAST_DOUBT, Doubt, KeyCheck, KeyDoubt, MoveWatch, RegularWatch, regular_reach, unquiet
@@ -294,6 +294,7 @@ class Hunter:
         self.exp_events: list[tuple[float, str | None]] = []
         self.told: deque[tuple[float, str | None]] = deque(maxlen=64)
         self.exp_gains = 0  # kills her EXP told of, ever (reports are replaced; this isn't)
+        self._no_hit_clips = 0  # recordings of her attacks hitting nothing this run (_no_hit)
         self.meter = ExpMeter(model.mob_exp)  # her EXP as read off its number, and what each gain was
         self._exp: np.ndarray | None = None  # the last look's EXP number (text pixels)
         self._last_hp: float | None = None
@@ -355,6 +356,7 @@ class Hunter:
         self.attacks.touched = lambda s: fresh_touch(self.senses, s, slack=fight.TOUCH_ROUND_S) is not None
         self.attacks.retap = lambda: self.actions.retap()
         self.attacks.gains = lambda: self.exp_gains
+        self.attacks.no_hit = self._no_hit
         if mode != "regular":
             self.actions.choose = self.attacks.key
             self.senses.shows = self.attacks.shown_by  # (the look a throw is decided on has the last one's kill)
@@ -1617,6 +1619,27 @@ class Hunter:
         telemetry.emit("event", kind="heading", text=text, seen=reading.record(), keys=against,
                        since_arrow=round(since_arrow, 2), since_hit=None if since_hit is None else round(since_hit, 2),
                        **({"shot": shot.name} if shot is not None else {}))
+
+    def _no_hit(self, s: Scene, thrown: list[tuple], tracks: set[int], until: float) -> None:
+        """Her attacks hit nothing (Attacks._watch_hits): said, and the recording of it saved beside the hunt, from
+        NO_HIT_PAD_S before the first attack's key to as long after this look (NO_HIT_CLIPS a run at most)."""
+        who = ", ".join(f"#{t}" for t in sorted(tracks)) or "no monster"
+        text = (f"no hit: {len(thrown)} attacks over {thrown[-1][0] - thrown[0][0]:.1f} s hit nothing: {who} not attacked "
+                f"for {until - s.t:.0f} s")
+        self.log(f"  {text}")
+        telemetry.emit("event", kind="no_hit", text=text, tracks=sorted(tracks), attacks=len(thrown),
+                       x=None if s.where is None else round(s.where.x, 1),
+                       platform=None if s.platform is None else s.platform.id)
+        self._no_hit_clips += 1
+        if self._no_hit_clips > NO_HIT_CLIPS:
+            return
+        seconds = NO_HIT_PAD_S + (time.monotonic() - thrown[0][0]) + NO_HIT_PAD_S
+        alarm.keep_recent_after(NO_HIT_PAD_S, seconds, "no-hit", self._no_hit_kept)
+
+    def _no_hit_kept(self, said: str) -> None:
+        """What came of a no-hit recording (`_no_hit`; a thread's, the recorder's answer)."""
+        self.log(f"  no hit: {said}")
+        telemetry.emit("event", kind="no_hit_clip", text=said)
 
     def _tell_feed(self, when: float, side: str) -> None:
         """A throw (Actions.throw_listeners) told to the feed (localization.tracking: whose kills are whose), with the

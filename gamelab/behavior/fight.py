@@ -411,7 +411,13 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     st.flinching = hit + hidden
     st.touch = _unsure_by_her(h, s)
     st.sightings = {tr.id: tr.last_seen for tr in (getattr(s, "tracks", None) or ()) if tr.last_seen < s.t}
+    ignored = getattr(getattr(h, "attacks", None), "ignored", None)  # (her attacks hit nothing: Attacks._watch_hits)
+    if ignored:
+        wanted = [m for m in wanted if getattr(m, "track", None) not in ignored]
     shot, st.unsure = shots_at(h, s, hidden, wanted)
+    if ignored:  # (no target, but her body keeps off them: the stance's `unsure`)
+        shot = [m for m in shot if getattr(m, "track", None) not in ignored]
+        st.unsure = [*st.unsure, *(m for m in visible if getattr(m, "track", None) in ignored)]
     return wanted + shot, visible, hidden
 
 
@@ -1174,7 +1180,10 @@ def owed(h: "Hunter", s: Scene, st: FightState | None = None, hurt_by: float | N
     visible = s.monsters if st is None else [m for m in s.monsters if m not in st.fading(s.monsters)]
     out = []
     worth = getattr(getattr(h, "attacks", None), "worth_a_throw", None)
+    ignored = getattr(getattr(h, "attacks", None), "ignored", ())
     for w in wounds:
+        if getattr(w, "track", None) in ignored:
+            continue
         again = seen_again(w, visible)
         if again is None and any(seen_again(w, [m]) is not None for m in s.monsters):
             continue  # seen fading out where it died

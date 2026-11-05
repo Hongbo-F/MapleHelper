@@ -952,6 +952,10 @@ class FakePlayer:
         self.kept.append([self.trace.at(self.clock.now), seconds, name])
         return f"the recording's last {seconds:g} s saved (simulated: nothing written)"
 
+    def keep_recent_after(self, delay: float, seconds: float, name: str, then) -> None:
+        """control.alarm.keep_recent_after in a simulated run: asked at once, no thread."""
+        then(self.keep_recent(seconds, name))
+
     # --- plans ---------------------------------------------------------------------------------------------------
 
     def send(self, events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lead_ms=100, name="plan",
@@ -1239,6 +1243,7 @@ def patched(clock: Clock, player: FakePlayer, folder: Path) -> Iterator[None]:
         from ..control import alarm
         put(alarm, "page", player.page)
         put(alarm, "keep_recent", player.keep_recent)
+        put(alarm, "keep_recent_after", player.keep_recent_after)
         mods = [m for n, m in list(sys.modules.items()) if n.startswith("gamelab") and not n.startswith("gamelab.sim")]
         for mod in mods:
             for name, value in list(vars(mod).items()):
