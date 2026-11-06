@@ -64,7 +64,7 @@ from .hunt import PASSING_S, TRIP_AHEAD_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .looting import STOOD_ON
 from .patrol import STOP_S, TAKE_WEIGHT, TICK_S, Patrol, choice_text, filled, reaching
-from .targeting import ASKS, IDLE_S, NO_WAY_S, ROUTE_STEP, Targeting, stay_or_go
+from .targeting import ASKS, IDLE_S, NO_WAY_S, ROUTE_STEP, Targeting
 from .targeting import on as target_on
 
 SEARCH_S = 2.5         # s past a kill's drops' landing (ledger.DROP_LANDS, LANDED_S) she waits by its pile for a search of it that can say
@@ -392,7 +392,7 @@ class Grind(Hunt):
 
     def _instead_of_waiting(self, o):
         if self.tp is None or not self.tp.screen or o.why not in (TO_TARGET, "sweep"):
-            return None  # (a stop's trip: she waits, and any monster on the screen ends it)
+            return None  # (a stop's trip: she waits, and what beats her round on the screen ends it: `_free_trip`)
         return self.tp.rather
 
     def _may_stop_her(self, s: Scene) -> list[Monster]:
@@ -418,24 +418,26 @@ class Grind(Hunt):
         """Her next is a trip: the round's nearest stop in its place, if what she'd make of her round is clearly over what the screen has
         had for her lately (`weighs`; the user, 2026-11-05, on the report's #4: the numbers can put another area ahead of monsters on
         the screen she'd have to go to). None: the trip to her target. Monsters in reach or on her platform aren't asked about, nor
-        where a pile seen pulls her to a stop on the platform she's on (Patrol.choose: going again at each look there, 26 times in 1.6 s, seed 201)."""
-        if not self.tp.weighs:
+        where a pile seen pulls her to a stop on the platform she's on (Patrol.choose: going again at each look there, 26 times in 1.6 s, seed 201),
+        nor while a trip has just given way for a monster in its way (`piles_wait`: 44 trips in 3 s to a pile that monster stood by, seed 304)."""
+        if not self.tp.weighs or self.tp.piles_wait():
             return None
         self._look_at_round(time.monotonic())
         j = self.patrol.nearest(s.platform.id, s.where.x) if self._round_bar() > GO_GAIN * self.tp.lately else None
-        if j is None or self.patrol.stops[self._instead(s, heading=j)[0]].platform == s.platform.id:
+        if j is None or (i := self._instead(s, heading=j)[0]) is None or self.patrol.stops[i].platform == s.platform.id:  # (None: every stop skipped)
             return None
         return j
 
     def _go(self, s: Scene, j: int) -> None:
-        """Off to her round's stop `j` (`_goes`), said; a census trip she's on is over: the numbers have spoken."""
+        """Off to her round's stop `j` (`_goes`; a pile she has seen may pull her to another, `_next_ground`), said with where she does go; a census
+        trip she's on is over: the numbers have spoken."""
         tp, p, bar = self.tp, self.patrol, self._round_bar()
-        self.log(f"  going: {bar * 60:.0f} EXP a minute of her round, the screen's had {tp.lately * 60:.0f} lately ({tp.got * 60:.0f} now), "
-                 f"{len(tp.foes)} monsters: stop {p.platform_of(j)}")
-        telemetry.emit("grind", what="go", lately=round(tp.lately * 60), got=round(tp.got * 60), bar=round(bar * 60), here=s.platform.id,
-                       stop=p.platform_of(j), monsters=len(tp.foes), **p.plan.record(p.platform_of))
         p.trip = None
         self._next_ground(s, heading=j)
+        self.log(f"  going: {bar * 60:.0f} EXP a minute of her round, the screen's had {tp.lately * 60:.0f} lately ({tp.got * 60:.0f} now), "
+                 f"{len(tp.foes)} monsters: stop {p.platform_of(self.stop)}")
+        telemetry.emit("grind", what="go", lately=round(tp.lately * 60), got=round(tp.got * 60), bar=round(bar * 60), here=s.platform.id,
+                       stop=p.platform_of(self.stop), monsters=len(tp.foes), **p.plan.record(p.platform_of))
         return self._travel("advance")
 
     def _home(self) -> tuple[int, float] | None:
@@ -643,7 +645,7 @@ class Grind(Hunt):
                     or (stretches and stop.arrive <= TRIP_AHEAD_S and self._respawn_guard(s, p, stop.arrive) is not None):
                 break  # (the guard on her first pile's `_go_for`'s, as ever)
             if p.status != "seen" or stop.spot.lands > 0.0:  # (nothing to run over for sure: the look there has it)
-                if abs(self._off_end(p, p.x) - p.x) > lootchain.OFF_END:  # (no way to it: a chain to its platform's end, none of her looks there
+                if self.tp.weighs and abs(self._off_end(p, p.x) - p.x) > lootchain.OFF_END:  # (no way to it: a chain to its platform's end, none of her looks there
                     self._tried(p)                                        # by it, and again, every 0.2 s for 150 s: S6's seed 3 with the design's first form)
                     continue
                 last = lootchain.Stretch(p, [(self._off_end(p, p.x), 1)], seen=False)
@@ -978,7 +980,7 @@ class Grind(Hunt):
         worth going to instead (Patrol.choose, the stop she's heading to as the default), or on a trip to a pile the
         loop's next stop when the pile no longer pays (Patrol.choose's "back to the loop"): taken at the next pass. With
         the whole screen (Targeting.screen): a trip to her target's place stops when the choice has something else for her,
-        or for a pile that goes first; a trip to a stop, for any monster on the screen."""
+        or for a pile that goes first; a trip to a stop, for any monster on the screen, what it has over her round if weighed (`_round_bar`)."""
         o = self.obj
         if getattr(o, "chain", None) is not None:
             return self._chain_stops(s, o)
@@ -1003,7 +1005,7 @@ class Grind(Hunt):
 
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
         """The hunt loop's, on its way to the pile `_interrupt` saw (or back to the loop) if it did. With the whole screen, a
-        trip to her target's place is decided again here, and a trip to a stop ends for any monster on the screen."""
+        trip to her target's place is decided again here, and a trip to a stop ends as `_free_trip` says."""
         o = self.obj
         if self._free_trip(o) and (o.why == TO_TARGET or targets):
             self.obj = None
@@ -1100,7 +1102,7 @@ class Grind(Hunt):
                 "refill_others_tick": round(1.0 - math.exp(-b.others * TICK_S), 3), "own": round(b.own(b.t), 3),
                 "refills": b.refills, "watched_s": round(b.watched_s), "kill_s": round(p.kill_s, 4),
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
-                "take_weight": TAKE_WEIGHT, "stay_or_go": list(stay_or_go()),
+                "take_weight": TAKE_WEIGHT, "stay_or_go": [False, False] if self.tp is None else [self.tp.landings, self.tp.weighs],
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
                        if p.hp_time[pid] >= HP_LOG_S},
                 "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}, **self._census(), **self._promise()}

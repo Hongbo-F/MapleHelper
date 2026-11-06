@@ -62,7 +62,7 @@ BLOCKED_S = 1.0       # guess: s a platform a trip would have stood and waited t
 ROUTE_STEP = 8.0      # units her x is rounded to for a route's time: 53 ms of her walk at most, and the searches kept (Planner.times)
 KILL_GAP_S = 2.4      # s from a kill to her next attack, live (the night of 2026-11-05: 2.24 on the top, 2.99 on the upper), in `_worth`
 SCREEN_S = 60.0       # guess: s what the screen had for her is let down over (`_worth`): the last minute's correlation with her next
-                      # 2 minutes, .33, .50 within the low platforms, where her own EXP's last minute has .24, .16 (M, 4,489 'target' records)
+                      # 2 minutes, .33, .31 within the low platforms, where her own EXP's last minute has .24, -.06 (M, 4,489 'target' records)
 CASTS_TOO = False     # her casts: `stay_or_go` off for them, the magician's runs as they were, the thief's trial first (README: it applies to her, no harm in 12 seeds)
 HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above

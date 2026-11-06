@@ -1097,6 +1097,7 @@ class Navigator:
         self.keep_avoid = False  # whether where moves were in a monster's way goes on from one trip to the next (the loot chain's: a trip's a plan)
         self.landing_asks = False  # whether a chain's landings get the question a pass asks first (behavior.targeting.stay_or_go: `_landing_calls`)
         self._asked_on: int | None = None  # ... the platform that last got it
+        self._asked_n = 0  # ... with so many monsters on the screen
         self._avoided: dict = {}  # ... those moves -> when
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
@@ -3143,16 +3144,17 @@ class Navigator:
         """Whether she has just landed on a platform the running chain goes on from, and what a pass asks first (the trip's
         `until`) calls for her there, from a real look: nothing else asks there (`_watching`'s checks are all of her route), and
         72% of the landings she passed live were inside a chain, at a third of those her own chooser shooting at once
-        if asked (README: "Where she hunts"). Once a landing; not where the chain set off from, nor its end (the pass asks), nor
-        while her invulnerability after a touch lasts (POST_HIT)."""
+        if asked (README: "Where she hunts"). Once a landing and again for a look with more monsters than it was asked with (the first look
+        hasn't all of them: of 82 landings she passed live with 2 or more in reach, 39 had them only at a later look); not where the chain set
+        off from, nor its end (the pass asks), nor while her invulnerability after a touch lasts (POST_HIT)."""
         state = getattr(self.senses, "glanced", None)
         if st is None or st.until is None or state is None or state.where is None or state.mode != "ground":
             self._asked_on = None
             return False
         on = state.where[2]
-        if on is None or on == self._asked_on:
+        if on is None or (on == self._asked_on and len(state.monsters) <= self._asked_n):
             return False
-        self._asked_on = on
+        self._asked_on, self._asked_n = on, len(state.monsters)
         if on == running.legs[0].start.platform.id or self._post_hit(st) \
                 or (on == running.legs[-1].end.platform.id and not running.more and queued is None):
             return False

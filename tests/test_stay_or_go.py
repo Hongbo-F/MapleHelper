@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 
+from gamelab import telemetry
 from gamelab.attack import danger as danger_mod
 from gamelab.attack import stance
 from gamelab.attack import target as tg
@@ -203,6 +204,12 @@ def test_she_goes_only_with_a_round_clearly_over_what_the_screen_has_had():
     g.patrol.stops[3] = SimpleNamespace(platform=31)
     g._instead = lambda s, heading=None: (3, {"why": "pulled"})  # (a pile she has seen pulls her to a stop on her own platform: that's a stay, not a go)
     assert g._goes(s) is None
+    g._instead = lambda s, heading=None: (None, {})  # (every stop skipped)
+    assert g._goes(s) is None
+    g = _grind(tp, 9999.0)
+    assert g._goes(s) == 7
+    tp.gave_way_at = time.monotonic()  # (a trip gave way for a monster in its way: going, her drops whatever they take, would have her back at it: seed 304, 44 trips in 3 s)
+    assert g._goes(s) is None
 
 
 def test_a_trip_to_a_stop_ends_only_for_what_beats_her_round_and_a_trip_to_her_target_or_unweighed_as_it_was():
@@ -268,6 +275,25 @@ def test_going_her_drops_go_first_whatever_they_take_then_the_round_s_stop():
         assert g.quiet_seen is (None if going is None else True)
 
 
+def test_a_go_says_where_she_does_go_and_the_turn_she_s_on():
+    tp = _targeting()
+    tp.foes, tp.lately, tp.got = ["a", "b"], 4.0, 3.0
+    g = _grind(tp, 600.0)
+    said, g.stop = [], None
+    g.patrol.trip, g.patrol.platform_of = "a census trip", {7: 10, 9: 13}.get
+    g.patrol.plan.record = lambda platform_of: {}
+    g.log = said.append
+    g._travel = lambda rule: said.append(rule)
+    g._next_ground = lambda s, heading=None: setattr(g, "stop", 9)  # (a pile she has seen pulls her to stop 9 and not the 7 she was going for)
+    with mock.patch.object(telemetry, "emit") as emit:
+        g._go(SimpleNamespace(platform=SimpleNamespace(id=31)), 7)
+    assert said[0].endswith("2 monsters: stop 13") and said[1] == "advance" and g.patrol.trip is None
+    assert emit.call_args.kwargs["stop"] == 13 and emit.call_args.kwargs["here"] == 31
+    assert (tp.landings, tp.weighs) == (True, True)
+    off = _targeting(False, False)
+    assert (off.landings, off.weighs) == (False, False)
+
+
 def test_the_switch_and_her_casts(monkeypatch):
     for value, want in (("0", (False, False)), ("land", (True, False)), ("go", (False, True)), ("1", (True, True))):
         monkeypatch.setenv("GAMELAB_STAY_OR_GO", value)
@@ -304,8 +330,8 @@ def test_the_round_s_nearest_stop_and_none_on_the_round():
 def _landed(until, platform=14, mode="ground", post_hit=False):
     """A navigator without __init__, a chain 10 -> 14 -> 19 running, her glance on `platform`."""
     nav = Navigator.__new__(Navigator)
-    nav.landing_asks, nav._asked_on = True, None
-    nav.senses = SimpleNamespace(glanced=SimpleNamespace(where=(0.0, 0.0, platform), mode=mode), band=None)
+    nav.landing_asks, nav._asked_on, nav._asked_n = True, None, 0
+    nav.senses = SimpleNamespace(glanced=SimpleNamespace(where=(0.0, 0.0, platform), mode=mode, monsters=[]), band=None)
     nav.model = None
     st = SimpleNamespace(until=until, post_hit_until=time.monotonic() + (9.0 if post_hit else -9.0))
     leg = lambda a, b: SimpleNamespace(start=SimpleNamespace(platform=SimpleNamespace(id=a)), end=SimpleNamespace(platform=SimpleNamespace(id=b)))
@@ -324,8 +350,17 @@ def test_a_landing_inside_a_chain_gets_the_question_once(looks):
     assert not nav._landing_calls(st, running, None) and len(asked) == 1  # (the same landing)
     nav.senses.glanced = SimpleNamespace(where=(0.0, 0.0, None), mode="air")  # (off it, and on it again: a landing)
     assert not nav._landing_calls(st, running, None)
-    nav.senses.glanced = SimpleNamespace(where=(0.0, 0.0, 14), mode="ground")
+    nav.senses.glanced = SimpleNamespace(where=(0.0, 0.0, 14), mode="ground", monsters=[])
     assert nav._landing_calls(st, running, None) and len(asked) == 2
+
+
+def test_a_landing_is_asked_again_for_a_look_with_more_monsters_than_it_was_asked_with(looks):
+    """(18:09:41 on P14: the first look 3 monsters, frame 243, 134 ms on, 5.)"""
+    asked = []
+    nav, st, running = _landed(lambda s: asked.append(s) or False)
+    for n, times in ((3, 1), (3, 1), (2, 1), (3, 1), (5, 2), (4, 2), (5, 2), (6, 3)):
+        nav.senses.glanced.monsters = ["a monster"] * n
+        assert not nav._landing_calls(st, running, None) and len(asked) == times, n
 
 
 def test_not_where_it_set_off_nor_its_end_nor_while_she_s_invulnerable_nor_in_the_air_nor_with_no_question(looks):
@@ -354,7 +389,7 @@ def test_a_pile_no_look_has_seen_off_its_platform_s_end_gets_no_chain():
     m = scenarios.real_map(TREE)
     g = Grind.__new__(Grind)
     tried = []
-    g.model, g.tp, g._tried = m, SimpleNamespace(choice=None), tried.append
+    g.model, g.tp, g._tried = m, SimpleNamespace(choice=None, weighs=True), tried.append
     far = SimpleNamespace(x=329.0, platform=32, status="expected")
     near = SimpleNamespace(x=m.platform(32).right + 20.0, platform=32, status="expected")
     g._pile_of = {1: far, 2: near}
@@ -367,3 +402,6 @@ def test_a_pile_no_look_has_seen_off_its_platform_s_end_gets_no_chain():
     g._sweeper.current.stops = [stop(2)]
     chain = g._loot_plan(look)
     assert chain is not None and chain.stretches[0].pile is near and tried == [far]
+    g.tp.weighs = False  # (the switch off: as it was, a chain to its platform's end)
+    g._sweeper.current.stops = [stop(1)]
+    assert g._loot_plan(look).stretches[0].pile is far and tried == [far]
