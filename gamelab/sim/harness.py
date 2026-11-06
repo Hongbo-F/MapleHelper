@@ -310,6 +310,23 @@ IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # 63%), and what's left of those dealt 343, 367, 395 at p10, p50, p90 (334, 373, 398).
 WORLDS["strangers"] = {"camps": TREE_STRANGERS}
 WORLDS["live-floors"] = {**HER_35, "skill_star": (166, 333), "miss": 0.04, "camps": TREE_STRANGERS, "shared_exp": True}
+# ... and the scenes of where she hunts, each after it in `--world` (`start`, every seed's: `scenario`; its players in place of the
+# option's; README, "Where she hunts"): S1 she starts on P33, nobody low, two players above; S2 on P12, a player on the top and one in the
+# middle; S3 on P12, players on both top platforms of her round and the upper; S4 on P33, the map at about its cap, three
+# above killing both kinds; S5 the same from P12; S6 on P33, every clear point refilled at each pass, so the bottom never runs dry; S7
+# on the top, a player taking all of it, the floors below full (the night's frames 231-286 of 20261105-181026-review: top empty, off to
+# her drops past five monsters on P14).
+_HORNY, _LOW, _P12 = "horny-mushroom", (33, 100.0), (12, 160.0)
+_ABOVE = (Camp(8, 100.0, (7, 8), (GREEN, _HORNY)), Camp(15, -110.0, (14, 15), (GREEN, _HORNY)), Camp(21, 90.0, (21, 22), (GREEN, _HORNY)))
+WORLDS.update({
+    "s1": {"start": _LOW, "camps": (Camp(21, 90.0, (21, 22), (GREEN,)), Camp(15, -110.0, (14, 15), (GREEN,)))},
+    "s2": {"start": _P12, "camps": (Camp(7, -95.0, (7,), (GREEN, _HORNY)), Camp(21, 90.0, (21, 22), (GREEN,)))},
+    "s3": {"start": _P12, "camps": (Camp(7, -95.0, (7,), (GREEN, _HORNY)), Camp(10, 0.0, (10,), (GREEN, _HORNY)), Camp(15, -110.0, (14, 15), (GREEN,)))},
+    "s4": {"start": _LOW, "camps": _ABOVE, "spawn_share": 0.7},
+    "s5": {"start": _P12, "camps": _ABOVE, "spawn_share": 0.7},
+    "s6": {"start": _LOW, "camps": (Camp(21, 90.0, (21, 22), (GREEN,)),), "respawn_cap": 1.0},
+    "s7": {"start": (8, 137.0), "camps": (Camp(8, 100.0, (6, 7, 8, 9, 10), (GREEN, _HORNY)),)},
+})
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
 # (`wide-body`: 15 either side and 55 tall, world.HER_HALF, HER_HEIGHT), not the client's touch test (world.HER_TOUCH: a
@@ -604,19 +621,20 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
     her = scenarios.her_on(map_id)[1]
     for name in sorted(world, key=lambda w: w in LAST_WORLDS):  # (stable: the others in their order, LAST_WORLDS after)
         fields = WORLDS[name]
-        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's)
-                                                  if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack")})
+        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's; `start`: below)
+                                                  if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack", "start")})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
     if attack is not None and her.magic is None:  # (the thief's Lucky Seven: the magician's attack is her Magic Claw)
         her = dataclasses.replace(her, **ATTACK_HER)
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
+    start = next((WORLDS[w]["start"] for w in world if "start" in WORLDS[w]), starts[seed % len(starts)])
     return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
                               + "".join(f":{w}" for w in world) + (f":g{'-'.join(map(str, grounds))}" if grounds else "")
                               + (f":attack-{attack}" if attack else ""),
                               fn,
-                              starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
+                              start, monsters="all", seed=seed, limit=minutes * 60, noise=noise,
                               realism=realism, may_die=True, think=think_clock or think, think_reads=bool(think_clock),
                               map_id=map_id,
                               her=her if world or attack else None, attack=attack,

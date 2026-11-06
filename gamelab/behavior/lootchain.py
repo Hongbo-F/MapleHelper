@@ -26,6 +26,7 @@ RUN_PRESSES = 2
 PRESS_S = PILE_EVERY_MS / 1000.0
 CHAIN_OFF_S = 0.5   # guess: s she goes the old way (a trip, a stand) after a monster stood in a chain's first walk
 END_ROOM = 10.0     # units a drop by a platform's end is walked to short of it (under her reach: no slide off for it; a guess)
+OFF_END = 60.0      # guess: units past its platform's end for a pile no look has seen to be no pile there (a kill placed wrong): `Grind._loot_plan`
 
 
 def on() -> bool:

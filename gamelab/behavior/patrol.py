@@ -989,6 +989,11 @@ class Patrol:
         """The stop on platform `pid`, if there's one."""
         return next((i for i, s in enumerate(self.stops) if s.platform == pid), None)
 
+    def nearest(self, here: int, x: float) -> int | None:
+        """Of her round's stops on another platform the one she gets to soonest from (platform `here`, map x `x`); None: none."""
+        far = {j: self.travel(here, x, self.stops[j].platform, self.stops[j].x) for j in self.plan.stops if self.stops[j].platform != here}
+        return min((j for j, d in far.items() if d is not None), key=far.get, default=None)
+
     def leg(self, i: int, j: int) -> float | None:
         """s from stop i to stop j (planner), kept."""
         if i == j:

@@ -19,6 +19,10 @@ navigator's moves and its score its place's (attack.target: see its top), the tr
 none on the screen her drops whatever they take (`quiet`), then another area. README: "The target-first planner".
 
 Her drops as one chain through a few (`chain`, GAMELAB_LOOT_CHAIN: behavior.lootchain, Grind._sweep_act). README: "The loot chain".
+
+Stay or go (`stay_or_go`, GAMELAB_STAY_OR_GO; the user, 2026-11-05): a trip's landings get the question a pass asks
+(Navigator._landing_calls), and what the screen has had for her lately (`_worth`) is weighed against her round: Grind._goes,
+Grind._round_bar. README: "Where she hunts".
 """
 
 import contextlib
@@ -56,6 +60,10 @@ NO_WAY_S = 0.5        # s a target the plan has nothing against for now (the sta
 IDLE_S = 1.5          # s with nothing she can act on (a wait, no pile) after which she goes on to the next stop
 BLOCKED_S = 1.0       # guess: s a platform a trip would have stood and waited to go to is kept off, if another target can be gone at
 ROUTE_STEP = 8.0      # units her x is rounded to for a route's time: 53 ms of her walk at most, and the searches kept (Planner.times)
+KILL_GAP_S = 2.4      # s from a kill to her next attack, live (the night of 2026-11-05: 2.24 on the top, 2.99 on the upper), in `_worth`
+SCREEN_S = 60.0       # guess: s what the screen had for her is let down over (`_worth`): the last minute's correlation with her next
+                      # 2 minutes, .33, .50 within the low platforms, where her own EXP's last minute has .24, .16 (M, 4,489 'target' records)
+CASTS_TOO = False     # her casts: `stay_or_go` off for them, the magician's runs as they were (12 seeds, the landings cost her more: README)
 HIST_MS = 0.05        # ms a bin of the choice's time (`Targeting.ms`: for the first live runs) ...
 HIST_N = 800          # ... up to 40 ms, the last bin all above
 
@@ -72,6 +80,13 @@ def screen_on() -> bool:
     """Whether the planner takes every monster on the screen (GAMELAB_SCREEN: '0' off, the planner before it to the digit; on by
     default on this branch: README)."""
     return os.environ.get("GAMELAB_SCREEN", "1") != "0"
+
+
+def stay_or_go() -> tuple[bool, bool]:
+    """(Whether a trip's landings are asked, whether her round is weighed against the screen), GAMELAB_STAY_OR_GO: '0' neither, the
+    grind before them to the digit; 'land' the first, 'go' the second, '1' both: for a live trial's turns."""
+    v = os.environ.get("GAMELAB_STAY_OR_GO", "0")
+    return v in ("1", "land"), v in ("1", "go")
 
 
 @contextlib.contextmanager
@@ -154,6 +169,10 @@ class Targeting:
         self.chose_on = None                 # the look the last choice was made on (a trip's first look has no more to say)
         self.gave_way_at = -1e18             # when a trip last gave way for a monster in its way (`rather`)
         self._stands = tg.in_height(g.model.places) if self.screen else {}
+        casts = getattr(getattr(g.h, "attacks", None), "picks", False)
+        self.landings, self.weighs = stay_or_go() if self.screen and (CASTS_TOO or not casts) else (False, False)
+        self.got = self.lately = 0.0        # EXP a second the last look's choice has for her, and lately (`_worth`)
+        self._worth_at = time.monotonic()
 
     # --- while her lock lasts --------------------------------------------------------------------------------
 
@@ -365,7 +384,7 @@ class Targeting:
         foes = self.foes
         if trip or free:
             foes = self._close_first(her, foes)
-        c = self.choice = self.chooser.choose(her, foes, walks=not trip)
+        c = self.choice = self._worth(self.chooser.choose(her, foes, walks=not trip))
         self.chose_on = s
         self._chose_at = time.monotonic()
         self.counts["decisions"] += 1
@@ -387,17 +406,32 @@ class Targeting:
         foes = self.foes_of(s, alive, alive if self.chain else s.monsters, pace, g._rest_of_screen(s, now))  # (with the chain, as the pass has them: fight._targets' visible)
         kept = chooser.primary, chooser.next
         try:
-            return chooser.choose(her, self._close_first(her, foes))
+            return self._worth(chooser.choose(her, self._close_first(her, foes)))
         finally:
             chooser.primary, chooser.next = kept
             _bin(self.ms["peek"], perf_counter_ns() - t0)
 
+    def _worth(self, c: tg.Choice) -> tg.Choice:
+        """`weighs`: choice `c` as what the screen has for her, EXP a second: `got`, its best (Choice.top), each with her time to the
+        next (KILL_GAP_S), after the way to the first; `lately`, up with it at once and let down over SCREEN_S, so that a thin moment
+        isn't a thin floor and she stays some 15-25 s past the last good monster."""
+        if self.weighs:
+            now, top = time.monotonic(), c.top
+            self.got = sum(t.foe.p * t.foe.exp for t in top) / (top[0].way.s + sum(t.foe.kill_s + KILL_GAP_S for t in top)) if top else 0.0
+            self.lately = max(self.got, self.lately + (self.got - self.lately) * min(1.0, (now - self._worth_at) / SCREEN_S))
+            self._worth_at = now
+        return c
+
     def changed(self, s) -> bool:
         """On a trip to her target's place: whether look `s` has something else for her than going on with it: another
-        target, or this one no more a trip. A look made up from another (Scene.what_if) has nothing to say."""
+        target, or this one no more a trip; at a landing inside a chain (Scene.landing) only one she needs no trip for: a look
+        there that has lost her target says nothing of it, and another trip is the next pass's to weigh. A look made up from
+        another (Scene.what_if) has nothing to say."""
         if getattr(s, "what_if", False) or s is self.chose_on:
             return False
         c, p = self.peek(s), self.chooser.primary
+        if getattr(s, "landing", False):
+            return c.primary is not None and c.primary.way.how != "trip"
         return c.primary is None or p is None or not tg.same(p, c.primary.m) or c.primary.way.how != "trip"
 
     def rather(self, s, dst: int) -> bool:
@@ -421,9 +455,9 @@ class Targeting:
         """Whether a trip just gave way for a monster in its way (`rather`): her drops wait as long as that way's kept off."""
         return time.monotonic() - self.gave_way_at < BLOCKED_S
 
-    def on_screen(self, s) -> bool:
-        """On her way somewhere else: whether look `s` has a monster on the screen she can get at."""
-        return not getattr(s, "what_if", False) and s is not self.chose_on and self.peek(s).primary is not None
+    def on_screen(self, s, bar: float = -1.0) -> bool:
+        """On her way somewhere else: whether look `s` has a monster on the screen she can get at, what it has for her over `bar`."""
+        return not getattr(s, "what_if", False) and s is not self.chose_on and self.peek(s).primary is not None and self.got > bar
 
     # --- the plan ------------------------------------------------------------------------------------------
 

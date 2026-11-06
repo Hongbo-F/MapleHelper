@@ -405,6 +405,7 @@ LANDED_DY = 6.0              # map units: on a platform at the height the state 
 KNOCK_STILL = True
 KNOCK_STILL_DX = 3.0         # map units from one state to the next (15 a second)
 COMING ="a monster coming into its way"  # (the cut's reason starts so: Navigator._watch, _carry_out_chain)
+ASKED = "the trip's until, at a landing"  # (Navigator._landing_calls: no miss either)
 TOUCHED = "touched"  # ... and a touch's (or her HP dropping): _touch_text
 # Landings with clearance (from 2026-10-27; the user: "the character should actively try to move away from the mob to
 # attack it"). With an escort that prices landings (Escort.landings: attack.stance.landing, what her first attack where a
@@ -1094,6 +1095,8 @@ class Navigator:
         self._cut_plan: tuple | None = None  # where the last cut cut: (the running plan's legs, its plan time then)
         self._unshot: dict = {}  # a track the shot first threw nothing at, on a trip through her drops -> until when it isn't tried again
         self.keep_avoid = False  # whether where moves were in a monster's way goes on from one trip to the next (the loot chain's: a trip's a plan)
+        self.landing_asks = False  # whether a chain's landings get the question a pass asks first (behavior.targeting.stay_or_go: `_landing_calls`)
+        self._asked_on: int | None = None  # ... the platform that last got it
         self._avoided: dict = {}  # ... those moves -> when
         self._tails: dict[str, float] = {}    # a chain's plan id -> s it runs on past its last key (_ended)
         # The last chain's glances, if her dot stood where the first had it all along: that dot and for how long
@@ -2495,7 +2498,7 @@ class Navigator:
         # fight starts on the way nor is `until` asked (POST_HIT): she moves on from there first. Stopped short for a
         # monster (one coming into the chain's way, or a hang under a rope's top, ROPE_HANG, after which she climbed on
         # up: the chain's moves past the climb not made), it's no miss.
-        st.stopped = cut.startswith((COMING, HUNG))
+        st.stopped = cut.startswith((COMING, HUNG, ASKED))
         if cut.startswith(TOUCHED) or cut.startswith(HUNG) and self._touch_since(s.t) is not None:  # (told late)
             self._touched(st)
         st.came, self._came = (self._came if st.stopped else None), None
@@ -3056,6 +3059,8 @@ class Navigator:
                 if off_since is not None and seen_at - off_since >= (OFF_LEG_S if off_leg else OFF_PATH_S):
                     where = f"still at x {behind:.0f}" if behind is not None else f"on {on.id if on else 'nothing'}"
                     cut = f"off the path ({where}, planned {want or leg.end.platform.id})"
+            if not cut and self.landing_asks and self._landing_calls(st, current, queued):
+                cut = ASKED
             hang = None
             if not cut and ROPE_HANG and (hang := self._hang_check(current, dot, seen_at)) is not None:
                 cut = HUNG  # (said once the hang is over, below)
@@ -3133,6 +3138,27 @@ class Navigator:
         if not cut and not top and not over:  # (the last chain's end: over, its glances seen through; cut: told above)
             self._keys_seen(current, glanced)
         return cut, sent
+
+    def _landing_calls(self, st: TripState | None, running: _Running, queued: _Running | None) -> bool:
+        """Whether she has just landed on a platform the running chain goes on from, and what a pass asks first (the trip's
+        `until`) calls for her there, from a real look: nothing else asks there (`_watching`'s checks are all of her route), and
+        72% of the landings she passed live were inside a chain, at a third of those her own chooser shooting at once
+        if asked (README: "Where she hunts"). Once a landing; not where the chain set off from, nor its end (the pass asks), nor
+        while her invulnerability after a touch lasts (POST_HIT)."""
+        state = getattr(self.senses, "glanced", None)
+        if st is None or st.until is None or state is None or state.where is None or state.mode != "ground":
+            self._asked_on = None
+            return False
+        on = state.where[2]
+        if on is None or on == self._asked_on:
+            return False
+        self._asked_on = on
+        if on == running.legs[0].start.platform.id or self._post_hit(st) \
+                or (on == running.legs[-1].end.platform.id and not running.more and queued is None):
+            return False
+        s = to_scene(state, self.model, self.senses.band, mobs=True, wide=True)
+        s.landing = True
+        return s.where is not None and s.where.platform is not None and s.searched and bool(st.until(s))
 
     # --- replanning while a chain runs (REPLAN) ------------------------------------------------------
 
