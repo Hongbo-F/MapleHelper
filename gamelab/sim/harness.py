@@ -297,6 +297,7 @@ HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed"
 # (Danger.keep_off) and a Green's counts as a danger; at 35 a Horny's is 10%, its keep-off about 72, inside the claw's 105,
 # and a Green's doesn't count: her close quarters are another ladder (README, "The no-hit scenes").
 WORLDS["her-35"] = HER_35
+IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and the floors of Tree Dungeon as live on 2026-11-05, her level 35's (`live-floors`: README, "Where she hunts"; the
 # magician's: `strangers`, her own stats and spell as MAGE_32 has them): her at 35 (`her-35`), the other players as they were
 # (`strangers`: TREE_STRANGERS, in place of the crowd's camps), their kills of what she hurt hers in part (`shared-exp`: 113 of
@@ -309,7 +310,6 @@ WORLDS["her-35"] = HER_35
 # 63%), and what's left of those dealt 343, 367, 395 at p10, p50, p90 (334, 373, 398).
 WORLDS["strangers"] = {"camps": TREE_STRANGERS}
 WORLDS["live-floors"] = {**HER_35, "skill_star": (166, 333), "miss": 0.04, "camps": TREE_STRANGERS, "shared_exp": True}
-IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
 # (`wide-body`: 15 either side and 55 tall, world.HER_HALF, HER_HEIGHT), not the client's touch test (world.HER_TOUCH: a
