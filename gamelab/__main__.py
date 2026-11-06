@@ -1516,11 +1516,13 @@ def _record(command: str, map_id: int) -> None:
     collections among it once a minute (gcstats). Its 'session' record says her physics as the run plans her moves
     (`physics`: motion.physics.record, from 2026-11-02)."""
     from . import gcstats
+    from .attack.stance import aside_on, hop_on
     from .motion import physics
     path = telemetry.record_to(command)
-    telemetry.emit("session", map=map_id, command=command, mode="live", physics=physics.record())
+    telemetry.emit("session", map=map_id, command=command, mode="live", physics=physics.record(), jump_aside=aside_on(), hop_up=hop_on())
     gcstats.report_every(telemetry.emit, when=telemetry.to_file)
     _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`: a window, and a page for a phone)")
+    _log(f"jump aside {'on' if aside_on() else 'off'}, hop up {'on' if hop_on() else 'off'}")
 
 
 def cmd_hunt(args) -> int:

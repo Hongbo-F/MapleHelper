@@ -954,7 +954,8 @@ def _log_close(h: "Hunter", s: Scene, act: tuple, plan) -> int | None:
                        rise=round(physics.rise_after(plan.key_ms / 1000), 1),
                        target=None if t is None else t.kind, dx=None if t is None else round(t.x - x, 1),
                        up=None if t is None else round(y - t.y, 1), platform=None if t is None else t.platform,
-                       x=round(x, 1), land_x=plan.land_x if back else round(x, 1), way=plan.way if back else 0, sure=plan.sure, n=n)
+                       x=round(x, 1), land_x=plan.land_x if back else round(x, 1), way=plan.way if back else 0, sure=plan.sure, n=n,
+                       weighed=plan.weighed)
     return n
 
 

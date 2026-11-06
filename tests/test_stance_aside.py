@@ -65,7 +65,6 @@ def _at(row: str, aside: bool = True, hop: bool = True, moves: int = 0, monkeypa
 @REAL
 @pytest.mark.parametrize("row, faces, lands", [
     ("231613 a02", LEFT, -60),   # (a wall's foot, a tap first and a star stopped at the trunk: away from it)
-    ("231613 a03", LEFT, -65),   # (a wall's foot, facing it, in under the search: away)
     ("081701 a04", RIGHT, 144),  # (the map's end, a slime coming: away, under P32's end)
     ("080032 a04", RIGHT, -177),  # (one she walked past behind her: on, to turn back at it)
     ("080032 a05", RIGHT, -184),  # (a bare jump back, its key picking nothing: the same keys with no key)
@@ -91,8 +90,24 @@ def test_where_the_jump_is_the_dearer_the_attack_goes(row, why, monkeypatch):
 
 @REAL
 def test_one_jump_aside_then_a_throw_whatever_she_finds_where_she_lands(monkeypatch):
-    assert S.plan_of(_at("231613 a03", moves=1, monkeypatch=monkeypatch)) is None  # (it's a move: fight.keyless, st.moves)
-    assert _at("231613 a03", moves=1, monkeypatch=monkeypatch)[0] == "jump_throw"
+    act = _at("231613 a02", moves=1, monkeypatch=monkeypatch)  # (it's a move: fight.keyless, st.moves)
+    assert act[0] == "jump_throw" and S.plan_of(act).why != S.ASIDE
+
+
+@REAL
+def test_her_landing_on_a_free_spawn_point_is_priced_and_the_score_decides(monkeypatch):
+    answer, stay, cost = S.plan_of(_at("231613 a02", monkeypatch=monkeypatch)).weighed
+    assert answer == "stopped" and cost < stay  # (the throw a tap away and stopped at the trunk: worth it, by the free point at -94 or not)
+    assert S.plan_of(_at("231613 a03", monkeypatch=monkeypatch)) is None  # (facing it, the throw's 1.64 s: her jump's 1.8 with the point)
+    monkeypatch.setattr(S, "SPAWN_S", 0.0)
+    assert S.plan_of(_at("231613 a03", monkeypatch=monkeypatch)).why == S.ASIDE
+
+
+@REAL
+def test_a_way_her_jump_may_go_onto_another_platform_is_priced_by_its_share(monkeypatch):
+    _, _, cost = S.plan_of(_at("081701 a04", monkeypatch=monkeypatch)).weighed  # (a slow take-off, one of the four, lands up on P32)
+    monkeypatch.setattr(S, "LEAVE_S", 0.0)
+    assert cost - S.plan_of(_at("081701 a04", monkeypatch=monkeypatch)).weighed[2] == pytest.approx(0.6 / 4, abs=0.01)
 
 
 @REAL
@@ -118,7 +133,7 @@ def test_a_throw_from_the_ground_that_takes_nothing_goes_up_onto_the_platform_ab
 @REAL
 def test_a_jump_shot_landing_back_comes_before_the_hop_and_the_throw_stays_where_the_search_picks(monkeypatch):
     plan = S.plan_of(_at("111448 a08", monkeypatch=monkeypatch))
-    assert plan.why == "above" and plan.shot.land.id == 8  # (the stance's own _jump_shot, landing her back)
+    assert plan.why == S.SHOT_BACK and plan.shot.land.id == 8  # (the stance's own _jump_shot, landing her back)
     assert _at("233732 a01", monkeypatch=monkeypatch)[0] == "throw"  # (a star at the look: 82% hit, 61% kill)
 
 
@@ -150,26 +165,40 @@ def test_her_jump_asides_keys_are_her_jump_backs_with_no_attack():
     assert at("left", "up") == at("right", "down") == JB_TURN_MS  # (she turns in the air, to face what she left)
     assert {n for _, n, _ in events} == {"left", "right", "alt"}  # (no attack key)
     assert a.lock_until == pytest.approx(a.sent_at + JB_RUN_MS / 1000 + physics.JUMP_LAG + physics.AIR_S, abs=0.01)  # (her next keys as she's down)
+    assert not a.faces(RIGHT)  # (the air turn with no attack to carry it isn't known: her next throw taps first)
 
 
 def test_a_keyed_jump_back_still_keys():
     sent = []
     a = _actions(sent)
     assert a.jump_back(RIGHT, 120) is True and not a.keyless
-    assert "shift" in {n for _, n, _ in sent[0][1]}
+    assert "shift" in {n for _, n, _ in sent[0][1]} and a.faces(RIGHT)
 
 
 @REAL
 def test_her_jump_aside_is_a_move_and_its_record_says_where_she_should_land(monkeypatch):
-    act = _at("231613 a03", monkeypatch=monkeypatch)
+    act = _at("231613 a02", monkeypatch=monkeypatch)
     logged = []
     h = SimpleNamespace(log=logged.append, jump_counts=Counter(), actions=SimpleNamespace(faces=lambda side: True), jitter=random.Random(1))
-    s = SimpleNamespace(where=SimpleNamespace(x=-176.5, y=-1595.6), platform=SimpleNamespace(id=7), monsters=[])
+    s = SimpleNamespace(where=SimpleNamespace(x=-171.5, y=-1594.9), platform=SimpleNamespace(id=7), monsters=[])
     keyed = fight.jittered(h, act, s)
     assert S.plan_of(keyed).key_ms == 0  # (nothing to jitter)
     with telemetry.captured() as records:
         fight.log_jump(h, s, keyed)
     jump = next(r for r in records if r.get("topic") == "jump")
     assert (jump["kind"], jump["jump"], jump["key_ms"], jump["way"], jump["land_x"]) == (S.ASIDE, "back", 0, 1, S.plan_of(act).land_x)
-    assert h.jump_counts["aside: back"] == 1 and "no attack, to land at x -65" in logged[0]
-    assert S.act_text(act, [], -176.5, []) == "jumping aside, to land at x -65 facing left"
+    assert h.jump_counts["aside: back"] == 1 and "no attack, to land at x -60" in logged[0]
+    assert S.act_text(act, [], -171.5, []) == "jumping aside, to land at x -60 facing left"
+    assert tuple(jump["weighed"]) == S.plan_of(act).weighed and jump["weighed"][2] < jump["weighed"][1]  # (what it decided on, for the grind's check)
+
+
+@REAL
+def test_a_hop_says_what_it_goes_at_her_target_or_not(monkeypatch):
+    act = _at("233732 a03", monkeypatch=monkeypatch)
+    t = S.plan_of(act).shot.target
+    assert f"{t.kind} {t.x - 11.5:+.0f}" in S.act_text(act, [], 11.5, [])
+
+
+@REAL
+def test_the_jump_shot_going_before_a_hop_has_a_kind_of_its_own(monkeypatch):
+    assert S.plan_of(_at("111448 a08", monkeypatch=monkeypatch)).why == S.SHOT_BACK

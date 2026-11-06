@@ -474,7 +474,8 @@ class Actions:
         to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; the top's, reach.TOP_KEY_MS, for a monster
         higher up; jittered: behavior.fight.jittered). With no
         attack to throw (`throw`'s), or her attack from the ground only (`ground_only`: the magician's), the jump away
-        alone, turning toward it in the air; `key_ms` 0 (the stance's jump aside) so too, her next keys when she has landed."""
+        alone, turning toward it in the air; `key_ms` 0 (the stance's jump aside) so too, her next keys when she has landed, her
+        next throw tapping the arrow: none of 89 jump backs live went with no attack, and on the frames she flips with the attack."""
         self.wait_lock()
         key = None if self.ground_only or key_ms == 0 else self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))
@@ -501,6 +502,7 @@ class Actions:
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
         if key_ms == 0:
             self.lock_until = self.sent_at + JB_RUN_MS / 1000 + physics.JUMP_LAG + physics.AIR_S  # (no attack: she's down)
+            self.retap()  # (the arrow in `facing` cleared it)
         return True  # (a jump back is her way out from a monster too close: never dropped)
 
     def _still(self, direction: str) -> bool:
