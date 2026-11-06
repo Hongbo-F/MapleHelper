@@ -234,6 +234,24 @@ def _alive(pid) -> bool:
         k32.CloseHandle(handle)
 
 
+def started(pid) -> int | None:
+    """When process `pid` started (Windows' creation time), which tells it from a later one given its pid; None if it can't
+    be told (behavior.guard.running_hunt)."""
+    if os.name != "nt" or not isinstance(pid, int) or pid <= 0:
+        return None
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        made, *rest = [ctypes.c_ulonglong() for _ in range(4)]
+        ok = k32.GetProcessTimes(handle, ctypes.byref(made), *(ctypes.byref(t) for t in rest))
+        return made.value if ok else None
+    finally:
+        k32.CloseHandle(handle)
+
+
 def splice(running_id: str, events=(), at_ms: int = 0, held=(), *, end_ms: int | None = None, name: str = "plan",
            kind: str | None = None) -> str:
     """Hand the player a plan that takes over from the running plan `running_id` at `at_ms` of that plan's own clock
@@ -338,12 +356,11 @@ def cancel(plan_id: str) -> bool:
 
 
 def cut_running() -> None:
-    """Cut short whatever the player is playing and withdraw what's waiting, whoever sent it (`gamelab stop`, from its own
-    process: a throw's key not pressed yet isn't pressed)."""
-    for path in INBOX.glob("*.splice"):
-        path.unlink(missing_ok=True)
+    """Cut short whatever the player is playing or is yet to take, whoever sent it (`gamelab stop`, from its own process:
+    a throw's key not pressed yet isn't pressed): each one's cancel file, read before its next key, its first's too (and
+    what's spliced in with it). Never a plan withdrawn from here: its sender's `wait` would get no result for `timeout`."""
     for path in [*INBOX.glob("*.running"), *INBOX.glob("*.json")]:
-        cancel(path.stem)
+        (INBOX / f"{path.stem}.cancel").touch()
 
 
 def wait(plan_id: str, timeout: float = 120) -> dict:

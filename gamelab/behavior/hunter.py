@@ -197,9 +197,9 @@ def feed_reads(events, meter: ExpMeter) -> list[tuple]:
 
 
 class Hunter:
+    """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
     stoppable = False  # a hunting command (behavior.retreat.on_alarm): `gamelab stop` is for it
     vitals = None      # her potions and her death on the phone (behavior.vitals: the command line's; None: not told)
-    """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
                  low_hp: float | None = None, potion_hp: float = 0.5, skill: bool = False, feed=None,
@@ -284,6 +284,7 @@ class Hunter:
         self.actions = Actions(keys, skill=mode != "regular")
         self.actions.ground_only = spell is not None and not spell.air
         self.senses.keyed = lambda: self.actions.last_key  # a look sees what came of her keys (Senses.fresh_after)
+        self.actions.before_play = self._stop_asked
         self.worth = worth_for(model)  # what drops are worth on this map (looting.Worth)
         if note := drops.unknown_note(model):  # its monsters whose drops aren't known, said once
             log(note)
@@ -1036,12 +1037,16 @@ class Hunter:
         if time.monotonic() - self._stop_wait >= STOP_WAIT_S:
             raise StopAsked(later=True)
 
-    def _stop_now(self, s: Scene) -> None:
-        """After every look's listeners (Senses.checks; STOP_ON_LOOK): `gamelab stop` asking (a hunting command's:
-        `stoppable`), and the safety stop raised there if it's due (the watch saw the look already: _vitals), once a hunt
-        has asked after her health (`asked`); neither while she retreats (`retreating`)."""
+    def _stop_asked(self) -> None:
+        """`gamelab stop` asking (a hunting command's: `stoppable`), not while she retreats (`retreating`)."""
         if self.stoppable and not self.retreating and paths.STOP_HUNT.exists():
             raise StopAsked()
+
+    def _stop_now(self, s: Scene) -> None:
+        """After every look's listeners (Senses.checks; STOP_ON_LOOK): `gamelab stop` asking (_stop_asked), and the safety
+        stop raised there if it's due (the watch saw the look already: _vitals), once a hunt has asked after her health
+        (`asked`), not while she retreats."""
+        self._stop_asked()
         if not (STOP_ON_LOOK and self.asked and not self.retreating):
             return
         if (stop := getattr(self, "_strong", None)) is not None:

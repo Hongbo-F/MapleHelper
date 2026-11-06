@@ -83,18 +83,21 @@ def _game_title() -> str:
     return her_setup()[0].game_window_title
 
 
-def _game_geometry(title: str, restore: bool = False):
+def _game_geometry(title: str, restore: bool = False, wait: bool = True):
     """The game window's geometry (screen.Geometry, from its client size). Minimized, its client area isn't the
     game's (GetClientRect gave 432x54 on 2026-10-24), so it's read once the window is back: with `restore` (the
     commands that bring the game to the front anyway: their first look did, before its size was read here) the
-    window is restored and brought forward first (window.bring_to_front); without (`watch`, which never brings it
-    forward), this waits until whoever is at the PC restores it. Otherwise it reads the window only."""
+    window is restored and brought forward first (window.bring_to_front); without (`watch`, `pet --every`, which never
+    bring it forward), this waits until whoever is at the PC restores it, or with `wait` False says so (`nav --park`).
+    Otherwise it reads the window only."""
     hwnd = window.find_game(title)
     if window.minimized(hwnd):
         if restore:
             window.bring_to_front(title, wait=FRONT_WAIT_S)
             if window.minimized(hwnd):
                 raise RuntimeError("the game is minimized and didn't come back: restore it, then run this again")
+        elif not wait:
+            raise RuntimeError("the game is minimized")
         else:
             print("the game is minimized: waiting for it to be restored (nothing is read; Ctrl+C stops)", flush=True)
             while window.minimized(hwnd):
@@ -944,16 +947,16 @@ def _annotate(scene, path) -> None:
     img.save(path)
 
 
-def _eyes(model, title: str, perception=None, restore: bool = True):
+def _eyes(model, title: str, perception=None, restore: bool = True, wait: bool = True):
     """A command's eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its
     window at the size it is now (its calibration at that size), and the map's minimap picture (_minimap_picture): what
     it reads off the frames the perception service hands it (`perception`, its client: the whole frames too,
     Eyes.full_frames). They take no shots of their own (perception.eyes.NoScreen). `restore`: a minimized game is
-    brought back (the commands that act); else it's waited for. Says where the window is, at what DPI awareness, and
+    brought back (the commands that act); else it's waited for, `wait` (_game_geometry). Says where the window is, at what DPI awareness, and
     what minimap picture was loaded: what a run that went wrong is told by (2026-10-24 16:46:50)."""
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
-    geo = _game_geometry(title, restore=restore)
+    geo = _game_geometry(title, restore=restore, wait=wait)
     area = window.client_rect(window.find_game(title))
     print(f"the game's client: {area['width']}x{area['height']} at ({area['left']}, {area['top']}) (desktop px); "
           f"DPI awareness {window.dpi_awareness()}", flush=True)
@@ -1033,14 +1036,15 @@ def _perceives_her(welcome: dict, hunts: bool) -> None:
     _log(f"perception: {why}")
 
 
-def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, **kw):
+def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, wait: bool = True, **kw):
     """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way): her looks
     and glances from the perception service (_perception), as a command that sends keys and tells her throws, or with
     `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`). A command that
     hunts sets a client of the wrong size right with Alt+Enter twice (control.window_size.SizeFix): at its start if
     the eyes have no calibration at its size (_fit_start: it waits START_WAIT_S at most, where it stopped), and on its
     looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
-    before the eyes are made (the pet's: PetWait). `restore` False: a minimized game isn't brought back (`nav --park`). A command that hunts has the OCR's models loaded at its start, on a
+    before the eyes are made (the pet's: PetWait). `restore` False: a minimized game isn't brought back: waited for
+    (`pet --every`), or with `wait` False an error (`nav --park`). A command that hunts has the OCR's models loaded at its start, on a
     thread of their own (perception.messages.warm: the message bar's first read comes in a fight). A command that
     hunts (one that takes `--low-hp`: `hunt`, `tour`, `probe run`) waits for her max HP off her HUD's HP number
     (Hunter.wait_max_hp: the perception service's newest states, behavior.safety.HP_WAIT_S at most) and hunts nothing
@@ -1064,7 +1068,7 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: 
         _fit_start(title, fix)
     if fit is not None:
         fit(perception)
-    eyes = _eyes(model, title, perception, restore=restore and not viewer)
+    eyes = _eyes(model, title, perception, restore=restore and not viewer, wait=wait)
     if throws and not viewer:  # (the OCR's models loaded now, not at the message bar's first read in a fight)
         from .perception.messages import warm
         warm()
@@ -1382,7 +1386,9 @@ def cmd_pet(args) -> int:
         while wait():
             time.sleep(WAIT_POLL_S)
 
-    hunter = _hunter(args, throws=False, fit=fit if args.every else None)
+    if args.every:
+        _said_minimized(title)
+    hunter = _hunter(args, throws=False, fit=fit if args.every else None, restore=not args.every)
     guard = _guard_pass(hunter, title) if args.every and hasattr(hunter.senses.feed, "latest") else None
     if waited:  # (the game wasn't there: that time isn't the pet's; 16:29 on 2026-10-30 it was, fed by blind twice)
         hunter.pet.away()
@@ -1420,6 +1426,20 @@ def cmd_pet(args) -> int:
         if not args.every:
             return 0
         _guarded(guard, args.every * 60)
+
+
+def _said_minimized(title: str) -> None:
+    """`pet --every` starting with the game minimized (the babysitter's, after a hunt): it isn't brought back (_hunter:
+    she never takes the focus, a stop's "i need to work" least of all), and with no eyes there's no guard's pass until it's
+    restored, so a park wanted (behavior.guard: a note, a hunt that died) is said now."""
+    from .behavior import guard
+    from .control import notify
+    if not window.minimized(window.find_game(title)) or guard.read_mode() == guard.OFF:
+        return
+    guard.left_behind()
+    if note := guard.read_note():
+        notify.phone("She can't park yet", f"{note['why']}; the game is minimized: she parks once it's back",
+                     bool(note.get("urgent")), log=_log)
 
 
 def _guard_pass(hunter, title: str):
@@ -1584,9 +1604,9 @@ def _record(command: str, map_id: int) -> None:
     from . import gcstats
     from .motion import physics
     path = telemetry.record_to(command)
-    if not command.startswith("pet"):  # (a command that hunts, for `gamelab stop` to find: behavior.guard.running_hunt)
-        paths.HUNT.write_text(json.dumps({"pid": os.getpid(), "command": command}), encoding="utf-8")
-        paths.STOP_HUNT.unlink(missing_ok=True)  # (one left by a `stop` that didn't see its hunt out)
+    from .behavior import guard
+    if command.split("-")[0] in guard.HUNTS:
+        guard.claim(command)
     telemetry.emit("session", map=map_id, command=command, mode="live", physics=physics.record())
     gcstats.report_every(telemetry.emit, when=telemetry.to_file)
     _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`: a window, and a page for a phone)")
@@ -1831,22 +1851,27 @@ def _nav_park(args) -> int:
     again while she's knocked back or blocked, and it ends once she's there; never brings the game forward: not in front,
     a note for the guard and no keys. `--tell`: the guard's, the outcome on the phone too. Log, telemetry and
     paths.PARKED say where and why. Exit code 0 if she's there, or stays for a reason it says."""
-    from .behavior import retreat
+    from .behavior import guard, retreat
     from .control import notify
+    if (hunt := guard.running_hunt()) is not None:
+        print(f"`{hunt.get('command')}` is running: nothing sent (`gamelab stop` asks it to stop, and she parks)")
+        return 1
     title = _game_title()
     if window.foreground_title() != title:
         retreat.told(None, "the game isn't in front")
-        print("the game isn't in front: nothing sent; she parks once it's back (the guard, `pet --every`)")
+        print(f"the game isn't in front: nothing sent; {guard.later()}")
         return 1
     if not _park_map(args):
         print("no perception service is running: she stays where she is")
         return 1
     _record("nav-park", args.map)
     try:
-        hunter = _hunter(args, throws=False, restore=False)
-    except (RuntimeError, OSError, KeyError, ValueError) as e:  # (no game data for it, say: no model)
-        said = f"she stays: no model of map {args.map} ({type(e).__name__}: {e})"
+        hunter = _hunter(args, throws=False, restore=False, wait=False)
+    except (RuntimeError, OSError, KeyError, ValueError) as e:  # (no game data for it, the service refused, minimized)
+        said = f"she stays: nothing to drive her with on map {args.map} ({type(e).__name__}: {e})"
         _log(said)
+        if window.foreground_title() != title:
+            retreat.told(None, "the game isn't in front")
         if args.tell:
             notify.phone("She can't park", said, True, log=_log)
         return 1
@@ -1854,6 +1879,8 @@ def _nav_park(args) -> int:
     with on_alarm(hunter):
         out = retreat.park(hunter, log=_log)
     said, safe = out.said(), out.there() and "no safe place" not in out.place.why
+    if args.tell and not safe and "took over" in out.result:
+        return 0  # (the hunt's now: nothing for the phone)
     _log(f"park: {said}")
     if args.tell:
         notify.phone("She's parked" if safe else "She can't park", said, not safe, log=_log)
@@ -1930,7 +1957,7 @@ def cmd_tour(args) -> int:
         return 1
     tour = Tour(hunter, nav, log=_log, rng=random.Random(args.seed))
     kinds = set(args.kinds.split(",")) if args.kinds else None
-    from .behavior.retreat import on_alarm
+    from .behavior.retreat import on_alarm, park
     if args.loop:  # the hunt loop (gamelab/docs/hunt-modes.md): one decision per look, for --minutes
         from .behavior import hunt
         if kinds is not None:
@@ -1943,6 +1970,7 @@ def cmd_tour(args) -> int:
                 report = Grind(tour, log=_log).run(minutes=args.minutes)
             else:  # --camp: one ground at a time, waiting there for its respawns
                 report = hunt.Hunt(tour, log=_log).run(minutes=args.minutes)
+            park(hunter, log=_log)  # (the time's up, and the grind loop ends here: she isn't left among them)
         print(f"hunt done: {report}")
         return 0
     with on_alarm(hunter):
@@ -3478,6 +3506,13 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _hunt_over() -> None:
+    """`main`: this command ended as it should, not killed or crashed (behavior.guard.over)."""
+    if paths.HUNT.exists():
+        from .behavior import guard
+        guard.over()
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     # Who plays, before any command loads her physics (gamelab.character); a command that attacks only as the thief.
@@ -3501,8 +3536,11 @@ def main(argv=None) -> int:
     try:
         if args.cmd in GAME_COMMANDS or getattr(args, "game", False):
             client.check_alarm()
-        return args.func(args)
+        code = args.func(args)
+        _hunt_over()
+        return code
     except client.LieDetectorAlarm as e:
+        _hunt_over()
         print(f"LIE DETECTOR: {e}. gamelab stopped all input (a running player stays up, locked, recording it; it "
               "takes only her pet's food, and a hunt's retreat to a safe place in the first 12 s).\n"
               "Answer it in the game yourself. Once it has been off the screen for a minute, run "
@@ -3515,6 +3553,7 @@ def main(argv=None) -> int:
         from .behavior.safety import HuntStop
         if not isinstance(e, HuntStop):  # (the safety stop, out of darts: behavior.safety, behavior.darts)
             raise
+        _hunt_over()
         print(f"{e.label}: {e}. {e.after} {e.advice}")
         return e.exit_code
     finally:
