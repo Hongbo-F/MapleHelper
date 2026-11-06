@@ -7888,6 +7888,48 @@ Stops a pile visit, 24 seeds, both switches off (master's code) against this: th
 
 **Not fixed, and why**: the unseen first pile that ends a chain (m5 above, tried, reverted); the removal of `rather` and `keep_avoid` (they earn it by the rule; six timers remain for "a monster in the way"); the fake player's leftovers the safety review found (`fakes.py:1159`'s arrow on a late splice, `played` not trimmed: master's, not this branch's); the idle metric reading `visible_monsters` (monsters' walks are drawn lazily, so reading them can change a run; both sides of the pair have it); `END_ROOM` 10 is thin after a flight: watch for "ended on ... instead of" in the first live run.
 
+### Where she hunts (from 2026-11-05; `--world live-floors`, the magician's `--world strangers`)
+
+The user, 2026-11-05, on the report of why she goes down to the low platforms and stays: "We can do all 1, 2, 3, 4, seems to be reasonable". And: "when you travel to another platform, especially when down jumping, you seem to skip an area with large amount of mobs which could potentially more beneficial." These are judged in the simulator, whose floors (top P6-10, upper P11-18, middle P19-27, low P28-33) didn't pay as live. So first a world that does; nothing she does changes here, and no golden moves (nothing but `--world` reads it).
+
+**What was wrong, measured.**
+
+- *Not the order, as the report had it.* Its table, top 179 EXP/min and upper 275, was its script's: `D:/MapleHelper-scratch/lowplat/judge/scene.py` added each look with no platform the whole time since the last that had one, so a jump's time counted many times over (and "about 70% of her EXP has a record" is 99.8%). Counted as live was, master's standard crowd pays in 30 s pieces top 469, upper 406, middle 381, with no time low: about the order, all of it about 20% short, kills a minute 11 against 15, attacks a kill 3.0 against 1.65.
+- *Not `LUCKY_SEVEN`.* Since 2026-10-26 `Her.skill_star` is what a cast does (`World._damage`); that 3.0 only says it's a cast. What's old is the rest of her: level 25, two stars of 96-192 a cast, 288 on average, where at 35, with the skill at level 20, she does 73% more. A Horny Mushroom took 2 casts and more; live 79% of the casts that show at a fresh one kill it.
+- *A star's miss of 27.5%* is the first map's at level 19 (`Noise.miss`). At a Green, where a hit always kills, 42 of 1,058 clear picks showed nothing (4.0%), of the frames' 61 attacks none a MISS over a monster.
+- *The crowd.* The study's five (`TREE_CAMPS`, 2026-10-24) stand still under the upper tower and kill every Green and Slime there within 2-6 s, and no Horny anywhere: others' kills a minute top 0, upper 0, middle 3.1, low 11.8, against live's 10.2, 6.6, 12.6, 2.9. So her low platforms stayed empty (1% of her time), the top full of Hornies she never had to race for.
+
+**`--world live-floors`** (`harness.py`, each from that night's four tours, 115 minutes at level 35, none tried for the number):
+
+| What | From | To | Measured |
+|---|---|---|---|
+| Her (`her-35`, as `work/no-hit-fixes` has it) | level 25, HP 774, W.DEF 75, 623 MP | 35, 1244, 117, 1048; a cast 16 MP | her stat window; a Horny's keep-off 72 |
+| Lucky Seven's stars | 96-192 | 166-333 | by the game's formula from LUK 158 and ATTACK 182 at skill level 20, the most twice the least as at 25. On the bars: of the casts at a fresh Horny that show, 79% kill (78% by these, 63% by the ledgers' 174-285, which `her-35` keeps); what's left dealt 343, 367, 395 at p10, p50, p90 (334, 373, 398) |
+| A star's miss | 0.275 | 0.04 | above |
+| Others (`strangers`, `TREE_STRANGERS`) | five camps, Greens and Slimes | a player a band, two on the middle, coming and going, Greens and Hornies | others' kills a minute on a band with a dot on it in the last 10 s and without: top 21.8, 1.2; upper 11.1, 0.9; middle 14.0, 1.1; low 5.7, 0.7. Here dots / players of the time, a kill every 60 x dots / kills s (dots a look 0.44, 0.45, 1.09, 0.68; kills a minute 10.2, 6.6, 12.6, 2.9). A spell here 60 s (67 and 58 measured on the top and upper, too few below). A Slime 4 of the day's 80 kills by others on the low platforms: none |
+| What she hurt and another killed (`shared-exp`) | none | her share | 113 of 1,654 gains, 3.4% of her EXP (the world's 1.4%) |
+
+**The floors**, her place by her last platform; pieces are 30 s with 70% on a floor (`mixed` the rest, as the report's), MP-out ones left out; `D:/MapleHelper-scratch/hunts/floors/run.py` and `final.py` make both sides. Seeds 1-12 of the standard thief at 5 minutes unless it says:
+
+| EXP/min, kills a minute | Top | Middle | Upper | Low | Mixed | All (pieces) | By the clock |
+|---|---|---|---|---|---|---|---:|
+| Master | 469, 12.6 | 381, 10.3 | 406, 12.4 | none | 327, 9.3 | 385, 11.1 | 380 |
+| `her-35` | 535, 13.9 | 477, 13.1 | 408, 12.4 | 402, 12 (0.5 min) | 455, 12.5 | 455, 12.8 | 456 |
+| ... and the miss | 582, 15.3 | 522, 14.4 | 511, 15.3 | 402, 12 (0.5 min) | 518, 14.2 | 527, 14.8 | 529 |
+| **`live-floors`** | 527, 13.9 | 515, 15.5 | 472, 14.3 | 289, 11 (1 min) | 459, 13.0 | 476, 13.8 | 480 |
+| **`live-floors`, 24 seeds** | **561, 14.9** | **522, 15.6** | **463, 14.0** | **384, 16.7** (2 min) | 455, 13.0 | 478, 14.0 | **482** |
+| ... every seed starting on P33, 12 | 585, 15.0 | 424, 12.8 | 487, 14.9 | **386, 15.8** (18 min) | 415, 13.3 | 432, 14.5 | 436 |
+| **Live, the night's four tours** | 611, 16.5 | 582, 18.0 | 491, 15.4 | 304, 13.1 (4.5 min) | 391, 12.6 | 490, 15.1 | 457 |
+| **Live since 07:23, seven tours** | 600, 16.1 | 540, 16.8 | 483, 15.2 | 369, 15.8 | 393, 12.6 | 473, 15.0 | |
+
+Over all her time on a floor (each look to the next, at most 2 s): 24 seeds top 614, middle 513, upper 486, low 413, all 525; the night's top 626, middle 572, upper 513, low 350, all 538; since 07:23 605, 548, 511, 383, 511. By EXP a minute the order is live's by both measures, each floor within 7% of since 07:23's in pieces. By kills a minute live has no such order to match (low kills as many as the top, at 23 EXP a kill against 37), and the world's stay within 8%.
+
+The rest against the night's: attacks a minute 26.3 and 25.0, attacks a kill by kind 1.81 and 1.94 against 1.82 and 1.73, of touches 69% MISS and 70%, kill to next attack on the top 2.2 s and 2.0, on the upper 2.7 and 2.5. On a floor with no stranger on it, then with one all the 30 s: top 567 and 517 against 661 and 528, upper 521 and 388 against 520 and 424, middle 685 and 479 against 693 and 463. Others' kills a minute by floor 7.2, 6.0, 12.1, 2.9 against 10.2, 6.6, 12.6, 2.9.
+
+**Run every later table this way:** the standard thief's worlds and `--world live-floors`; the magician's and `--world strangers` (`D:/MapleHelper-scratch/hunts/env.sh` has `THIEF` and `MAGE`). Compare by 24 seeds where you can: a run's EXP/min has an sd of 59 here, 44 on master, more of the map in others' hands. The magician, 3 seeds of her own world: `strangers` takes her from 574 EXP/min and 15.9 kills a minute to 441 and 12.7, others' kills from 19 to 31 a minute, touches from 6.0 to 4.7 a minute, drops picked up from .977 to 1.000, with the top 487, middle 461, upper 392 in pieces; live on 2026-11-02 at 00:17, level 32, 35 minutes, she made 436 and 12.3.
+
+**Still off.** She crosses floors more: 2.5 times a minute against 1.7, top and upper mostly, 36% of her pieces mixed against 19%, top 29% of her time against 22%, upper 51% against 62%, and those mixed pieces pay 16% over live's. 9.7 touches a minute against 8.1. No all-low round in these seeds (2 of 9 rounds on the night; the report's 20 sends): a stranger's dot on the top shows, but the scene for the stranger's cut stays its replay on the logged moments. Strangers don't walk between platforms, nor hurt without killing. The world's screen has her 147 over its bottom edge against live's 168, with no camera lag on a fall (live up to 256 under her in the air): what she can see before she drops is short by that much.
+
 ### How it works
 
 - **Which monster** (`attack/target.py`, `Chooser.choose`, `score`): EXP of the kind over (time to get an attack on it + time to kill it), weighted by the chance it's there (`behavior/presence.py`, her throws' reckoning). A hurt or chasing one has no term: it's close and quick to kill. Kept until dead, gone, or beaten by `MARGIN` (1.3).

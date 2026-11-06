@@ -1217,11 +1217,15 @@ class Realism:
 @dataclass(frozen=True)
 class Camp:
     """Another player camping (Realism.camps, CAMP_KILL): where it stands (its minimap dot), the platforms whose
-    monsters it kills, and of which kinds."""
+    monsters it kills, and of which kinds. With `every`, one that comes and goes: `spell`'s s here and s away on average,
+    in turn (World._camp_stays), and while here it kills one of them, any alike, every `every` s on average (_camp_hits),
+    its dot by its last kill (at `stand` and `x` as it comes), not each CAMP_KILL s after it shows."""
     stand: int
     x: float
     hunts: tuple[int, ...]
     kinds: tuple[str, ...]
+    every: float = 0.0
+    spell: tuple[float, float] = (0.0, 0.0)
 
 
 @dataclass(frozen=True)
@@ -1335,6 +1339,11 @@ LEVEL_24 = Her(max_hp=752.0, level=24, exp=0, defence=DEFENCE, pet=PET_HP, mp=60
 # potions as above.
 LEVEL_25 = Her(max_hp=774.0, level=25, exp=0, defence=DEFENCE, pet=PET_HP, mp=623.0, pet_mp=PET_MP, potion=HP_POTION,
                star=(20, 140), skill_star=(96, 192), cast_mp=14.0, mp_potion=100.0, claw=(15, 24), avoid=LEVEL_25_AVOID)
+# ... and at level 35 (harness `--world her-35`; the same numbers as no_hit_scenes.HER_35 on work/no-hit-fixes): her stat window
+# of 2026-11-05 07:48 (lab/her_stats.json: HP 1244, MP 1048, W.DEF 117, EVA 80, ATTACK 60-182), a cast 16 MP and an MP potion +150 on
+# her HUD, Lucky Seven's stars 174-285 each and the claw's 19-25 by her numbers on the verified ledgers.
+HER_35 = {"max_hp": 1244.0, "level": 35, "defence": 117.0, "avoid": 80.0, "mp": 1048.0, "star": (60, 182),
+          "skill_star": (174, 285), "cast_mp": 16.0, "mp_potion": 150.0, "claw": (19, 25)}
 # The magician, RiceBaby, as she grinds Tree Dungeon from 2026-11-02 (ROADMAP item 8; the user, that morning: today's
 # measurements are the simulator's truth for her), from R1-R3 and the hour's telemetry (00:17:48-00:53:06; the comment
 # above CLAW_HIT has her Magic Claw and her MP):
@@ -2397,6 +2406,13 @@ class World:
             self._push(int((first if self.realism.first_pass is None else self.realism.first_pass) * 1000), "map_tick")
         for m in self.monsters:
             self._camps_watch(m)
+        self.camp_at: dict[int, tuple[float, float] | None] = {}  # (Camp.every) where each that comes and goes is; None: away
+        for i, c in enumerate(self.realism.camps):
+            if c.every:
+                self.camp_at[i] = None if self._camp_rng.random() < c.spell[1] / sum(c.spell) else \
+                    (c.x, self.model.platform(c.stand).y_at(c.x))
+                self._push(self._camp_stays(i), "camp_turn", i)
+                self._push(self._camp_due(i), "camp_hits", i)
         for at, side in self.noise.turned:
             self._push(int(at * 1000), "turned", side)
 
@@ -2653,6 +2669,13 @@ class World:
             m, life = e.data
             if m.alive and m.life == life:
                 self._others_kill(m, self._camp_rng, CAMP_TAKES)
+        elif e.kind == "camp_turn":
+            c = self.realism.camps[e.data]
+            self.camp_at[e.data] = (c.x, self.model.platform(c.stand).y_at(c.x)) if self.camp_at[e.data] is None else None
+            self._push(self._camp_stays(e.data), "camp_turn", e.data)
+        elif e.kind == "camp_hits":
+            self._camp_hits(e.data)
+            self._push(self._camp_due(e.data), "camp_hits", e.data)
         elif e.kind == "rival_takes":
             for d in e.data:
                 if not d.gone:
@@ -3950,16 +3973,37 @@ class World:
         """Monster `m` shows (at the start, or respawned): each camp hunting its platform and kind kills it CAMP_KILL
         s from now (if it's still that life of it then)."""
         for c in self.realism.camps:
-            if m.platform.id in c.hunts and m.kind in c.kinds:
+            if not c.every and m.platform.id in c.hunts and m.kind in c.kinds:
                 self._push(self.ms + int(self._camp_rng.uniform(*CAMP_KILL) * 1000), "camp_kill", (m, m.life))
+
+    def _camp_due(self, i: int) -> int:
+        """The tick camp `i` (Camp.every) next kills, if it's here then."""
+        return self.ms + int(self.realism.camps[i].every * self._camp_rng.uniform(0.5, 1.5) * 1000)
+
+    def _camp_stays(self, i: int) -> int:
+        """The tick camp `i` (Camp.every) next comes or goes: its spell's s on average."""
+        return self.ms + int(self._camp_rng.expovariate(1 / self.realism.camps[i].spell[self.camp_at[i] is None]) * 1000)
+
+    def _camp_hits(self, i: int) -> None:
+        """Camp `i` (Camp.every), if it's here, kills a monster of its kinds on its platforms, its dot then by it."""
+        c, rng = self.realism.camps[i], self._camp_rng
+        live = [m for m in self.monsters if m.alive and m.platform.id in c.hunts and m.kind in c.kinds]
+        if self.camp_at[i] is not None and live:
+            m = live[rng.randrange(len(live))]
+            x = m.platform.clamp(m.at(self.t) + rng.uniform(-RIVAL_NEAR, RIVAL_NEAR))
+            self.camp_at[i] = (x, m.platform.y_at(x))
+            self._others_kill(m, rng, CAMP_TAKES)
 
     def others_at(self) -> list[tuple[float, float]]:
         """Where the other players are now (map units, as their minimap dots place them): the rival (rival_at) and
         the camps (Realism.camps)."""
         out = [] if (r := self.rival_at()) is None else [r]
-        for c in self.realism.camps:
-            p = self.model.platform(c.stand)
-            out.append((c.x, p.y_at(c.x)))
+        for i, c in enumerate(self.realism.camps):
+            if not c.every:
+                p = self.model.platform(c.stand)
+                out.append((c.x, p.y_at(c.x)))
+            elif self.camp_at[i] is not None:
+                out.append(self.camp_at[i])
         return out
 
     def _pick(self) -> None:

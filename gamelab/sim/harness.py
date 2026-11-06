@@ -197,6 +197,7 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
+from .world import HER_35  # (ahead of the rest: work/no-hit-fixes' `from .no_hit_scenes import HER_35` goes after it, the same numbers)
 from ..paths import LAB, REPO
 from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
                     INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025, NEAR_SEEN_1104,
@@ -251,6 +252,20 @@ PRESETS = {
 GREEN, SLIME = "green-mushroom", "slime"
 TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GREEN,)), Camp(23, 0.0, (22,), (GREEN,)),
               Camp(19, 200.0, (19,), (GREEN,)), Camp(33, 120.0, (32, 33), (GREEN, SLIME)))
+# ... and as the night of 2026-11-05 saw them, four tours, 115 minutes at level 35 (the perception service's dots and `died` events:
+# D:/MapleHelper-scratch/hunts/floors/l4_map.py, l5_str.py), where the study's five stand still below the upper tower killing
+# all the Greens and Slimes there: they kill on every floor, Hornies most on the top, a Slime 4 times of the day's 80 others'
+# kills on the low platforms, and only while one's there (others' kills a minute on the band, with a dot on it in the last 10 s
+# and without: top 21.8, 1.2; upper 11.1, 0.9; middle 14.0, 1.1; low 5.7, 0.7). By band, the dots a look (over the looks that could
+# show them) and others' kills a minute (each platform over its own time in view): top 0.44, 10.2; upper 0.45, 6.6; middle 1.09, 12.6;
+# low 0.68, 2.9. So a player for each band, two for the middle: here dots / players of the time, killing one every 60 x dots / kills
+# s while here, a spell here 60 s on average (a dot's run on the top 67, on the upper 58; too few on the others).
+TREE_STRANGERS = tuple(Camp(stand, x, tuple(hunts), (GREEN, "horny-mushroom"), every=60.0 * dots / kills,
+                            spell=(60.0, 60.0 * (players / dots - 1.0)))
+                       for stand, x, hunts, dots, kills, players in (
+                           (10, 30.0, range(6, 11), 0.44, 10.2, 1), (15, -110.0, range(11, 19), 0.45, 6.6, 1),
+                           (21, 90.0, range(19, 28), 1.09, 12.6, 2), (29, -100.0, range(28, 34), 0.68, 2.9, 1))
+                       for _ in range(players))
 # Tree Dungeon's crowd: "game"'s errors, other players' dots under hers unseen (Noise.dot_under: 56 units, the study's
 # frames), the camps above instead of "game"'s one roaming rival, the map's respawn the server's (Realism.respawn_tick:
 # its cap by the formula, the players there counted). Only on that map (PRESET_MAPS). Until 2026-10-31 every spawn
@@ -275,7 +290,25 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned", "max_hp", "level", "avoid",
+              "mp", "star", "skill_star", "cast_mp", "mp_potion", "claw")
+# ... and her as she was live on 2026-11-05 (`her-35`: no_hit_scenes.HER_35, her stat window and her numbers), where every
+# world's thief is level 25, HP 774, DEF 75, so that a Horny Mushroom's touch (16% of her HP) has her keep 164 off it
+# (Danger.keep_off) and a Green's counts as a danger; at 35 a Horny's is 10%, its keep-off about 72, inside the claw's 105,
+# and a Green's doesn't count: her close quarters are another ladder (README, "The no-hit scenes").
+WORLDS["her-35"] = HER_35
+# ... and the floors of Tree Dungeon as live on 2026-11-05, her level 35's (`live-floors`: README, "Where she hunts"; the
+# magician's: `strangers`, her own stats and spell as MAGE_32 has them): her at 35 (`her-35`), the other players as they were
+# (`strangers`: TREE_STRANGERS, in place of the crowd's camps), their kills of what she hurt hers in part (`shared-exp`: 113 of
+# that night's 1,654 gains, 3.4% of her EXP), a clear pick's star missing 4% of the time, a Green's where a hit always kills
+# (42 of 1,058, D:/MapleHelper-scratch/nohit/causes.md; Noise.miss's 27.5% is the first map's at level 19), and Lucky Seven's
+# stars by her stat window: LUK x 5 x WATK / 100 x its damage at the most, half of that at the least, as her 96-192 at level 25
+# (attack.choice.SKILL_STAR). At LUK 158, WATK 30 (ATTACK's 182 = (LUK x 3.6 + STR + DEX) x WATK / 100), its level 20 (16 MP a
+# cast, 140%) 166-333, where her-35's 174-285 is what the ledgers' few numbers showed. Off that night's bars (hunts/floors/
+# l6_cast.py, 530 throws at fresh Hornies, 105+ away, no stranger by): of the casts that show, 79% kill (166-333: 78%; 174-285:
+# 63%), and what's left of those dealt 343, 367, 395 at p10, p50, p90 (334, 373, 398).
+WORLDS["strangers"] = {"camps": TREE_STRANGERS}
+WORLDS["live-floors"] = {**HER_35, "skill_star": (166, 333), "miss": 0.04, "camps": TREE_STRANGERS, "shared_exp": True}
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
@@ -427,7 +460,7 @@ WORLDS["hang-rules"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", T
                                   ("gamelab.control.navigator", "HANG_TAKE", True))}
 WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "near_spell", "off_spell",  # WORLDS' fields that are
-                "spawn_found", "hit_hidden", "exact")                                  # world.Noise's
+                "spawn_found", "hit_hidden", "exact", "miss")                          # world.Noise's
 # Worlds that set again a field another sets (`walkers`' invulnerability, `near-misses`' bands): applied after the
 # others whatever the order they're given in (scenario), so `--world walkers --world invulnerable-1.45` and the reverse
 # are one.
