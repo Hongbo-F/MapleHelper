@@ -1,6 +1,6 @@
 """The no-hit scenes (sim.no_hit_scenes): moments of the failsafe's recordings in the world, whether each shows its
-fault on this code and whether what solved means for it holds. On master every scene's fault shows and none is solved:
-`OPEN`; a scene comes out of it as its fix lands, both its tests flipping. With --slow: 8 seeds of 11 scenes, about 2
+fault on this code and whether what solved means for it holds. On master every scene's fault shows and none is solved;
+`OPEN`, those still so: a scene comes out of it as its fix lands, both its tests flipping. With --slow: 8 seeds of 11 scenes, about 2
 minutes on 2 workers."""
 
 import functools
