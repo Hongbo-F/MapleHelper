@@ -1629,13 +1629,15 @@ class Hunter:
                        **({"shot": shot.name} if shot is not None else {}))
 
     def _no_hit(self, s: Scene, thrown: list[tuple], tracks: set[int], until: float) -> None:
-        """Her attacks hit nothing (Attacks._watch_hits): said, and the recording of it saved beside the hunt, from
-        NO_HIT_PAD_S before the first attack's key to as long after this look (NO_HIT_CLIPS a run at most)."""
+        """Her attacks hit nothing (Attacks._watch_hits): said, with each one's key as a telemetry record has its time, and
+        the recording of it saved beside the hunt, from NO_HIT_PAD_S before the first attack's key to as long after this
+        look (NO_HIT_CLIPS a run at most)."""
         who = ", ".join(f"#{t}" for t in sorted(tracks)) or "no monster"
         text = (f"no hit: {len(thrown)} attacks over {thrown[-1][0] - thrown[0][0]:.1f} s hit nothing: {who} not attacked "
                 f"for {until - s.t:.0f} s")
         self.log(f"  {text}")
         telemetry.emit("event", kind="no_hit", text=text, tracks=sorted(tracks), attacks=len(thrown),
+                       keys=[round(time.time() + at - time.monotonic(), 3) for at, _ in thrown],
                        x=None if s.where is None else round(s.where.x, 1),
                        platform=None if s.platform is None else s.platform.id)
         self._no_hit_clips += 1

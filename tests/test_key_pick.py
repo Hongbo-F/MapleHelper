@@ -168,3 +168,15 @@ def test_in_the_world_every_attack_has_its_key_asked_and_she_plays_as_she_did():
     assert attacks and len(keys) >= len(attacks)
     assert all(min(abs(k["key"] - a["key"]) for k in keys) < 0.05 for a in attacks)
     assert all(k["answer"] is not None and k["age_ms"] < 200 for k in keys)
+
+
+def test_the_no_hit_event_has_each_attacks_key_as_a_record_has_its_time(monkeypatch):
+    from gamelab.control import alarm
+    monkeypatch.setattr(alarm, "keep_recent_after", lambda *a: None)
+    me, now = NS(log=lambda text: None, _no_hit_clips=0, _no_hit_kept=None), time.monotonic()
+    wall = time.time()
+    thrown = [(now - 3.0, 7), (now - 2.0, 7), (now - 1.0, None), (now - 0.5, 8)]
+    with telemetry.captured() as records:
+        Hunter._no_hit(me, NS(t=now, where=None, platform=None), thrown, {7, 8}, now + 15.0)
+    keys = next(r for r in records if r.get("kind") == "no_hit")["keys"]
+    assert keys == pytest.approx([wall - 3.0, wall - 2.0, wall - 1.0, wall - 0.5], abs=0.05)
