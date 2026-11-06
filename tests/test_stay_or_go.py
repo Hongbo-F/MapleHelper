@@ -299,7 +299,7 @@ def test_the_switch_and_her_casts(monkeypatch):
         monkeypatch.setenv("GAMELAB_STAY_OR_GO", value)
         assert targeting.stay_or_go() == want
     monkeypatch.delenv("GAMELAB_STAY_OR_GO")
-    assert targeting.stay_or_go() == (True, True)
+    assert targeting.stay_or_go() == (False, False)  # (until the live trial reports)
     monkeypatch.setenv("GAMELAB_STAY_OR_GO", "1")
     g = SimpleNamespace(h=SimpleNamespace(attacks=SimpleNamespace(picks=True)), model=scenarios.real_map(TREE), kinds=None, danger=None)
     tp = targeting.Targeting(g)

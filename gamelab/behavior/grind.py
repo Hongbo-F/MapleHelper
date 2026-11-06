@@ -645,7 +645,7 @@ class Grind(Hunt):
                     or (stretches and stop.arrive <= TRIP_AHEAD_S and self._respawn_guard(s, p, stop.arrive) is not None):
                 break  # (the guard on her first pile's `_go_for`'s, as ever)
             if p.status != "seen" or stop.spot.lands > 0.0:  # (nothing to run over for sure: the look there has it)
-                if self.tp.weighs and abs(self._off_end(p, p.x) - p.x) > lootchain.OFF_END:  # (no way to it: a chain to its platform's end, none of her looks there
+                if abs(self._off_end(p, p.x) - p.x) > lootchain.OFF_END and self.tp.weighs:  # (no way to it: a chain to its platform's end, none of her looks there
                     self._tried(p)                                        # by it, and again, every 0.2 s for 150 s: S6's seed 3 with the design's first form)
                     continue
                 last = lootchain.Stretch(p, [(self._off_end(p, p.x), 1)], seen=False)

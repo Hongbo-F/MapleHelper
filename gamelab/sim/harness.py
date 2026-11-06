@@ -327,6 +327,11 @@ WORLDS.update({
     "s6": {"start": _LOW, "camps": (Camp(21, 90.0, (21, 22), (GREEN,)),), "respawn_cap": 1.0},
     "s7": {"start": (8, 137.0), "camps": (Camp(8, 100.0, (6, 7, 8, 9, 10), (GREEN, _HORNY)),)},
 })
+# ... and the policy's own draws (POLICY_SEED) by the world seed, `run_one`: every run shares them, so both sides of a paired table share her first routes and its t
+# hasn't that spread in it. On seeds 201-212 of 15 minutes the same code at another policy seed moved EXP/min +21.8 (t +1.3) and passed a gate of eight lines whole
+# (README, "Where she hunts"). `policy-each` each seed its own, `policy-other` others again, a do-nothing's side to set beside a change's. Goldens stay at POLICY_SEED.
+POLICY_EACH = {"policy-each": 0, "policy-other": 1000}
+WORLDS.update(dict.fromkeys(POLICY_EACH, {}))
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
 # (`wide-body`: 15 either side and 55 tall, world.HER_HALF, HER_HEIGHT), not the client's touch test (world.HER_TOUCH: a
@@ -660,6 +665,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     routes, feed_costs = route.ROUTES, feed.COSTS
     stack = [(importlib.import_module(mod), name, value)  # (the stack's switches the worlds set: WORLDS' `stack`)
              for w in world for mod, name, value in WORLDS[w].get("stack", ())]
+    stack += [(sys.modules[__name__], "POLICY_SEED", seed + POLICY_EACH[w]) for w in world if w in POLICY_EACH]
     kept = [(mod, name, getattr(mod, name)) for mod, name, _ in stack]  # (as they were: put back after the run)
     try:
         for mod, name, value in stack:

@@ -84,9 +84,9 @@ def screen_on() -> bool:
 
 def stay_or_go() -> tuple[bool, bool]:
     """(Whether a trip's landings are asked, whether her round is weighed against the screen), GAMELAB_STAY_OR_GO: '0' neither, the
-    grind before them to the digit; 'land' the first, 'go' the second, '1' both, by default on the branch since its gate on fresh seeds
-    (README), which says no harm found and no more: for a live trial's turns."""
-    v = os.environ.get("GAMELAB_STAY_OR_GO", "1")
+    grind before them to the digit, the default until the live trial reports: the simulator can't tell it from a do-nothing (README); 'land' the
+    first, 'go' the second, '1' both."""
+    v = os.environ.get("GAMELAB_STAY_OR_GO", "0")
     return v in ("1", "land"), v in ("1", "go")
 
 

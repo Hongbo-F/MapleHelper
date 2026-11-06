@@ -581,12 +581,12 @@ def test_her_drops_along_a_platform_she_runs_through_or_stops_at_each(monkeypatc
 
 
 def test_a_move_and_two_stops_are_one_plan():
-    """(The drop on 8 she runs over early on, on a trip: pick-up pressed on every run. The two on 10, once they're past another's ownership (OWN_S): two walks, one
-    plan, with no stand between them. From 16, where her trip's question at the landing finds them, or with GAMELAB_STAY_OR_GO=0 from 11 with the climb.)"""
+    """(The drop on 8 she runs over early on, on a trip: pick-up pressed on every run. The two on 10, once they're past another's ownership (OWN_S): from
+    11, a climb and two walks, one plan, with no stand between them.)"""
     trace, world = _grind_scene((("mesos", 10, -60.0), ("mesos", 10, 60.0), ("mesos", 8, 100.0)))
     taken = sorted(d.taken_at for d in world.drops if d.taken_by == "her")
     assert len(taken) == 3
-    assert any("loot: 2 stops" in line for line in trace["log"]) and any("walk->10, walk->10" in line for line in trace["log"])
+    assert any("loot: 2 stops" in line for line in trace["log"]) and any("climb->10, walk->10, walk->10" in line for line in trace["log"])
     assert not any(taken[-2] <= t <= taken[-1] for t in world.still_log)
 
 

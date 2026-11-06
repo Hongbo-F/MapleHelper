@@ -2293,7 +2293,7 @@ def _knock_offs(tr: dict) -> int:
 
 
 @tree((11, -80.0), monsters=[("Horny Mushroom", 10, -110.0), ("Horny Mushroom", 10, -60.0)],
-      seed=1, limit=90, may_die=True, **_CHASER_WORLD,
+      seed=2, limit=90, may_die=True, **_CHASER_WORLD,
       expects=(check("climbed up the rope at -80 onto 10", lambda tr: bool(tr["result"]["climbs"])),
                check("no knock-off off 10 within 6 s of the climb", lambda tr: _knock_offs(tr) == 0)))
 def loop_tree_rope_top_chaser(sim):
@@ -2304,8 +2304,7 @@ def loop_tree_rope_top_chaser(sim):
     climbs. The grind for 20 s, in the thief's standard world (the detector's misses, the walkers' chase). Master's arrival
     walks her from -80 on to the stop's x; the target-first planner takes a target from where she tops out instead: on here
     whatever its default (behavior.targeting.forced_on), GAMELAB_TARGET_SETPIECE=0 for master's arm. The outcome has the
-    world's climbs at -80 onto 10, its knocks (t, from, to, fall), the chaser's death (s) and her touches. (Seed 1 since stay or go
-    on by default, 2026-11-06: of seeds 1-12 a knock-off on 2, 4 and 8 with it, on 5 and 7 without.)"""
+    world's climbs at -80 onto 10, its knocks (t, from, to, fall), the chaser's death (s) and her touches."""
     from ..behavior import targeting
     from ..behavior.grind import Grind
     w = sim.world
