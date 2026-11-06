@@ -1025,12 +1025,11 @@ def test_a_look_the_choice_was_made_on_has_nothing_more_to_say_to_the_trip(tree)
     assert tp.changed(third) and not tp.on_screen(third) and len(asked) == 2
 
 
-def test_on_her_way_a_monster_set_aside_or_ignored_stops_no_trip(tree):
+def test_on_her_way_a_monster_set_aside_stops_no_trip(tree):
     m, _ = tree
     tp = _targeting(m)
-    tp.h.attacks.ignored = {2: 99.0}
     tp.no_way[3] = 99.0
-    mons = [_mon(m, HORNY, x, 10, track=t) for t, x in ((1, 0.0), (2, 50.0), (3, 90.0))]
+    mons = [_mon(m, HORNY, x, 10, track=t) for t, x in ((1, 0.0), (3, 90.0))]
     assert [o.track for o in tp.targets_of(mons)] == [1]
 
 

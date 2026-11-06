@@ -296,7 +296,6 @@ class Targeting:
         attacks = h.attacks
         avg = g._avg_exp()
         now = s.t
-        self.no_way.update(getattr(attacks, "ignored", None) or {})  # (her attacks hit nothing: Attacks._watch_hits)
         if self.no_way:
             self.no_way = {k: v for k, v in self.no_way.items() if v > now}
         chasers = {c.track for c in h.aggro.chasers.values() if c.track is not None and not c.dying}
@@ -411,9 +410,8 @@ class Targeting:
         return False
 
     def targets_of(self, monsters: list) -> list:
-        """Of `monsters` those she may have as a target now: not set aside (`no_way`), nor ignored by her attacks."""
-        ignored = getattr(self.h.attacks, "ignored", None) or ()
-        return [m for m in monsters if getattr(m, "track", None) not in self.no_way and getattr(m, "track", None) not in ignored]
+        """Of `monsters` those she may have as a target now: not set aside (`no_way`)."""
+        return [m for m in monsters if getattr(m, "track", None) not in self.no_way]
 
     def piles_wait(self) -> bool:
         """Whether a trip just gave way for a monster in its way (`rather`): her drops wait as long as that way's kept off."""

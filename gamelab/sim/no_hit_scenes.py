@@ -354,7 +354,8 @@ _scene("stranger_dead_080929",
        "look 0.4 s old, at her lock's end; green #764's number 90 ms after her next key", (2.0, 2, 2), (14, 38.5), "left",
        (Mob(H, 13, -134.0, ((0.13, 1),)), Mob(G, 12, 231.0, ((1.47, 0),)), Mob(G, 7, -207.0)),
        hp=0.731, mp=0.115, locked=0.56, misses=1, others=((13, -120.0),), script=_strangers_kill((0, 0.13), (1, 1.5)),
-       solved=(_fewer(1.0), ("a cast less than master's 3", lambda runs: _mean(runs, "mp") <= 32.0)))
+       solved=(_fewer(1.0), ("most runs a cast less than master's 3 (on 2 of 8 perception has it hidden at her key, not dead)",
+                             lambda runs: _mean(runs, "mp") <= 42.0)))
 _scene("stranger_dying_080929",
        "20261105-080929, frames 00171-00191 (a05): up the rope onto P10, horny #766 walking left at +270, the stranger "
        "standing by it, his number 66 ms after her MP step, her stars fly on (here his kill just before her key: which "

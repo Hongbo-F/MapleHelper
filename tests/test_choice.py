@@ -738,11 +738,11 @@ def test_throws_at_a_monster_that_show_nothing_have_the_next_tap_the_arrow():
     assert acts.faces("left")
 
 
-def test_four_attacks_that_hit_nothing_have_their_monster_ignored_for_a_while():
-    """The user, 2026-11-04: 4 throws or casts without hitting any mob: the recording saved, the target ignored for 15 s."""
+def test_four_attacks_that_hit_nothing_have_the_hunter_told_and_the_count_starts_again():
+    """The user, 2026-11-04: 4 throws or casts without hitting any mob: the recording saved (and 2026-11-05: no ignoring)."""
     a, _ = _attacks()
     told, gains = [], [0]
-    a.no_hit = lambda s, thrown, tracks, until: told.append((len(thrown), tracks, round(until - s.t, 3)))
+    a.no_hit = lambda s, thrown, tracks: told.append((len(thrown), tracks))
     a.gains = lambda: gains[0]
     t0 = time.monotonic()
 
@@ -758,13 +758,12 @@ def test_four_attacks_that_hit_nothing_have_their_monster_ignored_for_a_while():
 
     throws(4, t0)
     look(t0 + 3.5)            # (the 4th not shown yet)
-    assert not told and not a.ignored
+    assert not told
     look(t0 + 4.1)
-    assert told == [(4, {7}, 15.0)] and 7 in a.ignored
-    look(t0 + 4.1 + 14.0)
-    assert 7 in a.ignored
-    look(t0 + 4.1 + 15.1)
-    assert not a.ignored
+    assert told == [(4, {7})]
+    assert not a._misses and not hasattr(a, "ignored")
+    look(t0 + 8.2)
+    assert len(told) == 1     # (re-counted from there)
     told.clear()
     t1 = t0 + 30.0            # a bar new on any monster is a hit ...
     throws(4, t1)

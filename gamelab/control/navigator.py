@@ -805,7 +805,7 @@ class Escort(Protocol):
         one, and a fight's looks may not have it in reach after all)."""
 
     def wont_have(self, s: Scene, m: Monster) -> bool:
-        """Whether no fight would take monster `m` as things are (taken for dying, ignored by her attacks, set aside by the plan)."""
+        """Whether no fight would take monster `m` as things are (taken for dying, set aside by the plan)."""
 
     def shoot_from(self, s: Scene, m: Monster, most: float, finish: bool = True) -> int | None:
         """Walk along her platform, `most` units at most, to the nearest place a star reaches monster `m` from, and

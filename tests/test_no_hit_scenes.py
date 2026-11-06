@@ -15,7 +15,7 @@ REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE), reason="needs
 SEEDS = range(1, 9)
 # The scenes whose fault this code still has. Out of here as its fix lands; own_kill_235621's is perception's binding and
 # stranger_dying_080929's kill comes after the last frame before her key, which no drop of a throw reaches: they may stay.
-OPEN = set(nh.SCENES)
+OPEN = set(nh.SCENES) - {"stranger_dead_080929", "ignored_235621"}
 
 
 @functools.lru_cache(maxsize=None)

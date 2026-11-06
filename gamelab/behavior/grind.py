@@ -180,7 +180,6 @@ class Grind(Hunt):
         if self.tp is not None and self.tp.screen:
             self.h.attacks.whole_screen = True
             if self.nav.escort is not None:
-                self.nav.escort.not_ignored = True  # (no shot first at one her attacks ignore: it isn't a target anywhere)
                 self.nav.escort.set_aside = lambda: self.tp.no_way
         if self.tp is not None:
             self.h.actions.lock_watch = self.tp.watch_lock
@@ -357,12 +356,10 @@ class Grind(Hunt):
 
     def _alive(self, s: Scene, monsters: list[Monster], now: float) -> list[Monster]:
         """Of `monsters` of look `s`, those not seen fading out where a kill died, nor taken for dying where one the ledger
-        placed died, nor ignored by her attacks; of the kinds she hunts (fight._targets' for the rest of the screen)."""
+        placed died; of the kinds she hunts (fight._targets' for the rest of the screen)."""
         fading, led = self.fs.fading(monsters), self.h.ledger
         die = {k: b.die_s for k, b in bodies(self.model).items()}
-        ignored = getattr(self.h.attacks, "ignored", None) or ()
-        return [m for m in monsters if m not in fading and getattr(m, "track", None) not in ignored
-                and (self.kinds is None or m.kind in self.kinds)
+        return [m for m in monsters if m not in fading and (self.kinds is None or m.kind in self.kinds)
                 and not dying(led.kills, m, now, monsters, die, led.dead)]
 
     def _rest_of_screen(self, s: Scene, now: float) -> list[Monster]:

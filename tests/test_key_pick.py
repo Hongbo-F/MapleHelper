@@ -177,6 +177,6 @@ def test_the_no_hit_event_has_each_attacks_key_as_a_record_has_its_time(monkeypa
     wall = time.time()
     thrown = [(now - 3.0, 7), (now - 2.0, 7), (now - 1.0, None), (now - 0.5, 8)]
     with telemetry.captured() as records:
-        Hunter._no_hit(me, NS(t=now, where=None, platform=None), thrown, {7, 8}, now + 15.0)
+        Hunter._no_hit(me, NS(t=now, where=None, platform=None), thrown, {7, 8})
     keys = next(r for r in records if r.get("kind") == "no_hit")["keys"]
     assert keys == pytest.approx([wall - 3.0, wall - 2.0, wall - 1.0, wall - 0.5], abs=0.05)
