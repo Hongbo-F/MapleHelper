@@ -1,7 +1,8 @@
 """The no-hit scenes (sim.no_hit_scenes): moments of the failsafe's recordings in the world, whether each shows its
 fault on this code and whether what solved means for it holds, with her jump aside and her hop up on. On master every scene's fault
-shows and none is solved; `FAULT` and `OPEN`, those still so: a scene comes out of them as its fix lands, its tests flipping. With
---slow: 8 seeds of 11 scenes, about 2 minutes on 2 workers."""
+shows and none is solved; `FAULT` and `OPEN`, those still so: a scene comes out of them as its fix lands, its tests flipping. Those
+are the recorded phase's verdicts: `nh.SHIFTS` move most of them (README). With --slow: 8 seeds of 11 scenes, about 2 minutes on 2
+workers."""
 
 import functools
 import os
@@ -20,9 +21,10 @@ SEEDS = range(1, 9)
 # comes after the last frame before her key, which no drop of a throw reaches.
 FAULT = {"too_close_111448", "walked_past_080939", "stranger_dying_080929", "own_kill_235621"}
 # ... and those whose fault's gone but what solved means isn't all there: 081701's first throw goes at the look, the search saying a
-# star, so her first hit is 2.1 s in against 2 and 1.2 at nothing against 1; in 15 s her hops' scenes end below master's EXP, 140 of 160
-# and 175 of 187, a pile's touches and her stabs on it (README).
-OPEN = FAULT | {"too_close_081701", "from_below_233732", "from_below_234441"}
+# star, so her first hit is 2.1 s in against 2 and 1.2 at nothing against 1; 080032's first throw from her landing, a tap later, loses
+# its walker on 2 of 8, her first hit 2.1 s against 2, and one stands 0.85 s after a miss; in 15 s her hops' scenes end below master's EXP,
+# 140 of 160 and 175 of 187, a pile's touches and, on 233732, 2.5 stabs (README).
+OPEN = FAULT | {"too_close_081701", "walked_past_080032", "from_below_233732", "from_below_234441"}
 
 
 @functools.lru_cache(maxsize=None)
@@ -85,6 +87,23 @@ def test_a_scene_runs_from_its_moment_and_stops_at_its_length():
     assert sim.clock.elapsed == pytest.approx(nh.SCENES["walked_past_080939"].seconds, abs=0.5)
     assert out["attacks"] >= 1
     assert "SimTimeout" in str(trace["result"])  # (its length is the clock's limit: no run ends before)
+
+
+def test_a_shift_moves_her_or_the_rails_and_nothing_else():
+    sc = nh.SCENES["walked_past_080939"]
+    assert nh.shifted(sc, "her+6").start == (16, 114.5) and nh.shifted(sc, "her+6").mobs == sc.mobs
+    late, early = nh.shifted(sc, "late").mobs[0], nh.shifted(sc, "early").mobs[0]
+    assert (late.x, late.rails[:2]) == (59.0, ((0.1, 0), (1.11, 1)))
+    assert early.x == pytest.approx(69.0) and early.rails[0] == pytest.approx((1.01, 1)) and early.rails[1:] == sc.mobs[0].rails[1:]
+
+
+@REAL
+@pytest.mark.slow
+def test_the_wall_foots_verdicts_hold_at_every_shift():
+    def runs(shift):
+        with mock.patch.dict(os.environ, GAMELAB_JUMP_ASIDE="1", GAMELAB_HOP_UP="1"):
+            return [nh.run_scene("wall_foot_231613", seed, shift)[2] for seed in SEEDS]
+    assert nh.over_shifts("wall_foot_231613", runs) == {"fault": 0, "solved": 4}
 
 
 @REAL

@@ -10,7 +10,8 @@ these stopped, turned and came back. The world is the harness's standard thief's
 
 Not in scenarios.SCENARIOS: no golden, no effect on the others. `measures` is what D:/MapleHelper-scratch/nofix/scenes.py
 prints; `fault_shows` says whether runs show what the recording showed, `Scene.solved` what solved means in the user's
-words (tests/test_no_hit_scenes.py)."""
+words (tests/test_no_hit_scenes.py). A verdict holds at the recorded phase: `SHIFTS` are the small changes the frames can't rule
+out, `over_shifts` how many of them keep it (most don't: README). A scene tests an attack or two, not a stuck run."""
 
 import dataclasses
 import math
@@ -34,6 +35,9 @@ WORLD = ("zero-walls", "near-misses", "walkers", "spawn-fade", "map-drops", "dro
 MISS = 0.04
 NOTHING = ("nothing", "stopped", "miss")  # (World.attack_log's outcomes that hit nothing)
 FAULT_SHARE = 0.6                         # of the recording's attacks at nothing, for a scene's runs to show its fault
+# What the frames can't rule out, as (s the rails go later, units her place along): a monster's walk by the world's 0.1 s look offset,
+# her place by the 6 units it's off in a tenth of keys.
+SHIFTS = {"late": (0.1, 0.0), "early": (-0.1, 0.0), "her+6": (0.0, 6.0), "her-6": (0.0, -6.0)}
 
 
 class _RailWalker(SimMonster):
@@ -149,14 +153,29 @@ def _counted(h, n: int, now: float) -> None:
     attacks._watch_hits = watch
 
 
-def scenario_of(name: str, seed: int):
-    """Scene `name` in world `seed`: the harness's standard thief's world with her at level 35 (HER_35), MISS, nobody else
-    but `others` and nothing back within the scene. Her stack as it was then: her stats known, her facing, her target."""
+def shifted(sc: Scene, shift: str) -> Scene:
+    """Scene `sc` by SHIFTS[`shift`]: the rails standing that long first, or going in that much earlier (its monster that far on, at
+    100 a second); her place."""
+    late, her = SHIFTS[shift]
+
+    def mob(m: Mob) -> Mob:
+        if not m.rails or not late:
+            return m
+        if late > 0:
+            return dataclasses.replace(m, rails=((late, 0), *m.rails))
+        (s, way), rest = m.rails[0], m.rails[1:]
+        return dataclasses.replace(m, x=m.x + way * 100.0 * min(-late, s), rails=((s + late, way), *rest) if s > -late else rest)
+    return dataclasses.replace(sc, start=(sc.start[0], sc.start[1] + her), mobs=tuple(mob(m) for m in sc.mobs))
+
+
+def scenario_of(name: str, seed: int, shift: str = ""):
+    """Scene `name` (`shifted` by `shift`) in world `seed`: the harness's standard thief's world with her at level 35 (HER_35), MISS,
+    nobody else but `others` and nothing back within the scene. Her stack as it was then: her stats known, her facing, her target."""
     from ..attack import danger
     from ..behavior.grind import Grind
     from ..localization.monsters import Monster
     from . import harness, scenarios
-    sc = SCENES[name]
+    sc = shifted(SCENES[name], shift) if shift else SCENES[name]
     base = harness.scenario("loop-grind", seed, "crowd", sc.seconds / 60, 0.0, scenarios.TREE, WORLD, (), "choice")
 
     def run(sim):
@@ -187,14 +206,17 @@ def scenario_of(name: str, seed: int):
 
 def measures(w, sc: Scene) -> dict:
     """What a run of scene `sc` came to, from its world: her attacks, those hitting nothing (the world's own outcome: none
-    picked or dead by then, stopped, missed) and both in the recording's span, when the first hit went in and when her
-    target died (s of the scene), EXP, touches, knock-offs, the longest she stood with no key while a monster was within 60
-    (`_watch_stand`), MP spent, and her attacks as (key s, ground or air, outcome)."""
+    picked or dead by then, stopped, missed) and both in the recording's span, when the first hit went in, a claw's too, and the
+    first that wasn't a claw's swipe, her claw's swipes (`stabs`), when her target died (s of the scene), EXP, touches, knock-offs,
+    the longest she stood with no key while a monster was within 60 (`_watch_stand`), MP spent, and her attacks as (key s, ground
+    or air, outcome)."""
     hits = [a[0] for a in w.attack_log if a[5] in ("hit", "kill", "swipe")]
+    stars = [a[0] for a in w.attack_log if a[5] in ("hit", "kill")]
     target, early = w.monsters[sc.target], [a for a in w.attack_log if a[0] <= sc.saw[0]]
     return {"attacks": len(w.attack_log), "nothing": sum(a[5] in NOTHING for a in w.attack_log),
             "span_attacks": len(early), "span_nothing": sum(a[5] in NOTHING for a in early),
-            "first_hit": round(hits[0], 2) if hits else None,
+            "first_hit": round(hits[0], 2) if hits else None, "first_star": round(stars[0], 2) if stars else None,
+            "stabs": sum(a[5] == "swipe" for a in w.attack_log),
             "death": round(target.died_at, 2) if not target.alive and target.killed_by == "her" else None,
             "exp": w.exp, "touches": w.touches, "knocks": len(w.knock_log), "stand": round(w.stand_most, 2),
             "mp": round(w.mp_used), "outcomes": [(a[0], a[2], a[5]) for a in w.attack_log]}
@@ -215,14 +237,14 @@ def _watch_stand(w) -> None:
     w._idleness = idleness
 
 
-def run_scene(name: str, seed: int) -> tuple[dict, object, dict]:
-    """Run scene `name` in world `seed` with the measured costs of her looks, as harness.run_one a hunt: its trace, its
-    Sim, its `measures` and the failsafe's firings."""
+def run_scene(name: str, seed: int, shift: str = "") -> tuple[dict, object, dict]:
+    """Run scene `name` (`shifted` by `shift`) in world `seed` with the measured costs of her looks, as harness.run_one a hunt: its
+    trace, its Sim, its `measures` and the failsafe's firings."""
     from .. import telemetry
     from . import fakes, harness, scenarios
     costs = harness.COSTS["measured"]
     before = {k: getattr(fakes, k) for k in costs}
-    scenario = scenario_of(name, seed)
+    scenario = scenario_of(name, seed, shift)
 
     def run(sim):
         _watch_stand(sim.world)
@@ -259,6 +281,12 @@ def unmet(name: str, runs: list[dict]) -> list[str]:
     return [what for what, ok in SCENES[name].solved if not ok(runs)]
 
 
+def over_shifts(name: str, runs_of: Callable[[str], list[dict]]) -> dict[str, int]:
+    """Of the SHIFTS (`runs_of`: a shift's runs of scene `name`), on how many the fault shows and on how many it's solved."""
+    runs = {shift: runs_of(shift) for shift in SHIFTS}
+    return {"fault": sum(fault_shows(name, r) for r in runs.values()), "solved": sum(not unmet(name, r) for r in runs.values())}
+
+
 # --- what solved means: the user's words of 2026-10-27 and 11-05, each against master's table halved or so ------------
 
 def _fewer(n: float) -> tuple:
@@ -278,6 +306,11 @@ _NO_STAND = ("no standing 0.5 s with a monster within 60", lambda runs: max(r["s
 def _exp(n: float) -> tuple:
     """"More EXP and loot over fewer touches": whatever she does about it, no less than master's EXP."""
     return f"{n:g} EXP or more", lambda runs: _mean(runs, "exp") >= n
+
+
+def _stabs(n: float) -> tuple:
+    """"First hit sooner" isn't a claw's swipe under her pile: master's about none."""
+    return f"at most {n:g} of the claw's swipes", lambda runs: _mean(runs, "stabs") <= n
 
 
 def _kills_target(n: int) -> tuple:
@@ -341,14 +374,14 @@ _scene("from_below_233732",
         Mob(H, 13, -29.0, ((0.37, 1), (0.16, 0), (0.05, -1), (2.77, 0), (0.05, -1), (0.22, 0), (0.65, -1))),
         Mob(H, 13, -16.0, ((0.44, 1), (0.08, 0), (2.41, -1), (0.07, 1), (0.2, 0), (1.05, 1))),
         Mob(G, 11, -84.0), Mob(G, 18, 67.0), Mob(G, 12, 176.0, ((2.19, 0), (0.71, 1), (0.93, 0), (0.37, -1)))),
-       hp=0.769, mp=0.135, solved=(_fewer(1.3), _sooner(2.0), _exp(160)))
+       hp=0.769, mp=0.135, solved=(_fewer(1.3), _sooner(2.0), _exp(160), _stabs(1.0)))
 _scene("from_below_234441",
        "20261104-234441, frames 00102-00147 (a03-a05): on P9 under a pile on P8; ground throws under its lip, then a jump "
        "up onto 8 keyed at take-off: nothing, 42 on landing", (2.6, 3, 3), (9, 47.5), "right",
        (Mob(H, 8, 94.0, ((0.04, -1), (1.43, 0), (0.2, 1), (0.2, 0), (0.77, 1), (0.16, 0), (0.27, -1))),
         Mob(G, 8, 177.0, ((0.18, -1), (0.1, 0), (1.11, -1), (0.07, 0), (0.16, 1), (0.11, 0), (0.08, -1), (0.45, 0))),
         Mob(H, 7, -177.0), Mob(H, 7, -44.0), Mob(H, 6, 239.0)),
-       hp=0.769, mp=0.154, misses=1, solved=(_fewer(1.2), _sooner(1.5), _exp(187)))
+       hp=0.769, mp=0.154, misses=1, solved=(_fewer(1.2), _sooner(1.5), _exp(187), _stabs(1.0)))
 _scene("stranger_dead_080929",
        "20261105-080929, frames 00063-00098 (a03-a04): xXNephewXx's kills: horny #763 dead 0.23 s before her key, on a "
        "look 0.4 s old, at her lock's end; green #764's number 90 ms after her next key", (2.0, 2, 2), (14, 38.5), "left",
