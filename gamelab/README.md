@@ -8141,6 +8141,63 @@ Scenario `loop_tree_ore_waits` moved seed twice (D, E): it sits on the edge of "
 
 **Not done, and asked for.** The nine scenes left: jumping aside and attacking from a distance (the too-close, wall's-foot and walked-past ones) and the hop up onto the pile (from below). The log's supervised grind.
 
+### Jump aside, hop up (from 2026-11-05, off by default)
+
+The user on the failsafe's nine clips, asked whether she could stand still up to 0.5 s with a monster on her: "no, jump aside and attack from a distance"; asked about hopping up onto the pile: "Yes"; and of a supervised grind: "Yes, and maybe create scene in simulation to verify they work/solve the problem". **The causes** (61 attacks read frame by frame): up close a jump in place whose attack the search can't pick, too close in front, at a wall's foot or walked past her (20 rows of the 43 at nothing, 1.22 no-hit a minute live); from below, the star flying level under the platform, its window shut by the pick (7 rows, 0.33 a minute).
+
+**What changed**, both behind their own switch (`GAMELAB_JUMP_ASIDE`, `GAMELAB_HOP_UP`: `stance.aside_on`, `hop_on`), the thief's alone (`POINT_BLANK`). Off, to the digit on 12 whole runs and all 88 scene runs, and the magician with both on to the digit on 3.
+
+- **What the search says** (`_search_says`): `reach.key_pick` for the stance's act at the look, her keys as it has them, each monster walked by `Pace`, through her if it's coming. `PACE_STOP` stays out of it: live they do walk through her, and with it the search says a star on tap-first attacks that hit 65%, without it 83%, and its "nothing" goes from 137 such attacks to 309 at the same 35% (M, the 14 tours on replay).
+- **The jump aside** (`_aside`, at the stance's unsure throw or bare jump back, with no move since her last throw): her jump back's keys with no attack in them (`Actions.jump_back` `key_ms` 0; a key in the air picks a monster on her level only from 144 off, and locks her past her landing), away or over. One currency, s until an attack lands. The throw: its attack's start and `CYCLE_S` (1.3) for each it takes, by what it hits on replay (`LANDS`: search shut 46% facing, 35% turning; else 89%, 83%). The jump: her first attack where it lands (`first_attack_s`, `SURE_LANDS` 85%), `landing_of`'s price, no star from another platform `LANDING_PRICE_S`, another platform `LEAVE_S` (0.6, a guess), one on her way before her feet clear it `MEET_PRICE_S`. Monsters walk for `HEADING_S` (0.5, a guess; trusted all the way 081701 keeps its fault). It keeps to the stance's limits, `move_limits` on another platform, and no variant falls past `LONG_DROP`. It's a move (`keyless`, `moves`), so a second can't come before a throw. No second planner: the target stays the chooser's and the next look decides.
+- **The hop** (`up_instead`, for a throw from the ground, the fight's or close quarters', that the search says takes nothing): the stance's own `_jump_shot` landing back, else `_hop`: a shot from `reach.coverage` over the monsters above landing up on a platform within `move_limits`, its target first. Its landing isn't priced: the target's the chooser's by EXP a second, and the throw takes nothing.
+
+**Two designs, and what came of each** (`nofix/design_smallest.md`, `design_player.md`). The second's price in seconds and its trigger at the bare jump back, whose key is wasted: the first's compared prices that don't share a unit, and left 080032's. The first's search, its jump back's keys, its one-line touch on the way and its hop. The second never asked the search: its replay covered the class that hit nothing, so it couldn't see that of all such attacks those the search gives a star hit 83-89% and kill 55-61%, against 35-46% and 16-17%; it went 14 times a run, this about 3. Its forward keys let the arrow up 60 ms after the jump key, where the game acts on the jump 50-80 ms after it (`FORWARD_HOLD_MS`); her jump back's have gone live 62 times, a median 95 units. Its whole run looked better (EXP +33, t +2.0) in a world that misses 27.5% of what live misses 4-12%, which flatters exactly that choice.
+
+**On replay, 231.5 minutes live** (M, `nofix/build/rp/rpb.py`, moves 0): 142 jumps aside, 0.61 a minute, for attacks that hit 42% and killed 15%; from the landing by the recorded places 111 a star, 104 at the target; the target under 54 off then 20, 54-105 51, 105+ 71 (a chaser's reply isn't in those). 85 away, 57 over; 44 on another platform. 29 hops, 0.13 a minute, for attacks that hit 24%, 26 a star at the pick, 18 at the target. 90 shots landing back, 0.39 a minute, for attacks that hit 52%, 77 a star. Of the 501 attacks the search shuts, 144 go: for 144 no way lands (a platform's limits, a long fall), 75 meet one on the way, 59 have no star from the other platform, 52 land dearer than the throw, the rest walked into. `_aside` 0.27 ms, p99 0.53.
+
+| Scene (8 seeds, 15 s): master, off, aside, hop, both | Attacks / at nothing | First hit s | EXP | Touches | Fault shows |
+|---|---|---|---|---|---|
+| too_close_081701 | 5.2/2.8, 5.8/3.9, 3.9/1.4, 5.8/3.9, 3.9/1.4 | 2.8, 3.6, 2.1, 3.6, 2.1 | 16, 18, 24, 18, 24 | 3.2, 2.1, 1.0, 2.1, 1.0 | gone, 2 thresholds short (a throw at the first look, a star) |
+| too_close_111448 | 6.6/3.2, 7.4/4.2, 7.1/4.1, 7.4/4.2, 7.1/4.1 | 3.2, 3.8, 3.8, 3.8, 3.8 | 89, 79, 79, 79, 79 | 3.2, 3.6, 3.2, 3.6, 3.2 | yes: the search says a star, and the way away is past her limits |
+| wall_foot_231613 | 9.1/4.8, 11.1/7.6, 5.5/1.0, 11.0/7.8, 5.5/1.0 | 5.5, 7.4, 1.2, 7.4, 1.2 | 97, 97, 123, 92, 123 | 3.0, 2.5, 1.2, 2.6, 1.2 | **solved** |
+| walked_past_080032 | 5.6/2.9, 6.8/3.5, 5.4/1.2, 6.8/3.5, 5.4/1.2 | 3.7, 3.2, 1.4, 3.2, 1.4 | 73, 72, 105, 72, 105 | 3.1, 3.8, 2.6, 3.8, 2.6 | **solved** |
+| walked_past_080939 | 2.0/1.8, 3.6/2.8, same, same, same | 11.6, 5.5, same | 6, 23, same | 2.6, 2.9, same | yes: no room either way |
+| from_below_233732 | 10.4/3.9, 9.9/3.4, 9.9/3.4, 10.1/2.5, 9.9/2.5 | 3.3, 3.2, 3.2, 0.2, 0.2 | 160, 163, 163, 150, 140 | 1.0, 1.1, 1.1, 5.2, 5.2 | gone, short of master's EXP in 15 s, touches t +3.2 |
+| from_below_234441 | 11.0/3.8, 11.5/4.5, 11.5/4.5, 7.6/1.2, 7.6/1.2 | 2.5, 2.5, 2.5, 0.4, 0.4 | 173, 187, 187, 175, 175 | 4.5, 3.9, 3.9, 2.6, 2.6 | gone, short of 187 EXP (t -1.8); knock-offs 0.6 to 1.0 |
+| stranger_dead, ignored (the small fixes') | no change of note | | | | solved, stay so |
+| stranger_dying, own_kill (other causes) | no change | | | | yes |
+
+Every run, every attack: `nofix/scenes_built.txt`. 15 s is short for a pile: the hop's EXP may be there later, or it may not; the scene can't say.
+
+**The whole run: no gain shown, and by its rule off.** Written before the run, `nofix/prereg.txt`: the scenes it's for improve, attacks at nothing clearly fall (t under -2), EXP and knock-offs not clearly worse, MP not drained. Standard thief at her real level, 5 minutes, fresh seeds 201-224, against the branch off (`nofix/build/pairx.py`), master beside:
+
+| Means a run | Off | Aside (t) | Hop (t) | Both (t) | Master (t) |
+|---|---|---|---|---|---|
+| EXP/min | 467.4 | 452.3 (-1.7) | 459.7 (-0.7) | 456.2 (-0.9) | 442.1 (-2.4) |
+| Kills | 66.1 | 63.6 (-2.1) | 64.6 (-1.1) | 64.3 (-1.2) | 62.7 (-2.4) |
+| Touches | 65.9 | 65.4 (-0.2) | 64.1 (-0.6) | 66.4 (+0.2) | 66.3 (+0.1) |
+| Knock-offs | 6.13 | 6.04 (-0.1) | 6.00 (-0.2) | 5.71 (-0.6) | 5.33 (-1.3) |
+| Trip falls | 0.25 | 0.13 (-1.0) | 0.29 (+0.4) | 0.17 (-0.6) | 0.13 (-1.4) |
+| Deaths, stops | 0 | 0 | 0 | 0 | 0 |
+| drops_share | .977 | .976 (-0.2) | .978 (+0.2) | .970 (-0.7) | .967 (-1.2) |
+| value_share | .979 | .977 (-0.3) | .973 (-0.7) | .969 (-0.9) | .969 (-1.0) |
+| MP a minute | 437 | 426 (-1.4) | 427 (-1.3) | 412 (-3.4) | 417 (-2.4) |
+| Attacks | 172.2 | 171.3 (-0.3) | 171.8 (-0.1) | 167.3 (-1.6) | 167.9 (-1.6) |
+| At nothing, by the world | 71.5 | 71.5 (0.0) | 70.2 (-0.5) | 66.3 (-1.9) | 69.3 (-1.4) |
+| Firings | 2.71 | 2.83 (+0.3) | 2.83 (+0.4) | 2.04 (-1.4) | 2.46 (-0.7) |
+| Asides, hops | - | 3.0, - | -, 0.96 | 3.3, 0.88 | - |
+| Fidgets (an aside within 1.5 s of one) | - | 0 | - | 0 | - |
+| Standing with one within 60: s, longest | 11.6, 0.53 | 11.7, 0.51 | 11.1, 0.43 | 11.2, 0.47 | 11.2, 0.55 |
+| stance(), ms by the real clock: median, p99 | 0.20, 2.1 | 0.25, 1.9 | 0.21, 3.4 | 0.27, 3.3 | 0.18, 2.0 |
+
+Asides went a median 103 units (p10 72, p90 116), her next attack within 2.5 s landing 58% at +1.27 s, a knock-off within 3 s of 3 of 72; hops, that attack 78% at +0.52 s. Both fail on attacks at nothing, aside also on two of its five scenes, so both stay off. That was written down as likely before the run: about 3 jumps a run, each at most one attack, against 71 at nothing of which 30 are the world's own miss. Over all 36 seeds aside's EXP is -12 (t -1.8), kills t -2.1: not clearly worse by the rule, but it leans that way and it's the number I can't explain away. The world's 27.5% miss makes her sure attack from a landing land 58% where the next attack after her real jump backs landed 84%, so it's biased against the jump. That doesn't show it's all of it.
+
+**What the simulator can't tell.** Whether a chaser really follows her jump (the scenes' near monsters are on rails up to her first hit; the world's own chasers walk past her where the recordings turn back). What a small prize is worth: per-seed SD about 41-68 EXP/min here, and it predicted +11.8% on the merge whose live run fell. How her air turn holds without an attack to carry. Whether it looks like a player.
+
+**What's left.** 111448's rows go by the search, which says a star; 080939 has no room; 081701's first throw goes at the look; 359 of 501 shut attacks have no jump, most of them limits. The chooser still prices a close target as near (`target.soonest`). Stabs after a hop are as they were.
+
+**The first live run**: both switches on by environment, one supervised grind, the user watching (`nofix/first_live.md`; `nofix/keylog.py`, `asidelog.py`). First: does the key's "nothing" still hit 35%, does she land facing it and does a monster come with her, are there falls after jumps, and does it look like a player dodging. No table answers the last.
+
 ## In game, on Thicket Around the Beach II
 
 - **Navigation:** 21 moves in a row across every move type without a miss, and a 17-move climb from the basin to the top. Chained, a 13-move route up took 19.0 s in 3 key plans with no misses (33.4 s one move at a time). Over 10 test routes, a move landed elsewhere about once in 15, usually a drop or a straight-up jump timed off; each time she replanned from where she was.
