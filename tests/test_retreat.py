@@ -32,73 +32,93 @@ def tree_map() -> mapdata.MapModel:
     return m
 
 
-def _choose(m, pid, x, left=9.5, monsters=(), her=danger.Her(752, 24)):
+def _choose(m, pid, x, left=9.5, monsters=(), her=danger.Her(752, 24), hang=True):
     """`choose` from (platform pid, x), with a look that saw `monsters`, `left` s to get there."""
     h = SimpleNamespace(danger=danger.of_map(m, her))
     nav = SimpleNamespace(model=m, planner=Planner(m))
     s = SimpleNamespace(where=SimpleNamespace(platform=m.platform(pid), x=x), monsters=list(monsters))
-    return choose(h, nav, s, left)
+    return choose(h, nav, s, left, hang)
 
 
 # --- where she goes ---------------------------------------------------------------------------------------------
 
-def test_on_a_safe_platform_or_a_place_no_monster_reaches_she_stays():
+def test_on_a_safe_platform_she_stays_and_a_place_merely_safe_enough_keeps_her_only_with_nothing_safe_in_time():
+    """The user, 2026-11-05: a safe platform or a rope. 'Safe enough' is what's left when neither is in time."""
     m = tree_map()
     assert _choose(m, 26, 150.0) == Place(26, 150.0, "here: a safe platform", 0.0)
-    # 25 is MapModel.safe, but 24's Green Mushroom reaches her head over its right part (retreat.OVERHEAD): there by its
-    # places' danger, safe enough at 150, not under 24 at 250 (the nearest place safe enough within PLACE_SLACK: 199)
+    # 25 is MapModel.safe, but 24's Green Mushroom reaches her head over its right part (retreat.OVERHEAD): not wholly safe
     assert m.safe(25) and not retreat.wholly_safe(m, 25) and retreat.wholly_safe(m, 26)
-    assert _choose(m, 25, 150.0) == Place(25, 150.0, "here: safe enough", 0.0, 0.0)
-    assert (_choose(m, 25, 250.0).x, _choose(m, 25, 250.0).why) == (199.0, "safe enough")
-    assert not m.safe(28)  # 28 isn't MapModel.safe, but no monster reaches it by the danger model
-    stay = _choose(m, 28, 207.0)
-    assert stay.why == "here: safe enough" and stay.seconds == 0 and stay.danger <= retreat.SAFE_DANGER
+    p = _choose(m, 25, 150.0)
+    assert p.seconds > 0 and (retreat.wholly_safe(m, p.platform) or p.rope is not None)
+    assert not m.safe(28)  # 28 isn't MapModel.safe; no monster reaches it by the danger model, and there's better in time
+    p = _choose(m, 28, 207.0)
+    assert p.seconds > 0 and (retreat.wholly_safe(m, p.platform) or p.rope is not None)
+    # no time for those: there as before
+    assert _choose(m, 25, 150.0, left=0.1) == Place(25, 150.0, "here: safe enough", 0.0, 0.0)
+    assert _choose(m, 28, 207.0, left=0.1).why == "here: safe enough"
 
 
-def test_she_goes_to_the_nearest_safe_platform_when_it_is_near():
+def test_she_goes_to_the_quickest_of_the_safe_platforms_and_the_ropes_she_is_safe_on():
     m = tree_map()
-    p = _choose(m, 24, 231.0)  # shooting 23 from 24, as live: down onto 25, under her
-    assert (p.platform, p.x, p.why) == (25, 199.0, "safe enough") and trip_s(p.seconds) <= retreat.NEAR_S
-    with pytest.MonkeyPatch.context() as mp:  # (as before OVERHEAD: 25 a safe platform, anywhere on it)
-        mp.setattr(retreat, "OVERHEAD", False)
-        p = _choose(m, 24, 231.0)
-        assert (p.platform, p.x, p.why) == (25, None, "a safe platform")
+    p = _choose(m, 24, 231.0)  # shooting 23 from 24, as live: 26 is a drop away
+    assert (p.platform, p.x, p.why) == (26, None, "a safe platform")
+    p = _choose(m, 33, 0.0)  # Tree Dungeon's floor: the rope at 146 from 32, at its safest height
+    assert p.rope is not None and (p.platform, p.rope.x) == (32, 146) and p.danger == 0.0 and p.why == "a safe rope"
+    times = Planner(m).times(33, 0.0)
+    assert all(trip_s(p.seconds) <= trip_s(times[q.id]) for q in m.places if retreat.wholly_safe(m, q.id) and q.id in times)
 
 
-def test_from_the_floor_no_safe_platform_is_near_and_a_rope_as_safe_comes_first():
-    """From Tree Dungeon's floor (33) the nearest place no monster reaches is 28, 4.3 s by route: past NEAR_S by
-    `trip_s` (the crowd's stops made it 5-12 s in the simulator). The rope at 146 from 32, as safe at its safest height
-    (attack.ropes) and quicker, comes first."""
+def test_a_key_check_keeps_to_platforms():
+    """behavior.keycheck.unquiet: its window opens only with her on a platform."""
+    p = _choose(tree_map(), 33, 0.0, hang=False)
+    assert p.rope is None and p.platform is not None
+    assert retreat.KEY_CHECK.ropes is False and retreat.LIE_DETECTOR.ropes is True
+
+
+def test_every_kind_counts_for_a_retreat_and_hunting_s_measure_stays():
+    """2026-11-05 11:15-11:18, level 35: a Green Mushroom's touch 3.8% of her 1244 HP, under DANGER_MIN. She read 'here: safe
+    enough' on platform 11 with one on her; the measure her hunts go by is untouched."""
+    from gamelab.localization.monsters import Monster
     m = tree_map()
+    her = danger.Her(1244, 35, 117)
+    hunting, every = danger.of_map(m, her), danger.every_kind(danger.of_map(m, her))
+    green = Monster(SimpleNamespace(kind="green-mushroom"), -41.0, m.platform(11).y_at(-41.0), 11)
+    assert hunting.share("green-mushroom") == 0.0 and every.share("green-mushroom") > 0.03
+    assert hunting.at(11, -38.5, [green]) == 0.0 and every.at(11, -38.5, [green]) > 0.03
+    p = _choose(m, 11, -38.5, monsters=[green], her=her)
+    assert p.seconds > 0 and p.why == "a safe rope" and p.danger == 0.0
+    # with no time for it, not "safe enough" where one stands on her
+    assert _choose(m, 11, -38.5, left=0.1, monsters=[green], her=her).why == "here: the safest within reach"
+
+
+def test_a_rope_qualifies_by_the_danger_model_alone(monkeypatch):
+    """Nothing here takes ropes for safe: on a map where a monster's body reaches every height, none qualifies."""
+    m = tree_map()
+    monkeypatch.setattr(danger.Danger, "on_rope", lambda self, rope, y, seen=None: 0.001)
     p = _choose(m, 33, 0.0)
-    assert p.rope is not None and (p.platform, p.rope.x) == (32, 146) and p.danger <= retreat.SAFE_DANGER
-    assert p.why == "a rope as safe: no safe platform near"
-    assert trip_s(Planner(m).arrive(33, 0.0, 28, 207.0)) > retreat.NEAR_S
+    assert p.rope is None and p.why != "a safe rope"
 
 
 def test_with_no_safe_place_in_time_she_goes_to_the_safest_she_gets_to_or_stays():
     m = tree_map()
     p = _choose(m, 33, 0.0, left=2.0)  # nothing safe gets her there in 2 s
     assert p.why.endswith("the safest within reach") and trip_s(p.seconds) <= 2.0 or p.seconds == 0
-    here = danger.of_map(m, danger.Her(752, 24))
+    here = danger.every_kind(danger.of_map(m, danger.Her(752, 24)))
     assert p.danger <= max(here.at(33, 0.0, None), here.at(33, 0.0, []))
     assert _choose(m, 33, 0.0, left=0.1).seconds == 0  # no time for anything: she stays
 
 
-def test_the_look_s_monsters_count_a_place_is_safe_only_if_they_and_every_spawn_point_leave_it_so():
+def test_the_look_s_monsters_count_a_place_is_safe_enough_only_if_they_and_every_spawn_point_leave_it_so():
     from gamelab.localization.monsters import Monster
     m = tree_map()
-    assert _choose(m, 28, 207.0).why == "here: safe enough"
+    assert _choose(m, 28, 207.0, left=0.1).why == "here: safe enough"
     horny = Monster(SimpleNamespace(kind="horny-mushroom"), 207.0, m.platform(28).y_at(207.0), 28)  # seen on 28
-    assert _choose(m, 28, 207.0, monsters=[horny]).why != "here: safe enough"
+    assert _choose(m, 28, 207.0, left=0.1, monsters=[horny]).why != "here: safe enough"
 
 
-def test_on_a_map_where_no_kind_counts_only_a_safe_platform_is_a_safe_place():
-    """On the first map no kind's touch counts (attack.danger.DANGER_MIN): every place would be "safe enough". She goes
-    to a safe platform (MapModel.safe) she gets to in time, or stays."""
+def test_on_a_map_where_no_kind_s_touch_is_known_only_a_safe_platform_is_a_safe_place():
     m = mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail", "8": "Pig"}, {"2": 2})
-    d = danger.of_map(m, danger.Her(642, 19))
-    assert not d.any
+    assert not danger.every_kind(danger.of_map(m, danger.Her(642, 19))).any
     c = plat(m, 500, 400)
     safe = [p.id for p in m.places if m.safe(p.id)]
     p = _choose(m, c.id, 400.0, her=danger.Her(642, 19))
@@ -107,6 +127,16 @@ def test_on_a_map_where_no_kind_counts_only_a_safe_platform_is_a_safe_place():
     else:
         assert p.platform in safe or (p.seconds == 0 and p.why == "here: the safest within reach")
         assert _choose(m, c.id, 400.0, left=0.1, her=danger.Her(642, 19)).seconds == 0
+
+
+def test_small_kinds_count_for_a_retreat_too():
+    """On the first map no kind's touch passes DANGER_MIN (attack.danger): by hunting's measure every place reads safe."""
+    m = mapdata.parse(1, tree(), "Test Map", {}, {"2": "Snail", "8": "Pig"}, {"2": 2}, mob_damage={"2": 3, "8": 11})
+    d = danger.of_map(m, danger.Her(642, 19))
+    assert not d.any and danger.every_kind(d).any
+    c = next(p for p in m.places if not m.safe(p.id))
+    x = (c.left + c.right) / 2
+    assert d.at(c.id, x, None) == 0.0 and danger.every_kind(d).at(c.id, x, None) > 0.0
 
 
 # --- the hunt stops, and the retreat runs there --------------------------------------------------------------------

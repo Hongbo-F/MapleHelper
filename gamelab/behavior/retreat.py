@@ -11,15 +11,20 @@ key plan, or its next look (Hunter.look, a navigator's pass: client.check_alarm)
 retreat runs there, and the alarm goes on: the command stops (exit code 3) as before. With no hunt running nothing moves
 her: the player only raises the alarm and records, as before (it knows neither the map nor where she is).
 
-Where to (`choose`): of the safe places she gets to within RETREAT_S (alarm.RETREAT_S, 10 s) of the sighting, by the
-route planner's time (motion.route.Planner) stretched for her looks and stops on the way (`trip_s`): the nearest safe
-platform (MapModel.safe: no monster can touch her there) or place the danger model rates safe enough (attack.danger:
-SAFE_DANGER of her HP at most, with every spawn point's monster at its point and with the look's monsters; only on a map
-where a kind counts at all, Danger.any: on the first map none does, and anywhere would be "safe"), if it's near
-(NEAR_S); else the quickest to get to of those and the ropes as safe (positioning's rope model, attack.ropes: from any
-platform she gets to, at its safest height; she regains no HP there, so only when no safe platform is near). None in
-time: the safest place she gets to in that time, by the same danger, or where she is if that's it. Hanging on a rope
-as safe already (the hunt waits on ropes: its rule 9), she stays on it (`safe_rope`).
+Where to (`choose`; the user, 2026-11-05: "you should have gone to safe platform or rope upon stop, on lie detector, on
+hp safety trigger"): of the places she gets to in the time she has (Why.seconds: RETREAT_S, alarm.RETREAT_S, 10 s, of the
+sighting on the Lie Detector; STOP_S from a stop, nothing else limiting it), by the route planner's time (motion.route.
+Planner) stretched for her looks and stops on the way (`trip_s`): the quickest of the safe platforms (`wholly_safe`:
+no monster can touch her anywhere on it) and the ropes she's safe on (positioning's rope model, attack.ropes: from any
+platform she gets to, at its safest height, and no monster of any kind reaches her there, `ROPE_SAFE`: the model says,
+so on a map whose ropes aren't safe none qualifies; she regains no HP hanging, her pet's potions still go). Only if
+neither is in time: a place the danger model rates safe enough (attack.danger: SAFE_DANGER of her HP at most, with every
+spawn point's monster at its point and with the look's monsters), else the safest she gets to in that time, or where
+she is if that's it. Where she is counts as those do, so a place "safe enough" is no reason to stay while a safe one is
+in time. Every kind that can touch her counts, whatever its share (attack.danger.every_kind): from about level 30 on
+a Green Mushroom's touch is under DANGER_MIN, and hunting's measure read 'safe enough' on all 159 scenes of 2026-11-05
+11:15-11:18 with one walking up to her. Hanging on a rope she's safe on already, she stays on it (`safe_rope`). A key
+check keeps to platforms (Why.ropes): its window opens only with her on one (behavior.keycheck.unquiet).
 
 How: her moves alone, as the navigator plans them keeping clear of monsters (navigator.AVOID: never a fight; the
 quickest way; a monster in the way of a move waited out where she can stand, or gone round, as on any trip), its plans of
@@ -52,6 +57,7 @@ from dataclasses import dataclass
 
 from .. import telemetry
 from ..attack import ropes
+from ..attack.danger import every_kind
 from ..attack.ropes import Refuge
 from ..control import alarm, client
 from ..control.alarm import RETREAT_S, RETREAT_WINDOW_S
@@ -67,11 +73,14 @@ from .safety import HuntStop, SafetyStop
 
 SAFE_DANGER = 0.01  # a place whose danger (attack.danger: the share of her HP a touch takes, by how likely and soon) is
                     # at most this is safe enough: 1% of her HP, a Horny Mushroom's walk of 4.7 s off (16% a touch)
+ROPE_SAFE = 0.0     # a rope she's safe on: nothing of any kind reaches her there, however soon (a far monster walking
+                    # under a rope counts little by how soon, and touches her in the end: she may hang there for hours)
+STOP_S = 60.0       # s a stop's retreat has (a stop's, not the Lie Detector's: no player's window to meet; her safe place
+                    # however far, her trips watched and retried on the way)
+STOP_TRIES = 12     # ... goes at most: from wherever a go left her
 SLACK = 1.5         # her trips take about this much longer than the planner's time: the looks and stops between
                     # chains, the waits for monsters (the simulator's retreats from Tree Dungeon's floor: 1.0-2.4 times)
 TRIP_S = 0.6        # ... and this long more: the look on arrival, a chain sent a moment after its look
-NEAR_S = 6.0        # a safe platform or place she gets to this quickly is near: past it, a rope as safe and quicker
-                    # comes first (from the floor of Tree Dungeon, 28 is 4.3 s by route, which the crowd there made 5-12 s)
 PLACE_STEP = 20.0   # map units between the places along a platform weighed
 PLACE_IN = 15.0     # ... kept this far in from its ends (her half width: she stands on it)
 LOCATE_TRIES = 8    # looks at most for her dot before she sets off (a look every 0.25 s: 2 s)
@@ -166,22 +175,27 @@ class Watch:
 
 @dataclass(frozen=True)
 class Why:
-    """What a retreat is for, as its log lines and telemetry events say it: the Lie Detector's, or the safety stop's."""
+    """What a retreat is for, as its log lines and telemetry events say it (the Lie Detector's, or the safety stop's),
+    and what it has for it."""
     label: str  # the log's
     event: str  # the telemetry's
     after: str  # "N s <after>"
+    seconds: float = RETREAT_S  # s from `seen` it has to get there, and ...
+    window: float = RETREAT_WINDOW_S  # ... her trips are cut this long after it (the player's, on the Lie Detector)
+    tries: int = TRIES  # goes at most
+    ropes: bool = True  # a rope will do
 
 
 LIE_DETECTOR = Why("LIE DETECTOR", "Lie Detector", "after it was seen")
-SAFETY = Why(SafetyStop.label, SafetyStop.title, "after the stop")
+SAFETY = Why(SafetyStop.label, SafetyStop.title, "after the stop", STOP_S, STOP_S, STOP_TRIES)
 # Before the key check that follows a doubt of her regular attack's key (behavior.keycheck: a monster near her, the game's
 # KEY BINDINGS window is opened from a safe place)
-KEY_CHECK = Why("KEY CHECK", "Key check", "after the doubt")
+KEY_CHECK = Why("KEY CHECK", "Key check", "after the doubt", ropes=False)
 
 
 def why_of(stop: HuntStop) -> Why:
     """A stop's retreat's words (SAFETY for the safety stop's)."""
-    return Why(stop.label, stop.title, "after the stop")
+    return Why(stop.label, stop.title, "after the stop", STOP_S, STOP_S, STOP_TRIES)
 
 
 @contextmanager
@@ -245,18 +259,18 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
     """away's retreat."""
     log = log or h.log
     out = Retreat(time.monotonic() - seen)
-    if out.began >= RETREAT_S:
+    if out.began >= why.seconds:
         out.result = "too late"
-        log(f"{why.label}: seen {out.began:.1f} s ago, past the {RETREAT_S:g} s a retreat has: she stays where she is")
+        log(f"{why.label}: seen {out.began:.1f} s ago, past the {why.seconds:g} s a retreat has: she stays where she is")
         return _end(out, seen, log, None, why=why)
     actions = h.actions.moves_only()
     # no escort: she keeps clear of monsters (DODGE: of her memory's too, refuges' ties by her danger model)
     nav = Navigator(h.senses, actions, h.model, log=log, variety=0, rng=rng,
-                    **({"memory": getattr(h, "memory", None), "danger": lambda: h.danger} if DODGE else {}))
+                    **({"memory": getattr(h, "memory", None), "danger": lambda: every_kind(h.danger)} if DODGE else {}))
     stop = why is not LIE_DETECTOR and why is not KEY_CHECK  # (a stop's: the safety stop, out of darts)
     s = None
     try:
-        for go in range(TRIES):
+        for go in range(why.tries):
             s = nav.mover.locate(tries=LOCATE_TRIES, mobs=True, wide=True)
             # On a rope or in the air: a rope as safe as a safe place is one, where she stays; off any other at once
             # (_onto_platform's look until she's still is over), and down from the air.
@@ -276,8 +290,8 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
             if s.where.platform is None:
                 out.result = "lost: not on any platform"
                 return _end(out, seen, log, nav, why=why)
-            left = RETREAT_S - (time.monotonic() - seen)
-            p = choose(h, nav, s, left)
+            left = why.seconds - (time.monotonic() - seen)
+            p = choose(h, nav, s, left, why.ropes)
             if p.seconds <= 0:  # there (or nowhere better to be had in the time left)
                 out.place, out.result = (p, "stayed") if go == 0 else (out.place, out.result)
                 if go == 0:
@@ -291,13 +305,13 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
                 f"{time.monotonic() - seen:.1f} s {why.after}" + ("; her moves only, no mouse" if go == 0 else
                                                                   f" (go {go + 1})"))
             telemetry.emit("event", kind="retreat", text=f"{why.event}: retreat to {p.text()} ({p.why})")
-            deadline = seen + RETREAT_WINDOW_S
+            deadline = seen + why.window
             seconds = min(deadline - time.monotonic(), trip_s(p.seconds) + GO_SLACK_S)  # longer: from where she is
             dodge = {}
             linger = stop and STOP_REFUGES
             if DODGE:  # (the evade step's budget: the time the retreat has left; after a stop, refuges to the end)
                 dodge = dict(toucher=True, evade_s=max(0.0, deadline - time.monotonic()) if linger else
-                             min(navigation.EVADE_S, max(0.0, RETREAT_S - (time.monotonic() - seen))),
+                             min(navigation.EVADE_S, max(0.0, why.seconds - (time.monotonic() - seen))),
                              refuge_s=math.inf if linger else navigation.EVADE_MOVE_S, deadline_pass=not linger,
                              arrive_waits=ARRIVE_WAITS)  # (short of its x where standing is clear: waits there)
             trip = nav.go(p.platform, x=p.rope.x if p.rope else p.x, seconds=max(0.1, seconds), mode=AVOID, scene=s,
@@ -313,7 +327,7 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
                     out.result = "on the rope"
                     return _end(out, seen, log, nav, s, why)
                 out.result = f"not on the rope (on {platform_text(s)})"
-            if RETREAT_S - (time.monotonic() - seen) <= TRIP_S:
+            if why.seconds - (time.monotonic() - seen) <= TRIP_S:
                 break
     except client.LieDetectorAlarm as e:  # a plan past the player's window, or one it refused
         out.result = f"stopped: {e}"
@@ -353,31 +367,30 @@ def hanging(nav: Navigator, s: Scene) -> tuple[Scene, Rope] | None:
 def rope_risk(h, rope: Rope, y: float, seen) -> float:
     """The danger to her hanging on `rope` with her feet at map y, as choose has a rope's: the worst within HANG_SLACK
     of y, with every spawn point's monster at its point or with the monsters `seen` (a look's)."""
-    d = h.danger
+    d = every_kind(h.danger)
     return max(d.on_rope(rope, y + dy, look) for dy in (-ropes.HANG_SLACK, 0.0, ropes.HANG_SLACK)
                for look in (None, seen))
 
 
 def safe_rope(h, rope: Rope, y: float, seen) -> Place | None:
-    """Hanging on `rope`, her feet at map y (`hanging`): staying there (a Place of 0 s, platform None) if it's as safe as
-    a safe place (`rope_risk` SAFE_DANGER at most), else None; None too on a map where no kind counts (Danger.any), as
-    choose has it: only a safe platform is a safe place there. Got off first, a rope she waited on safely (the hunt's
-    rule 9) had sent her over 9 s across the map (review, 2026-10-24: the simulator, from the rope at -8, its danger
-    0)."""
-    if not h.danger.any:
+    """Hanging on `rope`, her feet at map y (`hanging`): staying there (a Place of 0 s, platform None) if she's safe on it
+    (`rope_risk` ROPE_SAFE at most), else None; None too on a map where nothing rates it (no kind's touch known), as
+    choose has it. Got off first, a rope she waited on safely (the hunt's rule 9) had sent her over 9 s across the map
+    (review, 2026-10-24: the simulator, from the rope at -8, its danger 0)."""
+    if not every_kind(h.danger).any:
         return None
     risk = rope_risk(h, rope, y, seen)
-    return Place(None, rope.x, "here: a safe rope", 0.0, risk) if risk <= SAFE_DANGER else None
+    return Place(None, rope.x, "here: a safe rope", 0.0, risk) if risk <= ROPE_SAFE else None
 
 
-def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
-    """Where her retreat goes from look `s`, with `left` s of RETREAT_S to get there (see the module's doc). Of the safe
-    places she gets to in time (`trip_s` within `left`): the nearest safe platform or place safe enough, if it's near
-    (NEAR_S); else the quickest to get to of those and the ropes as safe (from any platform she gets to: attack.ropes,
-    each at its safest height); else the safest place she gets to in time, or where she is."""
-    model, d = nav.model, h.danger
+def choose(h, nav: Navigator, s: Scene, left: float, hang: bool = True) -> Place:
+    """Where her retreat goes from look `s`, with `left` s to get there (see the module's doc). Of the places she gets to
+    in time (`trip_s` within `left`): the quickest of the safe platforms and, `hang`, the ropes she's safe on (from any
+    platform she gets to: attack.ropes, each at its safest height); else the nearest place safe enough; else the safest
+    she gets to, or where she is."""
+    model, d = nav.model, every_kind(h.danger)
     here, x = s.where.platform, s.where.x
-    counts = d.any
+    counts = d.any  # (no kind's touch known, or no kind: nothing rates a place, only a safe platform is one)
     seen = s.monsters
 
     def risk(pid: int, gx: float) -> float:
@@ -390,11 +403,11 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
     if wholly_safe(model, here.id):
         return Place(here.id, x, "here: a safe platform", 0.0)
     now = risk(here.id, x)
-    if counts and now <= SAFE_DANGER:
-        return Place(here.id, x, "here: safe enough", 0.0, now)
     times = nav.planner.times(here.id, x)
     way = _way_cost(nav, here.id, x, seen) if DODGE else (lambda pid: 0.0)
-    safe, hangs, safest = [], [], [Place(here.id, x, "here: the safest within reach", 0.0, now)]
+    safe, hangs, enough, safest = [], [], [], [Place(here.id, x, "here: the safest within reach", 0.0, now)]
+    if counts and now <= SAFE_DANGER:
+        enough.append(Place(here.id, x, "here: safe enough", 0.0, now))
     for p in model.places:
         t = 0.0 if p.id == here.id else times.get(p.id)
         if t is None or not in_time(t):
@@ -409,24 +422,23 @@ def choose(h, nav: Navigator, s: Scene, left: float) -> Place:
             tt = nav.planner.arrive(here.id, x, p.id, gx)
             if not in_time(tt):
                 continue
-            r = max(risk(p.id, min(max(gx + dx, p.left), p.right)) for dx in (-PLACE_SLACK, 0.0, PLACE_SLACK))                 if PLACE_SLACK else risk(p.id, gx)
-            (safe if r <= SAFE_DANGER else safest).append(
+            r = max(risk(p.id, min(max(gx + dx, p.left), p.right)) for dx in (-PLACE_SLACK, 0.0, PLACE_SLACK)) \
+                if PLACE_SLACK else risk(p.id, gx)
+            (enough if r <= SAFE_DANGER else safest).append(
                 Place(p.id, gx, "safe enough" if r <= SAFE_DANGER else "the safest within reach", tt, r, way=way(p.id)))
-        for r in ropes.refuges(model, d, p.id, None):  # at its safest height with every spawn filled; the look too
+        for r in ropes.refuges(model, d, p.id, None) if hang else ():  # at its safest height with every spawn filled
             tt = nav.planner.arrive(here.id, x, p.id, r.x)
             if tt is None or not in_time(tt + r.on_s):
                 continue
             worse = max([r.danger] + [d.on_rope(r.rope, r.y + dy, seen) for dy in (-ropes.HANG_SLACK, 0.0,
-                                                                                   ropes.HANG_SLACK)])
-            if worse <= SAFE_DANGER:
-                hangs.append(Place(p.id, r.x, "a rope as safe: no safe platform near", tt + r.on_s, worse, r,
-                                   way=way(p.id)))
-    # the quickest (by its way too: a move by a monster of the look dearer, DODGE); a safe platform before a place on one
-    first = (lambda c: (round(c.seconds + c.way, 3), c.x is not None))
-    if near := [c for c in safe if trip_s(c.seconds) <= NEAR_S]:
-        return min(near, key=first)
+                                                                                   ropes.HANG_SLACK)])  # (the look too)
+            if worse <= ROPE_SAFE:
+                hangs.append(Place(p.id, r.x, "a safe rope", tt + r.on_s, worse, r, way=way(p.id)))
+    # the quickest (by its way too: a move by a monster of the look dearer, DODGE); a safe platform before a rope
     if safe or hangs:
-        return min(safe + hangs, key=lambda c: (round(c.seconds + c.way, 3), c.rope is not None, c.x is not None))
+        return min(safe + hangs, key=lambda c: (round(c.seconds + c.way, 3), c.rope is not None))
+    if enough:
+        return min(enough, key=lambda c: (round(c.seconds + c.way, 3), c.danger))
     return min(safest, key=lambda c: (round(c.danger, 4), c.seconds))
 
 
@@ -494,7 +506,7 @@ def _end(out: Retreat, seen: float, log, nav: Navigator | None, s: Scene | None 
              f"on platform {out.where[0]} at x {out.where[1]:.0f}" if out.where[0] is not None else
              f"off any platform at x {out.where[1]:.0f}")
     log(f"{why.label}: retreat over ({out.result}): {where}, {out.took:.1f} s {why.after}"
-        + ("" if out.took <= RETREAT_S else f" (past the {RETREAT_S:g} s)"))
+        + ("" if out.took <= why.seconds else f" (past the {why.seconds:g} s)"))
     telemetry.emit("event", kind="retreat", text=f"{why.event}: retreat over ({out.result}), {where}, "
                                                  f"{out.took:.1f} s {why.after}")
     return out

@@ -477,8 +477,8 @@ def test_a_dodging_trip_keeps_clear_of_the_monster_that_touched_her_where_the_lo
 
 def test_her_retreat_dodges_its_trips_budget_the_time_it_has_left_and_after_a_stop_refuges_to_the_end(monkeypatch):
     # retreat._away: its trips are made with the dodge (Navigator.go's toucher, evade_s, refuge_s, deadline_pass): after a
-    # stop the budget is the player's window, refuge moves without a bound and no pass for the deadline; for the Lie
-    # Detector EVADE_S at most, refuge moves bounded.
+    # stop the budget is its STOP_S, refuge moves without a bound and no pass for the deadline; for the Lie Detector
+    # EVADE_S at most, refuge moves bounded.
     from gamelab.behavior import retreat as rv
     gone = []
 
@@ -493,13 +493,13 @@ def test_her_retreat_dodges_its_trips_budget_the_time_it_has_left_and_after_a_st
             return SimpleNamespace(result="arrived")
     here = SimpleNamespace(where=SimpleNamespace(platform=SimpleNamespace(id=1), x=0.0, y=0.0), monsters=[], t=NOW)
     monkeypatch.setattr(rv, "Navigator", Nav)
-    monkeypatch.setattr(rv, "choose", lambda h, nav, s, left: rv.Place(2, None, "a safe platform", 2.0))
+    monkeypatch.setattr(rv, "choose", lambda h, nav, s, left, hang: rv.Place(2, None, "a safe platform", 2.0))
     monkeypatch.setattr(rv.time, "monotonic", lambda: NOW)
     h = SimpleNamespace(actions=SimpleNamespace(moves_only=lambda: None), senses=None, model=None, log=lambda *a: None,
                         danger=None, memory=None)
     rv._away(h, NOW, rv.SAFETY)
     assert gone[0]["toucher"] and gone[0]["refuge_s"] == math.inf and not gone[0]["deadline_pass"]
-    assert gone[0]["evade_s"] == pytest.approx(rv.RETREAT_WINDOW_S)
+    assert gone[0]["evade_s"] == pytest.approx(rv.STOP_S)
     gone.clear()
     rv._away(h, NOW, rv.LIE_DETECTOR)
     assert gone[0]["refuge_s"] == nv.EVADE_MOVE_S and gone[0]["deadline_pass"] and gone[0]["evade_s"] == nv.EVADE_S

@@ -59,7 +59,9 @@ TOP_U = 1 - 1e-9  # the roll's top (touch_taken's u is in [0, 1))
 # her 774, only under 0.70; sim.world.PET_HP), and the first map's golden traces were made with every kind so (by the
 # formula a pig takes 1.7% of her 642 HP at level 19, an Orange Mushroom 2.0%, a slime 1.2%). Of the other maps' kinds,
 # a Horny Mushroom takes 16% of her 752 HP at level 24, a Green Mushroom 7.2%, an Axe Stump 10.8% of her 730 at 23;
-# a Dark Stump 4.3% and a Slime 1.2% don't count.
+# a Dark Stump 4.3% and a Slime 1.2% don't count. That's hunting's measure: a place to stay at for a while counts every
+# kind (`every_kind`, behavior.retreat's): from about level 30 on a Green Mushroom's touch is under it, and a place read
+# "safe" with one on her (2026-11-05 11:18: danger 0.0 at her 1244 HP of level 35, its 48 HP a touch).
 DANGER_MIN = 0.05
 # s: how soon a monster gets to her counts by exp(-t / THREAT_S). About two of her throws (her attack lock 0.73 s and
 # its margin: a throw every 0.79-0.85 s): a monster further off than that takes them first, with Lucky Seven two
@@ -168,7 +170,8 @@ def level(t: Threat, q: Platform, p: Platform, x: float) -> bool:
 class Danger:
     """The danger of places on one map, for her (`Her`): `at` a place, `keep_off` a kind on her platform."""
 
-    def __init__(self, model: MapModel, her: Her):
+    def __init__(self, model: MapModel, her: Her, least: float = DANGER_MIN):
+        """`least`: the share of her HP under which a kind counts for nothing (`every_kind`: none does)."""
         self.model, self.her = model, her
         body, speed = bodies(model), speeds(model)
         self.threats: dict[str, Threat] = {}
@@ -179,7 +182,7 @@ class Danger:
             self.takes[kind] = share
             b = body.get(kind)
             top = b.top if b else 46.0
-            self.threats[kind] = Threat(kind, share if share >= DANGER_MIN else 0.0, speed.get(kind, DEFAULT_SPEED),
+            self.threats[kind] = Threat(kind, share if share >= least else 0.0, speed.get(kind, DEFAULT_SPEED),
                                         b.half if b else 34.0, top, model.mob_hops.get(name, False),
                                         model.mob_flies.get(name, False), max(top, model.mob_tall.get(name, top)))
         # The spawn points of kinds that count, and how many of each kind each platform has.
@@ -382,16 +385,23 @@ def _flight(t: Threat, mx: float, floor: float, x: float, feet: float) -> float:
     return max(0.0, math.hypot(mx - x, (floor - t.tall / 2) - (feet - HER_TALL / 2)) - t.half - HER_HALF)
 
 
-# Danger by id(model) and her, with the model (kept, so its id can't go to another one while it's here).
-_KEPT: dict[tuple[int, Her], tuple[MapModel, Danger]] = {}
+# Danger by id(model), her and the least share counted, with the model (kept, so its id can't go to another one while
+# it's here).
+_KEPT: dict[tuple[int, Her, float], tuple[MapModel, Danger]] = {}
 MODELS_KEPT = 8
 
 
-def of_map(model: MapModel, her: Her) -> Danger:
-    """The map's Danger for her (made once per map and her)."""
-    kept = _KEPT.get((id(model), her))
+def of_map(model: MapModel, her: Her, least: float = DANGER_MIN) -> Danger:
+    """The map's Danger for her (made once per map, her and `least`)."""
+    kept = _KEPT.get((id(model), her, least))
     if kept is None or kept[0] is not model:
         if len(_KEPT) >= MODELS_KEPT:
             _KEPT.clear()
-        kept = _KEPT[(id(model), her)] = (model, Danger(model, her))
+        kept = _KEPT[(id(model), her, least)] = (model, Danger(model, her, least))
     return kept[1]
+
+
+def every_kind(d: Danger) -> Danger:
+    """`d`'s map and her with every kind that can touch her counted, whatever its share (a place to stay at, not a place
+    to shoot from: behavior.retreat's own measure; hunting's stays DANGER_MIN's)."""
+    return of_map(d.model, d.her, 0.0)
