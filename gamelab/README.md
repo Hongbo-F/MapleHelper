@@ -7970,7 +7970,7 @@ No harm I can find, and a bound of about -12 EXP/min on the thief (-5.0 +- 7.3):
 
 **What could still be wrong.** All of this rebuilds rates at moments that happened; what she'd have made is the report's natural experiment (137-157 EXP/min for 3 minutes), not this. On the night nothing much asks (15 asks in 117 minutes), so the round rarely gets its say: 35 of 115 minutes under all-low rounds made 424, against 506 for rounds with no low stop and 454 for top-only, and of the night's two sends one made more after it (394 to 461, the other 547 to 348). Crudely, the rounds at any weight at those kinds' own rates come to the same 452-456. The sends stop at 0.55, so a half isn't far inside: takes over the 0.77 logged could bring one back. The cut doesn't count dots, and two on a floor cost more than one. `Plan.rate` is also the bar for pulls and her landing prices: with a stranger by the round it stands higher than it did (`Grind._price_hp`). Live, `GAMELAB_TAKE_WEIGHT=1` and the default in turns, as the report has it: time low halved, top share up, +30 EXP/min with all pairs the same way.
 
-**Goldens:** 48 of 48 the same at 0.5 (read-only against the main lab's traces), nothing to record. Fast suite: 3,459 passed, the known `test_geometry` failed.
+**Goldens:** 48 of 48 the same at 0.5 (read-only against the main lab's traces), nothing to record. They can't see the weight: `loop_tree_crowd`, `loop_tree_grind`, `loop_tree_run` and `tour_tree_run` are the same at 0 too, so the table test and the runs above are its checks. Fast suite: 3,459 passed, the known `test_geometry` failed.
 
 ### How it works
 
