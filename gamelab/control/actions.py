@@ -169,6 +169,9 @@ class Actions:
         # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
         # decided on drops it). None: every throw goes.
         self.still: Callable[[str], bool] | None = None
+        # Her attack key as the throw listeners hear of it: its jump's kind (physics.jump_of; None: from the ground), which
+        # way that jump goes, the key's ms after the jump key, whether a tap on the ground turned her first (Hunter._key_pick)
+        self.key_is: tuple[str | None, int, int, bool] = (None, 0, 0, False)
         self.lock_watch: Callable[[], bool] | None = None  # (`_lock_for_attack`)
         self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
                             # retreat's moves); None: refused then
@@ -401,7 +404,7 @@ class Actions:
         key = self._attack_key(direction, ground=True)  # (chosen first, as jump_throw's: its MP goes with its own key)
         if key is None:
             return False
-        self._thrown(t, direction)
+        self._thrown(t, direction, (None, 0, 0, bool(events)))
         self.play(events + tap(t, key), "throw")
         self._turned(events, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
@@ -450,7 +453,7 @@ class Actions:
                 t = max(t, JUMP_THROW_TURN_MS)
             events = turn + tap(t, jump) + tap(t + key_ms, key)
             added = t
-        self._thrown(t + key_ms, direction)
+        self._thrown(t + key_ms, direction, ("forward" if way else "up", way, key_ms, bool(turn and t)))
         self.play(sorted(events, key=lambda e: e[0]), "jump_throw")
         if way:
             self.facing = direction  # her arrow turned her (and moved her): no tap, no time added
@@ -482,7 +485,7 @@ class Actions:
                   [JB_TURN_MS, away, "up"], *tap(JB_TURN_MS, toward),
                   *([] if key is None else tap(throw_ms, key))]
         if key is not None:
-            self._thrown(throw_ms, direction)
+            self._thrown(throw_ms, direction, ("back", -1 if direction == RIGHT else 1, throw_ms - JB_RUN_MS, False))
         else:
             self.keyless = not self.ground_only  # (no attack her choice would send: behavior.fight.keyless. The magician's
             # jump away alone counts as her throw, as it always has)
@@ -502,11 +505,12 @@ class Actions:
         """Whether a throw that way still goes (`still`), once her lock has been waited out."""
         return self.still is None or self.still(direction)
 
-    def _thrown(self, key_ms: int, direction: str) -> None:
-        """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent."""
+    def _thrown(self, key_ms: int, direction: str, key_is: tuple) -> None:
+        """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent (`key_is`: what kind)."""
         when = time.monotonic() + key_ms / 1000
         self._attack_at = when
         self.keyless = False
+        self.key_is = key_is
         for listener in self.throw_listeners:
             listener(when, direction)
 

@@ -230,8 +230,9 @@ def run_scene(name: str, seed: int) -> tuple[dict, object, dict]:
     try:
         for k, v in costs.items():
             setattr(fakes, k, v)
-        with telemetry.captured():
+        with telemetry.captured() as records:
             trace, sim = scenarios.run_sim(dataclasses.replace(scenario, fn=run))
+        sim.records = records  # (what her stack recorded)
     finally:
         for k, v in before.items():
             setattr(fakes, k, v)

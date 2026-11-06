@@ -1190,6 +1190,26 @@ def _air_pick(px: float, feet: float, side: int, rows: Placed, margin: float) ->
     return m
 
 
+def key_pick(platform: Platform, x: float, feet: float, side: int, rows: Placed,
+             ground: bool = True) -> tuple[str, list[Monster]]:
+    """What an attack picks that starts with her at map x, her feet at y `feet` on or over `platform`, throwing `side`, of
+    `rows` (Placed, as they are then), as the top of this module has it: ('claw', those it swipes) from the ground
+    (`ground`) if both its stances swipe; else the search's first band, ('star', those of it whose line is clear) or
+    ('stopped', all of it); ('nothing', []) with no body in any band. Nothing drawn: which stance, or which of a band's the
+    client takes. Her key's record (behavior.hunter.Hunter._key_pick)."""
+    bodies = [((mx - x) * side, my - feet, top, half) for _, mx, my, top, half in rows]
+    chances = attack_chances(bodies)
+    if ground and sum(swipe for swipe, _ in chances) > 0.99:
+        return "claw", [r[0] for r, (swipe, _) in zip(rows, chances) if swipe]
+    bands = [search_band(*body_box(*b)) for b in bodies]
+    first = min((k for k in bands if k is not None), default=None)
+    picked = [r for r, k in zip(rows, bands) if k is not None and k == first]
+    clear = [m for m, mx, my, top, half in picked
+             if wall_in_way(platform, x, feet, mx, 0.0, platform if m.platform == platform.id else platform.peer(m.platform),
+                            my, (top, half)) is None]
+    return ("star", clear) if clear else ("stopped", [r[0] for r in picked]) if picked else ("nothing", [])
+
+
 def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster],
           sizes: dict[str, MobBody] | None = None, kinds: tuple[str, ...] = JUMP_KINDS,
           where: Where | None = None, others: list[Monster] | None = None,

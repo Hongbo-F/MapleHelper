@@ -504,6 +504,24 @@ def walk_on(model: MapModel) -> reach.Where:
     return where
 
 
+def known_at(model: MapModel, st, at: float) -> reach.Placed:
+    """Every monster perception's state `st` (localization.worldstate.WorldState) knows of, as it will be at time `at`
+    (Hunter._key_pick): those of its frame and the live tracks it missed, each walked on from its sighting by `walk_on`, none
+    whose own track is dead or a kill's (Track.killed), by the map's bodies."""
+    where, body = walk_on(model), bodies(model)
+    dead = {tr.id for tr in st.tracks if tr.killed}
+    seen = {m.track for m in st.monsters}
+    out = []
+    for m, t in [*((m, st.t) for m in st.monsters),
+                 *((Monster(tr.mob, tr.x, tr.y, tr.platform, tr.bar, tr.facing, tr.pose, tr.id), tr.last_seen)
+                   for tr in st.tracks if tr.state == "live" and tr.platform is not None and tr.id not in seen)]:
+        if m.track not in dead:
+            mx = where(m, at - t)
+            q = None if m.platform is None else model.platform(m.platform)
+            out.append((m, mx, m.y if q is None else q.y_at(q.clamp(mx)), *reach.body_of(m.kind, body)))
+    return out
+
+
 # R1 of the cornered study, extended (2026-11-03, D:/MapleHelper-scratch/cornered: the user's clip of 2026-11-02 22:51,
 # "cornered character making bad attack move"): a monster she threw at that the look doesn't see (FightState.hidden, for
 # HIDDEN_FOR) and whose track heads at her walks on at her meanwhile (hidden_place: the feed's track's heading at its
