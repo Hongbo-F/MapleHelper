@@ -206,7 +206,7 @@ from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNE
                     SPAWN_FOUND_WIDE, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
-POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
+POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run (`--world policy-each`: POLICY_EACH)
 FIRST_MAP = 10000012  # (sim.scenarios.MAP_ID)
 START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12, -300.0), (21, -300.0),
             (24, 120.0), (4, 450.0), (1, 1200.0)]  # where seed k starts: START_AT[k % len]
