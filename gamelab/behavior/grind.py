@@ -63,7 +63,7 @@ from ..perception.loot import MESOS
 from .hunt import PASSING_S, TRIP_AHEAD_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .looting import STOOD_ON
-from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
+from .patrol import STOP_S, TAKE_WEIGHT, TICK_S, Patrol, choice_text, filled, reaching
 from .targeting import ASKS, IDLE_S, NO_WAY_S, ROUTE_STEP, Targeting
 from .targeting import on as target_on
 
@@ -1049,6 +1049,7 @@ class Grind(Hunt):
                 "refill_others_tick": round(1.0 - math.exp(-b.others * TICK_S), 3), "own": round(b.own(b.t), 3),
                 "refills": b.refills, "watched_s": round(b.watched_s), "kill_s": round(p.kill_s, 4),
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
+                "take_weight": TAKE_WEIGHT,
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
                        if p.hp_time[pid] >= HP_LOG_S},
                 "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}, **self._census(), **self._promise()}

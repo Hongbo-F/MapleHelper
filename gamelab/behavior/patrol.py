@@ -32,9 +32,9 @@ about the prior's REFILL_RATE (until 2026-10-29 a refill clock per point, nothin
 points on its platform, scaled by the refills she watched alone: a point that never came back never counted; until
 2026-10-30 one rate learned for every free point, whatever died). And what of it is hers (`share`): by a point with
 another player by it (their minimap dot, RIVAL_X across and RIVAL_DY up or down), as much as others leave of its kind,
-learned from her memory (`take`): of the monsters she saw by another player, those looks forgot (not those forgotten by
-age: she never looked again) without her kill, against those she killed or saw there TAKE_KEEP_S after she first saw
-them.
+learned from her memory (`take`, weighed by TAKE_WEIGHT): of the monsters she saw by another player, those looks forgot
+(not those forgotten by age: she never looked again) without her kill, against those she killed or saw there TAKE_KEEP_S
+after she first saw them.
 
 The loop (Patrol.best): a closed round of stops (LOOP_MIN to LOOP_MAX), chosen by its EXP a minute in the long run: each
 spawn point it reaches gives its EXP (times her share) each time she comes round and finds it back (`caught`: what's
@@ -148,6 +148,7 @@ are a search's resolution.
 
 import bisect
 import math
+import os
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -221,18 +222,23 @@ Q_CEIL = 1.0
 Q_UNKNOWN = 0.35       # a point never seen: this full (live: the uncamped 19-21 had a monster 31-39% of the time, 28%
                        # of all points; the simulator's crowd fills every point)
 # Another player by a point (their minimap dot within RIVAL_X across and RIVAL_DY up or down: hunt.PLAYER_NEAR and
-# PLAYER_DY) in a look within RIVAL_KEEP_S takes its monsters: of its kind, she gets 1 - take(kind), learned from her
-# memory (the monsters she saw by another player: forgotten by looks without a kill of hers, against killed by her or
-# seen there TAKE_KEEP_S after she first saw them), TAKE_PRIOR counting as TAKE_N monsters. The crowding study of
-# 2026-10-24: other players killed Green Mushrooms within about 4 s and left Horny Mushrooms alone; the simulator's
-# camps do the same. Replayed on the user's play (lab/telemetry/20261024-170558-watch.jsonl) it learns 0.50 and 0.33,
-# on the 14:01 hunt 0.51 and 0.50.
+# PLAYER_DY) in a look within RIVAL_KEEP_S takes its monsters: of its kind, she gets 1 - TAKE_WEIGHT x take(kind), take
+# learned from her memory (the monsters she saw by another player: forgotten by looks without a kill of hers, against
+# killed by her or seen there TAKE_KEEP_S after she first saw them), TAKE_PRIOR counting as TAKE_N monsters. The
+# crowding study of 2026-10-24: other players killed Green Mushrooms within about 4 s and left Horny Mushrooms alone;
+# the simulator's camps do the same. Replayed on the user's play (lab/telemetry/20261024-170558-watch.jsonl) it learns
+# 0.50 and 0.33, on the 14:01 hunt 0.51 and 0.50.
 RIVAL_X = 200.0
 RIVAL_DY = 100.0
 RIVAL_KEEP_S = 20.0    # guess
 TAKE_PRIOR = 0.5       # guess
 TAKE_N = 4.0           # guess
 TAKE_KEEP_S = 10.0     # guess (the crowding study's Green Mushrooms went within about 4 s)
+# What she believes of `take` (from 2026-11-05; GAMELAB_TAKE_WEIGHT, a live trial in turns; 1 as it was): it counts what
+# she never got to as taken. Logged 0.42-0.77, a dot by her round cut the round's rate by 55% at the 22 switches to an
+# all-low round; what she made over the next minute falls 14-15% with a dot on the top, 9-13% on the upper, 16-23% on
+# the middle; at this weight the cut is 21% and none of the 22 happens. README: "Where she hunts".
+TAKE_WEIGHT = float(os.environ.get("GAMELAB_TAKE_WEIGHT", "0.5"))
 # The danger hook (see the top): the share of her HP a second she loses fighting at a place, for each unit of its danger.
 # Live, hunting 23 (two Horny Mushroom points) on 2026-10-24 she lost 0.28-0.31 bars of HP a minute, 0.005 a second,
 # where the positioning model's Danger.at at 23's stop is 0.285: 0.0175. The default's danger there is 0.32 (two Horny
@@ -710,8 +716,10 @@ class Belief:
         return (g + TAKE_PRIOR * TAKE_N) / (g + k + TAKE_N)
 
     def share(self, i: int, t: float) -> float:
-        """The share of point `i`'s monsters that is hers: 1 - take with another player by it lately, else 1."""
-        return 1.0 - self.take(self.points[i].kind) if t - self.rival_at.get(i, -1e18) <= RIVAL_KEEP_S else 1.0
+        """The share of point `i`'s monsters that is hers: with another player by it lately 1 - TAKE_WEIGHT x take, else
+        1."""
+        by = t - self.rival_at.get(i, -1e18) <= RIVAL_KEEP_S
+        return 1.0 - TAKE_WEIGHT * self.take(self.points[i].kind) if by else 1.0
 
     def due(self, i: int, t: float) -> float | None:
         """s from `t` until point `i`, empty, has a monster with even odds by the refill alone (refill_median after

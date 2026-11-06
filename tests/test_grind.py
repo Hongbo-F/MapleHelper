@@ -237,7 +237,7 @@ def test_an_area_with_another_player_is_avoided():
     other = Player(1, "stranger", 150.0, -200.0, a[1], (0.0, 0.0), 0.0, 0.0)
     p.belief.update(0.0, m, [other])
     by, below = [q for q in p.points if q.platform == a[1]], [q for q in p.points if q.platform == a[0]]
-    assert [p.belief.share(q.id, 0.0) for q in by] == pytest.approx([1 - patrol.TAKE_PRIOR] * 2)
+    assert [p.belief.share(q.id, 0.0) for q in by] == pytest.approx([1 - patrol.TAKE_WEIGHT * patrol.TAKE_PRIOR] * 2)
     assert [p.belief.share(q.id, 0.0) for q in below] == [1.0, 1.0]  # 200 units under them: not by them
     loop = p.best(0.0)
     assert {p.platform_of(i) for i in loop.stops} == set(b)
