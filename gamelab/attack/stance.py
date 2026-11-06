@@ -1615,10 +1615,10 @@ def _aside(x: float, y: float, act: tuple, platform: Platform, close: list[Monst
     from its key (priced 1.5-2.4 past its start): dear on average, about right after no-hits. So it's a bet the first live grind
     has to bear out, not a measured "sooner" (README). The jump: her first attack where it lands her (first_attack_s and the tap
     she goes by, SURE_LANDS) and what's there (landing_of; no star at anything from another platform, LANDING_PRICE_S; a free spawn
-    point, SPAWN_S; another platform, or the share of its variants that go there, LEAVE_S), and one on her way before her feet are over it, out of
-    her invulnerability (MEET_PRICE_S); monsters walk as `pace` has them for HEADING_S. None: it lands past `lo` or `hi` on her
-    platform, or move_limits on another, or may not land, or fall past LONG_DROP (physics.jump_variants). The next look's attack
-    goes from where she lands, facing back, with a tap (Actions.jump_back)."""
+    point, SPAWN_S; another platform, or the share of its variants that go there, LEAVE_S), and one on her way before her feet are
+    over it, out of her invulnerability (MEET_PRICE_S); monsters walk as `pace` has them for HEADING_S. None: it lands past `lo` or
+    `hi` on her platform, or move_limits on another, or may not land, or fall past LONG_DROP (physics.jump_variants). The next look's
+    attack goes from where she lands, facing back, with a tap (Actions.jump_back)."""
     answer, at = _search_says(act, x, y, platform, around, facing, pace, tops, halves)
     stay = at - pace.lead + CYCLE_S * (1 / LANDS[answer in SHUT, act[1] != facing] - 1)
     walks = replace(pace, hold=lambda m: (pace.hold(m) if pace.hold is not None else None) or (HEADING_S, math.inf))

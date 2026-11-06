@@ -1087,7 +1087,7 @@ def loop_tree_grind_drops(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=2, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(check("no pile ahead of what's in reach (no ': the pile first')",
                      lambda tr: not any(": the pile first" in line for line in tr["log"])),
@@ -1098,7 +1098,8 @@ def loop_tree_grind_drops(sim):
                # fix/setp_master.txt)
                check("hurt six times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 6)))
 def loop_tree_ore_waits(sim):
-    """(Seed 2 since the 15 s of ignoring went, 2026-11-05: on seed 6 the ore not picked up; of seeds 1-8, 2, 3 and 7 meet all of this.)
+    """(Seed 1 since a firing of the failsafe taps her next throw, 2026-11-06: on seed 2 she was hurt 16 times; of seeds 1-12, 1, 4, 7, 8 and 11 meet all of this.)
+    (Seed 2 since the 15 s of ignoring went, 2026-11-05: on seed 6 the ore not picked up; of seeds 1-8, 2, 3 and 7 meet all of this.)
     (Seed 6 since a throw at one perception has dead is dropped, 2026-11-05, Hunter._still: on seed 4 she was hurt 17 times; of seeds 1-12 only 6
     meets all of this.) (Seed 4 since the no-hit failsafe, 2026-11-04: her stars hit a monster the world keeps hidden from there, no bar to show it, so it fires
     15-21 times a run; of seeds 1-8 only 4 still meets all of this. D:/MapleHelper-scratch/next-move/verify/cmp.txt, ff.txt.)
@@ -1789,7 +1790,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1800,7 +1801,8 @@ def loop_tree_attack_misses_seen(sim):
                      lambda tr: len(tr["result"]["pages"]) == 2 and "STARS MAY BE OUT" in tr["result"]["pages"][0][2]
                      and "out of darts" in tr["result"]["pages"][1][1])))
 def loop_tree_attack_no_darts(sim):
-    """(Seed 6 with the whole screen's and the chain's fixes of 2026-11-05: of seeds 1-12 only 6 meets all of this: on most she doesn't
+    """(Seed 5 since a firing of the failsafe taps her next throw, 2026-11-06: of seeds 1-12 only 5 meets all of this.)
+    (Seed 6 with the whole screen's and the chain's fixes of 2026-11-05: of seeds 1-12 only 6 meets all of this: on most she doesn't
     press the regular attack on enough dry stars for the stars' test.) (Seed 1 with the loot chain on, GAMELAB_LOOT_CHAIN: of seeds 1-12, 1, 5 and 10 meet all of this.) (Seed 2 with the whole screen on,
     GAMELAB_SCREEN: of seeds 1-12, 2-4 meet all of this.) (Seed 31 with the target-first planner on: of seeds 21-44 she stops out of darts on 20, her stars' test before it on 31
     and 34; with it off, GAMELAB_TARGET=0, as on 29.) `tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts

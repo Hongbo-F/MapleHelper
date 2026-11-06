@@ -584,8 +584,9 @@ def test_frames_read_the_wrong_way_but_not_strongly_never_take_a_tap_away(monkey
     """Noise.heading_wrong on every frame, her facing away from the Horny Mushroom at the start: read as weakly as the
     frames read the wrong way on 2026-10-24 (0.31, 0.24 ahead), her first throw taps the arrow first (the safe way;
     the rest she throws by her keys, the frames coming while her attack plays) and none goes the wrong way, as with no
-    frame read wrong. Were a frame that isn't strong let take a tap away (Actions.faces by `heading` alone), or were
-    the wrong frames strong (which none read was), every star would go the wrong way. (Seed 3 since the whole screen 10
+    frame read wrong. Were a frame that isn't strong let take a tap away (Actions.faces by `heading` alone), every star
+    would go the wrong way; were the wrong frames strong (which none read was), every star until the failsafe's firing, whose
+    tap turns her (Attacks._watch_hits, 2026-11-06: nothing else does at a hurt target). (Seed 3 since the whole screen 10
     times a second with her band's own search beside it where a whole screen takes longer than 0.05 s
     (worldstate.BAND_STAND_IN_S, 2026-10-28): on seed 1 the mushroom was lost, with the frames read right or wrong; of
     seeds 1-16, 3-6, 8-11 and 14-16 meet all of this.) (Seed 1 since work/replan's loot work on master 072e1ec's
@@ -599,7 +600,7 @@ def test_frames_read_the_wrong_way_but_not_strongly_never_take_a_tap_away(monkey
     # (said, as live: once an arrow, and her loot walk after the kill presses another, 2026-10-26)
     assert weak["taps"] == right["taps"] == 1 and weak["counts"]["against"] >= 1
     sure, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.6, 0.4, False)), **away)
-    assert sure["taps"] == 0 and sure["wrong way"] == sure["throws"] >= 8, sure
+    assert sure["taps"] >= 1 and sure["wrong way"] >= 4, sure
     monkeypatch.setattr(Actions, "faces", lambda self, direction: self.heading == direction)
     ungated, _ = _kill_on_23(Noise(heading_wrong=(1.0, 0.31, 0.24, False)), **away)
     assert ungated["taps"] == 0 and ungated["wrong way"] == ungated["throws"] >= 8, ungated
