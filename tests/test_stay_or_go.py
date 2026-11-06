@@ -1,6 +1,6 @@
-"""Stay or go (behavior.targeting.stay_or_go, GAMELAB_STAY_OR_GO; README: "Where she hunts"): her long stays low of 2026-11-05 replayed on the looks she had
-(tests/fixtures/hunt_stays_2026-11-05.json: the real Chooser, Targeting._worth and Grind._goes), the journeys that passed monsters put in the world
-(hunt_journeys_2026-11-05.json: sim.hunt_scenes, the full stack), and the pieces: what's on the screen, the bar, the landing's question."""
+"""Stay or go (behavior.targeting.stay_or_go, GAMELAB_STAY_OR_GO; README: "Where she hunts"): her long stays low of 2026-11-05 replayed on what her chooser made of the looks she had
+(tests/fixtures/hunt_stays_2026-11-05.json: the real Targeting._worth and Grind._goes), the journeys that passed monsters each landing by each landing and three in the
+world (hunt_journeys_2026-11-05.json: the real Targeting.peek and each trip's question; sim.hunt_scenes, the full stack), and the pieces: what's on the screen, the bar, the landing's question."""
 
 import json
 import os
@@ -43,8 +43,9 @@ def _targeting(weighs=True, landings=True):
 def _grind(tp, rate=None, nearest=lambda here, x: 7):
     """A grind without __init__, her round at `rate` EXP a minute, its look at the round a no-op."""
     g = Grind.__new__(Grind)
-    g.tp, g.patrol = tp, SimpleNamespace(plan=None if rate is None else SimpleNamespace(rate=rate / 60.0), nearest=nearest)
+    g.tp, g.patrol = tp, SimpleNamespace(plan=None if rate is None else SimpleNamespace(rate=rate / 60.0), nearest=nearest, stops={7: SimpleNamespace(platform=10)})
     g._look_at_round = lambda now: None
+    g._instead = lambda s, heading=None: (heading, {})
     return g
 
 
@@ -198,6 +199,10 @@ def test_she_goes_only_with_a_round_clearly_over_what_the_screen_has_had():
     off = _targeting(False, False)
     off.lately = 0.0
     assert _grind(off, 9999.0)._goes(s) is None
+    g = _grind(tp, 9999.0)
+    g.patrol.stops[3] = SimpleNamespace(platform=31)
+    g._instead = lambda s, heading=None: (3, {"why": "pulled"})  # (a pile she has seen pulls her to a stop on her own platform: that's a stay, not a go)
+    assert g._goes(s) is None
 
 
 def test_a_trip_to_a_stop_ends_only_for_what_beats_her_round_and_a_trip_to_her_target_or_unweighed_as_it_was():
@@ -227,6 +232,8 @@ def test_the_switch_and_her_casts(monkeypatch):
     for value, want in (("0", (False, False)), ("land", (True, False)), ("go", (False, True)), ("1", (True, True))):
         monkeypatch.setenv("GAMELAB_STAY_OR_GO", value)
         assert targeting.stay_or_go() == want
+    monkeypatch.delenv("GAMELAB_STAY_OR_GO")
+    assert targeting.stay_or_go() == (True, True)
     monkeypatch.setenv("GAMELAB_STAY_OR_GO", "1")
     g = SimpleNamespace(h=SimpleNamespace(attacks=SimpleNamespace(picks=True)), model=scenarios.real_map(TREE), kinds=None, danger=None)
     tp = targeting.Targeting(g)

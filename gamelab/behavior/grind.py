@@ -417,11 +417,15 @@ class Grind(Hunt):
     def _goes(self, s: Scene) -> int | None:
         """Her next is a trip: the round's nearest stop in its place, if what she'd make of her round is clearly over what the screen has
         had for her lately (`weighs`; the user, 2026-11-05, on the report's #4: the numbers can put another area ahead of monsters on
-        the screen she'd have to go to). None: the trip to her target. Monsters in reach or on her platform aren't asked about."""
+        the screen she'd have to go to). None: the trip to her target. Monsters in reach or on her platform aren't asked about, nor
+        where a pile seen pulls her to a stop on the platform she's on (Patrol.choose: going again at each look there, 26 times in 1.6 s, seed 201)."""
         if not self.tp.weighs:
             return None
         self._look_at_round(time.monotonic())
-        return self.patrol.nearest(s.platform.id, s.where.x) if self._round_bar() > GO_GAIN * self.tp.lately else None
+        j = self.patrol.nearest(s.platform.id, s.where.x) if self._round_bar() > GO_GAIN * self.tp.lately else None
+        if j is None or self.patrol.stops[self._instead(s, heading=j)[0]].platform == s.platform.id:
+            return None
+        return j
 
     def _go(self, s: Scene, j: int) -> None:
         """Off to her round's stop `j` (`_goes`), said; a census trip she's on is over: the numbers have spoken."""
