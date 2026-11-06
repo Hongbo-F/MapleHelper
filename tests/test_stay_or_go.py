@@ -236,22 +236,20 @@ def test_the_switch_and_her_casts(monkeypatch):
     assert (tp.landings, tp.weighs) == (True, True)
 
 
-def test_the_round_s_nearest_stop_is_on_another_platform():
+def test_the_round_s_nearest_stop_and_none_on_the_round():
     m = scenarios.real_map(TREE)
     planner = Planner(m)
     exp = {"horny-mushroom": 41.0, "green-mushroom": 26.0, "slime": 12.0}
     p = patrol.Patrol(m, set(exp), exp, travel=planner.arrive)
-    near, far = p.stop_on(30), p.stop_on(7)
-    if near is None:
-        near = next(j for j in range(len(p.stops)) if p.stops[j].platform >= 28)
-    here = p.stops[near]
-    p.plan = SimpleNamespace(stops=(near, far))
-    assert p.nearest(here.platform, here.x) == far  # (not the one she's on)
-    other = next(j for j in range(len(p.stops)) if p.stops[j].platform >= 28 and j != near)
-    p.plan = SimpleNamespace(stops=(far, other))
-    assert p.nearest(here.platform, here.x) == other
-    p.plan = SimpleNamespace(stops=(near,))
-    assert p.nearest(here.platform, here.x) is None
+    top, upper, low = p.stop_on(7), p.stop_on(14), p.stops[next(j for j in range(len(p.stops)) if p.stops[j].platform >= 31)]
+    p.plan = SimpleNamespace(stops=(top, upper))
+    assert p.nearest(low.platform, low.x) == upper  # (the nearer)
+    assert p.nearest(14, p.stops[upper].x) is None  # (on one of its stops: one stop to the next isn't going)
+    covered = next(p.points[q].platform for q, c in p.stops[upper].cover if c > 0 and p.points[q].platform != 14)
+    assert p.nearest(covered, p.stops[upper].x) is None  # (... nor on a platform one of them gets at)
+    p.plan = SimpleNamespace(stops=(top,))
+    p.travel = lambda a, x, b, bx: None
+    assert p.nearest(low.platform, low.x) is None  # (no way there)
 
 
 # --- the landing's question ---------------------------------------------------------------------------------------------
@@ -301,3 +299,24 @@ def test_not_where_it_set_off_nor_its_end_nor_while_she_s_invulnerable_nor_in_th
 
 def test_a_cut_for_a_landing_is_no_miss():
     assert navigator.ASKED.startswith(ASKED) and not ASKED.startswith(COMING)
+
+
+def test_a_pile_no_look_has_seen_off_its_platform_s_end_gets_no_chain():
+    """(S6's seed 3 with the design's first form: "loot: 1 stop, x 329 on 32: -0.1 s" every 0.2 s for 150 s, P32 ending at 179: `quiet` takes any pile with monsters on
+    the screen now.) Its try spent, and none planned; one by the platform's end, as ever."""
+    m = scenarios.real_map(TREE)
+    g = Grind.__new__(Grind)
+    tried = []
+    g.model, g.tp, g._tried = m, SimpleNamespace(choice=None), tried.append
+    far = SimpleNamespace(x=329.0, platform=32, status="expected")
+    near = SimpleNamespace(x=m.platform(32).right + 20.0, platform=32, status="expected")
+    g._pile_of = {1: far, 2: near}
+
+    def stop(key):
+        return SimpleNamespace(spot=SimpleNamespace(key=key, guards=(), lands=0.0), arrive=9.0, leave=9.0)
+    g._sweeper = SimpleNamespace(current=SimpleNamespace(stops=[stop(1)]), dest=None)
+    look = SimpleNamespace(platform=m.platform(32), where=SimpleNamespace(x=100.0), t=0.0)
+    assert g._loot_plan(look) is None and tried == [far]
+    g._sweeper.current.stops = [stop(2)]
+    chain = g._loot_plan(look)
+    assert chain is not None and chain.stretches[0].pile is near and tried == [far]

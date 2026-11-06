@@ -990,8 +990,14 @@ class Patrol:
         return next((i for i, s in enumerate(self.stops) if s.platform == pid), None)
 
     def nearest(self, here: int, x: float) -> int | None:
-        """Of her round's stops on another platform the one she gets to soonest from (platform `here`, map x `x`); None: none."""
-        far = {j: self.travel(here, x, self.stops[j].platform, self.stops[j].x) for j in self.plan.stops if self.stops[j].platform != here}
+        """Of her round's stops the one she gets to soonest from (platform `here`, map x `x`); None: no way, or she's where it gets at already: on a
+        stop's platform or that of a spawn point a stop reaches (one stop to the next isn't going: 8 goes in 14 s between 12 and 14 on a seed with no such clause)."""
+        far = {}
+        for j in self.plan.stops:
+            st = self.stops[j]
+            if here == st.platform or any(self.points[q].platform == here for q, c in st.cover if c > 0):
+                return None
+            far[j] = self.travel(here, x, st.platform, st.x)
         return min((j for j, d in far.items() if d is not None), key=far.get, default=None)
 
     def leg(self, i: int, j: int) -> float | None:
