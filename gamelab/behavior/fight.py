@@ -945,16 +945,16 @@ def _log_close(h: "Hunter", s: Scene, act: tuple, plan) -> int | None:
     turn = back or bool(plan.air_turn and faces is not None and not faces(act[1]))
     side = 1 if act[1] == RIGHT else -1
     jump = "a jump back" if back else "a jump in place"
-    h.log(f"    jump ({plan.why}): {jump} throwing {act[1]}, the attack {base} ms in ({lo}-{hi}"
-          f"{'' if plan.sure else ', not sure'}), keyed at {plan.key_ms} ({plan.key_ms - base:+d})"
-          + ("" if t is None else f": {t.kind} {t.x - x:+.0f}"))
+    how = (f"throwing {act[1]}, the attack {base} ms in ({lo}-{hi}{'' if plan.sure else ', not sure'}), keyed at {plan.key_ms} "
+           f"({plan.key_ms - base:+d})" if plan.land_x is None else f"turning {act[1]}, no attack, to land at x {plan.land_x:.0f}")
+    h.log(f"    jump ({plan.why}): {jump} {how}" + ("" if t is None else f": {t.kind} {t.x - x:+.0f}"))
     if telemetry.recording():
         telemetry.emit("jump", kind=plan.why, jump="back" if back else "up", side=side, turn=turn, key_ms=plan.key_ms,
                        base_ms=base, jitter_ms=plan.key_ms - base, window=[lo, hi],
                        rise=round(physics.rise_after(plan.key_ms / 1000), 1),
                        target=None if t is None else t.kind, dx=None if t is None else round(t.x - x, 1),
                        up=None if t is None else round(y - t.y, 1), platform=None if t is None else t.platform,
-                       x=round(x, 1), land_x=None if back else round(x, 1), way=0, sure=plan.sure, n=n)
+                       x=round(x, 1), land_x=plan.land_x if back else round(x, 1), way=plan.way if back else 0, sure=plan.sure, n=n)
     return n
 
 

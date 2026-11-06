@@ -99,7 +99,7 @@ def _act_text(act: tuple) -> str:
     if act[0] == "jump_throw":
         return f"jump attack {act[1]}"
     if act[0] == "jump_back":
-        return f"jump back, attack {act[1]}"
+        return f"jump aside, then attack {act[1]}" if len(act) > 2 and act[2].land_x is not None else f"jump back, attack {act[1]}"
     if act[0] == "trip":
         return f"trip to {act[1]} at x {act[2]:.0f}"
     return f"{act[0]} {act[1]}" if len(act) > 1 else act[0]

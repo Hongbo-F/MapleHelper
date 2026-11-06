@@ -45,9 +45,14 @@ With what her jumps' attacks reach (`jumps`: attack.reach.coverage), nothing in 
 jump-throw at a monster on a platform above where an attack from a jump surely picks it (_jump_shot), in place,
 forward or back, its attack key as soon in the jump as that pick is sure (JumpPlan); and on her way somewhere
 (`toward`), a jump forward along it that hits one goes before a throw from the ground (PASSING_JUMPS).
+From 2026-11-05, off by default (the failsafe's recordings: README, "Jump aside, hop up"), where the game's search says her attack
+would take nothing (_search_says): up close, her jump back's keys with no attack in them, away from the monster or over it, where
+that lands an attack sooner (_aside: GAMELAB_JUMP_ASIDE); from the ground, a jump shot, and failing one a hop up onto the platform
+above (_hop: GAMELAB_HOP_UP). Neither for the magician, who has no attack in the air (POINT_BLANK).
 """
 
 import math
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -378,6 +383,18 @@ BESIDE = True
 AWAY = "away"  # a step away from a close monster ('back', side, units, AWAY): what MAX_MOVES counts
 HELD_STEP = 30.0  # units a step off a spot of the magician's held goes (held_step): past behavior.attacks.HOLD_MOVED's
                   # 20 as her x reads it, a band and a half of her search
+# The jump aside and the hop up (the user, 2026-11-05, on the no-hit recordings: "no, jump aside and attack from a distance";
+# hop up onto the pile, "Yes"; README: "Jump aside, hop up"): s until an attack of hers lands, for a jump and for the throw (_aside).
+CYCLE_S = 1.3     # s an attack costs her, to her next key (live, up close, after one that took nothing: 1.28-1.34, a gap over 3 s as 3)
+LANDS = {(True, False): 0.46, (True, True): 0.35, (False, False): 0.89, (False, True): 0.83}  # what her attack up close hits (live, on
+#         replay, 1,034 of them), by whether the search says it takes nothing (SHUT: _search_says), and whether she must turn first
+SURE_LANDS = 0.85  # ... where it's sure (3,897)
+SHUT = ("nothing", "stopped")
+HEADING_S = 0.5   # guess: s a monster's heading holds for her landing (recorded walks up close turn every 0.3-0.5 s; all the way, a
+#                   chaser leaves her no landing and too_close_081701 keeps its fault)
+LEAVE_S = 0.6     # guess: s a landing on another platform is worth less, for the drops she leaves
+UP_S = physics.JUMP_LAG + 0.116  # s from a jump's key until her feet are over a mushroom's top (51 up): none on her way meets her after
+ASIDE, HOP = "aside", "hop"      # JumpPlan.why of each
 
 
 @dataclass(frozen=True)
@@ -618,6 +635,7 @@ class JumpPlan:
     room: tuple[int, int] | None = None
     target: Monster | None = None
     sure: bool = True
+    land_x: float | None = None  # where her jump aside should land her (_aside)
 
     @property
     def keys(self) -> tuple[int, int] | None:
@@ -879,6 +897,13 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     lo, hi = _stand_limits(platform, crowded=bool(mine))
     sizes = _sizes(tops, halves)  # (the search's: the game's bodies, the user's 2026-11-05: the check at her key has them)
     reachable = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around, sizes=sizes)]
+
+    def up_instead(side: str) -> tuple | None:  # (a throw from the ground that takes nothing: from a jump, if one takes something)
+        if not (hop_on() and POINT_BLANK and counts and jumps is not None) \
+                or _search_says(("throw", side), x, y, platform, around, facing, pace, tops, halves)[0] not in SHUT:
+            return None
+        return (_jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward, pace=pace, tops=tops,
+                           can_jump=can_jump) or _hop(x, y, platform, wanted, around, facing, pace, sizes, danger))
     if close:
         slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
         if limits is not None:
@@ -887,12 +912,17 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
                                            (platform.left + SMALL_STEP_END, platform.right - SMALL_STEP_END)
                                            if SNAIL_FAR_END else None, danger, platform, body, up, y, pace, moves,
                                            seen=around, castable=castable, clawed=clawed)
+        jump = up_instead(act[1]) if act[0] == "throw" else None
+        if jump is not None:
+            return jump
         if clawed and CLAWED_CLOSE and CLAWED_AIR and POINT_BLANK and act[0] == "jump_throw" and unsure:
             # (an unsure jump in place, a tap first or not: past the one on her instead)
             past = [t for t in reachable if not any(t is c for c in close)]
             air = _from_air(x, y, act[1], past, facing, can_jump, tops, halves, platform, pace) if past else None
             if air is not None:
                 return air
+        if (unsure or (act[0] == "jump_back" and plan_of(act) is None)) and aside_on() and POINT_BLANK and counts and not moves:
+            act = _aside(x, y, act, platform, close, body, facing, pace, tops, halves, danger, slo, shi) or act
         if act[0] == "wait" and not POINT_BLANK:  # (her: none she casts at up close; another in reach that she does)
             others = [t for t in reachable if not any(t is c for c in close) and (castable is None or castable(t))]
             if others:
@@ -930,6 +960,9 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
             air = _from_air(x, y, side, in_reach, facing, can_jump, tops, halves, platform, pace)
             if air is not None:
                 return air
+        jump = up_instead(side)
+        if jump is not None:
+            return jump
         return ("throw", side)
     if jumps is not None:
         jump = _jump_shot(x, y, platform, wanted, jumps(), lo, hi, facing, body, danger, halves, toward, pace=pace,
@@ -1530,6 +1563,115 @@ def _escape(x: float, side: str, room: float, can_jump: Callable[[float, float],
     return min(options, key=lambda o: (round(o[0], 6), o[1]))[2]
 
 
+def aside_on() -> bool:
+    """Whether her unsure attacks up close weigh a jump aside (_aside; GAMELAB_JUMP_ASIDE)."""
+    return os.environ.get("GAMELAB_JUMP_ASIDE", "0") == "1"
+
+
+def hop_on() -> bool:
+    """Whether her throws from the ground that take nothing go from a jump (_hop; GAMELAB_HOP_UP)."""
+    return os.environ.get("GAMELAB_HOP_UP", "0") == "1"
+
+
+def _search_says(act: tuple, x: float, y: float, platform: Platform, around: list[Monster], facing: str | None, pace: Pace,
+                 tops: dict[str, float] | None, halves: dict[str, float] | None) -> tuple[str, float]:
+    """What the game's search picks for stance's throw `act` (reach.key_pick) and when its attack starts, s after the look: her
+    keys as the stance has them, each monster as `pace` walks it till then, through her if it's coming (no PACE_STOP: live they
+    do; with it the search said a star at 65% hits where it says one at 83% without). Her key's record asks this at the key
+    (behavior.hunter.Hunter._key_pick)."""
+    d, turn, plan = directions.sign(act[1]), act[1] != facing, plan_of(act)
+    dx, rise = 0.0, 0.0
+    if act[0] == "throw":
+        t = pace.lead + GROUND_PICK_S + (TAP_S if turn else 0.0)
+    elif act[0] == "jump_back":
+        j = physics.jump_of("back", -d)
+        t = pace.lead + j.lead_s + jump_pick_s(physics.AIR_TURN_ATTACK_MS)
+        dx, rise = j.arc(jump_pick_s(physics.AIR_TURN_ATTACK_MS))
+    else:
+        air = plan is None or plan.air_turn
+        key = plan.key_ms if plan is not None else physics.JUMP_ATTACK_MS
+        key = max(key, physics.AIR_TURN_ATTACK_MS) if turn and air else key
+        t = pace.lead + (physics.JUMP_THROW_TURN_MS / 1000 if turn and not air else 0.0) + jump_pick_s(key)
+        rise = physics.jump_rise(jump_pick_s(key) * 1000)
+    rows = []
+    for m in around:
+        own = walks_on(m, platform)
+        mx = pace.at(m, m.x, t, own)  # (her at its own x: nothing to stop at)
+        rows.append((m, mx, m.y if own is None else own.y_at(own.clamp(mx)), (tops or MONSTER_TOP).get(m.kind, MONSTER_TOP["pig"]),
+                     half_of(m.kind, halves)))
+    return reach.key_pick(platform, x + dx, y - rise, d, rows, act[0] == "throw")[0], t
+
+
+def _aside(x: float, y: float, act: tuple, platform: Platform, close: list[Monster], around: list[Monster],
+           facing: str | None, pace: Pace, tops: dict[str, float] | None, halves: dict[str, float] | None, danger: Danger,
+           lo: float, hi: float) -> tuple | None:
+    """Her jump back's keys with no attack in them (a key in the air picks a monster on her level only from 144 off, and locks
+    her past her landing), away from what she'd throw at or over it, for stance's unsure throw `act`, if that lands an attack
+    sooner. The throw: when its attack starts and CYCLE_S for each one it takes, by what the search says (LANDS: _search_says).
+    The jump: her first attack where it lands her (first_attack_s, SURE_LANDS) and what's there (landing_of; no star at anything
+    from another platform, LANDING_PRICE_S; another platform, LEAVE_S), and one on her way before her feet are over it, out of
+    her invulnerability (MEET_PRICE_S); monsters walk as `pace` has them for HEADING_S. None: it lands past `lo` or `hi` on her
+    platform, or move_limits on another, or may not land, or fall past LONG_DROP (physics.jump_variants). The next look's attack
+    goes from where she lands, facing back: no tap."""
+    answer, at = _search_says(act, x, y, platform, around, facing, pace, tops, halves)
+    stay = at - pace.lead + CYCLE_S * (1 / LANDS[answer in SHUT, act[1] != facing] - 1)
+    walks = replace(pace, hold=lambda m: (pace.hold(m) if pace.hold is not None else None) or (HEADING_S, math.inf))
+    best = None
+    away = -directions.sign(act[1])
+    for way in (away, -away):
+        j = physics.jump_of("back", way)
+        land, lx, s = physics.jump_landing(danger.model, platform, x, j)
+        flights = [physics.jump_landing(danger.model, platform, x, v) for v in physics.jump_variants(j)]
+        if land is None or any(f[0] is None or f[0].y_at(f[0].clamp(f[1])) - y > LONG_DROP for f in [(land, lx), *flights]):
+            continue
+        slid, mine = lx + way * physics.LAND_SLIDE, land.id == platform.id
+        a, b = (lo, hi) if mine else move_limits(danger.model, land)
+        if not (a <= min(lx, slid) and max(lx, slid) <= b):
+            continue
+        when = pace.lead + j.lead_s + physics.JUMP_LAG + s
+        first = first_attack_s(when)
+        up = pace.lead + j.lead_s + UP_S
+        met = up > pace.window and any((m.x - x) * way > 0 and walks.meets(m, x + j.arc(UP_S)[0], up, platform)
+                                       for m in around if m.platform == platform.id)
+        star = mine or any(_star_takes(land, slid, land.y_at(land.clamp(slid)), m, walks.at(m, slid, first, walks_on(m, land)))
+                           for m in around)
+        cost = (first - pace.lead + CYCLE_S * (1 / SURE_LANDS - 1)
+                + landing_of(land, slid, around, when, walks, halves, tops, danger,
+                             lambda p, q, f=land: open_above(danger.model, f, p, q)).price_s
+                + (0.0 if star else LANDING_PRICE_S) + (0.0 if mine else LEAVE_S) + (MEET_PRICE_S if met else 0.0))
+        if cost < stay and (best is None or cost < best[0]):
+            best = (cost, way, slid)
+    if best is None:
+        return None
+    t = _nearest([m for m in close if _side_of(m, x) == act[1]] or close, x)
+    return ("jump_back", LEFT if best[1] > 0 else RIGHT, JumpPlan(0, best[1], True, ASIDE, None, (0, 0), t, land_x=round(best[2], 1)))
+
+
+def _hop(x: float, y: float, platform: Platform, wanted: list[Monster], around: list[Monster], facing: str | None, pace: Pace,
+         sizes: dict[str, MobBody] | None, danger: Danger) -> tuple | None:
+    """A jump throw at a monster off her level above her that lands her up on a platform (none lands back: _jump_shot), within
+    move_limits there, for a throw from the ground that takes nothing: its sooner or its top's key as the search has it (reach
+    .shots), at her target first, then the nearest. Her landing isn't priced: the target's the chooser's, by EXP a second, and
+    the throw takes nothing (the user: "more EXP and loot over fewer touches")."""
+    above = [m for m in around if m.y < y - reach.LEVEL]
+    cover = reach.coverage(danger.model, platform, x, y, above, sizes=sizes, others=around,
+                           where=lambda m, t: pace.at(m, x, pace.lead + t, walks_on(m, platform))) if above else None
+    best = None
+    for sh in cover.shots if cover is not None else ():
+        if sh.jump is None or sh.kind == "back" or (sh.kind == "up" and sh.turn != (facing != (RIGHT if sh.side > 0 else LEFT))) \
+                or not sh.lands_sure or sh.land is None or sh.land.id == platform.id:
+            continue
+        a, b = move_limits(danger.model, sh.land)
+        if a <= sh.land_span[0] and sh.land_span[1] <= b:
+            rank = (not any(sh.target is t for t in wanted), abs(sh.target.x - x) + 2 * abs(sh.target.y - y), sh.kind != "up", sh.key_ms)
+            if best is None or rank < best[0]:
+                best = (rank, sh)
+    if best is None:
+        return None
+    sh = best[1]
+    return ("jump_throw", RIGHT if sh.side > 0 else LEFT, JumpPlan(sh.key_ms, sh.jump.way, True, HOP, sh))
+
+
 def held_step(x: float, platform: Platform, side: str, around: list[Monster], halves: dict[str, float] | None = None,
               danger: Danger | None = None, limits: tuple[float, float] | None = None) -> tuple | None:
     """A step of HELD_STEP away from `side` from map x on `platform`, where her casts that way took no effect from
@@ -1672,6 +1814,8 @@ def act_text(act: tuple, wanted: list[Monster], x: float, hidden: list[Monster],
     if refused is not None:
         m = refused[1]
         why = f"no cast: {refused[0]}" + ("" if m is None else f" ({m.kind} {m.x - x:+.0f})")
+    if plan_of(act) is not None and plan_of(act).why == ASIDE:
+        return f"jumping aside, to land at x {plan_of(act).land_x:.0f} facing {act[1]}"
     if act[0] in _THROW_VERBS and refused is None:
         side = [t for t in wanted if (t.x > x) == (act[1] == RIGHT)]
 

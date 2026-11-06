@@ -1,9 +1,11 @@
 """The no-hit scenes (sim.no_hit_scenes): moments of the failsafe's recordings in the world, whether each shows its
-fault on this code and whether what solved means for it holds. On master every scene's fault shows and none is solved;
-`OPEN`, those still so: a scene comes out of it as its fix lands, both its tests flipping. With --slow: 8 seeds of 11 scenes, about 2
-minutes on 2 workers."""
+fault on this code and whether what solved means for it holds, with her jump aside and her hop up on. On master every scene's fault
+shows and none is solved; `FAULT` and `OPEN`, those still so: a scene comes out of them as its fix lands, its tests flipping. With
+--slow: 8 seeds of 11 scenes, about 2 minutes on 2 workers."""
 
 import functools
+import os
+from unittest import mock
 
 import pytest
 
@@ -13,14 +15,20 @@ from gamelab.sim.world import Realism, SimJumper, World
 
 REAL = pytest.mark.skipif(not scenarios.available(scenarios.TREE), reason="needs Tree Dungeon's game data (gamedata/data)")
 SEEDS = range(1, 9)
-# The scenes whose fault this code still has. Out of here as its fix lands; own_kill_235621's is perception's binding and
-# stranger_dying_080929's kill comes after the last frame before her key, which no drop of a throw reaches: they may stay.
-OPEN = set(nh.SCENES) - {"stranger_dead_080929", "ignored_235621"}
+# The scenes whose fault this code still has: 111448's a03 and a04 the search says take a star (of those 83-89% hit: no jump for them);
+# 080939's platform has no room for a jump either way; own_kill_235621's is perception's binding and stranger_dying_080929's kill
+# comes after the last frame before her key, which no drop of a throw reaches.
+FAULT = {"too_close_111448", "walked_past_080939", "stranger_dying_080929", "own_kill_235621"}
+# ... and those whose fault's gone but what solved means isn't all there: 081701's first throw goes at the look, the search saying a
+# star, so her first hit is 2.1 s in against 2 and 1.2 at nothing against 1; in 15 s her hops' scenes end below master's EXP, 140 of 160
+# and 175 of 187, a pile's touches and her stabs on it (README).
+OPEN = FAULT | {"too_close_081701", "from_below_233732", "from_below_234441"}
 
 
 @functools.lru_cache(maxsize=None)
 def _runs(name: str) -> tuple:
-    return tuple(nh.run_scene(name, seed)[2] for seed in SEEDS)
+    with mock.patch.dict(os.environ, GAMELAB_JUMP_ASIDE="1", GAMELAB_HOP_UP="1"):
+        return tuple(nh.run_scene(name, seed)[2] for seed in SEEDS)
 
 
 def _world(*mobs) -> World:
@@ -83,7 +91,7 @@ def test_a_scene_runs_from_its_moment_and_stops_at_its_length():
 @pytest.mark.slow
 @pytest.mark.parametrize("name", list(nh.SCENES))
 def test_the_recordings_fault_shows_where_it_isnt_fixed(name):
-    assert nh.fault_shows(name, list(_runs(name))) == (name in OPEN)
+    assert nh.fault_shows(name, list(_runs(name))) == (name in FAULT)
 
 
 @REAL

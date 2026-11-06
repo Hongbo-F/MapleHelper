@@ -474,9 +474,9 @@ class Actions:
         to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; the top's, reach.TOP_KEY_MS, for a monster
         higher up; jittered: behavior.fight.jittered). With no
         attack to throw (`throw`'s), or her attack from the ground only (`ground_only`: the magician's), the jump away
-        alone, turning toward it in the air."""
+        alone, turning toward it in the air; `key_ms` 0 (the stance's jump aside) so too, her next keys when she has landed."""
         self.wait_lock()
-        key = None if self.ground_only else self._attack_key(direction)
+        key = None if self.ground_only or key_ms == 0 else self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))
         toward, jump = self.arrow(direction), self.keys.jump.name
         throw_ms = JB_THROW_MS if key_ms is None else JB_RUN_MS + max(key_ms, JUMP_BACK_ATTACK_MS)
@@ -499,6 +499,8 @@ class Actions:
         # (review, 2026-10-25).
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
+        if key_ms == 0:
+            self.lock_until = self.sent_at + JB_RUN_MS / 1000 + physics.JUMP_LAG + physics.AIR_S  # (no attack: she's down)
         return True  # (a jump back is her way out from a monster too close: never dropped)
 
     def _still(self, direction: str) -> bool:
