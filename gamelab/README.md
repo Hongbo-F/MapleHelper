@@ -7972,6 +7972,175 @@ No harm I can find, and a bound of about -12 EXP/min on the thief (-5.0 +- 7.3):
 
 **Goldens:** 48 of 48 the same at 0.5 (read-only against the main lab's traces), nothing to record. They can't see the weight: `loop_tree_crowd`, `loop_tree_grind`, `loop_tree_run` and `tour_tree_run` are the same at 0 too, so the table test and the runs above are its checks. Fast suite: 3,459 passed, the known `test_geometry` failed.
 
+**Stay or go (`GAMELAB_STAY_OR_GO`, `behavior/targeting.py`; on by default on the branch since its gate, below; `0` the branch before it to the digit, `land`, `go` the pieces alone).** The user's observation on the report: "when you travel to another platform, especially when down jumping, you seem to skip an area with large amount of mobs which could potentially more beneficial"; and on its #4, her round put ahead of some monsters on the screen when the numbers clearly say so: "seems to be reasonable". M measured, C read from code, F seen on frames, I inferred.
+
+*Does she skip them? It holds, smaller than it looks and not special to down jumps* (7 tours on this code, 154.6 minutes; `D:/MapleHelper-scratch/hunts/skip/`). A journey runs from the last platform she attacked on or stood on 1.5 s, through those she only passed, to the next she did either on: 1,339 of them, 8.7 a minute. It "passes an area" with 2 monsters or more a star could hit from where she was at a look on the way, worth more than what's in reach in her first second at the goal.
+
+| Move | Journeys | Passed: monsters, EXP | Goal's first second | Area passed | EXP next 30, 60 s |
+|---|---:|---|---|---:|---|
+| Down jump | 230 | 1.5, 50 | 1.3, 43 | 24% | 231, 451 |
+| Walk off | 125 | 1.3, 40 | 1.2, 39 | 18% | 248, 481 |
+| Jump down | 151 | 1.6, 55 | 1.1, 39 | 32% | 229, 437 |
+| Rope up | 120 | 1.7, 57 | 1.1, 36 | 37% | 221, 432 |
+| Jump up | 611 | 1.1, 36 | 0.9, 32 | 16% | 240, 472 |
+| Ends level | 102 | 1.3, 42 | 0.9, 30 | 25% | 224, 451 |
+| All | 1,339 | 1.3, 44 | 1.0, 36 | 22% | 235, 460 |
+
+Of the 297 that passed an area: 188 she got half or more of those monsters within 15 s, 78 strangers took them, 17 she could only have hit in the air or on a rope, 7 she was touched and nothing asked, and 7 are truly skipped. Going down is no worse by rate, but she's blind at take-off (the screen shows 533 above her feet and 167 below: of what a down jump passes 61% was on the screen when she left, 87% going up), covers 270 units a chain where going up she covers 149, and up costs 2.4-2.7 times down to come back. The player clip of 10-30 stops no more than she does; they shoot as they go (kills in passing 26% against her 2-10%).
+
+*Why (C, M).* A chain of moves is one key plan and nobody asks about monsters at the landings inside it: `Navigator._pass` asks `until` once a pass, `_watching` only looks at her route. 72% of the landings she passes are inside a chain, and at a third of those (292 of 875, 1.9 a minute) her own chooser would have shot at once, against 15% of those a pass did ask. The score isn't what holds her: a trip's target has a median score of 5.0, what's in reach at a landing 18.3. Nor avoidance (9% of journeys). The size: on the same state with two actions, each monster in reach adds +11.8 EXP (se 5.1) over the next 30 s when she stops rather than carries on; over the 225 landings carried on with monsters in reach about +21 EXP/min (5-95%: +6 to +35), and split by direction, going up (2+ in reach: 289 stopped, 224 carried on) no less than going down (257, 207). The next 60 s overall show no gap, 462 against 465, so this is association.
+
+*Two designs were built as patches and judged on the night's looks and in the world* (`hunts/design_smallest`, `hunts/design_player`). Both have the landing's question. Each has her compare another area with what's here:
+
+| | The smallest | The player's |
+|---|---|---|
+| Here | what the screen has had lately: the choice's best three, her time to each, up at once, let down over 60 s | `max(her last 60 s of EXP, the next 20 s of the screen)` in a fight; the 20 s alone on a trip |
+| Asked | her next is a trip | her next is a trip or a walk, off the round |
+| A stop's trip ends | what the look has beats what she'd make of her round | that, by 1.3 |
+| Correlation with her next 120 s, and within low | .33, +.31 | .27 (last minute alone), -.06 |
+| From P33, 15 min: EXP (t), low %, longest low | +22 (+1.7), 32 to 11, 152 to 67 s | -3.9 (-0.4), 28.5 to 11.7, 152 to 81 s |
+| Against the landing's question alone | +39.7 (+3.2) from P33, +9.2 (+0.6) crowd | -20.5 (-2.1) crowd |
+| Code | about 54 lines | about 76, and `Choice.ranked` |
+
+**The smallest, built.** It's the better on the numbers, reads one number and asks at one moment. From the player's I took: no go on her round (`Patrol.nearest`, below: the smallest design dropped that clause as firing on 0% of looks, and in the world it went 8 times in 14 s between P12 and P14), every go said with its numbers, and its leaves as a check: the user's own leave with nothing in reach, 6 of 7, which is why a monster in reach or on her platform is never asked about. Its longest-way term (`got` over the longest way among the three, so a pile counts) I tried: goes 5.3 a run with 1.25 bounces and EXP no better, so no. A stranger's cut in `got` predicts a little better (.38 against .33) with no EXP in the world (+11.7, +16.6 against +17.1, +17.0), so no; it's for the trial to bring back.
+
+What she does, about 85 lines of code (+152, -27 in the behaviour files with docstrings and 17 moved out of `_next_ground` into `_look_at_round`):
+
+- *At each landing inside a chain* (`Navigator._landing_calls`, `control/navigator.py`), once a landing, what a pass asks first, the trip's `until`, from a real look. Not where it set off, not its end (the pass asks), not while she's invulnerable. The cut (`ASKED`) isn't a miss. A target trip there stops only for one she needs no trip for (`Scene.landing`, `Targeting.changed`): a look that has lost her target says nothing of it (07:48's first looks at P14 and P13 have 1 monster and none), and another trip is the next pass's to weigh. A loot chain's question and a trip to a stop's are as they are.
+- *Her next is a trip* (`Grind._planned_step`, `_goes`): what she'd make of her round, `DELIVERS x Plan.rate`, against `GO_GAIN x Targeting.lately`. Over it: her drops, whatever they take, as with no monster on the screen, then the round's nearest stop (`_go`, `Patrol.nearest`). A census trip she's on ends with it. Under it, the trip to her target as ever. In reach or a walk along her platform isn't asked: the fight on her platform goes on. On her round (a stop's platform, or that of a point a stop reaches) she isn't asked either, nor where a pile she has seen pulls her to a stop on the platform she's on.
+- *On a trip to a stop* (`_round_bar`, `Targeting.on_screen`, `_free_trip`): monsters on the screen end it only if what the look has (`got`) beats `DELIVERS x Plan.rate`; what's in reach she shoots on the way, `PASSING_S` a platform at most.
+- `lately` falls slowly, so she stays some 15-25 s past the last good monster (I): that's the hold; there's no timer, floor or place. `Targeting._worth` reads `Choice.top` at each look: nothing else changes in the choice.
+
+Constants: `DELIVERS` 0.8 (of the rate she makes: 0.88 on her round, 0.91 on a stop's platform, 0.72 off it live at take weight 0.5, 0.79 in the world), `GO_GAIN` 1.15 (guess, the report's), `SCREEN_S` 60 s (guess, a memory's length), `KILL_GAP_S` 2.4 s (measured kill to next attack: 2.24 top, 2.99 upper), `CASTS_TOO` False, `lootchain.OFF_END` 60 (guess: a pile no look has seen that far past its platform's end gets no chain: with `quiet` reachable under monsters, the design's first form spun 150 s on one, "loot: 1 stop, x 329 on 32: -0.1 s"). `stance`, `retreat`, `attacks` and `notify` aren't touched; `git merge-tree` against `work/no-hit-fixes` and `work/park-guard` shows no conflict.
+
+*The live cases, on file data* (`tests/test_stay_or_go.py`, `sim/hunt_scenes.py`).
+
+| Stay low | s | She goes at | `lately`, bar, round | EXP/min before, after |
+|---|---:|---|---|---|
+| 07:53:26 | 576 | +59 s, P33 | 440, 507, 14, 13, 11, 10, 7 | 511, 347 |
+| 08:03:19 | 153 | +2 s, P31, 8 monsters on the screen | 455, 544, 10, 7 | none, 341 |
+| 08:10:24 | 437 | +39 s, P33 | 372, 464, 12, 14, 10, 8 | 526, 297 (MP out) |
+| 17:22:33 | 93 | +70 s, P31 | 458, 529, 10, 7 | 365, 235 |
+| 17:29:23 | 141 | +51 s, P33 | 415, 478, 6, 12, 14, 10, 8 | 391, 216 |
+
+| Journey | Stops at | `got`, bar |
+|---|---|---:|
+| 07:48:24 P15 to P8, target | P11 | 421, 375 |
+| 11:13:10 P13 to P19, her drops | P17 | 489, no round yet |
+| 17:35:14 P10 to P19, her drops | P14 | 420, 468 |
+| 18:09:40 P10 to P19, her drops (review frames 243-252) | P14 | 457, 444 |
+| 18:10:56 P12 to P16, her drops | P14 | 489, 475 |
+| 18:32:10 P12 to P19, her drops | P14 | 489, 576 |
+| 18:44:15 P17 to P20, her drops | no stop: only a trip target | 204, 439 |
+| 18:10:33 P11 to P16, target | P13 | 515, 409 |
+| 18:16:00 P6 to P21, a stop's trip, past 495 EXP | P12: here the bar decides, and clears | 458, 365 |
+| 18:39:26 P6 to P20, spliced on past where it stopped | P15 | 472, 430 |
+| 18:26:27 P13 to P29, touched | P15 once she's not invulnerable | 458, 414 |
+
+Those are replays of a look at each landing through the real `Targeting.peek`; they don't follow where she'd have gone. Three (`183210`, `173514`, `182627`) also run in the world with the full stack, the journey's monsters where the looks had them: unasked she runs past to P19 with no attack, asked her first attack is on P14 (P17 on the third). On seeds 1-3 18:32 does so on all three, 17:35 on two (on the third she stops on P14 unasked), 18:26 on two.
+
+*The arms, dev seeds 101-112, 5 minutes, `--world live-floors`, paired against the branch before* (`hunts/built/`; t in brackets; every arm tried is here). `both*` has the landing's question and the comparison; `+ guard` a target trip at a landing asking only for one she needs no trip for; `+ round` no go on her round. Master here is `GAMELAB_STAY_OR_GO=0 GAMELAB_TAKE_WEIGHT=1`: master's code has no `live-floors`, and on the worlds it has that's 156552f to the digit on the 4 seeds checked (`built/check_master.out`; and `GAMELAB_STAY_OR_GO=0` is 48be6e8 to the digit).
+
+| | Before | Master | Land | Go | Both | Both, down only | Both, longest way | + guard | **+ round** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EXP/min | 461.1 | -2.1 (-0.8) | +28.9 (+1.3) | +17.4 (+1.5) | +38.9 (+2.5) | +28.1 (+1.8) | +28.0 (+1.4) | +38.8 (+2.2) | **+34.6 (+2.1)** |
+| Kills | 67.2 | +0.8 | +4.3 | +1.8 | +4.2 | +3.7 | +3.4 | +5.2 | **+4.7 (+1.9)** |
+| EXP a kill | 34.3 | -0.5 | +0.1 | +0.4 | +0.7 | +0.3 | +0.4 | +0.2 | **+0.2** |
+| Top % | 27.6 | -1.3 | -7.0 (-1.3) | +6.3 (+1.0) | 0.0 | +3.7 (+0.7) | -3.8 | -2.1 | **-2.8 (-0.8)** |
+| Upper % | 47.2 | -1.5 | +0.9 | +4.9 | +3.3 | +1.2 | +6.6 | +3.4 | **+4.1** |
+| Middle % | 20.0 | +0.3 | +5.6 | -7.4 (-2.0) | +0.7 | -2.7 | +1.1 | +2.5 | **+2.6** |
+| Low % | 5.1 | +2.5 | +0.5 | -3.8 (-1.8) | -3.9 (-1.9) | -2.2 | -3.9 | -3.9 | **-3.9 (-1.9)** |
+| Longest low a run, s | 11 | +7 | 0 | -6 | -7 | -2 | -7 | -7 | **-7 (-2.0)** |
+| Longest stay a run, s | 80 | 0 | -7 | -1 | 0 | -21 (-2.3) | -11 | -10 | **-9 (-1.0)** |
+| Trips | 109.9 | -2.6 | +9.9 | -1.5 | +8.5 | +3.5 | +13.2 | +6.7 | **+9.2** |
+| Plans cut short | 20.1 | +0.4 | +7.5 | -0.4 | +8.6 | +2.7 | +6.6 | +6.4 | **+6.0 (+3.3)** |
+| Fall-offs | 0.17 | 0 | 0 | 0 | -0.17 | 0 | -0.08 | -0.17 | **-0.17** |
+| Touches | 47.7 | +1.4 | -0.5 | +0.2 | +3.2 (+0.7) | -5.2 (-1.4) | +1.8 | +0.2 | **-1.3 (-0.3)** |
+| Knock falls | 4.50 | +0.08 | -0.42 | -0.42 | +0.17 | -0.50 | -0.50 | +0.17 | **0** |
+| Drops share | .983 | -.001 | +.002 | +.011 | +.014 (+2.0) | +.009 | +.010 | +.011 | **+.015 (+1.9)** |
+| Value share | .977 | -.001 | +.008 | +.017 | +.020 | +.017 | +.016 | +.016 | **+.019 (+1.6)** |
+| Loot a minute | 229.8 | -2.8 | +22.4 | +24.5 (+2.6) | +30.2 (+2.0) | +34.9 (+3.5) | +25.0 | +21.4 | **+23.6 (+1.7)** |
+| Deaths, stops | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 | **0, 0** |
+| MP a minute | 337 | +4 | +23 | +18 | +23 | +19 | +28 | +36 (+2.6) | **+34 (+2.5)**, no MP out |
+| Dither a run | 5.75 | -0.42 | -0.50 | +0.58 | -0.08 | +0.17 | -0.92 | -0.75 | **-1.00** |
+| Goes, of which bounced | | | | 1.33, .25 | .58, .25 | 1.83, .58 | 5.33, 1.25 | .83, .17 | **.67, .08** |
+| Landing stops | | | 12.2 | | 11.2 | 4.2 | 10.0 | 10.6 | **10.4** |
+
+Dither is floor changes within 20 s of the last; a bounce a go with her on the same floor 30 s on. With the guard `land` alone is +31.9 (+1.4), top -3.0; with no go on her round `go` alone is +14.8 (+1.2), top +8.1. The pieces' signs are the design's reason to be one switch with both: the landing's question alone costs top time (she settles where the monsters are), the comparison alone gives it (and takes the middle's). Going down only: no support live (the split above), and a rule where the same question does; its fewer touches I leave as a thing to look at if the trial's touches rise.
+
+By a real clock (decision time, 12 runs on 2 workers at idle priority): the choice median 1.5 ms, p99 7.1 (before 1.4, 6.4); a peek 1.0, 2.9 (1.0, 3.1); `_goes` 0.01, 31 ms, its p99 `Patrol.replan` on its 20 s clock; a landing's question at most 3.9 at p99.
+
+15 minutes, dev seeds, the last against before:
+
+| | Before | Both |
+|---|---:|---:|
+| EXP/min | 442.6 | 457.5 (+14.9, +1.5), better on 7 |
+| Kills | 195.5 | 198.8 (+3.3, +0.8) |
+| Top, upper, middle, low % | 30, 47, 15, 8 | 29, 53, 16, 2 (low -6.3, -1.6) |
+| Longest low a run, anywhere, s | 35, 147 | 15, 64 |
+| Trips, plans cut short | 314, 62 | 356, 79 |
+| Touches, knock falls | 144, 12.7 | 130 (-13.8, -1.2), 12.2 |
+| Drops, value share, loot a minute | .985, .986, 231 | .990, .991, 244 |
+| Dither a run, goes, bounced | 21.5, , | 21.2, 1.0, 0.17 |
+
+First differences: seed 101 at 24.5 s, "the trip's until, at a landing: plan cut short; on platform 23" where before the chain ran `jump->23, jump->22, jump->21, jump->20` on; seeds 102-106 at her first look, the run's opening trip to a stop no longer ending at the first monster, so a throw in passing before her target's line. That opening is a cost at each tour's start (the player's design measured about 7 EXP/min of it in a 5-minute run with its own trip question).
+
+*The magician.* The causes are hers too, and on her 12 dev seeds (`--world strangers`, `targeting.CASTS_TOO` True) there's no harm: EXP 445.5 to 456.4 (+10.9, +0.6), low 8.8 to 4.4%, touches 26.0 to 22.8, drops .984 to .994, landing stops 4.2, goes 0.58. (The smallest design's -18.9 was without the guard, 10.9 landing stops a run.) I keep her off, her runs to the digit (seeds 101-104 with the switch on), until the thief's trial says: flip `CASTS_TOO`.
+
+*The scenes* (`--world s1`-`s7` after `live-floors`, `sim/harness.py`; S1-S6 the report's, S7 the look's; `D:/MapleHelper-scratch/hunts/scenes_built.txt`). 6 seeds of 8 minutes, master against the branch, difference and t in brackets. Longest low anywhere; asks, 'next' records; passed, a platform stayed on under 1.5 s with no attack from it between two others; stopped at, the rest.
+
+| Scene | EXP/min | Top % | Upper % | Middle % | Low % | Longest low, s | Asks | Pick-ups | Loot a minute | Touches | Kills | Passed, stopped at |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| S1, from P33, two above | 473 to 481 (+9, +0.7) | 26 to 26 | 33 to 35 | 24 to 26 | 18 to 13 | 76 to 60 | 1.8 to 3.7 | 0.956 to 0.972 (+0.015, +0.6) | 231 to 247 | 84 to 74 (-10, -1.4) | 112 to 113 | 17 to 13, 80 to 92 |
+| S2, from P12, top and middle | 453 to 418 (-35, -2.4) | 26 to 29 | 52 to 55 | 17 to 13 | 5 to 3 | 56 to 55 | 2.7 to 5.8 | 0.983 to 0.994 (+0.011, +1.4) | 216 to 217 | 74 to 62 (-11, -1.4) | 107 to 97 | 15 to 16, 92 to 98 |
+| S3, from P12, her top round and the upper | 446 to 470 (+24, +1.7) | 14 to 15 | 44 to 43 | 31 to 36 | 10 to 5 | 110 to 73 | 3.5 to 4.7 | 0.972 to 0.986 (+0.014, +1.4) | 214 to 253 | 75 to 72 (-3, -0.5) | 109 to 113 | 17 to 16, 91 to 97 |
+| S4, from P33, map at its cap, three above | 497 to 501 (+4, +0.2) | 12 to 17 | 18 to 30 | 38 to 34 | 32 to 19 | 130 to 68 | 1.3 to 3.8 | 0.966 to 0.934 (-0.032, -1.4) | 224 to 230 | 83 to 85 (+2, +0.3) | 121 to 120 | 11 to 14, 78 to 82 |
+| S5, the same from P12 | 430 to 442 (+12, +0.8) | 28 to 34 | 47 to 48 | 18 to 16 | 7 to 2 | 61 to 61 | 3.5 to 4.5 | 0.981 to 0.986 (+0.005, +0.4) | 213 to 222 | 77 to 79 (+2, +0.4) | 99 to 99 | 15 to 12, 90 to 90 |
+| S6, from P33, the bottom never dry | 520 to 507 (-12, -1.8) | 6 to 11 | 26 to 35 | 33 to 30 | 34 to 24 | 97 to 85 | 1.0 to 3.7 | 0.955 to 0.928 (-0.027, -1.8) | 252 to 228 | 98 to 107 (+9, +1.8) | 134 to 127 | 7 to 10, 66 to 73 |
+| S7, from the top, taken | 430 to 477 (+47, +2.3) | 9 to 9 | 50 to 51 | 41 to 40 | 0 to 0 | 10 to 0 | 4.8 to 5.2 | 0.992 to 0.993 (+0.000, +0.0) | 227 to 257 | 80 to 78 (-2, -0.2) | 103 to 114 | 17 to 14, 94 to 91 |
+| The option's crowd | 493 to 476 (-17, -1.0) | 30 to 26 | 53 to 50 | 15 to 20 | 2 to 5 | 62 to 63 | 1.8 to 4.2 | 0.989 to 0.967 (-0.022, -3.5) | 230 to 252 | 75 to 77 (+2, +0.2) | 114 to 111 | 14 to 11, 91 to 91 |
+
+What it does where it's meant to: starting low (S1, S4, S6) low falls 18 to 13, 32 to 19, 34 to 24 and the longest stay 76 to 60, 130 to 68, 97 to 85 s; the top rises in S2-S6. S7, the look's, top taken and full floors below, is its clearest: +47 (t +2.3), 11 kills more. Where it hurts: S2 -35 (t -2.4), no go in any of its runs, the landing's question alone -29, the bar on a stop's trip alone -18, both on 6 seeds by -144 to +75, so not to be split; S6, where the bottom never dries, -12 (t -1.8), pick-ups .955 to .928 (t -1.8), touches +9 (t +1.8); and on these six seeds the crowd itself -17 (t -1.0), pick-ups .989 to .967 (t -3.5) while loot a minute rises 230 to 252, she leaving more of more. That's against +34.6 (t +2.1) and .983 to .998 on dev seeds and +5.5, .984 to .986 on the fresh ones below: a run's sd of 59 on 6 seeds says little either way. S4 and S6 say the case to watch is a floor that never dries, with her drops waiting behind monsters ("aim for 100% pick up rate"), which `LOOT_DUE_S` alone guards.
+
+*The gate* (`D:/MapleHelper-scratch/hunts/prereg.txt`, written first; commit a20291c; seeds 201-224, 15 minutes, the thief's worlds and `live-floors`; run once).
+
+| | Master | Before | On | On - before (t) | On - master (t) |
+|---|---:|---:|---:|---:|---:|
+| EXP/min | 432.1 | 424.3 | 429.8 | +5.5 (+0.6) | -2.3 (-0.3) |
+| Kills | 196.4 | 192.0 | 189.8 | -2.2 (-0.5) | -6.6 (-1.4) |
+| EXP a kill | 33.1 | 33.2 | 34.0 | +0.8 (+1.9) | +1.0 (+2.2) |
+| Top % | 24.0 | 24.2 | 26.9 | +2.7 (+0.9) | +2.9 (+1.1) |
+| Upper % | 45.6 | 47.0 | 51.8 | +4.8 (+1.4) | +6.2 (+1.9) |
+| Middle % | 18.9 | 18.0 | 15.8 | -2.2 (-0.9) | -3.2 (-1.5) |
+| Low % | 11.4 | 10.8 | 5.5 | -5.3 (-1.8) | -5.9 (-2.0) |
+| Longest low a run, s | 52 | 40 | 27 | -14 (-1.2) | -26 (-2.1) |
+| Longest stay a run, s | 95 | 90 | 100 | +9 (+1.1) | +5 (+0.6) |
+| Trips | 314.5 | 317.8 | 332.6 | +14.8 (+1.5) | +18.2 (+1.7) |
+| Plans cut short | 59.3 | 58.9 | 78.6 | +19.8 (+10.9) | +19.3 (+11.0) |
+| Fall-offs | 0.92 | 1.04 | 0.75 | -0.29 (-1.2) | -0.17 (-0.7) |
+| Touches | 136.2 | 131.8 | 136.6 | +4.8 (+1.2) | +0.3 (+0.1) |
+| Knock falls | 10.83 | 10.50 | 10.50 | +0.00 (+0.0) | -0.33 (-0.6) |
+| Drops share | 0.982 | 0.984 | 0.986 | +0.002 (+0.6) | +0.004 (+1.3) |
+| Value share | 0.982 | 0.983 | 0.987 | +0.004 (+0.9) | +0.005 (+1.3) |
+| Loot a minute | 239.7 | 235.9 | 244.6 | +8.7 (+1.3) | +4.8 (+0.7) |
+| Deaths | 0 | 0 | 0 | +0 (+0.0) | +0 (+0.0) |
+| Stops | 0 | 0 | 0 | +0 (+0.0) | +0 (+0.0) |
+| MP a minute | 332.3 | 322.8 | 334.9 | +12.1 (+1.8) | +2.6 (+0.3) |
+| No MP | 0 | 0 | 0 | +0 (+0.0) | +0 (+0.0) |
+| Dither a run | 21.25 | 24.29 | 22.33 | -1.96 (-0.8) | +1.08 (+0.5) |
+| Crossings a run | 37.5 | 40.9 | 39.3 | -1.6 (-0.7) | +1.8 (+0.8) |
+| Platforms passed | 24.6 | 25.0 | 25.3 | +0.3 (+0.2) | +0.7 (+0.4) |
+| Stopped at | 167.1 | 169.7 | 174.6 | +4.9 (+1.3) | +7.5 (+2.0) |
+| Goes | 0.00 | 0.00 | 2.71 | +2.71 (+2.2) | +2.71 (+2.2) |
+| Bounced | 0.00 | 0.00 | 0.62 | +0.62 (+3.5) | +0.62 (+3.5) |
+| Landing stops | 0.0 | 0.0 | 30.3 | +30.3 (+28.7) | +30.3 (+28.7) |
+
+**It passes, all eight:** EXP/min +5.5 (t +0.6, above -2); low 10.8 to 5.5%; longest low a run 40 to 27 s (176 to 163 anywhere); top 24.2 to 26.9%; pick-ups t +0.6; touches t +1.2; knock falls t 0.0; dither -2.0 a run. So `GAMELAB_STAY_OR_GO` is on by default on the branch. Read it as no harm found, no gain shown: the dev seeds' +34.6 and +14.9 shrink to +5.5 on fresh seeds, and against master it's -2.3 (t -0.3). What moves for sure is where she stands, not what she makes. Decision times as on the dev seeds: the choice median 1.3 ms, p99 6.1; a peek 0.8, 2.8; `_goes` 0.01, 35; a landing 4.0 at p99. Goes come to 2.7 a run in this table and 1.7 without one spin: seed 201 went 26 times in 1.6 s at 420.8 s, a pile she'd seen pulling her (`Patrol.choose`, "next: stop 11 ... pulled") to a stop on the platform she stood on, arrived at once, her next a trip again. Found after the gate, fixed after it (`Grind._goes`: where the pull is to her own platform, no go), so not in the table: that seed 406.9 to 432.7 with 2 goes, seeds 202, 203 and the 12 dev seeds to the digit (`built/sim/g-*.json`). Of the 40 real goes 15 were from low, 12 from the middle, 13 from the upper, none from the top; a median 4 monsters on the screen, 7 from 6 or more; `lately` a median 413, the bar 498.
+
+**What the simulator can't tell.** It predicted +11.8% on a merge whose live run fell, so all this says is no harm found. It shows 147 below her against live's 168, with no camera lag on a fall (live reaches 256 in the air), so going down it has less in reach at a landing than live. A live look at a landing is a moving frame's. Its strangers don't walk between platforms or hurt without killing; she crosses floors more there (2.5 a minute against 1.7). Her stack's stars and `choice.MISS` are stale in both. It can't say whether a round's promise is good: `[10, 7]` promised 680-750 and made 453 over 121 minutes, and at 08:03 that promise sends her from 8 monsters within 2 s, which a player wouldn't (I). Throwing while falling, what the player does in place of stopping, isn't built, and a target strangers take first (14% of target trips live) isn't in the score. Only a live trial tells whether the better floors and the kills on the way beat the stops: `D:/MapleHelper-scratch/hunts/first_live.md`, `hunts/trial_score.py`.
+
+**Tests and goldens.** Fast suite: 3,494 passed, 72 skipped, the known `test_geometry` failed. `tests/test_stay_or_go.py`, 34 tests: the five long stays and the eleven journeys on file data (`tests/fixtures/hunt_stays_2026-11-05.json`, `hunt_journeys_2026-11-05.json`; `D:/MapleHelper-scratch/hunts/built/fx_stays.py`, `fx_journeys.py` make them), three of the journeys in the world, and the pieces. Three tests had to move with the default: `test_the_order_...` asks with her round unweighed, `test_a_move_and_two_stops_are_one_plan` goes by the two walks (the climb's in another chain now: the question at P16's landing finds her drops), and `loop_tree_rope_top_chaser` goes from seed 2 to 1 (of seeds 1-12 a knock-off on 2, 4, 8 with it, on 5, 7 without: on the edge of what it checks). Goldens, read-only against the main lab's traces, recorded into `D:/MapleHelper-scratch/hunts/golden`: at `GAMELAB_STAY_OR_GO=0` 47 of 48 the same (the moved seed); at the default 32 the same, 16 differ, all grinds on Tree Dungeon, and 48 of 48 again against the scratch recording. Each first differs where it should: 13 at the opening trip to a stop, a throw in passing before her target's line where the first monster ended that trip ("0.153 throwing right (horny-mushroom +9)" for "0.153 target: horny-mushroom #1 at +9 ..."); `loop_tree_grind_arrow_key` at 13.2 s and `loop_tree_stat_window` at 8.8 s and `loop_tree_grind_rope_top` at 6.0 s, a stop's trip going on past a target it ended before. The main lab's traces want recording again at a merge.
+
 ### How it works
 
 - **Which monster** (`attack/target.py`, `Chooser.choose`, `score`): EXP of the kind over (time to get an attack on it + time to kill it), weighted by the chance it's there (`behavior/presence.py`, her throws' reckoning). A hurt or chasing one has no term: it's close and quick to kill. Kept until dead, gone, or beaten by `MARGIN` (1.3).
