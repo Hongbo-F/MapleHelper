@@ -8089,7 +8089,7 @@ First differences: seed 101 at 24.5 s, "the trip's until, at a landing: plan cut
 
 *The magician* is off the landing and the go (`CASTS_TOO`) and off `OFF_END`, but `TAKE_WEIGHT` 0.5 is hers: 12 seeds -9.5 (t -0.8), above. The causes are hers too, and on her 12 dev seeds (`--world strangers`, `targeting.CASTS_TOO` True) there's no harm: EXP 445.5 to 456.4 (+10.9, +0.6), low 8.8 to 4.4%, touches 26.0 to 22.8, drops .984 to .994, landing stops 4.2, goes 0.58. (The smallest design's -18.9 was without the guard, 10.9 landing stops a run.) I keep her off, her runs to the digit (seeds 101-104 with the switch on), until the thief's trial says: flip `CASTS_TOO`.
 
-*The scenes* (`--world s1`-`s7` after `live-floors`, `sim/harness.py`; S1-S6 the report's, S7 the look's; `D:/MapleHelper-scratch/hunts/scenes_built.txt`). 6 seeds of 8 minutes, master against the branch, difference and t in brackets. Longest low anywhere; asks, 'next' records.
+*The scenes* (`--world s1`-`s7` after `live-floors`, `sim/harness.py`; S1-S6 the report's, S7 the look's; `D:/MapleHelper-scratch/hunts/scenes_built.txt`). 6 seeds of 8 minutes, master against the branch before the reviews' fixes, not run again after them, difference and t in brackets. Longest low anywhere; asks, 'next' records.
 
 | Scene | EXP/min | Top % | Upper % | Middle % | Low % | Longest low, s | Asks | Pick-ups | Loot a minute | Touches | Kills |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
