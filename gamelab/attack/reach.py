@@ -426,8 +426,8 @@ def ramp_dx(dy: float) -> float:
 
 def shot_dx(dy: float, kind: str | None = None, sizes: dict[str, MobBody] | None = None) -> float:
     """The closest sideways a throw from the ground at a monster of `kind` dy below (+) her throws a star
-    that picks it: min_dx by its body (body_of; `sizes`, the map's game data, where given: the magician's
-    stance, as her casts' search goes by them, ledger.in_path), and never where the claw can take it instead
+    that picks it: min_dx by its body (body_of; `sizes`, the map's game data, where given: the stance's,
+    as her casts' search goes by them, ledger.in_path), and never where the claw can take it instead
     (claw_dx: on her level 65 plus half its width; on her own platform her decisions keep a monster out to
     claw_edge), nor closer than the old ramp between her level and 60 below her (ramp_dx, while RAMP_BELOW)."""
     top, half = body_of(kind, sizes)
@@ -839,7 +839,7 @@ def can_hit(platform: Platform | None, x: float, y: float, m: Monster, reach: fl
     isn't asked: a monster the attack takes first whose line is clear takes the stars until it's dead, and
     then m's turn comes, so it only orders the kills (her decisions shoot what's in the way first anyway). One
     whose star is stopped dies to none of them, so from here m gets none while it stands there. `sizes`: its body
-    by the map's game data (can_shoot; the magician's stance), else reach's tables."""
+    by the map's game data (can_shoot; the stance's), else reach's tables."""
     return (can_shoot(m.x - x, m.y - y, reach, m.kind, sizes) and wall_to(platform, x, y, m, rise, target) is None
             and shielded(platform, x, y, m, others, rise) is None)
 

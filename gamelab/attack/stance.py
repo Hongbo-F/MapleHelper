@@ -848,9 +848,9 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     (behavior.attacks.Attacks.refused: the magician's casts, none at one unseen, dead, likely dead or held; None: every
     one): one it won't go at is never thrown at, nor taken as sure from where she stands up close, but counts as ever
     for her body, the danger and who's too close. Without POINT_BLANK (the magician's), up close with nothing she casts
-    at from where she stands (_close_quarters' 'wait'), a throw that way at another in reach she casts at. With
-    `castable` her reach is by each kind's body in the map's game data (`tops`, `halves`: reach.can_hit's `sizes`), as
-    her casts' search is (ledger.in_path's: a mushroom 28 either side, where reach's table has a pig's 34), so the
+    at from where she stands (_close_quarters' 'wait'), a throw that way at another in reach she casts at. Her
+    reach is by each kind's body in the map's game data (`tops`, `halves`: reach.can_hit's `sizes`), as the search goes
+    (ledger.in_path's for her casts: a mushroom 28 either side, where reach's table has a pig's 34), so the
     stance neither throws where that search picks nothing (a throw her cast would send none with) nor stays there: off
     her level, nearer than it picks one, she steps out from under it (_step_from_under; the review of 2026-10-29: 60
     over her, the stance took one 116-122 off for in reach where her search picks from 123). `hurt`: what a monster she
@@ -877,7 +877,7 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
     if among:  # (those she isn't after, for her room: the target-first planner's)
         mine = mine + [t for t in among if not any(t is o for o in wanted) and beside(t, platform, x, danger)]
     lo, hi = _stand_limits(platform, crowded=bool(mine))
-    sizes = _sizes(tops, halves) if castable is not None else None  # (her casts' search: the game's bodies)
+    sizes = _sizes(tops, halves)  # (the search's: the game's bodies, the user's 2026-11-05: the check at her key has them)
     reachable = [t for t in wanted if reach.can_hit(platform, x, y, t, others=around, sizes=sizes)]
     if close:
         slo, shi = (lo, hi) if edges is None else (max(lo, edges[0]), min(hi, edges[1]))
@@ -944,8 +944,8 @@ def stance(x: float, y: float, platform: Platform, wanted: list[Monster], approa
 
 def _sizes(tops: dict[str, float] | None, halves: dict[str, float] | None) -> dict[str, MobBody] | None:
     """Each kind's body as reach.body_of takes it from the map's game data (MobBody) out of the stance's `tops` and
-    `halves` (behavior.fight.body_sizes: localization.monsters.bodies), or None without them: what the magician's
-    reach goes by (stance's `castable`), as her casts' search does (ledger.in_path's `sizes`)."""
+    `halves` (behavior.fight.body_sizes: localization.monsters.bodies), or None without them: what her reach goes by, as
+    her casts' search does (ledger.in_path's `sizes`) and the game's own."""
     if not tops or not halves:
         return None
     return {k: MobBody(tops[k], tops[k], halves[k]) for k in halves if k in tops}

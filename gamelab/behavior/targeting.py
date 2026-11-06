@@ -274,12 +274,10 @@ class Targeting:
         here, x, y = s.platform, s.where.x, s.where.y
         around = visible + hidden
         lo, hi = _stand_limits(here, crowded=True)
-        attacks = getattr(h, "attacks", None)
-        picks = getattr(attacks, "picks", False)
         if self._known[0] is not g.danger:
             self._known = (g.danger, {})
         return tg.Her(here, x, y, pace.lead, pace.window, h.actions.facing, fight._air() and fight.JUMP_SHOTS, around,
-                      _sizes(g._tops, g._halves) if picks else None, g._halves, g.danger, pace, lo, hi,
+                      _sizes(g._tops, g._halves), g._halves, g.danger, pace, lo, hi,
                       jump_hits=lambda m: g._jump_hits(s, m), can_jump=open_above(g.model, here, x, x),
                       routes=self._route if self.screen else None, stands=self._stands, known=self._known[1])
 
