@@ -1273,7 +1273,9 @@ class Hunter:
 
     def _still(self, side: str) -> bool:
         """Whether a throw that way still goes, asked by her Actions once her lock has been waited out (LAST_LOOK): not
-        if her EXP has gained a kill of a kind in its way since the look it was decided on. Read off the feed's newest
+        if her EXP has gained a kill of a kind in its way since the look it was decided on, nor if perception has its target
+        dead by its own track (`_target_dead`, Track.killed: live in 3.86 h, 98 attacks at one so, 69 of them no-hit; the next
+        look doesn't have it, so a hit dropped goes that one look later). Read off the feed's newest
         state, if of a frame after her keys' effect (Senses.fresh_after; none, the throw goes: nothing is asked of the
         feed, which takes its frames as it would): its events not drained yet (the next look's), their
         EXP readings told apart as the hunter's meter would (a copy of it: the kinds each gain names; one it can't
@@ -1289,7 +1291,7 @@ class Hunter:
         events = [e for e in feed.pending_events(st.t) if e.kind in ("exp_gain", "exp_read")]
         if not any(e.kind == "exp_gain" for e in events):
             self.attacks.heard(st.t, [])  # (and her EXP: no kill since the look, Attacks.heard)
-            return True
+            return not self._target_dead(st, side)
         meter, kinds, heard = copy.deepcopy(self.meter), set(), []
         for e in events:
             gains = meter.update(e.t, reading_of(e.data), e.kind == "exp_gain")
@@ -1301,11 +1303,22 @@ class Hunter:
         if not kinds and meter.unread > self.meter.unread:  # a change it couldn't read: a kill of a kind not known
             kinds = {None}
         if (kind := self.attacks.in_way(side, kinds)) is None:
-            return True
+            return not self._target_dead(st, side)
         text = f"a kill came in before the key ({kind}): the throw {side} is dropped, decided again"
         self.log(f"    {text}")
         telemetry.emit("event", kind="dropped", text=text)
         return False
+
+    def _target_dead(self, st, side: str) -> bool:
+        """(`_still`) Whether perception has the target of a throw that way dead by its own track in state `st`; said so."""
+        dead = {tr.id for tr in getattr(st, "tracks", None) or () if getattr(tr, "killed", False)}
+        target = (self.attacks.aimed or self.attacks.target(side)) if dead else None
+        if getattr(target, "track", None) not in dead:
+            return False
+        text = f"its target #{target.track} ({target.kind}) is dead: the throw {side} is dropped, decided again"
+        self.log(f"    {text}")
+        telemetry.emit("event", kind="dropped", text=text, track=target.track)
+        return True
 
     def _miss_glance(self, st) -> None:
         """Her attack's MISS popups off the feed's newest state `st` before a throw's key (`_still`), for the watches:

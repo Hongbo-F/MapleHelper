@@ -434,6 +434,51 @@ def test_a_throw_takes_a_last_look_before_its_key_and_a_kill_come_in_of_a_kind_i
     assert h.actions.jump_throw("right") is False and sent == []
 
 
+def test_a_throw_at_one_perception_has_dead_by_its_own_track_is_dropped():
+    """Hunter._still: 080929 a03 went 225 ms after perception had its target dead, another player's kill, with no EXP of hers
+    to drop it. By the target's own track alone: another's dead, or one dying at the place, says nothing of a live one. No
+    newer frame than the look: nothing to say, it goes."""
+    from gamelab import telemetry
+    from gamelab.behavior.hunter import Hunter
+    from gamelab.localization import mapdata
+    from test_fight import EMPTY_MAP, _Eyes
+
+    class Feed:
+        def __init__(self, tracks):
+            self.tracks = tracks
+
+        def newest(self, after, timeout=0.0):
+            return None if self.tracks is None else SimpleNamespace(t=time.monotonic(), tracks=self.tracks)
+
+        def pending_events(self, upto=None):
+            return []
+
+    def hunter(dead, aimed=None, none=False):
+        said = []
+        h = Hunter(_Eyes([]), KEYS7, mapdata.parse(1, EMPTY_MAP, "Test", {}), log=said.append, attack="choice")
+        h.senses._feed = Feed(None if none else [SimpleNamespace(id=t, killed=t in dead) for t in (7, 8)])
+        s = _look([("horny-mushroom", 250.0, None)])
+        s.monsters = [dataclasses.replace(s.monsters[0], track=7)]
+        h.attacks.on_look(s)
+        h.attacks.touched = lambda s: True
+        h.attacks.aimed = aimed
+        sent = []
+        h.actions.play = lambda events, name, kind=None: sent.append(name)
+        h.actions.facing = "right"
+        return h, said, sent
+
+    other = Monster(Mob("green-mushroom", 0, 0, 0, 0, 1.0), 300.0, 0.0, 1, None, track=8)
+    for dead, aimed, none, goes in (({7}, None, False, False), ((), None, False, True), ({8}, None, False, True),
+                                    ({8}, other, False, False), ({7}, None, True, True)):
+        h, said, sent = hunter(dead, aimed, none)
+        with telemetry.captured() as records:
+            assert h.actions.throw("right") is goes and (sent == ["throw"]) is goes, (dead, aimed, none)
+        assert any("is dead: the throw right is dropped" in line for line in said) is not goes
+        assert any(r.get("kind") == "dropped" for r in records) is not goes
+    h, said, sent = hunter({7})
+    assert h.actions.jump_throw("right") is False and sent == []  # (her jump's key too: all of its plan or none)
+
+
 def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_target():
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)]))
