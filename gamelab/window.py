@@ -354,6 +354,20 @@ def resize_client(hwnd: int, width: int, height: int) -> tuple[int, int]:
     return got.right, got.bottom
 
 
+def last_input_age() -> float | None:
+    """S since the last keyboard or mouse input in this session, injected or not (GetLastInputInfo; behavior.guard); None
+    if it can't be told."""
+    class Info(ctypes.Structure):
+        _fields_ = [("size", ctypes.c_uint), ("time", ctypes.c_uint)]
+    try:
+        info = Info(ctypes.sizeof(Info), 0)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        return ((ctypes.windll.kernel32.GetTickCount() - info.time) & 0xFFFFFFFF) / 1000.0
+    except (AttributeError, OSError):
+        return None
+
+
 def bring_to_front(title: str, wait: float = 0.0) -> bool:
     """Make the game the foreground window without sending it any keys, and say whether it is: waiting up to
     `wait` s for it to come (with SWITCH_FALLBACK, switching to it from half way).

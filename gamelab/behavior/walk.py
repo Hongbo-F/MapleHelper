@@ -5,8 +5,8 @@ trips' state kept from trip to trip, as a hunt keeps them), and the harness's `w
 same trips drawn the same way.
 
 Each trip: a platform drawn from PLATFORMS on Tree Dungeon (elsewhere any MIN_WIDTH wide), an x on it EDGE in from its
-ends, TRIP_S to get there. `save()` every SAVE_S (the live walk's rolling recording, save-recent), and at the end, on
-Tree Dungeon, a trip to PARK (by the portal on 27, where nothing walks).
+ends, TRIP_S to get there. `save()` every SAVE_S (the live walk's rolling recording, save-recent); `nav --walk` parks her
+at the end (behavior.retreat.park).
 """
 
 import random
@@ -19,7 +19,6 @@ MIN_WIDTH = 60.0
 EDGE = 15.0
 TRIP_S = 40.0
 SAVE_S = 270.0
-PARK = (27, 77.0)
 
 
 def places(model) -> list:

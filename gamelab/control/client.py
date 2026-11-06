@@ -16,7 +16,7 @@ import uuid
 import numpy as np
 
 from ..paths import ALARM, INBOX, OUTBOX, PLAYER_INFO, PLAYER_LOG
-from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, LIE_OK, PLAN_KINDS
+from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, LIE_OK, PLAN_KINDS, RETREAT
 
 POLL_S = 0.01  # how often `wait` looks for the result
 LIE_CLICK_DOWN_AT, LIE_CLICK_HOLD = 1000, 80  # pressed (its pointer's trail done by then) and held, ms
@@ -87,7 +87,8 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     capture = {"fps": fps, "duration_ms": duration_ms, "scale": scale, "lead_ms": lead_ms}
     if crop:
         capture["crop"] = [int(v) for v in crop]
-    plan = {"events": [list(e) for e in events], "capture": capture, "focus": focus}
+    # (her retreat's moves never bring the game forward: refused while another window is in front, control.player)
+    plan = {"events": [list(e) for e in events], "capture": capture, "focus": focus and kind != RETREAT}
     if end_ms is not None:
         plan["end_ms"] = end_ms
     if window_client is not None:
@@ -200,6 +201,14 @@ def can_splice() -> bool:
             return False  # (being written: asked again next time)
         _INFO.update(stamp=stamp, can=bool(info.get("splice")) and _alive(info.get("pid")))
     return _INFO["can"]
+
+
+def player_up() -> bool:
+    """Whether a player is running (paths.PLAYER_INFO's pid, written as it starts, removed as it stops)."""
+    try:
+        return _alive(json.loads(PLAYER_INFO.read_text(encoding="utf-8")).get("pid"))
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def _alive(pid) -> bool:
@@ -326,6 +335,15 @@ def cancel(plan_id: str) -> bool:
         if (INBOX / f"{plan_id}.running").exists():
             (INBOX / f"{plan_id}.cancel").touch()
         return False
+
+
+def cut_running() -> None:
+    """Cut short whatever the player is playing and withdraw what's waiting, whoever sent it (`gamelab stop`, from its own
+    process: a throw's key not pressed yet isn't pressed)."""
+    for path in INBOX.glob("*.splice"):
+        path.unlink(missing_ok=True)
+    for path in [*INBOX.glob("*.running"), *INBOX.glob("*.json")]:
+        cancel(path.stem)
 
 
 def wait(plan_id: str, timeout: float = 120) -> dict:

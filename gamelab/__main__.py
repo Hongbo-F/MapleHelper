@@ -7,6 +7,7 @@ the shared modules) is imported up here; the other layers are imported by the co
 
 import argparse
 import ctypes
+import json
 import math
 import os
 import random
@@ -122,6 +123,23 @@ def cmd_player(args) -> int:
 
 
 def cmd_stop(args) -> int:
+    """`stop`: the running hunt stops and she parks; with none running she parks (behavior.guard.stop)."""
+    from .behavior import guard
+    return guard.stop(_game_title())
+
+
+def cmd_guard(args) -> int:
+    """`guard`: the guard's switch (behavior.guard), read at its next pass; with no word, how it is."""
+    from .behavior import guard
+    if args.mode == guard.ON:
+        paths.GUARD_MODE.unlink(missing_ok=True)
+    elif args.mode is not None:
+        paths.GUARD_MODE.write_text(args.mode, encoding="utf-8")
+    print(f"the guard: {guard.read_mode()}")
+    return 0
+
+
+def cmd_stop_player(args) -> int:
     LAB.mkdir(parents=True, exist_ok=True)
     STOP.touch()
     deadline = time.monotonic() + 10
@@ -1015,14 +1033,14 @@ def _perceives_her(welcome: dict, hunts: bool) -> None:
     _log(f"perception: {why}")
 
 
-def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
+def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, **kw):
     """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way): her looks
     and glances from the perception service (_perception), as a command that sends keys and tells her throws, or with
     `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`). A command that
     hunts sets a client of the wrong size right with Alt+Enter twice (control.window_size.SizeFix): at its start if
     the eyes have no calibration at its size (_fit_start: it waits START_WAIT_S at most, where it stopped), and on its
     looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
-    before the eyes are made (the pet's: PetWait). A command that hunts has the OCR's models loaded at its start, on a
+    before the eyes are made (the pet's: PetWait). `restore` False: a minimized game isn't brought back (`nav --park`). A command that hunts has the OCR's models loaded at its start, on a
     thread of their own (perception.messages.warm: the message bar's first read comes in a fight). A command that
     hunts (one that takes `--low-hp`: `hunt`, `tour`, `probe run`) waits for her max HP off her HUD's HP number
     (Hunter.wait_max_hp: the perception service's newest states, behavior.safety.HP_WAIT_S at most) and hunts nothing
@@ -1046,15 +1064,17 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, **kw):
         _fit_start(title, fix)
     if fit is not None:
         fit(perception)
-    eyes = _eyes(model, title, perception, restore=not viewer)
+    eyes = _eyes(model, title, perception, restore=restore and not viewer)
     if throws and not viewer:  # (the OCR's models loaded now, not at the message bar's first read in a fight)
         from .perception.messages import warm
         warm()
     hunter = Hunter(eyes, keys, model, log=_log, feed=perception, **kw)
     hunter.config_keys = cfg.keys  # (the game's Attack on no key when last read: said, the regular attack tried again)
     if throws and not viewer and hasattr(hunter, "looter"):  # (her backpack full, on the phone: a regular push)
+        from .behavior.vitals import Vitals
         from .control import notify
         hunter.looter.push = notify.BackpackPush.from_lab(log=_log)
+        hunter.vitals = Vitals(lambda title_, text, critical: notify.phone(title_, text, critical, log=_log), log=_log)
     if not viewer and hasattr(hunter, "actions") and not keymap.publish(keys, why=f"`{args.cmd}` at its start"):
         _log("  her keys for the Lie Detector's allowance not written (the player keeps the ones it has)")
     hunts = throws and not viewer and hasattr(args, "low_hp")  # (`nav`'s trips have the stop as it is)
@@ -1363,6 +1383,7 @@ def cmd_pet(args) -> int:
             time.sleep(WAIT_POLL_S)
 
     hunter = _hunter(args, throws=False, fit=fit if args.every else None)
+    guard = _guard_pass(hunter, title) if args.every and hasattr(hunter.senses.feed, "latest") else None
     if waited:  # (the game wasn't there: that time isn't the pet's; 16:29 on 2026-10-30 it was, fed by blind twice)
         hunter.pet.away()
     eyes = hunter.senses.eyes.geo.client if waits else None
@@ -1398,7 +1419,52 @@ def cmd_pet(args) -> int:
                   + ("" if present else " (the game isn't there: time not counted)"))
         if not args.every:
             return 0
-        time.sleep(args.every * 60)
+        _guarded(guard, args.every * 60)
+
+
+def _guard_pass(hunter, title: str):
+    """The guard's pass for `pet --every` (behavior.guard): the service's newest state to act on, her HP against the stop
+    rule as the hunter's reserve has it, the phone, and `nav --park --tell` started detached."""
+    from .behavior.guard import STATE_AGE_S, Guard, Pass
+    from .behavior.vitals import Vitals
+    from .control import notify
+    from .localization import service
+    from .localization.worldstate import Asks
+    feed = hunter.senses.feed
+
+    def latest():
+        return feed.latest(Asks(time.monotonic() - STATE_AGE_S), timeout=0.0, ask=False)
+
+    def low(st) -> bool:
+        cur, most = st.hp_of if st.hp_of is not None else (None, hunter.max_hp)
+        return (st.hp * (most or 1.0) if cur is None else cur) < hunter.hp_watch.threshold(most)
+
+    def start_park() -> None:
+        log = paths.LAB / "park.log"
+        service._start_detached(f'cmd.exe /c set PYTHONUNBUFFERED=1&& "{sys.executable}" -u -X utf8 -m gamelab nav --park '
+                                f'--tell >> "{log}" 2>&1', str(REPO))
+
+    def push(title_: str, text: str, critical: bool) -> None:
+        notify.phone(title_, text, critical, log=_log)
+    return Pass(Guard(push, start_park, log=_log), latest, low, title, Vitals(push, log=_log))
+
+
+def _guarded(guard, seconds: float) -> None:
+    """`seconds` of `pet --every`'s wait with the guard's passes in it. Nothing that goes wrong in one stops the pet's care
+    (said once a kind)."""
+    from .behavior.guard import GUARD_S
+    if guard is None:
+        time.sleep(seconds)
+        return
+    end, said = time.monotonic() + seconds, set()
+    while time.monotonic() < end:
+        try:
+            guard.tick()
+        except Exception as e:
+            if type(e) not in said:
+                said.add(type(e))
+                _log(f"guard: a pass failed ({type(e).__name__}: {e})")
+        time.sleep(GUARD_S)
 
 
 def _pet_keys(hunter) -> None:
@@ -1518,6 +1584,9 @@ def _record(command: str, map_id: int) -> None:
     from . import gcstats
     from .motion import physics
     path = telemetry.record_to(command)
+    if not command.startswith("pet"):  # (a command that hunts, for `gamelab stop` to find: behavior.guard.running_hunt)
+        paths.HUNT.write_text(json.dumps({"pid": os.getpid(), "command": command}), encoding="utf-8")
+        paths.STOP_HUNT.unlink(missing_ok=True)  # (one left by a `stop` that didn't see its hunt out)
     telemetry.emit("session", map=map_id, command=command, mode="live", physics=physics.record())
     gcstats.report_every(telemetry.emit, when=telemetry.to_file)
     _log(f"telemetry: {path} (watch it with `python -m gamelab minimap`: a window, and a page for a phone)")
@@ -1746,9 +1815,56 @@ def _ways(args) -> None:
         route.ROUTES = args.ways
 
 
+def _park_map(args) -> bool:
+    """`nav --park`'s map: what the perception service looks at now (its info file, not a --map default: at 08:18 on
+    2026-11-05 a `nav` with none took the service off her map), in `args.map`. False if none's running."""
+    from .localization import service
+    try:
+        args.map = int(json.loads(service.info_path(False).read_text(encoding="utf-8"))["map"])
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _nav_park(args) -> int:
+    """`nav --park`: she goes to the chosen place on the map she's on (behavior.retreat.park, park_place), her moves alone,
+    again while she's knocked back or blocked, and it ends once she's there; never brings the game forward: not in front,
+    a note for the guard and no keys. `--tell`: the guard's, the outcome on the phone too. Log, telemetry and
+    paths.PARKED say where and why. Exit code 0 if she's there, or stays for a reason it says."""
+    from .behavior import retreat
+    from .control import notify
+    title = _game_title()
+    if window.foreground_title() != title:
+        retreat.told(None, "the game isn't in front")
+        print("the game isn't in front: nothing sent; she parks once it's back (the guard, `pet --every`)")
+        return 1
+    if not _park_map(args):
+        print("no perception service is running: she stays where she is")
+        return 1
+    _record("nav-park", args.map)
+    try:
+        hunter = _hunter(args, throws=False, restore=False)
+    except (RuntimeError, OSError, KeyError, ValueError) as e:  # (no game data for it, say: no model)
+        said = f"she stays: no model of map {args.map} ({type(e).__name__}: {e})"
+        _log(said)
+        if args.tell:
+            notify.phone("She can't park", said, True, log=_log)
+        return 1
+    from .behavior.retreat import on_alarm
+    with on_alarm(hunter):
+        out = retreat.park(hunter, log=_log)
+    said = out.said()
+    _log(f"park: {said}")
+    if args.tell:
+        notify.phone("She's parked" if out.there() else "She can't park", said, not out.there(), log=_log)
+    return 0 if out.there() else 1
+
+
 def cmd_nav(args) -> int:
+    if args.park:
+        return _nav_park(args)
     if args.walk is None and args.platform is None:
-        print("nav: a platform to go to, or --walk MINUTES")
+        print("nav: a platform to go to, --walk MINUTES or --park")
         return 2
     _ways(args)
     _record("nav", args.map)  # (before the hunter, whose start may set the client right: _fit_start)
@@ -1778,10 +1894,10 @@ def cmd_nav(args) -> int:
 def _nav_walk(args, hunter, nav) -> int:
     """`nav --walk MINUTES`: movement only, random trips in one navigator for MINUTES (behavior.walk; the live QA walk
     in one process), the rolling recording saved every walk.SAVE_S (save-recent's, named qa-walk; none if the recorder
-    isn't running), the Lie Detector's or the safety stop's retreat ending it as any hunt's; then, on Tree Dungeon, a
-    trip to walk.PARK and the recording saved once more."""
+    isn't running), the Lie Detector's or the safety stop's retreat ending it as any hunt's; then she parks
+    (behavior.retreat.park) and the recording is saved once more."""
     from .behavior import walk
-    from .behavior.retreat import on_alarm
+    from .behavior.retreat import on_alarm, park
     from .control import rolling
     if not _to_game():
         return 1
@@ -1796,9 +1912,7 @@ def _nav_walk(args, hunter, nav) -> int:
     start = time.monotonic()
     with on_alarm(hunter):  # the Lie Detector or a stop: she retreats to a safe place, then the command stops
         trips = walk.walk(nav, hunter.model, rng, minutes=args.walk, log=_log, save=save)
-        if hunter.model.id == walk.TREE:
-            park = nav.go(walk.PARK[0], x=walk.PARK[1], seconds=60)
-            _log(f"walk: parked on {walk.PARK[0]} at x {walk.PARK[1]:.0f}: {park.result}")
+        _log(f"walk: {park(hunter, log=_log).said()}")
     save("qa-walk-end")
     arrived = sum(1 for t in trips if t.result in ("arrived", "in position"))
     print(f"walk done in {time.monotonic() - start:.0f} s: {len(trips)} trips, {arrived} arrived, "
@@ -2903,7 +3017,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("player", help="run the key player (use --elevate: the game runs as admin)")
     s.add_argument("--elevate", action="store_true", help="start it as administrator via a UAC prompt")
     s.set_defaults(func=cmd_player)
-    sub.add_parser("stop", help="stop the player").set_defaults(func=cmd_stop)
+    sub.add_parser("stop", help="stop the running hunt: no attack after it, she parks on a safe place of the map she's "
+                                "on and it says where (behavior.guard); with no hunt running, she parks").set_defaults(
+        func=cmd_stop)
+    s = sub.add_parser("guard", help="the guard that parks her while no hunt runs (behavior.guard): off, alert (the push "
+                                     "and no moves) or on; no word: how it is")
+    s.add_argument("mode", nargs="?", choices=["off", "alert", "on"])
+    s.set_defaults(func=cmd_guard)
+    sub.add_parser("stop-player", help="stop the player").set_defaults(func=cmd_stop_player)
     sub.add_parser("clear-alarm", help="after you've answered a Lie Detector and its recording has ended: let "
                                        "gamelab run again (start the player again after it)"
                    ).set_defaults(func=cmd_clear_alarm)
@@ -3053,7 +3174,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("platform", type=int, nargs="?", help="platform id (see `map`); none with --walk")
     s.add_argument("--walk", type=float, metavar="MINUTES",
                    help="movement only: random trips for MINUTES in one navigator (behavior.walk: the QA walk), the "
-                        "rolling recording saved every 270 s, then parked on 27 at x 77 (Tree Dungeon)")
+                        "rolling recording saved every 270 s, then she parks (as --park)")
+    s.add_argument("--park", action="store_true",
+                   help="to the safe place of the map she's on, chosen from the live scene (behavior.retreat.park_place), "
+                        "her moves alone, retried until she's there; never brings the game forward")
+    s.add_argument("--tell", action="store_true", help="--park: the outcome on the phone too (the guard's)")
     s.add_argument("--seed", type=int, help="--walk's random seed for its trips and their route choices")
     s.add_argument("--x", type=float, help="and walk to this map x on it")
     s.add_argument("--map", type=int, default=DEFAULT_MAP)

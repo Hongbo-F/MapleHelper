@@ -68,7 +68,7 @@ from .ledger import DropStore, Ledger, Wounds
 from .looting import Looter, worth_for
 from .pet import PetCare
 from .bootstrap import Defence, HerStats, session_of_feed
-from .safety import HP_WAIT_S, HpWatch, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
+from .safety import HP_WAIT_S, HpWatch, StopAsked, TooStrong, Touches, kind_of_touch, mob_touch, reserve_of
 from .chatcheck import ChatCheck, ChatDue
 from .statcheck import StatCheck, StatsDue, speed_doubt
 from .safety import kinds_of as map_kinds
@@ -106,6 +106,7 @@ PLAN_DEF_STEP = 5.0  # her DEF for the positioning model (attack.danger) to this
 # her health: `asked`), and not while she retreats (`retreating`: the Lie Detector's way to a safe place isn't cut short
 # by it). False: at health_check only, as until then.
 STOP_ON_LOOK = True
+STOP_WAIT_S = 60.0  # s a hunt holds `gamelab stop` while a look has nothing to act on (_stop_waiting)
 # s a touch's knock may still be moving her after the look that was told of it, a touch that took HP (a MISS doesn't
 # move her: 0 units at the median on the frames of 2026-10-24..28, where damage moved her 63, p90 122; README, Touches):
 # it carries her through the air (0.22 s in the simulator) and she slides on as she lands (180 units/s braked at 800:
@@ -196,6 +197,8 @@ def feed_reads(events, meter: ExpMeter) -> list[tuple]:
 
 
 class Hunter:
+    stoppable = False  # a hunting command (behavior.retreat.on_alarm): `gamelab stop` is for it
+    vitals = None      # her potions and her death on the phone (behavior.vitals: the command line's; None: not told)
     """The agent: her senses, her keys and her looter, and what she did (`report`); runs the fights."""
 
     def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log: Callable[[str], None] = print,
@@ -250,6 +253,7 @@ class Hunter:
         self._unread_said = False              # ... HP_NUMBER_WAIT_S has been said
         self.asked = False       # a hunt has asked after her health (health_check): the stop raised at any look since
         self.retreating = False  # ... but not while she retreats (behavior.retreat.away)
+        self._stop_wait = 0.0  # when a look with nothing to act on first met `gamelab stop` (_stop_waiting)
         self._strong: TooStrong | None = None  # the map too strong for her, found once her max HP read (raised once)
         self._strong_asked = False
         own = potion_hp if keys.hp_potion is not None else None  # (her own potion key's: under it, the stop's lower)
@@ -263,6 +267,8 @@ class Hunter:
         # (her Shape: which monsters her attacks went at, and when what they did shows; the thief's THIEF_SHAPE)
         self.senses = Senses(eyes, model, band=(LOOK_UP, LOOK_DOWN), feed=feed, shape=profile.shape)
         self.senses.log = eyes.log = log  # looks that failed their checks, said in her log (localization.senses)
+        self.senses.waits.append(self._stop_waiting)  # (`gamelab stop` with no look to read it at)
+        self.senses.hands_off = lambda: self.retreating or (self.stoppable and paths.STOP_HUNT.exists())
         self.senses.checks.append(self._stop_now)  # (the safety stop at the look it's due at: STOP_ON_LOOK) ...
         self.senses.glance_checks.append(self._glanced)  # ... and at a glance (a chain's watch: no look for seconds)
         mode = attack or ("skill" if skill else "regular")
@@ -1020,10 +1026,22 @@ class Hunter:
         elif self._attack_mode == "regular":  # (as it was: her Actions key the regular attack themselves)
             self.actions.choose = None
 
+    def _stop_waiting(self, problem) -> None:
+        """A look with nothing to act on while `gamelab stop` asks (the game not in front): it goes on waiting, and past
+        STOP_WAIT_S the hunt ends for the guard to park her at the game's return (the babysitter holds the
+        pet feeder while a hunt runs: waiting must not starve the pet)."""
+        if not self.stoppable or self.retreating or not paths.STOP_HUNT.exists():
+            return
+        self._stop_wait = self._stop_wait or time.monotonic()
+        if time.monotonic() - self._stop_wait >= STOP_WAIT_S:
+            raise StopAsked(later=True)
+
     def _stop_now(self, s: Scene) -> None:
-        """After every look's listeners (Senses.checks; STOP_ON_LOOK): the safety stop raised there if it's due (the
-        watch saw the look already: _vitals), once a hunt has asked after her health (`asked`) and not while she
-        retreats (`retreating`)."""
+        """After every look's listeners (Senses.checks; STOP_ON_LOOK): `gamelab stop` asking (a hunting command's:
+        `stoppable`), and the safety stop raised there if it's due (the watch saw the look already: _vitals), once a hunt
+        has asked after her health (`asked`); neither while she retreats (`retreating`)."""
+        if self.stoppable and not self.retreating and paths.STOP_HUNT.exists():
+            raise StopAsked()
         if not (STOP_ON_LOOK and self.asked and not self.retreating):
             return
         if (stop := getattr(self, "_strong", None)) is not None:
@@ -1337,6 +1355,8 @@ class Hunter:
         self._kinds_on(s)
         self._unread(s, exact)
         mp = getattr(s, "mp", None)
+        if self.vitals is not None:
+            self.vitals.see(s.hp, mp, exact)
         self.hp_watch.see(s.t, s.hp, self.max_hp, None if exact is None else exact[0],
                           None if mp is None else mp * self.max_mp)
         self.darts.roped = self.on_rope(s)  # (presses keyed on a rope, which the game refuses, aren't counted)

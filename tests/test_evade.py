@@ -584,7 +584,7 @@ def test_a_walk_goes_on_random_trips_to_the_platforms_of_the_qa_walk_saving_the_
                                                                                                         right=90.0)])
     assert [p.id for p in walk.places(other)] == [2]
     from gamelab import __main__ as cli
-    assert cli.cmd_nav(SimpleNamespace(walk=None, platform=None)) == 2
+    assert cli.cmd_nav(SimpleNamespace(walk=None, platform=None, park=False)) == 2
 
 
 # --- after the review of 2026-10-29 (D:/MapleHelper-scratch/evade/review) ---------------------------------------------
