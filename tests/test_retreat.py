@@ -144,14 +144,15 @@ def test_small_kinds_count_for_a_retreat_too():
 def test_on_the_alarm_the_retreat_runs_and_the_alarm_goes_on(monkeypatch):
     ran, said = [], []
     h = SimpleNamespace(log=said.append)
-    monkeypatch.setattr(retreat, "retreat", lambda hunter, log=None, rng=None: ran.append(hunter) or "went")
+    went = retreat.Retreat(0.0)
+    monkeypatch.setattr(retreat, "retreat", lambda hunter, log=None, rng=None: ran.append(hunter) or went)
     with on_alarm(h) as watch:
         pass  # no alarm: nothing
     assert ran == [] and watch.retreat is None
     with pytest.raises(client.LieDetectorAlarm):
         with on_alarm(h) as watch:
             raise client.LieDetectorAlarm("Lie Detector seen at 21:02:00")
-    assert ran == [h] and watch.retreat == "went"
+    assert ran == [h] and watch.retreat is went
     with pytest.raises(client.PlayerError):  # any other error: no retreat
         with on_alarm(h):
             raise client.PlayerError("game not in front")

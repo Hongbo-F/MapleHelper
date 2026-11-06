@@ -26,10 +26,10 @@ a Green Mushroom's touch is under DANGER_MIN, and hunting's measure read 'safe e
 11:15-11:18 with one walking up to her. Hanging on a rope she's safe on already, she stays on it (`safe_rope`). A key
 check keeps to platforms (Why.ropes): its window opens only with her on one (behavior.keycheck.unquiet).
 
-A park (`park`, `park_place`: `nav --park`, `gamelab stop`, behavior.guard): the same choice with no time limit, from a
-look sure of her place (`sure_look`), again and again from wherever a go left her, on whatever map the hunter has; no map's
-platform or coordinates anywhere. A map where nothing can touch her, or with no safe place: she stays and it says so. `told`
-says how it came out, for whoever asked.
+A park (`park`, `park_place`: `nav --park`, `gamelab stop`, a grind's time up, behavior.guard): the same choice with no
+time limit, from a look sure of her place (`sure_look`), again and again from wherever a go left her, on whatever map the
+hunter has; no map's platform or coordinates anywhere. A map where nothing can touch her, or with no safe place: she stays
+and it says so. `told` says how it came out, any retreat's, for whoever asked.
 
 How: her moves alone, as the navigator plans them keeping clear of monsters (navigator.AVOID: never a fight; the
 quickest way; a monster in the way of a move waited out where she can stand, or gone round, as on any trip), its plans of
@@ -50,11 +50,14 @@ rest knocked back on the way up to the rope at 146 or to 28): tests/test_retreat
 D:/MapleHelper-scratch/ldpet/sweep.py, D:/MapleHelper-scratch/integ3/rebase/ldsweep.py. Since her jumps' attacks are
 weighed (2026-10-25): with the feed 28 of 32, without it 26 of 32, shooting 23 from 24 32 of 32
 (D:/MapleHelper-scratch/ov-jump/sweep_count.py). Since every look is the perception service's (2026-10-25: no
-`--no-feed`), 27 of 31, and 32 of 32 shooting 23 from 24 (D:/MapleHelper-scratch/perceive/build/ld_halves.py).
+`--no-feed`), 27 of 31, and 32 of 32 shooting 23 from 24 (D:/MapleHelper-scratch/perceive/build/ld_halves.py). All that by
+the order before 2026-11-05 (25 was a safe place then; now 26 or a rope): the numbers since are in the README, A stop that
+parks.
 """
 
 import json
 import math
+import os
 import random
 import time
 from collections.abc import Callable
@@ -86,7 +89,12 @@ STOP_S = 60.0       # s a stop's retreat has (a stop's, not the Lie Detector's: 
 STOP_TRIES = 12     # ... goes at most: from wherever a go left her
 PARK_S = 180.0      # s a park has (`park`, a stop asked for), and ...
 PARK_TRIES = 30     # ... goes at most: knocked back or blocked, again from where she is, however far
-PARK_ROPES = True   # a rope will do for a park too (she may hang for hours: her pet's food on one isn't tried live yet)
+ROPES = True        # a rope will do, for any retreat or park but a key check's, where she's on one already too (she may hang
+                    # for hours: her pet's food on one isn't tried live yet; False: platforms alone)
+ROPE_MARGIN = 25.0  # of heights on a rope as safe, she aims at one with nothing in reach this far either way if there's one
+                    # (attack.ropes.HANG_SLACK's 15 is how far off the height she ends up: live on the rope at 146 at y 47
+                    # and 51, the model's zero from 45): she may hang for hours. From under a rope her grab may keep her
+                    # lower (GRAB_CLIMB): from 32, still 62
 SURE_S = 3.0        # s a park waits for her place to be sure before she sets off: looks ...
 SURE_CONF = 0.9     # ... this sure of it (a carried place, her tag hidden in a fall, 0.32 at 2026-11-05 11:18:45) ...
 SURE_DX = 8.0       # ... two in a row within this of each other, on one platform (none: she's still falling)
@@ -168,11 +176,13 @@ class Retreat:
     result: str = ""
     took: float | None = None
     where: tuple[int | None, float] | None = None
+    air: bool = False  # ... in the air, that look
 
     def there(self) -> bool:
-        """Whether her last look has her where it went: on its platform, or hanging (on no platform) for a rope."""
+        """Whether her last look has her where it went: on its platform, or hanging (on no platform, not in the air) for
+        a rope."""
         p, w = self.place, self.where
-        if p is None or w is None:
+        if p is None or w is None or self.air:
             return False
         return w[0] is None if p.rope is not None or p.platform is None else w[0] == p.platform
 
@@ -209,7 +219,7 @@ class Why:
     seconds: float = RETREAT_S  # s from `seen` it has to get there, and ...
     window: float = RETREAT_WINDOW_S  # ... her trips are cut this long after it (the player's, on the Lie Detector)
     tries: int = TRIES  # goes at most
-    ropes: bool = True  # a rope will do
+    ropes: bool = ROPES  # a rope will do
     park: bool = False  # to `park_place`, with a sure look to set off from
 
 
@@ -218,13 +228,13 @@ SAFETY = Why(SafetyStop.label, SafetyStop.title, "after the stop", STOP_S, STOP_
 # Before the key check that follows a doubt of her regular attack's key (behavior.keycheck: a monster near her, the game's
 # KEY BINDINGS window is opened from a safe place)
 KEY_CHECK = Why("KEY CHECK", "Key check", "after the doubt", ropes=False)
-PARK = Why("PARK", "Park", "after it began", PARK_S, PARK_S, PARK_TRIES, ropes=PARK_ROPES, park=True)
+PARK = Why("PARK", "Park", "after it began", PARK_S, PARK_S, PARK_TRIES, park=True)
 
 
 def why_of(stop: HuntStop) -> Why:
     """A stop's retreat's words (SAFETY for the safety stop's)."""
     if stop.parks:
-        return Why(stop.label, stop.title, "after the stop", PARK_S, PARK_S, PARK_TRIES, ropes=PARK_ROPES, park=True)
+        return Why(stop.label, stop.title, "after the stop", PARK_S, PARK_S, PARK_TRIES, park=True)
     return Why(stop.label, stop.title, "after the stop", STOP_S, STOP_S, STOP_TRIES)
 
 
@@ -236,7 +246,7 @@ def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | N
     from the stop, said in capitals, and whoever is at the PC paged (control.alarm.page, once her retreat is over: her
     moves come first); a stop that keeps the recording (`keep_s`) has its last minutes saved then
     (control.alarm.keep_recent), and the log says where; then the stop goes on (the command stops). A stop asked for
-    (behavior.safety.StopAsked) pages nobody and says how it came out (`told`)."""
+    (behavior.safety.StopAsked) pages nobody. Either way how it came out is told (`told`)."""
     watch = Watch()
     h.stoppable = True  # (`gamelab stop`: Hunter._stop_now)
     try:
@@ -246,6 +256,8 @@ def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | N
             watch.retreat = retreat(h, log, rng)
         except Exception as e:  # the alarm is what the command stops on
             (log or h.log)(f"retreat: failed ({type(e).__name__}: {e})")
+        finally:
+            told(watch.retreat, "the Lie Detector")
         raise
     except HuntStop as stop:
         say = log or h.log
@@ -257,8 +269,7 @@ def on_alarm(h, log: Callable[[str], None] | None = None, rng: random.Random | N
         except Exception as e:  # the stop is what the command stops on
             say(f"retreat: failed ({type(e).__name__}: {e})")
         finally:
-            if stop.parks:
-                told(watch.retreat, str(stop))
+            told(watch.retreat, str(stop))
             if (page := stop.page()) is not None:
                 alarm.page(*page)
             if stop.keep_s:
@@ -307,13 +318,19 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
     s = None
     try:
         for go in range(why.tries):
+            if why.park and _taken_over():
+                out.result = "a hunt took over"
+                break
             s = sure_look(nav) if why.park else nav.mover.locate(tries=LOCATE_TRIES, mobs=True, wide=True)
+            if s is None:  # (a long fall, her tag hidden: again from the next look)
+                out.result = "her place isn't sure"
+                continue
             # On a rope or in the air: a rope as safe as a safe place is one, where she stays; off any other at once
             # (_onto_platform's look until she's still is over), and down from the air.
             if s.where.platform is None and (hung := hanging(nav, s)) is not None:
                 still, rope = hung
-                if (p := safe_rope(h, rope, still.where.y, s.monsters)) is not None:
-                    out.place, out.result = (p, "stayed") if go == 0 else (out.place, "on a safe rope")
+                if why.ropes and (p := safe_rope(h, rope, still.where.y, s.monsters)) is not None:
+                    out.place, out.result = p, "stayed" if go == 0 else "on a safe rope"
                     if go == 0:
                         log(f"{why.label}: retreat: she stays on {p.text()} ({p.why}; danger {p.danger:.3f}), "
                             f"{time.monotonic() - seen:.1f} s {why.after}")
@@ -329,7 +346,7 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
             left = why.seconds - (time.monotonic() - seen)
             p = park_place(h, nav, s, why.ropes) if why.park else choose(h, nav, s, left, why.ropes)
             if p.seconds <= 0:  # there (or nowhere better to be had in the time left)
-                out.place, out.result = (p, "stayed") if go == 0 else (out.place, out.result)
+                out.place, out.result = p, "stayed" if go == 0 else out.result
                 if go == 0:
                     log(f"{why.label}: retreat: she stays ({p.why}; danger {p.danger:.3f}), "
                         f"{time.monotonic() - seen:.1f} s {why.after}")
@@ -367,8 +384,11 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
                 break
     except client.LieDetectorAlarm as e:  # a plan past the player's window, or one it refused
         out.result = f"stopped: {e}"
-    except (client.PlayerError, RuntimeError, ValueError, LookLost) as e:  # no dot, a move the mover can't make from
-        out.result = f"stopped: {type(e).__name__}: {e}"                  # where she is, a look failing, no game
+    except client.PlayerError as e:  # (its words can name another window: the log's, not what's said on the phone)
+        log(f"{why.label}: retreat: {e}")
+        out.result = "stopped: the player refused a plan"
+    except (RuntimeError, ValueError, LookLost) as e:  # no dot, a move the mover can't make from where she is, a look
+        out.result = f"stopped: {type(e).__name__}: {e}"  # failing, no game
     return _end(out, seen, log, nav, why=why)
 
 
@@ -380,23 +400,35 @@ def park(h, log: Callable[[str], None] | None = None, rng: random.Random | None 
     return out
 
 
+def _taken_over() -> bool:
+    """Another command is hunting now, her keys its (paths.HUNT: behavior.guard.claim; the grind loop's next grind, come
+    while a park went on): the park ends."""
+    try:
+        return json.loads(paths.HUNT.read_text(encoding="utf-8")).get("pid") != os.getpid()
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def told(out: Retreat | None, by: str) -> None:
-    """How a park or a stop asked for came out, for whoever asked (paths.PARKED: `gamelab stop`, `nav --park`); not there
-    (or none: the game wasn't), a note for the guard (paths.PARK_NOTE), and the request's over either way."""
+    """How a park or a stop's retreat came out, for whoever asked (paths.PARKED: `gamelab stop`, `nav --park`, the guard);
+    not there (or none: the game wasn't), a note for the guard (paths.PARK_NOTE), and any request's over either way."""
     now, there = time.time(), out is not None and out.there()
     said = out.said() if out is not None else f"{by}: not parked"
-    paths.PARKED.write_text(json.dumps({"t": now, "by": by, "there": there, "said": said}), encoding="utf-8")
-    paths.STOP_HUNT.unlink(missing_ok=True)
-    if there:
-        paths.PARK_NOTE.unlink(missing_ok=True)
-    else:
-        paths.PARK_NOTE.write_text(json.dumps({"t": now, "why": said}), encoding="utf-8")
+    try:
+        paths.PARKED.write_text(json.dumps({"t": now, "by": by, "there": there, "said": said}), encoding="utf-8")
+        paths.STOP_HUNT.unlink(missing_ok=True)
+        if there:
+            paths.PARK_NOTE.unlink(missing_ok=True)
+        else:
+            paths.PARK_NOTE.write_text(json.dumps({"t": now, "why": said}), encoding="utf-8")
+    except OSError:  # (the disk full, say: it hides no alarm or stop)
+        pass
 
 
-def sure_look(nav: Navigator) -> Scene:
+def sure_look(nav: Navigator) -> Scene | None:
     """A look to set off from for a park, which no plan of hers leads up to (behavior.guard: from whatever's become of
     her): her place SURE_CONF sure on two looks in a row within SURE_DX of each other on one platform, or both off any;
-    a fall or a knock waited out, SURE_S at most (ValueError then: she doesn't set off). The look's own checks
+    a fall or a knock waited out, SURE_S at most (None then: she doesn't set off). The look's own checks
     (localization.placecheck, perception.framecheck) have passed by then."""
     last, end = None, time.monotonic() + SURE_S
     while True:
@@ -408,7 +440,7 @@ def sure_look(nav: Navigator) -> Scene:
             return s
         last = s if sure else None
         if time.monotonic() > end:
-            raise ValueError(f"her place isn't sure after {SURE_S:g} s")
+            return None
         time.sleep(ROPE_STILL_S / ROPE_STILL_LOOKS)
 
 
@@ -417,11 +449,14 @@ def platform_text(s: Scene) -> str:
 
 
 def hanging(nav: Navigator, s: Scene) -> tuple[Scene, Rope] | None:
-    """Look `s` has her on no platform: a look of her hanging on a rope, and the rope; None if she's in the air
-    (landed meanwhile, or still moving after ROPE_STILL_S). Hanging: her dot still over ROPE_STILL_LOOKS looks on no
-    platform, by the nearest rope reaching her height (Mover.off_rope's), between its ends."""
+    """Look `s` has her on no platform: a look of her hanging on a rope, and the rope; None if she's in the air (the
+    scene's `mode`: a still hang never read so in the live record's 675 s of still states it read for; landed meanwhile, or
+    still moving after ROPE_STILL_S). Hanging: her dot still over ROPE_STILL_LOOKS looks on no platform, by the nearest
+    rope reaching her height (Mover.off_rope's), between its ends."""
     model = nav.model
     if not model.ropes:
+        return None
+    if getattr(s, "mode", None) == "air":
         return None
     last, still, end = s, 1, time.monotonic() + ROPE_STILL_S
     while still < ROPE_STILL_LOOKS:
@@ -429,8 +464,8 @@ def hanging(nav: Navigator, s: Scene) -> tuple[Scene, Rope] | None:
             return None
         time.sleep(0.08)
         now = nav.mover.locate()
-        if now.where is None or now.where.platform is not None:  # (landed)
-            return None
+        if now.where is None or now.where.platform is not None or getattr(now, "mode", None) == "air":  # (landed; still
+            return None                                     # by the dot's coarse steps, a jump's top: 2026-11-05 18:14:51)
         still = still + 1 if math.dist(now.where.dot, last.where.dot) < 0.6 else 1
         last = now
     x, y = last.where.x, last.where.y
@@ -502,7 +537,7 @@ def choose(h, nav: Navigator, s: Scene, left: float, hang: bool = True) -> Place
                 if PLACE_SLACK else risk(p.id, gx)
             (enough if r <= SAFE_DANGER else safest).append(
                 Place(p.id, gx, "safe enough" if r <= SAFE_DANGER else "the safest within reach", tt, r, way=way(p.id)))
-        for r in ropes.refuges(model, d, p.id, None) if hang else ():  # at its safest height with every spawn filled
+        for r in ropes.refuges(model, d, p.id, None, ROPE_MARGIN) if hang else ():  # at its safest height, every spawn filled
             tt = nav.planner.arrive(here.id, x, p.id, r.x)
             if tt is None or not in_time(tt + r.on_s):
                 continue
@@ -594,6 +629,7 @@ def _end(out: Retreat, seen: float, log, nav: Navigator | None, s: Scene | None 
     out.took = (s.t if s is not None else time.monotonic()) - seen
     if s is not None and s.where is not None:
         out.where = (None if s.where.platform is None else s.where.platform.id, s.where.x)
+        out.air = getattr(s, "mode", None) == "air"
     where = ("where she is isn't known" if out.where is None else
              f"on platform {out.where[0]} at x {out.where[1]:.0f}" if out.where[0] is not None else
              f"off any platform at x {out.where[1]:.0f}")
