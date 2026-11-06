@@ -83,21 +83,18 @@ def _game_title() -> str:
     return her_setup()[0].game_window_title
 
 
-def _game_geometry(title: str, restore: bool = False, wait: bool = True):
+def _game_geometry(title: str, restore: bool = False):
     """The game window's geometry (screen.Geometry, from its client size). Minimized, its client area isn't the
     game's (GetClientRect gave 432x54 on 2026-10-24), so it's read once the window is back: with `restore` (the
     commands that bring the game to the front anyway: their first look did, before its size was read here) the
     window is restored and brought forward first (window.bring_to_front); without (`watch`, `pet --every`, which never
-    bring it forward), this waits until whoever is at the PC restores it, or with `wait` False says so (`nav --park`).
-    Otherwise it reads the window only."""
+    bring it forward), this waits until whoever is at the PC restores it. Otherwise it reads the window only."""
     hwnd = window.find_game(title)
     if window.minimized(hwnd):
         if restore:
             window.bring_to_front(title, wait=FRONT_WAIT_S)
             if window.minimized(hwnd):
                 raise RuntimeError("the game is minimized and didn't come back: restore it, then run this again")
-        elif not wait:
-            raise RuntimeError("the game is minimized")
         else:
             print("the game is minimized: waiting for it to be restored (nothing is read; Ctrl+C stops)", flush=True)
             while window.minimized(hwnd):
@@ -947,16 +944,16 @@ def _annotate(scene, path) -> None:
     img.save(path)
 
 
-def _eyes(model, title: str, perception=None, restore: bool = True, wait: bool = True):
+def _eyes(model, title: str, perception=None, restore: bool = True):
     """A command's eyes on the game, with monster templates for that map (screenshots + the game's sprites), for its
     window at the size it is now (its calibration at that size), and the map's minimap picture (_minimap_picture): what
     it reads off the frames the perception service hands it (`perception`, its client: the whole frames too,
     Eyes.full_frames). They take no shots of their own (perception.eyes.NoScreen). `restore`: a minimized game is
-    brought back (the commands that act); else it's waited for, `wait` (_game_geometry). Says where the window is, at what DPI awareness, and
+    brought back (the commands that act); else it's waited for. Says where the window is, at what DPI awareness, and
     what minimap picture was loaded: what a run that went wrong is told by (2026-10-24 16:46:50)."""
     from .perception.eyes import Eyes
     from .perception.sprites import detector_for
-    geo = _game_geometry(title, restore=restore, wait=wait)
+    geo = _game_geometry(title, restore=restore)
     area = window.client_rect(window.find_game(title))
     print(f"the game's client: {area['width']}x{area['height']} at ({area['left']}, {area['top']}) (desktop px); "
           f"DPI awareness {window.dpi_awareness()}", flush=True)
@@ -1036,15 +1033,15 @@ def _perceives_her(welcome: dict, hunts: bool) -> None:
     _log(f"perception: {why}")
 
 
-def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, wait: bool = True, **kw):
+def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, **kw):
     """The hunter on map `args.map`, logging to the console (sim.scenarios builds its stack the same way): her looks
     and glances from the perception service (_perception), as a command that sends keys and tells her throws, or with
     `viewer` one that does neither (`hunt look`); `throws` False: it sends keys but doesn't hunt (`pet`). A command that
     hunts sets a client of the wrong size right with Alt+Enter twice (control.window_size.SizeFix): at its start if
     the eyes have no calibration at its size (_fit_start: it waits START_WAIT_S at most, where it stopped), and on its
     looks later (Senses.window_fix), the game at its own 1366x768. `fit(perception)`: what else waits for the client
-    before the eyes are made (the pet's: PetWait). `restore` False: a minimized game isn't brought back: waited for
-    (`pet --every`), or with `wait` False an error (`nav --park`). A command that hunts has the OCR's models loaded at its start, on a
+    before the eyes are made (the pet's: PetWait; `nav --park`'s: _not_minimized). `restore` False: a minimized game isn't
+    brought back, but waited for (`pet --every`). A command that hunts has the OCR's models loaded at its start, on a
     thread of their own (perception.messages.warm: the message bar's first read comes in a fight). A command that
     hunts (one that takes `--low-hp`: `hunt`, `tour`, `probe run`) waits for her max HP off her HUD's HP number
     (Hunter.wait_max_hp: the perception service's newest states, behavior.safety.HP_WAIT_S at most) and hunts nothing
@@ -1068,7 +1065,7 @@ def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: 
         _fit_start(title, fix)
     if fit is not None:
         fit(perception)
-    eyes = _eyes(model, title, perception, restore=restore and not viewer, wait=wait)
+    eyes = _eyes(model, title, perception, restore=restore and not viewer)
     if throws and not viewer:  # (the OCR's models loaded now, not at the message bar's first read in a fight)
         from .perception.messages import warm
         warm()
@@ -1846,6 +1843,15 @@ def _park_map(args) -> bool:
         return False
 
 
+def _not_minimized(title: str):
+    """`_hunter`'s `fit` for `nav --park`: a game minimized as it starts is an error, where its eyes would wait for it for
+    good with the pet feeder held."""
+    def fit(perception) -> None:
+        if window.minimized(window.find_game(title)):
+            raise RuntimeError("the game is minimized")
+    return fit
+
+
 def _nav_park(args) -> int:
     """`nav --park`: she goes to the chosen place on the map she's on (behavior.retreat.park, park_place), her moves alone,
     again while she's knocked back or blocked, and it ends once she's there; never brings the game forward: not in front,
@@ -1866,7 +1872,7 @@ def _nav_park(args) -> int:
         return 1
     _record("nav-park", args.map)
     try:
-        hunter = _hunter(args, throws=False, restore=False, wait=False)
+        hunter = _hunter(args, throws=False, restore=False, fit=_not_minimized(title))
     except (RuntimeError, OSError, KeyError, ValueError) as e:  # (no game data for it, the service refused, minimized)
         said = f"she stays: nothing to drive her with on map {args.map} ({type(e).__name__}: {e})"
         _log(said)

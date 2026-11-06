@@ -753,7 +753,7 @@ def test_a_minimized_game_a_park_says_so_and_a_pet_feeders_start_waits_never_bri
     monkeypatch.setattr(cli.window, "minimized", lambda hwnd: True)
     monkeypatch.setattr(cli.window, "bring_to_front", lambda *a, **k: pytest.fail("she never steals the focus"))
     with pytest.raises(RuntimeError):
-        cli._game_geometry("game", restore=False, wait=False)
+        cli._not_minimized("game")(None)
     pushed = []
     monkeypatch.setattr("gamelab.control.notify.phone", lambda *a, **k: pushed.append(a))
     cli._said_minimized("game")
