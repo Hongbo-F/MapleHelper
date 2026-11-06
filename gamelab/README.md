@@ -97,6 +97,81 @@ What keeps the player safe:
 
 **To check in game**, at the next Lie Detector (explore only: no attacks; a hunt running only when attack tests are allowed again): `pet --every 1` running, its foods go on ("pet fullness: about N"; the player's log "Lie Detector alarm up: her pet's food"), and no Character Info opens; with a hunt running, it stops at once, she moves to a safe place within 10 s by its log and the minimap, and nothing presses after 12 s. On the mini-game's board the cursor follows its target through the elevated player; no click or key is sent for it, and the quiz is still yours to click. At the mini-game's notice or the quiz's warning (a player started since 2026-10-25: its log's "LIE DETECTOR seen (mini-game notice)" or "(quiz warning)"), all that within a second of the box showing, and she's on her safe place before the board or the quiz; `ALARM.json` says the `form`, the page names it, and the recording's folder has `before/`.
 
+## A stop that parks, and a guard between hunts (from 2026-11-05)
+
+The user, 2026-11-05 ~17:15: "you should build both, but the platform picking should be dynamically chosen based on the current map", then "also hanging on rope is also safe in most of maps. There was logic implementing this, you should have gone to safe platform or rope upon stop, on lie detector, on hp safety trigger. I want to understand why that didn't happen."
+
+**What happened.** A grind killed with `Stop-Process` at 11:15:35 ("Stop now, i need to work") ran no retreat, and nothing else moved her. Her first touch (a MISS) at 11:18:37, a Green Mushroom's on 11; its damage at 11:18:42 knocked her off 11 onto 14, and the next at 11:18:44 off 14 onto 19, a Horny Mushroom's ground, against its right end (x 309.5). Those two falls are real, not a misread: the states between have her in the air, 'tag' seen but for one frame's 'carried', and the touches go from 43-48 to 105-116 at 19. She stood there through 133 touches, her pet's last potion at 11:25:53, and died at 11:27:48. Nothing was said, for 5 h 40 min.
+
+**Why the retreat wouldn't have saved her either.** Four things, read and measured:
+1. It runs only inside a hunt, on `LieDetectorAlarm` or a `HuntStop` (`retreat.on_alarm`). No stop existed for "the user said stop", and a killed process runs nothing. Now `gamelab stop`, and the guard for what dies without it.
+2. Had it run she'd have stayed: `choose` on the 159 sampled scenes of 11:15:53-11:18:42 said "here: safe enough", danger 0.0, with a Green walking up to her. `attack.danger.DANGER_MIN` gives a kind under 5% of her HP a share of 0, right for hunting's choices and wrong for a place to stay: by the formula a Green's touch is 7.2% at level 24, 4.8% at 30, 3.8% at 35. Now `danger.every_kind`, a retreat's own measure; hunts' decisions are unchanged to the digit (38 of 48 goldens the same, the other 10 first differ at a retreat's first line).
+3. `choose` put "safe enough" before a rope, and took a place right where she stood first of all. The live record: of 22 retreats from 11-02 to 11-05, none to a rope or a safe platform (39 before: 27). Now the quickest of a safe platform and a safe rope; "safe enough" only when neither is in time.
+4. A rope "as safe" was 1% of her HP by how soon a monster comes: a far walker counts little, and touches her in the end. Now `retreat.ROPE_SAFE`: nothing of any kind reaches her at that height.
+
+**The retreat now** (`retreat.choose`, every caller): the Lie Detector's 10 s as ever; a stop's 60 s (`STOP_S`); a key check keeps to platforms (its window opens only with her on one: `keycheck.unquiet`). On the real scenes before the 57 retreats still in the telemetry (four are gone with its oldest files; her stats then, and level 35 gives the same places on all 57):
+
+| Trigger | n | Before | After |
+|---|---|---|---|
+| Lie Detector | 38 | 10 on stayed "safe enough", 18 to a "safe enough", 10 to a rope | 26 a safe rope, 12 a safe platform; trip by `trip_s` median 4.2 s, at most 8.9 |
+| Safety stop | 10 | 1 stayed, 6 to "safe enough", 3 to a rope | 6 a safe rope, 4 a safe platform |
+| Out of MP | 3 | 2 "safe enough", 1 rope | 2 platform, 1 rope |
+| Out of darts | 2 | 1 stayed, 1 "safe enough" | 1 platform, 1 rope |
+| Key check | 4 | 1 stayed, 3 "safe enough" | 2 platform, 2 the safest within reach (no platform in 10 s, no rope) |
+
+The simulator, level 35 (HP 1244), grinding from 23, seeds 1-8; on a wholly safe platform or a rope nothing reaches, 10 s after:
+
+| | Before | After |
+|---|---|---|
+| Lie Detector at 40, 75, 110, 150 s | 2 of 32 | 31 of 32 (the other on the rope at 11.1 s) |
+| ... touches in those 10 s, a run | 1.0 | 0.44 |
+| Safety stop, her pet out of potions | 0 of 8 | 8 of 8 (1.1-6.8 s) |
+| ... touches in the 30 s after | 7 | 0 |
+
+**Are those places safe?** The live telemetry (10-28 to 11-05, 42.6 h of states, 10,492 touches), by where she stood just before each:
+
+| Place | Time | Touches | Per hour |
+|---|---|---|---|
+| 26 (wholly safe) | 0.35 h | 0 | 0 |
+| 27 (wholly safe) | 5.65 h | 4, all MISSes | 0.7 |
+| 0-5 (wholly safe) | never been | | |
+| 28 ("safe enough" until now) | 3.14 h | 17 | 5.4 |
+| 25 (`MapModel.safe`, 24's Green over it) | 2.16 h | 153 | 70.9 |
+| any other platform | 21.8 h | 7,396 | 340 |
+
+On the ropes it's as sharp: over the 6 ropes, at heights the model rates 0, 14.6 minutes and no touch; at heights it rates above 0, 24.5 minutes and 271 touches (`on_rope` with every kind counted, HANG_SLACK either way, by bins of 20 units). She hung still 11.2 minutes in all; at the heights chosen, one touch (an unread popup, 10-30 21:18:20).
+
+**The place** (`retreat.park_place`): `choose` with no time limit, from the live scene, on whatever map the hunter has: no map's id, platform or coordinates in it (`walk.PARK` is gone; `walk`'s trips keep their own). A town or any map with nothing that can touch her: she stays. No safe place, or no model of the map: she stays and says so. On all 10 maps with data here (Tree Dungeon's three, Thicket, West Rocky, the towns), from 6 places each: towns stay; the others a safe platform or a safe rope, 0.6-7 s by `trip_s`.
+
+**`python -m gamelab nav --park`**: goes there (`retreat.park`, 180 s, 30 goes, again whenever knocked back or blocked; past a monster that stays in the way, as on the Lie Detector: a stop's patience at a refuge held her on 17 for all 180 s on 2 of 3 runs at level 25), ends once there. The map is the perception service's, not a `--map` default (at 08:18 on 11-05 a `nav` with none took the service off her map). It never brings the game forward: not in front, no keys, a note for the guard. A look sure of her place first (`retreat.sure_look`: 0.9 sure, two looks in a row agreeing; a fall waited out, 3 s at most). A command under `nav`, so the babysitter's regex holds the pet feeder meanwhile. The log, the telemetry and `lab/parked.json` say where and why.
+
+**`python -m gamelab stop`: how to stop a hunt from now on.** (The player's stop is `stop-player` now.) It asks the hunt (`lab/stop_hunt.json`, read at its next look or glance: `Hunter._stop_now`, `safety.StopAsked`), cuts the plan playing (`client.cut_running`), sets the grind loop's `STOP`, and waits to say what came of it: "parked on platform 26 (a safe platform), 2.5 s on". No page: it was asked for. In the simulator's grinds (level 35, seeds 1-8, the fake player cutting nothing, so a plan playing runs to its next look): there in 1.5-11.3 s, 0-4 touches on the way, 8 of 8 safe, 0 touches in the next 60 s; keys that aren't her moves after the request: one pick-up tap at 9 ms and one Lucky Seven at 145 ms, none later. The magician, seeds 1-4: 1.8-5.8 s, 4 of 4. The game not in front: nothing brings it forward, the request stands, she goes when it's back; after a minute (`hunter.STOP_WAIT_S`, 60.1-60.3 s over 4 seeds, no keys) the hunt ends with a note for the guard, so the pet feeder comes back (a point of fullness a 55 s: nothing to it). With no hunt running, `stop` just parks her.
+
+**The guard** (`behavior/guard.py`, in `pet --every`): the babysitter keeps that running exactly while no hunt runs, and it's attached to the perception service: no new process, no change to the babysitter, nothing but the service's newest state once a second. It goes by touches and HP alone, never by where she seems to be. She's touched twice within 30 s (a lone popup is mostly another player's: 4 in 5.6 h on 27), or her HP is under the stop rule on two passes, or a stop left a note; then, in order: dead, nothing (one critical push; it re-arms when she's alive); the Lie Detector alarm up, no moves; played by hand (the game in front and input within 60 s later than the player's last key), left alone with nothing said, but one alert under the stop rule, still no moves; the game in front and the player up, `nav --park --tell` detached, one critical push, at most every 2 minutes and 3 times an episode; else one critical push saying why not, and she parks at the game's return. It never starts the player and never brings the game forward.
+
+The switch: `python -m gamelab guard off`, `guard alert` (the push, no moves), `guard on`; `guard` says how it is. Read each pass (`lab/guard_mode.txt`).
+
+Played by hand can't be told for certain: Windows' last input moves with the player's injected keys too (measured on 2026-11-05 in a hunt: 0.09 s old at the median, 500 updates a minute), so what counts is input later than the player's log's last plan. Chrome Remote Desktop's host injects from the same session (`remoting_desktop.exe`, session 1, as the game and the player), so its keys should count: read off the process list, not tried. Someone watching without touching anything for a minute isn't "playing": she'd park, with the push saying so.
+
+The guard goes blind with the game not in front: perception's states aren't usable then, so a touch nobody can see can't set it off; it knows only what it saw before. The 11:15 case had the game on screen from 11:15:53.
+
+**The 11:15 moment, replayed** on the real record (`Guard` itself, the record going on as it went): 11:18:40 "Parking her", 3 s after her first touch; with the game never in front "She can't park yet" at the same moment, and in both "HP potions not working" at 11:26:38 and "She died" at 11:27:52. In the simulator (idle on 11 at x -38.5, HP 77%, level 35, the crowd's world, her pet's 9 Meat, 15 minutes, seeds 1-8):
+
+| | Touches, a run | Deaths | Safe |
+|---|---|---|---|
+| No guard | 1, 1, 5, 33-43 on five | 5 of 8, at 121-218 s | |
+| The guard | 1-11 | 0 of 8 | 6 parked, at 11-29 s (6 s of it the command's start, assumed: WMI, python's imports 1 s, the hello 1.5 s); the other 2 were touched once and needed nothing |
+
+The magician, 4 seeds: 0 deaths. Between hunts in the live record (18.3 h with only the pet attached, by the service's status lines; 701 touches): the telemetry has no input, so "by hand" was taken as her making kills or moving by herself within 60 s (2.95 h, 458 of the touches, the golden clip of 10-30 08:26-08:31 and its 34 among them): no park there, by that test; 19 parks in the rest (3 of them the 11:15 stretch), all with her standing still and being touched.
+
+**A hunt from a rope.** Live 3 hunts started on one (10-30 17:37, 21:18, 22:26), each on a platform within 6.2 s. In the simulator from the ropes at 146, -80 and -8 (seeds 1, 2): on a platform in about 5 s, no attack refused on it. Hanging: her pet's potions work there (28 jumps of her HP number live, on a rope); nothing drops her (209 s at the longest, no touch: its end her own key). **Not known: her pet's food on a rope**: none of the 239 feeds logged came on one. `retreat.PARK_ROPES` False keeps parks to platforms if the first live check says it doesn't work.
+
+**Her potions and her death** (`behavior/vitals.py`; `Hunter._vitals` in hunts, the guard between them; `lab/vitals.json`): a regular push when her pet's potions stop working, once per run-out, again only once they've worked and 30 minutes on; a critical one when she dies, once. By her bars rather than the game's words: "You are lacking the MP Potion that your pet is supposed to use." reads right off the fixture frame (00104.jpg, by `messages.ChatReader`), but any chat line replaces it within seconds and a read is an OCR's 285 ms; the HP line is known only by analogy; the bars are in every state and can be checked over everything live. HP: two touches under her pet's 60% (949, 902, 855, 739 of 1244, then 899 0.13 s on) with no jump of 5% between. MP: under 5% for a minute with no such jump. Replayed on all 1.22 million states of 10-28 to 11-05: 13 pushes. In the 14 tours (11-04 18:01 to 11-05 11:15): MP at 08:11:39 and HP at 11:26:37 as asked, she died at 11:27:51, and two more of MP: 11-04 19:33:15, which is real (MP under 5% on 90% of the states to 20:01; the clip of 19:57-20:01 shows the game's own line), and 18:26:43, MP 0-5% for 55 s with no potion, then one: real by the bars, no frames of it to say. Before those tours: HP six times, four of them within a minute of a safety stop (10-29 21:50, 10-30 02:51, 21:35, 11-04 01:23), the other two (10-29 00:05, 22:20) minutes after one; MP at 10-30 08:22 and 11-03 17:35. None of those six and two checked against frames: no recording covers them.
+
+**Tests** (`tests/test_guard.py`, 48: each of the guard's branches with fakes, the stop, the place, her potions, two simulator runs of the stop; `tests/test_retreat.py`: the four that pinned the old order, "safe enough" here and a safe platform before a rope, now say the new one).
+
+**Not tried live.** Everything here: offline only. `D:/MapleHelper-scratch/parkguard/live_check.md` is the first supervised check. The hunts themselves still bring the game forward as before (`Senses.look`, a plan's `focus`), and so does the pet's food tap (`Actions.play`): only her retreat, a park and a stop asked for never do. Changing the food tap would leave the pet unfed while the game is behind another window.
+
 ## No resting: the safety stop (from 2026-10-26)
 
 (Its rule, 65% of her HP for 2 s, went on 2026-10-28: The safety stop in HP, below. What it does at the stop is as here.)
@@ -1471,7 +1546,7 @@ The user, 2026-10-28, watching a movement-only walk: "Looks like there was no at
 - **The small fixes** (R6): a run-up's stop or step back is a span of its own in the leg's path (`flow.RUNUP_SPANS`, `_via`: as one straight span from where she stood to the takeoff, up to 23 units behind her went unchecked); a hop over a monster whose walking isn't known is timed as if it walked at her (`flow.HOP_AT_HER`); a chain queued on the move whose first leg is a drop or a climb is checked against the feed's newest tracks two glances before it starts, withdrawn if its flight, landing, climb or the rope's top meets one (`QUEUE_CHECK`, `_queued_meets`; it never fired in the walks measured); touched on a rope (`CLIMB_ON`), the rope's top is looked at when she'd get up there only after her window (`CLIMB_LOOK`, `_top_taken`): a monster there then, and she goes down the rope again ("touched on the rope 40 under its top, a green-mushroom by its top: down again"); within the window, up as before (the touch left her the window, and the next pass gets her clear: as first built it went down there too, and `nav_tree_rope_hit` took two touches more).
 - **Her retreat dodges** (R7, `retreat.DODGE`): its trips are the navigator's that avoid monsters, so all of the above goes with them; besides, their chains keep clear of the monster that touched her last (`go`'s `toucher`: a stand-in at her x where the look has no monster within `TOUCHER_NEAR` 40 of her, its walking not known, of the map's kind that touches hardest, while the touch is `TOUCHER_S` 2 s old at most; in the prototype's retreats the first chain was planned without the Horny Mushroom hidden under her sprite that had touched her three times, D:/MapleHelper-scratch/evade/design/trace_loop2.txt); the evade step's budget is the time the retreat has left (a stop's: to the player's window; the Lie Detector's `EVADE_S` at most); after a stop she waits at a refuge rather than go past a monster while one is there (no bound on a refuge move, no pass for the trip's deadline: `deadline_pass`; a trip that times out there is "timeout (at a refuge)"); her memory's monsters too, ties between refuges by her danger model; and `choose` weighs each place's way: a move of it by a monster of the look (`WAY_NEAR` 60 of where it sets off or lands) costs `WAY_BLOCKED_S` 2 s more (`_way_cost`).
 - **Fights** (R8, `stance.FIGHT_CLEAR`): touched, her invulnerability on at the look (`Pace.window`, from `fight.pace_of`; over `CLEAR_MIN_S` 0.2 s), the nearest monster on her platform too close for a throw from the ground in contact with her (its body on hers then, `CONTACT_SLACK` 10 more), of a kind that counts and not about to die (its HP bar over `KILL_BAR` 0.25): the escape decides (`_escape`), staying put `CLEAR_STAY` dearer, whatever the kind's keep-off: a jump back, throwing, where a short step to where her next throw takes it was (a Green Mushroom 50 off: ('back', 45) before, ('jump_back') now).
-- **The walk** (`behavior/walk.py`): random trips to the live QA walk's platforms (7-33 on Tree Dungeon; elsewhere any 60 wide), an x 15 in from their ends, 40 s each, in one navigator: the harness's `walk` policy, and `python -m gamelab nav --walk MINUTES [--seed S] --map 10002073` for the live check (one process; the rolling recording saved every 270 s, `save-recent`'s; the Lie Detector's or a stop's retreat ends it as any hunt's; then parked on 27 at x 77).
+- **The walk** (`behavior/walk.py`): random trips to the live QA walk's platforms (7-33 on Tree Dungeon; elsewhere any 60 wide), an x 15 in from their ends, 40 s each, in one navigator: the harness's `walk` policy, and `python -m gamelab nav --walk MINUTES [--seed S] --map 10002073` for the live check (one process; the rolling recording saved every 270 s, `save-recent`'s; the Lie Detector's or a stop's retreat ends it as any hunt's; then she parks: `nav --park`).
 
 **Measured** (offline, the simulator; Tree Dungeon's standard world: `--preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers --minutes 5`; `harness ab` against this branch's first commit, 91ab2be, master's behaviour with the walk and the new counts, its seeds cached):
 - **The walk** (`ab walk`, 48 seeds: `--metric retouch_2s --metric hurt --metric arrive_share --metric trip_s_per_arrival --metric touches_by.move --metric knock_falls`): touches 117.5 -> 95.3 a run (-18.9%, se 1.3%, t -14.9), touches within 2 s of the one before 73.0 -> 53.0 (-27.3%, t -11.6), those that hurt 69.1 -> 56.8 (-17.8%), HP lost 8.20 -> 6.53 bars; her touches on the mover's moves 57.5 -> 1.5 (-97%); the share of her trips that got there 0.813 -> 0.847 (+3.3 points, t +2.7) and her time on the move an arrival 18.0 -> 15.1 s (-16%, t -5.2); knocks off a platform 9.6 -> 8.7 (t -1.7); no death, fall or stop in the 96 runs; her plans landing elsewhere than planned 62 -> 87 in all, onto a lower platform 37 -> 55 (before the commit after: 240 and 202, a pass from a rope's top sent again and again, as built first).
@@ -1636,13 +1711,13 @@ From the repo root, in the `maplehelper` conda env:
 python -m gamelab player --elevate
 python -m gamelab calibrate
 python -m gamelab combo jump_back_shot --runs 4 --chain 8
-python -m gamelab stop
+python -m gamelab stop-player
 ```
 
 1. `player --elevate` starts the player. Approve the UAC prompt.
 2. `calibrate` finds her on screen and keeps her name tag's template. Stand her on flat, textured ground, such as a girder, with nothing around. The recordings (`--record`, `do`, `combo`, `lock`) are cropped around her name tag where it is when they start, found with that template (`calibration.crop_now`): calibrate's own crop is kept while her tag is within 40 px of where it put it, and used, with a warning, only when the tag isn't found. (On 2026-10-21 the 16 runs of a sweep of `act --record` were cropped from a calibration she had walked away from, and none had her.)
 3. `combo` plays the combo, here 4 runs of 8 shots in a row, and reports every jump and throw.
-4. `stop` shuts the player down.
+4. `stop-player` shuts the player down (`stop` stops a hunt: A stop that parks).
 
 Other commands (`python -m gamelab -h` lists them all):
 
@@ -1655,7 +1730,10 @@ Other commands (`python -m gamelab -h` lists them all):
 | `probe list`, `probe run NAME`, `probe score` | The in-game probes of what a star hits (see Probes to run): what each settles, running one, and weighing each question's two answers on their log, `lab/probe_geometry.jsonl` (`list` and `score` send no keys) |
 | `map`, `map --offline` | The map's platforms and her position on them (`lab/shots/map_<id>.png`); sends no keys |
 | `nav 35`, `nav 35 --fight` | Go to platform 35; with `--fight`, shoot monsters on the way instead of avoiding them |
-| `nav --walk 15 --seed 1 --map 10002073` | Movement only: random trips to the QA walk's platforms (7-33 on Tree Dungeon) for 15 minutes in one navigator (`behavior.walk`), the rolling recording saved every 270 s, then parked on 27 at x 77; the Lie Detector's or a stop's retreat ends it (Evading) |
+| `nav --walk 15 --seed 1 --map 10002073` | Movement only: random trips to the QA walk's platforms (7-33 on Tree Dungeon) for 15 minutes in one navigator (`behavior.walk`), the rolling recording saved every 270 s, then she parks (`nav --park`); the Lie Detector's or a stop's retreat ends it (Evading) |
+| `stop` | Stops the running hunt: no attack after it, she parks, and it says where; with no hunt running, she parks; the game not in front, she parks at its return (A stop that parks) |
+| `nav --park` | She goes to the safe place of the map she's on, chosen from the live scene, her moves alone, and it ends once she's there; never brings the game forward |
+| `guard off`, `guard alert`, `guard on`, `guard` | The guard's switch, and how it is: off, no moves and no pushes of it; alert, the push and no moves |
 | `nav 17 --avoid climb` | A kind of move the route takes only if nothing else gets there (each costs 20 times as much): from 23, the two rope hops instead of the climb past its end |
 | `nav 3 --ways 3`, `tour --loop --ways 3` | Each trip chooses among the 3 best distinct ways to where it's going, by a softmax over their times, not only the quickest (`route.ROUTES`; off by default: in the simulator as much EXP, and fewer of her drops picked up; see Route diversity; not tried in game) |
 | `tour --loop --camp --ground-tie 0.1` | Of the grounds within 10% of the best's score, the one she left longest ago goes next (`hunt.GROUND_TIE`; off by default: nothing in the simulator measures it; see Route diversity; not tried in game) |

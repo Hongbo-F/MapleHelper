@@ -3,7 +3,6 @@ her potions and her death on the phone (behavior.vitals). The user, 2026-11-05: 
 picking should be dynamically chosen based on the current map"."""
 
 import json
-import math
 import time
 from datetime import datetime
 from types import SimpleNamespace
@@ -412,6 +411,35 @@ def test_a_senses_look_with_hands_off_doesnt_bring_the_game_forward():
     assert brought
 
 
+def test_nav_park_with_the_game_not_in_front_sends_nothing_and_leaves_the_note(monkeypatch, capsys):
+    from gamelab import __main__ as cli
+    monkeypatch.setattr(cli, "_game_title", lambda: "game")
+    monkeypatch.setattr(cli.window, "foreground_title", lambda: "another")
+    monkeypatch.setattr(cli, "_hunter", lambda *a, **k: pytest.fail("no hunter: nothing to send keys"))
+    monkeypatch.setattr(cli.window, "bring_to_front", lambda *a, **k: pytest.fail("she never steals the focus"))
+    assert cli.cmd_nav(SimpleNamespace(park=True, walk=None, platform=None, tell=False)) == 1
+    assert paths.PARK_NOTE.exists() and "isn't in front" in capsys.readouterr().out
+
+
+def test_nav_parks_map_is_the_perception_services_not_a_map_default(tmp_path, monkeypatch):
+    from gamelab import __main__ as cli
+    from gamelab.localization import service
+    info = tmp_path / "perceive.json"
+    monkeypatch.setattr(service, "info_path", lambda saved=None: info)
+    args = SimpleNamespace(map=10000012)
+    assert not cli._park_map(args) and args.map == 10000012  # (no service: it says so, she stays)
+    info.write_text(json.dumps({"pid": 1, "map": 10002073}))
+    assert cli._park_map(args) and args.map == 10002073
+
+
+def test_the_guards_switch_by_its_command(capsys):
+    from gamelab import __main__ as cli
+    assert cli.cmd_guard(SimpleNamespace(mode="alert")) == 0 and g.read_mode() == ALERT
+    assert cli.cmd_guard(SimpleNamespace(mode="off")) == 0 and g.read_mode() == OFF
+    assert cli.cmd_guard(SimpleNamespace(mode=None)) == 0 and "off" in capsys.readouterr().out.splitlines()[-1]
+    assert cli.cmd_guard(SimpleNamespace(mode="on")) == 0 and g.read_mode() == ON and not paths.GUARD_MODE.exists()
+
+
 # --- the place ---------------------------------------------------------------------------------------------------------
 
 def _tree():
@@ -489,6 +517,57 @@ def test_a_park_sets_off_only_from_a_sure_place(monkeypatch):
     monkeypatch.setattr(retreat.time, "monotonic", tick)
     with pytest.raises(ValueError):
         retreat.sure_look(SimpleNamespace(mover=_Look(_at(1.0, conf=0.3))))
+
+
+# --- in the simulator --------------------------------------------------------------------------------------------------
+
+def _stop_in_a_grind(run_after: float, frames=None):
+    """`gamelab stop` `run_after` s into a grind on Tree Dungeon (its request as a file, as live: the fake player cuts no
+    plan for it, the command's client.cut_running being another process's): how it stopped, her keys from then on."""
+    def fn(sim):
+        from gamelab.behavior.grind import Grind
+        tour = sim.tour_stack()
+        asked = sim.clock.now + run_after
+        if frames is not None:
+            sim.fail_frames(sim.clock.elapsed + run_after - 2.0, sim.clock.elapsed + 900.0, frames)
+        sim.world.call_at(asked, lambda w: paths.STOP_HUNT.write_text("{}"))
+        out = {}
+        try:
+            with retreat.on_alarm(tour.h) as watch:
+                Grind(tour, log=sim.log).run(minutes=5)
+        except StopAsked as e:
+            out.update(later=e.later, after=sim.clock.now - asked, retreat=watch.retreat and watch.retreat.record())
+        ends = {q.id: q.end for q in sim.player.plans.values()}
+        k = sim.keys
+        moves = {k.left.name, k.right.name, k.up.name, k.down.name, k.jump.name}
+        out["keys"] = sorted((round(t - asked, 3), kind, *ev) for pid, (kind, events) in sim.player.played.items()
+                             for t, *ev in events if asked <= t < ends.get(pid, 1e18))
+        out["moves"] = sorted(moves)
+        out["safe"] = scenarios.safe_there(sim)
+        out["parked"] = json.loads(paths.PARKED.read_text()) if paths.PARKED.exists() else None
+        out["note"] = paths.PARK_NOTE.exists()
+        out["left"] = paths.STOP_HUNT.exists()
+        return out
+    import dataclasses
+    base = scenarios.SCENARIOS["loop_tree_lie_detector_grind"]
+    return scenarios.run_scenario(dataclasses.replace(base, fn=fn, limit=300, seed=1))["result"]
+
+
+def test_in_the_simulator_a_stop_in_a_grind_her_moves_alone_and_she_parks_and_it_says_so():
+    _tree()
+    out = _stop_in_a_grind(37.0)
+    assert out["later"] is False and out["safe"] and out["retreat"]["why"] in ("a safe platform", "a safe rope")
+    assert out["parked"]["there"] and out["parked"]["said"].startswith("parked on") and not out["note"] and not out["left"]
+    assert all(e[2] in out["moves"] and e[1] == "retreat" for e in out["keys"] if e[0] > 1.0)  # (the plan playing then, a moment)
+
+
+def test_in_the_simulator_a_stop_with_the_game_away_ends_the_hunt_in_a_minute_with_a_note_and_no_keys():
+    from gamelab.perception.framecheck import Problem
+    _tree()
+    out = _stop_in_a_grind(37.0, Problem("window", "the game isn't in front"))
+    assert out["later"] is True and 55.0 <= out["after"] <= 70.0
+    assert out["note"] and not out["left"] and not out["parked"]["there"] and out["retreat"] is None
+    assert not [e for e in out["keys"] if e[0] > 1.5]
 
 
 # --- her potions and her death -----------------------------------------------------------------------------------------
@@ -605,4 +684,3 @@ def test_the_pushes_go_as_the_lab_has_them(monkeypatch):
 
 def test_the_stop_itself_is_a_stop_the_command_line_knows():
     assert issubclass(StopAsked, HuntStop) and StopAsked().exit_code == 9 and StopAsked().page() is None
-    assert math.isinf(math.inf)

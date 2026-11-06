@@ -344,7 +344,7 @@ def _away(h, seen: float, why: Why, log: Callable[[str], None] | None = None,
             deadline = seen + why.window
             seconds = min(deadline - time.monotonic(), trip_s(p.seconds) + GO_SLACK_S)  # longer: from where she is
             dodge = {}
-            linger = stop and STOP_REFUGES
+            linger = stop and STOP_REFUGES and not why.park  # (a park has no hurry to be patient for: as the Lie Detector's, it goes past)
             if DODGE:  # (the evade step's budget: the time the retreat has left; after a stop, refuges to the end)
                 dodge = dict(toucher=True, evade_s=max(0.0, deadline - time.monotonic()) if linger else
                              min(navigation.EVADE_S, max(0.0, why.seconds - (time.monotonic() - seen))),

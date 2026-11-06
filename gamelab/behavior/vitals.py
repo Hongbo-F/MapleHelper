@@ -16,7 +16,8 @@ about 1 HP a second). So:
   potion is one frame's);
 - dead: HP 0 by her number, or her bar HP_ZERO or less, for DEAD_S (a look's misread 0 lasts a frame: Hunter._doubt_hp).
 AGAIN_S keeps a run-out that comes and goes (a potion picked up and drunk at once) from flooding the phone. Replayed on
-the live states of 10-28 to 11-05: D:/MapleHelper-scratch/parkguard, README: the guard."""
+the 1.22 million live states of 10-28 to 11-05 (D:/MapleHelper-scratch/parkguard, vitals_replay.py): 13 pushes, MP 5, HP 7,
+dead 1 (README, A stop that parks)."""
 
 import json
 import time
@@ -53,8 +54,8 @@ class Vitals:
     `clock`: the wall clock, what's kept across processes goes by it; a replay gives its own `t`."""
 
     def __init__(self, push: Callable[[str, str, bool], None] | None = None, log: Callable[[str], None] | None = None,
-                 clock=time.time):
-        self.push, self.log, self.clock = push, log, clock
+                 clock=None):
+        self.push, self.log, self.clock = push, log, clock or time.time
         self.state = load()
         self.last: dict[str, deque] = {"hp": deque(), "mp": deque()}  # the last WINDOW_S of each bar: (t, share)
         self.drops, self.drop_at = 0, 0.0

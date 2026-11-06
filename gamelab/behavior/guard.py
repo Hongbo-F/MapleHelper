@@ -121,8 +121,8 @@ class Guard:
     """The guard's decisions (`act`). `push(title, text, critical)` for the phone, `start_park()` for `nav --park`."""
 
     def __init__(self, push: Callable[[str, str, bool], None], start_park: Callable[[], None],
-                 log: Callable[[str], None] = print, clock=time.time):
-        self.push, self.start_park, self.log, self.clock = push, start_park, log, clock
+                 log: Callable[[str], None] = print, clock=None):
+        self.push, self.start_park, self.log, self.clock = push, start_park, log, clock or time.time
         try:
             self.state = dict(json.loads(paths.GUARD.read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
@@ -258,10 +258,9 @@ def parked_said(since: float) -> tuple[bool, str] | None:
     return (row["there"], row["said"]) if row.get("t", 0.0) >= since else None
 
 
-def stop(title: str, say: Callable[[str], None] = print, park: Callable[[], int] | None = None, clock=time.time,
-         sleep=time.sleep) -> int:
+def stop(title: str, say: Callable[[str], None] = print, park: Callable[[], int] | None = None, sleep=time.sleep) -> int:
     """`python -m gamelab stop` (see the top). 0 once the stop is done or standing, said; 1 if it can't tell."""
-    start = clock()
+    start = time.time()
     if LOOP_STOP.parent.exists():
         LOOP_STOP.touch()
     hunt = running_hunt()
@@ -279,7 +278,7 @@ def stop(title: str, say: Callable[[str], None] = print, park: Callable[[], int]
             paths.STOP_HUNT.write_text(json.dumps({"t": start}), encoding="utf-8")
             client.cut_running()
         say(f"asked `{hunt.get('command')}` (pid {hunt.get('pid')}) to stop")
-        while client._alive(hunt.get("pid")) and clock() - start < STOP_SAY_S:
+        while client._alive(hunt.get("pid")) and time.time() - start < STOP_SAY_S:
             sleep(0.2)
     done = parked_said(start)
     if done is not None:

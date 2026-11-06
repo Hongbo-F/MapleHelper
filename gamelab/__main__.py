@@ -1853,10 +1853,10 @@ def _nav_park(args) -> int:
     from .behavior.retreat import on_alarm
     with on_alarm(hunter):
         out = retreat.park(hunter, log=_log)
-    said = out.said()
+    said, safe = out.said(), out.there() and "no safe place" not in out.place.why
     _log(f"park: {said}")
     if args.tell:
-        notify.phone("She's parked" if out.there() else "She can't park", said, not out.there(), log=_log)
+        notify.phone("She's parked" if safe else "She can't park", said, not safe, log=_log)
     return 0 if out.there() else 1
 
 
