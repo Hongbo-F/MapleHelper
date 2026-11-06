@@ -228,6 +228,46 @@ def test_a_trip_to_a_stop_ends_only_for_what_beats_her_round_and_a_trip_to_her_t
     assert not tp.on_screen(look, 2.0) and tp.on_screen(look, 0.5) and tp.on_screen(look)
 
 
+class _Step(Grind):
+    """`_planned_step` with what it asks stubbed: her next a trip."""
+
+    def __init__(self, going, here):
+        self.tp, self.going, self.here_, self.did, self.quiet_seen = SimpleNamespace(quiet=False, screen=True), going, here, [], None
+
+    def _pile_first(self, s):
+        return None
+
+    def _stance(self, s, targets, visible, hidden, approach, log=True, goal=None):
+        return ("trip", 23, 0.0)
+
+    def _goes(self, s):
+        return self.going
+
+    def _to_place(self, s, act, visible, hidden, now):
+        self.did.append("her target")
+
+    def _wide(self, s):
+        return s
+
+    def _here(self, s, say=True):
+        self.quiet_seen = self.tp.quiet
+        return self.here_
+
+    def _sweep_act(self, s, stop, visible, hidden, now):
+        self.did.append("her drops")
+
+    def _go(self, s, j):
+        self.did.append(f"stop {j}")
+
+
+def test_going_her_drops_go_first_whatever_they_take_then_the_round_s_stop():
+    for going, here, want in ((None, "a pile", "her target"), (7, "a pile", "her drops"), (7, None, "stop 7")):
+        g = _Step(going, here)
+        g._planned_step(object(), ["a target"], [], [], 0.0)
+        assert g.did == [want] and g.tp.quiet is False
+        assert g.quiet_seen is (None if going is None else True)
+
+
 def test_the_switch_and_her_casts(monkeypatch):
     for value, want in (("0", (False, False)), ("land", (True, False)), ("go", (False, True)), ("1", (True, True))):
         monkeypatch.setenv("GAMELAB_STAY_OR_GO", value)

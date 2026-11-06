@@ -925,6 +925,7 @@ class _Order(Grind):
 
     def __init__(self, m, targets=False, act=("wait",), here=None, leaving=None, first=None, held=()):
         self.tp = _targeting(m)
+        self.tp.weighs = False  # (her round against the screen: tests/test_stay_or_go.py)
         self.tp.chooser, self.acts = tg.Chooser(), []
         self.h = self.tp.h
         self._targets_, self._act, self._here_, self._leaving_, self._first, self._held_ = targets, act, here, leaving, first, list(held)
