@@ -8062,6 +8062,48 @@ At the first gate, switch off: 47 of 47 to the byte. On: 15 differ, all grinds; 
 - **Attacks at the dead** rose for her (+1.4 a run, t +2.9): worth a look with the first live hour.
 - **Walls of numbers aside, this is one map.** Nothing is tuned to Tree Dungeon by name, but only it was run.
 
+### The no-hit scenes (from 2026-11-05)
+
+The user, on the failsafe's recordings and the fixes for them: "maybe create scene in simulation to verify they work/solve the problem". The whole-run tables can't say: per-seed SD about 64 EXP/min, t 2 at +10 needs about 160 seeds. `sim/no_hit_scenes.py`: moments of those recordings in the world, then the full stack for 15 fake seconds, about 1.2 s a run. Not in `SCENARIOS`: no golden, nothing else moves.
+
+**Can the world tell?** Each of the ledgers' 61 attacks put in the world as it stood at the pick (her place and height, her facing, the monsters' places, y's and platforms, those the frames have dead left out), `World._aim` resolving it, against what the frames showed (`D:/MapleHelper-scratch/nofix/agree.py`, `agree_plan.txt`; her height off the scene instead of the plan's physics, `agree_seen.txt`: the same by cause). 64 draws a row, for the claw's stance and a band's tie:
+
+| Cause | Rows | The world's noise off, agrees on | Mean share of draws agreeing, off / `TREE_AIR` |
+|---|---|---|---|
+| Hit rows (target, another, stab) | 18 | 18 | 100% / 88% |
+| Too close in front | 10 | 10 | 100% / 89% |
+| From below, window shut | 8 | 7 | 88% / 88% |
+| Walked past her | 6 | 5 | 83% / 83% |
+| From below, line stopped | 5 | 3 | 70% / 70% |
+| At a wall's foot | 4 | 4 | 100% / 100% |
+| Another player's kill | 4 | 3 | 75% / 75% |
+| Thrown at her own kill | 2 | 2 | 100% / 100% |
+| Not explained (080929's is under from below), stopped at a monster | 2 | 2 | 100% / 100% |
+| Knocked, press at nothing | 2 | 2 | 100% / 98% |
+| All | 61 | 56 | 93% / 87% |
+
+The five it doesn't: 233732 a04 (the line's comb along P13's left end flips with 1 unit, under perception's error), a07 (two hornies in one band: the world draws, 48% the far one, which the frames have), 080929 a02 (the unexplained row: the model picks it, the star flew level), a06 (it picks #762 at -344, alive at her MP step; his 471 came on it: the frames can't tell), a08 (his number 514 ms after her key: when his kill was can't be told). The agreement is of picks: the reach model was fitted on the same kind of throws, so it's no proof of the model, it says the world holds these moments as the frames do. No plain bug in the world came of it. Three differences stay: the standard world's `Noise.miss` 0.275 is the first map's at level 19, where none of the 61 shows a MISS over a monster and a clear pick shows nothing at a Green 4.0% (the scenes use 0.04; how much of the world's firing the failsafe 3.5-4 times too often comes of it isn't measured); a body's box touches her at +28 where live's slime at +24 three times in 081701 didn't; and after a jump her next look comes about 0.1 s sooner than live's.
+
+**The scenes**, each from the look before a clip's first attack of its cause, 0.15 s before it (a scene's first decision comes that far in): her place, facing, HP, MP, invulnerability, the failsafe's count, her target, her belief of who chases her; the monsters by her on rails, as their recorded walks (`nofix/moment.py`, off the packs' timelines, within 5-15 units), until her first hit on each, then the world's AI, whose walkers go on past her up to `AGGRO_PASS` where these turned and came back: with its AI alone 081701's slime is past her by the second attack and it doesn't reproduce. Her at level 35 (`HER_35`, the world `--world her-35`). `D:/MapleHelper-scratch/nofix/scenes.py` runs them; master 156552f, seeds 1-8 (`nofix/scenes_master.txt`, means, a run with no hit as 15 s):
+
+| Scene (the clip's attacks) | In the clip's span, keyed / at nothing (the clip) | First hit s | Target dead | EXP | Touches | Knock-offs | Stand s, most | MP | Failsafe fired |
+|---|---|---|---|---|---|---|---|---|---|
+| too_close_081701 (081701 a03-a05) | 2.6 / 2.0 (3) | 2.8 | 3 of 8 | 16 | 3.2 | 0.0 | 0.5 | 0 | 7 of 8 |
+| too_close_111448 (111448 a03-a04) | 1.8 / 1.2 (2) | 3.2 | 7 of 8 | 89 | 3.2 | 0.5 | 0.2 | 96 | 1 of 8 |
+| wall_foot_231613 (231613 a02-a05) | 4.0 / 3.6 (4) | 5.5 | 2 of 8 | 97 | 3.0 | 0.5 | 0.5 | 122 | 7 of 8 |
+| walked_past_080032 (080032 a04-a06) | 3.4 / 2.4 (3) | 3.7 | 6 of 8 | 73 | 3.1 | 0.4 | 0.9 | 92 | 2 of 8 |
+| walked_past_080939 (080939 a05-a06) | 2.0 / 1.8 (2) | 11.6 | 2 of 8 | 6 | 2.6 | 0.0 | 0.2 | 32 | 6 of 8 |
+| from_below_233732 (233732 a01-a03) | 3.0 / 2.5 (3) | 3.3 | 8 of 8 | 160 | 1.0 | 0.0 | 0.2 | 140 | 0 of 8 |
+| from_below_234441 (234441 a03-a05) | 3.0 / 2.4 (3) | 2.5 | 8 of 8 | 173 | 4.5 | 0.6 | 0.2 | 130 | 2 of 8 |
+| stranger_dead_080929 (080929 a03-a04) | 2.0 / 2.0 (2) | 8.6 | 0 of 8 | 26 | 0.0 | 0.0 | 0.0 | 48 | 0 of 8 |
+| stranger_dying_080929 (080929 a05) | 1.0 / 1.0 (1) | 4.3 | 0 of 8 | 64 | 2.0 | 0.1 | 0.2 | 64 | 7 of 8 |
+| own_kill_235621 (235621 a02-a03) | 2.0 / 1.0 (1) | 0.2 | 8 of 8 | 96 | 2.5 | 0.2 | 0.2 | 86 | 0 of 8 |
+| ignored_235621 (235621 a06 and after) | 2.4 / 1.4 (1) | 4.8 | 1 of 8 | 57 | 4.1 | 0.1 | 1.3 | 70 | 7 of 8 |
+
+Each shows its fault by `fault_shows`: at nothing in the clip's span at least 0.6 of the clip's, and as much of what she keyed. The first attacks go as in the clip on most seeds: from_below_233732's 0.2 s nothing, 1.1 s stopped on 8 of 8 (a01, a02), stranger_dead's two on 8 of 8, own_kill's kill then a throw at the corpse on 8 of 8, her EXP bound to the nearer green below as live (`tracking._picks`). `Scene.solved` is what solved means, in the user's words: fewer attacks at nothing, first hit sooner, no standing still, the target killed, no EXP lost, each about half of master's; `tests/test_no_hit_scenes.py` has them as strict expected failures (`OPEN`), flipped as the fixes land.
+
+**Left out**: 234441 a02 (a dying horny read as a new green: the detector's own misread, which the world's can't do); line-stopped rows have no scene of their own, they come up inside from_below's; knocked as the jump began, the press at nothing, the unexplained rows and the stabs. What no drop of a throw reaches: stranger_dying's kill comes after perception's last frame before her key, and own_kill's target isn't dead by the feed, so both stay open with fix 3 (I).
+
 ## In game, on Thicket Around the Beach II
 
 - **Navigation:** 21 moves in a row across every move type without a miss, and a 17-move climb from the basin to the top. Chained, a 13-move route up took 19.0 s in 3 key plans with no misses (33.4 s one move at a time). Over 10 test routes, a move landed elsewhere about once in 15, usually a drop or a straight-up jump timed off; each time she replanned from where she was.
