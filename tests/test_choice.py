@@ -741,9 +741,10 @@ def test_throws_at_a_monster_that_show_nothing_have_the_next_tap_the_arrow():
 def test_four_attacks_that_hit_nothing_have_the_hunter_told_and_the_count_starts_again():
     """The user, 2026-11-04: 4 throws or casts without hitting any mob: the recording saved (and 2026-11-05: no ignoring)."""
     a, _ = _attacks()
-    told, gains = [], [0]
+    told, gains, tapped = [], [0], []
     a.no_hit = lambda s, thrown, tracks: told.append((len(thrown), tracks))
     a.gains = lambda: gains[0]
+    a.retap = lambda: tapped.append(1)
     t0 = time.monotonic()
 
     def look(t, bar=None, track=7):
@@ -760,7 +761,7 @@ def test_four_attacks_that_hit_nothing_have_the_hunter_told_and_the_count_starts
     look(t0 + 3.5)            # (the 4th not shown yet)
     assert not told
     look(t0 + 4.1)
-    assert told == [(4, {7})]
+    assert told == [(4, {7})] and tapped  # (her facing may be what's wrong, at a hurt target too: `_landing` doesn't count those)
     assert not a._misses and not hasattr(a, "ignored")
     look(t0 + 8.2)
     assert len(told) == 1     # (re-counted from there)

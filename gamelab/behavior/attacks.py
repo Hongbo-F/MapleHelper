@@ -1464,8 +1464,8 @@ class Attacks:
 
     def _watch_hits(self, s: Scene) -> None:
         """The failsafe (NO_HIT_ATTACKS): look `s` against her attacks since one last hit. Any monster's HP bar new or lower,
-        or a kill her EXP told of, is a hit. NO_HIT_ATTACKS with none, the Hunter is told (`no_hit`: the look, the attacks,
-        their tracks), and the count starts again."""
+        or a kill her EXP told of, is a hit. NO_HIT_ATTACKS with none, her next throw taps the arrow (`retap`), the Hunter is told
+        (`no_hit`: the look, the attacks, their tracks), and the count starts again."""
         gains = 0 if self.gains is None else self.gains()
         hit = gains != self._gains_seen
         self._gains_seen = gains
@@ -1481,6 +1481,8 @@ class Attacks:
             self._misses.clear()
         elif len(self._misses) >= NO_HIT_ATTACKS and s.t >= self._misses[NO_HIT_ATTACKS - 1][0] + NO_HIT_SHOWN_S:
             thrown, self._misses = self._misses, []
+            if self.retap is not None:  # (no 15 s ignore now: a wrong facing at a hurt target, which `_landing` doesn't count, stops here)
+                self.retap()
             if self.no_hit is not None:
                 self.no_hit(s, thrown, {tr for _, tr in thrown if tr is not None})
 
