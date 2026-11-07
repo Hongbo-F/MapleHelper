@@ -48,8 +48,10 @@ Needs the alarm clips, the live tracker's round files (`gamelab/lab/lie_target`)
 
 `ld/clips.json` holds the 11 clips from before the live tracker wrote round files (their board run, rate, START and end,
 as first worked out). Any other clip's come from `ld/clip_range.py`: the round begun during the clip's recording gives the
-board's first frame and the last answer, and the SUCCESS banner's yellow glow gives the end. No round file or no banner:
-it says so and skips the clip rather than guess. A range worked out is kept in the work folder.
+first and last answers, the live tracker's own look for the board, going back from the first answer, gives the board's
+first frame, and the SUCCESS banner's yellow glow gives the end. No round file or no banner: it says so and skips the clip
+rather than guess. A range worked out is kept in the work folder (`ld/ranges/`), its frames in `ld/cache/`: to work one
+out again, delete the clip's files in both.
 
 ## References: approved and unchecked
 

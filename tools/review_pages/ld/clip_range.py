@@ -7,7 +7,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 
-START_S = 4.6  # s from the board's first frame (the frame before the target's first white answer) to START
+START_S = 4.6  # s from the board's first frame to START
 PAST_ANSWERS = 25  # frames past the last answer the banner is looked for in
 AFTER_END = 21  # frames kept past the banner's first (the sets stop before it, the frame cache a little after)
 GLOW = 300  # px: yellow over the frames' usual, in two frames running, that is the banner (its fade-in's first two
@@ -20,6 +20,20 @@ def round_file(clip, rounds):
     s = json.load(open(clip / "summary.json", encoding="utf-8"))
     lo, hi = (datetime.fromisoformat(s[k]).strftime("%Y%m%d-%H%M%S") for k in ("from", "to"))
     return max((p for p in rounds.glob("*.jsonl") if lo <= p.stem <= hi), key=lambda p: p.stem, default=None)
+
+
+def board_first(clip, files, i):
+    """The board's first frame, going back from frame i (one it is on): the run of frames the live tracker's own look
+    sees it on. The first answer doesn't tell, as that look comes every BOARD_CHECK_S: it was 0 to 3 frames after this
+    on the 6 clips with a range. Going back from just past their recorded `first` gives it on all 11 older clips."""
+    from gamelab.perception.lie_detector import LieDetectorSpotter  # (only a clip with no saved range gets here)
+    spotter = LieDetectorSpotter()
+    while i - 1 in files:
+        a = cv2.imread(str(clip / files[i - 1]))
+        if a is None or spotter.over_play(cv2.cvtColor(a, cv2.COLOR_BGR2RGB)) != "mini-game":
+            break
+        i -= 1
+    return i
 
 
 def clip_range(clip, rounds):
@@ -39,7 +53,7 @@ def clip_range(clip, rounds):
         print(f"{key}: round {path.stem}'s first answer is not in the clip: no range, skipped", flush=True)
         return None
     fps = round(head["fps"])
-    first = number[answers[0]] - 1
+    first = board_first(clip, files, number[answers[0]])
     start = first + round(START_S * fps)
     glow = []
     for i in range(start, max(number[s] for s in answers if s in number) + PAST_ANSWERS):

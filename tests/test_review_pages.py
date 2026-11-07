@@ -18,6 +18,7 @@ import clip_range  # noqa: E402
 import common  # noqa: E402
 import lib  # noqa: E402
 import reference  # noqa: E402
+from gamelab.perception import lie_detector  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "lie_detector" / "references"
 YELLOW = cv2.cvtColor(np.full((1, 1, 3), (28, 200, 240), np.uint8), cv2.COLOR_HSV2BGR)[0, 0]  # the banner's
@@ -62,9 +63,19 @@ def test_the_approved_references_have_the_centres_the_user_approved():
             assert np.hypot(frames[int(i)]["x"] - x, frames[int(i)]["y"] - y) <= 0.08  # (the fixture's 0.1 px rounding)
 
 
-def made_up_clip(tmp_path, banner_from=120, flash=None, round_stamp="20261104-180324", answers_from=11, seq0=1000):
+@pytest.fixture
+def board_look(monkeypatch):
+    """The live look for the board, on the made-up frames (too small for the real one): a frame's first pixel says."""
+    class Look:
+        def over_play(self, frame):
+            return "mini-game" if frame[0, 0].any() else None
+    monkeypatch.setattr(lie_detector, "LieDetectorSpotter", Look)
+
+
+def made_up_clip(tmp_path, banner_from=120, flash=None, round_stamp="20261104-180324", answers_from=11, seq0=1000,
+                 board_from=9):
     """A clip of 150 frames, 15 a second, recorded from 18:03:12 to 18:03:43, its frames small and only those looked at
-    written; yellow on the board from `banner_from`, and on frame `flash` alone."""
+    written; the board up from `board_from`; yellow on the board from `banner_from`, and on frame `flash` alone."""
     clip, rounds = tmp_path / "20261104-180343-lie-detector-mini-game-notice", tmp_path / "rounds"
     clip.mkdir()
     rounds.mkdir()
@@ -73,7 +84,11 @@ def made_up_clip(tmp_path, banner_from=120, flash=None, round_stamp="20261104-18
     (clip / "index.jsonl").write_text("\n".join(json.dumps(r) for r in rows + [{"gap": "covered", "t": 10.0}]))
     plain, glowing = np.zeros((230, 400, 3), np.uint8), np.zeros((230, 400, 3), np.uint8)
     glowing[180:230, 308:400] = YELLOW
-    for i in range(79, 150):
+    up = plain.copy()
+    up[0, 0] = 255
+    for i in range(board_from - 1, answers_from):
+        cv2.imwrite(str(clip / f"{i:05d}.png"), up if i >= board_from else plain)
+    for i in range(70, 150):
         cv2.imwrite(str(clip / f"{i:05d}.png"), glowing if i >= banner_from or i == flash else plain)
     lines = [{"kind": "the target", "fps": 15.0}]
     lines += [{"seq": seq0 + i, "board": [1, 2]} for i in range(answers_from, 130)] + [{"end": "board gone"}]
@@ -81,15 +96,23 @@ def made_up_clip(tmp_path, banner_from=120, flash=None, round_stamp="20261104-18
     return clip, rounds
 
 
-def test_a_clips_range_comes_from_its_round_file_and_the_banner(tmp_path):
+def test_a_clips_range_comes_from_its_round_file_and_the_banner(tmp_path, board_look):
     clip, rounds = made_up_clip(tmp_path, banner_from=120, flash=100)  # (a frame's flash is not the banner)
     (rounds / "20261104-170000.jsonl").write_text("not this clip's")
     assert clip_range.clip_range(clip, rounds) == {
-        "clip": clip.name, "round": "20261104-180324", "fps": 15, "first": 10, "start": 79, "end": 120, "last": 141}
+        "clip": clip.name, "round": "20261104-180324", "fps": 15, "first": 9, "start": 78, "end": 120, "last": 141}
 
 
-def test_the_banner_is_found_from_its_fade_in(tmp_path):
-    """20261104-185153's first two frames of it were 560 and 490 px, the third 3425: the sets stop before all of them."""
+@pytest.mark.parametrize("board_from", (8, 9, 10, 11))
+def test_a_clips_first_frame_is_the_boards_however_late_the_first_answer(tmp_path, board_look, board_from):
+    """The first answer is at frame 11, 0 to 3 frames after the board on the clips; START counts from the board."""
+    clip, rounds = made_up_clip(tmp_path, board_from=board_from)
+    found = clip_range.clip_range(clip, rounds)
+    assert found["first"] == board_from and found["start"] == board_from + 69
+
+
+def test_the_banner_is_found_from_its_fade_in(tmp_path, board_look):
+    """20261104-185153's first two frames of it were 560 and 490 px, the third 3425: the sets stop before all three."""
     clip, rounds = made_up_clip(tmp_path, banner_from=122)
     for i, side in ((120, 24), (121, 22)):  # (576 and 484 px)
         frame = np.zeros((230, 400, 3), np.uint8)
@@ -98,7 +121,7 @@ def test_the_banner_is_found_from_its_fade_in(tmp_path):
     assert clip_range.clip_range(clip, rounds)["end"] == 120
 
 
-def test_no_round_file_or_no_banner_says_so_and_gives_no_range(tmp_path, capsys):
+def test_no_round_file_or_no_banner_says_so_and_gives_no_range(tmp_path, capsys, board_look):
     clip, rounds = made_up_clip(tmp_path, banner_from=999, round_stamp="20261104-170000")  # (from before the clip)
     assert clip_range.clip_range(clip, rounds) is None
     assert "no live round file" in capsys.readouterr().out
