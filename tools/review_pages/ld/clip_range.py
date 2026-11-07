@@ -57,7 +57,7 @@ def clip_range(clip, rounds):
     start = first + round(START_S * fps)
     glow = []
     for i in range(start, max(number[s] for s in answers if s in number) + PAST_ANSWERS):
-        if i in files:
+        if i in files and (clip / files[i]).exists():
             hsv = cv2.cvtColor(cv2.imread(str(clip / files[i]))[180:500, 308:750], cv2.COLOR_BGR2HSV)
             yellow = (hsv[..., 0] > 22) & (hsv[..., 0] < 34) & (hsv[..., 1] > 110) & (hsv[..., 2] > 210)
             glow.append((i, int(yellow.sum())))

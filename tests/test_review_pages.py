@@ -121,6 +121,12 @@ def test_the_banner_is_found_from_its_fade_in(tmp_path, board_look):
     assert clip_range.clip_range(clip, rounds)["end"] == 120
 
 
+def test_a_frame_whose_file_is_gone_is_passed_over(tmp_path, board_look):
+    clip, rounds = made_up_clip(tmp_path, banner_from=120)
+    (clip / "00100.png").unlink()
+    assert clip_range.clip_range(clip, rounds)["end"] == 120
+
+
 def test_no_round_file_or_no_banner_says_so_and_gives_no_range(tmp_path, capsys, board_look):
     clip, rounds = made_up_clip(tmp_path, banner_from=999, round_stamp="20261104-170000")  # (from before the clip)
     assert clip_range.clip_range(clip, rounds) is None
