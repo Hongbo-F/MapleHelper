@@ -100,6 +100,12 @@ def offline(monkeypatch, tmp_path):
     for mod in (paths, alarm, client, player):
         monkeypatch.setattr(mod, "ALARM", tmp_path / "ALARM.json")
     monkeypatch.setattr(alarm, "page", refuse("gamelab.control.alarm.page"))
+    # Nor `gamelab stop`'s request, the guard's notes and what the phone's been told: a suite in the main checkout read
+    # them live, a hunt's stop among them.
+    for name in ("VITALS", "HUNT", "STOP_HUNT", "PARK_NOTE", "PARKED", "GUARD", "GUARD_MODE"):
+        monkeypatch.setattr(paths, name, tmp_path / getattr(paths, name).name)
+    from gamelab.behavior import guard
+    monkeypatch.setattr(guard, "LOOP_STOP", tmp_path / "loop_STOP")
     from gamelab.localization import service
     monkeypatch.setattr(service, "_start_detached", refuse("gamelab.localization.service._start_detached (the "
                                                            "perception service started)"))

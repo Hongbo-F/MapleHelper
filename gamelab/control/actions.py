@@ -152,6 +152,7 @@ class Actions:
 
     def __init__(self, keys: GameKeys, skill: bool = False, kind: str | None = None):
         self.keys = keys
+        self.before_play: Callable[[], None] | None = None  # asked before a plan is sent; may raise (Hunter._stop_asked)
         self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP) ...
         # ... or, with `skill`, the attack key each throw is asked of this (the way it's thrown -> a key name): the
         # hunter's choice of attack a throw (behavior.attacks: Lucky Seven, or the regular attack to finish a monster
@@ -264,6 +265,8 @@ class Actions:
         or attack in it would come inside her attack lock (hold_back). `kind`: what it is to the player with the
         Lie Detector alarm up (client.send's; these actions' own by default)."""
         self.hold_back(events)
+        if self.before_play is not None:  # (`gamelab stop`, come since the look it was planned from: nothing sent)
+            self.before_play()
         self._sent_at = time.monotonic()
         self.sent = None
         try:

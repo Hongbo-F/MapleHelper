@@ -36,6 +36,10 @@ TITLE_BOX = (0, 2, 80, 20)
 # good frames 0.0-1.1; shifted by 1 px 24-33 (across 1 and 2: 27 and 22, down 1: 33), 40-82 by 2-26 px; the two
 # offset frames of 16:48, 43 and 73; another window over the game, 191.
 TITLE_DIFF = 10.0
+# A server notice's dark band over the top of the client halves the strip exactly: 0.46 from the picture at half
+# brightness (2026-11-05 18:31:42, which went on 120 s with nothing sent, the strip reading 108 from the picture itself);
+# the same frame shifted by 1-10 px reads 9.8-24.4, hence a limit of its own.
+TITLE_DIMMED_DIFF = 5.0
 # The HUD's border, every HUD_STEP-th px of x HUD_X: row HUD_TOP_GAME darker than HUD_DARK in every channel, the row
 # under it brighter than HUD_WHITE. On the good frames all of them but on one, where the game's menu (opened by
 # hand) covers part of the border: 0.883. Shifted down or up by a px or more: none (0.000); across by 1-10 px it
@@ -168,11 +172,17 @@ def title_box() -> tuple[int, int, int, int]:
 
 
 def title_diff(strip: np.ndarray) -> float:
-    """How far a capture of TITLE_BOX (RGB) is from the title strip's picture (mean difference, 0-255)."""
+    """How far a capture of TITLE_BOX (RGB) is from the title strip's picture (mean difference, 0-255), under a server
+    notice's band from the picture dimmed by it."""
     want = title_picture()
     if strip.shape[:2] != want.shape[:2]:
         return 255.0
-    return float(np.abs(strip[..., :3].astype(np.int16) - want).mean())
+    got = strip[..., :3].astype(np.int16)
+    plain = float(np.abs(got - want).mean())
+    if plain <= TITLE_DIFF:
+        return plain
+    dimmed = float(np.abs(got - want / 2).mean())
+    return dimmed if dimmed <= TITLE_DIMMED_DIFF else plain
 
 
 def hud_share(full: np.ndarray, dx: int = 0, dy: int = 0) -> float:

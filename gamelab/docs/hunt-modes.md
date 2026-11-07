@@ -315,7 +315,7 @@ Each one was learned the hard way, and each gets a scenario in the loop's own se
 ## Ending, stopping, switching back
 
 - **`tour --loop --minutes N`** hunts for N minutes, then goes to a safe platform and stands by, as `tour` does after its sweep. `--stops`, `--kills` and `--seconds` don't apply to it. The ground maximum and the rate rule do their job.
-- **Ctrl+C, an error, or `python -m gamelab stop`** works as today: the navigator cancels every plan it sent, and the key player releases every key. On a Lie Detector, the player stops by itself.
+- **Ctrl+C, an error, or `python -m gamelab stop-player`** works as today: the navigator cancels every plan it sent, and the key player releases every key. **`python -m gamelab stop`** is the way to end a hunt: she parks first (README: A stop that parks). On a Lie Detector, the player stops by itself.
 - **The stuck guard** (see Safety) ends a loop that stops making progress.
 - **The old `tour` stays** until the loop has passed the game bar in 3 separate sessions.
 

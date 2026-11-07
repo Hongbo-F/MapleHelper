@@ -374,7 +374,9 @@ class HuntStop(Exception):
     place as on the Lie Detector, the log says why in capitals (`label`: "<label>: <the stop>. The hunt ends: <ends>"),
     a telemetry event says so (`event`), whoever is at the PC is paged (`page`: a title and a line), the rolling
     recording's last `keep_s` s are saved (0: none), and the command exits with `exit_code`, printing `after` and
-    `advice` (gamelab.__main__). `title`: its retreat's telemetry events' word (behavior.retreat.Why)."""
+    `advice` (gamelab.__main__). `title`: its retreat's telemetry events' word (behavior.retreat.Why). `parks`: her
+    retreat goes to the place a park would, however far (behavior.retreat.park_place; else STOP_S's best); `later`: no
+    retreat now (the game isn't there), the guard's to do (behavior.guard)."""
     label = "STOP"
     title = "Stop"
     event = "stop"
@@ -384,9 +386,11 @@ class HuntStop(Exception):
     after = "The hunt ended; she went to a safe place (the log says where)."
     advice = ""
     at = 0.0
+    parks = False
+    later = False
 
-    def page(self) -> tuple[str, str]:
-        """What's paged (control.alarm.page): a title and a line."""
+    def page(self) -> tuple[str, str] | None:
+        """What's paged (control.alarm.page): a title and a line; None: nothing."""
         return ("MapleStory: the hunt stopped", str(self))
 
 
@@ -435,6 +439,26 @@ class SafetyStop(HuntStop):
         return ("MapleStory: her HP stayed low",
                 f"gamelab stopped the hunt: {self.her_hp}, under {self.limit} for {self.seconds:.1f} s. "
                 "She went to a safe place. Check her potions and her pet.")
+
+
+class StopAsked(HuntStop):
+    """`python -m gamelab stop` (behavior.guard): the user's word, raised at the hunt's next look or glance
+    (Hunter._stop_now): her moves alone from here, no page. `later`: the game wasn't back in behavior.guard.STOP_WAIT_S."""
+    label = "STOP ASKED"
+    title = "Stop asked"
+    event = "stop_asked"
+    exit_code = 9
+    ends = "she parks"
+    after = "The hunt ended as asked."
+    parks = True
+
+    def __init__(self, later: bool = False):
+        self.later = later
+        super().__init__("`gamelab stop`" + (": the game isn't in front, so the guard parks her at its return" if later
+                                             else ""))
+
+    def page(self) -> None:
+        return None
 
 
 class TooStrong(HuntStop):

@@ -186,6 +186,10 @@ class Senses:
         # Whether LookLost is met by standing still and looking again (`regain`: the hunt loop, Hunt.run), where the
         # fix makes its tries; if not, a look with nothing to act on for its fault waits for its first try first.
         self.regains = False
+        # What a look with nothing to act on tells first (the hunter's: a stop asked for waits, and ends), and whether the
+        # game may be brought forward for it now (the hunter's: not for her retreat, nor once a stop's asked).
+        self.waits: list[Callable[[Problem], None]] = []
+        self.hands_off: Callable[[], bool] = lambda: False
 
     @property
     def feed(self):
@@ -217,7 +221,10 @@ class Senses:
             problem = self.feed.problem() or Problem("perception", "no state from perception in time")
             # The game brought forward first (once a second at most): after LOST_S every look raises at once, and a hunt
             # standing still on a game not in front (`regain`) would never bring it forward again otherwise.
-            self.feed.bring_forward(problem)
+            for wait in self.waits:
+                wait(problem)
+            if not self.hands_off():
+                self.feed.bring_forward(problem)
             if self._mend(problem):
                 continue  # (set right: the next look is of a frame shown after the window settled)
             self._failed(problem, hold=self._fixing(problem))  # (raises LookLost after LOST_S)

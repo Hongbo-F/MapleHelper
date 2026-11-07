@@ -130,13 +130,14 @@ def test_the_hunt_loop_grinds_by_default_and_camps_with_camp(monkeypatch):
     monkeypatch.setattr(grind, "Grind", type("Grind", (Ran,), {}))
     monkeypatch.setattr(hunt, "Hunt", type("Hunt", (Ran,), {}))
     monkeypatch.setattr(retreat, "on_alarm", lambda hunter: nullcontext())
+    monkeypatch.setattr(retreat, "park", lambda hunter, log=None: ran.append("park"))  # (the time up: she isn't left there)
     monkeypatch.setattr(tour_mod, "Tour", lambda hunter, nav, log, rng: SimpleNamespace())
     monkeypatch.setattr(cli, "_record", lambda *a: None)
     monkeypatch.setattr(cli, "_to_game", lambda: True)
     monkeypatch.setattr(cli, "_hunter", lambda args, **kw: SimpleNamespace(navigator=lambda **kw: None))
     for argv in (["tour", "--loop"], ["tour", "--loop", "--camp"]):
         assert cli.cmd_tour(p.parse_args(argv)) == 0
-    assert ran == ["Grind", "Hunt"]
+    assert ran == ["Grind", "park", "Hunt", "park"]
 
 
 def test_a_pile_objective_no_longer_worth_it_ends_the_trip_to_it():

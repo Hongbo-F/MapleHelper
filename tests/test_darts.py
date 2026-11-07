@@ -288,7 +288,7 @@ def test_at_the_stop_she_retreats_she_is_paged_and_the_recording_is_kept(monkeyp
     with pytest.raises(OutOfDarts):
         with retreat.on_alarm(h) as watch:
             raise OutOfDarts(32, 28.4, 0.35, said="")
-    assert went == [retreat.Why("OUT OF DARTS", "Out of darts", "after the stop")]
+    assert [(w.label, w.event, w.after) for w in went] == [("OUT OF DARTS", "Out of darts", "after the stop")]
     assert said[0].startswith("OUT OF DARTS: 32 Lucky Seven presses over 28 s took no MP and killed nothing")
     assert said[0].endswith("The hunt ends: to a safe place (no more throws)")
     assert paged == ["MapleStory: out of darts"] and kept == [(darts.KEEP_S, "out-of-darts")]
