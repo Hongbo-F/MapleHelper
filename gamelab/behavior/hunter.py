@@ -37,6 +37,7 @@ from .. import character as profiles
 from .. import paths, telemetry
 from ..attack import danger
 from ..attack.choice import Attack
+from ..attack import reach
 from ..attack.reach import LOOK_DOWN, LOOK_UP
 from ..control import alarm, client
 from ..control.actions import Actions
@@ -157,6 +158,11 @@ LAST_LOOK = True
 # show Lucky Seven on her key; not when the game itself said she's out (the pickup log, the message bar), nor within a
 # check's gap (keycheck.CHECK_GAP_S): then at once, as before. False: at once always.
 STARS_CHECKED = True
+# What her attack key would pick, asked of the game's search as it goes down, nothing changed in her play (`_key_pick`,
+# telemetry 'key_pick': the user, 2026-11-05, on the no-hit recordings, D:/MapleHelper-scratch/nohit/judgement.md): an attack
+# picks about this long after its key, and her arrow's tap walks her about this far.
+KEY_PICK_S = physics.JUMP_LAG + physics.ATTACK_DECIDE_LAG_MS / 2000
+TAP_WALK = 6.0
 MISS_SAID_S = 1.5    # her attack's MISS popup said once in this long (a look's and the frame's before her next key)
 STARS_WAIT_S = 15.0  # ... that check put off (no quiet moment: keycheck) this long at the most, then the stop (her Lucky
                      # Seven held meanwhile, the regular attack instead)
@@ -432,7 +438,8 @@ class Hunter:
         self.actions.throw_listeners += [self.ledger.on_throw, self.wounds.on_throw, self.memory.on_throw,
                                          self.aggro.throw,
                                          self.attacks.on_throw,  # (a cast's MP)
-                                         self._tell_feed]  # (the feed's: whose kills are whose, tracking)
+                                         self._tell_feed,  # (the feed's: whose kills are whose, tracking)
+                                         self._key_pick]
         self._feed_throw = self.senses.feed.throw  # (the feed she was made with, as the listener was before)
 
     def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene:
@@ -1289,7 +1296,9 @@ class Hunter:
 
     def _still(self, side: str) -> bool:
         """Whether a throw that way still goes, asked by her Actions once her lock has been waited out (LAST_LOOK): not
-        if her EXP has gained a kill of a kind in its way since the look it was decided on. Read off the feed's newest
+        if her EXP has gained a kill of a kind in its way since the look it was decided on, nor if perception has its target
+        dead by its own track (`_target_dead`, Track.killed: live in 3.86 h, 98 attacks at one so, 69 of them no-hit; the next
+        look doesn't have it, so a hit dropped goes that one look later). Read off the feed's newest
         state, if of a frame after her keys' effect (Senses.fresh_after; none, the throw goes: nothing is asked of the
         feed, which takes its frames as it would): its events not drained yet (the next look's), their
         EXP readings told apart as the hunter's meter would (a copy of it: the kinds each gain names; one it can't
@@ -1305,7 +1314,7 @@ class Hunter:
         events = [e for e in feed.pending_events(st.t) if e.kind in ("exp_gain", "exp_read")]
         if not any(e.kind == "exp_gain" for e in events):
             self.attacks.heard(st.t, [])  # (and her EXP: no kill since the look, Attacks.heard)
-            return True
+            return not self._target_dead(st, side)
         meter, kinds, heard = copy.deepcopy(self.meter), set(), []
         for e in events:
             gains = meter.update(e.t, reading_of(e.data), e.kind == "exp_gain")
@@ -1317,11 +1326,22 @@ class Hunter:
         if not kinds and meter.unread > self.meter.unread:  # a change it couldn't read: a kill of a kind not known
             kinds = {None}
         if (kind := self.attacks.in_way(side, kinds)) is None:
-            return True
+            return not self._target_dead(st, side)
         text = f"a kill came in before the key ({kind}): the throw {side} is dropped, decided again"
         self.log(f"    {text}")
         telemetry.emit("event", kind="dropped", text=text)
         return False
+
+    def _target_dead(self, st, side: str) -> bool:
+        """(`_still`) Whether perception has the target of a throw that way dead by its own track in state `st`; said so."""
+        dead = {tr.id for tr in getattr(st, "tracks", None) or () if getattr(tr, "killed", False)}
+        target = (self.attacks.aimed or self.attacks.target(side)) if dead else None
+        if getattr(target, "track", None) not in dead:
+            return False
+        text = f"its target #{target.track} ({target.kind}) is dead: the throw {side} is dropped, decided again"
+        self.log(f"    {text}")
+        telemetry.emit("event", kind="dropped", text=text, track=target.track)
+        return True
 
     def _miss_glance(self, st) -> None:
         """Her attack's MISS popups off the feed's newest state `st` before a throw's key (`_still`), for the watches:
@@ -1646,14 +1666,15 @@ class Hunter:
                        since_arrow=round(since_arrow, 2), since_hit=None if since_hit is None else round(since_hit, 2),
                        **({"shot": shot.name} if shot is not None else {}))
 
-    def _no_hit(self, s: Scene, thrown: list[tuple], tracks: set[int], until: float) -> None:
-        """Her attacks hit nothing (Attacks._watch_hits): said, and the recording of it saved beside the hunt, from
-        NO_HIT_PAD_S before the first attack's key to as long after this look (NO_HIT_CLIPS a run at most)."""
+    def _no_hit(self, s: Scene, thrown: list[tuple], tracks: set[int]) -> None:
+        """Her attacks hit nothing (Attacks._watch_hits): said, with each one's key as a telemetry record has its time, and
+        the recording of it saved beside the hunt, from NO_HIT_PAD_S before the first attack's key to as long after this
+        look (NO_HIT_CLIPS a run at most)."""
         who = ", ".join(f"#{t}" for t in sorted(tracks)) or "no monster"
-        text = (f"no hit: {len(thrown)} attacks over {thrown[-1][0] - thrown[0][0]:.1f} s hit nothing: {who} not attacked "
-                f"for {until - s.t:.0f} s")
+        text = f"no hit: {len(thrown)} attacks over {thrown[-1][0] - thrown[0][0]:.1f} s hit nothing: {who}"
         self.log(f"  {text}")
         telemetry.emit("event", kind="no_hit", text=text, tracks=sorted(tracks), attacks=len(thrown),
+                       keys=[round(time.time() + at - time.monotonic(), 3) for at, _ in thrown],
                        x=None if s.where is None else round(s.where.x, 1),
                        platform=None if s.platform is None else s.platform.id)
         self._no_hit_clips += 1
@@ -1677,6 +1698,40 @@ class Hunter:
         m = thrown[1] if thrown is not None and thrown[0] == when else None
         aim = None if m is None else (getattr(m, "track", None), m.kind, round(m.x, 1), m.platform)
         self._feed_throw(when, side, None, aim)
+
+    def _key_pick(self, when: float, side: str) -> None:
+        """Her attack key about to go down at `when` (Actions.throw_listeners, the thief's): what the game's search would pick
+        when its attack starts (reach.key_pick), a telemetry 'key_pick' record that nothing she does reads. By what she knows
+        now: the feed's newest state however old (`_still`'s has to be newer than the last look, and says nothing without
+        one), monsters and walks as fight.known_at has them, her tap's walk or jump's arc as her Actions keyed it (key_is).
+        `answer` 'star', 'stopped', 'claw' or 'nothing' (None: she's on no platform in it, 0.4% of keys live), `on` its `target`
+        or 'another', and what it used: her `x` and `feet` then, her `platform`, the state's age at the key, the monsters seen
+        and those `known` with the tracks held and the dead out; `cost_ms` by the real clock live (the simulator's is its own,
+        0). Whatever goes wrong here is the record's (`error`), never her key's."""
+        if not telemetry.recording() or getattr(self.attacks, "picks", False):
+            return
+        clock = time.perf_counter()
+        jump, way, after, tapped = self.actions.key_is
+        thrown = getattr(self.attacks, "thrown", None)
+        track = getattr(thrown[1], "track", None) if thrown is not None and thrown[0] == when else None
+        out = {"key": round(time.time() + when - time.monotonic(), 3), "side": side, "jump": jump, "after_ms": after,
+               "tapped": tapped, "target": track, "answer": None}
+        try:
+            st = self.senses.feed.newest(-math.inf)
+            if st is not None and st.where is not None and st.where[2] is not None:
+                here, d = self.model.platform(st.where[2]), 1 if side == "right" else -1
+                dx, rise = (0.0, 0.0) if jump is None else physics.jump_of(jump, way).arc(after / 1000 + KEY_PICK_S)
+                x, feet = st.where[0] + dx + (d * TAP_WALK if tapped else 0.0), here.y_at(here.clamp(st.where[0])) - rise
+                rows = fight.known_at(self.model, st, when + KEY_PICK_S)
+                answer, picked = reach.key_pick(here, x, feet, d, rows, jump is None)
+                at = {id(r[0]): r for r in rows}
+                out.update(answer=answer, on=("target" if any(m.track == track for m in picked) else "another") if picked else None,
+                           picks=[[m.track, m.kind, round((at[id(m)][1] - x) * d, 1), round(at[id(m)][2] - feet, 1)] for m in picked],
+                           x=round(x, 1), feet=round(feet, 1), platform=here.id, age_ms=round((time.monotonic() - st.t) * 1000),
+                           seen=len(st.monsters), known=len(rows))
+        except Exception as e:
+            out["error"] = repr(e)
+        telemetry.emit("key_pick", **out, cost_ms=round((time.perf_counter() - clock) * 1000, 2))
 
     def _retell(self, s: Scene, side: str) -> None:
         """Look `s`'s frame shows her facing `side`, otherwise than her keys had her (Actions.see): the throws told

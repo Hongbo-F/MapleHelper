@@ -198,6 +198,7 @@ from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
 from ..paths import LAB, REPO
+from .no_hit_scenes import HER_35
 from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
                     INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025, NEAR_SEEN_1104,
                     NEAR_SPELL_1104, OFF_SEEN_1104, OFF_SPELL_1104,
@@ -275,7 +276,13 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned", "max_hp", "level", "avoid",
+              "mp", "star", "skill_star", "cast_mp", "mp_potion", "claw")
+# ... and her as she was live on 2026-11-05 (`her-35`: no_hit_scenes.HER_35, her stat window and her numbers), where every
+# world's thief is level 25, HP 774, DEF 75, so that a Horny Mushroom's touch (16% of her HP) has her keep 164 off it
+# (Danger.keep_off) and a Green's counts as a danger; at 35 a Horny's is 10%, its keep-off about 72, inside the claw's 105,
+# and a Green's doesn't count: her close quarters are another ladder (README, "The no-hit scenes").
+WORLDS["her-35"] = HER_35
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02

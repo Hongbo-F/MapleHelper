@@ -99,7 +99,7 @@ def _act_text(act: tuple) -> str:
     if act[0] == "jump_throw":
         return f"jump attack {act[1]}"
     if act[0] == "jump_back":
-        return f"jump back, attack {act[1]}"
+        return f"jump aside, then attack {act[1]}" if len(act) > 2 and act[2].land_x is not None else f"jump back, attack {act[1]}"
     if act[0] == "trip":
         return f"trip to {act[1]} at x {act[2]:.0f}"
     return f"{act[0]} {act[1]}" if len(act) > 1 else act[0]
@@ -274,12 +274,10 @@ class Targeting:
         here, x, y = s.platform, s.where.x, s.where.y
         around = visible + hidden
         lo, hi = _stand_limits(here, crowded=True)
-        attacks = getattr(h, "attacks", None)
-        picks = getattr(attacks, "picks", False)
         if self._known[0] is not g.danger:
             self._known = (g.danger, {})
         return tg.Her(here, x, y, pace.lead, pace.window, h.actions.facing, fight._air() and fight.JUMP_SHOTS, around,
-                      _sizes(g._tops, g._halves) if picks else None, g._halves, g.danger, pace, lo, hi,
+                      _sizes(g._tops, g._halves), g._halves, g.danger, pace, lo, hi,
                       jump_hits=lambda m: g._jump_hits(s, m), can_jump=open_above(g.model, here, x, x),
                       routes=self._route if self.screen else None, stands=self._stands, known=self._known[1])
 
@@ -298,7 +296,6 @@ class Targeting:
         attacks = h.attacks
         avg = g._avg_exp()
         now = s.t
-        self.no_way.update(getattr(attacks, "ignored", None) or {})  # (her attacks hit nothing: Attacks._watch_hits)
         if self.no_way:
             self.no_way = {k: v for k, v in self.no_way.items() if v > now}
         chasers = {c.track for c in h.aggro.chasers.values() if c.track is not None and not c.dying}
@@ -413,9 +410,8 @@ class Targeting:
         return False
 
     def targets_of(self, monsters: list) -> list:
-        """Of `monsters` those she may have as a target now: not set aside (`no_way`), nor ignored by her attacks."""
-        ignored = getattr(self.h.attacks, "ignored", None) or ()
-        return [m for m in monsters if getattr(m, "track", None) not in self.no_way and getattr(m, "track", None) not in ignored]
+        """Of `monsters` those she may have as a target now: not set aside (`no_way`)."""
+        return [m for m in monsters if getattr(m, "track", None) not in self.no_way]
 
     def piles_wait(self) -> bool:
         """Whether a trip just gave way for a monster in its way (`rather`): her drops wait as long as that way's kept off."""

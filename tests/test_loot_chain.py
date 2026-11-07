@@ -644,7 +644,7 @@ def test_a_chain_sent_regardless_goes_as_far_as_the_routes_moves_never_its_walks
     assert nav._regardless(st, look, [jump, walk], [], 0.0, None, "why")[0] == [1] and asked == [[jump, walk]]
 
 
-def test_a_monster_her_attacks_ignore_isnt_in_her_way_with_the_whole_screen(tree):
+def test_a_monster_set_aside_is_no_fight_on_her_way_with_the_whole_screen(tree):
     from gamelab.behavior import fight
     from gamelab.perception.mobs import Mob
     from gamelab.localization.monsters import Monster
@@ -652,11 +652,7 @@ def test_a_monster_her_attacks_ignore_isnt_in_her_way_with_the_whole_screen(tree
     a = (p.left + p.right) / 2
     m = Monster(Mob("horny-mushroom", 0, 0, 30, 30, 0.9), a + 40.0, p.y_at(a + 40.0), 10, track=8)
     s = SimpleNamespace(where=SimpleNamespace(x=a), platform=p, monsters=[m])
-    esc = fight.FightOnTheWay(SimpleNamespace(attacks=SimpleNamespace(ignored={8: 1e18}), ledger=None, model=tree))
-    assert esc.in_way(s, a + 100.0) is m  # (the switch off: as master)
-    esc.not_ignored = True
-    assert esc.in_way(s, a + 100.0) is None and esc.wont_have(s, m)
-    esc.h.attacks.ignored = {}
+    esc = fight.FightOnTheWay(SimpleNamespace(attacks=SimpleNamespace(), ledger=None, model=tree))
     assert esc.in_way(s, a + 100.0) is m and not esc.wont_have(s, m)
     esc.set_aside = lambda: {8: 1e18}
     assert esc.wont_have(s, m)

@@ -294,6 +294,18 @@ def test_in_passing_she_throws_at_her_targets_only_and_never_at_a_kill_fading_ou
     assert got["can"] == got["shot"] == ([pig], [above])
 
 
+def test_a_jump_with_no_key_in_passing_is_a_move_and_her_time_there_still_counts(monkeypatch):
+    h = _hunt([])
+    h.obj = Objective("spot", 19, 36.0)
+    h._note, h._stance, h._toward = (lambda rule: None), (lambda *a, **k: ("jump_back", "right")), (lambda s: None)
+    monkeypatch.setattr(hunt.fight, "knocked_move", lambda *a: False)
+    monkeypatch.setattr(hunt.fight, "throw_act", lambda *a: True)
+    monkeypatch.setattr(hunt.fight, "keyless", lambda h: True)
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=22), where=SimpleNamespace(x=-10.0, y=-25.0), monsters=[])
+    h._passing_shot(s, [], [], [], [], time.monotonic())
+    assert h.fs.moves == 1 and h.fs.thrown == [] and 22 in h.obj.passing  # (not a throw, and PASSING_S still bounds her)
+
+
 def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():
     bubble = _pile(5, items=("slime-bubble", "mesos"), worth=65.0, dearest=50.0)
     coins = _pile(5, items=("mesos", "mesos", "leather"), worth=40.0, dearest=15.0)  # worth more than 30, but cheap drops

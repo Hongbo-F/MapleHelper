@@ -411,13 +411,7 @@ def _targets(h: "Hunter", st: FightState, s: Scene, kinds, ground: set[int] | No
     st.flinching = hit + hidden
     st.touch = _unsure_by_her(h, s)
     st.sightings = {tr.id: tr.last_seen for tr in (getattr(s, "tracks", None) or ()) if tr.last_seen < s.t}
-    ignored = getattr(getattr(h, "attacks", None), "ignored", None)  # (her attacks hit nothing: Attacks._watch_hits)
-    if ignored:
-        wanted = [m for m in wanted if getattr(m, "track", None) not in ignored]
     shot, st.unsure = shots_at(h, s, hidden, wanted)
-    if ignored:  # (no target, but her body keeps off them: the stance's `unsure`)
-        shot = [m for m in shot if getattr(m, "track", None) not in ignored]
-        st.unsure = [*st.unsure, *(m for m in visible if getattr(m, "track", None) in ignored)]
     return wanted + shot, visible, hidden
 
 
@@ -502,6 +496,24 @@ def walk_on(model: MapModel) -> reach.Where:
         half = reach.body_of(m.kind)[1]
         return MonsterTrack(m.platform, m.x, half=half, vx=vx).at(t, p)
     return where
+
+
+def known_at(model: MapModel, st, at: float) -> reach.Placed:
+    """Every monster perception's state `st` (localization.worldstate.WorldState) knows of, as it will be at time `at`
+    (Hunter._key_pick): those of its frame and the live tracks it missed, each walked on from its sighting by `walk_on`, none
+    whose own track is dead or a kill's (Track.killed), by the map's bodies."""
+    where, body = walk_on(model), bodies(model)
+    dead = {tr.id for tr in st.tracks if tr.killed}
+    seen = {m.track for m in st.monsters}
+    out = []
+    for m, t in [*((m, st.t) for m in st.monsters),
+                 *((Monster(tr.mob, tr.x, tr.y, tr.platform, tr.bar, tr.facing, tr.pose, tr.id), tr.last_seen)
+                   for tr in st.tracks if tr.state == "live" and tr.platform is not None and tr.id not in seen)]:
+        if m.track not in dead:
+            mx = where(m, at - t)
+            q = None if m.platform is None else model.platform(m.platform)
+            out.append((m, mx, m.y if q is None else q.y_at(q.clamp(mx)), *reach.body_of(m.kind, body)))
+    return out
 
 
 # R1 of the cornered study, extended (2026-11-03, D:/MapleHelper-scratch/cornered: the user's clip of 2026-11-02 22:51,
@@ -933,16 +945,17 @@ def _log_close(h: "Hunter", s: Scene, act: tuple, plan) -> int | None:
     turn = back or bool(plan.air_turn and faces is not None and not faces(act[1]))
     side = 1 if act[1] == RIGHT else -1
     jump = "a jump back" if back else "a jump in place"
-    h.log(f"    jump ({plan.why}): {jump} throwing {act[1]}, the attack {base} ms in ({lo}-{hi}"
-          f"{'' if plan.sure else ', not sure'}), keyed at {plan.key_ms} ({plan.key_ms - base:+d})"
-          + ("" if t is None else f": {t.kind} {t.x - x:+.0f}"))
+    how = (f"throwing {act[1]}, the attack {base} ms in ({lo}-{hi}{'' if plan.sure else ', not sure'}), keyed at {plan.key_ms} "
+           f"({plan.key_ms - base:+d})" if plan.land_x is None else f"turning {act[1]}, no attack, to land at x {plan.land_x:.0f}")
+    h.log(f"    jump ({plan.why}): {jump} {how}" + ("" if t is None else f": {t.kind} {t.x - x:+.0f}"))
     if telemetry.recording():
         telemetry.emit("jump", kind=plan.why, jump="back" if back else "up", side=side, turn=turn, key_ms=plan.key_ms,
                        base_ms=base, jitter_ms=plan.key_ms - base, window=[lo, hi],
                        rise=round(physics.rise_after(plan.key_ms / 1000), 1),
                        target=None if t is None else t.kind, dx=None if t is None else round(t.x - x, 1),
                        up=None if t is None else round(y - t.y, 1), platform=None if t is None else t.platform,
-                       x=round(x, 1), land_x=None if back else round(x, 1), way=0, sure=plan.sure, n=n)
+                       x=round(x, 1), land_x=plan.land_x if back else round(x, 1), way=plan.way if back else 0, sure=plan.sure, n=n,
+                       weighed=plan.weighed)
     return n
 
 
@@ -1180,10 +1193,7 @@ def owed(h: "Hunter", s: Scene, st: FightState | None = None, hurt_by: float | N
     visible = s.monsters if st is None else [m for m in s.monsters if m not in st.fading(s.monsters)]
     out = []
     worth = getattr(getattr(h, "attacks", None), "worth_a_throw", None)
-    ignored = getattr(getattr(h, "attacks", None), "ignored", ())
     for w in wounds:
-        if getattr(w, "track", None) in ignored:
-            continue
         again = seen_again(w, visible)
         if again is None and any(seen_again(w, [m]) is not None for m in s.monsters):
             continue  # seen fading out where it died
@@ -1694,7 +1704,6 @@ class FightOnTheWay:
         self.h = h
         self.kinds: set[str] | None = None  # shoot monsters in reach of these kinds only (None: all); any
                                             # in her way is shot
-        self.not_ignored = False  # (behavior.grind's whole screen) `reaches` and `in_way` say no of one her attacks ignore (Attacks.ignored)
         self.set_aside: Callable[[], dict] | None = None  # (behavior.grind's) the tracks the plan has set aside now: `wont_have`
 
     def target(self, s: Scene) -> Monster | None:
@@ -1719,18 +1728,14 @@ class FightOnTheWay:
         """The monster nearest her standing on her platform between her and map x (where her next move
         starts, or where she's sent to), or too close to her, whatever its kind (None if there's none)."""
         lo, hi = sorted((s.where.x, x))
-        in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE
-                  and not (self.not_ignored and self._ignored(m))]
+        in_way = [m for m in s.monsters if m.platform == s.platform.id and lo - TOO_CLOSE <= m.x <= hi + TOO_CLOSE]
         return min(in_way, key=lambda m: abs(m.x - s.where.x)) if in_way else None
 
-    def _ignored(self, m: Monster) -> bool:
-        return getattr(m, "track", None) in (getattr(self.h.attacks, "ignored", None) or ())
-
     def wont_have(self, s: Scene, m: Monster) -> bool:
-        """Whether no fight would take monster `m` of look `s` as things are: taken for dying by the ledger (`dying`), ignored by her
-        attacks (Attacks.ignored), set aside by the plan (`set_aside`: behavior.grind's, Targeting.no_way): a fight says "nothing in reach"."""
+        """Whether no fight would take monster `m` of look `s` as things are: taken for dying by the ledger (`dying`), set aside by
+        the plan (`set_aside`: behavior.grind's, Targeting.no_way): a fight says "nothing in reach"."""
         aside = self.set_aside() if self.set_aside is not None else ()
-        return self.dying(s, m) or self._ignored(m) or getattr(m, "track", None) in aside
+        return self.dying(s, m) or getattr(m, "track", None) in aside
 
     def clear_way(self, s: Scene, x: float, finish: bool = True) -> int | None:
         """Shoot the monster in her way to map x (in_way). Returns the kills, or None if nothing was in
@@ -1781,8 +1786,6 @@ class FightOnTheWay:
         stance would make at it from there (jump_reaches: what the hunt loop's Hunt._jump_hits counts). The seam S1's
         aim facade replaces for another character's attack, with stance.place_to_shoot's search along her platform."""
         if s.platform is None or s.where is None:
-            return False
-        if self.not_ignored and self._ignored(m):
             return False
         if reach.can_hit(s.platform, s.where.x, s.where.y, m, others=s.monsters):
             return True
