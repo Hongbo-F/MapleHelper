@@ -152,6 +152,7 @@ def build_violetta(todo, weights):
         run("yolo_detect.py", weights, "detsY.part", *boxes)
         for n in boxes:
             (Path("detsY.part") / f"{n}.jsonl").rename(Path("detsY") / f"{n}.jsonl")
+        shutil.rmtree("detsY.part")
     tallies = {}
     if sprite:
         tallies["sprite matches"] = tally("dets5", sprite)
