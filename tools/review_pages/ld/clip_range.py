@@ -1,6 +1,6 @@
 """A mini-game clip's frame range, for a clip newer than clips.json, from what the live tracker wrote (its round file,
 paths.LIE_TARGETS, a line an answer with the frame numbers the alarm clip's index has too) and the SUCCESS banner's
-yellow glow on the board. On the 11 clips with recorded ends the glow's first frame was within 0 or +1 of them."""
+yellow glow on the board. On the 11 clips with recorded ends the glow's first frame is that end, on all 11."""
 import json
 from datetime import datetime
 
@@ -10,7 +10,8 @@ import numpy as np
 START_S = 4.6  # s from the board's first frame (the frame before the target's first white answer) to START
 PAST_ANSWERS = 25  # frames past the last answer the banner is looked for in
 AFTER_END = 21  # frames kept past the banner's first (the sets stop before it, the frame cache a little after)
-GLOW = 500  # px: yellow over the frames' usual, in two frames running, that is the banner
+GLOW = 300  # px: yellow over the frames' usual, in two frames running, that is the banner (its fade-in's first two
+#            frames were 467 px at least on the 17 clips with a banner, every frame before them 0)
 
 
 def round_file(clip, rounds):

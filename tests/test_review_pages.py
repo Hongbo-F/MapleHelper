@@ -20,6 +20,7 @@ import lib  # noqa: E402
 import reference  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "lie_detector" / "references"
+YELLOW = cv2.cvtColor(np.full((1, 1, 3), (28, 200, 240), np.uint8), cv2.COLOR_HSV2BGR)[0, 0]  # the banner's
 TIED = re.compile(r"(?<![a-z])[a-z]:[\\/]|appdata|maplehelper.scratch", re.I)  # a drive's path, or a place on this PC
 
 
@@ -70,9 +71,8 @@ def made_up_clip(tmp_path, banner_from=120, flash=None, round_stamp="20261104-18
     (clip / "summary.json").write_text(json.dumps({"from": "2026-11-04 18:03:12.939", "to": "2026-11-04 18:03:43.152"}))
     rows = [{"i": i, "file": f"{i:05d}.png", "t": i / 15, "seq": seq0 + i, "run": 1} for i in range(150)]
     (clip / "index.jsonl").write_text("\n".join(json.dumps(r) for r in rows + [{"gap": "covered", "t": 10.0}]))
-    yellow = cv2.cvtColor(np.full((1, 1, 3), (28, 200, 240), np.uint8), cv2.COLOR_HSV2BGR)[0, 0]
     plain, glowing = np.zeros((230, 400, 3), np.uint8), np.zeros((230, 400, 3), np.uint8)
-    glowing[180:230, 308:400] = yellow
+    glowing[180:230, 308:400] = YELLOW
     for i in range(79, 150):
         cv2.imwrite(str(clip / f"{i:05d}.png"), glowing if i >= banner_from or i == flash else plain)
     lines = [{"kind": "the target", "fps": 15.0}]
@@ -86,6 +86,16 @@ def test_a_clips_range_comes_from_its_round_file_and_the_banner(tmp_path):
     (rounds / "20261104-170000.jsonl").write_text("not this clip's")
     assert clip_range.clip_range(clip, rounds) == {
         "clip": clip.name, "round": "20261104-180324", "fps": 15, "first": 10, "start": 79, "end": 120, "last": 141}
+
+
+def test_the_banner_is_found_from_its_fade_in(tmp_path):
+    """20261104-185153's first two frames of it were 560 and 490 px, the third 3425: the sets stop before all of them."""
+    clip, rounds = made_up_clip(tmp_path, banner_from=122)
+    for i, side in ((120, 24), (121, 22)):  # (576 and 484 px)
+        frame = np.zeros((230, 400, 3), np.uint8)
+        frame[180:180 + side, 308:308 + side] = YELLOW
+        cv2.imwrite(str(clip / f"{i:05d}.png"), frame)
+    assert clip_range.clip_range(clip, rounds)["end"] == 120
 
 
 def test_no_round_file_or_no_banner_says_so_and_gives_no_range(tmp_path, capsys):
