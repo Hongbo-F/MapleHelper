@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Client input logging</title>
+<style>
+:root {
+  --ink: #2C2C2A; --muted: #5F5E5A; --line: #888780; --page: #FFFFFF;
+  --n-bg: #F1EFE8; --n-b: #B4B2A9;
+  --s-bg: #EEEDFE; --s-b: #534AB7; --s-t: #3C3489;
+  --o-bg: #E1F5EE; --o-b: #0F6E56; --o-t: #085041;
+  --u-bg: #FAEEDA; --u-b: #854F0B; --u-t: #633806;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); }
+body { width: 600px; padding: 24px 20px 28px; color: var(--ink); font: 400 17px/1.35 "Segoe UI", Arial, sans-serif; }
+h1 { font-size: 27px; font-weight: 600; margin: 0 0 6px; }
+.sub { color: var(--muted); font-size: 16px; margin: 0 0 14px; }
+h2 { font-size: 21px; font-weight: 600; margin: 30px 0 4px; padding-top: 16px; border-top: 1px solid var(--n-b); }
+.lead { color: var(--muted); font-size: 16px; margin: 0 0 12px; }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.box { border: 1.5px solid var(--n-b); background: var(--n-bg); border-radius: 8px; padding: 10px 13px; }
+.box b { display: block; font-weight: 600; }
+.box span { display: block; font-size: 15.5px; color: var(--muted); }
+.box.key { padding: 6px 10px; font-size: 15.5px; text-align: center; }
+.server { background: var(--s-bg); border-color: var(--s-b); color: var(--s-t); }
+.server span { color: var(--s-t); }
+.out { background: var(--o-bg); border-color: var(--o-b); color: var(--o-t); }
+.out span { color: var(--o-t); }
+.unsure { background: var(--u-bg); border: 1.5px dashed var(--u-b); color: var(--u-t); }
+.unsure span { color: var(--u-t); }
+.down { text-align: center; color: var(--line); font-size: 20px; line-height: 24px; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.branch { text-align: center; font-size: 15.5px; font-weight: 600; color: var(--muted); padding-bottom: 2px; }
+ol.tests { margin: 6px 0 0; padding-left: 23px; }
+ol.tests li { margin: 2px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1.5px solid var(--n-b); }
+td { vertical-align: top; padding: 8px 8px 8px 0; border-bottom: 1px solid var(--n-b); }
+td:last-child, th:last-child { padding-right: 0; }
+td.unk { color: var(--u-t); }
+code { font: 500 14.5px Consolas, monospace; overflow-wrap: anywhere; }
+.labels { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 16px; font-size: 15.5px; margin: 0 0 12px; }
+.labels i { display: inline-block; width: 25px; font-style: normal; color: var(--muted); }
+ul.unknown { margin: 6px 0 0; padding-left: 20px; }
+ul.unknown li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<h1>Client input logging</h1>
+<p class="sub">Read from the Nov 4 client. 17 of 20 compared functions match the old build, so this doesn't look new. Exact cut-offs are left out on purpose.</p>
+<div class="legend">
+  <div class="box key">Inside the client</div>
+  <div class="box key server">Sent by the server</div>
+  <div class="box key out">Sent or logged by the client</div>
+  <div class="box key unsure">Not confirmed</div>
+</div>
+
+<h2>Type 0: running key log</h2>
+<p class="lead">A running log, with one for each input device.</p>
+<div class="box"><b>A key message reaches the client</b><span>From any source, bot or human</span></div>
+<div class="down">↓</div>
+<div class="box"><b>Key handler</b><span>Called from the window-message handler</span></div>
+<div class="down">↓</div>
+<div class="box"><b>Recorder for that device</b><span>Time, key code, down or up</span></div>
+<div class="down">↓</div>
+<div class="box unsure"><b>Probably also in each entry</b><span>The key's game binding, her ID and position</span></div>
+<div class="down">↓</div>
+<div class="box"><b>Batch about every 5 minutes</b><span>Sooner if it gets large</span></div>
+<div class="down">↓</div>
+<div class="box out"><b><code>ETC_MSInputEvent</code> log record</b><span>Character, device ID, vendor and product IDs, key data</span></div>
+<div class="down">+</div>
+<div class="box out"><b>Packet 0x1ef, kind 0x27</b><span>Counter, type and size of the batch</span></div>
+
+<h2>Type 1: mouse records</h2>
+<p class="lead">Probably inactive.</p>
+<div class="box unsure"><b>Mouse messages are formatted as text, then thrown away</b><span>The code that stores and sends them has no readable caller</span></div>
+
+<h2>Type 2: key fingerprint</h2>
+<p class="lead">Runs only when the server asks.</p>
+<div class="box server"><b>Packet 0x5ac starts a capture</b></div>
+<div class="down">↓</div>
+<div class="box"><b>Store key releases for each device</b></div>
+<div class="down">↓</div>
+<div class="box"><b>After 1 minute</b><span>Pick each device's rarest key as the start key</span></div>
+<div class="down">↓</div>
+<div class="box"><b>After 6 minutes: take a fixed-length run from the start key, and test it</b>
+  <ol class="tests">
+    <li>It reaches the full length</li>
+    <li>Enough different keys each appear enough times</li>
+    <li>It doesn't end in a long streak of one key</li>
+  </ol>
+</div>
+<div class="down">↓</div>
+<div class="split">
+  <div>
+    <div class="branch">Any test fails</div>
+    <div class="box"><b>No fingerprint</b><span>From that device, in this capture</span></div>
+  </div>
+  <div>
+    <div class="branch">All pass</div>
+    <div class="box out"><b>MD5 hash + XOR value</b><span>Packet 0x1f3, kind 4</span></div>
+  </div>
+</div>
+<div class="down">↓</div>
+<div class="box server"><b>Packet 0x5ad carries a hash</b><span>The server can send this back</span></div>
+<div class="down">↓</div>
+<div class="box out"><b>The raw keys behind it, as a type 2 log</b><span>With <code>HashValue|&lt;hash&gt;|Time|&lt;hhmmss&gt;</code></span></div>
+<div class="down">↓</div>
+<div class="box unsure"><b>My inference</b><span>The same keys give the same hash, so the server could spot a sequence repeating across sessions or accounts</span></div>
+
+<h2>Other reports</h2>
+<p class="lead">Separate from the three log types.</p>
+<table>
+  <tr><th style="width:36%">When</th><th style="width:40%">What's sent</th><th>Packet</th></tr>
+  <tr><td>Every 30 minutes, if more than one device was seen</td><td>Device list: IDs, vendor, product</td><td>0x1ef, kind 100</td></tr>
+  <tr><td>An arrow key stays held a long time</td><td>A flag</td><td>0x1ef, kind 0x60</td></tr>
+  <tr><td>A stretch of click history repeats</td><td>A flag</td><td>0x2a2, value 1</td></tr>
+  <tr><td>Fast cursor moves lead to a click</td><td>A check on the moves' shape</td><td>0x2a2, value 0</td></tr>
+  <tr><td class="unk">Certain dialogs end (which ones isn't confirmed; 5 of the 6 senders sit next to Lie Detector code)</td><td>Recent cursor and click positions</td><td>0xaf</td></tr>
+  <tr><td>Mouse log, which a server setting can switch off</td><td>Event count, two click hashes, screen size</td><td><code>ETC_MSMouseEvent</code></td></tr>
+</table>
+
+<h2>Reason labels</h2>
+<p class="lead">Only a list of names: no readable code calls it. My guess is a staff or recording tool showing why each player was picked.</p>
+<div class="labels">
+  <div><i>0</i>Field Mob Hunting</div><div><i>9</i>Hack Log_T</div>
+  <div><i>1</i>Keyboard Macro</div><div><i>10</i>NGS (the anti-cheat)</div>
+  <div><i>2</i>Mob Herding</div><div><i>11</i>Hack Log Pattern</div>
+  <div><i>3</i>Macro Log</div><div><i>12</i>LiveActionSystem</div>
+  <div><i>4</i>Hack Log</div><div><i>13</i>LiveActionSystem_Top100</div>
+  <div><i>5</i>Pet Teleport</div><div><i>14</i>Report Player</div>
+  <div><i>6</i>(no label)</div><div><i>15</i>Hack Log_Analysis</div>
+  <div><i>7</i>Auto Hotkey, Virtual Keyboard</div><div><i>16</i>Boss</div>
+  <div><i>8</i>Macro Log_T</div>
+</div>
+
+<h2>Not visible from the client</h2>
+<ul class="unknown">
+  <li>How the server scores or judges any of this</li>
+  <li>How often the server starts a capture, and for whom</li>
+  <li>Where the logger sends its records</li>
+  <li>Whether protected code adds to or reads these logs</li>
+</ul>
+</body>
+</html>
