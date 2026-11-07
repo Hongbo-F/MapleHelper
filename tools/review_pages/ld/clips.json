@@ -1,0 +1,13 @@
+{
+  "20261026-010244": {"fps": 10, "first": 194, "last": 328, "start": 240, "end": 314, "start_j": 46, "end_j": 120, "round_s": 7.38},
+  "20261029-162605": {"fps": 15, "first": 311, "last": 556, "start": 380, "end": 535, "start_j": 69, "end_j": 224, "round_s": 10.38},
+  "20261029-170011": {"fps": 15, "first": 296, "last": 495, "start": 365, "end": 474, "start_j": 69, "end_j": 178, "round_s": 7.27},
+  "20261029-174243": {"fps": 15, "first": 305, "last": 548, "start": 374, "end": 526, "start_j": 69, "end_j": 221, "round_s": 10.34},
+  "20261029-203140": {"fps": 15, "first": 299, "last": 544, "start": 368, "end": 522, "start_j": 69, "end_j": 223, "round_s": 10.29},
+  "20261029-212150": {"fps": 15, "first": 296, "last": 541, "start": 365, "end": 519, "start_j": 69, "end_j": 223, "round_s": 10.29},
+  "20261029-215056": {"fps": 15, "first": 307, "last": 552, "start": 376, "end": 530, "start_j": 69, "end_j": 223, "round_s": 10.28},
+  "20261030-024957": {"fps": 15, "first": 300, "last": 500, "start": 369, "end": 479, "start_j": 69, "end_j": 179, "round_s": 7.32},
+  "20261030-170839": {"fps": 15, "first": 300, "last": 545, "start": 369, "end": 524, "start_j": 69, "end_j": 224, "round_s": 10.42},
+  "20261030-173822": {"fps": 15, "first": 309, "last": 508, "start": 378, "end": 486, "start_j": 69, "end_j": 177, "round_s": 7.2},
+  "20261030-203125": {"fps": 15, "first": 297, "last": 497, "start": 366, "end": 475, "start_j": 69, "end_j": 178, "round_s": 7.27}
+}
