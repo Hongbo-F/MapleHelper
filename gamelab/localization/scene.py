@@ -77,6 +77,7 @@ class Scene(Observation):
                                                 # searched it, each at its own time (worldstate.DropStrip: the rotation's
                                                 # and the asked-for; the drop store takes them, behavior.ledger); []
                                                 # without
+    landing: bool = False         # a look at a landing inside a chain (the navigator's _landing_calls): a target trip's question is of what's there (Targeting.changed)
     what_if: bool = False         # a look made up from another (her put where a chain ends: the navigator's _stop_calls,
                                   # _look_ahead) for what a trip's `until` would say there: nothing it decides is kept
     seq: int | None = None        # with a continuous feed, the frame number of the state it's of (worldstate.WorldState:

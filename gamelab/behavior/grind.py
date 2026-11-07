@@ -63,12 +63,15 @@ from ..perception.loot import MESOS
 from .hunt import PASSING_S, TRIP_AHEAD_S, Hunt, Objective, Visit, bar_exp
 from .ledger import DROP_LANDS, EXPIRE_S, FOLLOW_S, LANDED_S, REVIVE_S, dying
 from .looting import STOOD_ON
-from .patrol import STOP_S, TICK_S, Patrol, choice_text, filled, reaching
+from .patrol import STOP_S, TAKE_WEIGHT, TICK_S, Patrol, choice_text, filled, reaching
 from .targeting import ASKS, IDLE_S, NO_WAY_S, ROUTE_STEP, Targeting
 from .targeting import on as target_on
 
 SEARCH_S = 2.5         # s past a kill's drops' landing (ledger.DROP_LANDS, LANDED_S) she waits by its pile for a search of it that can say
                        # it's empty (`_none_landed`; the rotation is back on a strip in 1.2-2.4 s: ledger.REVIVE_S)
+DELIVERS = 0.8         # of a round's rate (Plan.rate) what she makes of it: 0.88 on her round, 0.91 on a stop's platform, 0.72 off it, live at
+                       # patrol.TAKE_WEIGHT 0.5; 0.79 in the simulator (M); `_round_bar`
+GO_GAIN = 1.15         # guess: what she'd make of her round over what the screen has had lately (Targeting.lately) for her to go (`_goes`)
 STOP_MAX_S = 40.0      # guess: backstop, s at one stop with nothing in reach (there's a round to go); and from the final
                        # review of 2026-11-02, s waiting there on end (Hunt._wait, nothing shot, no step) with monsters
                        # held: on the thief's seed 19 of the standard grind she stood 123 s at 16 for a Horny on 15 the
@@ -182,6 +185,7 @@ class Grind(Hunt):
             if self.nav.escort is not None:
                 self.nav.escort.set_aside = lambda: self.tp.no_way
         if self.tp is not None:
+            self.nav.landing_asks = self.tp.landings
             self.h.actions.lock_watch = self.tp.watch_lock
             self.h.drops.revive_s = EXPIRE_S  # (a pile of hers seen gone and then seen again is hers, however late: 100%)
 
@@ -207,6 +211,8 @@ class Grind(Hunt):
         if getattr(self, "_loop_at", None) is not None:  # (and the loop's clock: its promise against what it gave)
             self._loop_at += seconds
         self._alt = self._hp = self._promised_at = None
+        if self.tp is not None:
+            self.tp._worth_at += seconds
 
     # --- what she knows ------------------------------------------------------------------------------------
 
@@ -383,7 +389,7 @@ class Grind(Hunt):
 
     def _instead_of_waiting(self, o):
         if self.tp is None or not self.tp.screen or o.why not in (TO_TARGET, "sweep"):
-            return None  # (a stop's trip: she waits, and any monster on the screen ends it)
+            return None  # (a stop's trip: she waits, and what beats her round on the screen ends it: `_free_trip`)
         return self.tp.rather
 
     def _may_stop_her(self, s: Scene) -> list[Monster]:
@@ -393,9 +399,43 @@ class Grind(Hunt):
 
     def _free_trip(self, o) -> bool:
         """Whether a trip's next pass may take any target on the screen (the whole screen: `_while_travelling`): any but one to a
-        pile, unless what's blocked the way to that pile (Targeting.rather)."""
+        pile, unless what's blocked the way to that pile (Targeting.rather); a trip to a stop only for what beats her round
+        (`_round_bar`: what's in reach she shoots on her way, Hunt._can_pass_shoot)."""
         return (self.tp is not None and self.tp.screen and o is not None
-                and (o.kind == "spot" or (o.why == "sweep" and self.tp.piles_wait())))
+                and ((o.kind == "spot" and (o.why == TO_TARGET or self.tp.got > self._round_bar()))
+                     or (o.why == "sweep" and self.tp.piles_wait())))
+
+    def _round_bar(self) -> float:
+        """EXP a second a look must have for her (Targeting.got) to end a trip to a stop: what she'd make of her round. -1, any monster:
+        no round, or not weighed (Targeting.weighs)."""
+        plan = self.patrol.plan
+        return -1.0 if plan is None or not self.tp.weighs else DELIVERS * plan.rate
+
+    def _goes(self, s: Scene) -> int | None:
+        """Her next is a trip: the round's nearest stop in its place, if what she'd make of her round is clearly over what the screen has
+        had for her lately (`weighs`; the user, 2026-11-05, on the report's #4: the numbers can put another area ahead of monsters on
+        the screen she'd have to go to). None: the trip to her target. Monsters in reach or on her platform aren't asked about, nor
+        where a pile seen pulls her to a stop on the platform she's on (Patrol.choose: going again at each look there, 26 times in 1.6 s, seed 201),
+        nor while a trip has just given way for a monster in its way (`piles_wait`: 44 trips in 3 s to a pile that monster stood by, seed 304)."""
+        if not self.tp.weighs or self.tp.piles_wait():
+            return None
+        self._look_at_round(time.monotonic())
+        j = self.patrol.nearest(s.platform.id, s.where.x) if self._round_bar() > GO_GAIN * self.tp.lately else None
+        if j is None or (i := self._instead(s, heading=j)[0]) is None or self.patrol.stops[i].platform == s.platform.id:  # (None: every stop skipped)
+            return None
+        return j
+
+    def _go(self, s: Scene, j: int) -> None:
+        """Off to her round's stop `j` (`_goes`; a pile she has seen may pull her to another, `_next_ground`), said with where she does go; a census
+        trip she's on is over: the numbers have spoken."""
+        tp, p, bar = self.tp, self.patrol, self._round_bar()
+        p.trip = None
+        self._next_ground(s, heading=j)
+        self.log(f"  going: {bar * 60:.0f} EXP a minute of her round, the screen's had {tp.lately * 60:.0f} lately ({tp.got * 60:.0f} now), "
+                 f"{len(tp.foes)} monsters: stop {p.platform_of(self.stop)}")
+        telemetry.emit("grind", what="go", lately=round(tp.lately * 60), got=round(tp.got * 60), bar=round(bar * 60), here=s.platform.id,
+                       stop=p.platform_of(self.stop), monsters=len(tp.foes), **p.plan.record(p.platform_of))
+        return self._travel("advance")
 
     def _home(self) -> tuple[int, float] | None:
         """(With the planner no place at a stop she comes back to: her piles' way goes on to nowhere.)"""
@@ -527,20 +567,25 @@ class Grind(Hunt):
         to hit her drops within what each may add to her way, then today's choice of where to go next."""
         if (stop := self._pile_first(s)) is not None:
             return self._sweep_act(s, stop, visible, hidden, now)
+        going = None
         if targets:
             act = self._stance(s, targets, visible, hidden, approach=True, log=False)
             if act[0] == "trip":
-                return self._to_place(s, act, visible, hidden, now)
-            if act[0] != "wait":
+                going = self._goes(s)
+                if going is None:
+                    return self._to_place(s, act, visible, hidden, now)
+            elif act[0] != "wait":
                 return self._shoot(s, targets, visible, hidden, now, "shoot", approach=True)
         wide = self._wide(s)
-        self.tp.quiet = self.tp.screen and not targets  # (with no monster on the screen, her drops whatever they take)
+        self.tp.quiet = self.tp.screen and (going is not None or not targets)  # (with no monster on the screen, or going, her drops whatever they take)
         try:
             stop = self._here(wide)
         finally:
             self.tp.quiet = False
         if stop is not None:
             return self._sweep_act(wide, stop, visible, hidden, now)
+        if going is not None:
+            return self._go(wide, going)
         held = [m for m in self._held(wide) if m.track not in self.tp.no_way]
         reason = self._leaving(wide, held)
         if reason is not None:
@@ -597,6 +642,9 @@ class Grind(Hunt):
                     or (stretches and stop.arrive <= TRIP_AHEAD_S and self._respawn_guard(s, p, stop.arrive) is not None):
                 break  # (the guard on her first pile's `_go_for`'s, as ever)
             if p.status != "seen" or stop.spot.lands > 0.0:  # (nothing to run over for sure: the look there has it)
+                if abs(self._off_end(p, p.x) - p.x) > lootchain.OFF_END and self.tp.weighs:  # (no way to it: a chain to its platform's end, none of her looks there
+                    self._tried(p)                                        # by it, and again, every 0.2 s for 150 s: S6's seed 3 with the design's first form)
+                    continue
                 last = lootchain.Stretch(p, [(self._off_end(p, p.x), 1)], seen=False)
                 return lootchain.LootChain([*stretches, last], None, s, stop.leave, now)
             st = self._stretch(s, p)
@@ -929,7 +977,7 @@ class Grind(Hunt):
         worth going to instead (Patrol.choose, the stop she's heading to as the default), or on a trip to a pile the
         loop's next stop when the pile no longer pays (Patrol.choose's "back to the loop"): taken at the next pass. With
         the whole screen (Targeting.screen): a trip to her target's place stops when the choice has something else for her,
-        or for a pile that goes first; a trip to a stop, for any monster on the screen."""
+        or for a pile that goes first; a trip to a stop, for any monster on the screen, what it has over her round if weighed (`_round_bar`)."""
         o = self.obj
         if getattr(o, "chain", None) is not None:
             return self._chain_stops(s, o)
@@ -939,7 +987,7 @@ class Grind(Hunt):
                 return s is not self.tp.chose_on and (
                     self.tp.changed(s) or (not self.tp.piles_wait() and self._sweep_calls(s))
                     or ((pile := self._valuable_pile(s)) is not None and self._loot_first(s, pile, wanted, say=False)))
-            if self.tp.on_screen(s):
+            if self.tp.on_screen(s, self._round_bar()):
                 return True
         if super()._interrupt(s):
             return True
@@ -954,7 +1002,7 @@ class Grind(Hunt):
 
     def _while_travelling(self, s: Scene, targets, visible, hidden, now: float) -> str | None:
         """The hunt loop's, on its way to the pile `_interrupt` saw (or back to the loop) if it did. With the whole screen, a
-        trip to her target's place is decided again here, and a trip to a stop ends for any monster on the screen."""
+        trip to her target's place is decided again here, and a trip to a stop ends as `_free_trip` says."""
         o = self.obj
         if self._free_trip(o) and (o.why == TO_TARGET or targets):
             self.obj = None
@@ -977,18 +1025,7 @@ class Grind(Hunt):
         if self.tp is not None:
             self.tp.forget()
         now, p = time.monotonic(), self.patrol
-        p.learn_kills(self.report.throws, self.report.exp)
-        why = p.replan(now)
-        if why is not None:
-            self._loop_at, self._loop_exp = now, self.report.exp
-            camp = p.camping(now)
-            self.log(f"  loop: {p.plan.text(p.platform_of)} ({why}; camping at {p.platform_of(camp.stops[0])} would "
-                     f"give {camp.rate * 60:.0f})")
-            telemetry.emit("grind", what="loop", why=why, **p.plan.record(p.platform_of),
-                           camping=[p.platform_of(camp.stops[0]), round(camp.rate * 60, 1)])
-        if now - self._stated >= STATE_EVERY_S:
-            self._stated = now
-            telemetry.emit("grind", what="state", **self._state())
+        self._look_at_round(now)
         where = s.where
         here = where.platform if where is not None else None
         skip = [g for g, until in self._skip.items() if until > now]
@@ -1013,6 +1050,22 @@ class Grind(Hunt):
         telemetry.emit("grind", what="next", **info)
         telemetry.emit("tour", order=list(self.report.grounds), stop=stop.platform,
                        spot={"platform": stop.platform, "x": round(stop.x, 1), "coverage": 1.0})
+
+    def _look_at_round(self, now: float) -> None:
+        """The round looked at again (Patrol.replan, on its clock), and what's said of it."""
+        p = self.patrol
+        p.learn_kills(self.report.throws, self.report.exp)
+        why = p.replan(now)
+        if why is not None:
+            self._loop_at, self._loop_exp = now, self.report.exp
+            camp = p.camping(now)
+            self.log(f"  loop: {p.plan.text(p.platform_of)} ({why}; camping at {p.platform_of(camp.stops[0])} would "
+                     f"give {camp.rate * 60:.0f})")
+            telemetry.emit("grind", what="loop", why=why, **p.plan.record(p.platform_of),
+                           camping=[p.platform_of(camp.stops[0]), round(camp.rate * 60, 1)])
+        if now - self._stated >= STATE_EVERY_S:
+            self._stated = now
+            telemetry.emit("grind", what="state", **self._state())
 
     def _leave_ground(self) -> None:
         """A stop's stay is kept (`stays`), and with kills there her handling of them (Patrol.handled: from getting there
@@ -1046,6 +1099,7 @@ class Grind(Hunt):
                 "refill_others_tick": round(1.0 - math.exp(-b.others * TICK_S), 3), "own": round(b.own(b.t), 3),
                 "refills": b.refills, "watched_s": round(b.watched_s), "kill_s": round(p.kill_s, 4),
                 "takes": {k: round(b.take(k), 2) for k in sorted({q.kind for q in p.points})},
+                "take_weight": TAKE_WEIGHT, "stay_or_go": [False, False] if self.tp is None else [self.tp.landings, self.tp.weighs],
                 "hp": {str(pid): round(p.hp_seen[pid] / p.hp_time[pid] * 60, 2) for pid in sorted(p.hp_time)
                        if p.hp_time[pid] >= HP_LOG_S},
                 "credit": {str(pid): [n, round(e, 1)] for pid, (n, e) in credit}, **self._census(), **self._promise()}
