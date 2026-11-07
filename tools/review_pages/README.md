@@ -65,7 +65,8 @@ reference (not yet checked by you)". **The references of the 5 clips of Nov 4 an
 
 To approve one, once the user has checked its ld-reference page and any hand fixes are in:
 
-1. move `<work>/ld/references-unchecked/<key>.json` to `ld/references/<key>.json`;
+1. move `<work>/ld/references-unchecked/<key>.json` to `ld/references/<key>.json` (a work folder without it makes it
+   again with `build.py ld <key> --force`: the same seeds gave the same file, measured on 20261104-194712);
 2. add `tests/fixtures/lie_detector/references/<key>.json`, in the shape the others have: `clip`, `fps`, `first`, `start`,
    `end`, `fixed_by_hand` (the frames fixed by hand) and `centre` (frame number -> [x, y], from START up to the banner);
 3. commit both. The clip's ld-outline-pf3 and ld-speed-compare pages still say "not yet checked" until built again with

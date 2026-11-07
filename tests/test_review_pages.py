@@ -1,6 +1,6 @@
 """tools/review_pages, the review pages' builders: no clips, GPU or game data here. No path tied to one PC; clips.json;
-a clip's range from a made-up round file and frames; what --list says and that a page is never written over; the approved
-reference before the unchecked one."""
+a clip's range from a made-up round file and frames; what --list says and that a page is never written over; the
+approved reference before the unchecked one."""
 import json
 import re
 import sys
