@@ -33,7 +33,8 @@ From any folder, with the project's Python:
     python tools/review_pages/build.py ld 20261104-180343 --force   build its pages again
 
 A page that is there is never written over: its clip is skipped with a line saying so, unless `--force` names that clip,
-and even then an approved clip's reference is not rebuilt. Steps whose output is already in the work folder are skipped.
+and even then an approved clip's reference is not rebuilt. Steps whose output is already in the work folder are skipped,
+but for the unchecked reference: building a clip's ld-reference page makes it again, over any hand fix in it.
 
 - `--root DIR`: where the pages go. Default: where the web UI looks (`GAMELAB_REVIEW_ROOT`, else the scratch folder's
   `golden-tree` beside the repo).
