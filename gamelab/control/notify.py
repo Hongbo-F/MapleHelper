@@ -205,6 +205,13 @@ def bark(cfg: dict | None, title: str, text: str, level: str = "critical", call:
     return t
 
 
+def phone(title: str, text: str, critical: bool = False, log=None) -> None:
+    """A push to lab/bark.json's iPhone, the file read now (none while there's none, nor under NO_PUSH_ENV): `critical` as
+    the Lie Detector's, else a regular one as her backpack's (behavior.vitals, behavior.guard)."""
+    bark(load_bark(), title, text, "critical" if critical else "active", log=log,
+         sound=BARK_SOUND if critical else None)
+
+
 class BackpackPush:
     """Her backpack full, on the phone as a regular push (the user, 2026-11-04: "if backpack is full, send a regular push
     notification"): Bark at level 'active', the phone's own sound, no ring and no text, the moment the game says a tab is full

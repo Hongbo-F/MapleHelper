@@ -326,6 +326,15 @@ def test_a_jump_attack_is_keyed_as_jittered_and_its_records_say_so(monkeypatch):
     assert a.key_gap() == pytest.approx(want + 1.6)
     a.sent = [[0.0, "alt", "down"]]  # (no attack key in the answer: not known)
     assert a.key_gap() is None
+    # Dropped at its last look (Actions.still): no key of it goes, her 'jump' record, written before them, has its 'jump_keys'
+    # say so, and no attack record comes between them (Attacks.key isn't asked)
+    plans.clear()
+    a.still = lambda side: False
+    a.lock_until = 0.0
+    with telemetry.captured() as records:
+        assert not fight.throw_act(h, s, ("jump_throw", RIGHT, JumpPlan(sh.key_ms, 0, True, "above", sh)))
+    assert not plans and [r["topic"] for r in records] == ["jump", "jump_keys"]
+    assert records[1] == {**records[1], "n": records[0]["n"], "thrown": False, "pressed_ms": None}
 
 
 def test_a_jump_throw_up_close_is_jittered_over_the_keys_the_stance_finds_as_sure(monkeypatch):

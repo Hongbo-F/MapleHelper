@@ -32,6 +32,7 @@ def frame(path: Path) -> np.ndarray:
 
 GOOD = frame(FIXTURES / "capture" / "tree_135315.png")
 OFFSET = frame(FIXTURES / "capture" / "tree_164845_offset.png")
+NOTICE = frame(FIXTURES / "capture" / "server_notice_top_183142.png")  # the client's top left under a server notice
 ROCKY = [frame(FIXTURES / "native" / n) for n in ("n28_000.png", "n28_008.png", "native_first.png")]
 
 
@@ -945,3 +946,26 @@ def test_hunt_look_every_says_each_look_and_stands_still_through_a_lost_one(monk
     out = capsys.readouterr().out
     assert out.count("her: map (31, -451) on platform 23 (camera)") == 1 and regained == [
         "the game's client is 1396x1952, not 1366x768"]
+
+
+def test_a_server_notice_over_the_title_is_no_problem():
+    """Its band halves the strip (18:31:42 on 2026-11-05: 120 s with nothing sent); the game is where it should be."""
+    x0, y0, x1, y1 = framecheck.TITLE_BOX
+    assert framecheck.title_diff(NOTICE[y0:y1, x0:x1]) < 1
+    full = GOOD.copy()
+    full[:NOTICE.shape[0], :NOTICE.shape[1]] = NOTICE
+    assert framecheck.frame_problem(full, NATIVE) is None
+    assert not framecheck.anchors_off(full)
+
+
+@pytest.mark.parametrize("dx, dy", [(1, 0), (0, 1), (1, 1), (2, 0), (0, 2), (3, 0), (5, 0), (10, 2)])
+def test_a_server_notice_doesnt_hide_a_shifted_capture(dx, dy):
+    x0, y0, x1, y1 = framecheck.TITLE_BOX
+    assert framecheck.title_diff(NOTICE[y0 + dy:y1 + dy, x0 + dx:x1 + dx]) > framecheck.TITLE_DIFF
+
+
+def test_the_title_covered_or_black_stays_a_problem_dimmed_or_not():
+    x0, y0, x1, y1 = framecheck.TITLE_BOX
+    h, w = y1 - y0, x1 - x0
+    for level in (0, 64, 127, 191, 255):
+        assert framecheck.title_diff(np.full((h, w, 3), level, np.uint8)) > framecheck.TITLE_DIFF

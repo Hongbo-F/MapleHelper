@@ -279,6 +279,28 @@ def test_a_camp_kills_the_greens_it_hunts_2_to_6_s_after_they_show_and_leaves_th
     assert w.others_at() == [(250.0, m.platform(28).y_at(250.0))]
 
 
+def test_a_stranger_who_comes_and_goes_kills_only_while_here_any_kind_it_hunts_its_dot_by_its_last_kill():
+    from gamelab.sim.world import Camp
+    m = tree_map()
+    top = (6, 7, 8, 9, 10)
+    w = world(m, 23, 0.0, monsters=set(top) | {23}, realism=Realism(camps=(Camp(10, 30.0, top, ("horny-mushroom", "green-mushroom"),
+                                                                              every=2.0, spell=(20.0, 20.0)),)))
+    w.invulnerable_ms = 10**9
+    seen, were = set(), []
+    for i in range(300):
+        before = len(w.kill_log)
+        w.advance(0.5 * (i + 1))
+        at = w.others_at()
+        were.append(bool(at))
+        if len(w.kill_log) > before:
+            assert at  # (a kill only while it's here, its dot then on the platform it killed on)
+            assert any(abs(at[0][1] - m.platform(k[2]).y_at(at[0][0])) < 1.0 for k in w.kill_log[before:])
+        seen |= {k[2] for k in w.kill_log[before:]}
+    assert True in were and False in were and {k[3] for k in w.kill_log} == {"rival"}
+    assert seen <= set(top) and len(seen) >= 3 and {k[1] for k in w.kill_log} == {"horny-mushroom", "green-mushroom"}
+    assert all(m_.alive or m_.platform.id in top for m_ in w.monsters)  # (23's stay)
+
+
 def test_with_shared_exp_a_monster_she_hurt_and_another_player_killed_gives_her_her_share():
     m = tree_map()
     for shared, exp in ((False, 0), (True, round(26 * 2 / 5))):
@@ -424,6 +446,17 @@ def test_the_harness_runs_tree_dungeon_with_its_crowd_and_the_unknowns_switched_
     with pytest.raises(ValueError, match="10002073's alone"):
         harness.scenario("loop", 1, "crowd")  # the camps stand on Tree Dungeon's platforms
     assert harness.main(["run", "loop", "--preset", "crowd", "--seeds", "1"]) == 2
+
+
+def test_the_live_floors_world_is_her_at_35_her_stars_landing_and_that_nights_strangers():
+    from gamelab.sim import harness
+    sc = harness.scenario("loop-grind", 1, "crowd", 1.0, 0.0, TREE, ("live-floors",), (), "choice")
+    assert sc.her.level == 35 and sc.her.skill_star == (166, 333) and sc.her.cast_mp == 16.0 and sc.noise.miss == 0.04
+    assert sc.realism.camps == harness.TREE_STRANGERS and sc.realism.shared_exp and sc.noise.dot_under == 56.0
+    assert {6, 12, 22, 33} <= {p for c in sc.realism.camps for p in c.hunts}
+    assert all("slime" not in c.kinds and c.every > 0 for c in sc.realism.camps)
+    base = harness.scenario("loop-grind", 1, "crowd", 1.0, 0.0, TREE, (), (), "choice")
+    assert base.realism.camps == harness.TREE_CAMPS and base.noise.miss == 0.275 and base.her.level == 25
 
 
 def test_a_short_harness_run_on_tree_dungeon():

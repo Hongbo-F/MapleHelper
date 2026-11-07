@@ -434,6 +434,51 @@ def test_a_throw_takes_a_last_look_before_its_key_and_a_kill_come_in_of_a_kind_i
     assert h.actions.jump_throw("right") is False and sent == []
 
 
+def test_a_throw_at_one_perception_has_dead_by_its_own_track_is_dropped():
+    """Hunter._still: 080929 a03 went 225 ms after perception had its target dead, another player's kill, with no EXP of hers
+    to drop it. By the target's own track alone: another's dead, or one dying at the place, says nothing of a live one. No
+    newer frame than the look: nothing to say, it goes."""
+    from gamelab import telemetry
+    from gamelab.behavior.hunter import Hunter
+    from gamelab.localization import mapdata
+    from test_fight import EMPTY_MAP, _Eyes
+
+    class Feed:
+        def __init__(self, tracks):
+            self.tracks = tracks
+
+        def newest(self, after, timeout=0.0):
+            return None if self.tracks is None else SimpleNamespace(t=time.monotonic(), tracks=self.tracks)
+
+        def pending_events(self, upto=None):
+            return []
+
+    def hunter(dead, aimed=None, none=False):
+        said = []
+        h = Hunter(_Eyes([]), KEYS7, mapdata.parse(1, EMPTY_MAP, "Test", {}), log=said.append, attack="choice")
+        h.senses._feed = Feed(None if none else [SimpleNamespace(id=t, killed=t in dead) for t in (7, 8)])
+        s = _look([("horny-mushroom", 250.0, None)])
+        s.monsters = [dataclasses.replace(s.monsters[0], track=7)]
+        h.attacks.on_look(s)
+        h.attacks.touched = lambda s: True
+        h.attacks.aimed = aimed
+        sent = []
+        h.actions.play = lambda events, name, kind=None: sent.append(name)
+        h.actions.facing = "right"
+        return h, said, sent
+
+    other = Monster(Mob("green-mushroom", 0, 0, 0, 0, 1.0), 300.0, 0.0, 1, None, track=8)
+    for dead, aimed, none, goes in (({7}, None, False, False), ((), None, False, True), ({8}, None, False, True),
+                                    ({8}, other, False, False), ({7}, None, True, True)):
+        h, said, sent = hunter(dead, aimed, none)
+        with telemetry.captured() as records:
+            assert h.actions.throw("right") is goes and (sent == ["throw"]) is goes, (dead, aimed, none)
+        assert any("is dead: the throw right is dropped" in line for line in said) is not goes
+        assert any(r.get("kind") == "dropped" for r in records) is not goes
+    h, said, sent = hunter({7})
+    assert h.actions.jump_throw("right") is False and sent == []  # (her jump's key too: all of its plan or none)
+
+
 def test_unseen_under_its_damage_numbers_the_monster_she_threw_at_is_still_the_target():
     a, _ = _attacks()
     a.on_look(_look([("horny-mushroom", 250.0, None)]))
@@ -693,12 +738,13 @@ def test_throws_at_a_monster_that_show_nothing_have_the_next_tap_the_arrow():
     assert acts.faces("left")
 
 
-def test_four_attacks_that_hit_nothing_have_their_monster_ignored_for_a_while():
-    """The user, 2026-11-04: 4 throws or casts without hitting any mob: the recording saved, the target ignored for 15 s."""
+def test_four_attacks_that_hit_nothing_have_the_hunter_told_and_the_count_starts_again():
+    """The user, 2026-11-04: 4 throws or casts without hitting any mob: the recording saved (and 2026-11-05: no ignoring)."""
     a, _ = _attacks()
-    told, gains = [], [0]
-    a.no_hit = lambda s, thrown, tracks, until: told.append((len(thrown), tracks, round(until - s.t, 3)))
+    told, gains, tapped = [], [0], []
+    a.no_hit = lambda s, thrown, tracks: told.append((len(thrown), tracks))
     a.gains = lambda: gains[0]
+    a.retap = lambda: tapped.append(1)
     t0 = time.monotonic()
 
     def look(t, bar=None, track=7):
@@ -713,13 +759,12 @@ def test_four_attacks_that_hit_nothing_have_their_monster_ignored_for_a_while():
 
     throws(4, t0)
     look(t0 + 3.5)            # (the 4th not shown yet)
-    assert not told and not a.ignored
+    assert not told
     look(t0 + 4.1)
-    assert told == [(4, {7}, 15.0)] and 7 in a.ignored
-    look(t0 + 4.1 + 14.0)
-    assert 7 in a.ignored
-    look(t0 + 4.1 + 15.1)
-    assert not a.ignored
+    assert told == [(4, {7})] and tapped  # (her facing may be what's wrong, at a hurt target too: `_landing` doesn't count those)
+    assert not a._misses and not hasattr(a, "ignored")
+    look(t0 + 8.2)
+    assert len(told) == 1     # (re-counted from there)
     told.clear()
     t1 = t0 + 30.0            # a bar new on any monster is a hit ...
     throws(4, t1)

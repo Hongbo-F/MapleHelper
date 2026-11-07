@@ -1267,10 +1267,13 @@ class Hunt:
             return None
         if act[0] in THROWS:
             if fight.throw_act(self.h, s, act):  # (dropped at its last look before the key: the next pass decides)
-                self.fs.note_throw(now, self.h.actions.attack_at)
-                self.fs.moves = 0
-                self.h.report.throws += 1
-                self.report.throws += 1
+                if fight.keyless(self.h):  # (her jump away alone: a move)
+                    self.fs.moves += 1
+                else:
+                    self.fs.note_throw(now, self.h.actions.attack_at)
+                    self.fs.moves = 0
+                    self.h.report.throws += 1
+                    self.report.throws += 1
         elif (step := self._pass_step(s, [*targets, *others])) is not None:  # out from under one: a star picks it
             if step != act:
                 self.h.log(f"  {act_text(step, [*targets, *others], s.where.x, hidden)} (HP {s.hp:.0%})")

@@ -130,13 +130,14 @@ def test_the_hunt_loop_grinds_by_default_and_camps_with_camp(monkeypatch):
     monkeypatch.setattr(grind, "Grind", type("Grind", (Ran,), {}))
     monkeypatch.setattr(hunt, "Hunt", type("Hunt", (Ran,), {}))
     monkeypatch.setattr(retreat, "on_alarm", lambda hunter: nullcontext())
+    monkeypatch.setattr(retreat, "park", lambda hunter, log=None: ran.append("park"))  # (the time up: she isn't left there)
     monkeypatch.setattr(tour_mod, "Tour", lambda hunter, nav, log, rng: SimpleNamespace())
     monkeypatch.setattr(cli, "_record", lambda *a: None)
     monkeypatch.setattr(cli, "_to_game", lambda: True)
     monkeypatch.setattr(cli, "_hunter", lambda args, **kw: SimpleNamespace(navigator=lambda **kw: None))
     for argv in (["tour", "--loop"], ["tour", "--loop", "--camp"]):
         assert cli.cmd_tour(p.parse_args(argv)) == 0
-    assert ran == ["Grind", "Hunt"]
+    assert ran == ["Grind", "park", "Hunt", "park"]
 
 
 def test_a_pile_objective_no_longer_worth_it_ends_the_trip_to_it():
@@ -291,6 +292,18 @@ def test_in_passing_she_throws_at_her_targets_only_and_never_at_a_kill_fading_ou
                         monsters=[dead, above, pig])
     h._while_travelling(s, [pig], [dead, above, pig], [], time.monotonic())
     assert got["can"] == got["shot"] == ([pig], [above])
+
+
+def test_a_jump_with_no_key_in_passing_is_a_move_and_her_time_there_still_counts(monkeypatch):
+    h = _hunt([])
+    h.obj = Objective("spot", 19, 36.0)
+    h._note, h._stance, h._toward = (lambda rule: None), (lambda *a, **k: ("jump_back", "right")), (lambda s: None)
+    monkeypatch.setattr(hunt.fight, "knocked_move", lambda *a: False)
+    monkeypatch.setattr(hunt.fight, "throw_act", lambda *a: True)
+    monkeypatch.setattr(hunt.fight, "keyless", lambda h: True)
+    s = SimpleNamespace(hp=1.0, platform=SimpleNamespace(id=22), where=SimpleNamespace(x=-10.0, y=-25.0), monsters=[])
+    h._passing_shot(s, [], [], [], [], time.monotonic())
+    assert h.fs.moves == 1 and h.fs.thrown == [] and 22 in h.obj.passing  # (not a throw, and PASSING_S still bounds her)
 
 
 def test_a_valuable_drop_is_gone_for_at_once_and_only_so_often():

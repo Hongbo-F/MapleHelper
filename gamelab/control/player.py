@@ -30,7 +30,7 @@ runs normally and talks to it through files. To keep that safe it only ever:
 Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears, after 24 idle
 hours (not while it records a Lie Detector) or after a Lie Detector, as above: plans are taken again
 only by a player started again, which takes the user's UAC click. Start it with `python -m gamelab
-player --elevate`; stop it with `python -m gamelab stop`.
+player --elevate`; stop it with `python -m gamelab stop-player`.
 
 Of gamelab, this module itself imports only paths, window and control.alarm (its constants: what goes with the alarm
 up), and control.lie_recorder, perception.lie_detector and perception.framecheck (its capture anchors; it imports

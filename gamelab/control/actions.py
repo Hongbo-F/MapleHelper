@@ -152,6 +152,7 @@ class Actions:
 
     def __init__(self, keys: GameKeys, skill: bool = False, kind: str | None = None):
         self.keys = keys
+        self.before_play: Callable[[], None] | None = None  # asked before a plan is sent; may raise (Hunter._stop_asked)
         self.skill = skill  # throw Lucky Seven instead of the regular attack (costs MP) ...
         # ... or, with `skill`, the attack key each throw is asked of this (the way it's thrown -> a key name): the
         # hunter's choice of attack a throw (behavior.attacks: Lucky Seven, or the regular attack to finish a monster
@@ -169,6 +170,9 @@ class Actions:
         # before its keys: the hunter's last look before the key (behavior.hunter: a kill shown since the look it was
         # decided on drops it). None: every throw goes.
         self.still: Callable[[str], bool] | None = None
+        # Her attack key as the throw listeners hear of it: its jump's kind (physics.jump_of; None: from the ground), which
+        # way that jump goes, the key's ms after the jump key, whether a tap on the ground turned her first (Hunter._key_pick)
+        self.key_is: tuple[str | None, int, int, bool] = (None, 0, 0, False)
         self.lock_watch: Callable[[], bool] | None = None  # (`_lock_for_attack`)
         self.kind = kind    # what its plans are to the player with the Lie Detector alarm up (alarm.RETREAT: her
                             # retreat's moves); None: refused then
@@ -264,6 +268,8 @@ class Actions:
         or attack in it would come inside her attack lock (hold_back). `kind`: what it is to the player with the
         Lie Detector alarm up (client.send's; these actions' own by default)."""
         self.hold_back(events)
+        if self.before_play is not None:  # (`gamelab stop`, come since the look it was planned from: nothing sent)
+            self.before_play()
         self._sent_at = time.monotonic()
         self.sent = None
         try:
@@ -401,7 +407,7 @@ class Actions:
         key = self._attack_key(direction, ground=True)  # (chosen first, as jump_throw's: its MP goes with its own key)
         if key is None:
             return False
-        self._thrown(t, direction)
+        self._thrown(t, direction, (None, 0, 0, bool(events)))
         self.play(events + tap(t, key), "throw")
         self._turned(events, direction, t)
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + THROW_LOCK_EXTRA_MS) / 1000
@@ -450,7 +456,7 @@ class Actions:
                 t = max(t, JUMP_THROW_TURN_MS)
             events = turn + tap(t, jump) + tap(t + key_ms, key)
             added = t
-        self._thrown(t + key_ms, direction)
+        self._thrown(t + key_ms, direction, ("forward" if way else "up", way, key_ms, bool(turn and t)))
         self.play(sorted(events, key=lambda e: e[0]), "jump_throw")
         if way:
             self.facing = direction  # her arrow turned her (and moved her): no tap, no time added
@@ -471,9 +477,10 @@ class Actions:
         to pick then, reach.turn_key_ms, JUMP_BACK_ATTACK_MS at the soonest; the top's, reach.TOP_KEY_MS, for a monster
         higher up; jittered: behavior.fight.jittered). With no
         attack to throw (`throw`'s), or her attack from the ground only (`ground_only`: the magician's), the jump away
-        alone, turning toward it in the air."""
+        alone, turning toward it in the air; `key_ms` 0 (the stance's jump aside) so too, her next keys when she has landed, her
+        next throw tapping the arrow: none of 89 jump backs live went with no attack, and on the frames she flips with the attack."""
         self.wait_lock()
-        key = None if self.ground_only else self._attack_key(direction)
+        key = None if self.ground_only or key_ms == 0 else self._attack_key(direction)
         away = self.arrow(directions.opposite(direction))
         toward, jump = self.arrow(direction), self.keys.jump.name
         throw_ms = JB_THROW_MS if key_ms is None else JB_RUN_MS + max(key_ms, JUMP_BACK_ATTACK_MS)
@@ -482,7 +489,7 @@ class Actions:
                   [JB_TURN_MS, away, "up"], *tap(JB_TURN_MS, toward),
                   *([] if key is None else tap(throw_ms, key))]
         if key is not None:
-            self._thrown(throw_ms, direction)
+            self._thrown(throw_ms, direction, ("back", -1 if direction == RIGHT else 1, throw_ms - JB_RUN_MS, False))
         else:
             self.keyless = not self.ground_only  # (no attack her choice would send: behavior.fight.keyless. The magician's
             # jump away alone counts as her throw, as it always has)
@@ -496,17 +503,21 @@ class Actions:
         # (review, 2026-10-25).
         self.lock_until = time.monotonic() + (COMBAT.attack_lock_ms + JUMP_THROW_LOCK_EXTRA_MS) / 1000
         self.arrow_until = self._attack_at + ARROW_LOCK_MS / 1000
+        if key_ms == 0:
+            self.lock_until = self.sent_at + JB_RUN_MS / 1000 + physics.JUMP_LAG + physics.AIR_S  # (no attack: she's down)
+            self.retap()  # (the arrow in `facing` cleared it)
         return True  # (a jump back is her way out from a monster too close: never dropped)
 
     def _still(self, direction: str) -> bool:
         """Whether a throw that way still goes (`still`), once her lock has been waited out."""
         return self.still is None or self.still(direction)
 
-    def _thrown(self, key_ms: int, direction: str) -> None:
-        """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent."""
+    def _thrown(self, key_ms: int, direction: str, key_is: tuple) -> None:
+        """Tell the throw listeners: the attack key goes down `key_ms` into the plan about to be sent (`key_is`: what kind)."""
         when = time.monotonic() + key_ms / 1000
         self._attack_at = when
         self.keyless = False
+        self.key_is = key_is
         for listener in self.throw_listeners:
             listener(when, direction)
 

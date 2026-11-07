@@ -46,6 +46,18 @@ def _splice_later(inbox, running: str, delay: float, plan: dict) -> threading.Ti
     return timer
 
 
+def test_a_plan_cancelled_before_its_first_key_presses_nothing_and_is_answered(monkeypatch, tmp_path):
+    """`gamelab stop` (client.cut_running) on a plan the player has yet to take: its sender gets its answer, at once and
+    with nothing pressed, not a wait of 120 s for a plan withdrawn."""
+    p, sent, inbox, outbox = _player(monkeypatch, tmp_path)
+    plan_id = client.send([[0, "z", "down"], [40, "z", "up"]], lead_ms=0, focus=False, name="throw")
+    client.cut_running()
+    plan = json.loads((inbox / f"{plan_id}.json").read_text())
+    (inbox / f"{plan_id}.json").replace(inbox / f"{plan_id}.running")  # (taken: control.player's serve)
+    result = p.run(dict(plan, id=plan_id))
+    assert sent == [] and result["problems"] == ["cancelled"] and not (inbox / f"{plan_id}.cancel").exists()
+
+
 def test_a_splice_takes_over_at_its_time_with_the_arrow_held_kept_down(monkeypatch, tmp_path):
     """Mid-plan, a splice into it takes over at its at_ms of the running plan's clock: the running plan's keys after it
     don't go, the arrow both hold isn't let go (no 'up' for it, no second 'down'), a key the running plan holds that the

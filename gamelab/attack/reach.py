@@ -426,8 +426,8 @@ def ramp_dx(dy: float) -> float:
 
 def shot_dx(dy: float, kind: str | None = None, sizes: dict[str, MobBody] | None = None) -> float:
     """The closest sideways a throw from the ground at a monster of `kind` dy below (+) her throws a star
-    that picks it: min_dx by its body (body_of; `sizes`, the map's game data, where given: the magician's
-    stance, as her casts' search goes by them, ledger.in_path), and never where the claw can take it instead
+    that picks it: min_dx by its body (body_of; `sizes`, the map's game data, where given: the stance's,
+    as her casts' search goes by them, ledger.in_path), and never where the claw can take it instead
     (claw_dx: on her level 65 plus half its width; on her own platform her decisions keep a monster out to
     claw_edge), nor closer than the old ramp between her level and 60 below her (ramp_dx, while RAMP_BELOW)."""
     top, half = body_of(kind, sizes)
@@ -839,7 +839,7 @@ def can_hit(platform: Platform | None, x: float, y: float, m: Monster, reach: fl
     isn't asked: a monster the attack takes first whose line is clear takes the stars until it's dead, and
     then m's turn comes, so it only orders the kills (her decisions shoot what's in the way first anyway). One
     whose star is stopped dies to none of them, so from here m gets none while it stands there. `sizes`: its body
-    by the map's game data (can_shoot; the magician's stance), else reach's tables."""
+    by the map's game data (can_shoot; the stance's), else reach's tables."""
     return (can_shoot(m.x - x, m.y - y, reach, m.kind, sizes) and wall_to(platform, x, y, m, rise, target) is None
             and shielded(platform, x, y, m, others, rise) is None)
 
@@ -1188,6 +1188,26 @@ def _air_pick(px: float, feet: float, side: int, rows: Placed, margin: float) ->
     if not air_takes(ahead, dy, top, half, margin):
         return None
     return m
+
+
+def key_pick(platform: Platform, x: float, feet: float, side: int, rows: Placed,
+             ground: bool = True) -> tuple[str, list[Monster]]:
+    """What an attack picks that starts with her at map x, her feet at y `feet` on or over `platform`, throwing `side`, of
+    `rows` (Placed, as they are then), as the top of this module has it: ('claw', those it swipes) from the ground
+    (`ground`) if both its stances swipe; else the search's first band, ('star', those of it whose line is clear) or
+    ('stopped', all of it); ('nothing', []) with no body in any band. Nothing drawn: which stance, or which of a band's the
+    client takes. Her key's record (behavior.hunter.Hunter._key_pick)."""
+    bodies = [((mx - x) * side, my - feet, top, half) for _, mx, my, top, half in rows]
+    chances = attack_chances(bodies)
+    if ground and sum(swipe for swipe, _ in chances) > 0.99:
+        return "claw", [r[0] for r, (swipe, _) in zip(rows, chances) if swipe]
+    bands = [search_band(*body_box(*b)) for b in bodies]
+    first = min((k for k in bands if k is not None), default=None)
+    picked = [r for r, k in zip(rows, bands) if k is not None and k == first]
+    clear = [m for m, mx, my, top, half in picked
+             if wall_in_way(platform, x, feet, mx, 0.0, platform if m.platform == platform.id else platform.peer(m.platform),
+                            my, (top, half)) is None]
+    return ("star", clear) if clear else ("stopped", [r[0] for r in picked]) if picked else ("nothing", [])
 
 
 def shots(model, platform: Platform, x: float, y: float, monsters: list[Monster],

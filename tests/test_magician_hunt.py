@@ -743,8 +743,8 @@ def test_up_close_no_cast_while_their_bodies_overlap():
 def test_her_stance_reaches_by_the_bodies_game_data_as_her_search_does():
     """The review of 2026-10-29: 60 over her the stance took a Green Mushroom 116-122 off for in reach (reach's table: a
     pig's 34 either side) where her search picks one from 123 (the game's 28), and threw, her cast sending none, and
-    she stood. With `castable` (hers) by the game's bodies: out from under it to where her search picks it; the thief's
-    (no `castable`) as before."""
+    she stood. By the game's bodies: out from under it to where her search picks it; from 2026-11-05 the thief's too (no
+    `castable`), as the game's own search and her key's check have them."""
     from gamelab.attack import stance
     from gamelab.localization.monsters import bodies
     from test_danger import build, seen
@@ -758,7 +758,7 @@ def test_her_stance_reaches_by_the_bodies_game_data_as_her_search_does():
         return stance.stance(300.0, 500.0, p, [m], True, RIGHT, can_jump=lambda a, b: stance.open_above(model, p, a, b),
                              tops=tops, halves=halves, around=[m], castable=castable)
     with magic.swapped(MAGE):
-        assert act(118.0, None) == ("throw", RIGHT)  # (as on master: reach's table)
+        assert act(118.0, None) == act(118.0, lambda m: True)
         mine = act(118.0, lambda m: True)
         assert mine[0] == "back" and mine[1] == LEFT and 118.0 + mine[2] >= 123.0, mine
         assert act(130.0, lambda m: True) == ("throw", RIGHT)

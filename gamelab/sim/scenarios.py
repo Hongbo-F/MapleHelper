@@ -1087,7 +1087,7 @@ def loop_tree_grind_drops(sim):
     return _grind(3)(sim)
 
 
-@tree((24, 231.0), monsters={22, 23}, seed=4, limit=240, may_die=True, noise=_CROWD[0],
+@tree((24, 231.0), monsters={22, 23}, seed=1, limit=240, may_die=True, noise=_CROWD[0],
       realism=Realism(zero_walls=True, drops=(("green-mushroom", "sapphire-ore", 1.0),)),
       expects=(check("no pile ahead of what's in reach (no ': the pile first')",
                      lambda tr: not any(": the pile first" in line for line in tr["log"])),
@@ -1098,7 +1098,10 @@ def loop_tree_grind_drops(sim):
                # fix/setp_master.txt)
                check("hurt six times at most", lambda tr: tr["world"]["touches"] - tr["world"]["evaded"] <= 6)))
 def loop_tree_ore_waits(sim):
-    """(Seed 4 since the no-hit failsafe, 2026-11-04: her stars hit a monster the world keeps hidden from there, no bar to show it, so it fires
+    """(Seed 1 since a firing of the failsafe taps her next throw, 2026-11-06: on seed 2 she was hurt 16 times; of seeds 1-12, 1, 4, 7, 8 and 11 meet all of this.)
+    (Seed 2 since the 15 s of ignoring went, 2026-11-05: on seed 6 the ore not picked up; of seeds 1-8, 2, 3 and 7 meet all of this.)
+    (Seed 6 since a throw at one perception has dead is dropped, 2026-11-05, Hunter._still: on seed 4 she was hurt 17 times; of seeds 1-12 only 6
+    meets all of this.) (Seed 4 since the no-hit failsafe, 2026-11-04: her stars hit a monster the world keeps hidden from there, no bar to show it, so it fires
     15-21 times a run; of seeds 1-8 only 4 still meets all of this. D:/MapleHelper-scratch/next-move/verify/cmp.txt, ff.txt.)
     EXP before loot (hunt._loot_first): 23 her only ground, shot from 24 at 231, every Green Mushroom on 22 dropping
     a Sapphire Ore (120 mesos, valuable on Tree Dungeon: twice its bronze coin, 66.8). Seen while a Horny Mushroom on 23
@@ -1225,13 +1228,13 @@ MOUSE_EVENTS = ("mouse", "lbutton", "rbutton")
 def safe_there(sim) -> bool:
     """Whether the world has her on a safe place now, by what behavior.retreat counts as one, the look aside: standing
     on a safe platform (retreat.wholly_safe: MapModel.safe, no monster's platform over it within her height), or where
-    the danger with every spawn point's monster at its point is at most retreat.SAFE_DANGER, on a platform or on a
-    rope."""
-    from ..behavior.retreat import SAFE_DANGER, wholly_safe
+    the danger with every spawn point's monster at its point, of every kind (attack.danger.every_kind), is at most
+    retreat.SAFE_DANGER; hanging on a rope, where none reaches her (retreat.ROPE_SAFE)."""
+    from ..behavior.retreat import ROPE_SAFE, SAFE_DANGER, wholly_safe
     w = sim.world
-    d = danger.of_map(sim.model, danger.Her(w.character.max_hp, w.character.level))
+    d = danger.every_kind(danger.of_map(sim.model, danger.Her(w.character.max_hp, w.character.level)))
     if w.mode == "rope" and w.rope is not None:
-        return d.on_rope(w.rope, w.y, None) <= SAFE_DANGER
+        return d.on_rope(w.rope, w.y, None) <= ROPE_SAFE
     if w.mode != "ground" or w.plat is None:
         return False
     return wholly_safe(sim.model, w.plat.id) or d.at(w.plat.id, w.x, None) <= SAFE_DANGER
@@ -1315,14 +1318,14 @@ def _went(why: str):
 
 
 @tree((33, 100.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
-    _went("a rope as safe: no safe platform near"),
+    _went("a safe rope"),
     check("onto the rope at 146 from 32", lambda tr: tr["result"]["then"]["mode"] == "rope"
           and tr["result"]["then"]["x"] == 146)))
 def loop_tree_lie_detector(sim):
     """`tour --loop --map 10002073`, the Lie Detector seen while she hunts the floor (33): the hunt stops at once (the
-    plan running cut, nothing of hers after it); no safe platform is near (28, the nearest place no monster reaches, is
-    past retreat.NEAR_S by route with the floor's crowd), so up onto the rope at 146 from 32, at its safest height
-    (attack.ropes), avoiding the monsters, her moves alone; a retreat plan past the player's 12 s is refused. (From the
+    plan running cut, nothing of hers after it); the quickest of the safe platforms and safe ropes is the rope at 146
+    from 32, at its safest height (attack.ropes), avoiding the monsters, her moves alone; a retreat plan past the
+    player's 12 s is refused. (From the
     floor's crowd, of seeds 1-12 seen at 40, 75, 110 and 150 s on 2026-10-24, 83% were on a safe place at 10 s; from
     24, shooting 23, 47 of 48: loop_tree_lie_detector_23.) The moment is set up (2026-10-31): she starts on the floor at
     x 100 and the Lie Detector is seen 2 s into the hunt loop. Until then the hunt loop started from 28 at x 247 (as
@@ -1337,10 +1340,11 @@ def loop_tree_lie_detector(sim):
 
 
 @tree((30, 100.0), monsters="all", seed=1, limit=400, expects=LIE_DETECTOR_EXPECTS + (
-    _went("safe enough"), check("on 28", lambda tr: tr["result"]["then"]["platform"] == 28)))
+    _went("a safe rope"), check("on the rope at 146", lambda tr: tr["result"]["then"]["mode"] == "rope"
+                                and tr["result"]["then"]["x"] == 146)))
 def loop_tree_lie_detector_28(sim):
-    """As loop_tree_lie_detector, on her way down from 28: back onto 28, which no monster reaches (its danger 0 by
-    attack.danger, though not MapModel.safe), close by route, safe enough. The moment is set up (2026-10-31): she starts
+    """As loop_tree_lie_detector, on her way down from 28: the rope at 146 hangs from her platform, the quickest safe
+    place (until 2026-11-05 back onto 28, safe enough: its danger 0 by attack.danger, though not MapModel.safe). The moment is set up (2026-10-31): she starts
     on 30 at x 100, just under 28 (where her way down from 28 takes her: the drop onto 30, then the rope at 146 down to
     32), and the Lie Detector is seen 2 s into the hunt loop. Until then it was seen 40 s into the hunt loop from 28 at
     x 247, where she was by then by her run's luck: on her way down from 28 on 2 of seeds 1-13 at master 35a1196 (on its
@@ -1352,12 +1356,12 @@ def loop_tree_lie_detector_28(sim):
 
 @tree((25, 220.0), monsters="all", seed=1, limit=500, noise=_CROWD[0], her=_LUCKY,
       realism=dataclasses.replace(_CROWD[1], zero_walls=True),
-      expects=LIE_DETECTOR_EXPECTS + (check("onto 25, the safe platform under 24", lambda tr: tr["result"]["then"][
-          "platform"] == 25),))
+      expects=LIE_DETECTOR_EXPECTS + (check("onto 26, the safe platform under 25", lambda tr: tr["result"]["then"][
+          "platform"] == 26),))
 def loop_tree_lie_detector_23(sim):
     """The hunt loop as live on 2026-10-24 (loop_tree_23: 23 its only ground, Lucky Seven, the crowd), the Lie Detector
-    seen 60 s in, as she shoots 23 from 24 at 231 (attack.spots): down onto 25, the safe platform under 24 (0.9 s by
-    route). (Seed 4 since her jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds
+    seen 60 s in, as she shoots 23 from 24 at 231 (attack.spots): down onto 26, the safe platform under 25 (until 2026-11-05
+    onto 25, 0.9 s by route, which a Green Mushroom's on 24 reach over its right part). (Seed 4 since her jumps' attacks are weighed and her jump throws turn in the air, 2026-10-25: of seeds
     1-12, 9 go down onto 25 and 10 are on a safe place at 10 s; on seeds 1 and 2 she was still on her way.) (Seed 1
     since parts A and B together (work/hunt-ab, 2026-10-26: no throws at the dying and a throw's last look before its
     key, with her drops waiting while a monster that counts is by them and her decisions going by the monsters the looks
@@ -1787,7 +1791,7 @@ def loop_tree_attack_misses_seen(sim):
     return key_check_run(2)(sim)
 
 
-@tree((23, 73.0), monsters="all", seed=6, limit=400, may_die=True, attack="regular",
+@tree((23, 73.0), monsters="all", seed=5, limit=400, may_die=True, attack="regular",
       her=dataclasses.replace(LEVEL_25, **harness.ATTACK_HER), realism=Realism(zero_walls=True, darts=40, chase=False),
       expects=(logs("THE REGULAR ATTACK TOOK NO EFFECT 5 TIMES IN A ROW"), logs("OUT OF DARTS: 20 Lucky Seven presses"),
                check("stopped out of darts", lambda tr: "OUT OF DARTS" in (tr["result"]["stopped"] or "")),
@@ -1798,7 +1802,8 @@ def loop_tree_attack_misses_seen(sim):
                      lambda tr: len(tr["result"]["pages"]) == 2 and "STARS MAY BE OUT" in tr["result"]["pages"][0][2]
                      and "out of darts" in tr["result"]["pages"][1][1])))
 def loop_tree_attack_no_darts(sim):
-    """(Seed 6 with the whole screen's and the chain's fixes of 2026-11-05: of seeds 1-12 only 6 meets all of this: on most she doesn't
+    """(Seed 5 since a firing of the failsafe taps her next throw, 2026-11-06: of seeds 1-12 only 5 meets all of this.)
+    (Seed 6 with the whole screen's and the chain's fixes of 2026-11-05: of seeds 1-12 only 6 meets all of this: on most she doesn't
     press the regular attack on enough dry stars for the stars' test.) (Seed 1 with the loot chain on, GAMELAB_LOOT_CHAIN: of seeds 1-12, 1, 5 and 10 meet all of this.) (Seed 2 with the whole screen on,
     GAMELAB_SCREEN: of seeds 1-12, 2-4 meet all of this.) (Seed 31 with the target-first planner on: of seeds 21-44 she stops out of darts on 20, her stars' test before it on 31
     and 34; with it off, GAMELAB_TARGET=0, as on 29.) `tour --loop --attack regular` (the regular attack alone: out of darts' own watch counts

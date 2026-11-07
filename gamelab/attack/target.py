@@ -90,7 +90,7 @@ class Foe:
 class Her:
     """Her at this look, as the choice needs her: her platform, feet, s until her next keys can go (`lead`), her
     invulnerability left, the way she faces, whether her attack goes from a jump (`jumps`, the thief's), every monster about
-    her (`around`), bodies (`sizes`: the magician's search by the game's; `halves`, half each kind's width), the map's danger,
+    her (`around`), bodies (`sizes`: the search's, by the game's; `halves`, half each kind's width), the map's danger,
     the stance's pace, where she keeps to (`lo`, `hi`), and what says a jump's attack surely takes one that no attack from the
     ground does (`jump_hits`: stance.jump_hits, asked only where it decides)."""
     platform: Platform

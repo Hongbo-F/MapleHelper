@@ -66,16 +66,18 @@ class Refuge:
         return self.rope.x
 
 
-def refuges(model: MapModel, danger: Danger, pid: int, seen: list[Monster] | None = None) -> list[Refuge]:
+def refuges(model: MapModel, danger: Danger, pid: int, seen: list[Monster] | None = None,
+            margin: float = 0.0) -> list[Refuge]:
     """The ropes she can get onto from platform `pid` and back, each at its safest height for her (with the monsters
     `seen` and the spawn points they don't account for; with no look, every spawn point's monster at its point), the
-    safest first. None on a platform no rope can be got onto from."""
+    safest first; of heights as safe, one with nothing within `margin` either way too if there's one. None on a platform
+    no rope can be got onto from."""
     p = model.platform(pid)
     out = []
     for rope in model.ropes:
         way = _way(model, p, rope)
         if way is not None:
-            out.append(_hang(danger, p, rope, way, seen))
+            out.append(_hang(danger, p, rope, way, seen, margin))
     return sorted(out, key=lambda r: (round(r.danger, 6), r.on_s + r.off_s))
 
 
@@ -93,7 +95,7 @@ def _way(model: MapModel, p: Platform, rope: Rope) -> str | None:
     return None
 
 
-def _hang(danger: Danger, p: Platform, rope: Rope, way: str, seen: list[Monster] | None) -> Refuge:
+def _hang(danger: Danger, p: Platform, rope: Rope, way: str, seen: list[Monster] | None, margin: float = 0.0) -> Refuge:
     """The Refuge on `rope` got onto from `p` (`way`: _way's) at its safest height, the quickest to get to and back
     from of those as safe."""
     floor = p.y_at(rope.x)
@@ -107,7 +109,8 @@ def _hang(danger: Danger, p: Platform, rope: Rope, way: str, seen: list[Monster]
     for y in ys:
         on, off = _times(way, rope, floor, start, y)
         here = max(danger.on_rope(rope, y + dy, seen) for dy in (-HANG_SLACK, 0.0, HANG_SLACK))
-        key = (round(here, 6), on + off)
+        far = max(danger.on_rope(rope, y + dy, seen) for dy in (-margin, margin)) if margin else 0.0
+        key = (round(here, 6), round(far, 6), on + off)
         if best is None or key < best[0]:
             best = (key, Refuge(rope, p.id, y, way == "top", round(on, 3), round(off, 3), here))
     return best[1]

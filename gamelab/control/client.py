@@ -16,7 +16,7 @@ import uuid
 import numpy as np
 
 from ..paths import ALARM, INBOX, OUTBOX, PLAYER_INFO, PLAYER_LOG
-from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, LIE_OK, PLAN_KINDS
+from .alarm import LIE_CURSOR, LIE_DETECTOR_ERROR, LIE_OK, PLAN_KINDS, RETREAT
 
 POLL_S = 0.01  # how often `wait` looks for the result
 LIE_CLICK_DOWN_AT, LIE_CLICK_HOLD = 1000, 80  # pressed (its pointer's trail done by then) and held, ms
@@ -87,7 +87,8 @@ def send(events=(), *, fps=0, duration_ms=0, crop=None, scale=1, focus=True, lea
     capture = {"fps": fps, "duration_ms": duration_ms, "scale": scale, "lead_ms": lead_ms}
     if crop:
         capture["crop"] = [int(v) for v in crop]
-    plan = {"events": [list(e) for e in events], "capture": capture, "focus": focus}
+    # (her retreat's moves never bring the game forward: refused while another window is in front, control.player)
+    plan = {"events": [list(e) for e in events], "capture": capture, "focus": focus and kind != RETREAT}
     if end_ms is not None:
         plan["end_ms"] = end_ms
     if window_client is not None:
@@ -202,6 +203,14 @@ def can_splice() -> bool:
     return _INFO["can"]
 
 
+def player_up() -> bool:
+    """Whether a player is running (paths.PLAYER_INFO's pid, written as it starts, removed as it stops)."""
+    try:
+        return _alive(json.loads(PLAYER_INFO.read_text(encoding="utf-8")).get("pid"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def _alive(pid) -> bool:
     """Whether process `pid` is still running (Windows: OpenProcess and its exit code, which an elevated process's
     gives too; elsewhere os.kill's probe; never Windows' os.kill, which ends a process)."""
@@ -221,6 +230,24 @@ def _alive(pid) -> bool:
     try:
         code = ctypes.c_ulong()
         return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        k32.CloseHandle(handle)
+
+
+def started(pid) -> int | None:
+    """When process `pid` started (Windows' creation time), which tells it from a later one given its pid; None if it can't
+    be told (behavior.guard.running_hunt)."""
+    if os.name != "nt" or not isinstance(pid, int) or pid <= 0:
+        return None
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        made, *rest = [ctypes.c_ulonglong() for _ in range(4)]
+        ok = k32.GetProcessTimes(handle, ctypes.byref(made), *(ctypes.byref(t) for t in rest))
+        return made.value if ok else None
     finally:
         k32.CloseHandle(handle)
 
@@ -326,6 +353,14 @@ def cancel(plan_id: str) -> bool:
         if (INBOX / f"{plan_id}.running").exists():
             (INBOX / f"{plan_id}.cancel").touch()
         return False
+
+
+def cut_running() -> None:
+    """Cut short whatever the player is playing or is yet to take, whoever sent it (`gamelab stop`, from its own process:
+    a throw's key not pressed yet isn't pressed): each one's cancel file, read before its next key, its first's too (and
+    what's spliced in with it). Never a plan withdrawn from here: its sender's `wait` would get no result for `timeout`."""
+    for path in [*INBOX.glob("*.running"), *INBOX.glob("*.json")]:
+        (INBOX / f"{path.stem}.cancel").touch()
 
 
 def wait(plan_id: str, timeout: float = 120) -> dict:

@@ -197,7 +197,9 @@ from concurrent.futures import ProcessPoolExecutor
 from ..analysis import coverage
 from ..behavior.hunt import HP_PER_MESO, MP_PER_MESO
 from ..behavior.looting import LOOT_REACH, worth_for
+from .world import HER_35  # (ahead of the rest: work/no-hit-fixes' `from .no_hit_scenes import HER_35` goes after it, the same numbers)
 from ..paths import LAB, REPO
+from .no_hit_scenes import HER_35
 from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNERABLE_LEAST_GAP, INVULNERABLE_LIVE,
                     INVULNERABLE_SOURCES, KNOCK_PLANNER, LUCKY_SEVEN, MAP_DROPS, MEAT_HP, NEAR_SEEN, NEAR_SEEN_1025, NEAR_SEEN_1104,
                     NEAR_SPELL_1104, OFF_SEEN_1104, OFF_SPELL_1104,
@@ -205,7 +207,7 @@ from .world import (HER_BOX_CLIENT, HER_HALF, HER_HEIGHT, IDLE_EVERY_MS, INVULNE
                     SPAWN_FOUND_WIDE, TICK_S, TREE_AIR, TREE_DROP_MIX, Camp, Noise, Realism, tab_of)
 
 FOLDER = LAB / "harness"
-POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run
+POLICY_SEED = 7   # the policy's own random choices (route weights, sweep order): the same in every run (`--world policy-each`: POLICY_EACH)
 FIRST_MAP = 10000012  # (sim.scenarios.MAP_ID)
 START_AT = [(36, 300.0), (32, 600.0), (16, 585.0), (14, 760.0), (29, 420.0), (12, -300.0), (21, -300.0),
             (24, 120.0), (4, 450.0), (1, 1200.0)]  # where seed k starts: START_AT[k % len]
@@ -251,6 +253,20 @@ PRESETS = {
 GREEN, SLIME = "green-mushroom", "slime"
 TREE_CAMPS = (Camp(28, 250.0, (29, 30), (GREEN,)), Camp(21, 90.0, (21, 22), (GREEN,)), Camp(23, 0.0, (22,), (GREEN,)),
               Camp(19, 200.0, (19,), (GREEN,)), Camp(33, 120.0, (32, 33), (GREEN, SLIME)))
+# ... and as the night of 2026-11-05 saw them, four tours, 115 minutes at level 35 (the perception service's dots and `died` events:
+# D:/MapleHelper-scratch/hunts/floors/l4_map.py, l5_str.py), where the study's five stand still below the upper tower killing
+# all the Greens and Slimes there: they kill on every floor, Hornies most on the top, a Slime 4 times of the day's 80 others'
+# kills on the low platforms, and only while one's there (others' kills a minute on the band, with a dot on it in the last 10 s
+# and without: top 21.8, 1.2; upper 11.1, 0.9; middle 14.0, 1.1; low 5.7, 0.7). By band, the dots a look (over the looks that could
+# show them) and others' kills a minute (each platform over its own time in view): top 0.44, 10.2; upper 0.45, 6.6; middle 1.09, 12.6;
+# low 0.68, 2.9. So a player for each band, two for the middle: here dots / players of the time, killing one every 60 x dots / kills
+# s while here, a spell here 60 s on average (a dot's run on the top 67, on the upper 58; too few on the others).
+TREE_STRANGERS = tuple(Camp(stand, x, tuple(hunts), (GREEN, "horny-mushroom"), every=60.0 * dots / kills,
+                            spell=(60.0, 60.0 * (players / dots - 1.0)))
+                       for stand, x, hunts, dots, kills, players in (
+                           (10, 30.0, range(6, 11), 0.44, 10.2, 1), (15, -110.0, range(11, 19), 0.45, 6.6, 1),
+                           (21, 90.0, range(19, 28), 1.09, 12.6, 2), (29, -100.0, range(28, 34), 0.68, 2.9, 1))
+                       for _ in range(players))
 # Tree Dungeon's crowd: "game"'s errors, other players' dots under hers unseen (Noise.dot_under: 56 units, the study's
 # frames), the camps above instead of "game"'s one roaming rival, the map's respawn the server's (Realism.respawn_tick:
 # its cap by the formula, the players there counted). Only on that map (PRESET_MAPS). Until 2026-10-31 every spawn
@@ -275,8 +291,48 @@ WORLDS = {"zero-walls": {"zero_walls": True}, "joined-walls": {"zero_walls": Fal
           "client-reach": {"rope_reach": ROPE_REACH_CLIENT}, "touch-share": {"defence": None},
           "no-evade": {"evade": 1e-9}, "red-potion": {"potion": 100.0}, "lucky-seven": {"stars": LUCKY_SEVEN},
           "knock-turns": {"knock_turns": True}}
-HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned")
+HER_FIELDS = ("defence", "evade", "potion", "stars", "walk_speed", "climb_speed", "planned", "max_hp", "level", "avoid",
+              "mp", "star", "skill_star", "cast_mp", "mp_potion", "claw")
+# ... and her as she was live on 2026-11-05 (`her-35`: no_hit_scenes.HER_35, her stat window and her numbers), where every
+# world's thief is level 25, HP 774, DEF 75, so that a Horny Mushroom's touch (16% of her HP) has her keep 164 off it
+# (Danger.keep_off) and a Green's counts as a danger; at 35 a Horny's is 10%, its keep-off about 72, inside the claw's 105,
+# and a Green's doesn't count: her close quarters are another ladder (README, "The no-hit scenes").
+WORLDS["her-35"] = HER_35
 IDLE_GRACE = 60.0  # s without a kill or a pick-up that still counts as hunting
+# ... and the floors of Tree Dungeon as live on 2026-11-05, her level 35's (`live-floors`: README, "Where she hunts"; the
+# magician's: `strangers`, her own stats and spell as MAGE_32 has them): her at 35 (`her-35`), the other players as they were
+# (`strangers`: TREE_STRANGERS, in place of the crowd's camps), their kills of what she hurt hers in part (`shared-exp`: 113 of
+# that night's 1,654 gains, 3.4% of her EXP), a clear pick's star missing 4% of the time, a Green's where a hit always kills
+# (42 of 1,058, D:/MapleHelper-scratch/nohit/causes.md; Noise.miss's 27.5% is the first map's at level 19), and Lucky Seven's
+# stars by her stat window: LUK x 5 x WATK / 100 x its damage at the most, half of that at the least, as her 96-192 at level 25
+# (attack.choice.SKILL_STAR). At LUK 158, WATK 30 (ATTACK's 182 = (LUK x 3.6 + STR + DEX) x WATK / 100), its level 20 (16 MP a
+# cast, 140%) 166-333, where her-35's 174-285 is what the ledgers' few numbers showed. Off that night's bars (hunts/floors/
+# l6_cast.py, 530 throws at fresh Hornies, 105+ away, no stranger by): of the casts that show, 79% kill (166-333: 78%; 174-285:
+# 63%), and what's left of those dealt 343, 367, 395 at p10, p50, p90 (334, 373, 398).
+WORLDS["strangers"] = {"camps": TREE_STRANGERS}
+WORLDS["live-floors"] = {**HER_35, "skill_star": (166, 333), "miss": 0.04, "camps": TREE_STRANGERS, "shared_exp": True}
+# ... and the scenes of where she hunts, each after it in `--world` (`start`, every seed's: `scenario`; its players in place of the
+# option's; README, "Where she hunts"): S1 she starts on P33, nobody low, two players above; S2 on P12, a player on the top and one in the
+# middle; S3 on P12, players on both top platforms of her round and the upper; S4 on P33, the map at about its cap, three
+# above killing both kinds; S5 the same from P12; S6 on P33, every clear point refilled at each pass, so the bottom never runs dry; S7
+# on the top, a player taking all of it, the floors below full (the night's frames 231-286 of 20261105-181026-review: top empty, off to
+# her drops past five monsters on P14).
+_HORNY, _LOW, _P12 = "horny-mushroom", (33, 100.0), (12, 160.0)
+_ABOVE = (Camp(8, 100.0, (7, 8), (GREEN, _HORNY)), Camp(15, -110.0, (14, 15), (GREEN, _HORNY)), Camp(21, 90.0, (21, 22), (GREEN, _HORNY)))
+WORLDS.update({
+    "s1": {"start": _LOW, "camps": (Camp(21, 90.0, (21, 22), (GREEN,)), Camp(15, -110.0, (14, 15), (GREEN,)))},
+    "s2": {"start": _P12, "camps": (Camp(7, -95.0, (7,), (GREEN, _HORNY)), Camp(21, 90.0, (21, 22), (GREEN,)))},
+    "s3": {"start": _P12, "camps": (Camp(7, -95.0, (7,), (GREEN, _HORNY)), Camp(10, 0.0, (10,), (GREEN, _HORNY)), Camp(15, -110.0, (14, 15), (GREEN,)))},
+    "s4": {"start": _LOW, "camps": _ABOVE, "spawn_share": 0.7},
+    "s5": {"start": _P12, "camps": _ABOVE, "spawn_share": 0.7},
+    "s6": {"start": _LOW, "camps": (Camp(21, 90.0, (21, 22), (GREEN,)),), "respawn_cap": 1.0},
+    "s7": {"start": (8, 137.0), "camps": (Camp(8, 100.0, (6, 7, 8, 9, 10), (GREEN, _HORNY)),)},
+})
+# ... and the policy's own draws (POLICY_SEED) by the world seed, `run_one`: every run shares them, so both sides of a paired table share her first routes and its t
+# hasn't that spread in it. On seeds 201-212 of 15 minutes the same code at another policy seed moved EXP/min +21.8 (t +1.3) and passed a gate of eight lines whole
+# (README, "Where she hunts"). `policy-each` each seed its own, `policy-other` others again, a do-nothing's side to set beside a change's. Goldens stay at POLICY_SEED.
+POLICY_EACH = {"policy-each": 0, "policy-other": 1000}
+WORLDS.update(dict.fromkeys(POLICY_EACH, {}))
 # ... and her body for touches as the planner has it (`client-body`: 22 either side of her feet and 65 tall,
 # motion.bodies, which the planner keeps her clear of monsters by), or as the simulator had it until 2026-11-02
 # (`wide-body`: 15 either side and 55 tall, world.HER_HALF, HER_HEIGHT), not the client's touch test (world.HER_TOUCH: a
@@ -427,7 +483,7 @@ WORLDS["hang-rules"] = {"stack": (("gamelab.control.navigator", "HANG_LONGER", T
                                   ("gamelab.control.navigator", "HANG_TAKE", True))}
 WORLDS["no-hang"] = {"stack": (("gamelab.control.navigator", "ROPE_HANG", False),)}
 NOISE_FIELDS = ("heading_wrong", "near_seen", "off_seen", "near_spell", "off_spell",  # WORLDS' fields that are
-                "spawn_found", "hit_hidden", "exact")                                  # world.Noise's
+                "spawn_found", "hit_hidden", "exact", "miss")                          # world.Noise's
 # Worlds that set again a field another sets (`walkers`' invulnerability, `near-misses`' bands): applied after the
 # others whatever the order they're given in (scenario), so `--world walkers --world invulnerable-1.45` and the reverse
 # are one.
@@ -571,19 +627,20 @@ def scenario(policy: str, seed: int, preset: str = "game", minutes: float = 20.0
     her = scenarios.her_on(map_id)[1]
     for name in sorted(world, key=lambda w: w in LAST_WORLDS):  # (stable: the others in their order, LAST_WORLDS after)
         fields = WORLDS[name]
-        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's)
-                                                  if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack")})
+        realism = dataclasses.replace(realism, **{k: v for k, v in fields.items()  # (`stack`: run_one's, not the world's; `start`: below)
+                                                  if k not in (*HER_FIELDS, *NOISE_FIELDS, "stack", "start")})
         her = dataclasses.replace(her, **{k: v for k, v in fields.items() if k in HER_FIELDS})
         noise = dataclasses.replace(noise, **{k: v for k, v in fields.items() if k in NOISE_FIELDS})
     if attack is not None and her.magic is None:  # (the thief's Lucky Seven: the magician's attack is her Magic Claw)
         her = dataclasses.replace(her, **ATTACK_HER)
     fn = POLICIES[policy] if not grounds else _only(POLICIES[policy], tuple(grounds))
     starts = STARTS[map_id]
+    start = next((WORLDS[w]["start"] for w in world if "start" in WORLDS[w]), starts[seed % len(starts)])
     return scenarios.Scenario(f"{policy}:{preset}:{seed}" + (f":{map_id}" if map_id != FIRST_MAP else "")
                               + "".join(f":{w}" for w in world) + (f":g{'-'.join(map(str, grounds))}" if grounds else "")
                               + (f":attack-{attack}" if attack else ""),
                               fn,
-                              starts[seed % len(starts)], monsters="all", seed=seed, limit=minutes * 60, noise=noise,
+                              start, monsters="all", seed=seed, limit=minutes * 60, noise=noise,
                               realism=realism, may_die=True, think=think_clock or think, think_reads=bool(think_clock),
                               map_id=map_id,
                               her=her if world or attack else None, attack=attack,
@@ -609,6 +666,7 @@ def run_one(policy: str, seed: int, preset: str = "game", minutes: float = 20.0,
     routes, feed_costs = route.ROUTES, feed.COSTS
     stack = [(importlib.import_module(mod), name, value)  # (the stack's switches the worlds set: WORLDS' `stack`)
              for w in world for mod, name, value in WORLDS[w].get("stack", ())]
+    stack += [(sys.modules[__name__], "POLICY_SEED", seed + POLICY_EACH[w]) for w in world if w in POLICY_EACH]
     kept = [(mod, name, getattr(mod, name)) for mod, name, _ in stack]  # (as they were: put back after the run)
     try:
         for mod, name, value in stack:

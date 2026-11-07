@@ -50,6 +50,13 @@ STAT_WINDOW = LAB / "stat_window.json"  # what a live capture of her stat window
                                          # with this (behavior.statcheck); the client's, not a character's
 STAT_TEMPLATES = LAB / "stat_window"    # ... and the panels cut from the live frame where the game data's didn't match
 PET = LAB / "pet.json"           # when she last fed her pet (behavior.hunter.feed_pet_if_due)
+VITALS = LAB / "vitals.json"     # what the phone has been told of her potions and her death (behavior.vitals)
+HUNT = LAB / "hunt.json"         # the command hunting now, as it said at its start (behavior.guard.running_hunt)
+STOP_HUNT = LAB / "stop_hunt.json"  # `gamelab stop`: the running hunt's next look reads it (Hunter._stop_now)
+PARK_NOTE = LAB / "park_note.json"  # a stop or a park not done, for the guard to do at the game's return
+PARKED = LAB / "parked.json"     # how the last park or stop's retreat came out (behavior.retreat.told)
+GUARD = LAB / "guard.json"       # the guard's state across the pet feeder's restarts (behavior.guard)
+GUARD_MODE = LAB / "guard_mode.txt"  # the guard's switch: "off" or "alert" (`gamelab guard`); none: on
 GROUNDS = LAB / "grounds.json"   # per map and hunting platform: visits, and the EXP they gave
 DAMAGE = LAB / "damage.json"     # her attacks' damage as the monsters' bars showed it, learned as she hunts
                                  # (behavior.damage: the reads and each attack's fit)
