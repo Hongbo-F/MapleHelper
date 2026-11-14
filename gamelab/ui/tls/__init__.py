@@ -10,6 +10,8 @@
     /tls/api/body?id=&part=req|resp|msg&form=decoded|wire[&dl=1]   a body, as bytes (application/octet-stream)
     /tls/api/record?n=&dir=&i=, stream?n=&dir=&off=&len=   a record's plaintext, a decrypted stream
     /tls/api/search?q=          the items whose headers or bodies hold q
+    /tls/api/csauth?cap=        its x-csauth calls as a timeline per computer, each event the diff against the
+                                computer's state (ui.tls.csauth)
 
 `local` is 1 / 0 / missing: frames over 1500 B trusted (captured on this PC) / not / by the capture's folder. ROOT is
 GAMELAB_TLS_ROOT, else the recorder's captures folder in the repo (.analysis/captures). Who may read it: ui.tls.access
@@ -136,6 +138,11 @@ def _api(send, name: str, q: dict) -> None:
         send(200, bytes(app[off:off + ln]), "application/octet-stream", {"X-Total-Length": str(len(app))})
     elif name == "search":
         send(200, _json({"ids": cap.search(q.get("q", ""))}))
+    elif name == "csauth":
+        if getattr(cap, "csauth", None) is None:
+            from .csauth import timeline
+            cap.csauth = _json(timeline(cap))
+        send(200, cap.csauth)
     else:
         fail(404, "not found")
 
