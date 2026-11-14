@@ -25,7 +25,9 @@ locked screen) is opened again, and every stream starts with a snapshot, so noth
 (WebRTC would need packages the standard library doesn't have, for nothing a LAN needs.)
 
 It only reads telemetry: it sends no keys and never touches the game. It asks for no key or password:
-whoever reaches its address (the network, or a tunnel's hostname) can watch, and steer a replay.
+whoever reaches its address (the network, or a tunnel's hostname) can watch, and steer a replay. The one
+exception is /tls/ (the recorder's captures with their TLS decrypted, ui.tls): what comes to it through the
+tunnel needs a Cloudflare Access login (ui.tls.access).
 """
 
 import json
@@ -45,7 +47,7 @@ from ..attack import reach
 from ..attack.reach import SHOT_DOWN, SHOT_H, SHOT_UP, STAR_REACH, shot_dx
 from .render import JUMP_ARC, KIND, PLAYERS, REACH_ALPHA, REMEMBER_FADE_S, REMEMBER_FAINT, STYLE, MapView
 from .state import LATEST, TRAIL, State
-from . import review
+from . import review, tls
 
 POLL_S = 0.025          # how often the telemetry is read: on average a record waits half of it (at 0.1 s,
                         # records reached the page 58 ms after they were written; at 0.025 s, 21 ms)
@@ -491,6 +493,8 @@ class _Handler(BaseHTTPRequestHandler):
                 now, rate = feed.clock()
             self._send(200, _json({"now": now, "rate": rate}), "application/json")
         elif review.handle(self, url.path, query=query):  # overlaid recordings, frame by frame (ui.review)
+            pass
+        elif tls.handle(self, url.path, query=query):  # the captures' TLS decrypted (ui.tls; Access-checked)
             pass
         else:
             self._send(404, b"not found", "text/plain")

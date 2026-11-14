@@ -17,6 +17,7 @@ dependencies:
   # commits about 3 GB.
   - libblas=*=*openblas
   - pillow
+  - cryptography  # the web page's /tls/: the captures' TLS decrypted, Cloudflare Access tokens checked (gamelab/ui/tls)
   - pip
   - pip:
       - rapidocr>=3.10
