@@ -22,6 +22,7 @@
   <div class="tabs" role="tablist">
     <button type="button" data-view="items" class="on" role="tab">Requests</button>
     <button type="button" data-view="conns" role="tab">Connections</button>
+    <button type="button" data-view="csauth" role="tab" title="The NGS anti-cheat's x-csauth calls per computer, each showing what changed">x-csauth</button>
   </div>
   <input id="q" type="search" placeholder="Filter: host, path, method, status, #conn  (-word excludes; / to focus)" autocomplete="off" spellcheck="false">
   <label class="chk" title="Also search headers and decoded bodies (server side)"><input type="checkbox" id="deep"> in bodies</label>
@@ -30,6 +31,9 @@
     <label class="chk"><input type="checkbox" id="t-http" checked> HTTP</label>
     <label class="chk"><input type="checkbox" id="t-ws" checked> WebSocket</label>
     <label class="chk" title="WebSocket ping / pong / close frames"><input type="checkbox" id="t-ctl"> WS control</label>
+  </span>
+  <span class="toggles" data-for="csauth">
+    <label class="chk" title="List every heartbeat, also those with nothing new"><input type="checkbox" id="t-quiet"> quiet heartbeats</label>
   </span>
   <span class="toggles" data-for="conns">
     <label class="chk" title="Also list TLS connections that could not be decrypted"><input type="checkbox" id="t-nokey"> undecrypted</label>

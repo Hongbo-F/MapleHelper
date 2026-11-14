@@ -189,3 +189,17 @@ tr.exp td { white-space: normal; background: var(--panel2) !important; cursor: d
   .split { display: none; }
   .stats { margin-left: 0; }
 }
+
+/* x-csauth timeline */
+table.grid tr.comp td { background: var(--panel2); cursor: default; height: auto; white-space: normal; padding: 8px; border-top: 1px solid var(--line); }
+table.grid tr.comp:hover td { background: var(--panel2); }
+.comphead { font-size: 12.5px; line-height: 1.5; }
+table.grid tr.fold td { cursor: default; font-size: 12px; }
+table.grid tr.fold:hover td { background: none; }
+table.grid td.chips { white-space: normal; height: auto; padding-top: 4px; padding-bottom: 4px; }
+table.grid td.chips .chip { margin-bottom: 2px; white-space: normal; }
+table.kv.changes tr.dim td { opacity: .6; }
+.old { color: var(--err); }
+.new { color: var(--ok); }
+.report { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+.report .rhead { margin-bottom: 4px; font-size: 12.5px; }

@@ -65,6 +65,7 @@ const S = {
   caps: [], cap: "", local: "", data: null, items: [], conns: [], itemById: new Map(), connByN: new Map(),
   view: "items", sel: null, selConn: null, deepIds: null, dtab: "resp", ctab: "overview", visible: [],
   bodyCache: new Map(), connCache: new Map(), loadToken: 0,
+  csauth: null, csauthLoading: false, evById: new Map(), selEv: null,
 };
 
 async function api(path, params, as = "json") {
@@ -92,7 +93,7 @@ function apiUrl(path, params) {
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   return { cap: h.get("cap") || "", local: h.get("local") || "", view: h.get("view") || "", sel: h.get("sel") || "",
-           conn: h.get("conn") || "" };
+           conn: h.get("conn") || "", ev: h.get("ev") || "" };
 }
 function writeHash() {
   const h = new URLSearchParams();
@@ -101,6 +102,7 @@ function writeHash() {
   h.set("view", S.view);
   if (S.view === "items" && S.sel) h.set("sel", S.sel);
   if (S.view === "conns" && S.selConn != null) h.set("conn", S.selConn);
+  if (S.view === "csauth" && S.selEv) h.set("ev", S.selEv);
   history.replaceState(null, "", "#" + h.toString());
 }
 
@@ -141,7 +143,7 @@ async function init() {
   const pick = S.caps.find((c) => c.id === h.cap) || S.caps.find((c) => c.keylogs.length) || S.caps[0];
   S.cap = pick.id;
   S.local = h.local;
-  S.view = h.view === "conns" ? "conns" : "items";
+  S.view = ["conns", "csauth"].includes(h.view) ? h.view : "items";
   sel.value = S.cap;
   $("#frames").value = S.local;
   await openCap(h);
@@ -153,6 +155,7 @@ async function openCap(h, reload) {
   $("#frames").options[0].text = "Frames: auto (" + (info && info.local_default ? "local" : "router rules") + ")";
   overlay("Decrypting " + (info ? info.name : S.cap));
   S.bodyCache.clear(); S.connCache.clear();
+  S.csauth = null; S.evById = new Map();
   $("#reload").classList.remove("on");
   try {
     for (let first = true; ; first = false) {
@@ -179,6 +182,7 @@ async function openCap(h, reload) {
   hs.value = [...hs.options].some((o) => o.value === keep) ? keep : "";
   S.sel = h && h.sel && S.itemById.has(h.sel) ? h.sel : null;
   S.selConn = h && h.conn && S.connByN.has(+h.conn) ? +h.conn : null;
+  S.selEv = h && h.ev ? h.ev : null;
   S.deepIds = null;
   if ($("#deep").checked && $("#q").value.trim()) runDeep();
   setView(S.view, true);
@@ -205,10 +209,13 @@ function setView(v, keepScroll) {
   S.view = v;
   for (const b of document.querySelectorAll(".tabs button")) b.classList.toggle("on", b.dataset.view === v);
   for (const t of document.querySelectorAll(".toggles")) t.classList.toggle("hidden", t.dataset.for !== v);
+  $("#host").style.display = $("#deep").closest("label").style.display = v === "csauth" ? "none" : "";
   renderList();
   if (v === "items" && S.sel) showItem(S.sel);
   else if (v === "conns" && S.selConn != null) showConn(S.selConn);
-  else $("#detail").replaceChildren(el("div", { class: "placeholder" }, v === "items" ? "Select a request." : "Select a connection."));
+  else if (v === "csauth" && S.selEv && S.evById.has(S.selEv)) showEvent(S.selEv);
+  else $("#detail").replaceChildren(el("div", { class: "placeholder" }, { items: "Select a request.", conns: "Select a connection.",
+    csauth: "Select a call: each one shows only what changed since the computer's call before it." }[v]));
   scrollSelIntoView();
   writeHash();
 }
@@ -272,6 +279,7 @@ function renderList() {
   const box = $("#list");
   const ts = terms(), host = $("#host").value;
   if (!S.data) { box.replaceChildren(); return; }
+  if (S.view === "csauth") { renderCsauth(box, ts); return; }
   if (S.view === "items") {
     const vis = S.items.filter((it) => itemVisible(it, ts, host));
     S.visible = vis.map((it) => it.id);
@@ -337,7 +345,8 @@ function renderList() {
 function markSel() {
   for (const tr of $("#list").querySelectorAll("tr.sel")) tr.classList.remove("sel");
   const sel = S.view === "items" ? (S.sel && $(`#list tr[data-id="${CSS.escape(S.sel)}"]`))
-                                 : (S.selConn != null && $(`#list tr[data-n="${S.selConn}"]`));
+    : S.view === "csauth" ? (S.selEv && $(`#list tr[data-ev="${CSS.escape(S.selEv)}"]`))
+    : (S.selConn != null && $(`#list tr[data-n="${S.selConn}"]`));
   if (sel) sel.classList.add("sel");
   return sel;
 }
@@ -351,6 +360,12 @@ function selectItem(id) {
   markSel();
   writeHash();
   showItem(id);
+}
+function selectEv(id) {
+  S.selEv = id;
+  markSel();
+  writeHash();
+  showEvent(id);
 }
 function selectConn(n) {
   S.selConn = n;
@@ -835,6 +850,192 @@ function gotoItem(id) {
   setView("items");
 }
 
+// ------------------------------------------------------------------------------------------ x-csauth timeline
+// One section per computer (the NGS hwid), its calls in time order, each showing only what changed (ui/tls/csauth.py
+// says what counts): runs of heartbeats with nothing new folded into one row.
+
+async function loadCsauth() {
+  if (S.csauthLoading) return;
+  S.csauthLoading = true;
+  const token = S.loadToken;
+  try {
+    const d = await api("api/csauth", capParams());
+    if (token !== S.loadToken) return;
+    S.csauth = d;
+    S.evById = new Map();
+    for (const c of d.computers) for (const ev of c.events) { ev.computer = c; S.evById.set(ev.id, ev); }
+  } catch (e) {
+    if (token !== S.loadToken) return;
+    S.csauth = { computers: [], unkeyed: [], error: e.message };
+  } finally { S.csauthLoading = false; }
+  if (S.view === "csauth") {
+    renderList();
+    if (S.selEv && S.evById.has(S.selEv)) showEvent(S.selEv);
+    scrollSelIntoView();
+  }
+}
+
+const OPS = { added: "+", removed: "−", changed: "~" };
+function evLabel(ev) {
+  return ev.kind === "v2" ? `heartbeat #${ev.beat}` : ev.kind === "issue" ? "issue: session start"
+    : ev.kind === "close" ? "close: session end" : ev.path;
+}
+function evShort(ev) { return ev.kind === "v2" ? `#${ev.beat}` : ev.kind; }
+
+function evChips(ev) {
+  const b = [];
+  const add = (t, cls, title) => b.push(el("span", { class: "chip " + (cls || ""), title }, t));
+  if (ev.damaged) add("damaged", "err", ev.damaged);
+  if (ev.initial) add("first call", "info", "the computer's first call in this capture: the whole request");
+  if (ev.gap) add("gap " + fmtDur(ev.gap), "warn", `no heartbeat for ${fmtDur(ev.gap)} before this one`);
+  for (const [k, v] of Object.entries((ev.response && ev.response.flags) || {}))
+    add(k === "detected" ? `detected ×${v.length}` : k, k === "config_changed" ? "warn" : "err", JSON.stringify(v));
+  const groups = new Map();
+  for (const r of ev.reports || []) { const k = r.code + (r.label ? " " + r.label : ""); groups.set(k, (groups.get(k) || 0) + 1); }
+  for (const [k, n] of groups) add(`+${n} ${k}`, k.startsWith("0xE2") ? "err" : "purple", "new report entries");
+  const major = (ev.changes || []).filter((c) => !c.minor);
+  if (major.length) add(major.slice(0, 3).map((c) => OPS[c.op] + c.path).join(", ") + (major.length > 3 ? ` +${major.length - 3}` : ""),
+    "info", major.map((c) => `${c.op} ${c.path}`).join("\n"));
+  const intro = Object.keys(ev.introduced || {});
+  if (intro.length) add(`${intro.length} first-seen fields`, "", intro.join(", "));
+  const rc = (ev.response && ev.response.changes) || [];
+  if (rc.length) add("response: " + rc.map((c) => c.path).join(", "), "warn");
+  if (!b.length && (ev.changes || []).length) add(`${ev.changes.length} minor`, "", ev.changes.map((c) => c.path).join("\n"));
+  return b;
+}
+
+function evText(ev) {
+  return [evLabel(ev), ev.kind, ev.client, ev.session, "#" + ev.conn, ev.damaged, ev.gap ? "gap" : "",
+          ...(ev.changes || []).map((c) => c.path), ...(ev.reports || []).map((r) => `${r.code} ${r.label} ${r.list}`),
+          ...Object.keys((ev.response && ev.response.flags) || {}), ...Object.keys(ev.introduced || {})].join(" ").toLowerCase();
+}
+
+function computerHead(c) {
+  const facts = [c.ips.join(", "), c.accounts.length ? "account " + c.accounts.join(", ") : "", `${c.beats} heartbeats`];
+  return el("div", { class: "comphead" },
+    el("div", null, el("b", null, c.name || (c.hwid === "?" ? "calls without a readable hwid" : "unknown machine")), "  ",
+      el("span", { class: "mono muted" }, c.hwid === "?" ? "" : "hwid " + c.hwid)),
+    el("div", { class: "muted" }, facts.filter(Boolean).join(" · ")),
+    c.unkeyed.map((u) => el("div", { class: "muted" }, `+ ${u.connections} x-csauth connections from ${u.client} not decrypted (${u.why}), `
+      + `${fmtTime(u.first).slice(0, 8)} – ${fmtTime(u.last).slice(0, 8)}: a second NGS client whose TLS keys aren't in the key log`)));
+}
+
+function renderCsauth(box, ts) {
+  if (!S.csauth) {
+    box.replaceChildren(el("div", { class: "empty" }, "Reading the x-csauth calls…"));
+    $("#count").textContent = "";
+    loadCsauth();
+    return;
+  }
+  const showQuiet = $("#t-quiet").checked;
+  const tb = el("tbody");
+  const vis = [];
+  let total = 0;
+  for (const c of S.csauth.computers) {
+    tb.append(el("tr", { class: "comp" }, el("td", { colspan: 4 }, computerHead(c))));
+    let run = [];
+    const flush = () => {
+      if (!run.length) return;
+      const minor = run.filter((e) => (e.changes || []).length).length;
+      tb.append(el("tr", { class: "fold" }, el("td", { class: "t" }, fmtTime(run[0].ts)),
+        el("td", { colspan: 3, class: "muted" }, `⋯ ${run.length} heartbeat${run.length > 1 ? "s" : ""} with nothing new`
+          + (run.length > 1 ? `, ${fmtTime(run[0].ts).slice(0, 8)} – ${fmtTime(run[run.length - 1].ts).slice(0, 8)}` : "")
+          + (minor ? ` (${minor} with only minor sequence changes)` : ""))));
+      run = [];
+    };
+    for (const ev of c.events) {
+      total++;
+      if (ts.length && !matchTerms(evText(ev), ts)) continue;
+      if (ev.quiet && !showQuiet && !ts.length) { run.push(ev); continue; }
+      flush();
+      vis.push(ev.id);
+      tb.append(el("tr", { "data-ev": ev.id, class: (ev.id === S.selEv ? "sel " : "") + (ev.quiet ? "dim" : "") },
+        el("td", { class: "t", title: fmtDate(ev.ts) }, fmtTime(ev.ts)),
+        el("td", { title: evLabel(ev) }, el("span", { class: "m" + (ev.kind === "v2" ? "" : " ws") }, evShort(ev))),
+        el("td", { class: "num muted" }, "#" + ev.conn),
+        el("td", { class: "chips" }, evChips(ev))));
+    }
+    flush();
+  }
+  for (const u of S.csauth.unkeyed) {
+    tb.append(el("tr", { class: "comp" }, el("td", { colspan: 4 }, el("div", { class: "comphead muted" },
+      `${u.client}: ${u.connections} x-csauth connections not decrypted (${u.why}), ${fmtTime(u.first).slice(0, 8)} – ${fmtTime(u.last).slice(0, 8)}`))));
+  }
+  S.visible = vis;
+  $("#count").textContent = `${num(vis.length)} of ${num(total)} calls shown`;
+  const table = el("table", { class: "grid" },
+    el("colgroup", null, [104, 64, 56, null].map((w) => el("col", w ? { style: `width:${w}px` } : null))),
+    el("thead", null, el("tr", null, ["Time", "Call", "Conn", "What's new"].map((h, i) => el("th", { class: i === 2 ? "num" : "" }, h)))), tb);
+  if (S.csauth.error) box.replaceChildren(el("div", { class: "empty" }, "Could not read the x-csauth calls: " + S.csauth.error));
+  else if (!S.csauth.computers.length && !S.csauth.unkeyed.length) box.replaceChildren(el("div", { class: "empty" }, "No x-csauth calls in this capture."));
+  else box.replaceChildren(table);
+}
+
+function compact(v) {
+  if (v === null || v === undefined) return "—";
+  const s = JSON.stringify(v);
+  return s.length > 240 ? s.slice(0, 240) + "…" : s;
+}
+
+function changesTable(changes) {
+  const t = el("table", { class: "kv changes" });
+  for (const c of changes) {
+    t.append(el("tr", { class: c.minor ? "dim" : "" },
+      el("td", { class: "k" }, OPS[c.op] + " " + c.path),
+      el("td", { class: "v", title: c.op === "changed" ? `${JSON.stringify(c.old)} → ${JSON.stringify(c.new)}` : JSON.stringify(c.op === "removed" ? c.old : c.new) },
+        c.op === "changed" ? [el("span", { class: "old" }, compact(c.old)), " → ", el("span", { class: "new" }, compact(c.new))]
+          : c.op === "removed" ? el("span", { class: "old" }, compact(c.old)) : el("span", { class: "new" }, compact(c.new)),
+        c.note ? el("div", { class: "muted" }, c.note) : null)));
+  }
+  return t;
+}
+
+function showEvent(id) {
+  ++detailToken;
+  const ev = S.evById.get(id), box = $("#detail");
+  if (!ev) { box.replaceChildren(el("div", { class: "placeholder" }, "No such call.")); return; }
+  const c = ev.computer;
+  const head = el("div", { class: "dhead" },
+    el("div", { class: "dtitle" }, el("span", { class: "m" }, evLabel(ev)), el("span", { class: "url" }, "https://x-csauth.ngs.nexon.com" + ev.path),
+      ev.status != null ? el("span", { class: statusClass(ev.status) }, ev.status) : null),
+    el("div", { class: "dmeta" }, el("span", null, fmtDate(ev.ts)), el("span", null, c.name || c.hwid),
+      el("span", { class: "mono" }, ev.client), ev.session ? el("span", { class: "mono" }, "session " + ev.session) : null,
+      el("a", { onclick: () => gotoItem(ev.id), title: "The whole request and response in the Requests view" }, "open the request"),
+      el("a", { onclick: () => { S.selConn = ev.conn; setView("conns"); } }, `connection #${ev.conn}`)));
+  const pane = el("div", { class: "pane" });
+  const sect = (title, ...kids) => el("div", { class: "sect" }, el("div", { class: "sect-h" }, title), ...kids);
+  if (ev.damaged) pane.append(el("div", { class: "banner err" }, ev.damaged));
+  if (ev.gap) pane.append(el("div", { class: "banner warn" }, `No heartbeat for ${fmtDur(ev.gap)} before this one.`));
+  const flags = Object.entries((ev.response && ev.response.flags) || {});
+  if (flags.length) pane.append(sect("The server asked", kvTable(flags.map(([k, v]) => [k, JSON.stringify(v)]))));
+  if ((ev.changes || []).length) pane.append(sect(`Changed (${ev.changes.length})`, changesTable(ev.changes)));
+  if (((ev.response && ev.response.changes) || []).length) pane.append(sect("The response changed", changesTable(ev.response.changes)));
+  if ((ev.reports || []).length) {
+    const s = sect(`New reports (${ev.reports.length})`);
+    for (const r of ev.reports) {
+      s.append(el("div", { class: "report" }, el("div", { class: "rhead" },
+        el("span", { class: "chip " + ((r.code || "").startsWith("0xE2") ? "err" : "purple") }, r.code || "?"), " ", r.label || "",
+        el("span", { class: "muted" }, "  " + r.list)), jsonTree(r.entry)));
+    }
+    pane.append(s);
+  }
+  if (ev.response && ev.response.text) pane.append(sect("Response body", el("div", { class: "startline" }, ev.response.text)));
+  const notes = [];
+  const h = ev.hidden || {};
+  if (h.decoys || h.markers) notes.push(`${h.decoys} decoy entries (log_code 0x221FFFFF) and ${h.markers} heartbeat marker (0x00000000) left out`);
+  if (ev.repeated) notes.push(`${ev.repeated} report entries the same as in the previous heartbeat`);
+  if (ev.answer_set != null) notes.push(`app_crc / module_crc: answer set ${ev.answer_set}` + (ev.answer_set_first
+    ? ", the computer's first heartbeat with it (nothing to compare with)" : ", compared with the set's previous heartbeat"));
+  if (notes.length) pane.append(el("div", { class: "muted sect" }, notes.join(". ") + "."));
+  const intro = Object.keys(ev.introduced || {});
+  if (intro.length) pane.append(el("details", { class: "sect" }, el("summary", null, `First-seen fields (${intro.length})`), jsonTree(ev.introduced)));
+  if (ev.body) pane.append(sect("The whole request (decoys left out)", jsonTree(ev.body)));
+  if (ev.quiet) pane.prepend(el("div", { class: "banner info" }, "Nothing new against the computer's previous heartbeat."
+    + ((ev.changes || []).length ? " Only minor sequence changes, listed below." : "")));
+  box.replaceChildren(head, pane);
+  box.scrollTop = 0;
+}
+
 // ------------------------------------------------------------------------------------------ events
 
 let deepTimer = 0;
@@ -862,10 +1063,10 @@ function onFilter() {
 
 function moveSel(delta) {
   if (!S.visible.length) return;
-  const curr = S.view === "items" ? S.sel : S.selConn;
+  const curr = S.view === "items" ? S.sel : S.view === "csauth" ? S.selEv : S.selConn;
   let i = S.visible.indexOf(curr);
   i = i < 0 ? (delta > 0 ? 0 : S.visible.length - 1) : Math.max(0, Math.min(S.visible.length - 1, i + delta));
-  if (S.view === "items") selectItem(S.visible[i]); else selectConn(S.visible[i]);
+  if (S.view === "items") selectItem(S.visible[i]); else if (S.view === "csauth") selectEv(S.visible[i]); else selectConn(S.visible[i]);
   scrollSelIntoView();
 }
 
@@ -877,11 +1078,11 @@ function wire() {
   for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => setView(b.dataset.view));
   $("#q").addEventListener("input", onFilter);
   $("#deep").addEventListener("change", () => { S.deepIds = null; onFilter(); });
-  for (const id of ["#host", "#t-http", "#t-ws", "#t-ctl", "#t-nokey"]) $(id).addEventListener("change", () => { renderList(); markSel(); });
+  for (const id of ["#host", "#t-http", "#t-ws", "#t-ctl", "#t-nokey", "#t-quiet"]) $(id).addEventListener("change", () => { renderList(); markSel(); });
   $("#list").addEventListener("click", (e) => {
-    const tr = e.target.closest("tr[data-id], tr[data-n]");
+    const tr = e.target.closest("tr[data-id], tr[data-n], tr[data-ev]");
     if (!tr) return;
-    if (tr.dataset.id) selectItem(tr.dataset.id); else selectConn(+tr.dataset.n);
+    if (tr.dataset.ev) selectEv(tr.dataset.ev); else if (tr.dataset.id) selectItem(tr.dataset.id); else selectConn(+tr.dataset.n);
   });
   document.addEventListener("keydown", (e) => {
     const tag = (e.target.tagName || "").toLowerCase();

@@ -294,3 +294,108 @@ def test_nothing_but_the_pages_own_files_and_the_capture_s_items_are_served(serv
         with pytest.raises(urllib.error.HTTPError) as e:
             get(served + path)
         assert e.value.code == 404, path
+
+
+# ------------------------------------------------------------------------------------------------ the x-csauth timeline
+
+from types import SimpleNamespace  # noqa: E402
+import zlib  # noqa: E402
+
+from gamelab.ui.tls import csauth  # noqa: E402
+
+HW, IP = "20000-5DF338-3F5283-CAFBE5-A35FDE-168AB5D-0183", "192.168.195.98"
+DECOY_ENTRY = {"guid": "1", "npacode": "G", "detail": {"reason": "4b3a0bb7"}, "log_id": 5, "log_code": "0x221FFFFF",
+               "log_timestamp": 9, "result": 4, "signature_id": 0}
+MARKER_ENTRY = {"guid": "1", "npacode": "G", "detail": {}, "log_id": 5, "log_code": "0x00000000", "log_timestamp": 9,
+                "result": 0, "signature_id": 0}
+INVENTORY = {"guid": "1", "npacode": "G", "detail": {"device_obj": {"cpu": "Ryzen", "gpu": "RTX"},
+             "system_obj": {"os": "Windows 10 VB", "edition": "ServerRdsh "}}, "log_id": 7, "log_code": "0xC210F070",
+             "log_timestamp": 11, "result": 4, "signature_id": 0}
+
+
+def token(answer_set, salt=0):
+    """A 19-hex token whose crc32 picks `answer_set` (csauth.answer_set)."""
+    n = salt * 1000
+    while zlib.crc32(("%019x" % n).encode()) % 5 != answer_set:
+        n += 1
+    return "%019x" % n
+
+
+def beat(tok, crc, seq, collected, detected, sig=1):
+    return {"lifetoken": "L1", "hwid": HW, "guid": "1", "npacode": "G", "process_id": 7, "csauthtoken": tok,
+            "app_crc": {"MapleStory.exe": crc}, "module_crc": {"CORE": crc + 1}, "signature_crc": {"0x06061": sig},
+            "sequence": seq, "collected_info": collected, "detected_info": detected}
+
+
+def fake_capture(calls):
+    """A ready Capture stand-in: x-csauth items (path, ts, request body, response body) on connection 1."""
+    def part(body):
+        raw = body if isinstance(body, bytes) else json.dumps(body).encode()
+        return SimpleNamespace(body=raw, display="json" if not isinstance(body, bytes) else "text")
+    items = [{"type": "http", "host": csauth.HOST, "path": path, "ts": ts, "conn": 1, "id": f"1.{k}", "status": 200,
+              "proto": "http/1.1", "req": part(req), "resp": part(resp) if resp is not None else None}
+             for k, (path, ts, req, resp) in enumerate(calls)]
+    conns = [{"n": 1, "client": IP + ":5000", "sni": csauth.HOST, "decrypted": True, "start": 0, "end": 1},
+             {"n": 2, "client": IP + ":5001", "sni": csauth.HOST, "decrypted": False, "start": 50, "end": 60,
+              "status": "no key"}]
+    return SimpleNamespace(items=items, conns=conns)
+
+
+def test_the_timeline_shows_each_call_against_the_computers_previous_ones_without_decoys_or_noise():
+    t0 = 1_794_600_000.0
+    decoys = [DECOY_ENTRY] * 9
+    calls = [
+        ("/v1/issue", t0, {"lifetoken": "L1", "hwid": HW, "guid": "1", "npacode": "", "process_id": 7}, {"csauthtoken": "x"}),
+        ("/v1/issue", t0 + 10, {"lifetoken": "L1", "hwid": HW, "guid": "1", "npacode": "G", "process_id": 7}, {"csauthtoken": "y"}),
+        ("/v2", t0 + 70, beat(token(2), 100, {"0x1000": [1, 50]}, [INVENTORY] + decoys, [MARKER_ENTRY] + decoys),
+         {"csauthtoken": "a", "config_changed": 1, "auth_cycle": 60, "detected": []}),
+        # ticks advance, the token's answer set and its answers differ, one id takes a value it never had: all noise
+        ("/v2", t0 + 130, beat(token(3), 900, {"0x1000": [2, 51]}, decoys + [DECOY_ENTRY], [MARKER_ENTRY] + decoys),
+         {"csauthtoken": "b", "config_changed": 0, "auth_cycle": 60, "detected": []}),
+        # set 2 again but with other answers (a file changed), a rule push, and the inventory again
+        ("/v2", t0 + 190, beat(token(2, 1), 101, {"0x1000": [3, 50], "0x2040": [3, 9]}, [INVENTORY] + decoys,
+                               [MARKER_ENTRY] + decoys, sig=2),
+         {"csauthtoken": "c", "config_changed": 0, "auth_cycle": 60, "detected": []}),
+        ("/v2", t0 + 500, beat(token(3, 1), 900, {"0x1000": [4, 50], "0x2040": [4, 9]}, [INVENTORY] + decoys,
+                               [MARKER_ENTRY] + decoys, sig=2),
+         {"csauthtoken": "d", "config_changed": 0, "auth_cycle": 60, "detected": [{"x": 1}]}),
+        ("/v1/close", t0 + 560, {"lifetoken": "L1", "hwid": HW, "guid": "", "npacode": "", "process_id": 7}, b"Lig="),
+    ]
+    t = csauth.timeline(fake_capture(calls))
+    json.dumps(t)
+    [c] = t["computers"]
+    assert (c["hwid"], c["ips"], c["accounts"], c["beats"]) == (HW, [IP], ["G"], 4)
+    assert c["name"] == "Ryzen · RTX · Windows 10 VB · ServerRdsh"
+    assert [(u["client"], u["connections"]) for u in c["unkeyed"]] == [(IP, 1)] and t["unkeyed"] == []
+    issue1, issue2, b1, b2, b3, b4, close = c["events"]
+    assert issue1["initial"] and "body" in issue1 and not issue1["quiet"]
+    assert [(x["path"], x["old"], x["new"]) for x in issue2["changes"]] == [("npacode", "", "G")]
+    # the first heartbeat: its new fields folded away, its real report, decoys and the marker only counted
+    assert set(b1["introduced"]) == {"app_crc", "module_crc", "signature_crc"} and b1["changes"] == []
+    assert [r["code"] for r in b1["reports"]] == ["0xC210F070"] and b1["hidden"] == {"decoys": 18, "markers": 1}
+    assert b1["response"]["flags"] == {"config_changed": 1} and not b1["quiet"]
+    # all noise: quiet, the one minor change kept for the curious
+    assert b2["quiet"] and b2["reports"] == [] and [x["path"] for x in b2["changes"]] == ["sequence.0x1000[1]"]
+    assert b2["changes"][0]["minor"] and b2["answer_set_first"]
+    # the same answer set as b1 with another answer, the rule push, a module joining; the inventory came again
+    paths = {x["path"]: x for x in b3["changes"]}
+    assert paths["app_crc.MapleStory.exe"]["old"] == 100 and paths["app_crc.MapleStory.exe"]["new"] == 101
+    assert "set 2" in paths["app_crc.MapleStory.exe"]["note"] and "module_crc.CORE" in paths
+    assert paths["signature_crc.0x06061"]["new"] == 2 and paths["sequence.0x2040"]["op"] == "added"
+    assert [r["code"] for r in b3["reports"]] == ["0xC210F070"] and b3["repeated"] == 0   # b2 had none: new again
+    # late: a gap; the server's verdict flagged; the inventory repeated from b3
+    assert b4["gap"] == 310.0 and b4["response"]["flags"] == {"detected": [{"x": 1}]} and b4["repeated"] == 1
+    assert [(x["path"], x["new"]) for x in close["changes"]] == [("guid", ""), ("npacode", "")]
+    assert close["response"]["text"] == "Lig="
+
+
+def test_a_body_the_capture_damaged_is_listed_not_diffed():
+    t = csauth.timeline(fake_capture([("/v2", 1.0, b'{"hwid": "2000\x00\x00\x00', None)]))
+    [c] = t["computers"]
+    assert c["hwid"] == "?" and c["events"][0]["damaged"]
+
+
+def test_the_page_serves_the_timeline(served):
+    [cap] = api(served, "captures")
+    opened(served, cap["id"])
+    assert api(served, "csauth", cap=cap["id"]) == {"computers": [], "unkeyed": []}   # (x-phaethon only)
