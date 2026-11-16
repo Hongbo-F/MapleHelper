@@ -39,27 +39,27 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2026,
+       "line": 2027,
        "symbol": "cmd_minimap"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2010,
+       "line": 2011,
        "symbol": "_map_source"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2038,
+       "line": 2039,
        "symbol": "web.start"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2047,
+       "line": 2048,
        "symbol": "sleep"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 3337,
+       "line": 3338,
        "symbol": "map_args"
       }
      ]
@@ -133,12 +133,12 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2065,
+       "line": 2066,
        "symbol": "_beside_game"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2056,
+       "line": 2057,
        "symbol": "_beside_game"
       }
      ]
@@ -233,12 +233,12 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2034,
+       "line": 2035,
        "symbol": "_map_source"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2055,
+       "line": 2056,
        "symbol": "_map_source"
       }
      ]
@@ -343,7 +343,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 3324,
+       "line": 3325,
        "symbol": ""
       },
       {
@@ -701,12 +701,12 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2026,
+     "line": 2027,
      "symbol": "cmd_minimap"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 3337,
+     "line": 3338,
      "symbol": "map_args"
     },
     {
@@ -753,7 +753,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2737,
+       "line": 2738,
        "symbol": "only_one"
       },
       {
@@ -846,7 +846,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2743,
+       "line": 2744,
        "symbol": "run"
       },
       {
@@ -956,7 +956,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1945,
+       "line": 1946,
        "symbol": "rolling.ask"
       },
       {
@@ -1095,7 +1095,7 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2729,
+     "line": 2730,
      "symbol": "cmd_recorder"
     },
     {
@@ -1147,7 +1147,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 3527,
+       "line": 3528,
        "symbol": "main"
       },
       {
@@ -1157,12 +1157,12 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 3549,
+       "line": 3550,
        "symbol": "check_alarm"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 3550,
+       "line": 3551,
        "symbol": "func"
       },
       {
@@ -1172,7 +1172,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1552,
+       "line": 1553,
        "symbol": "_close_perception"
       }
      ]
@@ -1204,7 +1204,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 118,
+       "line": 119,
        "symbol": "ShellExecuteW"
       }
      ]
@@ -1241,7 +1241,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 128,
+       "line": 129,
        "symbol": "cmd_stop"
       },
       {
@@ -1335,37 +1335,37 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 145,
+       "line": 146,
        "symbol": "cmd_stop_player"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 147,
+       "line": 148,
        "symbol": "STOP"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 206,
+       "line": 207,
        "symbol": "cmd_clear_alarm"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 134,
+       "line": 135,
        "symbol": "cmd_guard"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 566,
+       "line": 567,
        "symbol": "cmd_character"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 158,
+       "line": 159,
        "symbol": "cmd_notify"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2770,
+       "line": 2771,
        "symbol": "cmd_lab_usage"
       }
      ]
@@ -1408,12 +1408,12 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1000,
+       "line": 1001,
        "symbol": "_perception"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 778,
+       "line": 779,
        "symbol": "ServiceClient"
       }
      ]
@@ -1478,7 +1478,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2545,
+       "line": 2546,
        "symbol": "cmd_watch"
       },
       {
@@ -1493,17 +1493,17 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2609,
+       "line": 2610,
        "symbol": "full_frame"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2641,
+       "line": 2642,
        "symbol": "_lie_detector_seen"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 3301,
+       "line": 3302,
        "symbol": ""
       }
      ]
@@ -1597,12 +1597,12 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 799,
+       "line": 800,
        "symbol": "cmd_snap"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 862,
+       "line": 863,
        "symbol": "cmd_act"
       },
       {
@@ -1634,7 +1634,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2747,
+       "line": 2748,
        "symbol": "cmd_save_recent"
       },
       {
@@ -1687,12 +1687,12 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1600,
+       "line": 1601,
        "symbol": "_record"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1210,
+       "line": 1211,
        "symbol": "_record"
       },
       {
@@ -1719,22 +1719,22 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 679,
+       "line": 680,
        "symbol": "cmd_spot"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 687,
+       "line": 688,
        "symbol": "mss"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2416,
+       "line": 2417,
        "symbol": "cmd_bench_capture"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2250,
+       "line": 2251,
        "symbol": "cmd_bench_look"
       }
      ]
@@ -1743,7 +1743,7 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 3527,
+     "line": 3528,
      "symbol": "main"
     },
     {
@@ -1758,12 +1758,12 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 128,
+     "line": 129,
      "symbol": "cmd_stop"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2545,
+     "line": 2546,
      "symbol": "cmd_watch"
     },
     {
@@ -1800,22 +1800,22 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2782,
+       "line": 2783,
        "symbol": "cmd_coverage"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2880,
+       "line": 2881,
        "symbol": "cmd_memory"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2947,
+       "line": 2948,
        "symbol": "cmd_patrol"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2177,
+       "line": 2178,
        "symbol": "cmd_sheet"
       },
       {
@@ -1825,7 +1825,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 697,
+       "line": 698,
        "symbol": "cmd_lie_target"
       }
      ]
@@ -1882,7 +1882,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2250,
+       "line": 2251,
        "symbol": "cmd_bench_look"
       }
      ]
@@ -1904,12 +1904,12 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2092,
+       "line": 2093,
        "symbol": "cmd_sim"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 2104,
+       "line": 2105,
        "symbol": "run_scenario"
       }
      ]
@@ -1932,7 +1932,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2101,
+       "line": 2102,
        "symbol": "record_to"
       },
       {
@@ -2120,12 +2120,12 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2092,
+     "line": 2093,
      "symbol": "cmd_sim"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2782,
+     "line": 2783,
      "symbol": "cmd_coverage"
     },
     {

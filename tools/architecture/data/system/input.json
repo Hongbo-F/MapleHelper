@@ -135,7 +135,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1082,
+     "line": 1083,
      "symbol": "keymap.publish"
     },
     {
@@ -299,12 +299,12 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 434,
+     "line": 435,
      "symbol": "lbutton"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 823,
+     "line": 824,
      "symbol": "rbutton"
     },
     {
@@ -435,7 +435,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 755,
+     "line": 756,
      "symbol": "window_client"
     },
     {
@@ -453,32 +453,32 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 1581,
+     "line": 1582,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1588,
+     "line": 1589,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1629,
+     "line": 1630,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1785,
+     "line": 1786,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1916,
+     "line": 1917,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1967,
+     "line": 1968,
      "symbol": "_to_game"
     },
     {
@@ -488,7 +488,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1154,
+     "line": 1155,
      "symbol": "_game_geometry"
     },
     {
@@ -543,27 +543,27 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1940,
+     "line": 1941,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 959,
+     "line": 960,
      "symbol": "_game_geometry"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1071,
+     "line": 1072,
      "symbol": "_eyes"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1091,
+     "line": 1092,
      "symbol": "chat"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1099,
+     "line": 1100,
      "symbol": "read"
     },
     {
@@ -606,7 +606,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1402,
+     "line": 1403,
      "symbol": "bring_to_front"
     },
     {
@@ -626,7 +626,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1391,
+     "line": 1392,
      "symbol": "restore"
     },
     {
@@ -659,47 +659,47 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 729,
+     "line": 730,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 800,
+     "line": 801,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 865,
+     "line": 866,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 901,
+     "line": 902,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2122,
+     "line": 2123,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2137,
+     "line": 2138,
      "symbol": "bring_to_front"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 312,
+     "line": 313,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1212,
+     "line": 1213,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 789,
+     "line": 790,
      "symbol": "refit"
     },
     {
@@ -709,17 +709,17 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 3549,
+     "line": 3550,
      "symbol": "check_alarm"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 307,
+     "line": 308,
      "symbol": "alarm_up"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1207,
+     "line": 1208,
      "symbol": "alarm_up"
     },
     {
@@ -1254,17 +1254,17 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1860,
+     "line": 1861,
      "symbol": "_nav_park"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1871,
+     "line": 1872,
      "symbol": "foreground_title"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1891,
+     "line": 1892,
      "symbol": "park"
     },
     {
@@ -1274,7 +1274,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1462,
+     "line": 1463,
      "symbol": "start_park"
     }
    ]
@@ -1303,7 +1303,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1099,
+     "line": 1100,
      "symbol": "read"
     },
     {
@@ -1313,7 +1313,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 322,
+     "line": 323,
      "symbol": "run"
     }
    ]
@@ -1347,7 +1347,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1219,
+     "line": 1220,
      "symbol": "_window"
     }
    ]
@@ -1371,7 +1371,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1091,
+     "line": 1092,
      "symbol": "chat"
     },
     {
@@ -1425,7 +1425,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 789,
+     "line": 790,
      "symbol": "refit"
     },
     {
@@ -1440,7 +1440,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1159,
+     "line": 1160,
      "symbol": "fix"
     }
    ]
@@ -1474,7 +1474,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2712,
+     "line": 2713,
      "symbol": "LieTracking"
     }
    ]
@@ -1556,22 +1556,22 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 808,
+     "line": 809,
      "symbol": "parse_steps"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 862,
+     "line": 863,
      "symbol": "cmd_act"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 870,
+     "line": 871,
      "symbol": "record"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 877,
+     "line": 878,
      "symbol": "submit"
     }
    ]
@@ -1605,22 +1605,22 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 896,
+     "line": 897,
      "symbol": "action_events"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 903,
+     "line": 904,
      "symbol": "record"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2144,
+     "line": 2145,
      "symbol": "chain"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2149,
+     "line": 2150,
      "symbol": "record"
     }
    ]
@@ -1634,17 +1634,17 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2115,
+     "line": 2116,
      "symbol": "cmd_lock"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2125,
+     "line": 2126,
      "symbol": "_tap"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2126,
+     "line": 2127,
      "symbol": "record"
     }
    ]
@@ -1658,12 +1658,12 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 745,
+     "line": 746,
      "symbol": "cmd_window"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 755,
+     "line": 756,
      "symbol": "window_client"
     }
    ]
@@ -1697,7 +1697,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 848,
+     "line": 849,
      "symbol": "submit"
     },
     {
@@ -1716,32 +1716,32 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 372,
+     "line": 373,
      "symbol": "submit"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1309,
+     "line": 1310,
      "symbol": "submit"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1340,
+     "line": 1341,
      "symbol": "submit"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 329,
+     "line": 330,
      "symbol": "_stats_recorded"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 434,
+     "line": 435,
      "symbol": "recorded"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1281,
+     "line": 1282,
      "symbol": "_keys_recorded"
     }
    ]
@@ -1945,27 +1945,27 @@
    "process": "player",
    "path": "gamelab/control/player.py",
    "symbol": "plans",
-   "line": 1185,
+   "line": 1217,
    "text": "The elevated player's _serve loop looks at lab/inbox/*.json every 10 ms (1 ms timers on). It takes no plan before its watchdog's first look at the game, and takes the first by name (names start with HHMMSS, so the oldest that day).",
    "evidence": [
     {
      "path": "gamelab/control/player.py",
-     "line": 1185,
+     "line": 1217,
      "symbol": "plans"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1177,
+     "line": 1209,
      "symbol": "precise_timers"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1188,
+     "line": 1220,
      "symbol": "looked"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1189,
+     "line": 1221,
      "symbol": "sleep"
     }
    ]
@@ -1974,27 +1974,27 @@
    "process": "player",
    "path": "gamelab/control/player.py",
    "symbol": "replace",
-   "line": 1194,
+   "line": 1226,
    "text": "It claims the plan by renaming it to .running; from then on the client can only cancel it (a .cancel file), not withdraw it. It reads the JSON (retrying for 0.5 s if Windows holds the file), takes the plan id from the sanitized file name, and calls Player.run.",
    "evidence": [
     {
      "path": "gamelab/control/player.py",
-     "line": 1194,
+     "line": 1226,
      "symbol": "replace"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1198,
+     "line": 1230,
      "symbol": "_read_plan"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1199,
+     "line": 1231,
      "symbol": "id"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1200,
+     "line": 1232,
      "symbol": "run"
     }
    ]
@@ -2229,27 +2229,27 @@
    "process": "player",
    "path": "gamelab/control/player.py",
    "symbol": "_answer",
-   "line": 1206,
+   "line": 1238,
    "text": "_serve answers: lab/outbox/<id>.tmp is written and renamed to .json, and the .running file is deleted. 'ran <id>: ok' (or the error) goes to lab/player.log.",
    "evidence": [
     {
      "path": "gamelab/control/player.py",
-     "line": 1206,
+     "line": 1238,
      "symbol": "_answer"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1099,
+     "line": 1124,
      "symbol": "_answer"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1107,
+     "line": 1132,
      "symbol": "replace"
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1207,
+     "line": 1239,
      "symbol": "_log"
     }
    ]

@@ -111,7 +111,8 @@ def cmd_player(args) -> int:
         from .control.player import serve
         serve()
         return 0
-    if client.player_up():  # (one at a time: control.player.only_one; no UAC prompt for one that would refuse)
+    from .control import player
+    if player.running():  # (one at a time: player.only_one; no UAC prompt for one that would refuse)
         print("a player is already running: `python -m gamelab stop-player` first to start a new one")
         return 0
     # ShellExecute "runas" shows the UAC prompt and starts `python -m gamelab player` elevated.

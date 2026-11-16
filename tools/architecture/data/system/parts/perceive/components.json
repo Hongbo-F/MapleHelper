@@ -19,12 +19,12 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2652,
+     "line": 2653,
      "symbol": "cmd_perceive"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2669,
+     "line": 2670,
      "symbol": "only_one"
     },
     {
@@ -49,7 +49,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1006,
+     "line": 1007,
      "symbol": "ServiceClient"
     },
     {
@@ -69,7 +69,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 995,
+     "line": 996,
      "symbol": "PERCEPTION_WAIT_S"
     },
     {
@@ -157,7 +157,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2720,
+       "line": 2721,
        "symbol": "svc.serve"
       },
       {
@@ -692,7 +692,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2705,
+       "line": 2706,
        "symbol": "Publisher"
       },
       {
@@ -740,7 +740,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2703,
+       "line": 2704,
        "symbol": "record_to"
       },
       {
@@ -778,7 +778,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2702,
+       "line": 2703,
        "symbol": "console_in_background"
       },
       {
@@ -821,7 +821,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2704,
+       "line": 2705,
        "symbol": "report_every"
       },
       {
@@ -1096,7 +1096,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 2712,
+       "line": 2713,
        "symbol": "Together"
       },
       {

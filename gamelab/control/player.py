@@ -1031,6 +1031,7 @@ def _press(allowed: dict[str, Key], name: str, down: bool) -> None:
 
 MUTEX = "Local\\gamelab-player"  # one player at a time on this PC (`only_one`)
 ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS = 5, 183
+SYNCHRONIZE = 0x00100000
 
 
 def only_one(name: str = MUTEX):
@@ -1056,13 +1057,37 @@ def only_one(name: str = MUTEX):
     return handle
 
 
+def running(name: str | None = None) -> bool:
+    """Whether a player holds its mutex now (`player --elevate`, before its UAC prompt): asked of the mutex, which Windows
+    lets go however the player ended, not of PLAYER_INFO, which one closed or killed leaves behind with a pid Windows
+    may give again. An elevated player's is refused to one not elevated: running too."""
+    if sys.platform != "win32":
+        return False
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenMutexW.restype = wintypes.HANDLE
+    k32.OpenMutexW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = k32.OpenMutexW(SYNCHRONIZE, False, name or MUTEX)
+    if handle:
+        k32.CloseHandle(handle)
+        return True
+    return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+
+
+def _let_go(handle) -> None:
+    """A mutex `only_one` gave, let go as `serve` ends."""
+    if sys.platform == "win32" and handle not in (None, True):
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        k32.CloseHandle(handle)
+
+
 def _log(msg: str) -> None:
     """A line in the player's log (paths.PLAYER_LOG)."""
     with open(PLAYER_LOG, "a", encoding="utf-8") as f:
         f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
-
-
-_HELD = None  # the mutex `serve` took, held until the process ends
 
 
 def _pid_running() -> str:
@@ -1119,12 +1144,19 @@ def serve() -> None:
     with the alarm up, takes no plan before the watchdog's first look at the game, and stops if the watchdog does."""
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
-    global _HELD
-    _HELD = only_one()
-    if _HELD is None:
+    held = only_one(MUTEX)
+    if held is None:
         _log(f"refusing to start: another player is running (pid {_pid_running()}); `python -m gamelab stop-player` "
              "stops it")
         return
+    try:
+        _serve_held()
+    finally:
+        _let_go(held)
+
+
+def _serve_held() -> None:
+    """serve, its mutex held (see serve)."""
     _rotate_log()
     STOP.unlink(missing_ok=True)
     if alarm_up():

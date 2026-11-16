@@ -97,7 +97,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2694,
+     "line": 2695,
      "symbol": "screen_world"
     },
     {
@@ -242,12 +242,12 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2701,
+     "line": 2702,
      "symbol": "glimpse"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1120,
+     "line": 1121,
      "symbol": "_lie_detector_look"
     }
    ]
@@ -282,7 +282,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2708,
+     "line": 2709,
      "symbol": "Recording"
     },
     {
@@ -402,7 +402,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2712,
+     "line": 2713,
      "symbol": "LieTracking"
     },
     {
@@ -552,7 +552,7 @@
     },
     {
      "path": "gamelab/control/player.py",
-     "line": 1147,
+     "line": 1179,
      "symbol": "watchdog.start"
     },
     {
@@ -622,17 +622,17 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 799,
+     "line": 800,
      "symbol": "cmd_snap"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 755,
+     "line": 756,
      "symbol": "submit"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1309,
+     "line": 1310,
      "symbol": "submit"
     },
     {
@@ -707,17 +707,17 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 950,
+     "line": 951,
      "symbol": "_eyes"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1000,
+     "line": 1001,
      "symbol": "_perception"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1039,
+     "line": 1040,
      "symbol": "_hunter"
     },
     {
@@ -792,7 +792,7 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 966,
+     "line": 967,
      "symbol": "full_frames"
     },
     {
@@ -877,12 +877,12 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1581,
+     "line": 1582,
      "symbol": "_to_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1143,
+     "line": 1144,
      "symbol": "_fit_start"
     },
     {
@@ -947,12 +947,12 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1365,
+     "line": 1366,
      "symbol": "cmd_pet"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1384,
+     "line": 1385,
      "symbol": "full_frame"
     }
    ]
@@ -967,27 +967,27 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 1415,
+     "line": 1416,
      "symbol": "minimized"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1507,
+     "line": 1508,
      "symbol": "_pet_unfit"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1535,
+     "line": 1536,
      "symbol": "_pet_resized"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1565,
+     "line": 1566,
      "symbol": "_wait_for_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1445,
+     "line": 1446,
      "symbol": "_guard_pass"
     },
     {
@@ -1017,17 +1017,17 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 1860,
+     "line": 1861,
      "symbol": "_nav_park"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1871,
+     "line": 1872,
      "symbol": "foreground_title"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1851,
+     "line": 1852,
      "symbol": "_not_minimized"
     },
     {
@@ -1047,7 +1047,7 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2729,
+     "line": 2730,
      "symbol": "cmd_recorder"
     },
     {
@@ -1082,32 +1082,32 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 679,
+     "line": 680,
      "symbol": "cmd_spot"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 688,
+     "line": 689,
      "symbol": "grab"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2416,
+     "line": 2417,
      "symbol": "cmd_bench_capture"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2431,
+     "line": 2432,
      "symbol": "Grabber"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2250,
+     "line": 2251,
      "symbol": "cmd_bench_look"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2272,
+     "line": 2273,
      "symbol": "Grabber"
     },
     {
@@ -1132,37 +1132,37 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2545,
+     "line": 2546,
      "symbol": "cmd_watch"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2609,
+     "line": 2610,
      "symbol": "full_frame"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1675,
+     "line": 1676,
      "symbol": "_hunt_look"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 762,
+     "line": 763,
      "symbol": "_window_recover"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1172,
+     "line": 1173,
      "symbol": "cmd_keys"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1281,
+     "line": 1282,
      "symbol": "_keys_recorded"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 1815,
+     "line": 1816,
      "symbol": "_perception"
     }
    ]
@@ -1247,17 +1247,17 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 2065,
+     "line": 2066,
      "symbol": "_beside_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2072,
+     "line": 2073,
      "symbol": "client_rect"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2079,
+     "line": 2080,
      "symbol": "monitors"
     }
    ]
@@ -1372,22 +1372,22 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 1063,
+     "line": 1064,
      "symbol": "mapdata.load"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 970,
+     "line": 971,
      "symbol": "_minimap_picture"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 963,
+     "line": 964,
      "symbol": "detector_for"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2637,
+     "line": 2638,
      "symbol": "_heading_eyes"
     }
    ]
@@ -1407,32 +1407,32 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 686,
+     "line": 687,
      "symbol": "find_game"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2423,
+     "line": 2424,
      "symbol": "client_rect"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 775,
+     "line": 776,
      "symbol": "full_screen"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2262,
+     "line": 2263,
      "symbol": "foreground_title"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 2637,
+     "line": 2638,
      "symbol": "_heading_eyes"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 800,
+     "line": 801,
      "symbol": "bring_to_front"
     },
     {

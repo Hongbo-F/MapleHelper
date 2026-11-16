@@ -15,12 +15,12 @@
    "evidence": [
     {
      "path": "gamelab/__main__.py",
-     "line": 1365,
+     "line": 1366,
      "symbol": "cmd_pet"
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 3278,
+     "line": 3279,
      "symbol": "pet"
     },
     {
@@ -50,7 +50,7 @@
     },
     {
      "path": "gamelab/__main__.py",
-     "line": 3560,
+     "line": 3561,
      "symbol": "RuntimeError"
     },
     {
@@ -93,27 +93,27 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 1380,
+       "line": 1381,
        "symbol": "_wait_for_game"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1565,
+       "line": 1566,
        "symbol": "_wait_for_game"
-      },
-      {
-       "path": "gamelab/__main__.py",
-       "line": 1390,
-       "symbol": "_said_minimized"
       },
       {
        "path": "gamelab/__main__.py",
        "line": 1391,
+       "symbol": "_said_minimized"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1392,
        "symbol": "_hunter"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1009,
+       "line": 1010,
        "symbol": "ready"
       },
       {
@@ -123,27 +123,27 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1082,
+       "line": 1083,
        "symbol": "keymap.publish"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1394,
+       "line": 1395,
        "symbol": "away"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1398,
+       "line": 1399,
        "symbol": "_record"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 995,
+       "line": 996,
        "symbol": "PERCEPTION_WAIT_S"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 988,
+       "line": 989,
        "symbol": "RuntimeError"
       }
      ]
@@ -176,47 +176,47 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 1407,
+       "line": 1408,
        "symbol": "_pet_resized"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1412,
+       "line": 1413,
        "symbol": "WAIT_POLL_S"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1415,
+       "line": 1416,
        "symbol": "minimized"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1418,
+       "line": 1419,
        "symbol": "_pet_keys"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1420,
+       "line": 1421,
        "symbol": "tend"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1421,
+       "line": 1422,
        "symbol": "PlayerError"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1428,
+       "line": 1429,
        "symbol": "_guarded"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1472,
+       "line": 1473,
        "symbol": "_guarded"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1535,
+       "line": 1536,
        "symbol": "_pet_resized"
       },
       {
@@ -367,12 +367,12 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1383,
+       "line": 1384,
        "symbol": "PetWait"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1507,
+       "line": 1508,
        "symbol": "_pet_unfit"
       },
       {
@@ -397,7 +397,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1120,
+       "line": 1121,
        "symbol": "_lie_detector_look"
       }
      ]
@@ -460,7 +460,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1490,
+       "line": 1491,
        "symbol": "_pet_keys"
       },
       {
@@ -548,17 +548,17 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1445,
+       "line": 1446,
        "symbol": "_guard_pass"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1455,
+       "line": 1456,
        "symbol": "latest"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1487,
+       "line": 1488,
        "symbol": "GUARD_S"
       },
       {
@@ -626,7 +626,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1469,
+       "line": 1470,
        "symbol": "Vitals"
       },
       {
@@ -709,7 +709,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1006,
+       "line": 1007,
        "symbol": "ServiceClient"
       },
       {
@@ -762,12 +762,12 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 950,
+       "line": 951,
        "symbol": "_eyes"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 966,
+       "line": 967,
        "symbol": "full_frames"
       },
       {
@@ -858,7 +858,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 1607,
+       "line": 1608,
        "symbol": "record_to"
       },
       {
@@ -891,7 +891,7 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 1612,
+       "line": 1613,
        "symbol": "report_every"
       },
       {
@@ -929,7 +929,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1468,
+       "line": 1469,
        "symbol": "notify.phone"
       }
      ]
@@ -957,12 +957,12 @@
      "evidence": [
       {
        "path": "gamelab/__main__.py",
-       "line": 1462,
+       "line": 1463,
        "symbol": "start_park"
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1464,
+       "line": 1465,
        "symbol": "_start_detached"
       },
       {
@@ -1145,7 +1145,7 @@
       },
       {
        "path": "gamelab/__main__.py",
-       "line": 1567,
+       "line": 1568,
        "symbol": "the babysitter started it again every 5 s"
       }
      ]

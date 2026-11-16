@@ -22,12 +22,12 @@
    "tagline": "`python -m gamelab`: 47 subcommands, the safety gates before them, and process glue",
    "summary": "The single entry point of gamelab: every process of the autonomous player, from the elevated key player to the perception service, the hunts, the pet feeder and the mini-map, is started as `python -m gamelab <command>`. It checks who plays and whether the Lie Detector alarm is up before anything touches the game, wires a command's Hunter to the perception service and the key player, and turns how a command ended into an exit code.",
    "details_md": "`gamelab/__main__.py` is the top of the stack: the only module allowed to import every layer. It imports what many commands share (analysis, control, the shared modules) at the top; each command imports the other layers inside its own function, which keeps the elevated `python -m gamelab player` light.\n\n**`main(argv)`** is the same for all 47 subcommands:\n\n1. `build_parser()` parses the line. Every subcommand but `character` also takes `--character` after its own name (`gamelab tour --character magician ...`), so the babysitter's process match sees the command it is.\n2. **Who plays.** `_play_as` sets `GAMELAB_CHARACTER` for this process and its children, and refuses if her physics (`motion.physics`) is already loaded as someone else. `_unnamed` makes an unnamed in-game command play the thief when only `lab/character.json` or config.toml chose another (her bottom bar isn't read yet), except `perceive`, `pet` (`FOLLOW_CHOICE`) and the attacking commands (left to `_refused_as`). `_refused_as` refuses a non-thief's `lock`, `combo` and `probe run` (`HERS_NOT_YET`). For `hunt`, `nav` and `tour`, `attack.magic.apply` switches the attack layer to the magician's Magic Claw when she plays.\n3. DPI awareness on (real pixels whatever the display scaling), then `client.check_alarm()` for `GAME_COMMANDS` and anything whose parser sets `game` (`probe run`).\n4. The command's function runs. Its exceptions become exit codes: `LieDetectorAlarm` 3, `PlayerError` or `RuntimeError` 1 with `error: ...`, a `HuntStop` (the safety stop, out of darts, a stop asked...) its own `exit_code`. `_hunt_over` (clean ends, the Lie Detector and hunt stops) removes `lab/hunt.json`; `_close_perception` always runs.\n\n**Wiring a command that acts.** `_hunter(args, ...)` builds the agent (a `behavior.hunter.Hunter`) the same way for `hunt` (`hunt look` as a viewer that sends nothing), `nav`, `tour`, `probe run`, `pet`, `keys --read`, `stats --read` and `nav --park` (the last four send keys but don't hunt: no size fix, no OCR warm-up):\n\n- her keys (`keymap.at_start`: the bindings last read off the game, else config.toml `[keys]`) and the map (`mapdata`);\n- `_perception` attaches a `ServiceClient` named for the command (`tour`, `hunt-clear`, `pet`...), saying whether it sends keys (`acts`) and tells her throws; it waits up to `PERCEPTION_WAIT_S` (20 s) for the welcome, the client starting the service through WMI if none answers, and a hunting command stops if the service perceives another character (`_perceives_her`);\n- for a command that hunts (`hunt kill|clear`, `nav`, `tour`, `probe run`), `_size_fix` and `_fit_start`: a client of a size the eyes aren't calibrated for is set right with Alt+Enter twice and waited for, `START_WAIT_S` (180 s) at most;\n- `_eyes` builds `Eyes` on the service's frames (never capturing) with the map's monster detector and minimap picture (`_minimap_picture`: 3 tries, 0.5 s apart; one that won't load stops the command);\n- the OCR models warmed on a thread, the `Hunter` built, the phone pushes wired (`notify`), her keys published for the player's Lie Detector allowance (`lab/alarm_keys.json`);\n- a command that takes `--low-hp` (`hunt`, `tour`, `probe run`) then waits for her max HP off the HUD (5 s at most), collapses her chat box, reads her stat window and refuses a map whose monsters are too strong for her.\n\n`_record(command, map)` starts the run's telemetry (`lab/telemetry/<time>-<command>.jsonl`), claims `lab/hunt.json` for `hunt`, `probe`, `nav` and `tour` (`guard.claim`; a park claims it as `nav-park`, but never takes it from a running hunt), and writes the `session` record with her physics. `_to_game` brings the game forward and waits `FRONT_WAIT_S` (3 s): the player refuses every plan while another window is in front. The hunting commands run inside `retreat.on_alarm`: on the Lie Detector or a hunt stop she goes to a safe place before the exception reaches `main`.\n\n**The long-lived processes are started here too.** `cmd_player --elevate` relaunches `python -X utf8 -m gamelab player` through `ShellExecuteW(\"runas\")`, minimized and not activated; the elevated copy runs `control.player.serve`. `cmd_perceive` takes the service's mutex, sets its priority and timers (`service.settle`), and hands `service.Service` its `Publisher` (telemetry), the rolling `Recording` and the Lie Detector trackers. `cmd_pet --every` is the babysitter's pet feeder: between follows it runs the guard's passes once a second (`_guarded`), and the guard's park is started detached through WMI (`_guard_pass`: `nav --park --tell >> lab/park.log`). `cmd_minimap` runs the web server and the tkinter window in one process.\n\n**The rest** are tools: explore steps (`parse_steps`), combo and lock measurements, the in-game window readers, offline analyses.",
-   "lines": 3575,
+   "lines": 3576,
    "key_items": [
     {
      "name": "main",
      "kind": "function",
-     "line": 3527,
+     "line": 3528,
      "signature": "def main(argv=None) -> int",
      "summary": "Parses the line, applies who plays and the Lie Detector gate, runs the command and maps its exceptions to exit codes; always detaches from the perception service.",
      "details_md": "Order: `_play_as` (exit 2 if `--character` comes too late), `_unnamed`, `_refused_as` (exit 2: a non-thief's `lock`, `combo` or `probe run`, `HERS_NOT_YET` saying why), `magic.apply` for `hunt`/`nav`/`tour`, `enable_dpi_awareness`, `client.check_alarm()` for `GAME_COMMANDS` or `args.game`. Exceptions: `client.LieDetectorAlarm` -> 3 with instructions to answer it and run `clear-alarm`; `client.PlayerError`/`RuntimeError` -> 1; a `behavior.safety.HuntStop` -> its `exit_code`; anything else is re-raised. `finally: _close_perception()`."
@@ -35,7 +35,7 @@
     {
      "name": "build_parser",
      "kind": "function",
-     "line": 3049,
+     "line": 3050,
      "signature": "def build_parser() -> argparse.ArgumentParser",
      "summary": "Declares all 47 subcommands, their options and defaults, and adds `--character` after every command's name.",
      "details_md": "`hunt` takes a mode (`look`, `kill`, `clear`, `shots`); `probe` has its own subparsers (`list`, `run`, `score`), `run` setting `game=True` so the alarm gate applies. `minimap` and `web` share `map_args` (port 8765, host 0.0.0.0). `tour`'s `--grind` (the default since 2026-10-27) and `--camp` are a mutually exclusive group."
@@ -43,7 +43,7 @@
     {
      "name": "_hunter",
      "kind": "function",
-     "line": 1039,
+     "line": 1040,
      "signature": "def _hunter(args, viewer: bool = False, throws: bool = True, fit=None, restore: bool = True, **kw)",
      "summary": "Builds the Hunter for any command that looks or acts in the game: keys, map, perception client, size fix, eyes, OCR warm-up, phone pushes, published keys, and the start checks of a hunt.",
      "details_md": "Steps: her keys (`keymap.at_start`), the map (`mapdata.load`), `_perception`, then for a command that hunts `_size_fix` + `_fit_start`, the caller's `fit(perception)`, `_eyes`, the OCR warm-up, the `Hunter`, the phone pushes (`notify.BackpackPush`, `Vitals`), `keymap.publish`. `viewer` (`hunt look`): neither sends keys nor tells throws, no size fix, a minimized game waited for. `throws=False` (`pet`, `keys --read`, `stats --read`, `nav --park`): sends keys but doesn't hunt, no size fix, no OCR warm-up. `fit(perception)` runs before the eyes are made (the pet's `PetWait`, `nav --park`'s `_not_minimized`). Commands that take `--low-hp` (`hunt`, `tour`, `probe run`) then wait up to `safety.HP_WAIT_S` (5 s) for her max HP (unless `--low-hp` is a share, 1 or under), collapse her chat box, read her stat window (which shows her max HP too), raise `HpNotRead` if her max HP is still unknown, and raise `TooStrong` on a map whose monsters are too strong for her (both exit 4)."
@@ -51,7 +51,7 @@
     {
      "name": "_perception",
      "kind": "function",
-     "line": 1000,
+     "line": 1001,
      "signature": "def _perception(model, title: str, name: str, acts: bool, throws: bool = False)",
      "summary": "Attaches this command to the perception service as a named client and waits up to PERCEPTION_WAIT_S for its welcome.",
      "details_md": "The client is appended to `_PERCEPTION` so `main` closes it. `ready()` raises `RuntimeError` when another command holds the service on another map. Without a welcome in time the command goes on and its looks stand still until states come."
@@ -59,7 +59,7 @@
     {
      "name": "_record",
      "kind": "function",
-     "line": 1600,
+     "line": 1601,
      "signature": "def _record(command: str, map_id: int) -> None",
      "summary": "Starts the run's telemetry file, claims lab/hunt.json for hunting commands, and writes the run's session record.",
      "details_md": "`telemetry.record_to(command)`; `guard.claim(command)` when `command.split('-')[0]` is in `guard.HUNTS` (`hunt`, `probe`, `nav`, `tour`); `telemetry.emit('session', map, command, mode='live', physics=..., jump_aside, hop_up)`; `gcstats.report_every` (Python's garbage collections once a minute). Called before `_hunter`, whose start may resize the client."
@@ -75,7 +75,7 @@
     {
      "name": "cmd_perceive",
      "kind": "function",
-     "line": 2652,
+     "line": 2653,
      "signature": "def cmd_perceive(args) -> int",
      "summary": "`perceive`: the perception service's process: one per PC, its telemetry, the rolling recording and the Lie Detector trackers wired in, then `Service.serve`.",
      "details_md": "Takes `service.MUTEX` (or `SAVED_MUTEX` with `--frames`); a second one prints that one is running and returns 0. Live: `telemetry.console_in_background()`, `record_to('perceive')`, a `Publisher`, `Recording(title)` unless `--no-record`, and `Together(LieTracking, VioletaLive)`. With `--frames DIR`: saved PNGs looked at round and round (`--hold` 30 times each), nothing published or recorded, at its own pipe and info file (`GAMELAB_PERCEIVE=saved` reaches it)."
@@ -83,7 +83,7 @@
     {
      "name": "cmd_pet",
      "kind": "function",
-     "line": 1365,
+     "line": 1366,
      "signature": "def cmd_pet(args) -> int",
      "summary": "`pet`: her pet fed by its fullness followed in time; with `--every N` a loop that waits for the game, waits out a wrong-sized client, and runs the guard between follows.",
      "details_md": "Each follow: `_pet_resized` (a client now at another calibrated size ends the process for the babysitter to restart it with eyes for it), `PetWait` (a wrong size, full screen or the game drawn off its client: nothing sent), `_pet_keys` (follows key bindings another command read since), then `hunter.pet.tend(present=...)`. A `PlayerError` (the alarm's limits, no player) is logged and tried again next time. With the alarm up it goes on feeding but never reads (the read double-clicks her)."
@@ -91,7 +91,7 @@
     {
      "name": "_guard_pass",
      "kind": "function",
-     "line": 1445,
+     "line": 1446,
      "signature": "def _guard_pass(hunter, title: str)",
      "summary": "Builds the guard's pass for `pet --every`: the service's newest state, her HP against the stop rule, the phone, and a detached `nav --park --tell`.",
      "details_md": "`latest()` asks the feed for a state no older than `guard.STATE_AGE_S` (3 s) without waiting; `low(st)` compares her HP with `hunter.hp_watch.threshold`; `start_park()` runs `cmd.exe /c set PYTHONUNBUFFERED=1&& python -u -X utf8 -m gamelab nav --park --tell >> lab/park.log 2>&1` through `service._start_detached` (WMI), so the park outlives the pet feeder the babysitter stops when it sees it."
@@ -99,7 +99,7 @@
     {
      "name": "_nav_park",
      "kind": "function",
-     "line": 1860,
+     "line": 1861,
      "signature": "def _nav_park(args) -> int",
      "summary": "`nav --park`: she goes to the safe place on the map the service looks at, her moves alone; never brings the game forward.",
      "details_md": "Sends nothing if a hunt runs (`guard.running_hunt`), if the game isn't in front (a note for the guard: `retreat.told`), or if no service runs. The map comes from `lab/perceive.json` (`_park_map`), not a `--map` default: at 08:18 on 2026-11-05 a `nav` with none took the service off her map. `--tell` pushes the outcome to the phone."
@@ -107,7 +107,7 @@
     {
      "name": "cmd_tour",
      "kind": "function",
-     "line": 1961,
+     "line": 1962,
      "signature": "def cmd_tour(args) -> int",
      "summary": "`tour`: the sweep of the map's hunting platforms, or with `--loop` the hunt loop for `--minutes` (grinding by default, `--camp` one ground at a time), then she parks.",
      "details_md": "`--loop --grind` runs `behavior.grind.Grind(tour).run(minutes)`, `--loop --camp` runs `behavior.hunt.Hunt(tour).run(minutes)`, both inside `retreat.on_alarm`, then `park(hunter)`. Without `--loop`, `Tour.run(stops, kinds, kills_per_stop, seconds_per_stop)`."
@@ -115,7 +115,7 @@
     {
      "name": "cmd_clear_alarm",
      "kind": "function",
-     "line": 206,
+     "line": 207,
      "signature": "def cmd_clear_alarm(args) -> int",
      "summary": "`clear-alarm`: removes lab/ALARM.json once the Lie Detector's recording has ended; refuses (exit 3) while it is still going.",
      "details_md": "While `lie_recorder.going()` has a folder and the alarm is up, clearing it would let a running player stop `END_S` after the last sight while a person may still be answering it, and the commands run. After clearing, a player that stopped needs `player --elevate` again."
@@ -131,7 +131,7 @@
     {
      "name": "_fit_start",
      "kind": "function",
-     "line": 1143,
+     "line": 1144,
      "signature": "def _fit_start(title: str, fix) -> None",
      "summary": "At a hunting command's start, sets a client of an uncalibrated size right with Alt+Enter twice and waits for it, START_WAIT_S at most.",
      "details_md": "Polls the window every `START_POLL_S` (1 s) without capturing; checks the alarm each round; raises `RuntimeError` after 180 s. It used to wait for ever, while the babysitter kept the pet stopped meanwhile, unfed."
@@ -139,7 +139,7 @@
     {
      "name": "_to_game",
      "kind": "function",
-     "line": 1581,
+     "line": 1582,
      "signature": "def _to_game() -> bool",
      "summary": "Brings the game to the front before a hunting command's first look and plan, and checks it came (`FRONT_WAIT_S`, 3 s); if not, the command says which window is in front and doesn't start (exit 1).",
      "details_md": "The player refuses every plan while another window is in front, and a look then sees that window: on 2026-10-21 at 01:01:30 a tour's first looks saw another window for 2.5 s and its first plan was refused (\"game not in front\"). `window.bring_to_front` sends no keys: it attaches to the foreground window's input thread to be allowed `SetForegroundWindow`. Half way through the wait it also switches to the game as Alt+Tab does (`window.SWITCH_FALLBACK`, on; the README says it wasn't tried in game yet)."
