@@ -1,0 +1,3453 @@
+{
+ "id": "behavior-safety",
+ "layer": "behavior",
+ "title": "Behavior: safety, retreat, the guard and her care",
+ "tagline": "What keeps her alive and the run honest: stops, retreats, the guard, self-checks.",
+ "summary": "Everything around the hunt that keeps the character alive and the bot's picture of the game true. Watches on her HP, stars and MP end a hunt (a HuntStop) and send her to a safe platform or rope. Between hunts, a guard parks her when she's touched and pages the phone, and her pet is kept fed so it keeps drinking her potions. Self-checks open the game's own windows to confirm her keys, chat box and DEF, and two evidence modules price throws at unseen monsters and probe what a star hits.",
+ "details_md": "This slice keeps her alive and the run honest while `gamelab` hunts on its own. The hunter (`behavior/hunter.py`) calls into it at every look.\n\n### Stops: when a hunt must end\n\nSeveral watches are fed as she hunts, each from where its evidence is:\n\n- the HP watch (`safety.HpWatch`) and the magician's MP watch (`darts.MpWatch`): every look (`Hunter._vitals`) and every glance a chain's watch takes, about every 30 ms (`Hunter._glanced`);\n- the out-of-darts watch (`darts.DartWatch`): her Lucky Seven presses and each look's MP bar, from the attack choice (`behavior.attacks.Attacks`);\n- her key watches: `keycheck.RegularWatch` (her presses and casts, from `Attacks`) and `MoveWatch` (her jumps and runs, told by `control.navigator` at each chain's end).\n\n`Hunter.health_check` asks them at every look of a fight, a trip or a hunt-loop pass and raises the first that's due; `Hunter._stop_now` raises the HP stop (and a `gamelab stop` request) at the very look or glance it's due. A stop is a `safety.HuntStop` subclass, and each has its own exit code:\n\n| Stop | Exit | Means |\n|---|---|---|\n| Lie Detector (`client.LieDetectorAlarm`, not a HuntStop) | 3 | the player saw the Lie Detector |\n| `SafetyStop` / `TooStrong` / `HpNotRead` | 4 | her HP stayed under her reserve; the map is too strong; her max HP unread |\n| `OutOfDarts` | 5 | Lucky Seven presses take no MP and kill nothing |\n| `KeyCheckStop` | 6 | the key bindings window may be open, or keys can't be followed |\n| `StatWindowStop` | 7 | the stat window may be open |\n| `OutOfMp` | 8 | the magician's MP potions are out |\n| `StopAsked` | 9 | `gamelab stop` |\n\n`KeyDoubt`, `ChatDue` and `StatsDue` don't end a hunt: the hunt loop catches them, runs the check, and goes on.\n\n### Getting away\n\nEvery hunting command (`hunt kill`, `hunt clear`, `nav`, `tour`, `tour --loop`, `probe run`) runs inside `retreat.on_alarm`, which catches the Lie Detector alarm and every `HuntStop` and re-raises it (the command's exit code):\n\n- **On the Lie Detector alarm** it only retreats (the key player itself raised and paged the alarm).\n- **On a stop** it logs the stop in capitals and emits a telemetry event; retreats (unless the stop is `later`: the game isn't in front); records how the retreat went (`told`); pages the person at the PC, after her moves (sounds and a notification that doesn't steal focus; not for `StopAsked`); and saves the rolling recording when the stop asks (`keep_s`).\n\nA retreat uses her moves alone: no attack, pick-up, pet food or mouse.\n\nThe place is chosen live from the map's model and the danger model:\n\n1. the quickest wholly safe platform or rope that nothing can reach;\n2. else a place 'safe enough' (danger at most 1% of her HP);\n3. else the safest place in reach.\n\nThe Lie Detector allows 10 s, a stop 60 s, a park 180 s.\n\n### Between hunts\n\nThe pet babysitter keeps `pet --every` running exactly while no hunt runs. It feeds her pet (`pet.PetCare`) and runs the guard's pass once a second (`guard.Pass`), which reads only the perception service's newest state, pushes the phone about potions and death (`vitals.Vitals`) and starts a detached `nav --park --tell` when she's touched, under the stop rule, or a stop or a dead hunt left a note. Processes coordinate through small lab files:\n\n| File | Holds |\n|---|---|\n| lab/hunt.json | the command hunting now |\n| lab/stop_hunt.json | `gamelab stop`'s request |\n| lab/park_note.json | a park wanted and not done |\n| lab/parked.json | how the last park went |\n| lab/guard.json | the guard's episode state |\n| lab/guard_mode.txt | the guard's switch (off, alert, on) |\n| lab/vitals.json | what the phone has been told |\n\n### Checking the game agrees\n\nThree checks make the game's own screen agree with what the bot assumes:\n\n- **Key check.** After a doubt it reads the KEY BINDINGS window and follows keys that moved.\n- **Chat check.** At a hunt's start it collapses the chat box, which would hide monsters.\n- **Stat check.** At a hunt's start it reads her W.DEF so the safety reserve isn't stuck at DEF 0.\n\nAll three follow the same rules:\n\n- They wait for a quiet moment (`keycheck.unquiet`: on a platform, untouched, no monster within 250).\n- They move the mouse out of the way when it could hide what they read.\n- They never send Esc with nothing seen open (in the game Esc then opens the MENU).\n- A game window (key bindings, stats) that 'may be open' afterwards ends the hunt.\n- Every look of their own asks the safety stop.\n\n### Weighing evidence\n\n`presence` prices a throw at a monster the look just missed: a fitted chance it lands, times its worth, against its MP and lock time. `probe` is a set of in-game experiments, with a likelihood scorer, to settle open questions about what a star hits.\n\n### Design themes\n\n- **From the user, with dates.** Most rules start from a quoted request or a live incident: a grind killed on 2026-11-05 left her to die unnoticed for 5 h 40 min, which produced `stop`, the guard and the vitals pushes.\n- **Tuned on replays, reported loudly.** Thresholds come from replays of the live record and are checked in the simulator; every stop is said in capitals, sent as telemetry, and paged when a person must act.",
+ "groups": [
+  {
+   "id": "stops",
+   "title": "When the hunt must end",
+   "summary": "Watches on her HP, stars and MP that end a hunt with a HuntStop, and the exception family every stop shares.",
+   "modules": [
+    "gamelab/behavior/safety.py",
+    "gamelab/behavior/darts.py"
+   ]
+  },
+  {
+   "id": "getting-away",
+   "title": "Getting her to safety",
+   "summary": "The retreat that runs on the Lie Detector and on every stop, and the park used by `gamelab stop`, `nav --park` and the guard.",
+   "modules": [
+    "gamelab/behavior/retreat.py"
+   ]
+  },
+  {
+   "id": "between-hunts",
+   "title": "Between hunts: the guard, vitals and her pet",
+   "summary": "What runs in the `pet --every` babysitter: the guard that parks her when touched, the phone pushes for potions and death, and pet feeding.",
+   "modules": [
+    "gamelab/behavior/guard.py",
+    "gamelab/behavior/vitals.py",
+    "gamelab/behavior/pet.py"
+   ]
+  },
+  {
+   "id": "self-checks",
+   "title": "Checking the game agrees",
+   "summary": "Self-checks that open the game's own windows: key bindings after a doubt, the chat box at a start, the stat window for her DEF.",
+   "modules": [
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/chatcheck.py",
+    "gamelab/behavior/statcheck.py"
+   ]
+  },
+  {
+   "id": "evidence",
+   "title": "Weighing evidence",
+   "summary": "The chance a throw at an unseen monster lands, and in-game probes of what a star hits, with their scorer.",
+   "modules": [
+    "gamelab/behavior/presence.py",
+    "gamelab/behavior/probe.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/behavior/safety.py",
+   "title": "The safety stop (HP)",
+   "tagline": "Ends the hunt when her HP stays under a reserve of the map's strongest touches.",
+   "summary": "Works out a reserve in HP: her profile's hits (3 by default) times the largest touch any monster on the map can deal her. Every look and glance of her HP is checked against it; under it on two readings at least 0.25 s apart (by her HP number) or 0.6 s apart (by her HP bar), or under a single touch on two readings in a row, it raises `SafetyStop`. The module also defines `HuntStop`, the base class of every stop that ends a hunt, and the start-of-hunt refusals `TooStrong` and `HpNotRead`.",
+   "details_md": "**The reserve** (`Reserve`, built by `reserve_of` and rebuilt by `Hunter._reserve_check` whenever anything it depends on changes):\n\n- **Which monsters count.** The map's spawn list (`kinds_of`: `MapModel.mob_damage`, grouped by kind with `perception.kinds.kind_of`), plus any other kind a look sees on the map. A seen kind's touch damage (PADamage) comes from the game data's monster table, `gamedata/data/out/tables/mobs.json` (`mob_touch`).\n- **How hard each one touches.** The game's damage-taken formula (`attack.danger.touch_taken`) at the top of its roll (`TOP_U`), at her level and her DEF. Her level and DEF come from perception through `behavior.bootstrap` (HUD digits, stat window, or a DEF fitted to her touches). The reserve uses the low end of her DEF range (`Defence.low`), so a touch is never under-estimated.\n- **Her own measured touches.** Each exact drop of her HP number is kept as a JSON line in `lab/touches.jsonl` (`Touches`; the thief's file, another character's under `lab/characters/<her folder>/`). If the game hit harder than the formula says, the threshold uses `MARGIN` (5%) over the largest measured touch (`Touch.hp`). A measured touch only ever raises the threshold. Touches taken at another level are carried to her current level by the formula's level term (`carried`: one whole HP off per 10 levels up), so a level-up doesn't forget them.\n- **Which kind a touch was.** It's told by the touch's size, not by the monster nearest her: `kind_of_touch` keeps the kinds whose formula range covers the touch at a DEF from half her DEF's low end to twice its high end (`KIND_DEF`; up to `KIND_DEF_TOP` = 300 while her DEF is unknown). A touch that fits no kind counts for none.\n- **Fallbacks.** If the game data gives no touches for the map's monsters, the threshold is `FALLBACK_SHARE` (35%) of her max HP. If her max HP isn't read yet, it's `UNREAD_SHARE` (50%) of her HP bar, and everything is counted in shares of the bar.\n\nExamples from the README (the thief, 3 hits): Tree Dungeon at level 28 with 840 max HP, her DEF as her touches fit it (106.5) and her measured 122, gives 3 Horny Mushroom touches of 129 (122 plus `MARGIN`) = 387 HP (46%). With her DEF not yet known it's 3 x 151 = 453 (54%). West Rocky Mountain II gives 237 HP; Thicket Around the Beach II gives 33.\n\n**The watch** (`HpWatch`):\n\n- **Reading her HP.** `see()` takes each reading: her HP number if it was read at its last change, else her bar's share less one pixel (`BAR_SLACK` = 1/104) times her max HP. It ignores a frame older than the last one it saw.\n- **Counting.** It counts a stretch under the threshold (when it started, and how many readings), plus how many readings in a row were under the floor (one touch, `FLOOR_TOUCHES`).\n- **Firing.** `due()` returns the stop exactly once. It fires after `LOOKS` (2) readings at least `debounce` apart: `DEBOUNCE_EXACT_S` (0.25 s) on her HP number, enough for her pet's potion (it lands 0.04-0.20 s after a touch); `DEBOUNCE_S` (0.6 s) on her bar, which settles by 0.37 s. It also fires on `FLOOR_LOOKS` (2) readings in a row under the floor, with no wait.\n- **Overrides.** `--low-hp` overrides the threshold: 1 or under is a share of her max HP, over 1 is HP. A potion key of her own (`--potion-hp`) caps it at `UNDER` (5 points) below that key's threshold.\n\n**The stops.** `HuntStop` carries everything `retreat.on_alarm` and `gamelab.__main__` need: a capitals `label`, a telemetry `event`, an `exit_code`, `keep_s` (seconds of the rolling recording to save), `parks` (go to the park place) and `later` (no retreat now). Its subclasses here:\n\n| Stop | Exit code | When |\n|---|---|---|\n| `SafetyStop` | 4 | HP stayed under the threshold |\n| `TooStrong` | 4 | the reserve is at or over her pet's warning share (where the pet keeps her HP), so the stop would fire at once |\n| `HpNotRead` | 4 | her max HP isn't read within `HP_WAIT_S` (5 s) of a hunting command's start |\n| `StopAsked` | 9 | `gamelab stop` was asked; she parks and no one is paged |\n\n**Why this rule.** The old rule was 65% of her HP for 2 s. It assumed a 250 HP pet potion. By level 28 the potion gave +100 against Horny Mushroom touches of 103-122, so she sat at about 65% with nothing wrong, and the old rule fired on 2026-10-28 at 01:00:55. Replayed on the live looks since 10-25, the reserve rule never fires; her lowest look was 409 HP.",
+   "lines": 621,
+   "key_items": [
+    {
+     "name": "HpWatch",
+     "kind": "dataclass",
+     "line": 515,
+     "signature": "class HpWatch",
+     "summary": "The safety stop's watch over her HP, fed a reading at a time; `due` returns the stop once.",
+     "details_md": "Fields: `reserve`, `potion_hp`, `low_hp`, `max_hp`, `mp`, and the stretch's state (`since`, `looks`, `low`, `hp`, `share`, `exact`, `at`, `fired`). The hunter owns one (`Hunter.hp_watch`). The guard reuses its `threshold` for its own 'under the stop rule' test."
+    },
+    {
+     "name": "HpWatch.see",
+     "kind": "method",
+     "line": 581,
+     "signature": "def see(self, t, share, max_hp, exact=None, mp=None, slack=BAR_SLACK) -> None",
+     "summary": "One reading. It uses her HP number if read, else her bar less a pixel; it updates the stretch under the threshold and the run of readings under the floor."
+    },
+    {
+     "name": "HpWatch.due",
+     "kind": "method",
+     "line": 610,
+     "signature": "def due(self) -> SafetyStop | None",
+     "summary": "Returns the `SafetyStop` the first time she has been under the threshold for LOOKS readings at least `debounce` apart, or under the floor FLOOR_LOOKS readings in a row. Never again after that."
+    },
+    {
+     "name": "HpWatch.threshold",
+     "kind": "method",
+     "line": 533,
+     "signature": "def threshold(self, max_hp=None, mp=None) -> float",
+     "summary": "The threshold in HP: `--low-hp` if given, else the reserve's, capped below a potion key of her own. Before her max HP is read, it's a share of her bar instead."
+    },
+    {
+     "name": "Reserve",
+     "kind": "dataclass",
+     "line": 165,
+     "signature": "class Reserve",
+     "summary": "Her reserve on one map: `hits` times the largest `Touch`, at her `level` and `defence`, with `stats` saying where they came from."
+    },
+    {
+     "name": "Reserve.hp",
+     "kind": "method",
+     "line": 194,
+     "signature": "def hp(self, max_hp, mp=None) -> float",
+     "summary": "hits x largest touch in HP; FALLBACK_SHARE of max HP without game data; UNREAD_SHARE (a share) without her max HP."
+    },
+    {
+     "name": "reserve_of",
+     "kind": "function",
+     "line": 291,
+     "signature": "def reserve_of(kinds, hits=HITS, defence=0.0, level=1.0, measured=None, guard=0.0, map_id=None, seen=frozenset(), stats='') -> Reserve",
+     "summary": "Builds the Reserve: each kind's formula top (`touch_range`) and her measured touches by kind, sorted largest first."
+    },
+    {
+     "name": "Touch.hp",
+     "kind": "method",
+     "line": 144,
+     "signature": "def hp(self) -> int",
+     "summary": "A kind's touch as counted: the formula's top, or MARGIN (5%) over her largest measured touch of that kind if that's more."
+    },
+    {
+     "name": "kind_of_touch",
+     "kind": "function",
+     "line": 278,
+     "signature": "def kind_of_touch(hp, kinds, defence, level) -> str | None",
+     "summary": "Which kind a measured touch was, by its size alone. If several kinds fit, it picks the largest; if none fit, it returns None."
+    },
+    {
+     "name": "Touches.measured",
+     "kind": "method",
+     "line": 338,
+     "signature": "def measured(self, level) -> dict[str, tuple[int, int, int]]",
+     "summary": "Her kept touches by kind as they would be at `level`: all touches at that level, plus her last CARRY_N (40) at other levels carried over by the formula's level term."
+    },
+    {
+     "name": "HuntStop",
+     "kind": "class",
+     "line": 371,
+     "signature": "class HuntStop(Exception)",
+     "summary": "The base of every stop that ends a hunt for the person at the PC to fix. `retreat.on_alarm` catches it, retreats, pages and re-raises it, and the command exits with its `exit_code`.",
+     "details_md": "Class attributes: `label`, `title`, `event`, `exit_code` (1), `keep_s` (0), `ends`, `after`, `advice`, `at`, `parks`, `later`; `page()` gives the phone and desktop alert's title and line. Subclasses live in safety, darts (`OutOfDarts`, `OutOfMp`), keycheck (`KeyCheckStop`) and statcheck (`StatWindowStop`)."
+    },
+    {
+     "name": "SafetyStop",
+     "kind": "class",
+     "line": 397,
+     "signature": "class SafetyStop(HuntStop)",
+     "summary": "Her HP stayed under the threshold. Exit code 4. Its words give her HP, the threshold and how long she was under it, and add 'she may be dead' at 2% or less."
+    },
+    {
+     "name": "TooStrong",
+     "kind": "class",
+     "line": 464,
+     "signature": "class TooStrong(HuntStop)",
+     "summary": "The map's monsters are too strong: her reserve at her max HP is at or over her pet's HP warning (her profile's `pet.hp_warning`: the thief's 70%, the magician's 55%), so the stop would fire at once. Raised before a hunting command hunts (`Hunter.too_strong`), or on a `nav` trip at the look that first reads her max HP. `--low-hp` bypasses it."
+    },
+    {
+     "name": "HpNotRead",
+     "kind": "class",
+     "line": 488,
+     "signature": "class HpNotRead(HuntStop)",
+     "summary": "Raised when her max HP isn't read off her HUD within HP_WAIT_S (5 s), so nothing is hunted. Without her max HP, no share of her bar can stand for 'N touches' on every map and at every level."
+    },
+    {
+     "name": "StopAsked",
+     "kind": "class",
+     "line": 444,
+     "signature": "class StopAsked(HuntStop)",
+     "summary": "Raised when `gamelab stop` asks, at the hunt's next look or glance. She parks (`parks`) and no one is paged. Exit code 9. `later` means the game wasn't in front, so the guard parks her when it returns."
+    }
+   ],
+   "inputs": [
+    "her HP bar share and HP number (cur, max) from every look (`Hunter._vitals`) and every glance of a chain's watch (`Hunter._glanced`)",
+    "her MP, for Magic Guard's share (unused: `Hunter.guard` is 0)",
+    "her level and DEF as `behavior.bootstrap.HerStats` has them (HUD digits, stat window, or a DEF fitted to her touches)",
+    "the map's monster kinds and their PADamage (`MapModel.mob_damage`), plus kinds a look sees on the map",
+    "the game data's monster table (gamedata/data/out/tables/mobs.json)",
+    "her profile's `safety_hits` (3 for the thief and the magician), plus `--low-hp` and `--potion-hp`"
+   ],
+   "outputs": [
+    "`SafetyStop`, `TooStrong`, `HpNotRead` and `StopAsked`, which `retreat.on_alarm` and gamelab.__main__ turn into a retreat, a page and an exit code",
+    "the reserve described in words for the hunt's start line and the telemetry 'safety' events (via `Hunter._reserve_check`)",
+    "the threshold the guard uses between hunts to decide her HP is 'under the stop rule'",
+    "one JSON line per exact touch, appended to lab/touches.jsonl"
+   ],
+   "uses": [
+    "gamelab/attack/danger.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/behavior/bootstrap.py",
+    "gamedata/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/touches.jsonl",
+     "mode": "read-write",
+     "what": "her exact touches, one JSON line each: t, map, level, hp, kind, max, pads (per character, via paths.of().touches)"
+    },
+    {
+     "path": "gamedata/data/out/tables/mobs.json",
+     "mode": "read",
+     "what": "the game data's monster table, for the PADamage of a kind seen on a map whose spawn list doesn't have it"
+    }
+   ],
+   "concurrency": "None of its own. `HpWatch` is fed synchronously from the hunter's looks and from the glances a chain's watch takes about every 30 ms during a chain.",
+   "tunables": [
+    {
+     "name": "HITS",
+     "value": "3",
+     "meaning": "her profile's hits by default (`safety_hits`): the reserve is this many of the map's largest touch"
+    },
+    {
+     "name": "DEBOUNCE_EXACT_S",
+     "value": "0.25",
+     "meaning": "s apart for two readings under the threshold by her HP number (her pet's potion lands 0.04-0.20 s after a touch)"
+    },
+    {
+     "name": "DEBOUNCE_S",
+     "value": "0.6",
+     "meaning": "s apart for two readings under it by her bar, or with a potion key of her own (the bar settles by 0.37 s)"
+    },
+    {
+     "name": "LOOKS",
+     "value": "2",
+     "meaning": "readings under the threshold that stop the hunt"
+    },
+    {
+     "name": "FLOOR_TOUCHES",
+     "value": "1",
+     "meaning": "the floor, in touches: under it ..."
+    },
+    {
+     "name": "FLOOR_LOOKS",
+     "value": "2",
+     "meaning": "... on this many readings in a row stops the hunt with no wait"
+    },
+    {
+     "name": "MARGIN",
+     "value": "0.05",
+     "meaning": "over the largest measured touch of a kind, when that's more than the formula's top"
+    },
+    {
+     "name": "FALLBACK_SHARE",
+     "value": "0.35",
+     "meaning": "of her max HP: the threshold on a map whose monsters' touches the game data doesn't give"
+    },
+    {
+     "name": "BAR_SLACK",
+     "value": "1/104",
+     "meaning": "one bar pixel at 1366x768, taken off her bar's share when her HP number isn't read"
+    },
+    {
+     "name": "UNDER",
+     "value": "0.05",
+     "meaning": "below a potion key of her own's threshold, if that's lower than the reserve"
+    },
+    {
+     "name": "KIND_DEF",
+     "value": "(0.5, 2.0)",
+     "meaning": "a touch is a kind's if the formula gives it at a DEF between these multiples of her DEF's ends"
+    },
+    {
+     "name": "KIND_DEF_TOP",
+     "value": "300.0",
+     "meaning": "... or at any DEF up to this while her DEF isn't known"
+    },
+    {
+     "name": "CARRY_N",
+     "value": "FIT_N (40)",
+     "meaning": "her last this many kept touches count at other levels, carried over"
+    },
+    {
+     "name": "HP_WAIT_S",
+     "value": "5.0",
+     "meaning": "s a hunting command waits at its start for her HP number (else `HpNotRead`)"
+    },
+    {
+     "name": "EXIT",
+     "value": "4",
+     "meaning": "exit code after a safety stop (the Lie Detector's is 3)"
+    },
+    {
+     "name": "bootstrap.UNREAD_SHARE",
+     "value": "0.5",
+     "meaning": "the threshold, as a share of her bar, while her max HP isn't read (nav trips)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Resting removed (sit on the chair to recover HP); a safety stop that ends the hunt took its place",
+     "why": "The user: \"Just remove the sit recover hp functionality, it's no longer needed\". Her pet drinks her potions."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Threshold changed from 65% of her HP for 2 s to a reserve of N touches of the map's largest monster, in HP",
+     "why": "The user: \"it should be HP under the amount of taking 3 hits from the monsters on the map\" (2 for a high-evasion thief, 3 for the magician; the thief kept at \"3 hits for now\" until her retreat dodges). At level 28 the 65% rule fired with nothing wrong."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "The touch size is worked out live from game data, her level and DEF, and her measured touches; HP, level and DEF were removed from config.toml",
+     "why": "The user: \"please make sure the '3 hits' is dynamically calculated from the map's strongest mob, not calculated once and hard-coded\"."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Measured touches carried across level-ups (`Touches.measured`, `carried`)",
+     "why": "Review: at first a level-up forgot a measured 130 over the formula's 122, and the reserve fell back to the formula until that kind touched her again."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "A hunting command hunts nothing without her max HP (`HpNotRead`) unless `--low-hp` is given",
+     "why": "Review: the 50% share it hunted at was under 3 Horny Mushroom touches at levels 24-26."
+    }
+   ],
+   "gotchas": [
+    "A touch's kind is told by its size, not by the nearest monster: no monster was seen near her at 853 of 1,220 touches.",
+    "Measured touches only raise the threshold, never lower it.",
+    "Not raised while she retreats (`Hunter.retreating`), and only once per hunt (`fired`); what follows the stop goes on.",
+    "An HP read as 0 right after a higher reading isn't believed until the next look reads it too (`Hunter._doubt_hp`); a glance's 0 isn't taken.",
+    "Magic Guard isn't taken off a touch: `Reserve.guard` exists, but `Hunter.guard` is 0 because nothing reads whether it's up.",
+    "Before her max HP is read, everything is in shares of her bar, and `--low-hp` given in HP can't be applied (it counts as 0)."
+   ],
+   "tests": [
+    "tests/test_safety.py",
+    "tests/test_bootstrap.py",
+    "tests/test_hp_number.py",
+    "tests/test_guard.py",
+    "tests/test_sim_tree.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/darts.py",
+   "title": "Out of darts and out of MP",
+   "tagline": "Infers she's out of stars or MP potions, and ends the hunt.",
+   "summary": "Her throwing-star count is never on screen, so `DartWatch` infers 'out of darts' from Lucky Seven presses that take no MP and kill nothing. A long enough stretch (20 on Tree Dungeon, scaled by the map's toughest monster) raises `OutOfDarts` (exit code 5) and saves the last 90 s of the rolling recording. Presses the game refused, presses that only swipe a monster up close, and presses right after a touch don't count. `MpWatch` is the magician's version: MP under two casts' worth for 12 s raises `OutOfMp` (exit code 8).",
+   "details_md": "**The stretch** (`DartWatch.see`, fed by every look's and glance's MP bar). Her MP is read in steps (`attack.choice.MP_STEPS` = 104: the bar's pixels at 1366x768; a cast's 14 MP is about 2.3 steps). A stretch starts again at:\n\n- the first read;\n- a drop of `FALL_STEPS` (2) under the highest read since it began: a cast took MP, so she has stars (`mp_shown_at`);\n- a rise of `DRINK_STEPS` (4): her pet's MP potion, which could hide casts;\n- a read under `LOW_STEPS` (5, her pet's MP warning), which is too low to tell anything;\n- a kill of hers (`kill`).\n\nA press counts only once `MP_SHOWS_S` (0.55 s) has passed since its key (`shown`). Presses keyed during a gap of more than `GAP_S` (2 s) between reads are dropped, because the keys may not have reached the game.\n\n**What doesn't count** (`cast`, `touched`):\n\n- **On a rope.** Presses keyed on a rope (`roped`): the game refuses them.\n- **Claw swipes.** Presses from the ground at a monster within the claw's reach (`swipe`): up close, the Lucky Seven key swipes like the attack key and takes no MP, stars or not.\n- **Right after a touch.** Presses from the ground within `TOUCHED_S` (2 s) after a touch. A monster standing on her that the looks miss is in claw reach all the same. This also removes presses already counted.\n\nJump throws keyed in the air still count: a star thrown in the air is a real cast.\n\n**The game's own words.**\n\n- **Pickup log.** Every `READ_EVERY` (12) shown presses, the hunter reads the pickup log (`asks`/`hear`). If `perception.loot.says_no_darts` matches, the stop comes at 12 presses.\n- **Message bar.** At `READ_FIRST` (3) presses, then every `CHAT_EVERY` (3), and at the stop, it reads the message bar (`asks_chat`/`hear_chat`). A game refusal (\"That cannot be used while you're on a rope or ladder.\" or not enough MP) restarts the stretch. On a rope, the hunter gets her off it.\n- **Rope tops.** Regular presses at a rope's top (`at_top`, `regular`) are watched the same way.\n\n**When it stops.** `due()` raises `OutOfDarts` once a stretch has `presses` shown presses. That's `presses_for` the map: `PRESSES` (20) on Tree Dungeon, times how many more swipes the map's toughest monster takes than a Horny Mushroom (`HORNY` 403 HP, PDD 10: 21.1 swipes at `PRESS_DAMAGE` 21). West Rocky Mountain II's Axe Stump gives 22. In the hunt loop, unless the game itself said she has no stars, `Hunter.health_check` first raises a `KeyDoubt` (a 'stars' doubt, holding the stop) so the key bindings are checked: her Lucky Seven key moved in the game looks the same as no stars. The stop is raised once the window shows her Lucky Seven where she has it. `followed()` restarts the stretch after a key is followed.\n\n**Evidence.** On 2026-10-26 at 01:28 the 20th press came at 01:28:36.4, 19.6 s after her last cast's key and 10 s before the user stopped the hunt. Live hunts with stars had at most 9 presses in a row without MP (11 counting the perception service's reads). `tests/test_darts.py` replays those five hunts: no stop.\n\n**Out of MP** (`MpWatch`, the magician's). The floor is `OUT_OF_MP_CASTS` (2) times a cast's MP (40 of 1007, 4%, under her pet's 5% warning). Every read under the floor for `OUT_OF_MP_S` (12 s), with none at or over it, raises `OutOfMp`.",
+   "lines": 447,
+   "key_items": [
+    {
+     "name": "DartWatch",
+     "kind": "dataclass",
+     "line": 198,
+     "signature": "class DartWatch",
+     "summary": "Her Lucky Seven presses and MP bar, look by look. Fields include the stretch's `keys`, `shown`, `span`, `longest`, the excluded counts (roped, swiped, touched, refused) and `mp_shown_at`."
+    },
+    {
+     "name": "DartWatch.see",
+     "kind": "method",
+     "line": 275,
+     "signature": "def see(self, t: float, share: float | None) -> None",
+     "summary": "One MP reading: restarts the stretch on a cast's drop, a drink or a read under LOW_STEPS; drops the presses keyed during a read gap over GAP_S (they don't restart it); then counts the presses its bar has had MP_SHOWS_S to show."
+    },
+    {
+     "name": "DartWatch.cast",
+     "kind": "method",
+     "line": 232,
+     "signature": "def cast(self, t: float, swipe: bool = False, ground: bool = True) -> None",
+     "summary": "A Lucky Seven press. Not counted on a rope, as a claw swipe, or from the ground within TOUCHED_S of a touch."
+    },
+    {
+     "name": "DartWatch.touched",
+     "kind": "method",
+     "line": 251,
+     "signature": "def touched(self, at: float) -> None",
+     "summary": "A touch: removes ground presses keyed within TOUCHED_S after it (air presses stay)."
+    },
+    {
+     "name": "DartWatch.hear_chat",
+     "kind": "method",
+     "line": 320,
+     "signature": "def hear_chat(self, line: ChatLine, t: float, still: bool = False) -> str | None",
+     "summary": "The message bar: a new game refusal restarts the stretch. Returns 'rope', 'refused' or 'darts' (no stars), or None."
+    },
+    {
+     "name": "DartWatch.asks_chat",
+     "kind": "method",
+     "line": 311,
+     "signature": "def asks_chat(self) -> bool",
+     "summary": "Whether to read the message bar now: at READ_FIRST, every CHAT_EVERY, at the stop's count, or for rope-top presses."
+    },
+    {
+     "name": "DartWatch.asks",
+     "kind": "method",
+     "line": 300,
+     "signature": "def asks(self) -> bool",
+     "summary": "Whether to read the pickup log now: every READ_EVERY shown presses."
+    },
+    {
+     "name": "DartWatch.due",
+     "kind": "method",
+     "line": 345,
+     "signature": "def due(self, now: float = 0.0) -> OutOfDarts | None",
+     "summary": "The stop, once: `presses` shown presses, or READ_EVERY if the game said she has no stars."
+    },
+    {
+     "name": "DartWatch.followed",
+     "kind": "method",
+     "line": 371,
+     "signature": "def followed(self, t: float) -> None",
+     "summary": "Her Lucky Seven key was followed to another key (keycheck): a fresh stretch, and the stop can fire again."
+    },
+    {
+     "name": "presses_for",
+     "kind": "function",
+     "line": 147,
+     "signature": "def presses_for(mob_hp, mob_pdd) -> int",
+     "summary": "The stretch that stops the hunt on a map: PRESSES, scaled by the toughest monster's swipes against a Horny Mushroom's."
+    },
+    {
+     "name": "swipes",
+     "kind": "function",
+     "line": 141,
+     "signature": "def swipes(hp: float, pdd: float = 0.0) -> float",
+     "summary": "Claw swipes a monster standing on her takes to die: hp / (PRESS_DAMAGE x 100 / (PDD + 100))."
+    },
+    {
+     "name": "OutOfDarts",
+     "kind": "class",
+     "line": 155,
+     "signature": "class OutOfDarts(HuntStop)",
+     "summary": "The stop: exit code 5. It keeps the last 90 s of the rolling recording (keep_s), and its words carry the presses, MP, pickup log and message bar at the stop."
+    },
+    {
+     "name": "MpWatch",
+     "kind": "dataclass",
+     "line": 419,
+     "signature": "class MpWatch",
+     "summary": "The magician's MP reads: under the floor (2 casts) at every read for OUT_OF_MP_S makes `due()` raise `OutOfMp`."
+    },
+    {
+     "name": "OutOfMp",
+     "kind": "class",
+     "line": 398,
+     "signature": "class OutOfMp(HuntStop)",
+     "summary": "Her pet's MP potions are out: exit code 8, and 90 s of recording saved."
+    }
+   ],
+   "inputs": [
+    "Lucky Seven presses and every look's and glance's MP bar (from `behavior.attacks.Attacks.on_throw`/`on_look`)",
+    "whether her look has her on a rope or at a rope's top (`Hunter._vitals` sets `roped`/`at_top`)",
+    "her touches and kills (`Hunter._gained` from her EXP)",
+    "the pickup log's OCR (`Eyes.messages`) and the message bar's line (`Eyes.chat_line`, a `perception.messages.ChatLine`)",
+    "the map's monsters' HP and PDDamage (for `presses_for`)"
+   ],
+   "outputs": [
+    "`OutOfDarts` / `OutOfMp` raised from `Hunter.health_check`",
+    "'rope' answers that make the hunter get her off a rope",
+    "`mp_shown_at` for the key check's stars test",
+    "a summary line at the run's end (longest stretch, refused and excluded presses)"
+   ],
+   "uses": [
+    "gamelab/attack/choice.py",
+    "gamelab/perception/loot.py",
+    "gamelab/perception/messages.py",
+    "gamelab/behavior/safety.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "PRESSES",
+     "value": "20",
+     "meaning": "a stretch this long stops the hunt on Tree Dungeon (over twice the 9 in a row live hunts with stars had)"
+    },
+    {
+     "name": "PRESS_DAMAGE",
+     "value": "21.0",
+     "meaning": "a claw swipe's damage at a monster standing on her"
+    },
+    {
+     "name": "HORNY",
+     "value": "(403.0, 10.0)",
+     "meaning": "Tree Dungeon's toughest: a Horny Mushroom's HP and PDDamage (21.1 swipes)"
+    },
+    {
+     "name": "MP_FIRST_S / MP_SHOWS_S",
+     "value": "0.21 / 0.55",
+     "meaning": "s after a cast's key that its MP may first show / has shown"
+    },
+    {
+     "name": "FALL_STEPS",
+     "value": "2",
+     "meaning": "MP steps under the highest read: a cast's MP"
+    },
+    {
+     "name": "DRINK_STEPS",
+     "value": "4",
+     "meaning": "MP steps over it: a drink"
+    },
+    {
+     "name": "LOW_STEPS",
+     "value": "5",
+     "meaning": "a read under this can't tell anything, so the stretch restarts"
+    },
+    {
+     "name": "GAP_S",
+     "value": "2.0",
+     "meaning": "presses keyed in a read gap this long don't count"
+    },
+    {
+     "name": "READ_EVERY",
+     "value": "12",
+     "meaning": "pickup log read every this many presses"
+    },
+    {
+     "name": "READ_FIRST / CHAT_EVERY",
+     "value": "3 / 3",
+     "meaning": "message bar read at 3 presses and every 3 more"
+    },
+    {
+     "name": "TOUCHED_S",
+     "value": "2.0",
+     "meaning": "s after a touch during which ground presses don't count"
+    },
+    {
+     "name": "KEEP_S",
+     "value": "90.0",
+     "meaning": "s of the rolling recording saved after the stop"
+    },
+    {
+     "name": "EXIT",
+     "value": "5",
+     "meaning": "exit code after out of darts"
+    },
+    {
+     "name": "OUT_OF_MP_CASTS / OUT_OF_MP_S",
+     "value": "2 / 12.0",
+     "meaning": "the magician's MP floor in casts, and how long under it"
+    },
+    {
+     "name": "OUT_OF_MP_EXIT",
+     "value": "8",
+     "meaning": "exit code after out of MP"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Out of darts ends the hunt",
+     "why": "The user at 01:28, during a grind: \"stop, you run out of darts\". The bot kept pressing for nothing."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "PRESSES lowered from 32 (1.5 times a whole Horny Mushroom) to 20",
+     "why": "Review: at 01:28, 32 wouldn't have come before the user's stop (22 presses when she stopped pressing)."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Presses the game refused on a rope don't count; the message bar is read",
+     "why": "Three false stops that night (22:58:32, 23:11:49, 23:12:42) were all hangs at a rope's top with her stars in her bag."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Presses at a monster within the claw's reach don't count; regular presses at a rope's top are watched",
+     "why": "Up close the key swipes with no MP; a simulator run hung 31.9 s on a rope with 37 refused presses unheard."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "Ground presses within TOUCHED_S of a touch don't count",
+     "why": "A Horny Mushroom on her, hidden under her own damage numbers, stopped a simulator hunt with her stars in her bag."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Out of MP for the magician",
+     "why": "The user: low MP is covered by her pet's MP potions, so keep casting; stop only if MP stays under a floor."
+    }
+   ],
+   "gotchas": [
+    "Her star count is in her inventory's Use tab, never read: out of darts is inferred.",
+    "With stars, 10-15% of presses take no MP live (swipes up close), sometimes 5-9 in a row.",
+    "Regular attack presses aren't watched (they take no MP either), so `--attack regular` and `probe run` have no out-of-darts stop.",
+    "A read under LOW_STEPS restarts the stretch, so with her MP that low and her pet's MP potions gone too, the stop waits for regen (up to 90 s).",
+    "The game's own 'no stars' message isn't known: `says_no_darts` matches usual wordings, and nothing matched on 1,413 kept frames.",
+    "A refusal left up and the same refusal redrawn look identical (same pixels)."
+   ],
+   "tests": [
+    "tests/test_darts.py",
+    "tests/test_keycheck.py",
+    "tests/test_keymap.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_rope_top.py",
+    "tests/test_safety.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/retreat.py",
+   "title": "Retreat and park",
+   "tagline": "Gets her to a safe platform or rope after the Lie Detector, a stop, or a park.",
+   "summary": "`on_alarm` wraps every hunting command. On the Lie Detector alarm or any `HuntStop`, it runs her retreat, logs it and pages the person at the PC, then lets the exception end the command. `choose` picks where to go: the quickest wholly safe platform or a rope nothing can reach, else a place 'safe enough', else the safest place in reach. `away` drives her there with moves alone, trying again from wherever a knock leaves her. `park`/`park_place` make the same choice with no time limit, for `gamelab stop`, `nav --park` and the guard.",
+   "details_md": "**What a retreat is for** (`Why`):\n\n| Why | Time to get there (`seconds`) | Her trips cut after (`window`) | Goes | Ropes |\n|---|---|---|---|---|\n| `LIE_DETECTOR` | `RETREAT_S` 10 s from the sighting | `RETREAT_WINDOW_S` 12 s | `TRIES` 3 | yes |\n| a stop (`why_of`: safety, out of darts/MP, key check stop, stat window) | `STOP_S` 60 s | 60 s | `STOP_TRIES` 12 | yes |\n| `PARK` / `StopAsked` | `PARK_S` 180 s | 180 s | `PARK_TRIES` 30 | yes, from a sure look |\n| `KEY_CHECK` | 10 s | 12 s | 3 | platforms only | Only on the Lie Detector is `window` also the key player's own limit (`RETREAT_WINDOW_S`): with the alarm up the player refuses her plans after it. For a stop or a park it's just the deadline her trips are given.\n\n**Where to** (`choose`):\n\n- **Already safe.** On a wholly safe platform already, she stays.\n- **Places weighed.** On every platform she can reach in time, it weighs points every `PLACE_STEP` (20 units), kept `PLACE_IN` (15) from the ends.\n- **Time.** The route planner's time to each point is stretched by `trip_s` (1.5 x route time + 0.6 s), to cover the looks and waits on the way.\n- **Danger.** Each point's danger is the worse of two cases: every spawn point's monster standing at its point, or the monsters the look actually sees. It takes the worst within `PLACE_SLACK` (20 units) either side, because her walk stops near the point, not on it. Every kind that can touch her counts (`attack.danger.every_kind`), even weak ones that hunting's own measure rounds to 0.\n- **Ropes.** Candidates come from `attack.ropes.refuges`, at their safest height with `ROPE_MARGIN` (25) clear, and are accepted only at danger `ROPE_SAFE` = 0: nothing of any kind reaches her there.\n- **Order of preference.** The quickest wholly safe platform or safe rope wins; on a tie, a platform before a rope. Each way also costs `WAY_BLOCKED_S` (2 s) more per move that starts or lands within `WAY_NEAR` (60) of a monster the look sees (`_way_cost`). If neither is in time, the nearest place with danger at most `SAFE_DANGER` (1% of her HP) wins; failing that, the safest place in reach, or where she is.\n- **Wholly safe** (`wholly_safe`) means `MapModel.safe`, plus (with `OVERHEAD`) no platform where monsters spawn sits over it within her height. Tree Dungeon's 25 under 24's Green Mushroom was the case that prompted this.\n\n**How** (`_away`):\n\n- **Moves only.** She uses the hunter's actions limited to moves (`Actions.moves_only`: arrows, jump, up/down; no attack, pick-up, pet food or mouse). The `Navigator` runs in `AVOID` mode, with her memory of the monsters and the every-kind danger model (`DODGE`).\n- **Each go.** Find her (`locate`, or `sure_look` for a park: 0.9 sure on two looks within 8 units, 3 s at most). If she's hanging on a rope (dot still over 3 looks within 1 s) and the rope is safe, she stays. Otherwise she gets off it, then chooses, then `nav.go` to the place.\n- **Dodging.** A stop's retreat waits at refuges with no detour bound and no deadline pass, until the time runs out (`STOP_REFUGES`). The Lie Detector's dodging budget is min(`EVADE_S` 3.5 s, time left).\n- **Arriving.** She waits on the place's platform where the walk to its x isn't clear (`ARRIVE_WAITS`). For a rope she hangs with `Mover.hang`.\n- **Errors.** A knock-back or a missed rope means another go from where she is, while there's time. The player refusing a plan, a lost look, or no dot ends it with a reason.\n\n**`on_alarm`** sets `h.stoppable`. On `LieDetectorAlarm` it calls `retreat()` and re-raises (exit 3). On a `HuntStop` it logs the stop in capitals, emits a telemetry event, retreats (unless `later`), records the result with `told`, pages (after her moves), saves `keep_s` of the rolling recording, and re-raises. Nothing that fails inside the retreat hides the alarm or the stop.\n\n**Measured** (README, 2026-11-05): on 59 replayed live retreats, the Lie Detector's 40 now end on 28 safe ropes and 12 safe platforms. In the simulator, 32 of 32 Lie Detector retreats were on a wholly safe place within 10 s (at most 9.4 s), against 2 of 32 before; after a safety stop with her pet out of potions, 8 of 8, and 0 touches in the next 30 s.",
+   "lines": 640,
+   "key_items": [
+    {
+     "name": "on_alarm",
+     "kind": "function",
+     "line": 242,
+     "signature": "@contextmanager\ndef on_alarm(h, log=None, rng=None)",
+     "summary": "Context manager around a hunt. On the Lie Detector alarm or a HuntStop it retreats, records the outcome, pages and saves the recording as the stop asks, then re-raises."
+    },
+    {
+     "name": "away",
+     "kind": "function",
+     "line": 288,
+     "signature": "def away(h, seen, why, log=None, rng=None) -> Retreat",
+     "summary": "Her retreat from time `seen` for reason `why`. It sets `h.retreating` meanwhile, so the safety stop isn't raised at the retreat's own looks."
+    },
+    {
+     "name": "_away",
+     "kind": "function",
+     "line": 304,
+     "signature": "def _away(h, seen, why, log=None, rng=None) -> Retreat",
+     "summary": "The go loop: locate her (or take a sure look), handle a rope she's on, choose or `park_place`, `nav.go` in AVOID mode with a dodge budget, and retry while time remains."
+    },
+    {
+     "name": "choose",
+     "kind": "function",
+     "line": 497,
+     "signature": "def choose(h, nav, s, left, hang=True) -> Place",
+     "summary": "Where to go with `left` seconds: the quickest safe platform or safe rope, else 'safe enough' (danger at most SAFE_DANGER), else the safest place in reach."
+    },
+    {
+     "name": "park_place",
+     "kind": "function",
+     "line": 556,
+     "signature": "def park_place(h, nav, s, hang=True) -> Place",
+     "summary": "`choose` with no time limit, on whatever map the hunter has. A safe platform, a safe rope, or a 'safe enough' place at danger exactly 0 will do. If nothing on the map can touch her, or there's no such place, she stays and it says why."
+    },
+    {
+     "name": "wholly_safe",
+     "kind": "function",
+     "line": 572,
+     "signature": "def wholly_safe(model, pid) -> bool",
+     "summary": "True when no monster can touch her anywhere on the platform: `MapModel.safe` and, with OVERHEAD, no spawn platform overhead within her height."
+    },
+    {
+     "name": "safe_rope",
+     "kind": "function",
+     "line": 486,
+     "signature": "def safe_rope(h, rope, y, seen) -> Place | None",
+     "summary": "If she's already hanging on a rope with danger at most ROPE_SAFE (0), she stays there."
+    },
+    {
+     "name": "hanging",
+     "kind": "function",
+     "line": 451,
+     "signature": "def hanging(nav, s) -> tuple[Scene, Rope] | None",
+     "summary": "Tells hanging from the air: her dot still for ROPE_STILL_LOOKS (3) looks within ROPE_STILL_S (1 s), on the nearest rope that reaches her height."
+    },
+    {
+     "name": "sure_look",
+     "kind": "function",
+     "line": 428,
+     "signature": "def sure_look(nav) -> Scene | None",
+     "summary": "A look to start a park from: her place at least SURE_CONF (0.9) sure on two looks in a row within SURE_DX (8), SURE_S (3 s) at most."
+    },
+    {
+     "name": "told",
+     "kind": "function",
+     "line": 412,
+     "signature": "def told(out, by) -> None",
+     "summary": "Writes how a park or a stop's retreat came out to lab/parked.json. If she didn't get there it writes lab/park_note.json for the guard; otherwise it clears the note. It also clears the stop request."
+    },
+    {
+     "name": "trip_s",
+     "kind": "function",
+     "line": 616,
+     "signature": "def trip_s(route_s) -> float",
+     "summary": "How long a planned route takes her in practice: SLACK x route + TRIP_S (1.5 x + 0.6 s)."
+    },
+    {
+     "name": "_way_cost",
+     "kind": "function",
+     "line": 588,
+     "signature": "def _way_cost(nav, src, x, seen) -> Callable[[int], float]",
+     "summary": "How much dearer the quickest way onto each platform is when moves near a seen monster cost WAY_BLOCKED_S more (DODGE)."
+    },
+    {
+     "name": "Why",
+     "kind": "dataclass",
+     "line": 213,
+     "signature": "class Why",
+     "summary": "What a retreat is for: the log's label, the telemetry word, the time it has, the player's window, how many goes, whether ropes count, and whether it's a park."
+    },
+    {
+     "name": "Place",
+     "kind": "dataclass",
+     "line": 149,
+     "signature": "class Place",
+     "summary": "Where a retreat goes: a platform and x (or any x), or a rope refuge, plus why, planned seconds, danger and way cost."
+    },
+    {
+     "name": "Retreat",
+     "kind": "dataclass",
+     "line": 170,
+     "signature": "class Retreat",
+     "summary": "How a retreat went: when it began, the place, the result, how long it took, and where her last look put her. `there()` and `said()` report it."
+    }
+   ],
+   "inputs": [
+    "the hunter `h`: its senses (looks), actions (keys), MapModel, danger model and monster memory",
+    "the Lie Detector alarm's age (`client.alarm_age`, from the alarm file's time)",
+    "a `HuntStop` raised inside the hunt (safety, out of darts/MP, key check, stat window, stop asked)",
+    "route times from the motion planner (`nav.planner.times`, `arrive`, `quickest`) and rope refuges from `attack.ropes`"
+   ],
+   "outputs": [
+    "her moves to the chosen place, as key plans of kind `retreat` the player plays (with the Lie Detector alarm up, only until 12 s after the sighting)",
+    "log lines in capitals and telemetry 'retreat' events, plus the stop's own event",
+    "lab/parked.json and lab/park_note.json for `gamelab stop` and the guard",
+    "desktop/phone alerts via `control.alarm.page`, and a saved rolling recording via `control.alarm.keep_recent`",
+    "the re-raised alarm or stop, which sets the command's exit code"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/ropes.py",
+    "gamelab/attack/danger.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/client.py",
+    "gamelab/control/mover.py",
+    "gamelab/control/navigator.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/scene.py",
+    "gamelab/motion/bodies.py",
+    "gamelab/motion/physics.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/behavior/safety.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/parked.json",
+     "mode": "write",
+     "what": "how the last park or stop's retreat came out: {t, by, there, said}"
+    },
+    {
+     "path": "lab/park_note.json",
+     "mode": "write",
+     "what": "written when she didn't get to a safe place, so the guard parks her later; removed when she did"
+    },
+    {
+     "path": "lab/stop_hunt.json",
+     "mode": "write",
+     "what": "`gamelab stop`'s request, deleted once the outcome is told"
+    },
+    {
+     "path": "lab/hunt.json",
+     "mode": "read",
+     "what": "the command hunting now: if another command took over, a park ends (`_taken_over`)"
+    },
+    {
+     "path": "lab/recent/<time>-<event>",
+     "mode": "write",
+     "what": "the rolling recording's last `keep_s` seconds after a stop that keeps it (via control.alarm.keep_recent)"
+    }
+   ],
+   "concurrency": "Runs in the hunting command's own thread, inside `on_alarm`'s exception handler. `Hunter.retreating` is set while it runs. It polls with short sleeps (0.08 s in `hanging`, ROPE_STILL_S/ROPE_STILL_LOOKS in `sure_look`). With the Lie Detector alarm up, the key player (a separate elevated process) plays her plans of kind `retreat` only until RETREAT_WINDOW_S after the sighting.",
+   "tunables": [
+    {
+     "name": "SAFE_DANGER",
+     "value": "0.01",
+     "meaning": "danger at most this (1% of her HP) counts as 'safe enough'"
+    },
+    {
+     "name": "ROPE_SAFE",
+     "value": "0.0",
+     "meaning": "a rope counts as safe only if nothing of any kind reaches her there"
+    },
+    {
+     "name": "STOP_S",
+     "value": "60.0",
+     "meaning": "s a stop's retreat has"
+    },
+    {
+     "name": "STOP_TRIES",
+     "value": "12",
+     "meaning": "goes at most after a stop"
+    },
+    {
+     "name": "PARK_S",
+     "value": "180.0",
+     "meaning": "s a park has"
+    },
+    {
+     "name": "PARK_TRIES",
+     "value": "30",
+     "meaning": "goes at most for a park"
+    },
+    {
+     "name": "alarm.RETREAT_S",
+     "value": "10.0",
+     "meaning": "s from the Lie Detector's sighting by which she should be on a safe place"
+    },
+    {
+     "name": "alarm.RETREAT_WINDOW_S",
+     "value": "12.0",
+     "meaning": "s after the sighting the player still plays her retreat's moves"
+    },
+    {
+     "name": "TRIES",
+     "value": "3",
+     "meaning": "goes at most on the Lie Detector"
+    },
+    {
+     "name": "ROPES",
+     "value": "True",
+     "meaning": "a rope will do for any retreat or park except a key check's"
+    },
+    {
+     "name": "ROPE_MARGIN",
+     "value": "25.0",
+     "meaning": "she aims at a rope height with nothing in reach this far either way"
+    },
+    {
+     "name": "SLACK / TRIP_S",
+     "value": "1.5 / 0.6",
+     "meaning": "trip time = 1.5 x the planner's + 0.6 s"
+    },
+    {
+     "name": "PLACE_STEP / PLACE_IN",
+     "value": "20.0 / 15.0",
+     "meaning": "spacing of the points weighed along a platform, and how far in from its ends"
+    },
+    {
+     "name": "PLACE_SLACK",
+     "value": "20.0",
+     "meaning": "a point's danger is the worst within this many units either side"
+    },
+    {
+     "name": "GO_SLACK_S",
+     "value": "1.5",
+     "meaning": "s past a go's planned trip time before the next go starts from where she is"
+    },
+    {
+     "name": "SURE_S / SURE_CONF / SURE_DX",
+     "value": "3.0 / 0.9 / 8.0",
+     "meaning": "a park's sure look: time limit, confidence, and how close two looks must agree"
+    },
+    {
+     "name": "DODGE",
+     "value": "True",
+     "meaning": "retreat trips dodge: memory, every-kind danger, toucher avoidance, way costs"
+    },
+    {
+     "name": "WAY_NEAR / WAY_BLOCKED_S",
+     "value": "60.0 / 2.0",
+     "meaning": "a move within this of a seen monster costs this many s more"
+    },
+    {
+     "name": "OVERHEAD",
+     "value": "True",
+     "meaning": "a safe platform with a spawn platform overhead within her height isn't wholly safe"
+    },
+    {
+     "name": "ARRIVE_WAITS",
+     "value": "30",
+     "meaning": "looks she may wait on the place's platform where the walk on isn't clear"
+    },
+    {
+     "name": "STOP_REFUGES",
+     "value": "True",
+     "meaning": "after a stop, refuges have no bound and no deadline pass"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "On the Lie Detector the hunt stops and she moves to a safe place within 10 s",
+     "why": "The user, after one failed over Chrome Remote Desktop's lag with a hunt going on: \"just stop any in-progress hunt when this happens\", then \"On a lie detector you should move to a safe place, within 10s\"."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "She stays on a safe rope she's already hanging on (`safe_rope`) instead of getting off first",
+     "why": "Review: getting off a safe rope first sent her over 9 s across the map in the simulator."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Retreat trips dodge (DODGE: the evade step, toucher avoidance, memory, way costs)",
+     "why": "The evade work (R7). The user, watching a retreat after a stop: \"there was no attempt to even evade\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "OVERHEAD: a 'safe' platform under a spawn platform within her height is weighed by danger, not taken as wholly safe",
+     "why": "Tree Dungeon's 25: a Green Mushroom on 24 reached her head there and knocked her off the map on 2 seeds of 13."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "A safe platform or safe rope first, 'safe enough' only if neither is in time; ropes must be unreachable (ROPE_SAFE 0); every kind counts",
+     "why": "The user: \"you should have gone to safe platform or rope upon stop, on lie detector, on hp safety trigger. I want to understand why that didn't happen.\" Of 22 live retreats from 11-02 to 11-05, none went to a rope or a safe platform."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "`park_place` picks the place from the live scene on whatever map she's on (no hard-coded platform)",
+     "why": "The user: \"the platform picking should be dynamically chosen based on the current map\"."
+    }
+   ],
+   "gotchas": [
+    "No mouse during a retreat: the person at the PC may be answering the Lie Detector with it.",
+    "If the alarm was seen longer ago than the retreat's time (e.g. looks failing their checks), she stays where she is ('too late').",
+    "The page comes after her moves. Whatever fails inside the retreat is logged, and the alarm or stop still ends the command.",
+    "Because the quickest place wins, it's more often a rope than a platform, though platforms have far the better live record and she regains HP only on a platform. Her pet's food while hanging isn't tested live.",
+    "A key check's retreat keeps to platforms (its window opens only with her on one).",
+    "With no hunt running, nothing retreats her on the Lie Detector: the player only raises the alarm and records.",
+    "Not tried in game: the numbers (SLACK, SAFE_DANGER) come from the simulator."
+   ],
+   "tests": [
+    "tests/test_retreat.py",
+    "tests/test_guard.py",
+    "tests/test_evade.py",
+    "tests/test_safety.py",
+    "tests/test_keycheck.py",
+    "tests/test_darts.py",
+    "tests/test_statcheck.py",
+    "tests/test_chatbox.py",
+    "tests/test_hunt.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/guard.py",
+   "title": "The guard and `gamelab stop`",
+   "tagline": "Parks her between hunts when she's touched; stops a hunt so she parks first.",
+   "summary": "`stop` is how a hunt is ended. It writes a request the hunt reads at its next look (raising `StopAsked`, so she parks), cuts the plan playing, and waits to report where she ended up. `Guard` and `Pass` run inside the pet babysitter's `pet --every` process, once a second while no hunt runs, and read only the perception service's newest state. When she's being touched, her HP is under the stop rule, or a stop or a dead hunt left a note, they push a phone alert and, with the game in front and the key player running, start `nav --park --tell`. Small lab files coordinate the processes.",
+   "details_md": "**Why it exists.** On 2026-11-05 a grind was killed with `Stop-Process` at 11:15:35 (\"Stop now, i need to work\"). No retreat ran, and she was left among 7-9 monsters. She took 133 touches, her pet's potions ran out at 11:26, and she died at 11:27:48. Nothing was said for 5 h 40 min.\n\n**`stop`** (`python -m gamelab stop`):\n\n- **Grind loops.** It touches the grind loops' STOP file, so they start no other grind.\n- **No hunt running.** With the Lie Detector alarm up, nothing moves her. With the game not in front, it leaves a park note. Otherwise it parks her now (`nav --park` as a child process).\n- **A hunt running.** It writes lab/stop_hunt.json and cuts the plan playing (`client.cut_running`, not with the alarm up). Then it waits up to `STOP_SAY_S` (300 s) for the hunt to end and reads lab/parked.json to say where she is.\n\n**A pass** (`Pass.tick`, every `GUARD_S` = 1 s from `gamelab.__main__._guarded`):\n\n1. Read the switch (lab/guard_mode.txt: `off`, `alert`, otherwise on).\n2. Track input (`_hands`) and turn a dead hunt's leftover entry into an urgent note (`left_behind`).\n3. Take the perception service's newest state, at most `STATE_AGE_S` (3 s) old. No usable state for `BLIND_S` (5 min) gives one regular push (\"The guard can't see her\") unless she's known to be parked.\n4. Feed `Vitals` (potions, death).\n5. Count her touch popups, skipping ones `crowded` by another player: `TOUCHES` (2) within `TOUCH_WITHIN_S` (30 s) means she's being touched.\n6. Check her HP against the stop rule (the hunter's `HpWatch.threshold`) on `LOW_PASSES` (2) passes in a row, unless she's known parked.\n7. If anything set it off and no hunt is running, fill in the alarm, player, front and by-hand facts and call `Guard.act`.\n\n**`Guard.act`'s ladder**, once an episode is pending:\n\n1. Dead: nothing more (one critical push from vitals).\n2. Lie Detector alarm up: no moves.\n3. Played by hand: left alone, and any park note dropped (she's theirs now); one 'HP low' alert if under the stop rule.\n4. Mode `alert`: one push, no moves.\n5. Game not in front, or the player not running: one push saying why; she parks when it's put right.\n6. Otherwise `start_park()` (a detached `nav --park --tell`) and a 'Parking her' push, at most every `PARK_AGAIN_S` (120 s), and not within 10 s (2 x `BACK_S`) of the game coming back.\n7. After `PARK_MOST` (3) parks in one episode: one 'She can't park' push, and she's left to the person at the PC.\n\nAn episode ends after `EPISODE_S` (300 s) with nothing setting it off. Pushes are critical except for a stop's note alone, as the user asked. The guard never starts the player and never brings the game forward.\n\n**Played by hand** (`_hands`). Windows' last input also moves with the key player's injected keys (0.09 s old at the median in a hunt, 500 updates a minute). So it counts only input with the game in front, more than `BACK_S` (5 s) after the game came back, and later than the player's last plan by `KEY_SLACK_S` (1.5 s). The player's last plan comes from the last 'ran'/'spliced' line in lab/player.log (`player_last_key`). Such input is remembered for `HAND_S` (60 s).\n\n**The lab-file protocol:**\n\n| File | Written by | Means |\n|---|---|---|\n| lab/hunt.json | `claim` at a hunting command's start | {pid, started, command}; `over` removes it at a clean end; left behind means the command was killed or crashed |\n| lab/stop_hunt.json | `stop` | the hunt's next look raises `StopAsked`; `claim` drops one older than `STALE_S` (60 s) |\n| lab/park_note.json | `retreat.told`, `stop`, `left_behind` | a park wanted and not done: {t, why, urgent} |\n| lab/parked.json | `retreat.told` | how the last park went |\n| lab/guard.json | `Guard` | episode state, kept across restarts |\n\n**Measured** (README): replaying the 11:15 kill, the guard would have pushed \"She can't park yet\" at once and parked her 10 s after the game's return, 2.5 minutes before her first touch. In the simulator, 0 of 8 runs died with the guard, against 5 of 8 without.",
+   "lines": 429,
+   "key_items": [
+    {
+     "name": "Guard.act",
+     "kind": "method",
+     "line": 167,
+     "signature": "def act(self, seen: Seen, mode: str = ON) -> str | None",
+     "summary": "One pass's decision: opens or ends an episode and walks the ladder (dead, alarm, by hand, alert only, can't park yet, park). Returns 'park', 'alert' or None."
+    },
+    {
+     "name": "Guard",
+     "kind": "class",
+     "line": 130,
+     "signature": "class Guard",
+     "summary": "The decision state (lab/guard.json: episode, told, parks, park_at, pending, last), with `push(title, text, critical)` and `start_park()` injected."
+    },
+    {
+     "name": "Pass.tick",
+     "kind": "method",
+     "line": 269,
+     "signature": "def tick(self) -> str | None",
+     "summary": "One pass: mode, input, left-behind hunts, the note, the newest state (vitals, touches, low HP), then `Guard.act`."
+    },
+    {
+     "name": "Pass",
+     "kind": "class",
+     "line": 220,
+     "signature": "class Pass",
+     "summary": "A guard pass in `pet --every`, with `latest()` (the service's newest state), `low(st)` (under the stop rule), the game window's title and a `Vitals`."
+    },
+    {
+     "name": "Pass._hands",
+     "kind": "method",
+     "line": 236,
+     "signature": "def _hands(self, now: float) -> None",
+     "summary": "Tracks when the game came back to front and the last input that was someone actually playing (see 'Played by hand')."
+    },
+    {
+     "name": "Seen",
+     "kind": "dataclass",
+     "line": 115,
+     "signature": "class Seen",
+     "summary": "What one pass goes by: touched, low, note, urgent, dead, alarm, front, held, player, by_hand, hp."
+    },
+    {
+     "name": "stop",
+     "kind": "function",
+     "line": 389,
+     "signature": "def stop(title, say=print, park=None, sleep=time.sleep) -> int",
+     "summary": "`python -m gamelab stop`: asks the running hunt to stop (or parks her with none running) and reports how it came out. Returns 0 when done or standing, 1 when it can't tell."
+    },
+    {
+     "name": "claim",
+     "kind": "function",
+     "line": 325,
+     "signature": "def claim(command: str) -> None",
+     "summary": "A hunting command's start: writes lab/hunt.json (unless another hunt is running) and clears old guard state, park notes and stale stop requests."
+    },
+    {
+     "name": "over",
+     "kind": "function",
+     "line": 346,
+     "signature": "def over() -> None",
+     "summary": "A clean end: removes this process's lab/hunt.json entry. A killed or crashed one leaves it behind."
+    },
+    {
+     "name": "left_behind",
+     "kind": "function",
+     "line": 353,
+     "signature": "def left_behind() -> None",
+     "summary": "A hunt entry whose process is gone becomes an urgent park note at once."
+    },
+    {
+     "name": "running_hunt",
+     "kind": "function",
+     "line": 319,
+     "signature": "def running_hunt() -> dict | None",
+     "summary": "The command hunting now, if its pid is alive and is the same process (start time checked)."
+    },
+    {
+     "name": "player_last_key",
+     "kind": "function",
+     "line": 97,
+     "signature": "def player_last_key(now: float, log: Path | None = None) -> float | None",
+     "summary": "When the key player last played a plan, from the last 'ran'/'spliced' line in lab/player.log's last 2 KB."
+    },
+    {
+     "name": "read_mode",
+     "kind": "function",
+     "line": 88,
+     "signature": "def read_mode() -> str",
+     "summary": "The switch from lab/guard_mode.txt: 'off', 'alert', or 'on' by default."
+    },
+    {
+     "name": "parked_said",
+     "kind": "function",
+     "line": 379,
+     "signature": "def parked_said(since: float) -> tuple[bool, str] | None",
+     "summary": "How the last park or stop's retreat came out since a time, from lab/parked.json."
+    }
+   ],
+   "inputs": [
+    "the perception service's newest state (hp, mp, hp_of, touch with 'told'/'crowded') via `latest()`",
+    "the stop rule's threshold from the hunter's `HpWatch` via `low(st)`",
+    "the foreground window title and Windows' last input age (gamelab/window.py)",
+    "lab/player.log's tail, lab files written by hunts and retreats, and `client.alarm_up` / `client.player_up`"
+   ],
+   "outputs": [
+    "phone pushes (`push` -> control.notify.phone) and telemetry 'guard' events",
+    "a detached `nav --park --tell` (`start_park`), whose output goes to lab/park.log",
+    "lab/stop_hunt.json and park notes; `stop`'s printed outcome and exit code"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/window.py",
+    "gamelab/control/client.py",
+    "gamelab/behavior/vitals.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/guard.json",
+     "mode": "read-write",
+     "what": "the guard's episode state across the pet feeder's restarts"
+    },
+    {
+     "path": "lab/guard_mode.txt",
+     "mode": "read",
+     "what": "the switch: 'off' or 'alert' (`gamelab guard`); missing means on"
+    },
+    {
+     "path": "lab/hunt.json",
+     "mode": "read-write",
+     "what": "the command hunting now: {pid, started, command}"
+    },
+    {
+     "path": "lab/stop_hunt.json",
+     "mode": "read-write",
+     "what": "`gamelab stop`'s request: {t}"
+    },
+    {
+     "path": "lab/park_note.json",
+     "mode": "read-write",
+     "what": "a park wanted and not done: {t, why, urgent}"
+    },
+    {
+     "path": "lab/parked.json",
+     "mode": "read-write",
+     "what": "how the last park went (read; deleted at a hunt's start by `claim`)"
+    },
+    {
+     "path": "lab/player.log",
+     "mode": "read",
+     "what": "the key player's log tail: its last 'ran'/'spliced' time"
+    },
+    {
+     "path": "D:/MapleHelper-scratch/mageq/empty/STOP",
+     "mode": "write",
+     "what": "the grind loops' stop file, touched by `stop` when its folder exists"
+    }
+   ],
+   "concurrency": "`Pass.tick` runs in the `pet --every` process, once every GUARD_S (1 s) between pet follows (gamelab.__main__._guarded; an exception in a pass is logged, not fatal). A park is a separate detached process (`nav --park --tell`). `stop` is its own short-lived command, polling every 0.2 s for up to 300 s; with no hunt running it runs `nav --park` as a child process and waits.",
+   "tunables": [
+    {
+     "name": "GUARD_S",
+     "value": "1.0",
+     "meaning": "s between passes"
+    },
+    {
+     "name": "STATE_AGE_S",
+     "value": "3.0",
+     "meaning": "a state older than this says nothing"
+    },
+    {
+     "name": "LOW_PASSES",
+     "value": "2",
+     "meaning": "passes in a row under the stop rule"
+    },
+    {
+     "name": "TOUCHES / TOUCH_WITHIN_S",
+     "value": "2 / 30.0",
+     "meaning": "touches within this many s mean she's being touched (a lone popup is mostly another player's)"
+    },
+    {
+     "name": "HAND_S",
+     "value": "60.0",
+     "meaning": "s that real input counts as her being played by hand"
+    },
+    {
+     "name": "BACK_S",
+     "value": "5.0",
+     "meaning": "s after the game comes back during which input is what brought it (the park waits twice this)"
+    },
+    {
+     "name": "BLIND_S",
+     "value": "300.0",
+     "meaning": "s with no usable state before it pushes"
+    },
+    {
+     "name": "STALE_S",
+     "value": "60.0",
+     "meaning": "s after which a stop request is left over from another hunt"
+    },
+    {
+     "name": "KEY_SLACK_S",
+     "value": "1.5",
+     "meaning": "s past the player's last log line that is still its own keys"
+    },
+    {
+     "name": "PARK_AGAIN_S / PARK_MOST",
+     "value": "120.0 / 3",
+     "meaning": "time between parks in an episode, and the most parks"
+    },
+    {
+     "name": "EPISODE_S",
+     "value": "300.0",
+     "meaning": "s with nothing setting it off that end an episode"
+    },
+    {
+     "name": "STOP_SAY_S",
+     "value": "300.0",
+     "meaning": "s `stop` waits to say what came of it"
+    },
+    {
+     "name": "hunter.STOP_WAIT_S",
+     "value": "60.0",
+     "meaning": "s a hunt holds a stop request with the game not in front, then ends with a note for the guard"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-05",
+     "what": "Built `gamelab stop` (a stop that parks) and the guard between hunts",
+     "why": "A killed grind left her among monsters and she died unnoticed. The user: \"you should build both, but the platform picking should be dynamically chosen based on the current map\"."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "'Played by hand' means input later than the key player's last plan, with the game in front",
+     "why": "Windows' last input moves with the player's injected keys too (measured live: 0.09 s old at the median, 500 updates a minute)."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "Pushes are critical except for a stop's note alone",
+     "why": "The user asked for that one to be regular."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "The key player's own stop became `stop-player`; `gamelab stop` is how a hunt is stopped",
+     "why": "So stopping a hunt parks her first."
+    }
+   ],
+   "gotchas": [
+    "Blind with the game behind another window or minimized: touches, HP and potions can't be seen. Only 18.29 of 129.75 recorded hours had usable states.",
+    "The babysitter runs `pet --map 10002073` (Tree Dungeon), so on any other map every state is unusable and `stop` with no hunt can't park her.",
+    "Someone watching without touching anything for a minute isn't 'playing': she'd park, and the push says so.",
+    "Chrome Remote Desktop injects keys from the same session, so they should count as input, but this hasn't been tried.",
+    "It never starts the player and never brings the game forward: a park waits for the game's return however long that takes.",
+    "Not tried live: offline replays and the simulator only."
+   ],
+   "tests": [
+    "tests/test_guard.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/vitals.py",
+   "title": "Vitals: potions out, death",
+   "tagline": "Tells the phone once when her pet's potions stop working, or she dies.",
+   "summary": "`Vitals` reads each state's HP and MP bars (and her HP number) and pushes 'HP potions not working' and 'MP potions not working' (regular) and 'She died' (critical), each once: a potion push again only after that potion has worked again (and `AGAIN_S`, 30 min, since), the death push again only after she's alive. It's fed by every look in a hunt (`Hunter._vitals`) and by the guard's pass between hunts. What it has told is kept in lab/vitals.json, so separate processes don't repeat it.",
+   "details_md": "**Read from her bars, not from the game's words.** The game does print \"You are lacking the MP Potion that your pet is supposed to use.\" on the message bar. But any chat line replaces it within seconds, and an OCR read takes 285 ms. The bars are in every state and can be checked against all the live telemetry: her pet drinks within 0.2 s of a touch, and a potion shows as a jump in a bar.\n\n**The rules** (`see` -> `_see_hp`, `_see_mp`):\n\n- **HP potions out.** `HP_DROPS` (2) touch drops, each at least `DROP` (1.5% of her bar) and at least `TOUCH_APART_S` (1 s) apart, while she's under `HP_LOW` (60%, where her pet drinks), with no potion jump between them. A jump is a rise of at least `JUMP` (5%) over the last `WINDOW_S` (1.5 s) (`_moved`).\n- **MP potions out.** Under `MP_LOW` (5%) for `MP_OUT_S` (60 s) with no jump. With potions her MP never stays there; without them a cast's worth regained and spent again keeps her at 1-3%.\n- **Dead.** Her HP number reads 0, or her bar is at `HP_ZERO` (2%) or less, for `DEAD_S` (3 s). A one-frame misread 0 doesn't count.\n\nA jump marks that potion as working again (`_worked`), so the next run-out can be told, but not within `AGAIN_S` (30 min) of the last time it was told (`_may_tell`). That stops a potion picked up and drunk at once from flooding the phone. Being alive again re-arms the death push.\n\n**State** (lab/vitals.json): `hp` and `mp` hold the time told (None once the potion has worked again), `told_hp` and `told_mp` hold the last time told, and `dead` holds the time of death. The babysitter stops and starts the pet feeder around every hunt, so this file is how one process knows what another already told.\n\n**Replayed** on the 1.22 million live states of 10-28 to 11-05 (README): 13 pushes (MP 5, HP 7, dead 1). These include HP at 11:26:37 and the death at 11:27:51 on 11-05.",
+   "lines": 152,
+   "key_items": [
+    {
+     "name": "Vitals",
+     "kind": "class",
+     "line": 52,
+     "signature": "class Vitals",
+     "summary": "A state's bars at a time in, pushes out as they fall due. `push(title, text, critical)` may be None; `clock` is the wall clock (a replay gives its own `t`)."
+    },
+    {
+     "name": "Vitals.see",
+     "kind": "method",
+     "line": 101,
+     "signature": "def see(self, hp, mp, number=None, t=None) -> None",
+     "summary": "One state: HP share (or the HP number's cur/max), MP share, and the time."
+    },
+    {
+     "name": "Vitals._see_hp",
+     "kind": "method",
+     "line": 110,
+     "signature": "def _see_hp(self, share, zero, t) -> None",
+     "summary": "Counts touch drops under HP_LOW with no jump between them, and watches for death (zero for DEAD_S)."
+    },
+    {
+     "name": "Vitals._see_mp",
+     "kind": "method",
+     "line": 137,
+     "signature": "def _see_mp(self, share, t) -> None",
+     "summary": "MP under MP_LOW for MP_OUT_S with no jump means her MP potions are out."
+    },
+    {
+     "name": "Vitals._moved",
+     "kind": "method",
+     "line": 85,
+     "signature": "def _moved(self, key, t, share) -> tuple[bool, float]",
+     "summary": "Whether a bar jumped (a potion) within WINDOW_S, and how far it fell."
+    },
+    {
+     "name": "Vitals._may_tell",
+     "kind": "method",
+     "line": 97,
+     "signature": "def _may_tell(self, key, t) -> bool",
+     "summary": "Only if not told since the potion last worked, and AGAIN_S since the last time told."
+    },
+    {
+     "name": "Vitals.zero",
+     "kind": "method",
+     "line": 150,
+     "signature": "@property\ndef zero(self) -> bool",
+     "summary": "Her HP was 0 at the last state. The guard uses it as `Seen.dead`."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 42,
+     "signature": "def load() -> dict",
+     "summary": "What's been told so far, from lab/vitals.json ({} if none)."
+    }
+   ],
+   "inputs": [
+    "HP and MP bar shares and the HP number from a look (`Hunter._vitals`) or a guard pass's state",
+    "the time (wall clock, so the state can be shared across processes)"
+   ],
+   "outputs": [
+    "push(title, text, critical) to the phone (control.notify.phone through the caller)",
+    "log lines",
+    "`zero` for the guard"
+   ],
+   "uses": [
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/vitals.json",
+     "mode": "read-write",
+     "what": "what the phone has been told of her potions and her death"
+    }
+   ],
+   "concurrency": "None of its own. One instance lives in each hunting process and in `pet --every`; they share state through lab/vitals.json.",
+   "tunables": [
+    {
+     "name": "HP_LOW",
+     "value": "0.6",
+     "meaning": "of her bar: where her pet drinks"
+    },
+    {
+     "name": "HP_DROPS",
+     "value": "2",
+     "meaning": "touch drops under HP_LOW with no potion jump between"
+    },
+    {
+     "name": "DROP",
+     "value": "0.015",
+     "meaning": "of her bar: the least drop that counts as a touch"
+    },
+    {
+     "name": "TOUCH_APART_S",
+     "value": "1.0",
+     "meaning": "s between counted drops"
+    },
+    {
+     "name": "JUMP / WINDOW_S",
+     "value": "0.05 / 1.5",
+     "meaning": "a rise this big over this many s is a potion"
+    },
+    {
+     "name": "MP_LOW / MP_OUT_S",
+     "value": "0.05 / 60.0",
+     "meaning": "MP under this share for this long means MP potions are out"
+    },
+    {
+     "name": "HP_ZERO / DEAD_S",
+     "value": "0.02 / 3.0",
+     "meaning": "HP this low for this long means dead"
+    },
+    {
+     "name": "AGAIN_S",
+     "value": "1800.0",
+     "meaning": "s before the same potion is told of again"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-05",
+     "what": "Pushes for potions running out and death, in hunts and between them",
+     "why": "She stood among monsters for 12 minutes and lay dead for 5 h 40 min with nothing said."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "Told by her bars, not the game's message",
+     "why": "Any chat line replaces the message within seconds, and an OCR read is 285 ms; the bars are in every state."
+    }
+   ],
+   "gotchas": [
+    "Six past HP pushes came within minutes of a safety stop; none of them were checked against frames, because no recording covers them.",
+    "A regular push (not critical) for potions; critical only for death."
+   ],
+   "tests": [
+    "tests/test_guard.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/pet.py",
+   "title": "Pet care (PetCare and PetWait)",
+   "tagline": "Keeps her potion-drinking pet fed: reads fullness once, then follows it in time.",
+   "summary": "Her pet drinks her potions for her, and a hungry pet stops. `PetCare` reads the pet's fullness off her Character Info (a double-click on her, then OCR of the FULLNESS field) and, if it's under 70, feeds Pet Food until it's at least 80. After that it follows fullness in time (1 point every 55 s while the game window is there) and feeds when the followed value is under 60. It runs in hunts and in the `pet --every` babysitter, keeps feeding under the Lie Detector alarm, and doubts its own key when two foods in a row don't raise fullness. `PetWait` holds the babysitter (sending nothing) while the client is the wrong size, with one bounded Alt+Enter try when the pet is due food.",
+   "details_md": "**A check** (`check`, at most every `CHECK_EVERY_S` = 20 min, or `pet --read`):\n\n1. **Open her window.** A look for her name tag, then a double-click `BODY_ABOVE_TAG` (42 px) above it, clicks `CLICK_GAP_MS` (90 ms) apart (`_open`).\n2. **Read it.** `read_panel` OCRs the middle of the screen with maplehelper's OCR engine. It needs the FULLNESS label's number, LEVEL, the names in the portrait column, and the SHOW PET INFO button.\n3. **Make sure it's hers.** Her name (read once off the bottom bar, `NAME_BOX`) must be under the portrait; failing a name read, the level must match. Another player standing on her once took the double-click.\n4. **Open the pet panel** if it's collapsed (a click on SHOW PET INFO).\n5. **Feed.** Under `FEED_BELOW` (70), she feeds up to `FEED_TO` (80), at most `MAX_FEEDS` (3) foods, reading again `SETTLE_S` (0.6 s) after each.\n6. **Close it.** Esc, then read again to confirm, with one more Esc if needed. Esc is never pressed without a Character Info window seen open: with nothing open, Esc opens the game menu.\n\nIf the panel can't be read, she feeds once anyway when `FALLBACK_S` (2 h) have passed since the last food. A capture that isn't the game (`BadLook`) means no action, and a retry after `RETRY_S` (90 s).\n\n**Following** (`tend`, called by the hunter and by `pet --every`):\n\n- **Hunger.** `follow` lowers the kept level by `HUNGRY` (1) per `TICK_S` (55 s), counting only time the game window is there.\n- **Long gaps.** A gap of `UNWATCHED_S` (30 min) with nothing following means the level isn't known, and it's read before any food.\n- **Under the Lie Detector alarm.** It feeds by the followed level, never reads (the read double-clicks her, and the person may be using the mouse), and feeds a never-read pet once 2 h have passed.\n- **Feeding.** Under `FOLLOW_FEED_BELOW` (60), it gives one food (+`FOOD` 30) if the key is trusted (`config.toml`'s, or one read off the game's key bindings this run) or a check saw a food take within `VERIFIED_S` (2 h). Otherwise it runs a full check, or waits for a moment to read while the level is still `BLIND_BELOW` (20) or more. With the Lie Detector alarm up it always feeds blind. A key doubted in the last `FOOD_DOUBT_WAIT_S` isn't tapped at all.\n\n**Doubting the food key** (`_food_doubt`). `FOOD_DOUBT` (2) taps in a row with no rise in fullness are said in capitals, sent as a telemetry 'pet_doubt' event, paged, and passed to `on_doubt` (the hunter turns it into a key check). That key isn't tapped for `FOOD_DOUBT_WAIT_S` (30 min).\n\n**The hunger rate.** How often hunger ticks isn't in the client, and Classic sources don't know. Two v95 server emulators give 60-90 s per point. Measured live on 2026-10-29: 89 to 54 in 1,930 s, 55.1 s per point. So `TICK_S` is 55: a food about every 27.5 minutes. `PACKED_AT` (5) records the disputed point where the pet may be sent home.\n\n**`PetWait`** (the babysitter, while the client is unfit: another size, not calibrated, or drawing off it). It says so once, sends nothing, and keeps following fullness. It makes one Alt+Enter-twice try (`control.window_size.refit`) only when all of these hold:\n\n- the fault is one Alt+Enter fixes (`framecheck.FIX_KINDS`);\n- it has stood `STEADY_S`;\n- the pet is due a food (`due_to_feed`);\n- no alarm is up;\n- none in the last `TRY_EVERY_S` (30 min), and fewer than `HOURLY` (4) in the last hour across processes;\n- the game is seen in play (HUD match at least `framecheck.HUD_SEEN`).\n\n**Keys it sends:** the pet food key, Esc, left clicks on her and on SHOW PET INFO, and (in PetWait) Alt+Enter twice. Nothing else.",
+   "lines": 561,
+   "key_items": [
+    {
+     "name": "PetCare",
+     "kind": "class",
+     "line": 191,
+     "signature": "class PetCare",
+     "summary": "Checks and feeds her pet through `actions` (keys, plays) and `eyes` (looks, captures). `trusted()` and `on_doubt` are set by the hunter."
+    },
+    {
+     "name": "PetCare.tend",
+     "kind": "method",
+     "line": 223,
+     "signature": "def tend(self, present: bool = True, read_ok: bool = True) -> float | None",
+     "summary": "Follows fullness in time and feeds below FOLLOW_FEED_BELOW: blind on a trusted key, or by a check. Returns the followed fullness."
+    },
+    {
+     "name": "PetCare.check",
+     "kind": "method",
+     "line": 279,
+     "signature": "def check(self) -> int | None",
+     "summary": "Opens her Character Info, reads fullness, feeds while low (reading after each food), closes the window. Not done with the alarm up."
+    },
+    {
+     "name": "PetCare._open",
+     "kind": "method",
+     "line": 397,
+     "signature": "def _open(self) -> int | None",
+     "summary": "Double-clicks her body above her name tag, makes sure the window is hers, opens the pet panel, and returns fullness."
+    },
+    {
+     "name": "PetCare._close",
+     "kind": "method",
+     "line": 441,
+     "signature": "def _close(self) -> None",
+     "summary": "Esc only with a Character Info window seen open, and one more if it's still there."
+    },
+    {
+     "name": "PetCare._food_doubt",
+     "kind": "method",
+     "line": 373,
+     "signature": "def _food_doubt(self, state: dict, reads: list) -> None",
+     "summary": "FOOD_DOUBT taps without a rise: said, telemetry, paged, and that key held for 30 min."
+    },
+    {
+     "name": "PetCare._may_go_blind",
+     "kind": "method",
+     "line": 348,
+     "signature": "def _may_go_blind(self, now: float) -> bool",
+     "summary": "A food due may go without a read: on a trusted key, or one a check saw take within VERIFIED_S."
+    },
+    {
+     "name": "follow",
+     "kind": "function",
+     "line": 170,
+     "signature": "def follow(state: dict, now: float, present: bool = True) -> None",
+     "summary": "Lowers the followed level by HUNGRY per TICK_S while the game is there."
+    },
+    {
+     "name": "read_panel",
+     "kind": "function",
+     "line": 140,
+     "signature": "def read_panel(full: np.ndarray, ocr) -> dict",
+     "summary": "OCR of a Character Info window: open, fullness, level, names, and the SHOW PET INFO button's place."
+    },
+    {
+     "name": "due_to_feed",
+     "kind": "function",
+     "line": 452,
+     "signature": "def due_to_feed(now: float) -> tuple[bool, float | None]",
+     "summary": "Whether the followed fullness says a food is due now, without saving anything (for PetWait's try)."
+    },
+    {
+     "name": "PetWait",
+     "kind": "class",
+     "line": 463,
+     "signature": "class PetWait",
+     "summary": "The babysitter's wait while the client is unfit. Called before each follow; returns whether to wait."
+    },
+    {
+     "name": "PetWait._try",
+     "kind": "method",
+     "line": 501,
+     "signature": "def _try(self, problem: Problem, now: float) -> None",
+     "summary": "The single bounded Alt+Enter-twice try, made only when every condition holds."
+    }
+   ],
+   "inputs": [
+    "`Actions` (the pet food key, `feed_pet`, `play` for clicks and Esc) and `Eyes` (`look` for her name tag, `_capture` for frames)",
+    "maplehelper's OCR engine (`maplehelper.ocr.shared`)",
+    "`client.alarm_up` (Lie Detector), the hunter's `trusted()` check of the food key, and whether the game window is there",
+    "for PetWait: `unfit()` (a framecheck Problem), the perception service's picture, and the Lie Detector spotter"
+   ],
+   "outputs": [
+    "pet food taps, double-clicks, Esc; Alt+Enter twice at most every 30 min (PetWait)",
+    "the followed fullness (`tend`'s return), log lines, telemetry 'pet' and 'pet_doubt' events",
+    "a page and `on_doubt(text)` on a food doubt (the hunter's 'pet' key doubt)"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/control/client.py",
+    "gamelab/control/window_size.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/screen.py",
+    "maplehelper/ocr/__init__.py",
+    "gamelab/perception/exp_number.py",
+    "gamelab/control/alarm.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/pet.json",
+     "mode": "read-write",
+     "what": "per character (another's under lab/characters/<folder>/): level, at, fed, checked, read_at, fullness, food_doubt, retry_at, window_try"
+    },
+    {
+     "path": "lab/window_tries.json",
+     "mode": "read-write",
+     "what": "Alt+Enter tries by any process, for the hourly cap (via control.window_size)"
+    }
+   ],
+   "concurrency": "Runs on its caller's thread: a hunting command (`Hunter.feed_pet_if_due`) or the `pet --every` babysitter process. The babysitter follows every N minutes, runs guard passes in between, and polls PetWait every WAIT_POLL_S (5 s) while the client is unfit.",
+   "tunables": [
+    {
+     "name": "TICK_S",
+     "value": "55",
+     "meaning": "s per point of fullness lost (measured live 2026-10-29: 55.1)"
+    },
+    {
+     "name": "HUNGRY",
+     "value": "1",
+     "meaning": "fullness lost per tick (the game data's info/hungry for Snail pets)"
+    },
+    {
+     "name": "FOOD",
+     "value": "30",
+     "meaning": "fullness one Pet Food gives"
+    },
+    {
+     "name": "FOLLOW_FEED_BELOW",
+     "value": "60",
+     "meaning": "followed fullness under which she feeds"
+    },
+    {
+     "name": "FEED_BELOW / FEED_TO",
+     "value": "70 / 80",
+     "meaning": "a check feeds under 70 until at least 80"
+    },
+    {
+     "name": "MAX_FEEDS",
+     "value": "3",
+     "meaning": "foods at most in one check"
+    },
+    {
+     "name": "CHECK_EVERY_S",
+     "value": "1200",
+     "meaning": "s between checks"
+    },
+    {
+     "name": "FALLBACK_S",
+     "value": "7200",
+     "meaning": "s since the last food after which an unreadable check feeds anyway"
+    },
+    {
+     "name": "UNWATCHED_S",
+     "value": "1800",
+     "meaning": "s unfollowed after which fullness is taken as not known"
+    },
+    {
+     "name": "FOOD_DOUBT / FOOD_DOUBT_WAIT_S",
+     "value": "2 / 1800",
+     "meaning": "taps without a rise that doubt the key, and how long it's held"
+    },
+    {
+     "name": "BLIND_BELOW",
+     "value": "20",
+     "meaning": "under this followed fullness, an untrusted key is fed blind when no read can be made"
+    },
+    {
+     "name": "VERIFIED_S",
+     "value": "7200",
+     "meaning": "s an untrusted key is fed blind after a check saw its food take"
+    },
+    {
+     "name": "BODY_ABOVE_TAG",
+     "value": "42",
+     "meaning": "game px from her name tag up to her body (the double-click point)"
+    },
+    {
+     "name": "RETRY_S",
+     "value": "90",
+     "meaning": "s before another check after a failed one"
+    },
+    {
+     "name": "WAIT_POLL_S / TRY_EVERY_S",
+     "value": "5.0 / 1800",
+     "meaning": "PetWait's poll interval, and the minimum time between Alt+Enter tries"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Fullness read off her Character Info and followed in time",
+     "why": "The pet was found at fullness 9 of 100 after a night, fed only every 10 minutes while hunting."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "Feeding goes on under the Lie Detector alarm, by the followed fullness; no reads",
+     "why": "The user, after an alarm kept the pet from being fed: \"don't block pet feeding\"."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "PetWait: the babysitter waits while the client is unfit instead of ending",
+     "why": "At 23:21 on 2026-10-25 the game went full screen at 3840x2160 and the babysitter ended at once, restarted every 5 s."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Food doubt: two taps without a rise stop the taps and page",
+     "why": "Review: a remembered food key the game no longer had fed nothing, while the followed fullness rose by 30 per food."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "TICK_S 55 measured live (was 75 from emulators)",
+     "why": "The user: \"validate if the code's existing assumption holds\"; 89 to 54 in 32 minutes with no food."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "UNWATCHED_S: after a long unfollowed gap fullness is read before any food",
+     "why": "A feeder started with the game closed counted 3-8 hours as the pet's (89 to 0) and fed it blind; it was at 96."
+    }
+   ],
+   "gotchas": [
+    "Esc with nothing open opens the game menu (Change Channel, Logout, Exit Game), so Esc is only sent with the window seen open.",
+    "The panel opens collapsed; the OCR reads its button as 'SHO U PET IHFO'.",
+    "No key opens Character Info, so a double-click on her body is used.",
+    "Where a pet goes home is disputed (0 or 5); PACKED_AT takes the higher.",
+    "Her pet's food while hanging on a rope hasn't been tried live."
+   ],
+   "tests": [
+    "tests/test_pet.py",
+    "tests/test_framecheck.py",
+    "tests/test_window_size.py",
+    "tests/test_keycheck.py",
+    "tests/test_sim_her.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/keycheck.py",
+   "title": "The key check",
+   "tagline": "Doubts her keys from what her presses do, then reads the game's key bindings.",
+   "summary": "Watches whether her presses do anything. Five regular attacks in a row with no effect on a target in reach (`RegularWatch`), eight Lucky Seven casts, six jumps that didn't lift her or four runs that didn't move her (`MoveWatch`), out of darts due, a stall, or a pet food doubt each make a `Doubt`. `KeyCheck` then finds a safe, quiet moment, tests whether she still has stars, opens the game's KEY BINDINGS window with the backslash, reads it, closes it with Esc, and follows any keys that moved. If it can't put things right, it raises `KeyCheckStop` (exit code 6).",
+   "details_md": "**Origin** (2026-10-28, live). The user had moved the regular attack off Ctrl in their own play. The bot pressed it about 20 times at a Horny Mushroom at 9% HP, and nothing noticed. The user chose: \"1. Throw 5 times before doubting the key error 2. Check if star has run out 3. Open keyboard config (\\) to check the key configuration and see if attack button is different, and fix things.\"\n\n**1. The doubt** (`RegularWatch`, fed by `behavior.attacks.Attacks` at every throw and look). A press is judged at the first look at least `JUDGE_FROM_S` (0.6 s) after its key, and no later than `JUDGE_BY_S` (2.0 s). It's judged only if all of these hold:\n\n- it went at a target whose HP is known and that isn't dying;\n- it wasn't keyed on a rope or at a rope's top;\n- she wasn't touched from `KNOCK_S` (0.45 s) before the key to the look;\n- the target's bar was believable (hurt) or not up (unhurt, `UNHURT_JUDGED`);\n- the target was in her regular attack's reach (`regular_reach`: `REACH_IN` 50 inside the star's range, with no nearer monster that way taking it first).\n\nThe verdict:\n\n- **Effect.** The target's bar is lower by `BAR_STEP`/2, a kill is placed on it, or an EXP gain names its kind.\n- **Missed.** Her MISS popup over it, first seen `MISS_FROM_S` (0.5 s) to `MISS_BY_S` (1.6 s) after the key. The key works.\n- **No effect.** The target is seen again alive with its bar as high as before.\n- **Passed.** Anything else: neither counted nor breaking the run.\n\n`DOUBT_PRESSES` (5) no-effects in a row make the doubt. A second `RegularWatch` (kind 'casts', `CAST_DOUBT` 8) judges her Lucky Seven casts the same way. `MoveWatch` counts `JUMPS_DOUBT` (6) jumps that didn't lift her minimap dot and `RUNS_DOUBT` (4) runs that didn't move it. Doubt kinds also include 'stars' (out of darts due), 'stall' and 'pet'.\n\n**2. A place** (`_place`). With no monster within `PLACE_CLEAR` (250 x 120 units), she checks where she is. On a safe platform only monsters on her own platform count (`near_her`). Otherwise she retreats first (`retreat.away` with `KEY_CHECK`: 10 s, platforms only); with her moves doubted she doesn't move, and waits for a quiet moment where she is. Still crowded after that, the check is put off.\n\n**3. Her stars** (`_stars`, the thief's, for a regular doubt):\n\n- **Already shown.** A Lucky Seven cast that took MP since the doubt's first press says she has them.\n- **A test.** Otherwise up to `STAR_CASTS` (5) test casts within `STAR_TEST_MAX_S` (10 s). Each needs a monster in reach and none within the claw's reach plus `CLAW_SLACK` (50).\n- **Results.** One that takes MP or lowers its target's bar means she has them. All five taking nothing means they 'may be out'. That isn't the stop by itself: `OutOfDarts` is raised only if `DartWatch` is due.\n\n**4. The window** (`_window`):\n\n- **A quiet moment** (`unquiet`): on a platform, not on a rope, untouched, nothing near, still over two looks `QUIET_LOOK_S` (0.3 s) apart within `QUIET_S` (3 s).\n- **Size and mouse.** Only at 1366x768. The mouse moves to `MOUSE_AT` (1100, 300) so it isn't over a cell.\n- **Open it.** Backslash, then frames at `SETTLE_S`, `AGAIN_S` and `LATE_S` until it's seen open. If it isn't seen, the frame is compared with the one before the backslash where the window opens: unchanged, it didn't open (nothing more is sent, no Esc); `CHANGED_SHARE` (85%) of pixels changed by more than `CHANGE_LEVEL` (48) means it 'may be open'.\n- **Close it.** Seen open, the frame is saved to lab/shots and Esc closes it, once more if needed. 'May be open' raises `KeyCheckStop`, because what keys do with it open isn't known.\n\n**5. What then** (`_act`). Every key is followed to where the window shows its function (`control.keymap.follow`). If one of her moves, Lucky Seven or pet food is on no pressable key, that's `KeyCheckStop`. Otherwise:\n\n1. Moved keys are handed to the hunter (`Hunter.follow`), remembered for later runs (`keymap.remember`), and published to the player for the Lie Detector allowance (`keymap.publish`).\n2. ATTACK on another key: the regular attack uses that key from now on, and the user is paged.\n3. ATTACK on no key: no regular attacks this run.\n4. Only other keys moved: followed and paged; if her Lucky Seven moved, out of darts' stretch starts again (`DartWatch.followed`).\n5. Nothing moved: the misses were something else, and the regular attack skips the doubt's targets only; with her stars 'maybe out', no regular attacks this run.\n\nThe limits:\n\n- **Per run.** At most `CHECKS_MAX` (3) checks a run, none within `CHECK_GAP_S` (300 s) of the last.\n- **Put off.** A check put off is retried at a quiet look `DEFER_GAP_S` (5 s) later, at most `DEFERS_MAX` (3) times.\n- **Outside the hunt loop.** Regular presses are held instead, and the user is paged to run `gamelab keys --read`.\n\nLive replay (README): the 00:31 doubt came 12 s before her last useless press. With her keys right (245 minutes, 595 regular presses) it never fired.",
+   "lines": 1345,
+   "key_items": [
+    {
+     "name": "RegularWatch",
+     "kind": "dataclass",
+     "line": 488,
+     "signature": "class RegularWatch",
+     "summary": "Her regular presses (or casts) judged look by look. It keeps pending presses, the run of no-effects, recent casts, touches, gains, kills, bars and MISS popups, plus the check bookkeeping (held, off, checks, deferred)."
+    },
+    {
+     "name": "RegularWatch.look",
+     "kind": "method",
+     "line": 571,
+     "signature": "def look(self, t: float, monsters: list[Monster], s=None) -> None",
+     "summary": "A look: prunes memories, judges pending presses in key order, and raises the doubt at DOUBT_PRESSES no-effects in a row."
+    },
+    {
+     "name": "RegularWatch._judge",
+     "kind": "method",
+     "line": 599,
+     "signature": "def _judge(self, p: Press, t: float, monsters, s) -> None",
+     "summary": "One press's verdict at a look: passed (touched, maybe a later cast's effect, not judged by JUDGE_BY_S, out of reach), effect (`_effect`: its bar lower, a kill placed on it or a gain naming its kind), missed (`_missed`: her MISS popup over it 0.5-1.6 s after the key), or none (seen again with its bar as high as before)."
+    },
+    {
+     "name": "RegularWatch.pressed",
+     "kind": "method",
+     "line": 521,
+     "signature": "def pressed(self, t, m, *, known=True, dying=False, ground=True, roped=False, reach_ok=True) -> None",
+     "summary": "A press keyed: queued for judging, or counted as passed with why."
+    },
+    {
+     "name": "MoveWatch",
+     "kind": "dataclass",
+     "line": 417,
+     "signature": "class MoveWatch",
+     "summary": "Told by the navigator at each chain's end: JUMPS_DOUBT jumps without lift or RUNS_DOUBT runs without moving make a 'moves' doubt."
+    },
+    {
+     "name": "Doubt",
+     "kind": "dataclass",
+     "line": 361,
+     "signature": "class Doubt",
+     "summary": "A doubt: kind (regular, casts, moves, stall, pet, stars), its presses, when it was known, and for 'stars' the held OutOfDarts."
+    },
+    {
+     "name": "KeyCheck",
+     "kind": "class",
+     "line": 763,
+     "signature": "class KeyCheck",
+     "summary": "The check after a doubt, by hunter `h`, using a perception.keybindings.Reader. `window_state` is 'not opened', 'closed' or 'may be open'."
+    },
+    {
+     "name": "KeyCheck.run",
+     "kind": "method",
+     "line": 788,
+     "signature": "def run(self, doubt: Doubt) -> Outcome",
+     "summary": "Place, stars, quiet moment, window, act. Raises OutOfDarts, SafetyStop, KeyCheckStop or LieDetectorAlarm."
+    },
+    {
+     "name": "KeyCheck._stars",
+     "kind": "method",
+     "line": 860,
+     "signature": "def _stars(self, doubt: Doubt) -> str",
+     "summary": "Whether she has stars: 'shown', 'test', 'maybe out', 'not known', 'no target' or 'no stars'."
+    },
+    {
+     "name": "KeyCheck._window",
+     "kind": "method",
+     "line": 1050,
+     "signature": "def _window(self) -> keybindings.Reading | None",
+     "summary": "Opens the KEY BINDINGS window with the backslash, reads it, and closes it with Esc. Pages if it may be left open."
+    },
+    {
+     "name": "KeyDoubt",
+     "kind": "class",
+     "line": 455,
+     "signature": "class KeyDoubt(Exception)",
+     "summary": "Raised by Hunter.health_check (through `Hunter._doubted`) in the hunt loop on a doubt, or when a put-off check is due again: the hunt loop runs the check (`Hunter.check_keys`) and goes on. Not a HuntStop."
+    },
+    {
+     "name": "KeyCheckStop",
+     "kind": "class",
+     "line": 464,
+     "signature": "class KeyCheckStop(HuntStop)",
+     "summary": "What the check can't put right ends the hunt (exit code 6): the KEY BINDINGS window may be open, her moves, Lucky Seven or pet food are on no key she can press, or her moves were doubted and no check could run. The page says to close the window with Esc or CANCEL."
+    },
+    {
+     "name": "KeyCheck._act",
+     "kind": "method",
+     "line": 1178,
+     "signature": "def _act(self, doubt, reading, stars='') -> Outcome",
+     "summary": "Follows, remembers and publishes moved keys, then switches, turns off or holds the regular attack, or raises the stars stop."
+    },
+    {
+     "name": "unquiet",
+     "kind": "function",
+     "line": 305,
+     "signature": "def unquiet(h, s) -> str | None",
+     "summary": "Why a look isn't a quiet moment to open a game window, or None if it is. The chat and stat checks share it."
+    },
+    {
+     "name": "regular_reach",
+     "kind": "function",
+     "line": 239,
+     "signature": "def regular_reach(s, m: Monster) -> bool",
+     "summary": "Whether her regular attack reaches a monster from where the look has her: a wand's box, or the star's range minus REACH_IN with nothing nearer in front."
+    }
+   ],
+   "inputs": [
+    "her presses and casts with their targets, every look's monsters, touches, EXP gains and kills (from `behavior.attacks.Attacks` and the hunter)",
+    "MISS popups over targets (perception.misses via `Hunter._miss_points`)",
+    "jump lift and run checks from `control.navigator`, and the out-of-darts stop and pet food doubt from the hunter",
+    "frames of the game client (`Eyes._capture`) and the key bindings reader"
+   ],
+   "outputs": [
+    "`KeyDoubt` (raised by Hunter.health_check in the hunt loop) and `Outcome` records; telemetry 'attack_key' events",
+    "followed keys (`Hunter.follow`), lab/keybindings-<character>.json (keymap.remember), lab/alarm_keys.json (keymap.publish)",
+    "the regular attack held, switched or turned off (`Hunter.hold_regular`, `hold_at`, `regular_off`), and pages",
+    "`KeyCheckStop` (exit 6), or the held `OutOfDarts`"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/reach.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/client.py",
+    "gamelab/control/keymap.py",
+    "gamelab/control/navigator.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/perception/keybindings.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/behavior/safety.py",
+    "gamelab/behavior/retreat.py",
+    "gamelab/behavior/darts.py",
+    "gamelab/character.py",
+    "gamelab/attack/choice.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/shots/keybindings_<time>.png",
+     "mode": "write",
+     "what": "the window's frame as read, CHECKS_MAX a run at most"
+    },
+    {
+     "path": "lab/keybindings-<character>.json",
+     "mode": "write",
+     "what": "the binding read, remembered for her next runs (via control.keymap.remember)"
+    },
+    {
+     "path": "lab/alarm_keys.json",
+     "mode": "write",
+     "what": "her moves' and pet food's keys for the player's Lie Detector allowance (via control.keymap.publish)"
+    }
+   ],
+   "concurrency": "Runs in the hunting command's thread. The check blocks the hunt loop, whose clocks are paused meanwhile.",
+   "tunables": [
+    {
+     "name": "DOUBT_PRESSES",
+     "value": "5",
+     "meaning": "regular presses in a row without effect: the doubt (the user's '5 times')"
+    },
+    {
+     "name": "CAST_DOUBT",
+     "value": "8",
+     "meaning": "Lucky Seven casts in a row without effect"
+    },
+    {
+     "name": "JUMPS_DOUBT / RUNS_DOUBT",
+     "value": "6 / 4",
+     "meaning": "jumps without lift / runs without moving, in a row"
+    },
+    {
+     "name": "JUDGE_FROM_S / JUDGE_BY_S",
+     "value": "0.6 / 2.0",
+     "meaning": "a press is judged from this long after its key, no later than this"
+    },
+    {
+     "name": "SHOWS_S",
+     "value": "0.15",
+     "meaning": "an effect counts from this long after the key"
+    },
+    {
+     "name": "BAR_STEP",
+     "value": "0.03",
+     "meaning": "a bar this much lower is her damage"
+    },
+    {
+     "name": "KNOCK_S",
+     "value": "0.45",
+     "meaning": "a touch this close before the key means the press isn't judged"
+    },
+    {
+     "name": "REACH_IN",
+     "value": "50.0",
+     "meaning": "the target must be this far inside the star's range"
+    },
+    {
+     "name": "BAR_MEMORY_S",
+     "value": "3.0",
+     "meaning": "a bar missed in one look counts as the one seen this recently"
+    },
+    {
+     "name": "MISS_FROM_S / MISS_BY_S",
+     "value": "0.5 / 1.6",
+     "meaning": "window after the key for a MISS popup to be this press's"
+    },
+    {
+     "name": "STAR_CASTS / STAR_TEST_MAX_S",
+     "value": "5 / 10.0",
+     "meaning": "test casts, and how long they may take"
+    },
+    {
+     "name": "PLACE_CLEAR",
+     "value": "(250.0, 120.0)",
+     "meaning": "no monster this near (x, y) for her to check where she is"
+    },
+    {
+     "name": "QUIET_LOOK_S / QUIET_S",
+     "value": "0.3 / 3.0",
+     "meaning": "two still looks this far apart, within this long"
+    },
+    {
+     "name": "CHECKS_MAX / CHECK_GAP_S",
+     "value": "3 / 300.0",
+     "meaning": "checks per run, and the least gap between them"
+    },
+    {
+     "name": "DEFER_GAP_S / DEFERS_MAX",
+     "value": "5.0 / 3",
+     "meaning": "a put-off check's retry gap, and how many retries"
+    },
+    {
+     "name": "CHANGE_LEVEL / CHANGED_SHARE",
+     "value": "48 / 0.85",
+     "meaning": "pixel change that says something opened where the window opens"
+    },
+    {
+     "name": "MOUSE_AT",
+     "value": "(1100, 300)",
+     "meaning": "where the pointer goes first (client px at 1366x768)"
+    },
+    {
+     "name": "EXIT",
+     "value": "6",
+     "meaning": "exit code after KeyCheckStop"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "Doubt after 5 presses without effect; test stars; read the game's key bindings",
+     "why": "The user: \"1. Throw 5 times before doubting the key error 2. Check if star has run out 3. Open keyboard config (\\) ...\"."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Other keys that moved are followed; the binding read is remembered; her MISS is read",
+     "why": "The user's answers: \"Follow them\", \"Remember it\", \"Yes, read it\"."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "MISS_FROM_S raised from 0.15 to 0.5, and a MISS the other attack could have made is skipped",
+     "why": "Review: a cast's MISS still up 0.25 s after the next regular press counted for that press, so a dead key went undoubted."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Jump throws judged (JUMPS_JUDGED) and unhurt targets judged (UNHURT_JUDGED)",
+     "why": "In the simulator the doubt never came in 3 of 12 runs (mostly jump throws); with the regular attack alone and its key wrong no press was ever judged."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "On a safe platform only monsters on her own platform put the check off",
+     "why": "A Green Mushroom on 24 within 250 of her on 25 had put the check off."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "A stars doubt's out-of-darts stop is raised whatever else the window showed moved",
+     "why": "Review: with ATTACK moved too, the stop was dropped and never came due again that run."
+    }
+   ],
+   "gotchas": [
+    "Esc is never sent with nothing seen open: in the game, Esc with nothing open opens the MENU.",
+    "With the Lie Detector alarm up the player refuses the backslash; a window that may be left open is said and paged.",
+    "Up close the Lucky Seven key swipes without MP, so 5 test casts without MP don't prove she's out of stars.",
+    "The window is only read at 1366x768.",
+    "A check whose retreat timed out makes later checks wait where she is (her move keys may be wrong)."
+   ],
+   "tests": [
+    "tests/test_keycheck.py",
+    "tests/test_keymap.py",
+    "tests/test_misses.py",
+    "tests/test_control.py",
+    "tests/test_retreat.py",
+    "tests/test_sim_tree.py",
+    "tests/test_touches.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/chatcheck.py",
+   "title": "The chat check",
+   "tagline": "Collapses her chat box at a hunt's start so it doesn't hide monsters.",
+   "summary": "Expanded, the chat box covers the play area's bottom left (x 287-850, y 633-700 at 1366x768), hiding monsters and her name plate. At a hunt's start `ChatCheck.run` reads the box's state from the perception service's looks. If it's expanded with its input line empty, it taps her chat key once at a quiet moment and checks the result. It never sends Esc or Enter, and only ever sends the chat key (twice at most) and one mouse move.",
+   "details_md": "**What tells it.** `perception.chatbox` reads the box's +/- button and input row on every frame the perception service reads (`Scene.chat`). The states are COLLAPSED, EXPANDED and UNKNOWN, plus `typing` (text or a caret in the input line) and `readable`. With the simulator's eyes there's no state, and nothing is done. An older perception service carries none either; it says so once (\"restart it\").\n\n**When.** At a hunt's start (`Hunter.collapse_chat`, from gamelab.__main__'s `_hunter`), before her stat window's read, once a run.\n\n**The steps** (`run`):\n\n1. **Read the box.** Look until one look tells, `QUIET_S` (3 s) at most.\n   - Collapsed: done.\n   - Another client size: said, nothing sent.\n   - Button not seen, or the input line marked: the mouse moves off the box once a run (`MOUSE_AT`, no click), and looks from `MOUSE_SETTLE_S` (0.2 s) later count. Still marked means it may have the keyboard, so it's left alone.\n2. **Wait for a clear moment.** Expanded and unmarked on `CLEAR_LOOKS` (3) looks in a row over `CLEAR_S` (0.6 s), because a blinking caret can hide on one look. It also needs a quiet look (`keycheck.unquiet`). A monster within `PLACE_CLEAR` puts it off at once: nothing moves her for this.\n3. **Tap and verify** (`_press`). Her chat key (`chat_key`: CHAT+'s key in her remembered bindings, else ') goes out once through the player. Looks from `SETTLE_S` (0.3 s) on, for `VERIFY_S` (2 s) at most:\n   - Collapsed: done.\n   - Input line newly marked (the key typed into it): left so.\n   - Still expanded `STILL_S` (1 s) after the key: one more try (`PRESSES_MAX` 2).\n\n**Put off** (`_defer`). In the hunt loop (`tour --loop`, `--grind`), `Hunter.health_check` raises `ChatDue` at the first quiet look `DEFER_GAP_S` (2 s) or more later that can tell the box, up to `DEFERS_MAX` (10) times. Meanwhile `watch` counts the clear looks the hunt takes anyway, so the key can go at once. Elsewhere it's left at once, and said.\n\nEvery look of the check asks the safety stop, as `health_check` would.",
+   "lines": 338,
+   "key_items": [
+    {
+     "name": "ChatCheck",
+     "kind": "class",
+     "line": 103,
+     "signature": "class ChatCheck",
+     "summary": "Her chat box collapsed for hunter `h` if expanded. Tracks presses, mouse moves, done, pending and defers for the run."
+    },
+    {
+     "name": "ChatCheck.run",
+     "kind": "method",
+     "line": 156,
+     "signature": "def run(self, at_start: bool = False, look=None, loop: bool | None = None) -> Outcome",
+     "summary": "The check: look until told, mouse off once if needed, tap at a clear quiet look, or put off."
+    },
+    {
+     "name": "ChatCheck._press",
+     "kind": "method",
+     "line": 255,
+     "signature": "def _press(self, before, at_start: bool) -> Outcome | None",
+     "summary": "Taps her chat key and verifies: collapsed, typed into (left), or still expanded after STILL_S (tries again)."
+    },
+    {
+     "name": "ChatCheck._mouse_off",
+     "kind": "method",
+     "line": 239,
+     "signature": "def _mouse_off(self, told) -> bool",
+     "summary": "Moves the mouse off the box once a run: a pointer over the button hides it, and over the field reads as typing."
+    },
+    {
+     "name": "ChatCheck._clear_seen",
+     "kind": "method",
+     "line": 145,
+     "signature": "def _clear_seen(self, t: float) -> bool",
+     "summary": "Counts looks in a row with the box expanded and unmarked: CLEAR_LOOKS of them over CLEAR_S lets the key go."
+    },
+    {
+     "name": "ChatCheck.watch",
+     "kind": "method",
+     "line": 135,
+     "signature": "def watch(self, s) -> None",
+     "summary": "While a collapse is put off, counts the hunt's own looks and glances toward a clear stretch."
+    },
+    {
+     "name": "ChatCheck.again",
+     "kind": "method",
+     "line": 126,
+     "signature": "def again(self, t: float, s=None) -> bool",
+     "summary": "Whether a put-off collapse is due again at a quiet look that can tell the box."
+    },
+    {
+     "name": "ChatCheck._defer",
+     "kind": "method",
+     "line": 305,
+     "signature": "def _defer(self, why, at_start: bool, told=None) -> Outcome",
+     "summary": "Put off: retried in the hunt loop up to DEFERS_MAX times; otherwise left for this run."
+    },
+    {
+     "name": "ChatDue",
+     "kind": "class",
+     "line": 72,
+     "signature": "class ChatDue(Exception)",
+     "summary": "Raised by Hunter.health_check in the hunt loop when a put-off collapse is due. Not a HuntStop: the hunt goes on."
+    },
+    {
+     "name": "chat_key",
+     "kind": "function",
+     "line": 95,
+     "signature": "def chat_key(keys, character: str | None = None) -> tuple[str | None, str]",
+     "summary": "Her chat key and where it came from, refused if it's one of her own keys, Esc, the backslash or a hotkey (statcheck.bound_key)."
+    },
+    {
+     "name": "Outcome",
+     "kind": "dataclass",
+     "line": 83,
+     "signature": "class Outcome",
+     "summary": "What a check did: collapsed, was collapsed, left, not told, not read, put off or skipped, plus what it sent and how long it took."
+    }
+   ],
+   "inputs": [
+    "the chat box state on each look (`Scene.chat`, from perception.chatbox via the perception service)",
+    "the hunter's looks, quiet-moment test (`keycheck.unquiet`) and HP watch",
+    "her remembered key bindings (via `statcheck.bound_key`)"
+   ],
+   "outputs": [
+    "one or two taps of her chat key and at most one mouse move, through the player",
+    "`ChatDue` in the hunt loop; log lines and telemetry 'chat_box' events"
+   ],
+   "uses": [
+    "gamelab/telemetry.py",
+    "gamelab/control/client.py",
+    "gamelab/perception/chatbox.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/statcheck.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/keybindings-<character>.json",
+     "mode": "read",
+     "what": "CHAT+'s key in her remembered bindings (via statcheck.bound_key)"
+    }
+   ],
+   "concurrency": "Runs in the hunting command's thread, polling every QUIET_LOOK_S (0.3 s).",
+   "tunables": [
+    {
+     "name": "FUNCTION / KEY",
+     "value": "'CHAT+' / \"'\"",
+     "meaning": "the key bindings' name for the toggle, and its key in her bindings of 2026-10-28"
+    },
+    {
+     "name": "PRESSES_MAX",
+     "value": "2",
+     "meaning": "chat key taps at most per run"
+    },
+    {
+     "name": "SETTLE_S / STILL_S / VERIFY_S",
+     "value": "0.3 / 1.0 / 2.0",
+     "meaning": "after the key: first telling look, still-expanded verdict, give-up time"
+    },
+    {
+     "name": "CLEAR_S / CLEAR_LOOKS",
+     "value": "0.6 / 3",
+     "meaning": "expanded and unmarked over this long and this many looks before the key"
+    },
+    {
+     "name": "MOUSE_SETTLE_S / MOUSE_MOVES_MAX",
+     "value": "0.2 / 1",
+     "meaning": "the mouse moved off the box once a run, then looks counted after this"
+    },
+    {
+     "name": "DEFER_GAP_S / DEFERS_MAX",
+     "value": "2.0 / 10",
+     "meaning": "put-off retry gap in the hunt loop, and how many retries"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "The chat box is collapsed at a hunt's start",
+     "why": "The user, ~12:45: \"At the start of grind/hunt, you should collapse the chat window if it's open.\" Hunts had started with it expanded on 10-29 and 10-30."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "STILL_S = 1.0 before a second key",
+     "why": "Review: a game slow (over 0.4 s) to act showed the box expanded on both looks that judged it, and a second key would have expanded it again."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "The mouse moves off the box when the input line reads as marked",
+     "why": "Review: 215 of 216 pointer places over the field read as typing."
+    }
+   ],
+   "gotchas": [
+    "The chat key toggles: pressed with the box collapsed, it would expand it. So it's never pressed on a look that can't tell the state.",
+    "No Esc (with nothing open it opens the game's MENU) and no Enter (it sends what's typed).",
+    "Checked once a run, at a hunt's start (and at the hunt loop's retries of a put-off collapse): the box isn't watched after that."
+   ],
+   "tests": [
+    "tests/test_chatbox.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/statcheck.py",
+   "title": "The stat check",
+   "tagline": "Opens, reads and closes her stat window for W.DEF and other stats.",
+   "summary": "The safety stop's reserve needs her DEF. Until 8 touches are kept to fit it, it assumes DEF 0, the most a touch can take. `StatCheck` opens her stat window with her stats key at a quiet moment, clicks DETAIL, reads W.DEF and the other values by OCR, and closes it. The hunter takes each value only after checking it against her HUD and bars. If the window may be left open, `StatWindowStop` ends the hunt (exit code 7).",
+   "details_md": "**When** (`due`). At a hunt's start (`Hunter.read_stats`, after her max HP is read), when all of these hold:\n\n- her DEF isn't known from the window this session (`bootstrap.HerStats.window_due`: none read, read at another level or in another perception-service session, over `SESSION_S` (3 h) ago, or her newest touches don't fit it);\n- the reader is calibrated on this client (lab/stat_window.json, made once by `gamelab stats --read --record`);\n- her stats key is known and safe (`stats_key`: ABILITY's key in her remembered bindings, else S, and never one of her own keys, Esc, the backslash or a hotkey);\n- fewer than `READS_MAX` (2) reads this run.\n\nA level-up in the hunt loop asks for one more read (`level_up`).\n\n**How** (`run`):\n\n1. **A quiet moment** (`keycheck.unquiet`, still over two looks). No retreat: a monster near puts it off at once.\n2. **Size check.** Only at 1366x768; if the window is already open, it's read as it is.\n3. **Open it.** The mouse moves off the calibrated panels (`_mouse_at`), her stats key is tapped, and frames are taken at `SETTLE_S`, `AGAIN_S` and `LATE_S` until a panel is found (`stat_window.find_all`). Not found: if nothing changed where the Main panel opens, it didn't open; otherwise it may be open.\n4. **DETAIL panel.** If it isn't open, one click on its DETAIL button (the only click sent), then frames at `DETAIL_S` and `DETAIL_AGAIN_S`.\n5. **Read it** (`stat_window.read`). A second frame if W.DEF read no number, or if SPEED differs from what's planned. The frame is saved to lab/shots/statwindow_<time>.png.\n6. **Close it** (`_close`). Her stats key (it toggles), then Esc twice at most, each checked by frames at `CLOSE_S` and `CLOSE_AGAIN_S`. Esc is never sent with no panel seen.\n\n**What the hunter takes** (`Hunter._stats_read`, using the checks defined here):\n\n- **Nothing**, if `disagreement` finds the window's level or max HP differ from her HUD's.\n- **W.DEF**, if it's between 0 and `bootstrap.DEF_TOP` (400) and her touches bear it out (`HerStats.window_doubt`).\n- **Max HP**, only while her HUD's number hasn't read, and only if `borne`: equal to the kept max, or her bar within `BAR_TOL` (5%) of the window's cur/max.\n- **Max MP**, if her MP bar bears it out or it's within `MP_SPAN` (1.25x) of what her casts assume.\n- **SPEED**, for her walk and climb, unless `speed_doubt` finds it outside the client's 80-140 or more than `SPEED_STEP` (10) from both the planned value and the last read. A changed SPEED also needs a second frame to agree.\n- **JUMP** is only reported (`moves_notes`).\n\n**Put off** (`_defer`): in the hunt loop `StatsDue` is raised at the next quiet look `DEFER_GAP_S` (5 s) on, up to `DEFERS_MAX` (6) times. Elsewhere it's not read this run.",
+   "lines": 640,
+   "key_items": [
+    {
+     "name": "StatCheck",
+     "kind": "class",
+     "line": 282,
+     "signature": "class StatCheck",
+     "summary": "Her stat window read for hunter `h`, with a perception.stat_window Calibration. Tracks reads, pending, defers, window_state and what was sent."
+    },
+    {
+     "name": "StatCheck.run",
+     "kind": "method",
+     "line": 347,
+     "signature": "def run(self, at_start=False, quiet=True, force=False, loop=None) -> Outcome",
+     "summary": "A read if due: quiet moment, then the window. Raises StatWindowStop if it may be left open, SafetyStop, or LieDetectorAlarm."
+    },
+    {
+     "name": "StatCheck.due",
+     "kind": "method",
+     "line": 314,
+     "signature": "def due(self, force: bool = False) -> str | None",
+     "summary": "Why it isn't read now: DEF already known this session, READS_MAX reached, not calibrated, or no safe key."
+    },
+    {
+     "name": "StatCheck._window",
+     "kind": "method",
+     "line": 513,
+     "signature": "def _window(self) -> sw.StatReading | None",
+     "summary": "Opens the window, reads it, and closes it. Sets window_state; pages if it may still be open after an exception."
+    },
+    {
+     "name": "StatCheck._detail",
+     "kind": "method",
+     "line": 592,
+     "signature": "def _detail(self, main_at, shown)",
+     "summary": "One click on DETAIL (where W.DEF is), the mouse moved off again, then waits for the panel."
+    },
+    {
+     "name": "StatCheck._close",
+     "kind": "method",
+     "line": 612,
+     "signature": "def _close(self) -> bool",
+     "summary": "Her stats key, then Esc at most twice, each checked by two frames."
+    },
+    {
+     "name": "StatCheck._quiet",
+     "kind": "method",
+     "line": 416,
+     "signature": "def _quiet(self) -> str | None",
+     "summary": "A quiet still moment within QUIET_S, or why not. A monster near puts it off at once."
+    },
+    {
+     "name": "StatCheck.level_up",
+     "kind": "method",
+     "line": 331,
+     "signature": "def level_up(self, level: int) -> None",
+     "summary": "Her level changed since W.DEF was read: one more read at the next quiet look."
+    },
+    {
+     "name": "bound_key",
+     "kind": "function",
+     "line": 179,
+     "signature": "def bound_key(function, default, default_source, keys, character=None)",
+     "summary": "The key for a game function from her remembered bindings (or a default), refused if it's one of her keys, Esc, the backslash or a hotkey. Also used by chatcheck."
+    },
+    {
+     "name": "stats_key",
+     "kind": "function",
+     "line": 170,
+     "signature": "def stats_key(keys, character: str | None = None) -> tuple[str | None, str]",
+     "summary": "ABILITY's key (S by default) and where it came from."
+    },
+    {
+     "name": "disagreement",
+     "kind": "function",
+     "line": 204,
+     "signature": "def disagreement(reading, stats) -> str | None",
+     "summary": "Where the window's level or max HP differ from her HUD's: a misread, so none of the read is taken."
+    },
+    {
+     "name": "borne",
+     "kind": "function",
+     "line": 217,
+     "signature": "def borne(pair, share, kept=None, span=None) -> str | None",
+     "summary": "Why a cur/max pair isn't taken: not a valid pair, or not borne out by the kept max or her bar."
+    },
+    {
+     "name": "speed_doubt",
+     "kind": "function",
+     "line": 240,
+     "signature": "def speed_doubt(speed: float, planned: float, kept: float | None = None) -> str | None",
+     "summary": "Why a SPEED read isn't used to plan her walk: outside 80-140, or more than SPEED_STEP from both the planned value and the last read."
+    },
+    {
+     "name": "StatWindowStop",
+     "kind": "class",
+     "line": 107,
+     "signature": "class StatWindowStop(HuntStop)",
+     "summary": "Her stat window may be open in the game: exit code 7. At a hunt's start nothing is hunted."
+    },
+    {
+     "name": "StatsDue",
+     "kind": "class",
+     "line": 128,
+     "signature": "class StatsDue(Exception)",
+     "summary": "Raised in the hunt loop when a put-off read is due. Not a HuntStop."
+    }
+   ],
+   "inputs": [
+    "frames of the game client (`Eyes._capture`) and the eyes' OCR (`stat_ocr`)",
+    "the calibration (perception.stat_window.Calibration, lab/stat_window.json)",
+    "her stats (bootstrap.HerStats: level, DEF, window_due), her keys, and her remembered bindings",
+    "the hunter's looks for the quiet moment and its HP watch"
+   ],
+   "outputs": [
+    "a `StatReading` (W.DEF, level, HP, MP, SPEED, JUMP, ...) passed to `Hunter._stats_read`",
+    "`StatWindowStop` / `StatsDue`; log lines, telemetry 'stat_window' events, pages",
+    "the stats key, one click and Esc as the only keys sent"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/client.py",
+    "gamelab/motion/body.py",
+    "gamelab/perception/stat_window.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/behavior/bootstrap.py",
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/safety.py",
+    "gamelab/character.py",
+    "gamelab/motion/physics.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/keybindings-<character>.json",
+     "mode": "read",
+     "what": "ABILITY's (and CHAT+'s) key in her remembered bindings"
+    },
+    {
+     "path": "lab/stat_window.json",
+     "mode": "read",
+     "what": "the reader's calibration (via perception.stat_window.Calibration.load)"
+    },
+    {
+     "path": "lab/shots/statwindow_<time>.png",
+     "mode": "write",
+     "what": "the window's frame as read, READS_MAX a run"
+    }
+   ],
+   "concurrency": "Runs in the hunting command's thread; polls with short sleeps.",
+   "tunables": [
+    {
+     "name": "READS_MAX",
+     "value": "2",
+     "meaning": "reads a run: the start's, and one after a level-up"
+    },
+    {
+     "name": "SETTLE_S / AGAIN_S / LATE_S",
+     "value": "0.6 / 0.4 / 1.0",
+     "meaning": "frames after the stats key until it's seen open"
+    },
+    {
+     "name": "DETAIL_S / DETAIL_AGAIN_S",
+     "value": "0.4 / 0.6",
+     "meaning": "frames after the DETAIL click"
+    },
+    {
+     "name": "CLOSE_S / CLOSE_AGAIN_S",
+     "value": "0.6 / 0.4",
+     "meaning": "frames after a close key"
+    },
+    {
+     "name": "CHANGE_LEVEL / CHANGED_SHARE",
+     "value": "48 / 0.85",
+     "meaning": "pixel change that says something opened where the Main panel opens"
+    },
+    {
+     "name": "MOUSE_AT / MOUSE_ELSE",
+     "value": "(1100, 300) / ((1300, 420), (120, 420), (683, 60))",
+     "meaning": "where the pointer goes, off every panel"
+    },
+    {
+     "name": "DEFER_GAP_S / DEFERS_MAX",
+     "value": "5.0 / 6",
+     "meaning": "put-off retry gap and count"
+    },
+    {
+     "name": "BAR_TOL",
+     "value": "0.05",
+     "meaning": "her bar against the window's cur/max"
+    },
+    {
+     "name": "MP_SPAN",
+     "value": "1.25",
+     "meaning": "the window's max MP within this factor of what her casts assume"
+    },
+    {
+     "name": "VALUE_TOP",
+     "value": "30000",
+     "meaning": "the game's cap on max HP and MP: over it is a misread"
+    },
+    {
+     "name": "SPEED_STEP",
+     "value": "10.0",
+     "meaning": "a SPEED read more than this from both the SPEED she's planned at and her last read kept is taken as a misread (gear changes it by less between two reads)"
+    },
+    {
+     "name": "EXIT",
+     "value": "7",
+     "meaning": "exit code after StatWindowStop"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "Her W.DEF read off the stat window at a hunt's start",
+     "why": "The user, ~18:20, about a first run's unknown DEF (the reserve at DEF 0: 453 HP of 840 until 8 touches are kept): \"You can open character stats panel to check the defense\"."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Each value checked before it's taken (disagreement, borne)",
+     "why": "Review: a misread W.DEF, max HP or max MP had been taken as read."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "window_state set to 'may be open' before the key is sent",
+     "why": "Review: a Lie Detector halfway through a plan may have sent the key, and the window stayed open through the test with nobody told."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "SPEED from the window plans her walk and climb (client formula 125 x (SPEED + 20)/100), checked by speed_doubt and a second frame",
+     "why": "Final review: one OCR frame's 108 for 100 would have planned her 6.7% fast until the next read."
+    }
+   ],
+   "gotchas": [
+    "Nothing is sent until a live capture has calibrated the reader.",
+    "Esc is never sent with no panel seen: with nothing open, Esc opens the game's MENU.",
+    "No retreat for it: a monster near only puts it off.",
+    "JUMP is read and reported but not used to plan her jumps."
+   ],
+   "tests": [
+    "tests/test_statcheck.py",
+    "tests/test_panel_speed.py",
+    "tests/test_walk_speed.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/presence.py",
+   "title": "Presence: throws at what no look has",
+   "tagline": "How likely a throw at a monster the look missed is to land, and its worth.",
+   "summary": "Not about someone at the keyboard: this decides whether the thief's throw at a monster her looks just lost is worth making. `chance` turns the evidence about that monster (seconds since last seen, its feed track's state, past blank throws, EXP gains, frames the exact finder missed) into a probability with fitted log-odds weights. `net` prices the throw: chance x the share of the monster's worth it would take, minus MP and lock time. `behavior.attacks` and `behavior.fight` use it in place of fixed 'hidden for 1.8 s' windows.",
+   "details_md": "**The bug it fixes** (the user, 2026-11-04): \"mobs near the player are not detected by perception and kept for 2s, during which the motion planner will keep attempting attack the mob even tho it may well have died\". A missed monster stayed a target for fixed times: 1.8 s from her last throw, or 1.5-2.0 s for those about. In 118.5 live minutes, 430 of 2,831 throws went at a target no look had. 53-60% of them showed nothing, and 34-43% of their targets were dead or gone by the key.\n\n**The chance** (`log_odds`, `chance`): a logistic model on `Evidence`.\n\n| Evidence | Weight |\n|---|---|\n| start | `BASE` +0.39 |\n| per second since last seen | `AGE_S` -0.63 |\n| its track gone from the feed | `GONE` -0.86 |\n| dying or dead by the feed (set by hand) | `DYING` -2.5 |\n| seen in `SHORT_FRAMES` (3) frames or fewer | `SHORT` -0.50 |\n| her last throw at it unseen showed nothing / something | `BLANK` -0.65 / `PROVEN` +0.68 |\n| an EXP gain of its kind in the last `GAIN_S` (1.2 s) | `GAIN` -0.82 |\n| reckoned killed by her throws (at least `SPENT_DEAD` 0.5) and blank | `SPENT` -0.35 |\n| each frame the exact finder missed it, past the first | `BLIND` -0.39 |\n\nThe weights are a logistic fit on 401 live throws with no seen monster in their path, fitted on one hour and tested on the other: log-loss 0.617 and 0.651 against a constant's 0.688 and 0.672. `BLIND` was fitted separately, on the real step's dumps. 'Effect' means her EXP rose, a bar fell, or a ground cast took no MP. It can hide a real hit, so the chance is a floor.\n\n**The price** (`net` = p x `landing` - `cost`). The user's prices: MP 1 a meso, a meso `MESO_EXP` 0.5 EXP.\n\n- **`landing`** is the monster's worth times the share of its remaining HP her attack takes. A Horny Mushroom is worth about 53 EXP-equivalent; a Lucky Seven takes 0.65 of a whole one.\n- **`cost`** is MP x `MP_EXP` plus lock time (`THROW_LOCK_S` 0.86 s from the ground, `JUMP_LOCK_S` 1.1 s from a jump) times what she makes per second. That's about 14 EXP-equivalent per cast and 6 per regular attack.\n\nA throw goes while it's worth it, and (with `OVER_SEEN`) only if it beats a throw at a monster she does see, at `SEEN_CHANCE` (0.76).\n\n**Switches.** `EVIDENCE` False restores the old fixed windows. The magician's casts never go at an unseen body (`Attacks.picks`).",
+   "lines": 129,
+   "key_items": [
+    {
+     "name": "Evidence",
+     "kind": "dataclass",
+     "line": 84,
+     "signature": "class Evidence",
+     "summary": "What's known of a missed monster at a moment: age, feed state, blank/proven throws, a gain, short track, spent, blind frames."
+    },
+    {
+     "name": "chance",
+     "kind": "function",
+     "line": 111,
+     "signature": "def chance(e: Evidence) -> float",
+     "summary": "The probability a throw at it shows an effect: the logistic of `log_odds`."
+    },
+    {
+     "name": "log_odds",
+     "kind": "function",
+     "line": 100,
+     "signature": "def log_odds(e: Evidence) -> float",
+     "summary": "The sum of the evidence weights."
+    },
+    {
+     "name": "net",
+     "kind": "function",
+     "line": 127,
+     "signature": "def net(p, worth, left_hp, damage, mp, lock_s, rate) -> float",
+     "summary": "A throw's worth in EXP: p x landing - cost."
+    },
+    {
+     "name": "landing",
+     "kind": "function",
+     "line": 116,
+     "signature": "def landing(worth: float, left_hp: float, damage: float) -> float",
+     "summary": "The share of a monster's worth an attack of `damage` takes off what it has left."
+    },
+    {
+     "name": "cost",
+     "kind": "function",
+     "line": 122,
+     "signature": "def cost(mp: float, lock_s: float, rate: float) -> float",
+     "summary": "MP at MP_EXP each plus the lock's seconds at her EXP rate."
+    },
+    {
+     "name": "EVIDENCE",
+     "kind": "constant",
+     "line": 75,
+     "signature": "EVIDENCE = True",
+     "summary": "Whether throws at what no look has go by all this. False means the fixed windows used until 2026-11-04."
+    },
+    {
+     "name": "SEEN_CHANCE",
+     "kind": "constant",
+     "line": 71,
+     "signature": "SEEN_CHANCE = 0.76",
+     "summary": "The live effect rate of a throw at a monster she does see (76-77%)."
+    }
+   ],
+   "inputs": [
+    "each missed monster's evidence, built by `behavior.attacks.Attacks.evidence` from the feed's tracks, her past throws and her EXP gains",
+    "the monster's worth and remaining HP, her attack's mean damage, MP and lock time, and her EXP rate (`fight.made_rate`)"
+   ],
+   "outputs": [
+    "the chance and net worth used by `Attacks.worth_a_throw`, `seen_net` and target picks, and by `fight` (STEP_S for `_not_thrown_at`)",
+    "the 'attack' telemetry record's chance, unseen_s, blank, blind and state"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "BASE / AGE_S / GONE / DYING",
+     "value": "0.39 / -0.63 / -0.86 / -2.5",
+     "meaning": "log-odds: start, per second unseen, track gone, dying"
+    },
+    {
+     "name": "SHORT / SHORT_FRAMES",
+     "value": "-0.50 / 3",
+     "meaning": "a track seen in 3 frames or fewer"
+    },
+    {
+     "name": "BLANK / PROVEN",
+     "value": "-0.65 / 0.68",
+     "meaning": "her last throw at it unseen showed nothing / something"
+    },
+    {
+     "name": "GAIN / GAIN_S",
+     "value": "-0.82 / 1.2",
+     "meaning": "an EXP gain of its kind in the last 1.2 s"
+    },
+    {
+     "name": "SPENT / SPENT_DEAD",
+     "value": "-0.35 / 0.5",
+     "meaning": "her throws reckoned to have killed it, with a blank"
+    },
+    {
+     "name": "BLIND / BLIND_FREE",
+     "value": "-0.39 / 1",
+     "meaning": "per frame the exact finder missed it, after the first"
+    },
+    {
+     "name": "SEEN_CHANCE",
+     "value": "0.76",
+     "meaning": "effect rate of a throw at a seen monster"
+    },
+    {
+     "name": "OVER_SEEN",
+     "value": "True",
+     "meaning": "an unseen throw must beat a throw at a seen one in reach"
+    },
+    {
+     "name": "MESO_EXP / MP_EXP",
+     "value": "0.5 / 0.5",
+     "meaning": "EXP per meso, and per MP point"
+    },
+    {
+     "name": "THROW_LOCK_S / JUMP_LOCK_S",
+     "value": "0.86 / 1.1",
+     "meaning": "s a throw from the ground / a jump locks her"
+    },
+    {
+     "name": "STEP_S",
+     "value": "0.4",
+     "meaning": "s a step away takes her (a guess): fight's price for keeping a monster off"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-04",
+     "what": "Throws at what no look has go by evidence and price, not fixed windows",
+     "why": "The user: \"mobs near the player are not detected by perception and kept for 2s ...\"; and on 2026-11-03: \"Motion planning should consider the current game situation and dynamically calculate the best action to perform\"."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "DYING set by hand at -2.5",
+     "why": "The fit's -0.37 came from bystanders' effects; all 9 such targets were dead by the key."
+    }
+   ],
+   "gotchas": [
+    "The name is misleading: 'presence' is a missed monster's presence, not a person at the PC (that's guard.Pass._hands).",
+    "The weights come from one map, the thief, before the exact finder; not tried live.",
+    "A touch isn't counted as evidence of presence (no stable sign between the two hours)."
+   ],
+   "tests": [
+    "tests/test_presence.py",
+    "tests/test_choice.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/probe.py",
+   "title": "Probes: what a star hits",
+   "tagline": "In-game experiments that settle attack.reach's open questions, and their scorer.",
+   "summary": "Each `Probe` stands her at a place on Thicket Around the Beach II where one open question of `attack.reach` shows: the search window's top and floor, the search below her, how a jump's attack picks, which walls and lines stop a star, and how far the claw swipes. `run` keeps her there and throws the regular attack only when a single eligible monster is in front, then gathers each throw's evidence and logs it to lab/probe_geometry.jsonl. `score` reads the log offline and weighs each question's answers by likelihood. Per the README none has been run to a score in game: the first tries on 2026-10-21 (step-down, claw-edge) threw nothing, and shaped the platform clearing, the stepping away and the crowd allowance.",
+   "details_md": "**The probes** (`PROBES`):\n\n| Probe | Question |\n|---|---|\n| `top-60`, `top-120` | the search window's top (`SEARCH_TOP0`: the client's 44, or 21 fitted to the logs) |\n| `floor` | the window's floor by kind |\n| `below-42` | the search between her level and 60 below her, against the old ramp |\n| `air` | how an attack from a jump picks: the area, or the search from as high as she is |\n| `other-wall` | whether another block's side wall stops a star |\n| `step-up` | how high the line a wall stops runs (`SHOT_H`) |\n| `step-down`, `hanging-wall` | the v83 line or a level line (`LINE`) |\n| `claw-edge`, `claw-down` | how far the claw swipes, on and off her level |\n\nEach probe gives her platform, x and throwing side, the target platforms, kinds and sideways range, the style (`throw`, `jump_throw`, `jump_back`), the number of throws, whether to look `wide`, the `crowd` allowed, the wall rule, and `at_pick` (aim by where the monster will be when the attack picks, `x_after`).\n\n**A run** (`run` -> `_run`, the regular attack always, `reach.WALLS_BLOCK` switched for the run and restored):\n\n1. **Look.** Check the alarm, look (`wide` if asked), and feed any throw in flight its evidence.\n2. **Placement.** Lost for `UNPLACED_S` ends the run. Knocked, she waits. Off her place, `_to_place` walks or navigates back, always arriving facing the way she throws.\n3. **Her platform** (`_keep_clear`). If monsters spawn on it and the targets are elsewhere (`clears_first`), she clears it with `fight.clear` (`CLEAR_KILLS` 8, `CLEAR_S` 30 s). A target-kind monster too close is stepped away from (`GIVE_WAY`, within `STEP_LEASH` 60 and `END_ROOM` 90). Anything else in her way is fought off. `FIGHT_MAX_S` (120 s) of fighting without a throw stops the run.\n4. **Choose** a target only if it's the only monster in front (`in_front`: within `FRONT` 420 ahead, `FRONT_UP` above to `FRONT_DOWN` 140 below), or with up to `crowd` others. It must be in range and, with the wall rule on, not walled or shielded.\n5. **Throw and wait** (`_throw` -> `_Flying`). Every monster in front at the throw and at the first look after (the pick) is followed until `EVIDENCE_S` (0.9 s) after the star was due, or up to `HIDDEN_MAX_S` (2.5 s) while the target is hidden. So one throw's evidence is never another's.\n\n**The scorer** (`score`):\n\n- **What each monster showed** (`shown`, `seen`): a hit (bar new or lower by `HURT` 0.02, or killed: her EXP up and it the only one gone), none (seen `SETTLED_S` 0.3 s after with its bar unchanged), or can't tell. A hit taking less than `CLAW_SPLIT_HP` (20 HP) of its bar was the claw's (`claw_drop`).\n- **What each model predicts** (`chances`). A `Model` (`reach_model` with one piece changed per answer) gives each monster's chance of the claw's swipe and of a star that gets there. That covers claw stances, the search's first band, the area or the v83 search from a jump, then the line to the pick (`gets_to`). Positions are spread over `PICK_STEPS` (5) moments within `PICK_SLACK_S` (0.04 s) of the look (`placings`).\n- **The fit** (`likelihood`). Two hit rates are fitted: a (taken, at least `A_MIN` 0.3) and f (not taken, at most `F_MAX` 0.2), neither within `RATE_FLOOR` 0.05 of 0 or 1. A hit's size is misread `SIZE_SLIP` (5%) of the time.\n- **Decisions.** Each `Question` is decided when one answer is `DECIDES` (3.0, about 20 to 1) better than the next, on at least `DECIDE_THROWS` (5) throws where they differ (`answers`). `SEARCH_TOP0`, `SEARCH_FLOOR0` and `SHOT_H` are also fitted on grids, with a `FITS` (1.92) interval.",
+   "lines": 1390,
+   "key_items": [
+    {
+     "name": "Probe",
+     "kind": "dataclass",
+     "line": 191,
+     "signature": "class Probe",
+     "summary": "One probe: name, the question it asks, her platform/x/side, targets' platforms, kinds and range, style, throws, wide, crowd, walls, at_pick, expect, source."
+    },
+    {
+     "name": "PROBES",
+     "kind": "constant",
+     "line": 218,
+     "signature": "PROBES = {p.name: p for p in (...)}",
+     "summary": "The 11 probes on Thicket Around the Beach II."
+    },
+    {
+     "name": "run",
+     "kind": "function",
+     "line": 421,
+     "signature": "def run(h, nav, probe, seconds=900, crowd=None) -> ProbeReport",
+     "summary": "Runs a probe until its throws are done or time runs out. The wall switch is the probe's for the run and is restored however it ends."
+    },
+    {
+     "name": "choose",
+     "kind": "function",
+     "line": 640,
+     "signature": "def choose(s, probe, crowd=0, model=None, lead=0.0) -> Monster | None",
+     "summary": "What to throw at: the nearest eligible monster in range, only when it's alone in front (or within the crowd), never with one of her platform in her way."
+    },
+    {
+     "name": "in_front",
+     "kind": "function",
+     "line": 614,
+     "signature": "def in_front(s: Scene, side: str) -> list[Monster]",
+     "summary": "Every monster that could take the star: within FRONT ahead, FRONT_UP above to FRONT_DOWN below."
+    },
+    {
+     "name": "_keep_clear",
+     "kind": "function",
+     "line": 552,
+     "signature": "def _keep_clear(h, probe, s, guard, report) -> bool",
+     "summary": "Her platform's monsters before a throw: clear it first, step away from a target too close, or fight off another."
+    },
+    {
+     "name": "_Flying",
+     "kind": "class",
+     "line": 717,
+     "signature": "class _Flying",
+     "summary": "A throw whose evidence is coming in: every monster in front at the throw and at the pick, followed look by look."
+    },
+    {
+     "name": "x_after",
+     "kind": "function",
+     "line": 624,
+     "signature": "def x_after(m: Monster, lead: float, model=None) -> float",
+     "summary": "Where a walking monster will be `lead` s after the look, turning at its platform's walk edges."
+    },
+    {
+     "name": "Model",
+     "kind": "dataclass",
+     "line": 944,
+     "signature": "class Model",
+     "summary": "What the scorer takes an attack to do: top0, floor0, claw, line, shot_h, walls, ramp, air."
+    },
+    {
+     "name": "chances",
+     "kind": "function",
+     "line": 997,
+     "signature": "def chances(row, model, body, m) -> list[tuple[dict, float, float]]",
+     "summary": "Per monster of a throw's evidence: the model's chance of a claw swipe and of a star that gets to it."
+    },
+    {
+     "name": "likelihood",
+     "kind": "function",
+     "line": 1080,
+     "signature": "def likelihood(rows, chance) -> tuple[float, dict]",
+     "summary": "The log-likelihood of what the monsters showed under a model, with the two hit rates fitted."
+    },
+    {
+     "name": "QUESTIONS",
+     "kind": "constant",
+     "line": 1195,
+     "signature": "QUESTIONS = {q.key: q for q in (...)}",
+     "summary": "The open questions (SEARCH_TOP0, CLAW_FAR, claw_takes, RAMP_BELOW, LINE, WALLS, OTHER_WALLS, in_area) and their answers."
+    },
+    {
+     "name": "answers",
+     "kind": "function",
+     "line": 1247,
+     "signature": "def answers(rows, model, question) -> Answers",
+     "summary": "A question's answers scored over its probes' throws, and on how many throws the best two differ."
+    },
+    {
+     "name": "score",
+     "kind": "function",
+     "line": 1352,
+     "signature": "def score(rows, model) -> str",
+     "summary": "The whole report: tables by probe and distance, each question, the window and line fits, and the claw table."
+    },
+    {
+     "name": "shown",
+     "kind": "function",
+     "line": 858,
+     "signature": "def shown(e, exp, only_gone) -> bool | None",
+     "summary": "What a monster showed after the star was due: hit, none, or can't tell."
+    }
+   ],
+   "inputs": [
+    "the hunter (looks, actions, fight's clear, health_check) and a Navigator",
+    "the map (MapModel), reach's model and its switches",
+    "for scoring: the probe log and the map's game data (bodies, walk speeds)"
+   ],
+   "outputs": [
+    "regular-attack throws and the moves to hold her place",
+    "one JSON line per throw in lab/probe_geometry.jsonl",
+    "a `ProbeReport`, log lines and telemetry 'probe' events; `score`'s text report"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "maplehelper/game.py",
+    "gamelab/directions.py",
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/stance.py",
+    "gamelab/control/actions.py",
+    "gamelab/control/client.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/scene.py",
+    "gamelab/motion/body.py",
+    "gamelab/motion/physics.py",
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/hunter.py",
+    "gamelab/control/navigator.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/probe_geometry.jsonl",
+     "mode": "read-write",
+     "what": "every probe throw: probe, style, her place, target, monsters in front, the pick, EXP, evidence (per character)"
+    }
+   ],
+   "concurrency": "Runs in `probe run`'s main thread inside `retreat.on_alarm`; `score` is offline and sends nothing.",
+   "tunables": [
+    {
+     "name": "FRONT / FRONT_DOWN",
+     "value": "420 / 140",
+     "meaning": "how far ahead / below a monster can take the star"
+    },
+    {
+     "name": "STAND_SLACK / APPROACH",
+     "value": "20 / 12",
+     "meaning": "she walks back past this; approaches from this far behind"
+    },
+    {
+     "name": "EVIDENCE_S / HIDDEN_MAX_S",
+     "value": "0.9 / 2.5",
+     "meaning": "evidence gathered after the star was due; longer while the target is hidden"
+    },
+    {
+     "name": "SETTLED_S / HURT",
+     "value": "0.3 / 0.02",
+     "meaning": "no hit if seen this long after with its bar unchanged; a hit is this much lower"
+    },
+    {
+     "name": "GIVE_WAY / STEP_LEASH / END_ROOM",
+     "value": "True / 60 / 90",
+     "meaning": "step away from a target too close, within the leash, never near the ends"
+    },
+    {
+     "name": "CLEAR_KILLS / CLEAR_S / FIGHT_MAX_S",
+     "value": "8 / 30.0 / 120.0",
+     "meaning": "clearing her platform, and the most fighting without a throw"
+    },
+    {
+     "name": "A_MIN / F_MAX / RATE_FLOOR",
+     "value": "0.3 / 0.2 / 0.05",
+     "meaning": "bounds on the fitted hit rates"
+    },
+    {
+     "name": "CLAW_SPLIT_HP",
+     "value": "20",
+     "meaning": "a hit under this much HP was the claw's"
+    },
+    {
+     "name": "SIZE_SLIP",
+     "value": "0.05",
+     "meaning": "how often a hit's size is misread"
+    },
+    {
+     "name": "DECIDES / DECIDE_THROWS",
+     "value": "3.0 / 5",
+     "meaning": "log-likelihood lead and throws needed to decide a question"
+    },
+    {
+     "name": "FITS",
+     "value": "1.92",
+     "meaning": "values within this of the best fit (95%)"
+    },
+    {
+     "name": "PICK_SLACK_S / PICK_STEPS",
+     "value": "0.04 / 5",
+     "meaning": "the pick's moment spread around the look"
+    },
+    {
+     "name": "LOGS_TOP0",
+     "value": "21",
+     "meaning": "the window's top the logs fit (reach has the client's 44)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "A probe standing where monsters spawn clears its platform first (clears_first)",
+     "why": "In game, step-down fought platform 2's monsters one at a time for all its 150 s and threw none."
+    },
+    {
+     "date": "2026-10-21",
+     "what": "No throw while a monster of her platform is in her way; she steps away instead (GIVE_WAY)",
+     "why": "Review: throws with one in her way told nothing. In the simulator, stepping away decided 11 right, 1 wrong and 4 undecided, against 5, 1 and 10 standing."
+    },
+    {
+     "date": "2026-10-21",
+     "what": "SHOT_H fitted by the line in force (reach.LINE)",
+     "why": "Until then it was fitted by the level line whatever reach had, so throws down past her platform's end bounded nothing."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "A throw dropped at its last look (no key sent) isn't scored",
+     "why": "Review: one had been scored for a star never thrown."
+    }
+   ],
+   "gotchas": [
+    "No probe has a scored run in game yet (README, Probes to run): step-down and claw-edge were tried on 2026-10-21 and threw nothing, which led to `clears_first`, `GIVE_WAY` and claw-edge's `crowd` 2.",
+    "She throws the regular attack always (no MP), so there's no out-of-darts watch during a probe.",
+    "The wall rule (`reach.WALLS_BLOCK`) is the probe's for the run and restored afterwards, however the run ends.",
+    "The look that logs the pick isn't taken exactly when the attack picks; the scorer spreads the pick over PICK_STEPS moments."
+   ],
+   "tests": [
+    "tests/test_probe.py",
+    "tests/test_navigation.py",
+    "tests/test_sim_mobs.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "HuntStop",
+   "module": "gamelab/behavior/safety.py",
+   "line": 371,
+   "summary": "The base exception for every stop that ends a hunt. Raised by the watches through Hunter.health_check, caught by retreat.on_alarm (which retreats, pages and re-raises), and turned into an exit code by gamelab.__main__.",
+   "fields": [
+    {
+     "name": "label",
+     "type": "str",
+     "meaning": "the log's capitals word, e.g. 'SAFETY STOP'"
+    },
+    {
+     "name": "title / event",
+     "type": "str",
+     "meaning": "the retreat's telemetry word, and the telemetry event kind"
+    },
+    {
+     "name": "exit_code",
+     "type": "int",
+     "meaning": "4 safety/too strong/HP not read, 5 out of darts, 6 key check, 7 stat window, 8 out of MP, 9 stop asked"
+    },
+    {
+     "name": "keep_s",
+     "type": "float",
+     "meaning": "seconds of the rolling recording to save (90 for out of darts/MP)"
+    },
+    {
+     "name": "parks",
+     "type": "bool",
+     "meaning": "retreat to the park place (StopAsked)"
+    },
+    {
+     "name": "later",
+     "type": "bool",
+     "meaning": "no retreat now; the guard parks her later"
+    },
+    {
+     "name": "page()",
+     "type": "tuple[str, str] | None",
+     "meaning": "the alert's title and line, or None for no page"
+    }
+   ]
+  },
+  {
+   "name": "Reserve",
+   "module": "gamelab/behavior/safety.py",
+   "line": 165,
+   "summary": "The safety stop's reserve on one map. Built by reserve_of in Hunter._reserve_check and held by HpWatch.",
+   "fields": [
+    {
+     "name": "hits",
+     "type": "int",
+     "meaning": "her profile's safety_hits"
+    },
+    {
+     "name": "touches",
+     "type": "tuple[Touch, ...]",
+     "meaning": "each kind's touch, largest first"
+    },
+    {
+     "name": "level / defence",
+     "type": "float",
+     "meaning": "what the touches are worked out at"
+    },
+    {
+     "name": "guard",
+     "type": "float",
+     "meaning": "Magic Guard's share (0: unused)"
+    },
+    {
+     "name": "map_id / stats",
+     "type": "int | None / str",
+     "meaning": "the map, and where her stats came from in words"
+    }
+   ]
+  },
+  {
+   "name": "Touch",
+   "module": "gamelab/behavior/safety.py",
+   "line": 123,
+   "summary": "One monster kind's touch as the safety stop counts it.",
+   "fields": [
+    {
+     "name": "kind / name",
+     "type": "str",
+     "meaning": "the kind and the game data's name"
+    },
+    {
+     "name": "prior",
+     "type": "int",
+     "meaning": "the formula's top at her DEF and level"
+    },
+    {
+     "name": "measured / n / taken_at",
+     "type": "int | None / int / int | None",
+     "meaning": "her largest measured touch (carried to her level), how many, and the level it was taken at"
+    },
+    {
+     "name": "pad",
+     "type": "float",
+     "meaning": "its PADamage"
+    },
+    {
+     "name": "seen",
+     "type": "bool",
+     "meaning": "a kind seen on the map but not in its spawn list"
+    }
+   ]
+  },
+  {
+   "name": "Touches",
+   "module": "gamelab/behavior/safety.py",
+   "line": 316,
+   "summary": "Her exact touches kept across runs in lab/touches.jsonl, one JSON row per touch. Written by the hunter at each HP-number drop; read for the reserve and for bootstrap's DEF fit.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "wall clock"
+    },
+    {
+     "name": "map",
+     "type": "int",
+     "meaning": "the map id"
+    },
+    {
+     "name": "level",
+     "type": "int | None",
+     "meaning": "her level then (None: not read, counted at no level)"
+    },
+    {
+     "name": "hp",
+     "type": "int",
+     "meaning": "the HP the touch took"
+    },
+    {
+     "name": "kind",
+     "type": "str | None",
+     "meaning": "kind_of_touch's answer (None: fits no kind)"
+    },
+    {
+     "name": "max",
+     "type": "int",
+     "meaning": "her max HP then"
+    },
+    {
+     "name": "pads",
+     "type": "dict",
+     "meaning": "the PADamage of the map's kinds then"
+    }
+   ]
+  },
+  {
+   "name": "HpWatch",
+   "module": "gamelab/behavior/safety.py",
+   "line": 515,
+   "summary": "The live watch over her HP (Hunter.hp_watch), fed by every look and glance. The guard also asks its threshold.",
+   "fields": [
+    {
+     "name": "reserve",
+     "type": "Reserve",
+     "meaning": "the threshold's source"
+    },
+    {
+     "name": "potion_hp / low_hp",
+     "type": "float | None",
+     "meaning": "a potion key of her own; --low-hp's override"
+    },
+    {
+     "name": "max_hp / mp",
+     "type": "float | None",
+     "meaning": "as of the last reading"
+    },
+    {
+     "name": "since / looks / low",
+     "type": "float | None / int / int",
+     "meaning": "the stretch under the threshold, and the run under the floor"
+    },
+    {
+     "name": "hp / share / exact / at",
+     "type": "...",
+     "meaning": "the last reading"
+    },
+    {
+     "name": "fired",
+     "type": "bool",
+     "meaning": "the stop was returned already"
+    }
+   ]
+  },
+  {
+   "name": "Why",
+   "module": "gamelab/behavior/retreat.py",
+   "line": 213,
+   "summary": "What a retreat is for, and the time and goes it has (LIE_DETECTOR, SAFETY, KEY_CHECK, PARK, or why_of(stop)).",
+   "fields": [
+    {
+     "name": "label / event / after",
+     "type": "str",
+     "meaning": "the log's label, telemetry word, and 'N s <after>'"
+    },
+    {
+     "name": "seconds",
+     "type": "float",
+     "meaning": "s from `seen` to get there (10, 60, 180)"
+    },
+    {
+     "name": "window",
+     "type": "float",
+     "meaning": "her trips are cut this long after `seen` (12 on the Lie Detector)"
+    },
+    {
+     "name": "tries",
+     "type": "int",
+     "meaning": "goes at most"
+    },
+    {
+     "name": "ropes / park",
+     "type": "bool",
+     "meaning": "a rope will do; go to park_place from a sure look"
+    }
+   ]
+  },
+  {
+   "name": "Place",
+   "module": "gamelab/behavior/retreat.py",
+   "line": 149,
+   "summary": "Where a retreat goes, as chosen by choose or park_place.",
+   "fields": [
+    {
+     "name": "platform / x",
+     "type": "int | None / float | None",
+     "meaning": "a platform and x (x None: anywhere on a safe platform; platform None: the rope she's on)"
+    },
+    {
+     "name": "rope",
+     "type": "Refuge | None",
+     "meaning": "a rope refuge got onto from `platform`"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "'a safe platform', 'a safe rope', 'safe enough', 'the safest within reach', 'here: ...'"
+    },
+    {
+     "name": "seconds / danger / way",
+     "type": "float",
+     "meaning": "planner time, danger there, extra cost of its way"
+    }
+   ]
+  },
+  {
+   "name": "Retreat",
+   "module": "gamelab/behavior/retreat.py",
+   "line": 170,
+   "summary": "How a retreat went: returned by away and logged. Its `said()` goes into lab/parked.json.",
+   "fields": [
+    {
+     "name": "began",
+     "type": "float",
+     "meaning": "s after the sighting or stop when it began"
+    },
+    {
+     "name": "place",
+     "type": "Place | None",
+     "meaning": "where it went"
+    },
+    {
+     "name": "result",
+     "type": "str",
+     "meaning": "arrived, timeout, stayed, too late, on the rope, stopped: ..."
+    },
+    {
+     "name": "took / where / air",
+     "type": "float | None / tuple | None / bool",
+     "meaning": "time to her last look, where it put her, whether in the air"
+    }
+   ]
+  },
+  {
+   "name": "told",
+   "module": "gamelab/behavior/retreat.py",
+   "line": 412,
+   "summary": "The lab/parked.json record: how the last park or stop's retreat came out. Read by `gamelab stop` and by the guard's 'known parked' test.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "wall clock"
+    },
+    {
+     "name": "by",
+     "type": "str",
+     "meaning": "who asked: the stop's text, '`nav --park`', 'the Lie Detector'"
+    },
+    {
+     "name": "there",
+     "type": "bool",
+     "meaning": "her last look has her on the chosen place"
+    },
+    {
+     "name": "said",
+     "type": "str",
+     "meaning": "e.g. 'parked on platform 26 (here: a safe platform), 2.5 s on'"
+    }
+   ]
+  },
+  {
+   "name": "read_note",
+   "module": "gamelab/behavior/guard.py",
+   "line": 362,
+   "summary": "The lab/park_note.json record: a park wanted and not done, for the guard. Written by retreat.told, stop and left_behind.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "wall clock"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "why she should park"
+    },
+    {
+     "name": "urgent",
+     "type": "bool",
+     "meaning": "nobody asked for it (a hunt that died): a critical push"
+    }
+   ]
+  },
+  {
+   "name": "claim",
+   "module": "gamelab/behavior/guard.py",
+   "line": 324,
+   "summary": "The lab/hunt.json record: the command hunting now, written at its start, removed at a clean end (`over`).",
+   "fields": [
+    {
+     "name": "pid",
+     "type": "int",
+     "meaning": "its process id"
+    },
+    {
+     "name": "started",
+     "type": "float | None",
+     "meaning": "the process's start time, so a reused pid isn't mistaken for it"
+    },
+    {
+     "name": "command",
+     "type": "str",
+     "meaning": "e.g. 'tour', 'nav park'"
+    }
+   ]
+  },
+  {
+   "name": "Seen",
+   "module": "gamelab/behavior/guard.py",
+   "line": 114,
+   "summary": "What one guard pass goes by, from Pass.tick to Guard.act.",
+   "fields": [
+    {
+     "name": "touched / low / note / urgent",
+     "type": "bool / bool / str / bool",
+     "meaning": "what set it off"
+    },
+    {
+     "name": "dead / alarm",
+     "type": "bool",
+     "meaning": "she's dead; the Lie Detector alarm is up"
+    },
+    {
+     "name": "front / held / player",
+     "type": "bool",
+     "meaning": "the game is in front; only just back; the player is up"
+    },
+    {
+     "name": "by_hand / hp",
+     "type": "bool / str",
+     "meaning": "someone's playing her; her HP in words"
+    }
+   ]
+  },
+  {
+   "name": "Doubt",
+   "module": "gamelab/behavior/keycheck.py",
+   "line": 361,
+   "summary": "A doubt of her keys, from RegularWatch, MoveWatch, the hunter (stars, stall, pet), carried by KeyDoubt into KeyCheck.run.",
+   "fields": [
+    {
+     "name": "presses",
+     "type": "list[Press]",
+     "meaning": "the no-effect presses (regular, casts)"
+    },
+    {
+     "name": "known",
+     "type": "float",
+     "meaning": "when it was raised"
+    },
+    {
+     "name": "number",
+     "type": "int",
+     "meaning": "the run's how-many-th doubt"
+    },
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "regular, casts, moves, stall, pet, stars"
+    },
+    {
+     "name": "what",
+     "type": "str",
+     "meaning": "its words for non-press kinds"
+    },
+    {
+     "name": "stop",
+     "type": "OutOfDarts | None",
+     "meaning": "a stars doubt's held stop"
+    }
+   ]
+  },
+  {
+   "name": "Evidence",
+   "module": "gamelab/behavior/presence.py",
+   "line": 84,
+   "summary": "What's known of a monster the look missed, built by behavior.attacks.Attacks.evidence for presence.chance.",
+   "fields": [
+    {
+     "name": "age",
+     "type": "float",
+     "meaning": "s since last seen, as of the key"
+    },
+    {
+     "name": "state",
+     "type": "str | None",
+     "meaning": "its feed track's state, 'gone', or None with no feed"
+    },
+    {
+     "name": "blank / proven",
+     "type": "int / bool",
+     "meaning": "her last unseen throw at it showed nothing / something"
+    },
+    {
+     "name": "gain / short / spent / blind",
+     "type": "bool / bool / float / int",
+     "meaning": "a gain of its kind; a short-lived track; reckoned killed; frames the finder missed it"
+    }
+   ]
+  },
+  {
+   "name": "Probe",
+   "module": "gamelab/behavior/probe.py",
+   "line": 191,
+   "summary": "One in-game probe: a place, its targets and a throwing style. From PROBES, adjusted by the command line.",
+   "fields": [
+    {
+     "name": "name / asks / source / expect",
+     "type": "str",
+     "meaning": "what it settles and what each answer predicts"
+    },
+    {
+     "name": "platform / x / side",
+     "type": "int / float / str",
+     "meaning": "where she stands and which way she throws"
+    },
+    {
+     "name": "at / kinds / dx / by_kind",
+     "type": "tuples",
+     "meaning": "target platforms, kinds and sideways range"
+    },
+    {
+     "name": "style / throws",
+     "type": "str / int",
+     "meaning": "throw, jump_throw or jump_back; how many"
+    },
+    {
+     "name": "wide / crowd / walls / at_pick",
+     "type": "bool / int / bool / bool",
+     "meaning": "whole-screen looks; others allowed in front; the wall rule; aim at the pick position"
+    }
+   ]
+  },
+  {
+   "name": "Outcome",
+   "module": "gamelab/behavior/keycheck.py",
+   "line": 749,
+   "summary": "What a key check found and did, returned by KeyCheck.run and sent as a telemetry 'attack_key' event. (chatcheck and statcheck each have their own `Outcome` of the same shape.)",
+   "fields": [
+    {
+     "name": "what",
+     "type": "str",
+     "meaning": "switched, off, followed, as configured, held or put off"
+    },
+    {
+     "name": "text",
+     "type": "str",
+     "meaning": "what was said in capitals"
+    },
+    {
+     "name": "key",
+     "type": "str | None",
+     "meaning": "the key the game has ATTACK on"
+    },
+    {
+     "name": "reading",
+     "type": "keybindings.Reading | None",
+     "meaning": "the window as read"
+    },
+    {
+     "name": "stars",
+     "type": "str",
+     "meaning": "how her stars were told: shown, test, maybe out, not known, no target, no stars"
+    },
+    {
+     "name": "seconds",
+     "type": "float",
+     "meaning": "how long the check took"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "safety-stop",
+   "title": "From a low-HP look to a safe place and a page",
+   "summary": "How her HP staying under the reserve ends a hunt. Out of darts, out of MP, the key check's stop and the stat window's stop take the same path from step 4 on.",
+   "trigger": "A look or glance reads her HP under the reserve on two readings at least 0.25 s apart by the HP number (0.6 s by the bar), or under one touch twice in a row.",
+   "steps": [
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._vitals",
+     "text": "Every look reads her HP number (or bar) and feeds HpWatch.see, plus Vitals.see for the phone. `_reserve_check` rebuilds the reserve if the map, a kind seen, her level, DEF, max HP or a measured touch changed.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/behavior/safety.py",
+     "symbol": "HpWatch.see",
+     "text": "Counts the stretch under the threshold and the readings in a row under the floor.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._stop_now",
+     "text": "After every look (and glance), once the hunt has asked after her health and not while she retreats: HpWatch.due() returns a SafetyStop, which is raised. Hunter.health_check raises it too.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "on_alarm",
+     "text": "Catches the HuntStop: logs 'SAFETY STOP: HP 360 of 774, under 3 Horny Mushroom touches ... The hunt ends: ...', and emits a telemetry 'safety_stop' event.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "away",
+     "text": "why_of(stop) gives 60 s and 12 goes. Sets Hunter.retreating, builds a Navigator over moves-only actions with dodging, and finds her.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "choose",
+     "text": "The quickest wholly safe platform or rope with nothing in reach, else a place 'safe enough', else the safest place in reach.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator.go",
+     "text": "Moves her there in AVOID mode, waiting at refuges while monsters are in the way, retried from wherever a knock leaves her.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "told",
+     "text": "Writes lab/parked.json (and a park note if she isn't there). Then control.alarm.page pages the person at the PC, after her moves.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "",
+     "text": "The re-raised stop ends the command, which prints the stop's `after` and `advice` and exits with code 4.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "lie-detector-retreat",
+   "title": "The Lie Detector: away within 10 s",
+   "summary": "When the key player sees the Lie Detector, the running hunt stops at once and her retreat gets her to a safe place within 10 s, using moves only.",
+   "trigger": "The key player spots the Lie Detector and starts refusing the hunt's plans.",
+   "steps": [
+    {
+     "module": "gamelab/control/client.py",
+     "symbol": "check_alarm",
+     "text": "The hunt's next key plan, or its next look, raises client.LieDetectorAlarm.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "on_alarm",
+     "text": "Catches the alarm and calls retreat(h), which dates the sighting from the alarm file's age (client.alarm_age).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "_away",
+     "text": "With LIE_DETECTOR (10 s, the player's 12 s window, 3 goes): 'too late' if seen 10 s ago or more. Otherwise locate her; stay on a safe rope she's hanging on; else choose with the seconds left.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/control/navigator.py",
+     "symbol": "Navigator.go",
+     "text": "Her moves (kind `retreat`, no attack, pick-up, pet food or mouse) to the place, with a dodge budget of min(EVADE_S, time left). The player cuts them 12 s after the sighting.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "_end",
+     "text": "Logs 'LIE DETECTOR: retreat over (arrived): on platform 26 at x 260, 2.8 s after it was seen' and a telemetry 'retreat' event. `told` records it.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "",
+     "text": "The alarm is re-raised and the command stops with exit code 3. The pet babysitter keeps feeding by the followed fullness meanwhile.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "stop-and-guard",
+   "title": "Parking her: `gamelab stop` and the guard",
+   "summary": "Two ways she gets parked outside a hunt's own stops: the user asks with `gamelab stop`, or the guard sees her touched or a hunt that died, between hunts.",
+   "trigger": "`python -m gamelab stop`; or, between hunts, touches, low HP or a park note seen by a guard pass.",
+   "steps": [
+    {
+     "module": "gamelab/behavior/guard.py",
+     "symbol": "stop",
+     "text": "Touches the grind loops' STOP, finds the running hunt (lab/hunt.json), writes lab/stop_hunt.json, cuts the playing plan (client.cut_running), and waits.",
+     "process": "gamelab stop"
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._stop_asked",
+     "text": "At the hunt's next look or glance the request (lab/stop_hunt.json) raises StopAsked. If looks have nothing to act on meanwhile (the game not in front), `Hunter._stop_waiting` holds it for STOP_WAIT_S (60 s), then raises StopAsked(later=True): no retreat, and the guard parks her at the game's return.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "park_place",
+     "text": "on_alarm -> away with PARK settings (180 s, 30 goes) from a sure look. `park_place` is `choose` with no time limit; if nothing can touch her, or there's no safe place, she stays.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "told",
+     "text": "lab/parked.json says where she ended up. If she isn't there, lab/park_note.json is left for the guard. `stop` reads parked_said and prints it.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/behavior/guard.py",
+     "symbol": "Pass.tick",
+     "text": "Between hunts, once a second in `pet --every`: mode, input, a dead hunt's leftover entry (left_behind), the note, and the service's newest state (Vitals, touches, HP under the stop rule).",
+     "process": "pet --every (the babysitter)"
+    },
+    {
+     "module": "gamelab/behavior/guard.py",
+     "symbol": "Guard.act",
+     "text": "Opens an episode, then: dead / alarm / played by hand / alert only / game not in front: a push and no moves; else start_park() and a push, at most every 120 s and 3 times an episode.",
+     "process": "pet --every (the babysitter)"
+    },
+    {
+     "module": "gamelab/behavior/retreat.py",
+     "symbol": "park",
+     "text": "The detached `nav --park --tell` runs `park` (from gamelab.__main__) and tells how it came out.",
+     "process": "nav --park --tell (detached)"
+    }
+   ]
+  },
+  {
+   "id": "key-check",
+   "title": "From useless presses to the game's key bindings",
+   "summary": "How five regular attacks without effect become a check of the game's KEY BINDINGS window, and what she does with what it shows.",
+   "trigger": "RegularWatch judges DOUBT_PRESSES (5) presses in a row with no effect on a target in reach (or MoveWatch, a cast run, out of darts due, a stall, a pet food doubt).",
+   "steps": [
+    {
+     "module": "gamelab/behavior/keycheck.py",
+     "symbol": "RegularWatch.look",
+     "text": "At each look, pending presses are judged (effect / missed / none / passed). The fifth 'none' in a row makes a Doubt.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter.health_check",
+     "text": "Asks the watch's due(); `Hunter._doubted` says the doubt in capitals, emits a 'key_doubt' event, holds her regular presses and, in the hunt loop, raises KeyDoubt. The hunt loop catches it and calls Hunter.check_keys with its clocks paused. Outside the hunt loop the person at the PC is paged instead.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/keycheck.py",
+     "symbol": "KeyCheck.run",
+     "text": "May it check (CHECKS_MAX 3, CHECK_GAP_S 300)? Regular presses are held. A place: she checks where she is if nothing is within 250 x 120, else retreat.away(KEY_CHECK).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/keycheck.py",
+     "symbol": "KeyCheck._stars",
+     "text": "For a regular doubt: a cast's MP since the doubt says she has stars; else up to 5 test casts. 'Maybe out' isn't a stop unless DartWatch is due.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/keycheck.py",
+     "symbol": "KeyCheck._window",
+     "text": "At a quiet still moment: mouse to (1100, 300), backslash, frames until it's seen open, read it, save the frame, then Esc. 'May be open' raises KeyCheckStop (exit 6).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/keycheck.py",
+     "symbol": "KeyCheck._act",
+     "text": "control.keymap.follow maps her keys. Moved keys go to Hunter.follow, are remembered, and are published to the player. Then she switches or turns off the regular attack, or holds it at those targets.",
+     "process": ""
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "Almost all of the guard, the stop that parks, vitals, the retreat's new choice order and the probes are offline-only (simulator and replays); none has been checked live (README).",
+  "Her retreat after a stop doesn't know her HP: a retreat at 10% HP goes as one at 90%. The thief's SAFETY_HITS goes back to 2 only once her retreat's dodging is shown to hold.",
+  "Whether her pet's food works while she hangs on a rope isn't known; `retreat.ROPES` False would keep every retreat and park to platforms if it doesn't.",
+  "The game's own 'no throwing stars' message isn't known; out of darts is inferred from MP alone.",
+  "The guard is blind with the game behind another window, and on any map but the babysitter's `pet --map 10002073`.",
+  "'Played by hand' can't be told for certain: Chrome Remote Desktop's input reaching it is untested, and someone watching without touching counts as nobody.",
+  "The chat box is only checked at a hunt's start; its input line can't be taken back from the keyboard (no Esc or Enter is sent).",
+  "The stat window's JUMP isn't modelled; the bottom bar's stat button as another way in, and her MISS/dodge chances from ACC/AVOID, aren't used.",
+  "presence's weights are from one map, the thief, before the exact finder; they need refitting on a live hour.",
+  "A touch's kind is told by its size only (fine on Tree Dungeon); Magic Guard's state isn't read."
+ ]
+}

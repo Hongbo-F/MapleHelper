@@ -1,0 +1,2991 @@
+{
+ "id": "control-player",
+ "layer": "control",
+ "title": "Control: the elevated key player, alarms and recordings",
+ "tagline": "The one admin process that presses keys, its Lie Detector guard, and the recorders",
+ "summary": "MapleStory runs as administrator, so one small elevated process, the key player, presses every key and click; everything else hands it JSON plans through files in `gamelab/lab`. Around it sit the Lie Detector safety net (a watchdog 4 times a second, the alarm file, PC paging, phone pushes, a per-cycle recording), the rolling 5-minute recording that saves what led up to an alarm, the perception service's live helpers for the Lie Detector's mini-games, and the Alt+Enter fix for a game window of the wrong size.",
+ "details_md": "### Why one elevated process\nWindows blocks input sent by normal programs into an administrator window, and the game runs as administrator. So `python -m gamelab player --elevate` starts one process through a UAC prompt (ShellExecute \"runas\"), and the hunt, the perception service and every command stay unelevated. They talk through files: a plan is `lab/inbox/<id>.json`, claimed as `.running`, cut short by `.cancel`, taken over by `.splice`; its result is `lab/outbox/<id>.json`. The player's rules: it runs no code from plans (they are data that `validate` checks), presses keys only with the game in front (checked before every key), moves the pointer only inside the game, loads its code and keys once (only `lab/alarm_keys.json` is read again, and it can only move which keys her moves and pet food are on), stops itself (`lab/STOP`, 24 idle hours, or after a Lie Detector), and lets go of every held key when a plan is cancelled or ends.\n\n### The Lie Detector\nThe game's anti-bot check comes in several forms: a countdown window (the Violetta shuffle game), the mouse mini-game and its notice 10 s ahead, an image quiz and its warning 30 s ahead, and the Truth Booth a failed test sends her to. The player's `Watchdog` looks at the game 4 times a second, idle or not. On a sighting:\n\n1. the `Alarm` event is set first: the key thread's waits end and a running plan stops within about 10 ms, its held keys let go;\n2. `lab/ALARM.json` and a screenshot are written and the PC is paged (control.alarm), the phone pushed (control.notify);\n3. the cycle is recorded look by look (control.lie_recorder), and the rolling recorder saves the 5 minutes before it and a lossless clip (control.rolling);\n4. every plan is refused but four kinds (`alarm.PLAN_KINDS`): a pet-food tap (3 a minute), her retreat's moves for 12 s (the running hunt's behavior.retreat), and two kinds of strictly shaped mouse plan that the perception service's helpers send: the mini-game cursor (control.lie_tracking) and the Violetta answer and pass-dialog OK clicks (control.violetta_live);\n5. every other gamelab command refuses to send keys while the alarm file exists (exit code 3).\n\nAn answered Lie Detector (off the screen 10 s, no Truth Booth seen) clears its own alarm and plans resume. A cycle that saw the Truth Booth keeps the player locked: a person runs `clear-alarm`, the player stops 10 s after the screen is clear, and only a person's UAC click starts it again.\n\n### The recordings\n| What | Who | Where |\n|---|---|---|\n| per-look scores of each cycle | the player's Watchdog (lie_recorder) | `lab/lie_detector/<stamp>/` |\n| the last 5 minutes, lossless, in memory | the perception service (recording + rolling, 15 frames a second), or `gamelab recorder` (its own grabs, 10 a second) | memory; saves below |\n| 5 minutes before an alarm | rolling | `<cycle folder>/before/` |\n| the alarm's clip, lossless: 2 s before the first frame showing it to 5 s after the test's last sight (3 minutes after the alarm at most) | rolling | `lab/alarm_clips/` |\n| the 5 minutes before a Truth Booth no test was seen before (cause unknown), at once | rolling | `lab/booth_unknown/` |\n| on demand (`save-recent`) | rolling | `lab/recent/` |\n\nSaves made in the perception service are encoded by a separate partwriter process, so they don't share Python's lock with the frame loop.\n\n### Window sizing\nThe eyes are built for a 1366x768 client. When it's another size or the game draws off its client, control.window_size sends Alt+Enter twice through the player (full screen and back), checking before every press that the alarm isn't up, no Lie Detector is on the picture, no plan is running and no other process is trying, at most 4 tries an hour.\n\n### Processes in this slice\nThe elevated player (watchdog thread inside); the perception service, which hosts the recording, the mini-game tracker and the Violetta solver; their child processes (the partwriter per save, the target tracker during an alarm); and, where the service doesn't record, the standalone `gamelab recorder`.",
+ "groups": [
+  {
+   "id": "key-player",
+   "title": "The elevated key player",
+   "summary": "The administrator process that plays plans from the inbox, its safety rules, splices, and the Lie Detector watchdog thread inside it.",
+   "modules": [
+    "gamelab/control/player.py"
+   ]
+  },
+  {
+   "id": "alarm-paging",
+   "title": "The alarm and paging",
+   "summary": "The alarm file and its rules for what still runs, the PC's beeps and toast, and the phone's Bark alerts and texts.",
+   "modules": [
+    "gamelab/control/alarm.py",
+    "gamelab/control/notify.py"
+   ]
+  },
+  {
+   "id": "lie-detector-live",
+   "title": "Recording and answering the Lie Detector",
+   "summary": "The per-cycle look index the watchdog writes, and the perception service's live helpers that follow the mouse mini-game and solve the Violetta game through the player.",
+   "modules": [
+    "gamelab/control/lie_recorder.py",
+    "gamelab/control/lie_tracking.py",
+    "gamelab/control/violetta_live.py"
+   ]
+  },
+  {
+   "id": "rolling-recording",
+   "title": "The rolling recording",
+   "summary": "The last 5 minutes kept losslessly in memory, fed by the perception service's frames, saved on alarms and on demand by a separate writer process.",
+   "modules": [
+    "gamelab/control/rolling.py",
+    "gamelab/control/recording.py",
+    "gamelab/control/partwriter.py"
+   ]
+  },
+  {
+   "id": "window-sizing",
+   "title": "Window sizing",
+   "summary": "Alt+Enter twice through the player to set a wrong-sized or misdrawn client back to 1366x768.",
+   "modules": [
+    "gamelab/control/window_size.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/control/player.py",
+   "title": "The key player",
+   "tagline": "The one elevated process that plays JSON key plans, watched over by a Lie Detector watchdog",
+   "summary": "`python -m gamelab player --elevate` runs `serve`: a single administrator process (one UAC click) that takes plans from `lab/inbox` in name order, presses their keys, mouse moves and clicks on time on a thread of its own, optionally records the game's client area, and answers in `lab/outbox`. A `Watchdog` thread looks at the game 4 times a second for the Lie Detector; on a sighting it sets the `Alarm` event (keys stop within about 10 ms), raises the alarm, pages, pushes the phone and records the cycle, and from then on `alarm_refusal` lets only four kinds of plan through.",
+   "details_md": "MapleStory runs as administrator, and Windows blocks input from normal programs into an administrator window. So every key gamelab sends goes through this one elevated process, and everything else runs unelevated and talks to it through files. The safety rules are what make it acceptable to run elevated:\n\n| Rule | How the code enforces it |\n|---|---|\n| No code from plans | plans are JSON data; `validate` checks every event, time and option |\n| Game in front only | checked before a plan and again before every single key (`win32.foreground_title`) |\n| Pointer only inside the game | mouse moves are client pixels; one outside the client area is skipped |\n| Fixed at start | code, config.toml and the key list are read once (only `lab/alarm_keys.json` is re-read: it can move her move and pet-food keys, nothing more); the watchdog's perception imports are made only when it is created |\n| Stops itself | `lab/STOP`, 24 idle hours (`IDLE_LIMIT_S`), or after a Lie Detector once a person cleared it |\n| Cancel files | `lab/inbox/<id>.cancel` is checked between 15 ms wait steps; every held key is let go |\n| Lie Detector watchdog | 4 looks a second; the alarm event stops keys mid-plan |\n\n### A plan's life\n1. control.client writes `lab/inbox/<id>.json` atomically.\n2. `_serve` polls every 10 ms, takes the first by name and claims it by renaming it `<id>.running` (from then on the client can cancel it but not withdraw it). `_read_plan` retries every 5 ms for up to `READ_RETRY_S` (0.5 s) while Windows refuses the file.\n3. `Player.run` checks and plays it; `_answer` writes the result to `lab/outbox/<id>.json` via a `.tmp` file and an atomic replace. Output names come from the sanitized file name, never from the plan's contents.\n\n### Timing\nThe key thread waits for each event's time in 15 ms steps (`WAIT_STEP_S`) slept on the halt event, so a Lie Detector sighting ends the wait at once, and waits the last 20 ms (`FINAL_S`) with `_sleep_until`: `time.sleep` steps of at most 10 ms that wake 2 ms early, spinning only the final 4 ms. Waiting with `_sleep_until` all the way had cost 0.12 cores while plans ran back to back; the stepped wait costs about 0.02. The serve loop runs inside `win32.precise_timers()` (a 1 ms system timer).\n\n### Splices\nA plan can be taken over mid-flight: `<running id>.splice` (written by `control.client.splice`) is claimed, validated, never a resize or recording, held to the alarm rules like any plan, and at its `at_ms` the keys not in its `held` list are let go and the missing ones pressed; the old plan is answered with the problem `spliced` (`{to, at_ms, late_ms}`). The player advertises this in `lab/player.json` (`SPLICE` = 1) so the navigator knows it can splice instead of cutting and resending.\n\n### The Lie Detector\nSee `Watchdog.tick` and `alarm_refusal`. In short: the alarm event is set first, then the alarm file, screenshot and paging (control.alarm), the phone push (control.notify) and the cycle's recording (control.lie_recorder). An answered Lie Detector (off the screen 10 s, no Truth Booth) clears its own alarm (`AUTO_RESUME`); a Truth Booth cycle keeps the player locked until `clear-alarm`, after which it stops and needs a person's UAC click to start again.",
+   "lines": 1222,
+   "key_items": [
+    {
+     "name": "serve",
+     "kind": "function",
+     "line": 1111,
+     "signature": "def serve() -> None",
+     "summary": "The player's entry point: refuses to start with the alarm up, cleans stale inbox files, builds the Player, the phone Pusher and the Watchdog, then runs `_serve` until it stops.",
+     "details_md": "Steps: make `lab`, `lab/inbox`, `lab/outbox`; rotate `player.log` past 5 MB (`_rotate_log`); delete `lab/STOP`; return at once if `lab/ALARM.json` exists (\"refusing to start: a Lie Detector alarm hasn't been cleared\"); delete leftover `*.json`, `*.cancel`, `*.running`, `*.splice`, `*.spliced`; load config.toml once; build the unsafe-key list for the alarm's key file (`ALARM_UNSAFE` plus maplehelper's `[hotkeys]` and `[control]` keys); make `Player(allowed_keys(cfg.keys), title, alarm, keys=cfg.keys, keys_file=ALARM_KEYS)`; enable DPI awareness; `notify.Pusher.from_lab`; start the `Watchdog`; log what is allowed; write `lab/player.json` (`{\"splice\": 1, \"pid\", \"started\"}`), removed again when it stops."
+    },
+    {
+     "name": "Player.run",
+     "kind": "method",
+     "line": 737,
+     "signature": "def run(self, plan: dict) -> dict",
+     "summary": "Checks one plan and plays it: key events on a `key-player` thread, frames captured on the calling thread, every held key let go at the end.",
+     "details_md": "1. With the alarm event set and a kind not in `PLAN_KINDS`: the Lie Detector error at once. A plan of one of those kinds with only the alarm *file* up (raised by `watch --lie-detector`, not this player) is treated as if this player had seen it (`filed`), its retreat window counted from the file's `at`.\n2. `validate`; `lie_cursor` and `lie_ok` plans always held to their exact shapes (`lie_cursor_refusal`, `lie_ok_refusal`); with the alarm up, `_with_alarm` -> `alarm_refusal`. A retreat gets a cutoff at `RETREAT_WINDOW_S` (12 s) after the sighting.\n3. `window_client` resizes the client first (0.5 s to lay out); `focus` brings the game to the front (0.5 s) but never with the alarm up; then the game must be in front.\n4. `t0` = now + `lead_ms` (default 100). A `key-player` thread runs `press_keys`: for each event `wait(due)` (cancel files, retreat cutoff, pending splice, halt event), the foreground checked again, then `_press` (win32 SendInput) or `window.move_cursor` (a generated trail, recorded as `trail`). A `lie_cursor`/`lie_ok` button press goes down only if the game is the window under the pointer (`window.pointer_on`).\n5. Meanwhile, if the plan asked, mss grabs the region at `fps` for `duration_ms` (+ lead), every `scale`-th pixel, RGB; saved to `lab/outbox/<id>.npz` with each frame's time.\n6. `finally`: every held key let go, the plan's `.cancel` and late `.splice` removed, a splice taken but never reached answered as cancelled.\n\nThe halt event is the player's `Alarm` for a normal plan; a plan let through with the alarm up gets a private `threading.Event`, so the alarm that is already up doesn't stop it."
+    },
+    {
+     "name": "Watchdog",
+     "kind": "class",
+     "line": 330,
+     "signature": "class Watchdog(threading.Thread)",
+     "summary": "The `lie-detector-watch` daemon thread: one look at the game every 0.25 s, idle or not, and the Lie Detector's whole cycle from first sight to its end.",
+     "details_md": "Made with `Watchdog(game_title, alarm, spotter=None, grab=None, interval=0.25, on_alarm=None, folder=None, log=None, end_s=None, cap_s=None, pusher=None, auto_resume=None, test_tail_s=None)`; it imports `perception.framecheck`, `perception.lie_detector`, `control.lie_recorder` and `control.alarm.raise_alarm` only here, so the elevated process loads them only when it watches. `run` sets OpenCV to one thread (its 24 threads cost 0.27 cores more at 4 looks a second), opens an mss grabber and schedules a look every `interval` from the *start* of the previous one (`due = max(due + interval, now)`): 4 looks a second, where waiting 0.25 s after each look (plus the look's own ~70 ms) had made 3.10 a second. A look that ran long (the paging's beeps) is followed at once, not caught up. `looked` is set after the first look: the player takes no plan before it, so a Lie Detector already on screen at start is seen before any key. Nothing that goes wrong in a look, the recording or the log stops it (`_trouble` logs the first failure of a kind and every 1000th). Its events: `looked`, `cleared` (a person cleared the alarm and the screen has been clear `end_s`: the player stops), `stopped`."
+    },
+    {
+     "name": "Watchdog.tick",
+     "kind": "method",
+     "line": 464,
+     "signature": "def tick(self, now: float, sct=None) -> None",
+     "summary": "One look and everything that follows from it: first sight, re-raising, recording, phone pushes, the cycle's end and the alarm's clearing.",
+     "details_md": "1. `_look` -> a frame (RGB), a frame flagged \"covered\", or no frame and why (\"no window\", \"minimized\").\n2. `_scores` -> each form's match / threshold; `seen` if any is >= 1; `tested` if a form other than the Truth Booth is.\n3. A look without a frame resets `gone_since` (the Lie Detector may be up behind a minimized game); a covered frame with nothing seen counts towards gone (since 2026-10-29).\n4. First sight with no cycle in progress: `alarm.set()` before anything else (keys stop within about 10 ms); `form` = the best-scoring form; `cause` = `UNKNOWN_CAUSE` for a Truth Booth with no test seen and outside a known stay; `_raise` (alarm file, screenshot, paging); then the recording starts with this first frame.\n5. Seen again after someone deleted the alarm file mid-cycle: raised again and paged (`_raise_again`), so gamelab's commands keep refusing.\n6. A look that sees a form: `pusher.seen` (the phone) and, if the Truth Booth is among the forms, its on-screen clock read (`_booth_seen`: the stay's end, the median of the readings). Every look while a recording runs: `recording.add`. The recording ends at `cap_s` (600 s), or `test_tail_s` (5 s) after the test's last sight; the cycle then goes on unrecorded, its folder's `cycle.live` touched (`lie_recorder.cycle_going`).\n7. Gone for `end_s` (10 s): the cycle ends, `pusher.ended`; answered (no Truth Booth) with `auto_resume` -> `_resume`.\n8. With the alarm set: once the file has been seen and is then gone with no cycle and the screen clear for `end_s`, `cleared` is set and the player stops."
+    },
+    {
+     "name": "alarm_refusal",
+     "kind": "function",
+     "line": 202,
+     "signature": "def alarm_refusal(plan: dict, keys: GameKeys | None, since: float | None, fed: list[float], now: float) -> str | None",
+     "summary": "Why a plan can't run with the Lie Detector alarm up (None: it can). Only the four kinds in `alarm.PLAN_KINDS` go, each only in its exact form.",
+     "details_md": "- Any kind outside `PLAN_KINDS`, any window resize or recording: refused.\n- `lie_cursor` -> `lie_cursor_refusal`; `lie_ok` -> `lie_ok_refusal` (clicks, see those).\n- Otherwise no mouse at all, and the plan must start within `TAP_MAX_MS` (200 ms) of being taken (its `lead_ms`), so a plan let through can't hold the player.\n- `pet_food`: exactly her pet-food key down then up, the up and any `end_ms` within 200 ms; at most `PET_FOOD_PER_MIN` (3) in any 60 s (`fed`).\n- `retreat`: only her left, right, jump, up and down keys, every key pressed also released, and only while `since` <= `RETREAT_WINDOW_S` (12 s) after the sighting; refused if when it was seen isn't known.\n\n`keys` is `Player.allowance()`: config.toml's keys, or the followed ones from `lab/alarm_keys.json` (control.alarm.AlarmKeys)."
+    },
+    {
+     "name": "validate",
+     "kind": "function",
+     "line": 102,
+     "signature": "def validate(plan: dict, allowed: dict[str, Key]) -> None",
+     "summary": "Raises ValueError unless a plan is well-formed data that only uses allowed keys.",
+     "details_md": "Events are `[ms, key, \"down\"|\"up\"]` (a key in `allowed` or `lbutton`/`rbutton`) or `[ms, \"mouse\", x, y]` (non-negative client px); at most `MAX_EVENTS` (400), times sorted and within `MAX_PLAN_MS` (20 s). `end_ms` after the last event and within 20 s. `window_client` one of `window.CLIENT_SIZES` (1366x768, 1920x1080). `capture`: fps 0-60, duration 0-20 s, at most `MAX_FRAMES` (900) frames including the lead, scale 1-4, crop `[x, y, w, h]` of non-negative ints."
+    },
+    {
+     "name": "lie_cursor_refusal",
+     "kind": "function",
+     "line": 182,
+     "signature": "def lie_cursor_refusal(plan: dict) -> str | None",
+     "summary": "The two allowed shapes of a `lie_cursor` plan: one immediate mouse move inside the mini-game's board, or one Violetta answer click. Enforced whether or not the alarm is up.",
+     "details_md": "Any mouse-button event selects the click form (`lie_answer_refusal`, which may not fall back to the board-wide move allowance). Otherwise: no resize or recording, no focus, `lead_ms` 0, no final wait, exactly one `[0, \"mouse\", x, y]`, and `308 <= x < 1058`, `180 <= y < 680` (`LIE_CURSOR_BOX`)."
+    },
+    {
+     "name": "_lie_click_refusal",
+     "kind": "function",
+     "line": 147,
+     "signature": "def _lie_click_refusal(plan: dict, boxes, what: str, button: str) -> str | None",
+     "summary": "The one allowed click shape shared by `lie_ok_refusal` (the pass dialog's OK, `LIE_OK_BOX`) and `lie_answer_refusal` (a Violetta button, `LIE_ANSWER_BOXES`).",
+     "details_md": "No resize, recording, focus, lead or final wait; exactly three events: a move at 0 ms to a point inside one of `boxes`, then left button down and up; down within `LIE_CLICK_DOWN_MS` (1-1500 ms) and held `LIE_CLICK_HOLD_MS` (30-300 ms). control.client sends the button down at 1000 ms and up 80 ms later."
+    },
+    {
+     "name": "Alarm",
+     "kind": "class",
+     "line": 311,
+     "signature": "class Alarm(threading.Event)",
+     "summary": "The Lie Detector seen: an Event that also remembers `at`, the time.monotonic() of its first `set`.",
+     "details_md": "Set by the Watchdog, cleared by it only when an answered cycle is over (`_resume`). Every normal plan's key waits are on this event, so setting it ends them at once; `at` starts the retreat's 12 s window."
+    },
+    {
+     "name": "Watchdog._scores",
+     "kind": "method",
+     "line": 603,
+     "signature": "def _scores(self, frame) -> dict[str, float]",
+     "summary": "Chooses how much of the frame to search: only near each form's usual places on most looks, the whole frame when needed.",
+     "details_md": "`spotter.near` on a 1366x768 frame with either capture anchor in place (`framecheck.anchors_off`: the minimap's title strip, the HUD's border; 0.04 ms). The whole frame (`spotter.scores`) on every `WHOLE_EVERY`-th look (8: a form shown anywhere else is seen within 2 s), throughout a cycle, on frames of any other size, and when neither anchor is in place (the game drawing its picture off its client moves every form off its places too). At 4 looks a second on saved hunt frames: 0.07-0.12 cores against 0.55-0.58 with the whole frame every look. Of 16,050 saved 1366x768 frames, the 3,809 that show a form all have an anchor in place."
+    },
+    {
+     "name": "Watchdog._grab",
+     "kind": "method",
+     "line": 651,
+     "signature": "def _grab(self, sct)",
+     "summary": "Grabs the game's client area with mss: the frame, (frame, \"covered\"), or why there is none.",
+     "details_md": "Asks Windows whether the window is minimized (a minimized client reports 432x54, not 0x0). `covered` when `window.shows` finds another window over the middle or near a corner: still checked for the Lie Detector (it can show round that window) but never saved, and it counts as gone when nothing is seen. A client of any size other than 1366x768 or 1920x1080 (full screen at 3840x2160, say) is resized to 1920x1080, the templates' size (`lie_detector.to_template`): before that, no saved Lie Detector screen was seen at such sizes (0.53-0.78 of the thresholds)."
+    },
+    {
+     "name": "Watchdog._resume",
+     "kind": "method",
+     "line": 580,
+     "signature": "def _resume(self) -> None",
+     "summary": "An answered Lie Detector's cycle over: deletes the alarm file and clears the alarm, so plans are taken again with no restart.",
+     "details_md": "Only when the cycle saw no Truth Booth, the alarm file was written and is still there, and `auto_resume` is on (`AUTO_RESUME`, the user on 2026-10-29: \"Stop requesting uac after a lie detector. Just detect that I manually solved it and carry on\"). A file that can't be deleted keeps it locked. Seen again later, it's a new cycle and input stops at once."
+    },
+    {
+     "name": "_serve",
+     "kind": "function",
+     "line": 1174,
+     "signature": "def _serve(player: \"Player\", watchdog: \"Watchdog\", idle_since: float) -> None",
+     "summary": "The plan loop: polls the inbox every 10 ms, claims, runs and answers plans until a stop condition.",
+     "details_md": "Stops on `lab/STOP`, `watchdog.cleared`, 24 idle hours (idle time resets after each plan and while a Lie Detector recording or its post-test cycle runs), or the watchdog thread dying (\"nothing would see one\"). Takes no plan before the watchdog's first look. A spliced run answers under the last plan's id. On the way out it waits up to 30 s for the watchdog to finish its alarm, paging and recording (exiting at once had once killed it mid-write: no ALARM.json, an empty screenshot) and, with the alarm set, answers every waiting plan with the Lie Detector error."
+    },
+    {
+     "name": "allowed_keys",
+     "kind": "function",
+     "line": 96,
+     "signature": "def allowed_keys(keys: GameKeys | None = None, extra=ALL_KEYS) -> dict[str, Key]",
+     "summary": "Her bound in-game actions plus every key config.toml can name (`ALL_KEYS`), by name.",
+     "details_md": "Since 2026-10-23 the player may press any key config.toml can name and both mouse buttons (the in-game key bindings window, `\\`, needs clicks to save a change); until then only her bound keys, `\\` and Esc."
+    },
+    {
+     "name": "alarm_up",
+     "kind": "function",
+     "line": 287,
+     "signature": "def alarm_up() -> bool",
+     "summary": "Whether `lab/ALARM.json` exists; when that can't be told, it does (the lock stays).",
+     "details_md": "Uses `os.stat`: missing -> False, any other OSError -> True. `Path.exists` answers False for any error on the Python used here (3.15), so an alarm file it couldn't look at had read as cleared."
+    }
+   ],
+   "inputs": [
+    "plans: `lab/inbox/<id>.json` from control.client (send, submit, move_lie_cursor, click_lie_answer, click_lie_ok)",
+    "splices: `lab/inbox/<running id>.splice` and cancels: `lab/inbox/<id>.cancel` from control.client",
+    "config.toml (her key bindings, the game window's title, maplehelper's hotkeys), read once at start",
+    "`lab/alarm_keys.json`: her move and pet-food keys as the running commands follow them (control.keymap), re-read when it changes",
+    "the screen: the game's client area grabbed with mss 4 times a second (Watchdog) and during plans that record",
+    "`lab/ALARM.json` (raised by itself, `watch --lie-detector` or window_size; cleared by `clear-alarm`), `lab/STOP`"
+   ],
+   "outputs": [
+    "key presses, mouse moves and clicks into the game (win32 SendInput via maplehelper.win32, window.move_cursor)",
+    "results in `lab/outbox/<id>.json` and recorded frames in `lab/outbox/<id>.npz`, for control.client",
+    "the Lie Detector alarm (`lab/ALARM.json`, screenshot, PC paging), phone pushes, and a cycle recording in `lab/lie_detector/<stamp>/`",
+    "`lab/player.json` (it takes splices; its pid) and `lab/player.log`"
+   ],
+   "uses": [
+    "gamelab/control/alarm.py",
+    "gamelab/control/lie_recorder.py",
+    "gamelab/control/notify.py",
+    "gamelab/window.py",
+    "gamelab/paths.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/perception/framecheck.py",
+    "maplehelper/win32.py",
+    "maplehelper/config.py",
+    "maplehelper/keys.py",
+    "maplehelper/combos.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/inbox/<id>.json",
+     "mode": "read-write",
+     "what": "plans; claimed by renaming to `<id>.running`, deleted when answered"
+    },
+    {
+     "path": "lab/inbox/<id>.cancel",
+     "mode": "read-write",
+     "what": "cut the plan short; deleted once handled"
+    },
+    {
+     "path": "lab/inbox/<id>.splice",
+     "mode": "read-write",
+     "what": "a plan taking over from the running one; claimed as `.spliced`"
+    },
+    {
+     "path": "lab/outbox/<id>.json",
+     "mode": "write",
+     "what": "each plan's result (written as `.tmp`, then replaced atomically)"
+    },
+    {
+     "path": "lab/outbox/<id>.npz",
+     "mode": "write",
+     "what": "frames recorded during a plan, with their times"
+    },
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read-write",
+     "what": "looked at (os.stat); written through control.alarm.raise_alarm; deleted by `_resume`"
+    },
+    {
+     "path": "lab/alarm_keys.json",
+     "mode": "read",
+     "what": "her move and pet-food keys for the alarm's allowance (control.alarm.AlarmKeys)"
+    },
+    {
+     "path": "lab/STOP",
+     "mode": "read-write",
+     "what": "stop request (`stop-player`); deleted at start"
+    },
+    {
+     "path": "lab/player.json",
+     "mode": "write",
+     "what": "{\"splice\": 1, \"pid\", \"started\"} while it runs (control.client.can_splice)"
+    },
+    {
+     "path": "lab/player.log",
+     "mode": "write",
+     "what": "its log; moved to player.log.1 at start past 5 MB"
+    },
+    {
+     "path": "lab/lie_detector/<YYYYmmdd-HHMMSS>/",
+     "mode": "write",
+     "what": "each Lie Detector cycle's recording (control.lie_recorder)"
+    },
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "her keys and the game window's title, once at start"
+    }
+   ],
+   "concurrency": "One elevated process (started by `python -m gamelab player --elevate` through ShellExecute \"runas\": a UAC prompt). Main thread: the serve loop (10 ms polls, inside win32.precise_timers) and, during a plan that records, the mss capture. A `key-player` thread per plan (press_keys). The `lie-detector-watch` daemon thread (Watchdog, 4 looks a second). Per Lie Detector cycle, lie_recorder's writer and prune threads; per phone push, notify's threads.",
+   "tunables": [
+    {
+     "name": "IDLE_LIMIT_S",
+     "value": "24 * 60 * 60",
+     "meaning": "idle seconds before the player exits by itself (not while it records a Lie Detector)"
+    },
+    {
+     "name": "MAX_EVENTS",
+     "value": "400",
+     "meaning": "events in one plan at most"
+    },
+    {
+     "name": "MAX_PLAN_MS",
+     "value": "20_000",
+     "meaning": "a plan's events, end and capture all within 20 s"
+    },
+    {
+     "name": "MAX_FRAMES",
+     "value": "900",
+     "meaning": "frames one plan may record"
+    },
+    {
+     "name": "TAP_MAX_MS",
+     "value": "200",
+     "meaning": "with the alarm up: a pet-food tap is over and any plan starts within this"
+    },
+    {
+     "name": "AUTO_RESUME",
+     "value": "True",
+     "meaning": "an answered Lie Detector (no Truth Booth) clears its own alarm and plans resume"
+    },
+    {
+     "name": "LOG_MAX_BYTES",
+     "value": "5 * 1024 * 1024",
+     "meaning": "player.log rotated at start past this (about 30 hours of hunting)"
+    },
+    {
+     "name": "READ_RETRY_S",
+     "value": "0.5",
+     "meaning": "a claimed plan refused by Windows (another program has it open) is read again for this long"
+    },
+    {
+     "name": "WAIT_STEP_S",
+     "value": "0.015",
+     "meaning": "the key thread's sleep step between cancel/splice/alarm checks"
+    },
+    {
+     "name": "FINAL_S",
+     "value": "0.02",
+     "meaning": "the last stretch before a key's time, waited precisely"
+    },
+    {
+     "name": "Watchdog interval",
+     "value": "0.25",
+     "meaning": "seconds between the starts of two looks (4 a second)"
+    },
+    {
+     "name": "SPLICE",
+     "value": "1",
+     "meaning": "written to lab/player.json: this player takes splices"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-23",
+     "what": "Any key config.toml can name and both mouse buttons may be pressed; the pointer moves only inside the game",
+     "why": "The key bindings window (\\) needs a click on Confirm to save a change."
+    },
+    {
+     "date": "2026-10-23",
+     "what": "Idle limit raised from 3 hours to 24 hours",
+     "why": "The user asked that it not be exited proactively: starting it again needs their UAC click, and it had stopped overnight."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "At the Lie Detector the player stays up, locked, and records the whole cycle instead of shutting down at once",
+     "why": "Nothing it saved showed the Lie Detector being answered."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "Four plan kinds (pet food, retreat; later the Lie Detector cursor and OK click) still go with the alarm up",
+     "why": "The user, after a Lie Detector failed while the alarm kept the pet from being fed: \"just stop any in-progress hunt when this happens, don't block pet feeding\", and \"On a lie detector you should move to a safe place, within 10s\"."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "The watchdog also recognizes the mini-game's notice and the image quiz's warning",
+     "why": "Both come 10 s / 30 s before their test; the hunt had attacked through them."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Clients of other sizes are brought to 1920x1080 before the Lie Detector check",
+     "why": "No saved Lie Detector screen was seen at other sizes (0.53-0.78 of the thresholds), and Alt+Enter puts the game full screen on purpose (control.window_size)."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "AUTO_RESUME: an answered Lie Detector clears its own alarm",
+     "why": "The user: \"Stop requesting uac after a lie detector. Just detect that I manually solved it and carry on\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "A covered game window counts towards the Lie Detector being gone",
+     "why": "The user: \"count seconds when game window is covered\": this app's window over a corner of the game had kept the player locked after the answer."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "A claimed plan's file is read again for up to 0.5 s on PermissionError",
+     "why": "At 17:04:41 a walk's plan failed so (\"Permission denied\"), and the grind ended there."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The watchdog's YOLO shadow removed",
+     "why": "The user: \"remove the old yolo-based live detection\"; the template spotter alone sees each recorded cycle with no gap over 1 s. Target following moved to the perception service (control.lie_tracking)."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "`lie_ok` and the `lie_cursor` click form added, each held to one exact click",
+     "why": "The user: \"at the end of the success, click the ok button of 'you have successfully passed'\" and \"let's actually click it\" (control.violetta_live)."
+    }
+   ],
+   "gotchas": [
+    "Its code is loaded once: a running player keeps the old rules until a person starts it again (UAC click).",
+    "With the alarm up, a plan it lets through waits on a private event, so the alarm that is already up doesn't stop it; a retreat is cut at 12 s after the sighting with the problem RETREAT_OVER.",
+    "The four alarm kinds get past control.client's own alarm check, so the player holds them to the alarm rules even when only the alarm file is up and its own watchdog hasn't seen the Lie Detector.",
+    "With `AUTO_RESUME` the template spotter alone decides an answered Lie Detector is over: 10 s (`lie_recorder.END_S`) with no form it knows and no Truth Booth in the cycle, and the player deletes the alarm file and takes plans again. Seen again, it's a new cycle and input stops at once.",
+    "`lie_cursor` and `lie_ok` plans are held to their exact click/move shapes whether or not the alarm is up.",
+    "An alarm file that couldn't be written (disk full) keeps the player up and locked until it is stopped: nothing could tell that a person cleared it.",
+    "A key already held when a splice takes over is not pressed again ('down' of a held key is skipped), so it stays down across the splice.",
+    "No plan is taken before the watchdog's first look; if the watchdog thread dies, the player stops.",
+    "test_architecture checks that importing the player (and alarm, perception.lie_detector) loads none of behavior, motion, localization, attack, ui, sim, gamedata, tkinter or gamelab.native."
+   ],
+   "tests": [
+    "tests/test_alarm.py",
+    "tests/test_lie_recording.py",
+    "tests/test_player_splice.py",
+    "tests/test_player_read.py",
+    "tests/test_violetta.py",
+    "tests/test_keymap.py",
+    "tests/test_gamelab.py",
+    "tests/test_chatbox.py",
+    "tests/test_disk.py",
+    "tests/test_architecture.py",
+    "tests/test_window_size.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/alarm.py",
+   "title": "The Lie Detector alarm",
+   "tagline": "The alarm file, paging at the PC, and the rules for what may run while it's up",
+   "summary": "The shared vocabulary of the Lie Detector lock: the alarm file `lab/ALARM.json` (`raise_alarm`, `clear_alarm`, `alarm_info`), paging whoever is at the PC with beeps and a Windows toast (`page`), the four plan kinds that still run with the alarm up and their exact click boxes and limits, and `AlarmKeys`, which lets the elevated player follow her move and pet-food keys when they are rebound in the game. It imports nothing of gamelab but `paths` at load time, because the elevated player loads it.",
+   "details_md": "### The alarm file\n`raise_alarm(frame, reason, form, cause)` writes `{\"reason\", \"time\", \"at\", \"form\"?, \"cause\"?}` first (everything after it may fail), then saves the frame as `lab/lie_detector_<HHMMSS>.png` and writes the file again with `screenshot`. Paging runs in a `finally`, so an alarm that can't be written (disk full) is still paged before its error is raised; until that change nobody was told. `at` is `time.time()` at the sighting: her retreat counts its 10 s from it, and the player uses it when the alarm was raised by another program. While the file exists every gamelab command that sends keys refuses to run (control.client, exit code 3); `clear_alarm` (the `clear-alarm` command) deletes it. Raisers: the player's Watchdog, `watch --lie-detector`, and control.window_size when it sees the Lie Detector before an Alt+Enter.\n\n### Paging\n`page(title, text)`: three `MessageBeep`s 0.4 s apart (about 1.2 s), then a Windows toast (PowerShell, ToastText02) started hidden so the game keeps focus. The text depends on the form (`PAGED`): \"MapleStory Lie Detector mini-game in 10 s\", \"MapleStory image quiz in 30 s\", and so on; otherwise `PAGE`. The phone is control.notify's job.\n\n### What still runs with the alarm up\n`PLAN_KINDS`, checked in player.alarm_refusal:\n\n| Kind | What | Limit |\n|---|---|---|\n| `pet_food` | one tap of her pet-food key | 3 a minute (`PET_FOOD_PER_MIN`) |\n| `retreat` | her arrows, jump, up and down | until 12 s after the sighting (`RETREAT_WINDOW_S`); the hunt plans to be safe by 10 s (`RETREAT_S`) |\n| `lie_cursor` | one move inside the board `LIE_CURSOR_BOX`, or one click on a Violetta button (`LIE_ANSWER_BOXES`) | click down 1-1500 ms in, held 30-300 ms |\n| `lie_ok` | one click on the pass dialog's OK (`LIE_OK_BOX`) | same click timing |\n\nThe boxes are client pixels copied from perception (the board's `BOARD_AT_NATIVE`, Violetta's `BUTTON_AT`), because the elevated player must not import those modules.\n\n### Her keys followed\nconfig.toml is read once at the player's start, but the running commands follow her keys when they move in the game (control.keymap publishes `lab/alarm_keys.json`). `AlarmKeys.current()` re-reads the file whenever its size or mtime changes and accepts it only if `alarm_keys_problem` finds nothing wrong: only `ALARM_FIELDS`; each a key config.toml can name; none of `ALARM_UNSAFE` (Esc, `\\`, Enter, Tab, Backspace, the digits: keys that could answer the Lie Detector or open game windows); her five moves on five keys; pet food not on a move key; arrows and jump bound. A field the file puts on a key config.toml uses for another of her actions goes on no key with the alarm up (`_clashes`). A bad file is left out (config.toml's keys used) and said once per change.\n\n### Saving the recent recording\n`keep_recent` / `keep_recent_after` ask the rolling recorder (control.rolling.ask) to save its last N seconds, never raising; used by behavior (the out-of-darts stop, the hunter's no-hit saves, a retreat's stop). rolling is imported only when asked, since the player loads this module.",
+   "lines": 290,
+   "key_items": [
+    {
+     "name": "raise_alarm",
+     "kind": "function",
+     "line": 186,
+     "signature": "def raise_alarm(frame: np.ndarray | None, reason: str = \"lie_detector\", form: str | None = None, cause: str | None = None) -> dict",
+     "summary": "Writes `lab/ALARM.json` first, then the screenshot, and always pages; returns what it wrote."
+    },
+    {
+     "name": "PLAN_KINDS",
+     "kind": "constant",
+     "line": 46,
+     "signature": "PLAN_KINDS = (PET_FOOD, RETREAT, LIE_CURSOR, LIE_OK)",
+     "summary": "The only plan kinds the player plays with the alarm up (`pet_food`, `retreat`, `lie_cursor`, `lie_ok`)."
+    },
+    {
+     "name": "AlarmKeys",
+     "kind": "class",
+     "line": 103,
+     "signature": "class AlarmKeys",
+     "summary": "Her move and pet-food keys for the alarm's allowance: config.toml's at start with `lab/alarm_keys.json`'s over them, re-read when the file changes.",
+     "details_md": "A file that can't be read or fails `alarm_keys_problem` is left out. A field on a key config.toml has for another of her actions (attack, Lucky Seven, potions, pick-up, chair, sit) goes on no key with the alarm up: on 2026-10-28 a remembered binding put back without `keys --forget` had her pet food on Ctrl, which the game had on ATTACK again."
+    },
+    {
+     "name": "AlarmKeys.current",
+     "kind": "method",
+     "line": 127,
+     "signature": "def current(self)",
+     "summary": "Her keys now (a GameKeys): cached by the file's (mtime, size) stamp; validated and merged when it changes."
+    },
+    {
+     "name": "alarm_keys_problem",
+     "kind": "function",
+     "line": 78,
+     "signature": "def alarm_keys_problem(names: dict, unsafe=ALARM_UNSAFE) -> str | None",
+     "summary": "Why a table of her alarm keys can't be used (None: it can): extra fields, unknown or unsafe keys, two moves on one key, pet food on a move key, arrows or jump unbound."
+    },
+    {
+     "name": "page",
+     "kind": "function",
+     "line": 232,
+     "signature": "def page(title: str, text: str) -> None",
+     "summary": "Gets attention at the PC without taking focus from the game: 3 beeps 0.4 s apart and a hidden PowerShell toast."
+    },
+    {
+     "name": "LIE_CURSOR_BOX",
+     "kind": "constant",
+     "line": 49,
+     "signature": "LIE_CURSOR_BOX = (308, 180, 1058, 680)",
+     "summary": "Client-pixel bounds of the mouse mini-game's board: a move-only `lie_cursor` plan may point only here."
+    },
+    {
+     "name": "LIE_ANSWER_BOXES",
+     "kind": "constant",
+     "line": 52,
+     "signature": "LIE_ANSWER_BOXES = ((479, 487, 576, 522), (583, 487, 680, 522), (687, 487, 784, 522), (791, 487, 888, 522))",
+     "summary": "The Violetta game's four answer buttons: a `lie_cursor` click must land inside one of them."
+    },
+    {
+     "name": "LIE_OK_BOX",
+     "kind": "constant",
+     "line": 57,
+     "signature": "LIE_OK_BOX = (758, 419, 812, 442)",
+     "summary": "The OK button of the \"You have successfully passed\" dialog, a few px round the button (762-807 x 423-437): the only place a `lie_ok` click may land."
+    },
+    {
+     "name": "ALARM_UNSAFE",
+     "kind": "constant",
+     "line": 74,
+     "signature": "ALARM_UNSAFE = (\"esc\", \"\\\\\", \"enter\", \"tab\", \"backspace\", *\"0123456789\")",
+     "summary": "Keys never taken from the alarm key file: a retreat move or pet-food tap must never be able to answer the Lie Detector (the quizzes' Confirm, the keypad's numbers, Violetta's 1-4) or open game windows."
+    },
+    {
+     "name": "RETREAT_WINDOW_S",
+     "kind": "constant",
+     "line": 62,
+     "signature": "RETREAT_WINDOW_S = 12.0",
+     "summary": "Seconds after the sighting during which the player takes her retreat's moves (the hunt plans to be safe by `RETREAT_S` = 10 s)."
+    },
+    {
+     "name": "keep_recent",
+     "kind": "function",
+     "line": 260,
+     "signature": "def keep_recent(seconds: float, name: str) -> str",
+     "summary": "Asks the rolling recorder to save its last `seconds`; returns a line for the log, never raises."
+    },
+    {
+     "name": "clear_alarm",
+     "kind": "function",
+     "line": 215,
+     "signature": "def clear_alarm() -> dict | None",
+     "summary": "Deletes the alarm file after a person dealt with the Lie Detector; returns what it said."
+    }
+   ],
+   "inputs": [
+    "a frame and the form seen, from the player's Watchdog, `watch --lie-detector` or control.window_size",
+    "`lab/alarm_keys.json` written by control.keymap; her config.toml keys (the player's)"
+   ],
+   "outputs": [
+    "`lab/ALARM.json` and `lab/lie_detector_<HHMMSS>.png`, read by every command, the rolling recorder and the service's Lie Detector helpers",
+    "beeps and a Windows toast at the PC",
+    "the plan-kind rules and boxes the player and control.client use"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/control/rolling.py",
+    "maplehelper/keys.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read-write",
+     "what": "the alarm: written by raise_alarm, read by alarm_info, deleted by clear_alarm"
+    },
+    {
+     "path": "lab/lie_detector_<HHMMSS>.png",
+     "mode": "write",
+     "what": "the alarm's screenshot"
+    },
+    {
+     "path": "lab/alarm_keys.json",
+     "mode": "read",
+     "what": "her followed keys for the alarm's allowance (AlarmKeys)"
+    }
+   ],
+   "concurrency": "Runs on its caller's thread; `page` starts a PowerShell child process; `keep_recent_after` starts a `keep-recent` daemon thread.",
+   "tunables": [
+    {
+     "name": "BEEPS",
+     "value": "3",
+     "meaning": "alert sounds when paging"
+    },
+    {
+     "name": "BEEP_GAP_S",
+     "value": "0.4",
+     "meaning": "seconds between them"
+    },
+    {
+     "name": "PET_FOOD_PER_MIN",
+     "value": "3",
+     "meaning": "pet-food taps a minute with the alarm up (a food is due every 75 s or so at the most often)"
+    },
+    {
+     "name": "RETREAT_S",
+     "value": "10.0",
+     "meaning": "seconds from the sighting by which she should be on a safe place (behavior.retreat plans for it)"
+    },
+    {
+     "name": "RETREAT_WINDOW_S",
+     "value": "12.0",
+     "meaning": "seconds the player takes retreat moves after the sighting"
+    },
+    {
+     "name": "LIE_CLICK_DOWN_MS",
+     "value": "(1, 1500)",
+     "meaning": "an allowed click's button goes down this long after the plan's start"
+    },
+    {
+     "name": "LIE_CLICK_HOLD_MS",
+     "value": "(30, 300)",
+     "meaning": "... and is let go this long after"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Pet food and the retreat still go with the alarm up",
+     "why": "The user, after a Lie Detector failed over Chrome Remote Desktop's lag while the alarm kept the pet from being fed: \"just stop any in-progress hunt when this happens, don't block pet feeding\", then \"On a lie detector you should move to a safe place, within 10s\"."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "Paging names the form (notice, quiz warning) and how long there is",
+     "why": "The notice and the quiz's warning come 10 s and 30 s before their tests."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "The alarm's keys follow her rebound keys through lab/alarm_keys.json",
+     "why": "The user: \"Follow them\", after her moves' keys moved in the game; the elevated player reads config.toml only at start."
+    },
+    {
+     "date": "",
+     "what": "The alarm file is written before the paging, and the paging always runs",
+     "why": "It had raised before the paging when the file couldn't be written, so nobody was told."
+    }
+   ],
+   "gotchas": [
+    "Importing this module must stay cheap: the elevated player loads it, so rolling and maplehelper.keys are imported inside functions.",
+    "An alarm file that can't be parsed reads as `{\"reason\": \"unknown\"}`: still an alarm.",
+    "The click boxes are copies of perception's numbers; if the perception side moves, these must move too."
+   ],
+   "tests": [
+    "tests/test_alarm.py",
+    "tests/test_keymap.py",
+    "tests/test_retreat.py",
+    "tests/test_pet.py",
+    "tests/test_darts.py",
+    "tests/test_violetta.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/notify.py",
+   "title": "Notifications: phone and text",
+   "tagline": "Bark critical alerts to the iPhone and email-to-SMS texts, never in the player's way",
+   "summary": "Pages the user's phone without ever blocking the player: `Pusher` (owned by the player's Watchdog) sends a critical Bark alert and an email-to-SMS text at a Lie Detector's first sight, again once if it turns into the Truth Booth, and an ordinary push when it's gone. `phone` sends the hunt's own pushes, critical or regular (her potions and death from behavior.vitals, the guard, a park that failed or was put off); `BackpackPush` a regular one when her backpack is full. Config lives in git-ignored `lab/bark.json` and `lab/smtp.json`, read again at every push.",
+   "details_md": "The PC's own beeps and toast (control.alarm.page) stay; this module adds the phone, because a push sent by whoever drove gamelab came late (the user, 2026-10-29: \"I need a better notification method, I didn't catch the notification in time to solve this\").\n\n### Bark (iPhone)\n`bark_url` builds Bark's GET form, `{server}/{key}/{title}/{body}?level=...&group=gamelab`, with `volume=10` at level `critical` and `sound=alarm` unless the caller passes none (the regular pushes of `phone` and `BackpackPush` use the phone's own sound; Pusher's \"gone\" push keeps `alarm`) (Bark's critical alerts are documented to ignore silent and Do Not Disturb modes; ntfy's iOS app, used before, couldn't). `call=1` (its sound repeated for 30 s) only if the file says `\"ring\": true`. A Bark answer must have code 200 (or none). Timeout 10 s.\n\n### Text (SMS by email)\n`send_mail` sends through the user's own SMTP account with STARTTLS (port 587 by default) to the addresses in `lab/smtp.json` (a carrier's email-to-text gateway), timeout 20 s, kept short (gateways keep about 160 characters). `setup_mail` (`notify --setup-sms`) makes the file with the login left empty for the user to fill in themselves.\n\n### The Lie Detector's pushes: `Pusher`\n| When | Title | Level | Text too |\n|---|---|---|---|\n| a cycle's first sight | \"Lie Detector up\" (or \"Lie Detector missed\" if first seen as the Truth Booth, noting an unknown cause) | critical | yes |\n| the Truth Booth later in the cycle, once | \"Lie Detector missed\" | critical | yes |\n| the cycle's end | \"Lie Detector gone\" | active | no |\n\nThere is no repeated \"still up\" reminder (removed on 2026-11-04). The text holds only the form, the time and how long it has been up: never a screenshot, her name or the map.\n\n### Never in the way\nEach push and each mail runs on its own daemon thread with a timeout, and never raises: failures are logged with the Bark key replaced by `<key>`. No config file, nothing sent; each file is read at each push, so one set up while a player runs is used without a restart. Under `GAMELAB_NO_PUSH` (set by the tests' conftest) the lab's files are never read: on 2026-10-29 a test run in the main checkout had texted the user a Lie Detector from a test's fake screen.",
+   "lines": 299,
+   "key_items": [
+    {
+     "name": "Pusher",
+     "kind": "class",
+     "line": 252,
+     "signature": "class Pusher",
+     "summary": "A Lie Detector cycle's pushes as the Watchdog's looks tell it: `seen` at each look that sees one, `ended` at its end. `push` is injectable for tests."
+    },
+    {
+     "name": "Pusher.seen",
+     "kind": "method",
+     "line": 277,
+     "signature": "def seen(self, now: float, form: str | None, cause: str | None = None) -> None",
+     "summary": "First sight in a cycle: \"Lie Detector up\" (or \"missed\" for the Truth Booth), urgent with a text; the Truth Booth later in the cycle: \"missed\", high with a text, once."
+    },
+    {
+     "name": "Pusher.from_lab",
+     "kind": "method",
+     "line": 265,
+     "signature": "def from_lab(cls, log=None, mail_path: Path | None = None, bark_path: Path | None = None) -> \"Pusher\"",
+     "summary": "A Pusher sending to lab/bark.json's iPhone (urgent and high as critical) and, for `text_too`, a mail through lab/smtp.json, each file read at each push."
+    },
+    {
+     "name": "Pusher.ended",
+     "kind": "method",
+     "line": 293,
+     "signature": "def ended(self, now: float) -> None",
+     "summary": "The cycle's end: \"Lie Detector gone\", an ordinary push, no text."
+    },
+    {
+     "name": "bark",
+     "kind": "function",
+     "line": 190,
+     "signature": "def bark(cfg: dict | None, title: str, text: str, level: str = \"critical\", call: bool = False, log=None, sound: str | None = BARK_SOUND) -> threading.Thread | None",
+     "summary": "`send_bark` on a thread of its own; failure logged (key masked), never raised; None without config."
+    },
+    {
+     "name": "bark_url",
+     "kind": "function",
+     "line": 161,
+     "signature": "def bark_url(cfg: dict, title: str, text: str, level: str = \"critical\", call: bool = False, sound: str | None = BARK_SOUND) -> str",
+     "summary": "The Bark push's URL: level, group gamelab, sound, volume 10 at critical, call for a 30 s ring."
+    },
+    {
+     "name": "send_bark",
+     "kind": "function",
+     "line": 176,
+     "signature": "def send_bark(cfg: dict, title: str, text: str, level: str = \"critical\", call: bool = False, sound: str | None = BARK_SOUND) -> None",
+     "summary": "One Bark push now, on this thread; raises on failure or a non-200 code."
+    },
+    {
+     "name": "mail",
+     "kind": "function",
+     "line": 114,
+     "signature": "def mail(cfg: dict | None, subject: str, text: str, log=None) -> threading.Thread | None",
+     "summary": "`send_mail` on a thread of its own; failure logged, never raised."
+    },
+    {
+     "name": "send_mail",
+     "kind": "function",
+     "line": 102,
+     "signature": "def send_mail(cfg: dict, subject: str, text: str) -> None",
+     "summary": "One text's mail through SMTP with STARTTLS and login, on this thread."
+    },
+    {
+     "name": "load_bark",
+     "kind": "function",
+     "line": 130,
+     "signature": "def load_bark(path: Path | None = None) -> dict | None",
+     "summary": "lab/bark.json's server, key and `ring`, or None (no file, no key, or GAMELAB_NO_PUSH)."
+    },
+    {
+     "name": "load_mail",
+     "kind": "function",
+     "line": 64,
+     "signature": "def load_mail(path: Path | None = None) -> dict | None",
+     "summary": "lab/smtp.json's account and addresses, or None if anything needed is missing."
+    },
+    {
+     "name": "BackpackPush",
+     "kind": "class",
+     "line": 215,
+     "signature": "class BackpackPush",
+     "summary": "Her backpack full as a regular push (level active, no ring, no text), once a tab until it's seen clear again."
+    },
+    {
+     "name": "phone",
+     "kind": "function",
+     "line": 208,
+     "signature": "def phone(title: str, text: str, critical: bool = False, log=None) -> None",
+     "summary": "A push to the iPhone, critical or regular: used by the hunt's vitals (potions, death), the guard and the park messages (`She's parked`, `She can't park`)."
+    },
+    {
+     "name": "NO_PUSH_ENV",
+     "kind": "constant",
+     "line": 53,
+     "signature": "NO_PUSH_ENV = \"GAMELAB_NO_PUSH\"",
+     "summary": "Set by the tests: no push or text from the lab's own files, ever."
+    }
+   ],
+   "inputs": [
+    "the Watchdog's sightings and cycle ends (Pusher.seen, Pusher.ended)",
+    "the hunt's events (backpack full from behavior.looting; vitals, guard and park notes through `phone`)",
+    "`lab/bark.json` and `lab/smtp.json`, read at each push"
+   ],
+   "outputs": [
+    "HTTPS GETs to the Bark server (iPhone pushes) and SMTP mails (texts through the user's own account)"
+   ],
+   "uses": [
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/bark.json",
+     "mode": "read-write",
+     "what": "Bark's server and device key; written by `notify --setup-bark`"
+    },
+    {
+     "path": "lab/smtp.json",
+     "mode": "read-write",
+     "what": "the mail account and addresses; written by `notify --setup-sms`"
+    }
+   ],
+   "concurrency": "Each push (`bark-push`) and mail (`text-mail`) on a daemon thread of its own with a timeout (10 s, 20 s); callers never wait.",
+   "tunables": [
+    {
+     "name": "BARK_SERVER",
+     "value": "\"https://api.day.app\"",
+     "meaning": "Bark's own server, unless the file names another"
+    },
+    {
+     "name": "BARK_VOLUME",
+     "value": "10",
+     "meaning": "a critical alert's volume (Bark's 0-10)"
+    },
+    {
+     "name": "BARK_SOUND",
+     "value": "\"alarm\"",
+     "meaning": "the critical alert's sound"
+    },
+    {
+     "name": "SEND_TIMEOUT_S",
+     "value": "10.0",
+     "meaning": "seconds a push may take"
+    },
+    {
+     "name": "MAIL_TIMEOUT_S",
+     "value": "20.0",
+     "meaning": "seconds a mail may take"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "The player pushes the phone itself at the moment it sees the Lie Detector",
+     "why": "The user: \"I need a better notification method, I didn't catch the notification in time to solve this\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "Bark with critical alerts; ntfy removed",
+     "why": "The user: \"switch to something that can actually send urgent alert on iPhone\", chose Bark, then \"Let's remove ntfy notification all along\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "A text by email through the user's own SMTP account",
+     "why": "The user asked for a text alert; asked how: \"My email via SMTP\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "GAMELAB_NO_PUSH for the tests",
+     "why": "A test run had texted the user a Lie Detector from a test's fake screen through the real lab files."
+    },
+    {
+     "date": "",
+     "what": "The critical alert's sound plays once, not Bark's 30 s `call`",
+     "why": "The user: \"just 5s is enough\"."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "The \"still up\" reminder every 30 s removed",
+     "why": "The user: \"let's also remove the 'still up' reminder\"."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "Backpack full as a regular push",
+     "why": "The user: \"if backpack is full, send a regular push notification\"."
+    }
+   ],
+   "gotchas": [
+    "No config file means nothing is sent, silently (the player's start log says whether Bark and texts are set up).",
+    "An exception from Bark may quote the URL: the key is replaced by `<key>` before logging.",
+    "lab/bark.json's key and lab/smtp.json's password are secrets; the lab folder is git-ignored."
+   ],
+   "tests": [
+    "tests/test_notify.py",
+    "tests/test_guard.py",
+    "tests/test_target.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/lie_recorder.py",
+   "title": "The Lie Detector cycle recorder",
+   "tagline": "An index of every watchdog look from a Lie Detector's first sight to its end",
+   "summary": "For each Lie Detector cycle the player's watchdog makes a `Recording`: a folder `lab/lie_detector/<YYYYmmdd-HHMMSS>/` with `index.jsonl` (a line a look: time, the spotter's score per form, or why there was no frame) and, at the end, `summary.json` (forms seen and when, outcome, cause, the Truth Booth stay's end). Writing happens on its own thread behind a queue, so a slow disk never holds up the watchdog. Since 2026-11-01 it keeps no pictures: the cycle's video is the rolling recorder's clip.",
+   "details_md": "### What a look adds\n`add(t, frame, scores, why)` is called every look (4 a second). A frame contributes only its size and a frame number `i`; without one, `game` says why (\"no window\", \"minimized\", or \"covered\" with the scores of what was on top). Each form scoring at least 1 updates `forms[name]` (first, last, frames); any form but the Truth Booth sets `test_last`. Lines go into a queue of `QUEUE_ITEMS` (16, about 4 s of looks); the `lie-detector-recording` thread appends each to `index.jsonl`, opening and closing the file every time so its last write shows. When the disk falls behind a line is dropped and the next line's `dropped_before` says how many.\n\n### How it ends\n`finish(end)` returns at once; the writer drains the queue and writes `summary.json`. It reads the `ended` flag *before* the queue, so a look added just before the end is never lost. End reasons: `gone` (no Lie Detector for `END_S`, 10 s), `test over` (the test, every form but the Truth Booth, unseen for `TEST_TAIL_S`, 5 s), `cap` (`CAP_S`, 10 minutes after the first sight: the longest cycle seen, a test left unanswered then the Truth Booth, is about 8 minutes), `stopped` (the player stopped). Outcome: \"sent to the Truth Booth\" if it showed, \"answered\" if the Lie Detector went away without it, else \"unknown: still up when the recording ended\".\n\nA recording that ended at its test's end while the cycle goes on (the Truth Booth) has a `cycle.live` file the watchdog touches every look (`cycle_going`) and removes at the cycle's end (`cycle_over`, which also adds a late Truth Booth to the summary). `going()` tells `clear-alarm` whether a cycle is still in progress (an index or live file written within `LIVE_S`, 5 s): `clear-alarm` refuses until then.\n\n### The Truth Booth\nA failed test sends her to the Truth Booth. `booth_until` (when its on-screen clock says the stay ends, read by the watchdog) goes into the summary; `last_booth_until` reads it back when a player starts, so a player started again inside the booth doesn't take it for a new sighting of unknown cause. `UNKNOWN_CAUSE` marks a Truth Booth first seen with no test before it (\"we missed some kind of check\"); a stay whose clock was never read ends `BOOTH_UNREAD_S` (10 minutes) after its first sight.\n\n### Disk\nWhen a recording starts, `prune` (on its own thread) deletes the oldest recordings until the rest take at most `KEEP_BYTES` (10 GB), never the one being written. Most of the bytes are the rolling recorder's `before/` (about 650 MB each), so about 15 cycles fit. It records nothing of the mouse or keyboard and never touches the game; it imports nothing of gamelab but paths, since the elevated player loads it.",
+   "lines": 399,
+   "key_items": [
+    {
+     "name": "Recording",
+     "kind": "class",
+     "line": 104,
+     "signature": "class Recording",
+     "summary": "One cycle's recording: makes its folder (OSError if it can't), starts its writer thread and a prune thread; the watchdog adds looks and ends it."
+    },
+    {
+     "name": "Recording.add",
+     "kind": "method",
+     "line": 136,
+     "signature": "def add(self, t: float, frame: np.ndarray | None, scores: dict[str, float] | None = None, why: str | None = None) -> int | None",
+     "summary": "One look into the index (never blocks: a full queue drops the line and counts it); returns the frame's number."
+    },
+    {
+     "name": "Recording.finish",
+     "kind": "method",
+     "line": 183,
+     "signature": "def finish(self, end: str) -> None",
+     "summary": "Ends it ('gone', 'test over', 'cap', 'stopped'); the writer writes what's waiting, then the summary. Returns at once."
+    },
+    {
+     "name": "Recording.summary",
+     "kind": "method",
+     "line": 195,
+     "signature": "def summary(self) -> dict",
+     "summary": "What summary.json says: first and last sight, test_last, looks, forms, outcome, cause, booth_until, end, window."
+    },
+    {
+     "name": "Recording._write",
+     "kind": "method",
+     "line": 214,
+     "signature": "def _write(self) -> None",
+     "summary": "The writer thread: drains the queue into index.jsonl, checking `ended` before the queue so no look is lost, then writes the summary and logs the end."
+    },
+    {
+     "name": "END_S",
+     "kind": "constant",
+     "line": 62,
+     "signature": "END_S = 10.0",
+     "summary": "The cycle ends once the game has shown no Lie Detector this long; the player, its alarm cleared, stops only after as long.",
+     "details_md": "Its comment (written when it was a minute) says it must outlast what the spotter couldn't see then: the mini-game's \"5 ... START\" count and the figure tracking itself. Since then the spotter knows the board's own form (`mini-game`): on the 11 alarm clips of 2026-10-26 to 30 it saw each cycle from first sight to end with no gap over 1 s (player.Watchdog's docstring). A minute until the user's \"Change lie detector timeout from 60s to 10s\" (2026-10-29): the minute kept the player locked and the grind waiting after the answer."
+    },
+    {
+     "name": "TEST_TAIL_S",
+     "kind": "constant",
+     "line": 69,
+     "signature": "TEST_TAIL_S = 5.0",
+     "summary": "The recording ends this long after its test's last sight even if the cycle goes on (the Truth Booth)."
+    },
+    {
+     "name": "CAP_S",
+     "kind": "constant",
+     "line": 75,
+     "signature": "CAP_S = 10 * 60.0",
+     "summary": "The recording stops this long after the first sight at the latest (2,400 looks)."
+    },
+    {
+     "name": "UNKNOWN_CAUSE",
+     "kind": "constant",
+     "line": 99,
+     "signature": "UNKNOWN_CAUSE = \"unknown\"",
+     "summary": "The cause given to a Truth Booth first seen with no test before it and outside a known stay."
+    },
+    {
+     "name": "prune",
+     "kind": "function",
+     "line": 309,
+     "signature": "def prune(root: Path | None = None, keep_bytes: int = KEEP_BYTES, spare: Path | None = None, dry_run: bool = False) -> list[tuple[Path, int]]",
+     "summary": "Deletes the oldest recordings until the rest take at most `keep_bytes`, never `spare`; also used by rolling for its own folders.",
+     "details_md": "A folder that can't be wholly deleted (a frame open in a viewer) has what's left taken off the sum, so newer recordings aren't deleted in its place."
+    },
+    {
+     "name": "going",
+     "kind": "function",
+     "line": 351,
+     "signature": "def going(root: Path | None = None, now: float | None = None) -> Path | None",
+     "summary": "The recording still being written, or whose cycle still goes on (its cycle.live touched within 5 s); `clear-alarm` refuses while there is one."
+    },
+    {
+     "name": "cycle_over",
+     "kind": "function",
+     "line": 381,
+     "signature": "def cycle_over(folder: Path, truth_booth: bool, booth_until: float | None = None) -> None",
+     "summary": "A cycle that ended after its recording: the live file removed and a late Truth Booth (and its stay's end) added to the summary."
+    },
+    {
+     "name": "last_booth_until",
+     "kind": "function",
+     "line": 333,
+     "signature": "def last_booth_until(root: Path | None = None) -> float | None",
+     "summary": "The Truth Booth stay's end from the newest summary that has one: read when the watchdog starts."
+    }
+   ],
+   "inputs": [
+    "every watchdog look: time since first sight, the frame (its size only), the spotter's scores, why there was no frame"
+   ],
+   "outputs": [
+    "`lab/lie_detector/<stamp>/index.jsonl` and `summary.json`, read by the rolling recorder (clip end), `clear-alarm` and the review tools",
+    "`cycle.live` while a cycle goes on after its recording ended"
+   ],
+   "uses": [
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/lie_detector/<stamp>/index.jsonl",
+     "mode": "write",
+     "what": "a line a look"
+    },
+    {
+     "path": "lab/lie_detector/<stamp>/summary.json",
+     "mode": "read-write",
+     "what": "written at the end; updated by cycle_over; read back by last_booth_until"
+    },
+    {
+     "path": "lab/lie_detector/<stamp>/cycle.live",
+     "mode": "read-write",
+     "what": "touched every look while the cycle goes on after the recording"
+    },
+    {
+     "path": "lab/lie_detector/",
+     "mode": "read-write",
+     "what": "pruned to 10 GB as each recording starts"
+    }
+   ],
+   "concurrency": "Per recording: a `lie-detector-recording` writer thread behind a 16-item queue and a one-off `lie-detector-prune` thread, both daemons. `add` and `finish` are called from the player's Watchdog thread.",
+   "tunables": [
+    {
+     "name": "END_S",
+     "value": "10.0",
+     "meaning": "no Lie Detector this long: the cycle is over"
+    },
+    {
+     "name": "TEST_TAIL_S",
+     "value": "5.0",
+     "meaning": "no test this long: the recording ends"
+    },
+    {
+     "name": "CAP_S",
+     "value": "600.0",
+     "meaning": "the recording ends this long after the first sight at the latest"
+    },
+    {
+     "name": "KEEP_BYTES",
+     "value": "10 * 1024 ** 3",
+     "meaning": "recordings kept, besides the one being written"
+    },
+    {
+     "name": "QUEUE_ITEMS",
+     "value": "16",
+     "meaning": "looks waiting to be written (4 s)"
+    },
+    {
+     "name": "LIVE_S",
+     "value": "5.0",
+     "meaning": "an index or live file written this recently: still going"
+    },
+    {
+     "name": "BOOTH_UNREAD_S",
+     "value": "600.0",
+     "meaning": "a Truth Booth stay whose clock was never read ends this long after its first sight"
+    },
+    {
+     "name": "BOOTH_SLACK_S",
+     "value": "5.0",
+     "meaning": "a sighting up to this long after a known stay's end is still that stay's"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Each Lie Detector's whole cycle recorded",
+     "why": "The user asked: the player used to shut down at the alarm, so nothing it saved showed them answering it."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "END_S lowered from 60 s to 10 s",
+     "why": "The user: \"Change lie detector timeout from 60s to 10s\": the minute kept the player locked and the grind waiting after the answer."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "No pictures kept (index and summary only)",
+     "why": "The user: \"stop keeping the 4fps recording and only use the unified recorder's 15fps video saving\"."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "The recording ends 5 s after its test's last sight (TEST_TAIL_S)",
+     "why": "The user: \"Only include frames of up to 5s once the board disappears\"; a recording had run 68 s into the Truth Booth."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "A Truth Booth with no test seen before it is marked UNKNOWN_CAUSE",
+     "why": "The user: \"if we entered a truth booth without triggering any of the mini-game/challenge, that probably means we missed some kind of check\"."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "The Truth Booth's stay read off its clock to block re-sightings",
+     "why": "The user: \"When you enter the truth booth you can see how much count down it has, and block the re-sighting\"."
+    }
+   ],
+   "gotchas": [
+    "A stretch of more than END_S (10 s) with no form the spotter knows ends the cycle early: an answered-looking cycle then clears its own alarm (player.AUTO_RESUME), and a Truth Booth one lets `clear-alarm` stop the player while the Lie Detector may still be up.",
+    "A game window gone or minimized doesn't count towards the end (it may be up behind); a covered one does.",
+    "Nothing of the mouse or keyboard is recorded, and nothing here can answer the Lie Detector."
+   ],
+   "tests": [
+    "tests/test_lie_recording.py",
+    "tests/test_alarm.py",
+    "tests/test_rolling.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/lie_tracking.py",
+   "title": "Live mini-game target tracking",
+   "tagline": "Follows the mouse mini-game's target on the service's frames and moves the cursor through the player",
+   "summary": "Runs inside the perception service. While the alarm file is up, `LieTracking` keeps the newest frame, looks for the mouse mini-game's board, and during a round sends board crops to a tracker child process (perception.lie_target.TargetTracker). Each answer (the target's centre in board, client and desktop px) goes to a per-round file and to telemetry, and a cursor thread hands the newest position to the elevated player as a `lie_cursor` move.",
+   "details_md": "### Rounds\n`saw` (on the frame loop) keeps only the newest frame, and only while the alarm is up or a round is on; the `lie-target` thread's `step` takes it. The alarm file is looked at once every 0.5 s at most (`ALARM_POLL_S`); one that can't be looked at counts as up. Before a round the board is looked for every 0.25 s (`BOARD_CHECK_S`) with the spotter's `over_play` (\"mini-game\"); a round begins at its first sight and ends when the board has been unseen 3 s (`BOARD_GONE_S`), the alarm goes, or after 60 s (`ROUND_MAX_S`; the longest seen was 10.4 s from START). In a round the board is checked once a second (`BOARD_ROUND_S`, 4 ms a look); frames after a look without it aren't sent and the cursor stops, going on if the board shows again within 3 s. Only 1366x768 frames are used: the board's place, `BOARD_AT_NATIVE` (308, 180, 750x500), is known at that size.\n\n### The tracker process\n`Child` starts `python -m gamelab.control.lie_tracking <folder> <fps>` at below-normal priority with OpenCV on 6 threads (`CHILD_THREADS`) when the alarm goes up, and it is stopped 60 s after the alarm has gone (`CHILD_IDLE_S`). Messages are pickled down its stdin (`begin`, `frame` with the 750x500 RGB board crop and the client's screen corner, `end`, `quit`); replies come up its stdout (`ready` with the answer line or None, `ended`, `error`). One frame is in flight at a time: a new frame goes only when the child said `ready`; frames in between are skipped and counted. Why a process: in the service, whose OpenCV runs on one thread, a frame took 78 ms against 52-64 on 6-12 threads, over the 66 ms of 15 frames a second, and it would share the frame loop's Python lock.\n\n### Answers\n`serve` (in the child) steps the TargetTracker on each crop and writes `lab/lie_target/<round>.jsonl`: a header line, a template line whenever the tracker takes a new white-star template (its outline and normals, so an answer can be redrawn without its frame), an answer line per frame (`t`, `at`, `seq`, `run`, `board`, `client` = board + (308, 180), `desktop` = client + the window's corner, `angle`, `score`, `white`, `template`, `ms`), and an end line (frames, answers, skipped, frames without the board, median and worst ms). Answers also go to the service's telemetry (`lie_target`, `lie_target_round`, `lie_target_cursor`).\n\n### The cursor\n`_queue_cursor` keeps only the newest target; the `lie-target-cursor` thread calls `client.move_lie_cursor` with client coordinates: one `lie_cursor` plan `[0, \"mouse\", x, y]`, which the player checks against `LIE_CURSOR_BOX` and plays as a generated trail (`window.move_cursor`), the trail coming back in the plan's result. The plan is cancelled when the round ends or the board disappears (`_cursor_wait`). A mover failure turns only the cursor off (`cursor_why_off`); tracking and its records go on. The ordinary service can't move the pointer itself: the administrator game blocks its input. Only the cursor moves inside the board: never a button or a key.",
+   "lines": 532,
+   "key_items": [
+    {
+     "name": "LieTracking",
+     "kind": "class",
+     "line": 72,
+     "signature": "class LieTracking",
+     "summary": "The service's side: `saw` from the frame loop, `start`/`close` with the service, `line` for its status; owns the child, the rounds and the cursor thread."
+    },
+    {
+     "name": "LieTracking.step",
+     "kind": "method",
+     "line": 186,
+     "signature": "def step(self, now: float, item: tuple | None) -> None",
+     "summary": "One turn of its thread: the child started or stopped with the alarm, the board looked for, a round begun or ended, the newest board crop sent if the child is ready."
+    },
+    {
+     "name": "LieTracking.saw",
+     "kind": "method",
+     "line": 114,
+     "signature": "def saw(self, st, frame, run) -> None",
+     "summary": "Keeps the frame loop's newest frame while the alarm is up or a round is on; never waits."
+    },
+    {
+     "name": "LieTracking._cursor_run",
+     "kind": "method",
+     "line": 363,
+     "signature": "def _cursor_run(self) -> None",
+     "summary": "The cursor thread: takes the newest target of the current round, moves through the player, records `move started`/`move finished`/`failed` with the trail."
+    },
+    {
+     "name": "LieTracking._move_cursor",
+     "kind": "method",
+     "line": 337,
+     "signature": "def _move_cursor(self, x: int, y: int, wait, played: list | None = None)",
+     "summary": "Converts desktop to client px and calls `client.move_lie_cursor`: the elevated player generates and plays the trail."
+    },
+    {
+     "name": "LieTracking._queue_cursor",
+     "kind": "method",
+     "line": 347,
+     "signature": "def _queue_cursor(self, desktop, seq=None) -> None",
+     "summary": "Hands the cursor thread only the newest target; the reply thread never waits for a trail."
+    },
+    {
+     "name": "LieTracking._cursor_on",
+     "kind": "method",
+     "line": 287,
+     "signature": "def _cursor_on(self, on: bool) -> None",
+     "summary": "The cursor follows answers only while the board shows; off, its trail ends and no answer is taken."
+    },
+    {
+     "name": "LieTracking._replies",
+     "kind": "method",
+     "line": 318,
+     "signature": "def _replies(self, child) -> None",
+     "summary": "Reads the child's replies: answers to telemetry and the cursor queue, `ready` for the next frame, round ends, errors."
+    },
+    {
+     "name": "Child",
+     "kind": "class",
+     "line": 417,
+     "signature": "class Child",
+     "summary": "The tracker's process (`python -m gamelab.control.lie_tracking`), below-normal priority: messages pickled down stdin, replies up stdout."
+    },
+    {
+     "name": "serve",
+     "kind": "function",
+     "line": 449,
+     "signature": "def serve(inp, out, folder: Path, fps: float = FPS) -> None",
+     "summary": "The child's loop: begin/frame/end/quit messages; steps perception.lie_target.TargetTracker and writes each round's jsonl file."
+    },
+    {
+     "name": "LieTracking.alarm_up",
+     "kind": "method",
+     "line": 128,
+     "signature": "def alarm_up(self, now: float) -> bool",
+     "summary": "Whether the alarm file is there, looked at again 0.5 s after the last look; one that can't be looked at counts as there."
+    }
+   ],
+   "inputs": [
+    "the perception service's frames (Service._emit -> `saw`, via violetta_live.Together)",
+    "`lab/ALARM.json` (polled)",
+    "the game window's client corner on the screen (gamelab.window), once a second"
+   ],
+   "outputs": [
+    "`lie_cursor` move plans to the elevated player (control.client.move_lie_cursor)",
+    "`lab/lie_target/<round>.jsonl` per round, and telemetry records `lie_target`, `lie_target_round`, `lie_target_cursor`"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/localization/rate.py",
+    "gamelab/perception/lie_target.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/window.py",
+    "gamelab/control/client.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read",
+     "what": "whether the alarm is up"
+    },
+    {
+     "path": "lab/lie_target/<YYYYmmdd-HHMMSS>.jsonl",
+     "mode": "write",
+     "what": "one round's answers (written by the child process)"
+    },
+    {
+     "path": "lab/inbox/<id>.json",
+     "mode": "write",
+     "what": "the cursor's `lie_cursor` plans, through control.client"
+    }
+   ],
+   "concurrency": "In the perception service: `saw` on the frame loop (never waits); a `lie-target` thread (step), a `lie-target-replies` thread per child and a `lie-target-cursor` thread, all daemons. The tracker runs in a child process (below-normal priority, OpenCV on 6 threads), started with the alarm and stopped 60 s after.",
+   "tunables": [
+    {
+     "name": "ALARM_POLL_S",
+     "value": "0.5",
+     "meaning": "the alarm file looked at once in this at most"
+    },
+    {
+     "name": "BOARD_CHECK_S",
+     "value": "0.25",
+     "meaning": "how often the board is looked for before a round"
+    },
+    {
+     "name": "BOARD_ROUND_S",
+     "value": "1.0",
+     "meaning": "... and during one"
+    },
+    {
+     "name": "BOARD_GONE_S",
+     "value": "3.0",
+     "meaning": "the board unseen this long: the round is over"
+    },
+    {
+     "name": "ROUND_MAX_S",
+     "value": "60.0",
+     "meaning": "a round this long is over whatever"
+    },
+    {
+     "name": "CHILD_IDLE_S",
+     "value": "60.0",
+     "meaning": "the tracker's process stopped this long after the alarm has gone"
+    },
+    {
+     "name": "CHILD_THREADS",
+     "value": "6",
+     "meaning": "OpenCV threads in the child (64 ms a frame on 6, 71 on 4, 52 on 12)"
+    },
+    {
+     "name": "ORIGIN_POLL_S",
+     "value": "1.0",
+     "meaning": "how often the client's corner on the screen is looked at again"
+    },
+    {
+     "name": "FPS",
+     "value": "rate.HZ (15.0)",
+     "meaning": "the frames' nominal rate, for the tracker's look-back"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-02",
+     "what": "Target following moved to the perception service's frames, replacing the player's YOLO shadow",
+     "why": "The user: \"Let's wire this and remove the old yolo-based live detection\" and \"I thought the perception process is already screenshotting at 15fps\"."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "In a round the board is checked once a second, and the cursor stops on a frame without it",
+     "why": "The user: \"Fix lie detector code\": the 00:01 round's answers had gone on 2.9 s into the Truth Booth; \"1 in 15 frames, every literal second\"."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "A move's `move finished`/`failed` record carries the player's trail",
+     "why": "For a review's overlay of the bot's cursor beside the game's (the user: \"does the telemetry include cursor movement? Can you overlay that with the review UI?\")."
+    },
+    {
+     "date": "",
+     "what": "Cursor moves go through the elevated player",
+     "why": "The ordinary perception process's SendInput is blocked by the administrator game; its old direct call also hid that failure."
+    }
+   ],
+   "gotchas": [
+    "Only frames of the game's own 1366x768 size are used: at any other client size it follows nothing.",
+    "A mover failure turns off cursor movement for good (until the service restarts); tracking and records continue.",
+    "Behind, the child takes the newest frame and skips the rest (counted `skipped`); the tracker goes by each frame's own time."
+   ],
+   "tests": [
+    "tests/test_lie_tracking.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/violetta_live.py",
+   "title": "Live Violetta solver",
+   "tagline": "Follows the Violetta shuffle game, clicks the answer, and clicks the pass dialog's OK",
+   "summary": "Also in the perception service. When the alarm goes up it loads the Violetta YOLO model (perception.violetta) on a background thread; from the countdown window's first sight it detects the Violettas on every frame, solves each round when the four answer buttons light up, and clicks the made-up Violetta's button through the player (`client.click_lie_answer`, a `lie_cursor` click). After a pass it clicks the \"You have successfully passed\" dialog's OK (`client.click_lie_ok`). `Together` bundles it with LieTracking as the service's one Lie Detector watcher.",
+   "details_md": "The Violetta game (\"Keep your eyes on the Violetta who's wearing make-up\") is the countdown form's test: four Violettas shuffle and the player must click the button under the made-up one.\n\n### Following a game\n- `saw` queues the frame loop's frames (at most `QUEUE` = 45, about 3 s; past it the oldest is dropped and counted) while the alarm is up, a game is on, or for `AFTER_S` (90 s) after the alarm went: the pass dialog shows after the game.\n- The model is loaded on a `violetta-load` thread as the alarm goes up, before the game's window shows (its box comes 10 s and its window 15 s more before the shuffles). A load failure turns the watcher off (`why_off`); the service goes on.\n- A game begins at the first look (every 0.25 s, `WINDOW_CHECK_S`) where the spotter's `over_play` says \"countdown\"; during it the window is checked once a second; it ends when unseen 3 s (`WINDOW_GONE_S`) or after 150 s (`GAME_MAX_S`; 4 rounds take about 60 s). Only 1366x768 frames are used.\n- Every frame: the detector's boxes and the frame's time are kept. On the frame where the buttons light up (`violetta.buttons_lit`), `_round` runs: on the first window the four slots (`slots_of`) and the made-up one's start slot (`start_slot`) are measured on the frames before it; each round's permutation comes from `solve_round` on the frames since the last window, knowing the answer window's time (its `window` argument), and the slot is chained `where = perm[where]`. The shuffle is fitted to the client's own rules (one hop or two, the motion 3.8-5.0 s, per the README).\n- The answer is logged and recorded (`violetta` telemetry: `begin`, `round`, `answer`, `end`, `ok`), with no phone push per round, and clicked on a `violetta-answer` thread: `BUTTON_AT[slot - 1]` through `client.click_lie_answer`, whose `active` turns false once the buttons go dark or the game ends, so the plan is withdrawn or cancelled.\n\n### The pass dialog\nEvery 0.5 s (`OK_CHECK_S`) `violetta.OkDialog` looks for it; seen on 2 looks in a row (`OK_SEEN`) its OK is clicked through `client.click_lie_ok` (one click inside `LIE_OK_BOX`, the game the window under the pointer), at most 3 times (`OK_TRIES`) a minute and 3 s apart (`OK_RETRY_S`) while it stays.",
+   "lines": 335,
+   "key_items": [
+    {
+     "name": "VioletaLive",
+     "kind": "class",
+     "line": 49,
+     "signature": "class VioletaLive",
+     "summary": "The service's Violetta watcher: `saw` from the frame loop, its thread's `step`, `start`/`close`, `line`; tests inject detector, spotter, ok finder and clickers."
+    },
+    {
+     "name": "VioletaLive.step",
+     "kind": "method",
+     "line": 152,
+     "signature": "def step(self, now: float, item) -> None",
+     "summary": "One turn: the model loaded as the alarm goes up, the OK dialog looked for, the game begun, followed or ended, a round solved when the buttons light."
+    },
+    {
+     "name": "VioletaLive._round",
+     "kind": "method",
+     "line": 220,
+     "signature": "def _round(self, k: int) -> None",
+     "summary": "An answer window at frame k: the slots and start measured on the first, the round solved since the last window, the made-up one's slot chained, said and answered."
+    },
+    {
+     "name": "VioletaLive._answer",
+     "kind": "method",
+     "line": 251,
+     "signature": "def _answer(self, g: dict, slot: int) -> None",
+     "summary": "Clicks the slot's button on a thread of its own, cancelled once the buttons go dark or the game ends."
+    },
+    {
+     "name": "VioletaLive._look_for_ok",
+     "kind": "method",
+     "line": 278,
+     "signature": "def _look_for_ok(self, now: float, full) -> None",
+     "summary": "The pass dialog: its OK clicked once seen 2 looks in a row, 3 tries a minute at most, 3 s apart."
+    },
+    {
+     "name": "VioletaLive.saw",
+     "kind": "method",
+     "line": 83,
+     "signature": "def saw(self, st, frame, run) -> None",
+     "summary": "Queues the frame loop's frame while the alarm is up, a game is on, or 90 s after the alarm went; never waits."
+    },
+    {
+     "name": "VioletaLive._load",
+     "kind": "method",
+     "line": 195,
+     "signature": "def _load(self) -> None",
+     "summary": "Loads perception.violetta.Detector (YOLO) on its own thread; a failure turns the watcher off."
+    },
+    {
+     "name": "Together",
+     "kind": "class",
+     "line": 316,
+     "signature": "class Together",
+     "summary": "Several of the service's Lie Detector watchers as one (LieTracking and VioletaLive): each started, fed, said, closed."
+    },
+    {
+     "name": "VioletaLive.alarm_up",
+     "kind": "method",
+     "line": 97,
+     "signature": "def alarm_up(self, now: float) -> bool",
+     "summary": "Whether the alarm file is there (polled every 0.5 s); remembers when it last went down, for AFTER_S."
+    }
+   ],
+   "inputs": [
+    "the perception service's frames (Service._emit -> Together.saw)",
+    "`lab/ALARM.json` (polled)",
+    "perception.violetta's detector, solver and OK-dialog finder; perception.lie_detector's spotter (`over_play`)"
+   ],
+   "outputs": [
+    "`lie_cursor` answer clicks and `lie_ok` clicks to the elevated player (control.client)",
+    "the service's log lines and `violetta` telemetry records"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/perception/violetta.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/control/client.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read",
+     "what": "whether the alarm is up"
+    },
+    {
+     "path": "lab/inbox/<id>.json",
+     "mode": "write",
+     "what": "the answer and OK click plans, through control.client"
+    }
+   ],
+   "concurrency": "In the perception service: `saw` on the frame loop (never waits); a `violetta` thread (step), a `violetta-load` thread for the model, and a `violetta-answer` thread per answer click, all daemons. The YOLO model runs on the GPU.",
+   "tunables": [
+    {
+     "name": "ALARM_POLL_S",
+     "value": "0.5",
+     "meaning": "the alarm file looked at once in this at most"
+    },
+    {
+     "name": "AFTER_S",
+     "value": "90.0",
+     "meaning": "frames looked at this long after the alarm has gone (the pass dialog)"
+    },
+    {
+     "name": "QUEUE",
+     "value": "45",
+     "meaning": "frames waiting at most (3 s at 15 a second)"
+    },
+    {
+     "name": "WINDOW_CHECK_S",
+     "value": "0.25",
+     "meaning": "the game's window looked for this often before the game"
+    },
+    {
+     "name": "WINDOW_ROUND_S",
+     "value": "1.0",
+     "meaning": "... and during it"
+    },
+    {
+     "name": "WINDOW_GONE_S",
+     "value": "3.0",
+     "meaning": "the window unseen this long: the game is over"
+    },
+    {
+     "name": "GAME_MAX_S",
+     "value": "150.0",
+     "meaning": "a game this long is over whatever"
+    },
+    {
+     "name": "OK_CHECK_S",
+     "value": "0.5",
+     "meaning": "how often the pass dialog is looked for"
+    },
+    {
+     "name": "OK_SEEN",
+     "value": "2",
+     "meaning": "looks in a row seeing the dialog before its OK is clicked"
+    },
+    {
+     "name": "OK_RETRY_S",
+     "value": "3.0",
+     "meaning": "seconds between OK clicks"
+    },
+    {
+     "name": "OK_TRIES",
+     "value": "3",
+     "meaning": "OK clicks a minute at most"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-03",
+     "what": "The Violetta game followed live, its answer clicked, the pass dialog's OK clicked",
+     "why": "The user: \"wire in the code to run this live when the violetta mini game shows up in game\", \"at the end of the success, click the ok button of 'you have successfully passed'\", and \"let's actually click it\"."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "No phone push per round",
+     "why": "The user: \"let's not send one message per violetta stage\"; the player's own pushes say the Lie Detector is up and gone."
+    }
+   ],
+   "gotchas": [
+    "If the made-up one's start wasn't seen before the first window, no round can be answered (the slot is None).",
+    "Frames that arrive while the model is still loading are counted as `unseen` and not used.",
+    "It only clicks through the player's two strict click forms; the quiz forms are still for the person at the PC."
+   ],
+   "tests": [
+    "tests/test_violetta.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/rolling.py",
+   "title": "The rolling recording",
+   "tagline": "The game's last 5 minutes kept losslessly in memory, saved on alarms or on demand",
+   "summary": "A `Recorder` keeps a `Ring` of moments (a compressed frame, or a gap and why) covering the last 300 s, at most 4 GB. It is fed by its own mss grabs 10 times a second (`gamelab recorder`) or, in the perception service, by the service's own frames 15 times a second (control.recording). On a Lie Detector alarm it saves the 5 minutes before into the player's cycle folder (`before/`) and writes a lossless clip of the cycle; `save-recent` asks it for the last N seconds through a file inbox.",
+   "details_md": "### Moments and the ring\nEach `Item` is one moment: `t` (wall clock) and either `data` (the pixels, zstd level 1 through Python 3.14's `compression.zstd`, zlib on older Pythons) or a gap with `why` (\"no window\", \"minimized\", \"no client area\", \"off the screen\", \"covered\", \"moved\", \"capture failed\", \"not encoded\"). Frames it grabs itself are packed whole (`pack`: BGRA to BGR into a per-thread buffer, then compressed; about 757 KB and 9.5 ms a 1366x768 frame). The perception service's frames are kept as their difference from the frame before (`pack_diff`: uint8 subtraction that wraps round; 332 KB against 482 whole), with a whole frame (`key=True`) at least every second: a *chain*. `decode` adds the differences back, giving exactly the frames shown. The `Ring` drops whole chains from the front once they are older than `SECONDS` (300), or past `MAX_BYTES` (4 GB, counted as `trimmed`) or `MAX_ITEMS` (twice the moments of 5 minutes: 6,000 at 10 a second, 9,000 in the service at 15).\n\nLossless since 2026-10-25 (the user asked): as JPEG with the usual half-resolution colour, the countdown's thin yellow title lost its colour and the spotter scored it 0.36-0.41 of its threshold.\n\n### What counts as a frame\n`GameWindow.check`: the window exists, isn't minimized, has a client area wholly on the monitors (`window.on_screen`); then the windows above it (`window.overs`). Wholly covered is a gap; partly covered keeps the frame and notes the covered boxes and share (`Item.over`, `Item.covered`; since 2026-11-01, when seven alarms' clips of 2026-10-29 had kept no frame at all). `tick` checks before and after the grab; a window that moved in between is a gap.\n\n### Saving\n`poll` runs between ticks: inbox requests (every tick), a new alarm (every 0.5 s, keyed by the alarm's `time`), clips that are due, the status file every 5 s, a log line every 10 minutes. Saves go on a queue to one `rolling-saves` thread at below-normal thread priority (`WRITER_PRIORITY` -1; the service's recording passes -2) and are written by `write_part`: frames as JPEG (quality 75, full-resolution colour) or PNG (level 1, no row filters), on 4 encoder threads, a chain at a time, plus `index.jsonl` and `summary.json`.\n\nOn an alarm `check_alarm` makes a `Clip` that holds the ring's snapshot (for `before/`) and every new moment (so the ring's cap can't lose them). Once the player's recording of the cycle has a summary, `cycle_end` ends the clip 5 s after the test's last sight (`CLIP_TAIL_S`), and at most 180 s after the alarm (`CLIP_MAX_S`). Then `_save_clip` writes PNG frames from 2 s (`CLIP_BEFORE_S`) before the first frame where the spotter sees the Lie Detector (looked for from 3 s before the alarm) to `lab/alarm_clips/<stamp>-lie-detector[-form]/`, and `_save_before` writes the 5 minutes before plus the alarm's first 5 s (JPEG) into the cycle folder's `before/` (found by its name, 2 s before to 20 s after the alarm; none: `lab/recent`). Writing waits for the cycle's end so heavy encoding doesn't run while the Lie Detector is up. A Truth Booth of unknown cause has its 5 minutes written at once, PNG, to `lab/booth_unknown/`. Each folder is pruned to its budget: recent 20 GB, clips 30 GB, unknown-cause 20 GB, Lie Detector recordings 10 GB.\n\n### One recorder, and asking it\n`only_one` holds the named mutex `Local\\gamelab-rolling-recorder`. `ask` is the command line's side of `save-recent`: it writes a request into `lab/recorder/inbox/`, withdraws it if not taken (renamed `.taken`) within 3 s, and waits up to 180 s for the answer in `lab/recorder/outbox/`. `status_lines` prints `recorder --status`.",
+   "lines": 1346,
+   "key_items": [
+    {
+     "name": "Recorder",
+     "kind": "class",
+     "line": 492,
+     "signature": "class Recorder",
+     "summary": "The rolling recording: `tick` takes a moment, `add` takes one made elsewhere, `poll` handles the inbox, alarms, clips and status, `run` does both FPS times a second.",
+     "details_md": "Built with a `game` (GameWindow) and a `grab` (ScreenGrab); tests pass fakes and their own folders. `apart=True` writes saves in a partwriter process (the perception service's). `encoders` may be a callable (fewer writers while a command hunts)."
+    },
+    {
+     "name": "Recorder.tick",
+     "kind": "method",
+     "line": 553,
+     "signature": "def tick(self) -> Item",
+     "summary": "One moment of its own: checks the window, grabs with mss, checks again (moved? covered?), packs the frame or records a gap, and adds it."
+    },
+    {
+     "name": "Recorder.add",
+     "kind": "method",
+     "line": 590,
+     "signature": "def add(self, item: Item, after: Item | None = None, cost: float | None = None, detail: str = \"\") -> bool",
+     "summary": "A moment into the ring and into every pending clip, counted; with `after`, refused unless the ring's newest is that frame (a difference must follow its own frame)."
+    },
+    {
+     "name": "Recorder.check_alarm",
+     "kind": "method",
+     "line": 671,
+     "signature": "def check_alarm(self) -> None",
+     "summary": "A new alarm (by its `time`): snapshots the ring and starts holding a Clip; a Truth Booth of unknown cause gets its 5 minutes saved at once.",
+     "details_md": "An alarm already up when the recorder starts is never saved (`alarm_handled` is set from it)."
+    },
+    {
+     "name": "Recorder.cycle_end",
+     "kind": "method",
+     "line": 723,
+     "signature": "def cycle_end(self, clip: Clip, now: float) -> float | None",
+     "summary": "When an alarm's clip ends: `first_seen_at + test_last + CLIP_TAIL_S` once the player's recording has a summary, never past CLIP_MAX_S; with no player recording within 20 s, when the alarm is cleared."
+    },
+    {
+     "name": "Recorder._save_clip",
+     "kind": "method",
+     "line": 877,
+     "signature": "def _save_clip(self, clip: Clip, items: list[Item], cut_short: bool, end: float | None = None) -> None",
+     "summary": "Writes the alarm's clip as PNG, starting 2 s before the first frame that shows the Lie Detector (`_first_shown`, the spotter's `near`), the first frame re-made whole if it's a difference (`starting_at`)."
+    },
+    {
+     "name": "Ring",
+     "kind": "class",
+     "line": 282,
+     "signature": "class Ring",
+     "summary": "The last `seconds` of moments, oldest first, at most `max_bytes`; drops whole chains from the front. Thread-safe (a lock): recorders add, the saver reads."
+    },
+    {
+     "name": "Item",
+     "kind": "dataclass",
+     "line": 195,
+     "signature": "@dataclass(frozen=True, slots=True) class Item",
+     "summary": "One moment: a packed frame (whole or a difference) or a gap and why, with the service's frame number and run, and the boxes other windows covered."
+    },
+    {
+     "name": "pack_diff",
+     "kind": "function",
+     "line": 463,
+     "signature": "def pack_diff(frame: np.ndarray, before: np.ndarray) -> bytes",
+     "summary": "A frame kept as its uint8 difference from the frame before, compressed: mostly zeros, 332 KB a frame against 482 whole, 7.6 ms against 8.9."
+    },
+    {
+     "name": "pack",
+     "kind": "function",
+     "line": 449,
+     "signature": "def pack(frame: np.ndarray) -> bytes",
+     "summary": "A grabbed frame kept losslessly: BGRA to BGR into a per-thread buffer (a fresh 3 MB buffer each frame cost page faults the kernel zeroes), then zstd.",
+     "details_md": "9.5 ms on the six test frames. PNG at its fastest was as big and took 55 ms; WebP lossless 502 KB in 667 ms; zstd level 3 666 KB in 12.8 ms."
+    },
+    {
+     "name": "decode",
+     "kind": "function",
+     "line": 222,
+     "signature": "def decode(items: list[Item])",
+     "summary": "Yields each frame's exact BGR pixels from moments in a row, adding differences to the frame before; a gap breaks a chain."
+    },
+    {
+     "name": "write_part",
+     "kind": "function",
+     "line": 1055,
+     "signature": "def write_part(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False, encoders: int = ENCODERS, priority: int = WRITER_PRIORITY) -> dict",
+     "summary": "Writes a saved part: frames as JPEG or PNG on `encoders` threads a batch of chains at a time, `index.jsonl` (a line a frame or a run of gaps) and `summary.json`.",
+     "details_md": "A difference whose chain's whole frame isn't in the part becomes a gap `no whole frame`. Returns the summary."
+    },
+    {
+     "name": "write_part_apart",
+     "kind": "function",
+     "line": 1124,
+     "signature": "def write_part_apart(folder: Path, items: list[Item], info: dict, fps: float = FPS, png: bool = False, encoders: int = ENCODERS, log: Callable[[str], None] = print) -> dict",
+     "summary": "`write_part` in a `python -m gamelab.control.partwriter` child, the moments pickled down its stdin, the summary back on stdout; on failure, written here instead.",
+     "details_md": "Written in the service, a 120 s save during a replayed hunt made the frame loop's steps wait 18-21 ms (median) against 1-2, 8.4-9.7 frames a second against 13.0-14.3; written apart, 3-4 ms and 9.6-10.7. A half-written folder from a failed child is moved aside as `<name>.failed-<HHMMSS>`."
+    },
+    {
+     "name": "GameWindow.check",
+     "kind": "method",
+     "line": 400,
+     "signature": "def check(self) -> tuple[dict | None, str]",
+     "summary": "The client area (an mss box) when the screen shows the game, else None and why; notes the boxes other windows cover (`over`)."
+    },
+    {
+     "name": "ask",
+     "kind": "function",
+     "line": 1237,
+     "signature": "def ask(seconds: float = SECONDS, name: str | None = None, box: Path | None = None, taken_s: float = ASK_TAKEN_S, wait_s: float = ASK_WAIT_S, png: bool = False) -> dict",
+     "summary": "The `save-recent` side: asks the running recorder through its inbox and waits for the folder it saved; raises NotRunning if none is running or none takes the request within 3 s."
+    }
+   ],
+   "inputs": [
+    "the screen: the game's client area grabbed with mss (its own ticks), or the perception service's frames handed over by control.recording",
+    "`lab/ALARM.json` (a new alarm by its `time`, `form`, `cause`)",
+    "the player's cycle recordings' `summary.json` in `lab/lie_detector/` (when a clip ends)",
+    "`save-recent` requests in `lab/recorder/inbox/`"
+   ],
+   "outputs": [
+    "`before/` in each Lie Detector cycle folder; alarm clips in `lab/alarm_clips/`; unknown-cause saves in `lab/booth_unknown/`; on-demand saves in `lab/recent/`",
+    "answers in `lab/recorder/outbox/`, and `lab/recorder/status.json` for `recorder --status` and the babysitter"
+   ],
+   "uses": [
+    "gamelab/capture.py",
+    "gamelab/paths.py",
+    "gamelab/window.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/lie_recorder.py",
+    "gamelab/control/partwriter.py",
+    "gamelab/perception/lie_detector.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/recorder/inbox/<id>.json",
+     "mode": "read-write",
+     "what": "save-recent requests; renamed `<id>.taken` when taken"
+    },
+    {
+     "path": "lab/recorder/outbox/<id>.json",
+     "mode": "write",
+     "what": "the answer: the folder saved, or an error"
+    },
+    {
+     "path": "lab/recorder/status.json",
+     "mode": "write",
+     "what": "what it keeps, its rate and cost, pending saves (every 5 s)"
+    },
+    {
+     "path": "lab/ALARM.json",
+     "mode": "read",
+     "what": "new Lie Detector alarms"
+    },
+    {
+     "path": "lab/lie_detector/<stamp>/summary.json",
+     "mode": "read",
+     "what": "the player's cycle summary: when the clip ends"
+    },
+    {
+     "path": "lab/lie_detector/<stamp>/before/",
+     "mode": "write",
+     "what": "the 5 minutes before the alarm (JPEG)"
+    },
+    {
+     "path": "lab/alarm_clips/<stamp>-lie-detector[-form]/",
+     "mode": "write",
+     "what": "the alarm's clip (PNG)"
+    },
+    {
+     "path": "lab/booth_unknown/<stamp>-truth-booth-unknown-cause/",
+     "mode": "write",
+     "what": "the 5 minutes before a Truth Booth of unknown cause (PNG)"
+    },
+    {
+     "path": "lab/recent/<stamp>[-name]/",
+     "mode": "write",
+     "what": "save-recent's saves (JPEG, or PNG if asked)"
+    }
+   ],
+   "concurrency": "`run` ticks FPS times a second on its caller's thread (or control.recording's ticks thread). One `rolling-saves` saver thread at below-normal priority; `write_part` uses a pool of ENCODERS `rolling-writer` threads; `write_part_apart` starts a partwriter child process per save. `add` may be called from another thread (the service's encoder), guarded by an RLock; the Ring has its own lock. `gamelab recorder` runs it at below-normal process priority with OpenCV on one thread (`quiet`).",
+   "tunables": [
+    {
+     "name": "FPS",
+     "value": "10.0",
+     "meaning": "moments a second for the standalone `gamelab recorder`; the perception service's recording passes its own 15 (localization.rate.HZ)"
+    },
+    {
+     "name": "SECONDS",
+     "value": "300.0",
+     "meaning": "the last 5 minutes are kept"
+    },
+    {
+     "name": "MAX_BYTES",
+     "value": "4 * 1024 ** 3",
+     "meaning": "memory for frames at most; past it the oldest go early (`trimmed`)"
+    },
+    {
+     "name": "ZSTD_LEVEL",
+     "value": "1",
+     "meaning": "compression level of kept frames"
+    },
+    {
+     "name": "JPEG_QUALITY",
+     "value": "75",
+     "meaning": "JPEG parts (`before/`, save-recent), full-resolution colour (4:4:4)"
+    },
+    {
+     "name": "ENCODERS",
+     "value": "4",
+     "meaning": "threads encoding a part as it's written"
+    },
+    {
+     "name": "CLIP_BEFORE_S",
+     "value": "2.0",
+     "meaning": "an alarm clip starts this long before the first frame showing the Lie Detector"
+    },
+    {
+     "name": "CLIP_LOOK_BACK_S",
+     "value": "3.0",
+     "meaning": "that first frame is looked for from this long before the alarm"
+    },
+    {
+     "name": "CLIP_TAIL_S",
+     "value": "5.0",
+     "meaning": "an alarm clip ends this long after the test's last sight"
+    },
+    {
+     "name": "CLIP_MAX_S",
+     "value": "180.0",
+     "meaning": "an alarm clip ends this long after the alarm at the latest"
+    },
+    {
+     "name": "BEFORE_TAIL_S",
+     "value": "5.0",
+     "meaning": "`before/` runs this long past the alarm"
+    },
+    {
+     "name": "FOLDER_WAIT_S",
+     "value": "20.0",
+     "meaning": "how long after an alarm the player's recording folder is looked for"
+    },
+    {
+     "name": "RECENT_KEEP_BYTES",
+     "value": "20 * 1024 ** 3",
+     "meaning": "save-recent's folder budget"
+    },
+    {
+     "name": "CLIPS_KEEP_BYTES",
+     "value": "30 * 1024 ** 3",
+     "meaning": "alarm clips' budget"
+    },
+    {
+     "name": "UNKNOWN_KEEP_BYTES",
+     "value": "20 * 1024 ** 3",
+     "meaning": "unknown-cause saves' budget"
+    },
+    {
+     "name": "ALARM_POLL_S",
+     "value": "0.5",
+     "meaning": "how often it looks for a new alarm"
+    },
+    {
+     "name": "STATUS_S",
+     "value": "5.0",
+     "meaning": "how often the status file is written"
+    },
+    {
+     "name": "STATUS_STALE_S",
+     "value": "30.0",
+     "meaning": "an older status file means no recorder is running"
+    },
+    {
+     "name": "SAVES_WAITING",
+     "value": "4",
+     "meaning": "save requests queued at most; more are answered \"busy\""
+    },
+    {
+     "name": "APART_TIMEOUT_S",
+     "value": "600.0",
+     "meaning": "a part written in a child process takes this long at most"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "The rolling recording built",
+     "why": "At 21:50 something popped up in the game wanting an answer within 10 s and nothing recorded it; it was the image quiz, which the player's check didn't know yet (it does since 2026-10-25)."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "Captured with mss, not DXGI desktop duplication",
+     "why": "Duplications of a monitor are limited: with `watch` and `pet` running, a third failed (DXGI_ERROR_NOT_CURRENTLY_AVAILABLE)."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "Frames kept losslessly (zstd) instead of JPEG",
+     "why": "The user asked."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "Each alarm gets its own clip; its budget raised from 5 GB to 30 GB",
+     "why": "The user: \"a 2nd line of defense\"."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "`before/` written with the clip once the cycle is over, not as the player's recording begins",
+     "why": "So its frames' encoding doesn't run beside the grabs while the Lie Detector is up."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Fed by the perception service's own frames (control.recording)",
+     "why": "The user: \"The recording should probably just take frames from within the same perception process...\"."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "save-recent's budget raised from 5 GB to 20 GB",
+     "why": "The user asked."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "save-recent can save PNG",
+     "why": "The user: \"record at the 15fps where perception would run, save this as a dataset\"."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Partly covered frames kept, with the covered boxes noted",
+     "why": "The user: \"keep the frame if it's only partially covered ... save metadata on what part was covered\"; seven alarm clips of 2026-10-29 had kept no frame at all."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "The alarm clip becomes the Lie Detector's only video",
+     "why": "The user: \"stop keeping the 4fps recording and only use the unified recorder's 15fps video saving\"."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "Clip from 2 s before the first frame showing the Lie Detector to 5 s after the test's last sight",
+     "why": "The user: \"Only include frames that are 2s before the bottom right count down\" and \"Only include frames of up to 5s once the board disappears\" (a clip had run 85 s into the Truth Booth)."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "The 5 minutes before a Truth Booth of unknown cause saved at once",
+     "why": "The user: \"...we missed some kind of check, we should immediately save a 5min-clip and mark them unknown reason that led to truth booth for later analysis\"."
+    }
+   ],
+   "gotchas": [
+    "A save that starts inside a chain also carries the chain's earlier frames back to its whole frame, so a save of N s may hold up to a second more.",
+    "`Item.pixels` raises for a difference frame: decode its chain with `decode`.",
+    "A minimized game keeps a cycle going, and the clip holds its moments meanwhile (about 5 MB a second of the service's frames, up to 180 s).",
+    "`write_status` retries the replace 5 times 20 ms apart: Windows refuses to replace a file a reader has open.",
+    "It also prunes the Lie Detector recordings to 10 GB counting `before/`, because an old elevated player (restarted only with a UAC click) may not count it.",
+    "It reads the screen only: no keys, no clicks, and it never brings the game forward."
+   ],
+   "tests": [
+    "tests/test_rolling.py",
+    "tests/test_service_recorder.py",
+    "tests/test_darts.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/recording.py",
+   "title": "The perception service's recording",
+   "tagline": "Feeds the rolling recorder from the perception service's own 15 fps frames",
+   "summary": "Since 2026-10-26 the rolling recording lives inside the perception service (`gamelab perceive`). `Recording.saw` takes the frame loop's frames without ever waiting, a token bucket keeps 15 a second, an encoder thread stores each as a difference from the one before, and a ticks thread runs the rolling Recorder's polling and takes its own mss grabs when the frame loop is silent or too slow. Saves are written by a separate partwriter process.",
+   "details_md": "### Taking frames\n`saw(st, frame, run)` is called by the service for every state it emits. It skips frames that don't show the game wholly (`frame.visible`), whose capture is offset from the window (`GAP_KINDS`), or whose cover check wasn't made (`frame.over is None`). A token bucket (`FPS` = 15 tokens a second, `BURST` = 2) picks frames by their own times: a loop slower than 15 a second has all its frames kept, and after a stall at most one extra. On the replays' real frame times a loop at 12-14 a second kept 11.6-13.2, at 25-30 a second 15.0. The picture is passed by reference (perception.frames never overwrites a picture while it's held; never a shared-memory slot: encoding from one crashed the service when a new run unmapped it) onto a queue of `QUEUE` = 8; past it the frame is dropped and counted. Another window over all of the game (or over it where the boxes aren't known) makes a `covered` gap; over part of it, the frame is kept with its boxes.\n\n### Encoding\nThe `perceive-recording-encoder` thread's `encode` stores a difference (`rolling.pack_diff`) unless a whole frame is due (`KEY_EVERY_S` = 1 s), the size changed, or another moment came in between (then `Recorder.add(after=...)` refuses and a whole frame is stored). Frames older than the ring's newest moment are dropped as `late`. Measured: 180-375 KB and 4-7 ms of CPU a frame, so 5 minutes at 15 a second take 0.5-1.6 GB. Keeping camera-pan frames whole saved only 3-5% for 65% more CPU, so it isn't done.\n\n### Its own moments\nThe `perceive-recording` ticks thread runs 15 times a second. When the frame loop has handed nothing over for `OWN_AFTER_S` (0.25 s: the game not on screen, another client size, a stalled capture) it calls `rolling.Recorder.tick` itself. When the loop gives fewer than `FLOOR_FPS` (10) frames in the last second it takes the *floor*: its own grabs, until the loop gives `FLOOR_BACK_FPS` (12) a second over `FLOOR_BACK_S` (2 s); the loop's frames meanwhile are only counted. Then it polls (inbox, alarm, clips, status).\n\n### One recorder\n`take` grabs the rolling mutex first. While `gamelab recorder` holds it, the service writes `lab/recorder/waiting.json` and tries again every 10 s; the babysitter stops the old recorder when it sees this and it has nothing left to write.\n\n### Saves\nThe Recorder is made with `apart=True`: parts are written by a partwriter child process with 4 writer threads (`WRITERS`; 2 while a hunting command is attached), the saver thread at `WRITER_PRIORITY` (-2, the lowest). Written in the service, a save shared Python's lock with the frame loop whatever the priority. It can't outlive the service: a service that ends loses the 5 minutes it held.",
+   "lines": 392,
+   "key_items": [
+    {
+     "name": "Recording",
+     "kind": "class",
+     "line": 104,
+     "signature": "class Recording",
+     "summary": "The rolling recording in the perception service: `saw` from the frame loop, `start` its threads, `close` at the service's end."
+    },
+    {
+     "name": "Recording.saw",
+     "kind": "method",
+     "line": 146,
+     "signature": "def saw(self, st, frame, run: int) -> None",
+     "summary": "Takes a frame from the frame loop if it shows the game and the token bucket has a token; queues it for the encoder. Never waits."
+    },
+    {
+     "name": "Recording.encode",
+     "kind": "method",
+     "line": 189,
+     "signature": "def encode(self, t: float, full, seq: int | None, run: int | None, over: str = \"\", covered: float = 0.0, boxes: tuple = ()) -> Item | None",
+     "summary": "One frame into the ring as a difference or a whole frame (or a covered gap); None if a moment of its own came after its time."
+    },
+    {
+     "name": "Recording.tick",
+     "kind": "method",
+     "line": 242,
+     "signature": "def tick(self) -> None",
+     "summary": "A tick: a moment of its own if the loop has been silent 0.25 s or the floor is taken, then the recorder's poll."
+    },
+    {
+     "name": "Recording.floored",
+     "kind": "method",
+     "line": 259,
+     "signature": "def floored(self, now: float) -> bool",
+     "summary": "Whether to grab its own moments for the floor: under 10 frames from the loop in the last second, held until 12 a second over 2 s."
+    },
+    {
+     "name": "Recording.take",
+     "kind": "method",
+     "line": 307,
+     "signature": "def take(self) -> bool",
+     "summary": "Takes the recorders' mutex and builds the rolling.Recorder (GameWindow with perception.frames' z-order walk, ScreenGrab, apart saves); else says it's waiting."
+    },
+    {
+     "name": "Recording.close",
+     "kind": "method",
+     "line": 379,
+     "signature": "def close(self, timeout: float = 120.0) -> None",
+     "summary": "Stops its threads, closes the recorder (queued saves written, clips cut short, status says stopped) and lets go of the mutex."
+    }
+   ],
+   "inputs": [
+    "the perception service's frames and states (`Service._emit` calls `saw` with the frame by reference, its seq and run)",
+    "the screen, through rolling.Recorder.tick, when the frame loop is silent or under the floor"
+   ],
+   "outputs": [
+    "moments into the rolling.Recorder's ring; everything the Recorder saves (see control.rolling)",
+    "counts for the status file (taken, dropped, late, covered, own moments, floor) and the service's console line",
+    "`lab/recorder/waiting.json` while another recorder holds the mutex"
+   ],
+   "uses": [
+    "gamelab/control/rolling.py",
+    "gamelab/paths.py",
+    "gamelab/localization/rate.py",
+    "gamelab/perception/frames.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/recorder/waiting.json",
+     "mode": "write",
+     "what": "the service waiting for the recorders' mutex (pid, since, updated)"
+    }
+   ],
+   "concurrency": "Inside the perception service: `saw` on the frame loop's thread (never blocks); a `perceive-recording` ticks thread (15 a second, takes the mutex first) and a `perceive-recording-encoder` thread, both daemons; rolling's saver thread; saves in a partwriter child process.",
+   "tunables": [
+    {
+     "name": "FPS",
+     "value": "rate.HZ (15.0)",
+     "meaning": "frames a second kept: every frame of the service's"
+    },
+    {
+     "name": "BURST",
+     "value": "2.0",
+     "meaning": "the token bucket's most, in frames"
+    },
+    {
+     "name": "KEY_EVERY_S",
+     "value": "1.0",
+     "meaning": "a whole frame at least this often"
+    },
+    {
+     "name": "QUEUE",
+     "value": "8",
+     "meaning": "frames waiting for the encoder at most (about half a second)"
+    },
+    {
+     "name": "OWN_AFTER_S",
+     "value": "0.25",
+     "meaning": "silence from the frame loop before it grabs its own moments"
+    },
+    {
+     "name": "FLOOR_FPS",
+     "value": "10.0",
+     "meaning": "fewer frames than this in FLOOR_WINDOW_S (1 s): take the floor"
+    },
+    {
+     "name": "FLOOR_BACK_FPS",
+     "value": "12.0",
+     "meaning": "the loop must give this many a second over FLOOR_BACK_S (2 s) to end the floor"
+    },
+    {
+     "name": "MUTEX_RETRY_S",
+     "value": "10.0",
+     "meaning": "seconds between tries for the mutex"
+    },
+    {
+     "name": "WRITERS",
+     "value": "4",
+     "meaning": "threads a save is encoded on ..."
+    },
+    {
+     "name": "WRITERS_HUNTING",
+     "value": "2",
+     "meaning": "... while a command that hunts is attached"
+    },
+    {
+     "name": "WRITER_PRIORITY",
+     "value": "-2",
+     "meaning": "the saver's thread priority (THREAD_PRIORITY_LOWEST)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "The rolling recording moved into the perception service",
+     "why": "The user: \"The recording should probably just take frames from within the same perception process to have a rolling window copy of things in memory, match fps or fps/2\"."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Saves written in a process of their own (partwriter)",
+     "why": "Written in the service a save shared Python's lock with the frame loop, whose steps then waited 18-21 ms (median) against 1-2."
+    },
+    {
+     "date": "",
+     "what": "A token bucket instead of a due grid",
+     "why": "The due grid kept 0.1-0.2 frames a second fewer on the replays' frame times."
+    },
+    {
+     "date": "",
+     "what": "OWN_AFTER_S lowered from 0.5 s to 0.25 s",
+     "why": "A stall of the loop had left a gap of half a second before its own moments came."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "15 frames a second (localization.rate.HZ)",
+     "why": "Every other one of the service's 30 until then."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Partly covered frames kept with their boxes",
+     "why": "As control.rolling: the user's request."
+    }
+   ],
+   "gotchas": [
+    "While the floor is taken, the loop's frames are only counted: a frame of the loop between two of its own would make the second late.",
+    "It can't outlive the service: a crash or restart loses the 5 minutes held, unlike the standalone `gamelab recorder`.",
+    "One recorder at a time: with `gamelab recorder` running, the service records nothing until it is stopped."
+   ],
+   "tests": [
+    "tests/test_service_recorder.py",
+    "tests/test_rate.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/partwriter.py",
+   "title": "The part writer",
+   "tagline": "A child process that encodes and writes one saved part of the rolling recording",
+   "summary": "`python -m gamelab.control.partwriter` reads a pickled header and N rolling `Item`s from stdin, writes the part with `rolling.write_part` at the lowest thread priority, and prints one JSON line (`{\"summary\": ...}` or `{\"error\": ...}`). It exists so the perception service's saves don't share Python's lock with its frame loop.",
+   "details_md": "Started by `rolling.write_part_apart` with no window and a below-normal priority class (Idle if its parent is Idle). The header carries `folder`, `info`, `fps`, `png`, `encoders` and `n`; then each moment is pickled as the Item's fields in order (`t, data, why, size, key, rgb, seq, run, covered, over`), the compressed frame bytes passed through as they are (pickle protocol 5 writes a big buffer straight out).\n\nIt sets OpenCV to one thread (its writers are the threads) and every thread, the writers too, to `LOWEST` (-2). Writers at normal priority had still taken CPUs from the frame loop on the replays (its rate 11.4 to 8.0 frames a second during a 120 s save, the machine 54% busy).\n\nOn any failure it prints `{\"error\": ...}` and exits 1; the parent then writes the part itself, after moving a half-written folder aside. The parent also kills it past `APART_TIMEOUT_S` (600 s; 300 s of frames took 24-31 s written in the service).",
+   "lines": 47,
+   "key_items": [
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 23,
+     "signature": "def main() -> int",
+     "summary": "Reads the header and moments from stdin, writes the part with rolling.write_part at LOWEST priority, prints the summary or the error as one JSON line."
+    },
+    {
+     "name": "LOWEST",
+     "kind": "constant",
+     "line": 20,
+     "signature": "LOWEST = -2",
+     "summary": "THREAD_PRIORITY_LOWEST: this process's threads, its writers too, below the frame loop and the game."
+    }
+   ],
+   "inputs": [
+    "a pickled header and moments on stdin, from rolling.write_part_apart in the perception service"
+   ],
+   "outputs": [
+    "the part's folder (frames, index.jsonl, summary.json) and one JSON line on stdout"
+   ],
+   "uses": [
+    "gamelab/control/rolling.py"
+   ],
+   "files_io": [
+    {
+     "path": "<the folder named in the header>",
+     "mode": "write",
+     "what": "the part: frames (JPEG or PNG), index.jsonl, summary.json"
+    }
+   ],
+   "concurrency": "A short-lived child process per save; its main thread plus write_part's encoder pool, all at THREAD_PRIORITY_LOWEST in a below-normal (or Idle) process.",
+   "tunables": [
+    {
+     "name": "LOWEST",
+     "value": "-2",
+     "meaning": "thread priority of everything in the process"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "The perception service's saves written in a process of their own",
+     "why": "Written in the service a 120 s save made the frame loop's steps wait 18-21 ms (median) against 1-2; apart, 3-4 ms."
+    }
+   ],
+   "gotchas": [
+    "It has no fallback of its own: an error is reported and the parent writes the part in the service instead (slower for the frame loop)."
+   ],
+   "tests": [
+    "tests/test_service_recorder.py"
+   ]
+  },
+  {
+   "path": "gamelab/control/window_size.py",
+   "title": "Window sizing (Alt+Enter twice)",
+   "tagline": "Sets the game's client back to 1366x768 with Alt+Enter twice, guarded against the Lie Detector",
+   "summary": "The eyes only work on a 1366x768 client drawn where its window is. When the client is another size or the game draws its picture off the client (framecheck's fault kinds `size` and `drawn`), `SizeFix` makes a `refit` try: Alt+Enter through the key player to go full screen, then Alt+Enter again to come back windowed at the game's own size, the way the user fixes it by hand. Every press is guarded: no alarm, no Lie Detector on the picture, no plan running, one process at a time, the game in front.",
+   "details_md": "### One try: `refit`\n- Not tried (`held`) with the game minimized, the alarm up, `client.busy()` (a plan waiting for the player or being played), or another process holding the named mutex `Local\\gamelab-window-fix`.\n- From windowed: one Alt+Enter (`ALT_ENTER`: Alt down, Enter down at 50 ms, Enter up at 90 ms, Alt up at 140 ms; each Alt+Enter is a plan of its own through `client.submit`), then `_settle` waits for the client area to change within 8 s (`CHANGE_S`) and stay the same 1.5 s (`SETTLE_S`), polled every 0.1 s, 20 s at most. If it is now full screen, it waits until 8 s (`FULL_HOLD_S`) after the player answered that press, then sends Alt+Enter back, pressing again up to 3 times (`BACK_PRESSES`) while a press changes nothing.\n- No second press after a first that set the size right or didn't reach full screen: a second would leave the game full screen.\n- Before *every* press (`_press`): the game not minimized, the alarm not up, any busy plan waited for (10 s, on the way back), the game brought to the front (3 s), and the Lie Detector looked for on the perception service's picture of the client at whatever size (`spot`, usually `lie_detector_sighting`: the picture brought to 1920x1080, the spotter's templates' size). Seen: `_alarm` raises the alarm as the player's watchdog would (it may not see it at this size). No picture: no Alt+Enter; after a first press the look is asked again every 0.5 s for 8 s (`LOOK_FOR_S`), then the try stops, the game left full screen.\n- The outcome is a `Refit` and a log line (also a telemetry `event` of kind `window`).\n\n### When to try: `SizeFix`\nA hunting command's Senses hand it every look's `Problem` that left nothing to act on. Only `FIX_KINDS` faults count. It tries once the same fault, the window where it was, has stood 5 s (`STEADY_S`: never in the middle of the user's own drag), once more 30 s later (`AGAIN_S`), and after `TRIES` (2) gives up and waits for the user, until a look passes. `HOURLY` (4) tries an hour at most across all processes (`lab/window_tries.json`). Before a try it checks the game is in play: the HUD's buttons match at least 0.7 (`HUD_SEEN`), so Enter never goes into a login or character-select field. A try is counted as its first Alt+Enter goes to the player (`on_try`), so one killed in the hold still counts; tries that sent nothing are counted apart (`UNPRESSED`, 4). `pending()` lets a command's looks wait for the first try (up to `STEADY_S` + `HOLD_S` = 15 s) before giving up.\n\nAlt is her jump key too: she jumps where she stands at each Alt+Enter. Only `FULL_HOLD_S` is measured; the other waits are guesses that `window --recover`'s settle times are meant to check.",
+   "lines": 553,
+   "key_items": [
+    {
+     "name": "refit",
+     "kind": "function",
+     "line": 209,
+     "signature": "def refit(title: str, want: tuple[int, int] = GAME_VIEW, log: Callable[[str], None] = print, spot: Callable[[], object] | None = None, on_try: Callable[[], None] | None = None) -> Refit",
+     "summary": "One try at setting the client to `want` (1366x768) with Alt+Enter twice (from full screen only the way back); what came of it is said and returned."
+    },
+    {
+     "name": "SizeFix",
+     "kind": "class",
+     "line": 437,
+     "signature": "class SizeFix",
+     "summary": "What a command's Senses hand each look with nothing to act on: decides when to make a refit try, and when to give up and wait for the user."
+    },
+    {
+     "name": "SizeFix.__call__",
+     "kind": "method",
+     "line": 477,
+     "signature": "def __call__(self, problem: Problem, wait: bool = True) -> bool",
+     "summary": "After a failed look: whether a try set the client right now. Applies STEADY_S, AGAIN_S, TRIES, UNPRESSED, the alarm, HOURLY and the in-play check before calling refit."
+    },
+    {
+     "name": "_press",
+     "kind": "function",
+     "line": 288,
+     "signature": "def _press(title: str, area: dict, out: Refit, spot: Callable[[], object] | None, on_try: Callable[[], None] | None, log: Callable[[str], None]) -> tuple[dict, bool]",
+     "summary": "One Alt+Enter once nothing stands in its way (minimized, alarm, busy plan, not in front, Lie Detector look), then the wait for the window to change and settle."
+    },
+    {
+     "name": "_presses",
+     "kind": "function",
+     "line": 255,
+     "signature": "def _presses(title: str, area: dict, full: bool, want: tuple[int, int], out: Refit, spot: Callable[[], object] | None, on_try: Callable[[], None] | None, log: Callable[[str], None]) -> None",
+     "summary": "The Alt+Enters of one try: to full screen if windowed, the hold to FULL_HOLD_S, then back, pressed again while one changes nothing."
+    },
+    {
+     "name": "_settle",
+     "kind": "function",
+     "line": 374,
+     "signature": "def _settle(title: str, before: dict | None) -> tuple[dict | None, float | None, str]",
+     "summary": "After an Alt+Enter: the client area once it has changed and stayed so SETTLE_S, and how long that took; or why not."
+    },
+    {
+     "name": "ALT_ENTER",
+     "kind": "constant",
+     "line": 71,
+     "signature": "ALT_ENTER = ((0, \"alt\", \"down\"), (ALT_LEAD_MS, \"enter\", \"down\"), (ALT_LEAD_MS + ENTER_MS, \"enter\", \"up\"), (2 * ALT_LEAD_MS + ENTER_MS, \"alt\", \"up\"))",
+     "summary": "The plan, as the user's manual fix `alt+ 50 enter 50 alt-`: Alt down, Enter tapped 50 ms later, Alt up 50 ms after it."
+    },
+    {
+     "name": "lie_detector_sighting",
+     "kind": "function",
+     "line": 144,
+     "signature": "def lie_detector_sighting(frame: np.ndarray) -> Sighting | None",
+     "summary": "The Lie Detector on a picture of the client at any size (brought to 1920x1080), or None.",
+     "details_md": "On saved screens stretched to clients of 3840x2160 down to 1280x720 and brought to 1920x1080, every form is seen at every size (1.08-1.43 of the threshold) but the countdown, missed at 2560x1440, 1350x700 and 1280x720 (0.76-0.86: its thin yellow letters resampled); brought to 1366x768 instead, the countdown was seen at none."
+    },
+    {
+     "name": "_alarm",
+     "kind": "function",
+     "line": 163,
+     "signature": "def _alarm(seen, log: Callable[[str], None]) -> str",
+     "summary": "The Lie Detector seen by a try's look: raises the alarm as the player's watchdog does (file, screenshot, page), unless it's up already."
+    },
+    {
+     "name": "Refit",
+     "kind": "dataclass",
+     "line": 183,
+     "signature": "@dataclass class Refit",
+     "summary": "What one try came to: sizes before and after, full screen or not, ok, presses, settle times, why it stopped, held, counted."
+    },
+    {
+     "name": "SizeFix.pending",
+     "kind": "method",
+     "line": 470,
+     "signature": "def pending(self) -> bool",
+     "summary": "Whether its first try at the fault is still to come (wrong less than STEADY_S + HOLD_S, none tried): a command that stops on failed looks waits for it."
+    },
+    {
+     "name": "tries_within",
+     "kind": "function",
+     "line": 417,
+     "signature": "def tries_within(path, now: float) -> list[float]",
+     "summary": "The times Alt+Enter was tried in the hour before `now`, by any process (lab/window_tries.json)."
+    },
+    {
+     "name": "_lock",
+     "kind": "function",
+     "line": 394,
+     "signature": "def _lock()",
+     "summary": "The named mutex for a try, or None while another process holds it; Windows lets go of it when a process ends, however it ends."
+    }
+   ],
+   "inputs": [
+    "a look's `Problem` (perception.framecheck) from a command's Senses",
+    "the game window's client rect and full-screen state (gamelab.window)",
+    "`spot`: the perception service's picture of the client for the Lie Detector look; `in_play`: the HUD buttons' match score",
+    "`lab/ALARM.json` and whether a plan is busy (control.client)"
+   ],
+   "outputs": [
+    "Alt+Enter plans to the key player (control.client.submit)",
+    "the alarm (control.alarm.raise_alarm) if it sees the Lie Detector",
+    "log lines and telemetry `event`s of kind `window`; `lab/window_tries.json`"
+   ],
+   "uses": [
+    "gamelab/control/client.py",
+    "gamelab/control/alarm.py",
+    "gamelab/window.py",
+    "gamelab/telemetry.py",
+    "gamelab/paths.py",
+    "gamelab/screen.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/localization/service.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/window_tries.json",
+     "mode": "read-write",
+     "what": "when Alt+Enter was tried in the last hour, by any process"
+    },
+    {
+     "path": "lab/ALARM.json",
+     "mode": "write",
+     "what": "raised through control.alarm when the try's look sees the Lie Detector"
+    },
+    {
+     "path": "lab/inbox/<id>.json",
+     "mode": "write",
+     "what": "the Alt+Enter plans, through control.client"
+    }
+   ],
+   "concurrency": "Runs on the calling command's thread (a hunt's Senses, the pet's babysitter, `window --recover`) and blocks for the whole try; holds the named mutex `Local\\gamelab-window-fix` for it.",
+   "tunables": [
+    {
+     "name": "ALT_LEAD_MS",
+     "value": "50",
+     "meaning": "Alt held this long before Enter goes down and after it comes up (a guess)"
+    },
+    {
+     "name": "ENTER_MS",
+     "value": "40",
+     "meaning": "Enter's tap"
+    },
+    {
+     "name": "CHANGE_S",
+     "value": "8.0",
+     "meaning": "the window must change within this of an Alt+Enter, or the key did nothing (a guess)"
+    },
+    {
+     "name": "SETTLE_S",
+     "value": "1.5",
+     "meaning": "... and stay the same this long (a guess)"
+    },
+    {
+     "name": "SETTLE_BY_S",
+     "value": "20.0",
+     "meaning": "... and settle within this, or the try stops"
+    },
+    {
+     "name": "FULL_HOLD_S",
+     "value": "8.0",
+     "meaning": "from full screen, no Alt+Enter sooner than this after the one that put it there (measured)"
+    },
+    {
+     "name": "BACK_PRESSES",
+     "value": "3",
+     "meaning": "presses from full screen at most in a try"
+    },
+    {
+     "name": "LOOK_FOR_S",
+     "value": "8.0",
+     "meaning": "after a press, the Lie Detector look is retried this long (every LOOK_EVERY_S, 0.5 s)"
+    },
+    {
+     "name": "BUSY_WAIT_S",
+     "value": "10.0",
+     "meaning": "a busy plan waited for before a press back"
+    },
+    {
+     "name": "FRONT_WAIT_S",
+     "value": "3.0",
+     "meaning": "the game waited for to come to the front"
+    },
+    {
+     "name": "PLAN_TIMEOUT_S",
+     "value": "10.0",
+     "meaning": "the player's answer to an Alt+Enter plan"
+    },
+    {
+     "name": "STEADY_S",
+     "value": "5.0",
+     "meaning": "the same fault stood this long before a try (a guess)"
+    },
+    {
+     "name": "HOLD_S",
+     "value": "10.0",
+     "meaning": "a command waits this much longer for the first try at most"
+    },
+    {
+     "name": "TRIES",
+     "value": "2",
+     "meaning": "tries each time it goes wrong, AGAIN_S apart"
+    },
+    {
+     "name": "AGAIN_S",
+     "value": "30.0",
+     "meaning": "seconds between tries (a guess)"
+    },
+    {
+     "name": "HOURLY",
+     "value": "4",
+     "meaning": "tries in any hour at most, by any process"
+    },
+    {
+     "name": "UNPRESSED",
+     "value": "4",
+     "meaning": "tries that sent no Alt+Enter, each time at most (a guess)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Built (on work/window-recover)",
+     "why": "At about 19:55 the client was another size, the cause unknown; the user: \"use alt + enter to enter full screen mode, then use alt + enter again to return to window-ed mode\"."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "FULL_HOLD_S = 8 s",
+     "why": "Measured at 23:41: a second Alt+Enter 3.5 s after the first wasn't taken; one about 8 s after it set the client back."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "The `drawn` fault (the game drawing 18 px left and 85 up of its client) mended the same way",
+     "why": "At 23:40 a hunt stood still for ever on it; Alt+Enter twice set it right."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Ported onto the perception service (Senses.window_fix, `window --recover`), with the Lie Detector looked for before each press on the service's picture at any size",
+     "why": "The player's watchdog didn't see the Lie Detector at other sizes, and Enter can answer a quiz."
+    },
+    {
+     "date": "",
+     "what": "A named mutex instead of a lock file",
+     "why": "Windows lets go of a mutex when a process ends; the branch's lock file stood 120 s after the babysitter killed the pet's process."
+    }
+   ],
+   "gotchas": [
+    "Alt is her jump key too: she jumps where she stands at each Alt+Enter.",
+    "A try stopped after the first press (no picture to look at, a game that won't take the key) leaves the game full screen for the next try or the user: an Enter typed into the Lie Detector can't be undone.",
+    "A minimized game (the user switched away from full screen) is never brought back over what they're doing.",
+    "Only FULL_HOLD_S is measured; the other waits are guesses."
+   ],
+   "tests": [
+    "tests/test_window_size.py",
+    "tests/test_pet.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "plan (inbox JSON)",
+   "module": "gamelab/control/player.py",
+   "line": 98,
+   "summary": "A key plan: written by control.client into lab/inbox, checked by `validate` and played by `Player.run`. Plain data, never code.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "str",
+     "meaning": "set by the player from the sanitized file name (letters, digits, - and _, 64 chars)"
+    },
+    {
+     "name": "kind",
+     "type": "str | None",
+     "meaning": "pet_food, retreat, lie_cursor or lie_ok: the kinds that may go with the alarm up"
+    },
+    {
+     "name": "events",
+     "type": "list",
+     "meaning": "[ms, key, 'down'|'up'] or [ms, 'mouse', x, y] (client px), sorted, at most 400, within 20 s"
+    },
+    {
+     "name": "end_ms",
+     "type": "number | None",
+     "meaning": "the plan lasts this long (the next one starts then)"
+    },
+    {
+     "name": "focus",
+     "type": "bool",
+     "meaning": "bring the game to the front first (never with the alarm up, never for a retreat)"
+    },
+    {
+     "name": "window_client",
+     "type": "[w, h] | None",
+     "meaning": "resize the client first: one of window.CLIENT_SIZES"
+    },
+    {
+     "name": "capture",
+     "type": "dict",
+     "meaning": "fps (0-60), duration_ms, lead_ms (default 100), scale (1-4), crop [x, y, w, h]"
+    },
+    {
+     "name": "held",
+     "type": "list[str]",
+     "meaning": "a splice only: the keys that should be down when it takes over"
+    },
+    {
+     "name": "at_ms",
+     "type": "int",
+     "meaning": "a splice only: when it takes over, on the running plan's clock"
+    }
+   ]
+  },
+  {
+   "name": "result (outbox JSON)",
+   "module": "gamelab/control/player.py",
+   "line": 967,
+   "summary": "A plan's answer in lab/outbox/<id>.json, read by control.client.wait.",
+   "fields": [
+    {
+     "name": "sent",
+     "type": "list",
+     "meaning": "what was actually played: [ms since the plan's start, key, down/up] or [ms, 'mouse', x, y]"
+    },
+    {
+     "name": "problems",
+     "type": "list[str]",
+     "meaning": "e.g. 'cancelled', the Lie Detector error, the retreat's time over, 'game left the foreground; stopped pressing keys', 'spliced'"
+    },
+    {
+     "name": "region",
+     "type": "dict",
+     "meaning": "the screen box recorded"
+    },
+    {
+     "name": "scale",
+     "type": "int",
+     "meaning": "the recording's pixel step"
+    },
+    {
+     "name": "client",
+     "type": "dict",
+     "meaning": "the client rect (left, top, width, height)"
+    },
+    {
+     "name": "trail",
+     "type": "list",
+     "meaning": "where the pointer went: [clock time (s), client x, client y]"
+    },
+    {
+     "name": "frames",
+     "type": "int",
+     "meaning": "frames saved to lab/outbox/<id>.npz"
+    },
+    {
+     "name": "error",
+     "type": "str",
+     "meaning": "a refusal, the Lie Detector error, or an exception (with `trace`)"
+    },
+    {
+     "name": "spliced",
+     "type": "dict",
+     "meaning": "on a plan taken over: {to, at_ms, late_ms}"
+    }
+   ]
+  },
+  {
+   "name": "info (the alarm file)",
+   "module": "gamelab/control/alarm.py",
+   "line": 194,
+   "summary": "What lab/ALARM.json holds: built by raise_alarm, read back with alarm_info by every command, the player, the rolling recorder and the service's helpers.",
+   "fields": [
+    {
+     "name": "reason",
+     "type": "str",
+     "meaning": "'lie_detector' (or 'lie_detector (seen by watch)')"
+    },
+    {
+     "name": "time",
+     "type": "str",
+     "meaning": "local '%Y-%m-%d %H:%M:%S'; also the rolling recorder's key for a new alarm"
+    },
+    {
+     "name": "at",
+     "type": "float",
+     "meaning": "time.time() of the sighting: her retreat counts its 10 s from it; the player counts the retreat window from it only when the alarm is the file's (its own watchdog didn't see it: otherwise `Alarm.at`)"
+    },
+    {
+     "name": "form",
+     "type": "str",
+     "meaning": "the spotter's form name (e.g. 'mini-game notice', 'quiz warning', 'truth booth')"
+    },
+    {
+     "name": "cause",
+     "type": "str",
+     "meaning": "'unknown' for a Truth Booth with no test seen before it"
+    },
+    {
+     "name": "screenshot",
+     "type": "str",
+     "meaning": "path of lab/lie_detector_<HHMMSS>.png"
+    }
+   ]
+  },
+  {
+   "name": "Alarm",
+   "module": "gamelab/control/player.py",
+   "line": 307,
+   "summary": "The player's in-memory alarm: a threading.Event the Watchdog sets on a sighting and every key wait listens to.",
+   "fields": [
+    {
+     "name": "(is_set)",
+     "type": "bool",
+     "meaning": "the Lie Detector seen and not yet cleared"
+    },
+    {
+     "name": "at",
+     "type": "float | None",
+     "meaning": "time.monotonic() of the first set: the retreat window's start"
+    }
+   ]
+  },
+  {
+   "name": "Item",
+   "module": "gamelab/control/rolling.py",
+   "line": 195,
+   "summary": "One moment of the rolling recording: a packed frame or a gap. Made by Recorder.tick or control.recording, kept in the Ring, written by write_part (also pickled to partwriter).",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "time.time() of the grab or showing"
+    },
+    {
+     "name": "data",
+     "type": "bytes | None",
+     "meaning": "zstd-compressed pixels (whole or a difference); None for a gap"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "a gap's reason"
+    },
+    {
+     "name": "size",
+     "type": "(w, h) | None",
+     "meaning": "a frame's size"
+    },
+    {
+     "name": "key",
+     "type": "bool",
+     "meaning": "a whole frame; False: a difference from the frame just before"
+    },
+    {
+     "name": "rgb",
+     "type": "bool",
+     "meaning": "RGB (the service's frames) rather than BGR (a grab)"
+    },
+    {
+     "name": "seq, run",
+     "type": "int | None",
+     "meaning": "the perception service's frame number and run, to join a frame with what perception made of it"
+    },
+    {
+     "name": "covered, over",
+     "type": "float, tuple",
+     "meaning": "the share and boxes of the client other windows were over"
+    }
+   ]
+  },
+  {
+   "name": "Clip",
+   "module": "gamelab/control/rolling.py",
+   "line": 271,
+   "summary": "An alarm's saves being gathered by the rolling Recorder until the cycle ends.",
+   "fields": [
+    {
+     "name": "info",
+     "type": "dict",
+     "meaning": "the alarm file's contents"
+    },
+    {
+     "name": "seen",
+     "type": "float",
+     "meaning": "when the alarm was seen (the file's mtime)"
+    },
+    {
+     "name": "items",
+     "type": "list[Item]",
+     "meaning": "the clip's moments so far, held so the ring's cap can't lose them"
+    },
+    {
+     "name": "before",
+     "type": "list[Item]",
+     "meaning": "what the ring held at the alarm, for before/"
+    },
+    {
+     "name": "folder",
+     "type": "Path | None",
+     "meaning": "the player's recording of the cycle, once found"
+    }
+   ]
+  },
+  {
+   "name": "summary (a saved part)",
+   "module": "gamelab/control/rolling.py",
+   "line": 1107,
+   "summary": "summary.json of every saved part (before/, a clip, save-recent, unknown-cause): the save's own `info` fields first, then the counts.",
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "'save-recent', 'before the Lie Detector', \"the alarm's clip\", 'before a Truth Booth of unknown cause'"
+    },
+    {
+     "name": "from, to, seconds, ticks, frames",
+     "type": "str, str, float, int, int",
+     "meaning": "the span and counts"
+    },
+    {
+     "name": "gaps",
+     "type": "dict",
+     "meaning": "seconds of gap by reason"
+    },
+    {
+     "name": "format, jpeg_quality, fps",
+     "type": "str, int | None, float",
+     "meaning": "jpeg or png, and the rate"
+    },
+    {
+     "name": "window, sources",
+     "type": "[w, h], dict",
+     "meaning": "the last frame's size; how many frames were the service's, how many grabbed"
+    },
+    {
+     "name": "alarm, alarm_at, alarm_t",
+     "type": "dict, str, float",
+     "meaning": "an alarm save's alarm and where it falls in the part"
+    },
+    {
+     "name": "first_shown, asked, cut_short, player_recording",
+     "type": "str, list, bool, str",
+     "meaning": "a clip's first frame showing the Lie Detector, the span asked, whether the recorder stopped it, the cycle folder"
+    }
+   ]
+  },
+  {
+   "name": "Recording.summary",
+   "module": "gamelab/control/lie_recorder.py",
+   "line": 195,
+   "summary": "summary.json of a Lie Detector cycle recording, read by the rolling recorder (when the clip ends), `clear-alarm`, and the review tools.",
+   "fields": [
+    {
+     "name": "first_seen_at",
+     "type": "float",
+     "meaning": "time.time() of the first sight"
+    },
+    {
+     "name": "first_seen, last_seen, test_last",
+     "type": "float | None",
+     "meaning": "seconds after it: any form's first and last sight, the test's last"
+    },
+    {
+     "name": "seen_s, duration_s",
+     "type": "float | None, float",
+     "meaning": "from the first to the last sight; how long the recording ran"
+    },
+    {
+     "name": "grabs, not_showing, dropped",
+     "type": "int, dict, int",
+     "meaning": "looks, looks without a frame by why, index lines dropped"
+    },
+    {
+     "name": "forms",
+     "type": "dict",
+     "meaning": "each form seen: first, last, frames"
+    },
+    {
+     "name": "truth_booth, outcome",
+     "type": "bool, str",
+     "meaning": "'answered', 'sent to the Truth Booth' or 'unknown: still up when the recording ended'"
+    },
+    {
+     "name": "cause, booth_until",
+     "type": "str | None, float | None",
+     "meaning": "UNKNOWN_CAUSE or None; the Truth Booth stay's end by its clock"
+    },
+    {
+     "name": "end",
+     "type": "str",
+     "meaning": "'gone', 'test over', 'cap' or 'stopped'"
+    },
+    {
+     "name": "alarm_screenshot, window",
+     "type": "str, [w, h]",
+     "meaning": "the alarm's screenshot and the frames' size"
+    },
+    {
+     "name": "truth_booth_after",
+     "type": "bool",
+     "meaning": "added by cycle_over when the Truth Booth showed only after the recording ended at its test"
+    }
+   ]
+  },
+  {
+   "name": "line (a lie_target answer)",
+   "module": "gamelab/control/lie_tracking.py",
+   "line": 498,
+   "summary": "One tracker answer for the mouse mini-game: a line of lab/lie_target/<round>.jsonl, a `lie_target` telemetry record, and the cursor's next target.",
+   "fields": [
+    {
+     "name": "t, at",
+     "type": "float, str",
+     "meaning": "the frame's monotonic time and clock time"
+    },
+    {
+     "name": "seq, run",
+     "type": "int",
+     "meaning": "the service's frame number and run (joins the alarm clip's index)"
+    },
+    {
+     "name": "board",
+     "type": "[x, y]",
+     "meaning": "the target's centre on the 750x500 board"
+    },
+    {
+     "name": "client",
+     "type": "[x, y]",
+     "meaning": "board + (308, 180): in the 1366x768 client"
+    },
+    {
+     "name": "desktop",
+     "type": "[x, y] | None",
+     "meaning": "client + the client's corner on the screen"
+    },
+    {
+     "name": "angle, score, white",
+     "type": "float, float, bool",
+     "meaning": "the match's angle (rad), score, and whether the white blob itself was found"
+    },
+    {
+     "name": "template, ms",
+     "type": "int | None, float",
+     "meaning": "the seq of the template matched with; the step's time"
+    }
+   ]
+  },
+  {
+   "name": "Refit",
+   "module": "gamelab/control/window_size.py",
+   "line": 183,
+   "summary": "What one Alt+Enter try came to: returned by refit to SizeFix, the pet's babysitter or `window --recover`.",
+   "fields": [
+    {
+     "name": "before, after",
+     "type": "(w, h) | None",
+     "meaning": "the client's size before and after (None: no window)"
+    },
+    {
+     "name": "full, ok",
+     "type": "bool",
+     "meaning": "full screen after it; the size wanted, windowed"
+    },
+    {
+     "name": "pressed, took",
+     "type": "int, list[float]",
+     "meaning": "Alt+Enters played; seconds from each to the window's last change"
+    },
+    {
+     "name": "why, held",
+     "type": "str, bool",
+     "meaning": "why it stopped short; held off before anything was done"
+    },
+    {
+     "name": "counted",
+     "type": "bool",
+     "meaning": "an Alt+Enter went to the player: one of the tries"
+    },
+    {
+     "name": "pressed_at, settled",
+     "type": "float | None",
+     "meaning": "monotonic times of the last answer and the last settle"
+    }
+   ]
+  },
+  {
+   "name": "Recorder.status",
+   "module": "gamelab/control/rolling.py",
+   "line": 991,
+   "summary": "lab/recorder/status.json, written every 5 s: read by `recorder --status`, `save-recent` (is one running?) and the babysitter (anything left to write?).",
+   "fields": [
+    {
+     "name": "pid, started, updated, stopped",
+     "type": "int, str, float, bool",
+     "meaning": "which recorder, and whether it's alive (older than 30 s: not running)"
+    },
+    {
+     "name": "showing, why",
+     "type": "bool, str",
+     "meaning": "whether the game is on screen, else why not"
+    },
+    {
+     "name": "kept_s, frames, bytes, trimmed, gaps_s",
+     "type": "numbers",
+     "meaning": "what the ring holds"
+    },
+    {
+     "name": "fps, ms_a_frame, cpu_ms_a_frame, core_share",
+     "type": "float",
+     "meaning": "rate and cost since the last status"
+    },
+    {
+     "name": "saves, last_save, pending_clips, saves_waiting",
+     "type": "int, str, int, int",
+     "meaning": "saves made, and what it still has to write"
+    },
+    {
+     "name": "source (+ the service's counts)",
+     "type": "str, dict",
+     "meaning": "where frames come from; taken, dropped, late, covered, own_moments, floor_moments, floor_times, floor, queue"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "lie-detector-cycle",
+   "title": "From a Lie Detector sighting to its end",
+   "summary": "How one sighting stops the keys, raises the alarm, pages, records, lets the mini-game helpers act through the player, and finally unlocks (or doesn't).",
+   "trigger": "A Watchdog look scores some Lie Detector form at or above its threshold with no cycle in progress",
+   "steps": [
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Watchdog.tick",
+     "text": "The look (one of 4 a second) sees a form: `alarm.set()` comes first, before any file or sound.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "text": "The key thread's `wait` was sleeping on that event: it returns at once, `press_keys` stops, the `finally` lets go of every held key and the plan is answered with the Lie Detector error.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/alarm.py",
+     "symbol": "raise_alarm",
+     "text": "The watchdog's `_raise` writes lab/ALARM.json (time, `at`, form, cause), saves the screenshot and pages: 3 beeps and a Windows toast.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/lie_recorder.py",
+     "symbol": "Recording",
+     "text": "A recording folder lab/lie_detector/<stamp>/ starts with this first look; every later look adds a line.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/notify.py",
+     "symbol": "Pusher.seen",
+     "text": "A critical Bark alert and a text go out on threads of their own.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/rolling.py",
+     "symbol": "Recorder.check_alarm",
+     "text": "Within 0.5 s the rolling recorder sees a new alarm time, snapshots its 5-minute ring and starts holding a clip.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "symbol": "LieTracking.step",
+     "text": "Seeing the alarm file, the service starts the target tracker child and, on the mouse mini-game's board, sends the cursor's moves to the player as `lie_cursor` plans; the Violetta watcher (violetta_live) likewise loads its model and clicks answers.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "alarm_refusal",
+     "text": "Meanwhile every plan is refused but the four kinds: the hunt's retreat (12 s), pet-food taps, the cursor moves and the two click forms.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/lie_recorder.py",
+     "symbol": "Recording.finish",
+     "text": "The recording ends 5 s after the test's last sight (or when nothing has been seen 10 s); its thread writes summary.json.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/rolling.py",
+     "symbol": "Recorder.cycle_end",
+     "text": "With the summary there, the clip ends 5 s after `test_last`; the clip (PNG) and before/ (JPEG) are then written, by a partwriter process in the perception service (the standalone `gamelab recorder` writes them itself).",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Watchdog._resume",
+     "text": "Gone 10 s with no Truth Booth: the alarm file is deleted and the alarm cleared, plans resume with no restart. A Truth Booth cycle stays locked until `clear-alarm`; then the player stops and needs a UAC click.",
+     "process": "player (elevated)"
+    }
+   ]
+  },
+  {
+   "id": "plan-to-keys",
+   "title": "How a plan becomes key presses",
+   "summary": "The file handshake between an unelevated command and the elevated player, and how the keys are timed.",
+   "trigger": "A command calls control.client.send or submit, which writes lab/inbox/<id>.json",
+   "steps": [
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "_serve",
+     "text": "Polling every 10 ms, the player takes the first plan by name and claims it by renaming it `<id>.running`; the client can now only cancel it.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "_read_plan",
+     "text": "Reads the JSON, retrying every 5 ms for up to 0.5 s while Windows refuses the file; the id comes from the sanitized file name.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "validate",
+     "text": "Checks events, times, sizes and capture; then the cursor/click shapes and, with the alarm up, `alarm_refusal`.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "text": "Resizes the client or brings the game to the front if asked, refuses if the game isn't in front, and starts the `key-player` thread; the main thread records frames if asked.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "text": "For each event the key thread's `wait` sleeps on the halt event in 15 ms steps (`WAIT_STEP_S`), checking `.cancel`, a retreat's cutoff and a waiting splice between, then reaches the key's time with `_sleep_until` (the last 20 ms, spinning only the final 4 ms); it checks the foreground again and presses (`_press`, SendInput) or moves the pointer along a generated trail.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "_answer",
+     "text": "`Player.run`'s `finally` lets go of every held key; `_serve` then has `_answer` write the result to lab/outbox/<id>.tmp and rename it to <id>.json (frames, if recorded, to <id>.npz); control.client.wait picks it up.",
+     "process": "player (elevated)"
+    }
+   ]
+  },
+  {
+   "id": "mini-game-cursor",
+   "title": "The mouse mini-game's cursor, from frame to pointer",
+   "summary": "How the perception service follows the fading figure and moves the real pointer through the elevated player.",
+   "trigger": "The alarm file is up and the mouse mini-game's board shows",
+   "steps": [
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "symbol": "LieTracking.saw",
+     "text": "The service's frame loop hands over each frame; only the newest is kept.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "symbol": "LieTracking.step",
+     "text": "The board is seen (`over_play` says 'mini-game'): a round begins, and each 750x500 board crop is sent to the tracker child when it is ready.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "symbol": "serve",
+     "text": "The child steps perception.lie_target.TargetTracker, writes the answer line to lab/lie_target/<round>.jsonl and replies with it.",
+     "process": "tracker child process"
+    },
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "symbol": "LieTracking._replies",
+     "text": "The answer goes to telemetry and, if the board is still showing, becomes the cursor thread's newest target.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/lie_tracking.py",
+     "symbol": "LieTracking._cursor_run",
+     "text": "The cursor thread calls control.client.move_lie_cursor with client px: a `lie_cursor` plan of one move at 0 ms, cancelled if the round ends first.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "lie_cursor_refusal",
+     "text": "The player accepts only one move at 0 ms inside the board's box, no focus, no wait.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "text": "window.move_cursor plays a generated trail to the point; the trail comes back in the result and into the `move finished` telemetry record.",
+     "process": "player (elevated)"
+    }
+   ]
+  },
+  {
+   "id": "window-refit",
+   "title": "Setting a wrong-sized client right",
+   "summary": "From a failed look to Alt+Enter twice through the player, and the guards on every press.",
+   "trigger": "A hunting command's look has nothing to act on because of a framecheck fault of kind `size` or `drawn`",
+   "steps": [
+    {
+     "module": "gamelab/control/window_size.py",
+     "symbol": "SizeFix.__call__",
+     "text": "The same fault has stood 5 s, tries are left (2 each time, 4 an hour across processes), no alarm, and the HUD shows the game in play: try.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/control/window_size.py",
+     "symbol": "refit",
+     "text": "Held off if minimized, the alarm is up, a plan is busy, or another process holds the window-fix mutex; else it takes the mutex.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/control/window_size.py",
+     "symbol": "_press",
+     "text": "Brings the game forward and looks for the Lie Detector on the service's picture of the client; seen, it raises the alarm instead of pressing.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/control/player.py",
+     "symbol": "Player.run",
+     "text": "The Alt+Enter plan (Alt down, Enter at 50-90 ms, Alt up at 140 ms) is played with the game in front.",
+     "process": "player (elevated)"
+    },
+    {
+     "module": "gamelab/control/window_size.py",
+     "symbol": "_settle",
+     "text": "Waits for the client to change within 8 s and stay 1.5 s.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/control/window_size.py",
+     "symbol": "_presses",
+     "text": "Full screen now: waits until 8 s after the first press, then Alt+Enter back (up to 3 presses if one changes nothing); refit reads the size and says whether it's 1366x768 windowed.",
+     "process": "the hunting command"
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "window_size has not run in game apart from the user's own Alt+Enters of 2026-10-25 23:41; all its waits but FULL_HOLD_S are guesses (README: Capture checks).",
+  "Whether the player's watchdog grab sees a full-screen game at all isn't known, and the window-size in-play check has met no login, character-select or cash-shop screen (README).",
+  "lie_recorder.END_S (10 s) ends a cycle after 10 s with no form the spotter knows; its comment's worry (the mini-game's count and figure tracking unseen) predates the board's own form, and how long an unseen stretch can last live isn't measured. An early end clears an answered-looking cycle's alarm by itself (AUTO_RESUME).",
+  "The rolling recording kept by the perception service can't outlive it: a service that ends loses the 5 minutes it held (recording.py).",
+  "Lossless packing in the standalone recorder (about 0.17 of a core estimated) is not measured in the live loop yet (README: The rolling recording).",
+  "lie_tracking and violetta_live use only frames of the game's own 1366x768 size; at any other client size they follow nothing.",
+  "partwriter.py has only two symbols (main, LOWEST); its behaviour lives in rolling.write_part and write_part_apart.",
+  "Some docstrings and README lines still give older numbers: player.py's top and the README say the player stops after \"a minute\" off the screen (END_S is 10 s), rolling.py's top says the service records \"every other frame of its 30 a second\" (15, every frame, since 2026-10-30), and paths.ALARM_CLIPS says a clip runs \"10 s before it to 60 s after\" (2 s before the first frame showing it to 5 s after the test). The values here are the code's constants."
+ ]
+}

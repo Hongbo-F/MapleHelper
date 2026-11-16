@@ -1,0 +1,1463 @@
+{
+ "id": "components",
+ "summary_md": "Two kinds of short-to-medium-lived, **non-elevated** Python processes: **a hunt** (`tour --loop`, `tour`, `hunt kill|clear`, `nav`, `nav --walk`, `probe run`), which looks at the perception service's latest state, decides, and hands every key to the elevated player as a plan file (so the player, which you start with `player --elevate` and a UAC click, must already run); and **a park** (`nav --park`), which only walks her to a safe place and ends. Neither is started by the babysitter: you or Claude start a hunt (by hand, or through an external grind-loop script that restarts `tour --loop`), and the pet feeder's guard, `gamelab stop` or you start a park. The babysitter itself is a PowerShell loop outside the repo, `D:/MapleHelper-scratch/live/babysit3.ps1` (not at the `pconst/finish` path runtime.json names: that folder is gone), started once by hand or by a Claude session detached through WMI and checking every 5 s; no scheduled task runs it, and none was running on 2026-11-16. For these two it only reads the process list and stops the pet feeder while either runs.",
+ "processes": [
+  {
+   "process": "hunt",
+   "is_os_process": true,
+   "plain_md": "**A hunt is the agent that plays.** It is one command: `python -m gamelab tour --loop --minutes 20 --map 10002073` (a 20-minute grind, what runs live), `tour` (one sweep of the map), `hunt kill` or `hunt clear` (fight from where she stands), `nav PLATFORM` (one trip), `nav --walk MINUTES` (random trips, a movement test) or `probe run NAME` (a throwing test). **Each is its own ordinary OS process** (`python.exe -m gamelab ...`), not elevated. It never presses a key itself: every key goes to the elevated key player as a plan file, so **the player must already be running** (you start it with `python -m gamelab player --elevate` and a UAC click). Without the player its first plan waits 120 s and the hunt ends with \"is the player running?\". It never captures the screen either: what it sees comes from the perception service, and if none runs it starts one (hidden, through WMI) and waits up to 20 s for it.\n\n**Who starts it: you, by hand in a terminal, or Claude when it drives gamelab.** Claude may also run it through a grind-loop script outside the repo (`D:/MapleHelper-scratch/mageq/empty/grind_loop.py` or `grind_loop_thief.py`). That script runs `tour --loop` as its child, with the hunt's output in a log file, waits for it, and starts it again for the time left after a Lie Detector you answered or a safety stop her pet's potions recovered from. How a grind loop itself gets launched is not written down; `chain_loop.sh` beside it starts the next one hidden through WMI. **The babysitter never starts a hunt.** It only sees it in the process list (its pattern is `gamelab (tour|hunt|nav|probe|combo|act|do) `) and stops the pet feeder while it runs, because the hunt feeds the pet itself.\n\n**It lives** until its job or `--minutes` is done (`tour --loop` then parks her on a safe place), or until `gamelab stop` (she parks, exit 9), a Lie Detector (she retreats, exit 3), a hunt stop (exit 4 to 8: her HP, out of darts, her keys, her stat window, out of MP), an error (exit 1) or Ctrl+C. While it runs, `gamelab/lab/hunt.json` names it. A normal end, a Lie Detector or a hunt stop deletes that file. An error, Ctrl+C, a kill or a crash leaves it behind, and the guard in the pet feeder (back once the hunt is gone) takes that as a sign to park her. `hunt look`, `hunt shots`, `probe list|score` and `patrol` share this code but send no keys: `hunt look` only reads the service, the others work offline from files.",
+   "expected_start": "you, by hand in a terminal; or Claude when it drives gamelab, directly or through the external grind-loop script (which runs `tour --loop` as its child and restarts it); never the babysitter. The elevated player (your UAC click) must be running first",
+   "started_by": [
+    "user",
+    "claude",
+    "grind-loop"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 4,
+     "symbol": "Claude"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 234,
+     "symbol": "whoever drives gamelab"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 84,
+     "symbol": "LOOP_STOP"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 12,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1961,
+     "symbol": "cmd_tour"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1617,
+     "symbol": "cmd_hunt"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1901,
+     "symbol": "cmd_nav"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1755,
+     "symbol": "cmd_probe"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2947,
+     "symbol": "cmd_patrol"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 3527,
+     "symbol": "main"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 380,
+     "symbol": "is the player running"
+    },
+    {
+     "path": "gamelab/behavior/safety.py",
+     "line": 450,
+     "symbol": "exit_code"
+    },
+    {
+     "path": "gamelab/behavior/darts.py",
+     "line": 395,
+     "symbol": "OUT_OF_MP_EXIT"
+    }
+   ],
+   "components": [
+    {
+     "id": "main-thread",
+     "name": "Main thread: start-up, the job, the end",
+     "runs_as": "main thread",
+     "started_by": "Python, when the command starts (`main` calls `cmd_tour`, `cmd_hunt`, `cmd_nav` or `cmd_probe`)",
+     "lives": "the whole process",
+     "does": "First the Lie Detector alarm: with `gamelab/lab/ALARM.json` there, `hunt`, `tour`, `nav` and `probe run` exit 3 at once. Then it records the run (`_record`: opens the telemetry file and claims `gamelab/lab/hunt.json`) and builds the agent (`_hunter`): it attaches to the perception service, writes her keys for the player (`gamelab/lab/alarm_keys.json`), and sets a wrongly sized game window right. For the commands that attack (`hunt`, `tour`, `probe run`) it also waits up to 5 s for her max HP off the HUD, collapses the chat box, opens and reads her stat window, and refuses a map whose monsters are too strong for her (exit 4). It brings the game to the front (3 s at most, else exit 1) and runs the job inside the retreat guard (`on_alarm`). At the end it turns what happened into an exit code (0, 1, 3, 4-9) and deletes `gamelab/lab/hunt.json`, unless an error was raised (exit 1) or Ctrl+C ended it. Last it detaches from the service, printing how many states it was handed.",
+     "rate": "once per run",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "the ServiceClient object it creates",
+       "what": "waits up to 20 s for the service's welcome; refused if another hunt holds the service on another map"
+      },
+      {
+       "to": "player",
+       "via": "gamelab/lab/alarm_keys.json",
+       "what": "her moves' and pet food's keys, the ones the player still takes with the Lie Detector up"
+      },
+      {
+       "to": "windows",
+       "via": "window.bring_to_front (focus change, no keys)",
+       "what": "the game window to the front before the first look"
+      },
+      {
+       "to": "pet",
+       "via": "gamelab/lab/hunt.json",
+       "what": "claimed at the start, removed at the end; left behind by an error, Ctrl+C or a crash, for the guard to park her"
+      },
+      {
+       "to": "user",
+       "via": "the console",
+       "what": "log lines and the final summary"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 3549,
+       "symbol": "client.check_alarm"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1600,
+       "symbol": "_record"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1039,
+       "symbol": "_hunter"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1082,
+       "symbol": "keymap.publish"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 46,
+       "symbol": "GAME_COMMANDS"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 3199,
+       "symbol": "set_defaults"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1581,
+       "symbol": "_to_game"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1100,
+       "symbol": "too_strong"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 3520,
+       "symbol": "_hunt_over"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 3560,
+       "symbol": "client.PlayerError"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 3571,
+       "symbol": "_close_perception"
+      }
+     ]
+    },
+    {
+     "id": "job-loop",
+     "name": "The job: the grind loop, a tour, a fight, a trip or a probe",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the main thread, inside the retreat guard (`on_alarm`)",
+     "lives": "until the job or `--minutes` is done, or a stop",
+     "does": "`tour --loop` runs the hunt loop (`Grind.run` by default, `Hunt.run` with `--camp`): one decision after every look (shoot, pick up, move on, wait), for `--minutes` (20 by default), then she stands by and parks. Now and then, at a quiet moment, it opens her stat window or checks her keys in the game's Key Bindings window. `tour` sweeps the hunting platforms once (`Tour.run`). `hunt kill|clear` fight from where she stands, `nav` takes one trip (`Navigator.go`), `nav --walk` takes random trips and then parks, `probe run` throws only at a lone monster and logs each throw. When looks stop passing their checks (the game covered, minimized, resized), nothing is sent and a look is taken every 0.5 s until one passes: the hunt loop waits like that until its time is up (then it ends as usual), a trip up to its own deadline. A fight, or a trip whose deadline passes, ends the command with an error (exit 1).",
+     "rate": "one decision per look; looks are taken from perception states that come 15 times a second",
+     "talks_to": [
+      {
+       "to": "hunter",
+       "via": "method calls",
+       "what": "looks, fights, pick-ups, potions, pet food"
+      },
+      {
+       "to": "navigator",
+       "via": "method calls",
+       "what": "trips between platforms"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/hunt.py",
+       "line": 586,
+       "symbol": "Hunt.run"
+      },
+      {
+       "path": "gamelab/behavior/grind.py",
+       "line": 192,
+       "symbol": "Grind.run"
+      },
+      {
+       "path": "gamelab/behavior/tour.py",
+       "line": 431,
+       "symbol": "Tour.run"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1981,
+       "symbol": "Grind"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1644,
+       "symbol": "hunter.clear"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1921,
+       "symbol": "nav.go"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1789,
+       "symbol": "probe.run"
+      },
+      {
+       "path": "gamelab/localization/senses.py",
+       "line": 301,
+       "symbol": "Senses.regain"
+      },
+      {
+       "path": "gamelab/behavior/hunt.py",
+       "line": 618,
+       "symbol": "regains"
+      },
+      {
+       "path": "gamelab/control/navigator.py",
+       "line": 1156,
+       "symbol": "regain"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 983,
+       "symbol": "check_keys"
+      }
+     ]
+    },
+    {
+     "id": "hunter",
+     "name": "The Hunter: her state, her senses and her safety watches",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`_hunter` at start-up",
+     "lives": "the whole run",
+     "does": "One object that holds her Senses, her key Actions, the looter, the ledger of kills and drops, her memory of the monsters, the attack choice, her pet's care and the safety watches (her HP against a reserve, out of darts or MP, doubted keys). After every look its listeners count her EXP and HP, follow which way she faces, and publish the scene for the mini-map. At every look of a fight, a trip or a pass of the hunt loop its health check feeds her pet when it is due and raises a hunt stop when one is due. The safety stop and `gamelab stop`'s request are also raised right at the look or glance where they come due.",
+     "rate": "every look and every glance",
+     "talks_to": [
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit (a queue)",
+       "what": "a 'scene' record per look, kills, events"
+      },
+      {
+       "to": "phone-push",
+       "via": "notify.phone",
+       "what": "her backpack full, her potions running out, her death"
+      },
+      {
+       "to": "plan-client",
+       "via": "Actions",
+       "what": "throws, pick-ups, potions, pet food"
+      },
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.throw (up the pipe)",
+       "what": "each throw, so the service can tell her kills from other players'"
+      },
+      {
+       "to": "pet",
+       "via": "gamelab/lab/pet.json",
+       "what": "the pet's fullness as followed and its last food, shared with the pet feeder so whichever runs next carries on"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 205,
+       "symbol": "Hunter"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 434,
+       "symbol": "listeners"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 674,
+       "symbol": "health_check"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1052,
+       "symbol": "_stop_now"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 329,
+       "symbol": "PetCare"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1267,
+       "symbol": "feed_pet_if_due"
+      },
+      {
+       "path": "gamelab/paths.py",
+       "line": 52,
+       "symbol": "PET"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1691,
+       "symbol": "_tell_feed"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1796,
+       "symbol": "_publish"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1081,
+       "symbol": "Vitals"
+      }
+     ]
+    },
+    {
+     "id": "senses",
+     "name": "Senses: every look and glance",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the Hunter, when it is built",
+     "lives": "the whole run",
+     "does": "Turns the perception service's newest state into a scene: her place on the map, the monsters, the drops, her HP. A look waits for a state of a frame shown at least 68 ms after her last key (so it shows what that key did) and, when it wants drops, asks the service to search them on that frame. A look whose state fails its checks is tried again every 0.2 s; after 3 s of that it raises LookLost (the grind loop then stands still; other jobs end). A glance, used while a chain of keys plays, just takes the newest state. If the game is not in front it brings it forward (once a second at most), but not while she retreats or a stop is asked. The look's picture is copied out of the service's shared-memory ring here, on this thread.",
+     "rate": "a look per decision; glances about 15 a second while a chain plays",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.latest: a threading.Condition over its list of the newest 8 states",
+       "what": "waits for a fresh enough state; sends an 'ask' (what to search on the next frame)"
+      },
+      {
+       "to": "perceive",
+       "via": "shared memory ring",
+       "what": "the look's frame, copied out"
+      },
+      {
+       "to": "windows",
+       "via": "window.bring_to_front",
+       "what": "the game to the front when a look finds it behind"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/senses.py",
+       "line": 202,
+       "symbol": "Senses.look"
+      },
+      {
+       "path": "gamelab/localization/senses.py",
+       "line": 318,
+       "symbol": "Senses.glance"
+      },
+      {
+       "path": "gamelab/localization/senses.py",
+       "line": 99,
+       "symbol": "KEY_EFFECT_S"
+      },
+      {
+       "path": "gamelab/localization/feed.py",
+       "line": 363,
+       "symbol": "Feed.look"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1349,
+       "symbol": "ServiceClient.latest"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1384,
+       "symbol": "ServiceClient.bring_forward"
+      }
+     ]
+    },
+    {
+     "id": "navigator",
+     "name": "The Navigator: routes and chains of moves",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`Hunter.navigator()` in `cmd_tour`, `cmd_nav` and `cmd_probe` (the retreat makes one of its own)",
+     "lives": "the whole run",
+     "does": "Plans a route of walks, jumps, ropes and drops, and sends a whole chain of moves as one key plan without waiting for it (`client.send`). While the plan plays it glances at her minimap dot and HP about 15 times a second. A touch, a drop in HP or her landing on the wrong platform cuts the plan short (a `.cancel` file); a better chain can replace the rest of the running plan (`client.splice`). A fighting navigator (tours, the grind) shoots monsters in her way.",
+     "rate": "glances about 15 a second while a chain plays",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "gamelab/lab/inbox (`<id>.json`, `<id>.splice`, `<id>.cancel`)",
+       "what": "chains of key events, take-overs, cuts"
+      },
+      {
+       "to": "senses",
+       "via": "Senses.glance",
+       "what": "her dot and HP while a chain plays"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/navigator.py",
+       "line": 1129,
+       "symbol": "go"
+      },
+      {
+       "path": "gamelab/control/navigator.py",
+       "line": 2901,
+       "symbol": "client.send"
+      },
+      {
+       "path": "gamelab/control/navigator.py",
+       "line": 3013,
+       "symbol": "glance"
+      },
+      {
+       "path": "gamelab/control/navigator.py",
+       "line": 3308,
+       "symbol": "client.splice"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 461,
+       "symbol": "navigator"
+      }
+     ]
+    },
+    {
+     "id": "plan-client",
+     "name": "Her key plans: Actions and the plan client",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the Hunter (Actions) and the navigator",
+     "lives": "the whole run",
+     "does": "Every key she presses is a plan: a JSON list of timed key events, written as `gamelab/lab/inbox/<id>.tmp` and renamed to `<id>.json` so the player never reads half a plan. `Actions.play` (a throw, a jump throw, a pick-up, a potion, pet food) blocks until the player's answer appears in `gamelab/lab/outbox/<id>.json`, looking every 10 ms, 120 s at most. Before writing a plan it checks the Lie Detector alarm and `gamelab stop`'s request. With the alarm up only plans of kind `retreat` or `pet_food` may go. Every plan but a retreat's asks the player to bring the game to the front before its keys.",
+     "rate": "one plan per action; answers polled every 10 ms",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "gamelab/lab/inbox and gamelab/lab/outbox (JSON files)",
+       "what": "key plans out, results back (what was pressed, when, any error)"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/actions.py",
+       "line": 266,
+       "symbol": "Actions.play"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 71,
+       "symbol": "send"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 366,
+       "symbol": "wait"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 21,
+       "symbol": "POLL_S"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 38,
+       "symbol": "check_alarm"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 91,
+       "symbol": "focus"
+      },
+      {
+       "path": "gamelab/control/actions.py",
+       "line": 272,
+       "symbol": "before_play"
+      }
+     ]
+    },
+    {
+     "id": "perceive-client",
+     "name": "The perception feed's reader (`perceive-client` thread)",
+     "runs_as": "thread",
+     "started_by": "`_perception` at start-up (the ServiceClient starts it as it is made)",
+     "lives": "until the command ends: `_close_perception` sends 'bye' and waits 2 s for it",
+     "does": "Connects to the perception service's named pipe `\\\\.\\pipe\\gamelab-perceive` (its key is in `gamelab/lab/perceive.json`) and says hello: its name, its pid, that it sends keys and tells her throws, and its map. A hunting client holds the service on its map: if the service looks at another map and no other hunt holds it, it switches to the hunt's map (a new run); a second hunt on another map is refused (exit 1). It then reads every state the service sends (about 15 a second, a few KB each) and keeps the newest 8, waking any look that waits. If the pipe breaks or stays silent for 10 s, it reconnects every 0.5 s. If no service runs, it starts one (at most every 10 s). What the main thread sends up the same pipe (an 'ask', her throws, a request for a full-size frame) goes under a lock.",
+     "rate": "about 15 states a second in",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "named pipe \\\\.\\pipe\\gamelab-perceive (pickled messages)",
+       "what": "states, welcomes and full frames down; hello, ask, throw, full, bye up"
+      },
+      {
+       "to": "senses",
+       "via": "a threading.Condition and a deque of the newest 8 states",
+       "what": "each new state, as it comes"
+      },
+      {
+       "to": "service-start",
+       "via": "service.ensure",
+       "what": "start a service when none answers"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1147,
+       "symbol": "ServiceClient"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1192,
+       "symbol": "start"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1198,
+       "symbol": "_run"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1257,
+       "symbol": "_take"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 71,
+       "symbol": "ADDRESS"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 495,
+       "symbol": "_hello"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 515,
+       "symbol": "_rebuild"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1006,
+       "symbol": "ServiceClient"
+      }
+     ]
+    },
+    {
+     "id": "service-start",
+     "name": "Starting the perception service when none runs (PowerShell + WMI)",
+     "runs_as": "child process",
+     "started_by": "the `perceive-client` thread (`ensure`), only when it cannot reach a service; normally the babysitter keeps one running and this never happens",
+     "lives": "a few seconds (waited for, 60 s at most)",
+     "does": "Runs `powershell.exe`, which asks WMI (`Win32_Process.Create`) to start `cmd.exe /c ... python -m gamelab perceive --map <map>` hidden, its console appended to `gamelab/lab/perceive.log`. The new service is WMI's child, not the hunt's, so it keeps running after the hunt ends.",
+     "rate": "at most once every 10 s, only while no service answers",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "WMI Win32_Process.Create",
+       "what": "starts it"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 209,
+       "symbol": "ensure"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 241,
+       "symbol": "_start_detached"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1204,
+       "symbol": "_ensure"
+      }
+     ]
+    },
+    {
+     "id": "retreat",
+     "name": "The retreat guard (`on_alarm`) and her parks",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the main thread, which runs the job inside it",
+     "lives": "around the whole job; it moves her only when something ends the job",
+     "does": "On the Lie Detector (seen at her next look or plan) she goes to a safe place within 10 s with plans of moves only (arrows, jump, up, down), which the player still takes for 12 s after the sighting; then the command exits 3. On a hunt stop (her HP, out of darts or MP, her keys, her stat window) the same retreat, up to 60 s, then beeps and a Windows notification at the PC. On `gamelab stop`, and at the end of `tour --loop` or `nav --walk`, she parks (up to 180 s). How it went goes to `gamelab/lab/parked.json`; if she is not there, also a note in `gamelab/lab/park_note.json` for the guard.",
+     "rate": "only when the job ends",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "gamelab/lab/inbox, plans of kind 'retreat'",
+       "what": "her moves to the safe place"
+      },
+      {
+       "to": "pet",
+       "via": "gamelab/lab/parked.json, gamelab/lab/park_note.json",
+       "what": "where she ended up, or that the guard should park her"
+      },
+      {
+       "to": "page-toast",
+       "via": "alarm.page",
+       "what": "after a hunt stop's retreat"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 242,
+       "symbol": "on_alarm"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 395,
+       "symbol": "park"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 412,
+       "symbol": "told"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1984,
+       "symbol": "park"
+      }
+     ]
+    },
+    {
+     "id": "stop-request",
+     "name": "The hunt's claim and `gamelab stop`'s request",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`_record` at start-up (the claim); every look, glance and plan (the check)",
+     "lives": "the whole run",
+     "does": "At its start the hunt writes `gamelab/lab/hunt.json` (its pid, start time and command), so `gamelab stop`, the pet feeder's guard and a park know a hunt is running. `gamelab stop`, another process, writes `gamelab/lab/stop_hunt.json` and drops `.cancel` files for the plan playing. The hunt reads the request at its next look, glance or plan and parks her. With the game behind another window it waits up to 60 s, then ends with a note so the guard parks her when the game is back.",
+     "rate": "checked at every look, glance and plan",
+     "talks_to": [
+      {
+       "to": "tools",
+       "via": "gamelab/lab/stop_hunt.json and `.cancel` files",
+       "what": "`gamelab stop` asks it to stop and park"
+      },
+      {
+       "to": "pet",
+       "via": "gamelab/lab/hunt.json",
+       "what": "a hunt is running"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 325,
+       "symbol": "claim"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 346,
+       "symbol": "over"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1047,
+       "symbol": "_stop_asked"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1037,
+       "symbol": "_stop_waiting"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 389,
+       "symbol": "stop"
+      }
+     ]
+    },
+    {
+     "id": "size-fix",
+     "name": "The window-size fix (Alt+Enter twice)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`_fit_start` at start-up, and Senses when looks keep failing for a wrong window size",
+     "lives": "the whole run; acts only on a wrong size",
+     "does": "If the game's client area is not a size the eyes are calibrated for (1366x768 or 1920x1080), or the game draws off it, it sends Alt+Enter twice as a plan through the player. Before each try it looks for the Lie Detector on the service's picture; if it is there, it raises the alarm itself (writes `gamelab/lab/ALARM.json` and pages the PC) and presses nothing. At start-up it waits up to 180 s for a right size, then the command ends.",
+     "rate": "rare: only when the window is wrong",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "gamelab/lab/inbox, an 'alt_enter' plan",
+       "what": "Alt+Enter twice"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1143,
+       "symbol": "_fit_start"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 437,
+       "symbol": "SizeFix"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 173,
+       "symbol": "raise_alarm"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 325,
+       "symbol": "client.submit"
+      }
+     ]
+    },
+    {
+     "id": "telemetry-writer",
+     "name": "The telemetry writer (`telemetry-writer` thread)",
+     "runs_as": "thread",
+     "started_by": "`telemetry.record_to`, called by `_record` at start-up",
+     "lives": "the whole process; what it still holds is written at exit",
+     "does": "Everything the run sees and decides (scenes, chains, kills, events, log lines) is turned into a JSON line on the thread that emits it and queued. This thread writes the queue to `gamelab/lab/telemetry/<YYYYmmdd-HHMMSS>-<command>.jsonl` every 0.2 s, so a slow disk never holds up the hunt. The mini-map window and its web page follow that file live.",
+     "rate": "a write every 0.2 s",
+     "talks_to": [
+      {
+       "to": "hunter",
+       "via": "a deque and a threading.Condition (telemetry.emit)",
+       "what": "records to write"
+      },
+      {
+       "to": "minimap",
+       "via": "gamelab/lab/telemetry/<time>-<command>.jsonl",
+       "what": "the run, live"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 192,
+       "symbol": "Recorder"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 218,
+       "symbol": "telemetry-writer"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 136,
+       "symbol": "FLUSH_S"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 342,
+       "symbol": "atexit.register"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1607,
+       "symbol": "telemetry.record_to"
+      }
+     ]
+    },
+    {
+     "id": "gc-report",
+     "name": "Garbage-collection report (`gc-report` thread)",
+     "runs_as": "thread",
+     "started_by": "`gcstats.report_every`, called by `_record` at start-up",
+     "lives": "the whole process",
+     "does": "Once a minute writes a 'gc' record (how often and how long Python's garbage collector ran) into the telemetry.",
+     "rate": "once a minute",
+     "talks_to": [
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "the 'gc' record"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 113,
+       "symbol": "report_every"
+      },
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 131,
+       "symbol": "gc-report"
+      },
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 21,
+       "symbol": "REPORT_S"
+      }
+     ]
+    },
+    {
+     "id": "ocr-warm",
+     "name": "OCR warm-up (`ocr-warm` thread)",
+     "runs_as": "thread",
+     "started_by": "`_hunter`, for commands that attack (not `hunt look`, not a park)",
+     "lives": "about 1.3 s at start-up, then it ends",
+     "does": "Loads the text-reading (OCR) models so the first read of the message bar or the pick-up log, which comes mid-fight, does not stall the hunt. A read that comes meanwhile waits for the load.",
+     "rate": "once",
+     "talks_to": [
+      {
+       "to": "hunter",
+       "via": "the shared OCR engine's lock",
+       "what": "the models, ready"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/perception/messages.py",
+       "line": 154,
+       "symbol": "warm"
+      },
+      {
+       "path": "gamelab/perception/messages.py",
+       "line": 164,
+       "symbol": "ocr-warm"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1074,
+       "symbol": "warm"
+      }
+     ]
+    },
+    {
+     "id": "damage-fit",
+     "name": "Damage refit (`damage-fit` thread, the magician only)",
+     "runs_as": "thread",
+     "started_by": "her damage book (`damage.Book.add`) as hits of her skill are read off the monsters' HP bars",
+     "lives": "0.1-0.4 s per fit; one at a time, at most every 10 s per attack",
+     "does": "Fits her skill's damage again from the newest reads, kept in her own file between runs. Only for a character whose attack is a damage skill (Magic Claw).",
+     "rate": "at most every 10 s",
+     "talks_to": [
+      {
+       "to": "hunter",
+       "via": "the damage book (shared object)",
+       "what": "the new fit, used by the attack choice"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/damage.py",
+       "line": 182,
+       "symbol": "add"
+      },
+      {
+       "path": "gamelab/behavior/damage.py",
+       "line": 193,
+       "symbol": "damage-fit"
+      },
+      {
+       "path": "gamelab/behavior/damage.py",
+       "line": 49,
+       "symbol": "REFIT_S"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 354,
+       "symbol": "damage.Book"
+      }
+     ]
+    },
+    {
+     "id": "heading-pictures",
+     "name": "Her facing pictures rebuilt (`heading-pictures` thread)",
+     "runs_as": "thread",
+     "started_by": "her heading pictures (`Heading.rebuild`), when looks where her keys left no doubt have taught it new crops of her",
+     "lives": "about 65 ms each; the process waits for it at exit",
+     "does": "Rebuilds the pictures that tell which way she faces from the crops collected, and saves them to `gamelab/lab`.",
+     "rate": "now and then",
+     "talks_to": [
+      {
+       "to": "hunter",
+       "via": "the Heading object, under its lock",
+       "what": "the new pictures"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/perception/heading.py",
+       "line": 271,
+       "symbol": "rebuild"
+      },
+      {
+       "path": "gamelab/perception/heading.py",
+       "line": 282,
+       "symbol": "_making"
+      },
+      {
+       "path": "gamelab/perception/eyes.py",
+       "line": 543,
+       "symbol": "heading_bank"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1625,
+       "symbol": "_heading"
+      }
+     ]
+    },
+    {
+     "id": "phone-push",
+     "name": "Phone pushes (`bark-push` threads)",
+     "runs_as": "thread",
+     "started_by": "`notify.phone`, from the hunt's watches of her potions, her death and her backpack",
+     "lives": "one per push, 10 s at most",
+     "does": "Sends a Bark push to the iPhone set up in `gamelab/lab/bark.json` (nothing if there is none). The hunt never waits for it.",
+     "rate": "rare",
+     "talks_to": [
+      {
+       "to": "phone",
+       "via": "HTTPS to the Bark server",
+       "what": "a push"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 190,
+       "symbol": "bark"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 203,
+       "symbol": "bark-push"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 208,
+       "symbol": "phone"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1080,
+       "symbol": "BackpackPush"
+      }
+     ]
+    },
+    {
+     "id": "page-toast",
+     "name": "Alert at the PC (beeps and a hidden PowerShell toast)",
+     "runs_as": "child process",
+     "started_by": "`alarm.page`, on the main thread: after a hunt stop's retreat, when her keys, her pet's food or her stat window look wrong, or when the window-size fix sees a Lie Detector",
+     "lives": "a few seconds; not waited for",
+     "does": "Beeps on the main thread, then starts a hidden `powershell` that shows a Windows notification.",
+     "rate": "rare",
+     "talks_to": [
+      {
+       "to": "user",
+       "via": "beeps and a Windows notification",
+       "what": "the hunt stopped, and why"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 232,
+       "symbol": "page"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 254,
+       "symbol": "subprocess.Popen"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 274,
+       "symbol": "alarm.page"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 929,
+       "symbol": "alarm.page"
+      },
+      {
+       "path": "gamelab/behavior/pet.py",
+       "line": 386,
+       "symbol": "alarm.page"
+      }
+     ]
+    },
+    {
+     "id": "keep-recent",
+     "name": "Saving the recording's last minutes (`keep-recent` thread)",
+     "runs_as": "thread",
+     "started_by": "`Hunter._no_hit` (her attacks hit nothing) through `alarm.keep_recent_after`",
+     "lives": "a few seconds: it waits, asks, gets the answer and ends",
+     "does": "Asks the rolling recording, which the perception service keeps (or the old `gamelab recorder`, if that still runs), to save its last seconds to `gamelab/lab/recent/`, without the hunt waiting. The out-of-darts and out-of-MP stops ask the same on the main thread, after her retreat, and `nav --walk` saves its test recording that way.",
+     "rate": "rare",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "gamelab/lab/recorder/inbox and outbox (JSON files)",
+       "what": "save the last N seconds; where it went"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 275,
+       "symbol": "keep_recent_after"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 281,
+       "symbol": "keep-recent"
+      },
+      {
+       "path": "gamelab/behavior/hunter.py",
+       "line": 1684,
+       "symbol": "keep_recent_after"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 1237,
+       "symbol": "ask"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "park",
+   "is_os_process": true,
+   "plain_md": "**A park** is `python -m gamelab nav --park [--tell]`: a short-lived, ordinary (not elevated) Python process that walks her, with moves only (arrows, jump, up, down; no attack, no pick-up, no mouse), to the safest place of the map the perception service is looking at (a platform no monster can reach, or a rope she is safe on), and then ends. It is **its own OS process on purpose**: the babysitter sees `gamelab nav ` in the process list and stops the pet feeder while it runs, so the two never send keys at the same time. **Mostly the pet feeder's guard starts it, automatically**: between hunts, when she is being touched, her HP is low, a hunt died without parking her, or a stop or an earlier park left a note, and only with the game in front and the player running. The guard launches `nav --park --tell` hidden and detached through WMI, its console appended to `gamelab/lab/park.log`, so the park survives the babysitter killing the pet feeder a few seconds later. `gamelab stop` with no hunt running starts `nav --park` as its child and waits for it, and you can run it by hand. A hunt's own parks (at the end of `tour --loop`, or on `gamelab stop` during a hunt) happen inside the hunt process, not here. **It lives** seconds, at most 180 s and 30 tries from wherever she gets knocked to. It refuses at once (exit 1, no key sent) if a hunt or another park is running, the game is not the window in front or is minimized, or no perception service runs. It ends early if a hunt starts and claims `gamelab/lab/hunt.json`, and on the Lie Detector (exit 3). It never brings the game forward. It writes how it went to `gamelab/lab/parked.json` and, if she is not there, a note in `gamelab/lab/park_note.json` for the guard to try again. With `--tell` it pushes \"She's parked\" or \"She can't park\" to the phone.",
+   "expected_start": "the guard inside the pet feeder (`pet --every`), automatically, detached through WMI; or `gamelab stop` with no hunt running (a child it waits for); or you by hand; never the babysitter",
+   "started_by": [
+    "pet",
+    "tools",
+    "user"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1860,
+     "symbol": "_nav_park"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1462,
+     "symbol": "start_park"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 427,
+     "symbol": "_park_now"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 403,
+     "symbol": "_park_now"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 202,
+     "symbol": "seen.player"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 216,
+     "symbol": "start_park"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1867,
+     "symbol": "running_hunt"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 32,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 12,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 90,
+     "symbol": "PARK_S"
+    },
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 403,
+     "symbol": "_taken_over"
+    }
+   ],
+   "components": [
+    {
+     "id": "main-thread",
+     "name": "Main thread: checks, the park, the outcome",
+     "runs_as": "main thread",
+     "started_by": "Python, when the command starts (`main` calls `cmd_nav`, which calls `_nav_park`)",
+     "lives": "the whole process",
+     "does": "Exits 3 at once with the Lie Detector alarm up. Sends nothing and exits 1 if `gamelab/lab/hunt.json` names a running hunt or park, if the game is not the window in front (then a note for the guard), or if `gamelab/lab/perceive.json` is missing (no service). It takes the map from that file, not from `--map`. It records the run as `nav-park` (telemetry, and a claim on `gamelab/lab/hunt.json`), builds the Hunter without attacks and without restoring a minimized game (a minimized game is an error here), and runs the park inside the retreat guard. Then it logs the outcome, pushes it with `--tell`, and exits 0 if she got there, 1 if not.",
+     "rate": "once",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "gamelab/lab/perceive.json",
+       "what": "which map the service looks at"
+      },
+      {
+       "to": "windows",
+       "via": "window.foreground_title, window.minimized",
+       "what": "is the game in front and not minimized"
+      },
+      {
+       "to": "phone-push",
+       "via": "notify.phone (with --tell)",
+       "what": "\"She's parked\" or \"She can't park\""
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1860,
+       "symbol": "_nav_park"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1840,
+       "symbol": "_park_map"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1851,
+       "symbol": "_not_minimized"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1878,
+       "symbol": "_record"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1897,
+       "symbol": "notify.phone"
+      }
+     ]
+    },
+    {
+     "id": "park-trip",
+     "name": "The park itself (`retreat.park`)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the main thread",
+     "lives": "until she is there, 180 s and 30 goes at most",
+     "does": "Waits up to 3 s for a look that is sure of her place, picks the quickest safe place (a platform no monster can reach, or a rope she is safe on), and sends her there with a navigator of its own that keeps clear of monsters and uses moves only. If she is knocked back or misses a rope it tries again from where she is. It stops early if a hunt claims `gamelab/lab/hunt.json` meanwhile (the grind loop's next grind, say). At the end it writes `gamelab/lab/parked.json` and removes `gamelab/lab/stop_hunt.json`; if she is not there, a note in `gamelab/lab/park_note.json`.",
+     "rate": "a look per move",
+     "talks_to": [
+      {
+       "to": "plan-client",
+       "via": "Actions.moves_only",
+       "what": "her moves"
+      },
+      {
+       "to": "pet",
+       "via": "gamelab/lab/parked.json, gamelab/lab/park_note.json",
+       "what": "how the park came out"
+      },
+      {
+       "to": "hunt",
+       "via": "gamelab/lab/hunt.json",
+       "what": "a hunt that starts takes over and the park ends"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 395,
+       "symbol": "park"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 313,
+       "symbol": "moves_only"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 315,
+       "symbol": "Navigator"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 403,
+       "symbol": "_taken_over"
+      },
+      {
+       "path": "gamelab/behavior/retreat.py",
+       "line": 412,
+       "symbol": "told"
+      }
+     ]
+    },
+    {
+     "id": "hunter-senses",
+     "name": "The Hunter and its Senses, without attacks",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`_hunter` at start-up, with `throws=False`",
+     "lives": "the whole run",
+     "does": "The same Hunter and Senses as a hunt's (looks built from the perception service's states, the scene published to telemetry after each look), but with no OCR warm-up, no wait for her max HP, no window-size fix and no phone watches.",
+     "rate": "a look per move; glances about 15 a second while a move plays",
+     "talks_to": [
+      {
+       "to": "perceive-client",
+       "via": "ServiceClient.latest (a threading.Condition)",
+       "what": "the newest state"
+      },
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "scenes and events"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1880,
+       "symbol": "_hunter"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1072,
+       "symbol": "throws"
+      },
+      {
+       "path": "gamelab/localization/senses.py",
+       "line": 202,
+       "symbol": "Senses.look"
+      }
+     ]
+    },
+    {
+     "id": "plan-client",
+     "name": "Her moves as key plans",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the park's navigator",
+     "lives": "the whole run",
+     "does": "Plans of kind `retreat` written to `gamelab/lab/inbox`, each marked not to bring the game forward: the player refuses them while another window is in front instead. Answers are polled every 10 ms. With the Lie Detector up, the player still takes them for 12 s after the sighting.",
+     "rate": "a plan per chain of moves",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "gamelab/lab/inbox and gamelab/lab/outbox",
+       "what": "her moves, and their results"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/client.py",
+       "line": 91,
+       "symbol": "RETREAT"
+      },
+      {
+       "path": "gamelab/control/actions.py",
+       "line": 640,
+       "symbol": "moves_only"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 366,
+       "symbol": "wait"
+      }
+     ]
+    },
+    {
+     "id": "perceive-client",
+     "name": "The perception feed's reader (`perceive-client` thread)",
+     "runs_as": "thread",
+     "started_by": "`_perception` at start-up",
+     "lives": "until the command ends",
+     "does": "As in a hunt: connects to `\\\\.\\pipe\\gamelab-perceive`, says it sends keys but does not attack, and reads every state (about 15 a second), keeping the newest 8. Because it does not attack it does not hold the service on its map.",
+     "rate": "about 15 states a second in",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "named pipe \\\\.\\pipe\\gamelab-perceive",
+       "what": "states down; hello, ask, bye up"
+      },
+      {
+       "to": "hunter-senses",
+       "via": "a threading.Condition and a deque",
+       "what": "each new state"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1162,
+       "symbol": "Hello"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1192,
+       "symbol": "start"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 497,
+       "symbol": "fast"
+      }
+     ]
+    },
+    {
+     "id": "service-start",
+     "name": "Starting the perception service (PowerShell + WMI), rarely",
+     "runs_as": "child process",
+     "started_by": "the `perceive-client` thread, only if the service vanished after the park checked `gamelab/lab/perceive.json`",
+     "lives": "a few seconds",
+     "does": "The same hidden WMI start of `python -m gamelab perceive` as a hunt's; the park itself stops at once when no service runs, so this is an edge case.",
+     "rate": "at most once every 10 s",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "WMI Win32_Process.Create",
+       "what": "starts it"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 209,
+       "symbol": "ensure"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1204,
+       "symbol": "_ensure"
+      }
+     ]
+    },
+    {
+     "id": "telemetry-writer",
+     "name": "The telemetry writer (`telemetry-writer` thread)",
+     "runs_as": "thread",
+     "started_by": "`_record(\"nav-park\")` at start-up",
+     "lives": "the whole process",
+     "does": "Writes the park's records to `gamelab/lab/telemetry/<time>-nav-park.jsonl` every 0.2 s, for the mini-map.",
+     "rate": "a write every 0.2 s",
+     "talks_to": [
+      {
+       "to": "minimap",
+       "via": "gamelab/lab/telemetry/<time>-nav-park.jsonl",
+       "what": "the park, live"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 218,
+       "symbol": "telemetry-writer"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1878,
+       "symbol": "_record"
+      }
+     ]
+    },
+    {
+     "id": "gc-report",
+     "name": "Garbage-collection report (`gc-report` thread)",
+     "runs_as": "thread",
+     "started_by": "`_record` at start-up",
+     "lives": "the whole process",
+     "does": "A 'gc' telemetry record once a minute (most parks end sooner).",
+     "rate": "once a minute",
+     "talks_to": [
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "the 'gc' record"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 131,
+       "symbol": "gc-report"
+      }
+     ]
+    },
+    {
+     "id": "heading-pictures",
+     "name": "Her facing pictures rebuilt (`heading-pictures` thread)",
+     "runs_as": "thread",
+     "started_by": "her heading pictures, after looks have taught them new crops",
+     "lives": "about 65 ms each",
+     "does": "As in a hunt; rare in a park, whose moves give few looks.",
+     "rate": "rare",
+     "talks_to": [
+      {
+       "to": "hunter-senses",
+       "via": "the Heading object",
+       "what": "the new pictures"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/perception/heading.py",
+       "line": 282,
+       "symbol": "_making"
+      }
+     ]
+    },
+    {
+     "id": "phone-push",
+     "name": "The outcome on the phone (`bark-push` thread, with `--tell`)",
+     "runs_as": "thread",
+     "started_by": "the main thread at the end, only with `--tell` (the guard's launches always pass it)",
+     "lives": "one push, 10 s at most",
+     "does": "Pushes \"She's parked\" (regular), or \"She can't park\" (critical) with why, to the iPhone in `gamelab/lab/bark.json`.",
+     "rate": "once",
+     "talks_to": [
+      {
+       "to": "phone",
+       "via": "HTTPS to the Bark server",
+       "what": "the outcome"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1897,
+       "symbol": "notify.phone"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 203,
+       "symbol": "bark-push"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

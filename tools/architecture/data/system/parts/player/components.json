@@ -1,0 +1,1188 @@
+{
+ "id": "components",
+ "summary_md": "One process: **the key player** (`python -m gamelab player`), the only part of gamelab that runs as administrator, so the only one whose key presses reach the game. You start it by hand with `python -m gamelab player --elevate` and click *Yes* on Windows' UAC prompt. Nothing starts it automatically. The babysitter (a PowerShell loop outside the repo that runs every 5 s; its newest version is `D:/MapleHelper-scratch/live/babysit3.ps1`, while the README still names a `D:/MapleHelper-scratch/pconst/finish/` copy that no longer exists) never starts or stops the player: it only reads the player's command line. The babysitter was not running when this was checked on 2026-11-16. Inside the player, the main thread takes plans from `gamelab/lab/inbox` one at a time, and a `key-player` thread presses each plan's keys on time. Meanwhile the `lie-detector-watch` thread looks at the game 4 times a second. When the Lie Detector appears, that thread stops every key within about 10 ms, beeps and shows a Windows notification (through a hidden PowerShell), starts recording the episode (a writer thread), and pushes alerts to the phone (each push on a thread of its own).",
+ "processes": [
+  {
+   "process": "player",
+   "is_os_process": true,
+   "started_by": [
+    "user",
+    "tools"
+   ],
+   "plain_md": "**The key player** is a standalone Windows process: its own `python.exe`, running **as administrator**, in a console window of its own that starts minimized. It has to be separate because MapleStory runs as administrator, and Windows blocks key presses from normal programs into an administrator's window. So every key, click, pointer move and window resize that gamelab sends to the game goes through this one process. The other programs (a hunt, the pet feeder, the park trip, the perception service, short commands) never call it directly. They drop JSON plans into `gamelab/lab/inbox` and read its answers from `gamelab/lab/outbox`, in the checkout it was started from, so it and they must run from the same checkout (normally `D:\\MapleHelper`).\n\n**You are expected to start it by hand**: in a terminal in `D:\\MapleHelper`, type `python -m gamelab player --elevate`, then click *Yes* on the UAC prompt. Do this once per sitting, again after it stops, and again after a change to the code or to `config.toml`, because it reads both only once. Neither the babysitter nor the pet feeder's guard ever starts it. Claude, when it drives gamelab, can type the command, but only you can click *Yes*. Only one runs at a time: a second copy started by mistake says so in its log and exits without touching the first one's plans, and `--elevate` doesn't even show the UAC prompt while one is running.\n\nIt runs until `python -m gamelab stop-player` (after the plan it is playing), until 24 hours pass with no plan, until its Lie Detector watch thread dies, or until you clear a Lie Detector alarm whose episode reached the Truth Booth. A Lie Detector you answered in time, with no Truth Booth, clears its own alarm, and the player carries on. It won't start while the alarm is up. Closing the terminal you typed the command in doesn't stop it; closing its own console window kills it at once, even mid-plan. Its log is `gamelab/lab/player.log`.",
+   "expected_start": "you, by hand: `python -m gamelab player --elevate` in a terminal in D:\\MapleHelper, then your Yes on the UAC prompt (once per sitting, and again whenever it has stopped or its code or config.toml changed). Claude may type the command, but the Yes is yours. Never the babysitter, never another gamelab process.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 30,
+     "symbol": "STOP"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 35,
+     "symbol": "player --elevate"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 108,
+     "symbol": "cmd_player"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 3056,
+     "symbol": "player"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1111,
+     "symbol": "serve"
+    },
+    {
+     "path": "gamelab/paths.py",
+     "line": 15,
+     "symbol": "INBOX"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 29,
+     "symbol": "starts the player"
+    },
+    {
+     "path": "tests/test_architecture.py",
+     "line": 76,
+     "symbol": "test_the_elevated_player_loads_only_what_it_needs"
+    }
+   ],
+   "components": [
+    {
+     "id": "uac-launcher",
+     "name": "The launcher: `player --elevate` (a separate short-lived process, one of the short commands, not part of the player)",
+     "runs_as": "separate process (short-lived, not elevated)",
+     "started_by": "you, typing `python -m gamelab player --elevate` in a terminal in D:\\MapleHelper (the maplehelper conda env). Claude can type it too, but the UAC click is yours.",
+     "lives": "until you answer the UAC prompt; then it exits (0 if Windows started the player, 1 if you declined, 3 at once with the Lie Detector alarm up)",
+     "does": "With `lab/ALARM.json` present it refuses at once, and no prompt appears. Otherwise it asks Windows to run `python -X utf8 -m gamelab player` (the same python.exe) as administrator. It does this with ShellExecuteW and the \"runas\" verb, which is what shows the UAC prompt. The new process starts in the checkout the launcher ran from (normally D:\\MapleHelper), in a new console window that is minimized and not activated, so the game keeps the focus. The launcher prints where the player's log is and exits. The two processes share nothing after that: no pipe, no file, and closing the launcher's terminal doesn't stop the player. It doesn't check whether a player is already running. Without `--elevate`, the same command runs the player right there, inside the terminal's own process; its keys then reach the game only if that terminal itself runs as administrator.",
+     "rate": "once per start",
+     "talks_to": [
+      {
+       "to": "windows",
+       "via": "ShellExecuteW \"runas\" (the UAC prompt)",
+       "what": "start python as administrator; your Yes or No comes back as success or error 5"
+      },
+      {
+       "to": "the plan loop (main thread)",
+       "via": "Windows creates the elevated process",
+       "what": "nothing else: it is gone by the time the player runs"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 108,
+       "symbol": "cmd_player"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 110,
+       "symbol": "args.elevate"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 112,
+       "symbol": "serve"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 118,
+       "symbol": "ShellExecuteW"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 119,
+       "symbol": "REPO"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 68,
+       "symbol": "SW_SHOWMINNOACTIVE"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 69,
+       "symbol": "SHELL_ERRORS"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 3549,
+       "symbol": "client.check_alarm"
+      }
+     ]
+    },
+    {
+     "id": "plan-loop",
+     "name": "The plan loop (main thread)",
+     "runs_as": "main thread",
+     "started_by": "the elevated `python -m gamelab player` that Windows starts after your UAC click (main -> cmd_player -> control.player.serve)",
+     "lives": "as long as the process: when it ends, the process ends",
+     "does": "**At start:** it rotates `lab/player.log` past 5 MB and deletes `lab/STOP`. It refuses to start while `lab/ALARM.json` is there. It deletes whatever is left in the inbox from before (plans, cancel and splice files), so a plan sent while no player ran is dropped; its sender gives up after its timeout (120 s by default) and says \"is the player running?\". It reads `config.toml` once (her key bindings and the game window's title), starts the watchdog thread and writes `lab/player.json` (its pid, and that it accepts splices). **Then it loops:** it looks at `lab/inbox` every 10 ms and takes the oldest `*.json` plan by renaming it to `.running`. From then on the sender can cancel the plan but not withdraw it. The loop plays the plan (Player.run) and writes the answer to `lab/outbox/<id>.json`, as a `.tmp` file that is then renamed. It takes no plan before the watchdog's first look. **It stops** when `lab/STOP` appears (checked between plans), after 24 hours with no plan (time spent recording a Lie Detector doesn't count as idle), if the watchdog thread has died, or once you cleared a Truth Booth alarm and the screen has stayed clear for 10 s. On the way out it stops the watchdog and waits up to 30 s for it to finish writing. If the alarm is up, it answers every waiting plan with the Lie Detector error. It writes `player stopped` to the log and deletes `lab/player.json`.",
+     "rate": "the inbox checked every 10 ms; one plan at a time; Windows' timer resolution set to 1 ms while it runs",
+     "talks_to": [
+      {
+       "to": "hunt, pet, park, perceive, tools (every sender of plans)",
+       "via": "files: lab/inbox/<id>.json in; lab/outbox/<id>.json (and <id>.npz with frames) out",
+       "what": "plans, and the answer to each: keys sent and when, problems, errors"
+      },
+      {
+       "to": "hunt, pet and tools (`window --recover`) (control/window_size.py)",
+       "via": "lab/inbox, as an ordinary plan named `alt_enter`",
+       "what": "the Alt+Enter window fix. That fix's logic runs in those processes, not here."
+      },
+      {
+       "to": "tools (`stop-player`)",
+       "via": "the file lab/STOP",
+       "what": "stop after the plan in hand. `stop-player` then waits up to 10 s for `player stopped` in the log."
+      },
+      {
+       "to": "the senders' client code (control/client.py), and the guard inside pet",
+       "via": "lab/player.json",
+       "what": "a player is running (its pid, checked alive) and accepts splices; the guard parks her only with a player up"
+      },
+      {
+       "to": "the Lie Detector watchdog",
+       "via": "threading.Events `looked`, `cleared` and `stopped`; is_alive(); its `recording` attribute",
+       "what": "wait for its first look; stop once it says a person cleared the alarm; tell it to stop; reset the idle clock while it records"
+      },
+      {
+       "to": "the key-player thread",
+       "via": "Thread.start and join",
+       "what": "one thread per plan, waited for before the answer is written"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1111,
+       "symbol": "serve"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1130,
+       "symbol": "alarm_up"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1133,
+       "symbol": "INBOX.glob"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1136,
+       "symbol": "config.load"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1161,
+       "symbol": "PLAYER_INFO"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1174,
+       "symbol": "_serve"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1177,
+       "symbol": "win32.precise_timers"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1178,
+       "symbol": "IDLE_LIMIT_S"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1189,
+       "symbol": "time.sleep"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1194,
+       "symbol": "path.replace"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1215,
+       "symbol": "watchdog.join"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1099,
+       "symbol": "_answer"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 69,
+       "symbol": "IDLE_LIMIT_S"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 380,
+       "symbol": "PlayerError"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 145,
+       "symbol": "cmd_stop_player"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 186,
+       "symbol": "can_splice"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 206,
+       "symbol": "player_up"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 298,
+       "symbol": "client.player_up"
+      },
+      {
+       "path": "gamelab/control/window_size.py",
+       "line": 325,
+       "symbol": "client.submit"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 750,
+       "symbol": "_window_recover"
+      }
+     ]
+    },
+    {
+     "id": "plan-checks",
+     "name": "The plan checks (what it agrees to play)",
+     "runs_as": "library code on the caller's thread (the main thread for each plan; the key-player thread for a splice)",
+     "started_by": "Player.run, for every plan the loop takes, before any key",
+     "lives": "a check per plan",
+     "does": "A plan is plain data, never code. It may hold at most 400 events within 20 s, using only keys `config.toml` can name and the two mouse buttons, plus pointer moves in game-window pixels. It may resize the window only to 1366x768 or 1920x1080, and record at most 900 frames. The two Lie Detector click kinds are held to their exact shape even with no alarm up. **With the Lie Detector alarm up**, only four kinds of plan get through. The alarm counts as up when the watchdog has set it, or when `lab/ALARM.json` is there, even if another program such as `watch --lie-detector` wrote it. The four kinds are `pet_food` (one tap of her pet food key, 3 a minute at most), `retreat` (her arrows, jump, up and down, for 12 s after the sighting), `lie_cursor` (one pointer move inside the mini-game's board, or one click on a Violetta answer button) and `lie_ok` (one click on the OK button of the 'passed' dialog). Her move and pet-food keys come from `config.toml`, overridden by `lab/alarm_keys.json`, which the other commands keep up to date; it is read again whenever it changes. A refused plan is logged and answered as an error.",
+     "rate": "once per plan",
+     "talks_to": [
+      {
+       "to": "the Lie Detector watchdog",
+       "via": "the Alarm (a threading.Event) and its `at` time",
+       "what": "whether the alarm is up, and how long ago it was raised (for the retreat's 12 s)"
+      },
+      {
+       "to": "hunt and the other commands (control/keymap.py)",
+       "via": "lab/alarm_keys.json",
+       "what": "which keys her moves and her pet food are on now"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/player.py",
+       "line": 102,
+       "symbol": "validate"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 202,
+       "symbol": "alarm_refusal"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 182,
+       "symbol": "lie_cursor_refusal"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 737,
+       "symbol": "Player.run"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 751,
+       "symbol": "lie_cursor_refusal"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1003,
+       "symbol": "Player._with_alarm"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 984,
+       "symbol": "Player._splice_refusal"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 46,
+       "symbol": "PLAN_KINDS"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 62,
+       "symbol": "RETREAT_WINDOW_S"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 103,
+       "symbol": "AlarmKeys"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 127,
+       "symbol": "AlarmKeys.current"
+      },
+      {
+       "path": "gamelab/control/keymap.py",
+       "line": 322,
+       "symbol": "publish"
+      }
+     ]
+    },
+    {
+     "id": "key-player",
+     "name": "The key-player thread (one per plan)",
+     "runs_as": "thread",
+     "started_by": "Player.run on the main thread, once a plan has passed its checks and the game is confirmed in front (one new thread named `key-player` per plan)",
+     "lives": "the plan's length (20 s at most, longer if splices carry it on); the main thread waits for it to end",
+     "does": "Presses the plan's keys and mouse buttons at their times, and moves the pointer along a human-like path. Before each event it waits in steps of up to 15 ms, and between them it checks for the plan's `.cancel` file, a `.splice` file, the end of a retreat's 12 s, and the alarm. The last 20 ms before an event are timed precisely. Before every event it checks that the game is still the window in front, and stops if not. For a Lie Detector click it also checks that no other window is under the pointer. A **splice** is a new plan, written as `<id>.splice`, that takes over from the running one at a given moment. The thread claims it, checks it like any plan, and switches to it without letting go of keys that both plans hold. The old plan is answered as `spliced`. When the thread ends, the main thread lets go of every key still held.",
+     "rate": "each event on its time, to about 1-2 ms",
+     "talks_to": [
+      {
+       "to": "the Lie Detector watchdog",
+       "via": "the Alarm threading.Event (its sleeps are waits on it)",
+       "what": "stop now: the wait ends at once and no further key goes out. A plan let through with the alarm already up waits on a private Event instead, and plays to its end."
+      },
+      {
+       "to": "hunt, park, tools (`gamelab stop`)",
+       "via": "lab/inbox/<id>.cancel and <id>.splice files",
+       "what": "cut the plan short; take over from it"
+      },
+      {
+       "to": "game",
+       "via": "SendInput (keys by scan code, mouse moves and buttons) and SetCursorPos, through the window and input helpers",
+       "what": "the input itself"
+      },
+      {
+       "to": "the plan loop (main thread)",
+       "via": "shared objects: the dict `cur` and the set `held`; join",
+       "what": "keys sent and when, problems, the pointer's path, which keys are still down"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/player.py",
+       "line": 945,
+       "symbol": "threading.Thread"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 875,
+       "symbol": "press_keys"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 822,
+       "symbol": "wait"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 273,
+       "symbol": "WAIT_STEP_S"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 795,
+       "symbol": "splice_taken"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 850,
+       "symbol": "switch"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 888,
+       "symbol": "win32.foreground_title"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 917,
+       "symbol": "window.pointer_on"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 793,
+       "symbol": "halt"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 960,
+       "symbol": "held"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1024,
+       "symbol": "_press"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 333,
+       "symbol": "cancel"
+      }
+     ]
+    },
+    {
+     "id": "frame-recorder",
+     "name": "The plan's frame recorder",
+     "runs_as": "library code on the caller's thread (the main thread, while the key-player thread presses)",
+     "started_by": "Player.run, only for a plan that asks for frames. Those come only from short commands that take a picture or a recording through the player: `snap`, `act` (always, for its picture at the end), `do`, `lock`, `combo`, `calibrate`, `window`, and `stats` or `keys` with `--read --record`. Hunts, the pet feeder and the perception service never ask for frames.",
+     "lives": "the plan's capture time (20 s and 900 frames at most)",
+     "does": "Captures the game's drawing area, or the plan's crop of it, with mss (a plain screen grab) at the plan's rate. Frames can be scaled down 1-4 times. It saves them with their times as `lab/outbox/<id>.npz` beside the answer, and stops at once if the alarm goes off. This is separate from the perception service's capture, which the hunts use for their looks.",
+     "rate": "the plan's frames per second, 0-60",
+     "talks_to": [
+      {
+       "to": "game",
+       "via": "mss screen grab of the client area",
+       "what": "frames"
+      },
+      {
+       "to": "tools (the commands that record)",
+       "via": "lab/outbox/<id>.npz",
+       "what": "the frames and their times"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/player.py",
+       "line": 950,
+       "symbol": "mss.MSS"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 953,
+       "symbol": "_sleep_until"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 955,
+       "symbol": "sct.grab"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 980,
+       "symbol": "np.savez_compressed"
+      },
+      {
+       "path": "gamelab/analysis/recordings.py",
+       "line": 54,
+       "symbol": "client.submit"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 801,
+       "symbol": "recordings.screenshot"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 877,
+       "symbol": "client.submit"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 870,
+       "symbol": "recordings.record"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 755,
+       "symbol": "client.submit"
+      },
+      {
+       "path": "gamelab/analysis/calibration.py",
+       "line": 70,
+       "symbol": "client.submit"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 372,
+       "symbol": "client.submit"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 1309,
+       "symbol": "client.submit"
+      }
+     ]
+    },
+    {
+     "id": "window-input",
+     "name": "The window and input helpers",
+     "runs_as": "library code on the caller's thread (the main thread, the key-player thread and the watchdog)",
+     "started_by": "called by Player.run, the key-player thread and the watchdog",
+     "lives": "as long as the process (loaded once at start)",
+     "does": "`gamelab/window.py` and `maplehelper/win32.py`. They find the game window by its title and read its drawing area (the client area). They tell whether it is minimized, or whether another window covers part of it. They bring it to the front without sending keys (SetForegroundWindow, with an Alt+Tab-like fallback), and resize it to 1366x768 or 1920x1080. They move the pointer along a generated human-like path (SendInput mouse moves, then SetCursorPos), and press keys by scan code and mouse buttons with SendInput. Each input carries a tag (\"MHLP\") so maplehelper's own keyboard hook can tell it apart from your real key presses.",
+     "rate": "as called: every key, pointer step and look",
+     "talks_to": [
+      {
+       "to": "game",
+       "via": "SendInput, SetCursorPos, SetWindowPos",
+       "what": "keys, clicks, pointer moves, a resize"
+      },
+      {
+       "to": "windows",
+       "via": "FindWindowW, GetClientRect, IsIconic, WindowFromPoint, SetForegroundWindow",
+       "what": "where the game is, whether it is in front or covered; bring it to the front"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/window.py",
+       "line": 98,
+       "symbol": "move_cursor"
+      },
+      {
+       "path": "gamelab/window.py",
+       "line": 135,
+       "symbol": "find_game"
+      },
+      {
+       "path": "gamelab/window.py",
+       "line": 201,
+       "symbol": "shows"
+      },
+      {
+       "path": "gamelab/window.py",
+       "line": 338,
+       "symbol": "resize_client"
+      },
+      {
+       "path": "gamelab/window.py",
+       "line": 371,
+       "symbol": "bring_to_front"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 17,
+       "symbol": "INJECTED_TAG"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 65,
+       "symbol": "send_key"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 103,
+       "symbol": "send_mouse_button"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 767,
+       "symbol": "window.resize_client"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 773,
+       "symbol": "window.bring_to_front"
+      }
+     ]
+    },
+    {
+     "id": "watchdog",
+     "name": "The Lie Detector watchdog (`lie-detector-watch`)",
+     "runs_as": "thread",
+     "started_by": "serve, at start-up, before the first plan is taken",
+     "lives": "as long as the plan loop runs. The loop sets its `stopped` Event on the way out and waits up to 30 s. It is a daemon thread. It dies only if it can't open its screen grabber at all, and then the player stops, since nothing would see a Lie Detector.",
+     "does": "Every 0.25 s, with or without a plan running, it grabs the game's drawing area with its own mss screen grab and asks the spotter whether any form of the Lie Detector is showing. It runs OpenCV on this one thread (no hidden worker pool). **At the first sight** it sets the Alarm first, so every key stops within about 10 ms. Then it raises the alarm (the file, a screenshot, beeps and a Windows notification), starts recording the episode, and pushes to the phone. **The episode ends** once no Lie Detector has shown for 10 s. A window covering part of the game counts toward those 10 s; a minimized or missing game does not. If the episode never reached the Truth Booth, it deletes `ALARM.json` itself and clears the Alarm, and plans flow again with no restart. If it did reach the Truth Booth, the Alarm stays set until you run `clear-alarm`; it then sets `cleared` and the player stops. An alarm file deleted while the Lie Detector is still up is raised again. Nothing that fails during a look stops it: the error is logged and the next look comes.",
+     "rate": "4 looks a second (about 0.07-0.12 of a CPU core)",
+     "talks_to": [
+      {
+       "to": "the plan loop and the key-player thread",
+       "via": "the Alarm (a threading.Event subclass that records when it was set)",
+       "what": "stop all input now; cleared again when an answered Lie Detector is over"
+      },
+      {
+       "to": "the plan loop (main thread)",
+       "via": "threading.Events `looked`, `cleared` and `stopped`",
+       "what": "first look done; a person cleared the alarm (stop now); stop watching"
+      },
+      {
+       "to": "the recording writer",
+       "via": "Recording.add into a queue.Queue of 16 looks; Recording.finish sets its `ended` Event",
+       "what": "every look of the episode; its end"
+      },
+      {
+       "to": "tools (`clear-alarm`)",
+       "via": "the recording folder's `cycle.live` file",
+       "what": "the episode goes on after its recording ended at the test's end: `clear-alarm` waits"
+      },
+      {
+       "to": "game",
+       "via": "mss screen grab of the client area, plus the window helpers",
+       "what": "a frame 4 times a second; is it minimized, missing or covered"
+      },
+      {
+       "to": "perceive",
+       "via": "lab/ALARM.json (checked by the service's mini-game tracker and Violetta helper every 0.5 s)",
+       "what": "the alarm is up: the service starts following the mini-game and sends `lie_cursor` and `lie_ok` plans back to this player"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/player.py",
+       "line": 330,
+       "symbol": "Watchdog"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 390,
+       "symbol": "daemon"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 443,
+       "symbol": "Watchdog.run"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 445,
+       "symbol": "cv2.setNumThreads"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 464,
+       "symbol": "Watchdog.tick"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 483,
+       "symbol": "self.alarm.set"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 486,
+       "symbol": "_raise"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 502,
+       "symbol": "_start_recording"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 516,
+       "symbol": "self.pusher.seen"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 526,
+       "symbol": "cycle_going"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 580,
+       "symbol": "_resume"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 629,
+       "symbol": "_raise_again"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 651,
+       "symbol": "_grab"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 311,
+       "symbol": "Alarm"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 81,
+       "symbol": "AUTO_RESUME"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1147,
+       "symbol": "watchdog.start"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1182,
+       "symbol": "watchdog.is_alive"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 62,
+       "symbol": "END_S"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 373,
+       "symbol": "cycle_going"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 128,
+       "symbol": "alarm_up"
+      }
+     ]
+    },
+    {
+     "id": "spotter",
+     "name": "The Lie Detector spotter",
+     "runs_as": "library code on the caller's thread (the watchdog's)",
+     "started_by": "the Watchdog, which creates it when the player starts",
+     "lives": "as long as the watchdog",
+     "does": "Template matching against cut-out pictures of each form of the Lie Detector (the mini-game's notice and board, the image quiz's warning and quiz, the Truth Booth, and the others it knows). A score of 1 or more means 'seen'. On most looks it checks only around where each form usually appears. It checks the whole frame on every 8th look (every 2 s), on every look during an episode, and whenever the picture is not where it belongs. It also reads the Truth Booth's countdown clock. A game window of a size other than 1366x768 or 1920x1080 is stretched to 1920x1080 first.",
+     "rate": "every look (4 a second); the whole frame every 8th",
+     "talks_to": [
+      {
+       "to": "the Lie Detector watchdog",
+       "via": "return values (a score per form)",
+       "what": "which forms show, and how strongly"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/perception/lie_detector.py",
+       "line": 163,
+       "symbol": "LieDetectorSpotter"
+      },
+      {
+       "path": "gamelab/perception/lie_detector.py",
+       "line": 125,
+       "symbol": "WHOLE_EVERY"
+      },
+      {
+       "path": "gamelab/perception/lie_detector.py",
+       "line": 218,
+       "symbol": "clock_left"
+      },
+      {
+       "path": "gamelab/perception/lie_detector.py",
+       "line": 128,
+       "symbol": "to_template"
+      },
+      {
+       "path": "gamelab/perception/framecheck.py",
+       "line": 243,
+       "symbol": "anchors_off"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 603,
+       "symbol": "_scores"
+      }
+     ]
+    },
+    {
+     "id": "alarm-raiser",
+     "name": "Raising the alarm and paging the PC",
+     "runs_as": "library code on the caller's thread (the watchdog's)",
+     "started_by": "the watchdog, at an episode's first sight (and again if the alarm file was deleted while the Lie Detector is still up)",
+     "lives": "about 1.2 s per raise (3 beeps 0.4 s apart hold the watchdog's thread), plus saving the screenshot",
+     "does": "First it writes `lab/ALARM.json` (when, which form, its cause), then saves the frame as `lab/lie_detector_<HHMMSS>.png`. Then it pages whoever is at the PC: 3 beeps 0.4 s apart, and a Windows notification that doesn't take focus from the game. While `ALARM.json` is there, the gamelab commands that bring the game forward or send it input refuse to start (exit code 3), and a running command's next ordinary plan is refused. Only the four allowed kinds of plan still go (the pet feeder's food, a hunt's retreat, the service's mini-game cursor and OK click). `python -m gamelab clear-alarm` removes the file.",
+     "rate": "once per episode (plus once per re-raise)",
+     "talks_to": [
+      {
+       "to": "hunt, pet, park, tools (every gamelab command)",
+       "via": "lab/ALARM.json",
+       "what": "the Lie Detector is up: refuse to run, except the four plan kinds"
+      },
+      {
+       "to": "user",
+       "via": "winsound beeps; the toast's PowerShell",
+       "what": "come and answer it"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 186,
+       "symbol": "raise_alarm"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 232,
+       "symbol": "page"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 18,
+       "symbol": "BEEPS"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 238,
+       "symbol": "winsound.MessageBeep"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 38,
+       "symbol": "check_alarm"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 46,
+       "symbol": "GAME_COMMANDS"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 677,
+       "symbol": "_raise"
+      }
+     ]
+    },
+    {
+     "id": "toast",
+     "name": "The Windows notification (a hidden PowerShell)",
+     "runs_as": "child process",
+     "started_by": "page() on the watchdog thread, with subprocess.Popen (`powershell -NoProfile -NonInteractive -Command ...`, no window). It inherits the player's administrator rights.",
+     "lives": "a few seconds, until it has shown the notification. Nobody waits for it.",
+     "does": "Shows a Windows notification without taking focus from the game. Its title and line of advice depend on the form seen: for example 'MapleStory image quiz in 30 s', or 'MapleStory Lie Detector on screen' with 'Answer it in the game yourself.'",
+     "rate": "once per page",
+     "talks_to": [
+      {
+       "to": "user",
+       "via": "a Windows toast notification",
+       "what": "the Lie Detector's form and what to do"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 254,
+       "symbol": "subprocess.Popen"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 23,
+       "symbol": "PAGED"
+      },
+      {
+       "path": "gamelab/control/alarm.py",
+       "line": 35,
+       "symbol": "PAGE"
+      }
+     ]
+    },
+    {
+     "id": "recording-writer",
+     "name": "The Lie Detector recording's writer (`lie-detector-recording`)",
+     "runs_as": "thread",
+     "started_by": "the watchdog, which creates a new Recording at each episode's first sight (one thread per episode)",
+     "lives": "from the first sight until the recording ends (10 s with no Lie Detector, 5 s after its test, 10 minutes at most, or the player stopping) and its queue is written. It is a daemon thread; when the player stops, the watchdog waits up to 20 s for it.",
+     "does": "Writes one folder per episode, `lab/lie_detector/<YYYYmmdd-HHMMSS>/`: a line per look in `index.jsonl` (time, a score per form, why there was no frame), then `summary.json` at the end (forms seen and when, outcome, the Truth Booth's clock). It works behind a queue of 16 looks, so a slow disk never holds up the watchdog: past 16 waiting, a line is dropped and counted. It saves no pictures. The episode's video comes from the perception service's rolling recorder.",
+     "rate": "a line per look (4 a second)",
+     "talks_to": [
+      {
+       "to": "the Lie Detector watchdog",
+       "via": "queue.Queue (16 looks); the `ended` threading.Event",
+       "what": "looks in; the end"
+      },
+      {
+       "to": "perceive (its rolling recorder)",
+       "via": "lab/lie_detector/<time>/summary.json",
+       "what": "once the summary says the test is over, the service writes the alarm clip and the 5 minutes before it into `before/`"
+      },
+      {
+       "to": "tools (`clear-alarm`)",
+       "via": "how recently the folder's index was written",
+       "what": "`clear-alarm` refuses (exit 3) while an episode is still being recorded"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 104,
+       "symbol": "Recording"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 132,
+       "symbol": "threading.Thread"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 136,
+       "symbol": "Recording.add"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 214,
+       "symbol": "_write"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 82,
+       "symbol": "QUEUE_ITEMS"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 69,
+       "symbol": "TEST_TAIL_S"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 75,
+       "symbol": "CAP_S"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 351,
+       "symbol": "going"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 685,
+       "symbol": "_start_recording"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 462,
+       "symbol": "rec.join"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 723,
+       "symbol": "cycle_end"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 206,
+       "symbol": "cmd_clear_alarm"
+      }
+     ]
+    },
+    {
+     "id": "recording-prune",
+     "name": "The recordings' pruner (`lie-detector-prune`)",
+     "runs_as": "thread",
+     "started_by": "each new Recording, as it starts",
+     "lives": "seconds, once per episode (a daemon thread)",
+     "does": "Deletes the oldest folders in `lab/lie_detector/` until the rest take at most 10 GB, never the one being written.",
+     "rate": "once per episode",
+     "talks_to": [
+      {
+       "to": "the recording writer",
+       "via": "the folder it spares",
+       "what": "never deletes the episode being written"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 134,
+       "symbol": "_prune"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 309,
+       "symbol": "prune"
+      },
+      {
+       "path": "gamelab/control/lie_recorder.py",
+       "line": 81,
+       "symbol": "KEEP_BYTES"
+      }
+     ]
+    },
+    {
+     "id": "pusher",
+     "name": "The phone alerts (Pusher)",
+     "runs_as": "library code on the caller's thread (the watchdog's); each push then goes out on a thread of its own",
+     "started_by": "serve, which creates it at start-up and hands it to the watchdog",
+     "lives": "as long as the watchdog",
+     "does": "At an episode's first sight it sends an alert, 'Lie Detector up' with its form and the time. It sends one more if the Truth Booth shows ('Lie Detector missed'), and an ordinary one when the episode ends. The first two also go out as a text by mail. It reads `lab/bark.json` and `lab/smtp.json` at each push; with no file, nothing is sent. The text never includes a screenshot, her name or the map.",
+     "rate": "2-3 pushes per episode",
+     "talks_to": [
+      {
+       "to": "the Lie Detector watchdog",
+       "via": "calls `seen` and `ended`",
+       "what": "what it sees"
+      },
+      {
+       "to": "the Bark and mail threads",
+       "via": "a new thread per push",
+       "what": "title and text"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 252,
+       "symbol": "Pusher"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 265,
+       "symbol": "Pusher.from_lab"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 277,
+       "symbol": "Pusher.seen"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 293,
+       "symbol": "Pusher.ended"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1145,
+       "symbol": "notify.Pusher.from_lab"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 516,
+       "symbol": "self.pusher.seen"
+      }
+     ]
+    },
+    {
+     "id": "bark-push",
+     "name": "A Bark push to the iPhone (`bark-push`)",
+     "runs_as": "thread",
+     "started_by": "the Pusher, one thread per alert (only if `lab/bark.json` holds a device key)",
+     "lives": "one HTTPS request, which times out after 10 s; a daemon thread that never raises",
+     "does": "Sends an HTTPS GET to Bark's server (https://api.day.app unless the file names another), which pushes the alert to the iPhone. The first sight and the Truth Booth go as Bark's 'critical' level, which is meant to get through Do Not Disturb and the mute switch; with `\"ring\": true` in the file they also ring for 30 s. The episode's end goes as an ordinary push. A failure is logged, with the device key hidden.",
+     "rate": "per push",
+     "talks_to": [
+      {
+       "to": "phone",
+       "via": "HTTPS to the Bark server",
+       "what": "the alert's title and text"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 190,
+       "symbol": "bark"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 203,
+       "symbol": "threading.Thread"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 271,
+       "symbol": "bark"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 272,
+       "symbol": "call"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 47,
+       "symbol": "BARK_SERVER"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 51,
+       "symbol": "SEND_TIMEOUT_S"
+      }
+     ]
+    },
+    {
+     "id": "text-mail",
+     "name": "A text by mail (`text-mail`)",
+     "runs_as": "thread",
+     "started_by": "the Pusher, for the first sight and the Truth Booth only (only if `lab/smtp.json` is filled in)",
+     "lives": "one SMTP send (each network wait times out after 20 s); a daemon thread that never raises",
+     "does": "Mails a short text through your own mail account to the addresses in `lab/smtp.json`, such as a carrier's email-to-text address.",
+     "rate": "1-2 per episode",
+     "talks_to": [
+      {
+       "to": "phone",
+       "via": "SMTP through your mail account",
+       "what": "a short text"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 114,
+       "symbol": "mail"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 125,
+       "symbol": "threading.Thread"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 107,
+       "symbol": "smtplib.SMTP"
+      },
+      {
+       "path": "gamelab/control/notify.py",
+       "line": 50,
+       "symbol": "MAIL_TIMEOUT_S"
+      }
+     ]
+    },
+    {
+     "id": "player-log",
+     "name": "The player's log (`lab/player.log`)",
+     "runs_as": "library code on the caller's thread (any of its threads: the file is opened, appended to and closed for each line)",
+     "started_by": "every component above, as things happen",
+     "lives": "the file outlives the process. At start, a log over 5 MB is moved to `player.log.1`.",
+     "does": "One line per plan (`ran <id>: ok` or its error), every refusal and splice, and every step of a Lie Detector episode, each with the time of day.",
+     "rate": "about 40 bytes a plan (some 150 KB an hour of hunting)",
+     "talks_to": [
+      {
+       "to": "tools (`stop-player`)",
+       "via": "lab/player.log",
+       "what": "waits for its last line to be `player stopped`"
+      },
+      {
+       "to": "pet (the guard)",
+       "via": "lab/player.log",
+       "what": "the time of the last plan played: whether someone is playing her"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1059,
+       "symbol": "_log"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1076,
+       "symbol": "_rotate_log"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 84,
+       "symbol": "LOG_MAX_BYTES"
+      },
+      {
+       "path": "gamelab/__main__.py",
+       "line": 150,
+       "symbol": "PLAYER_LOG"
+      },
+      {
+       "path": "gamelab/behavior/guard.py",
+       "line": 97,
+       "symbol": "player_last_key"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

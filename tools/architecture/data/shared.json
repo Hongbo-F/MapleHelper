@@ -1,0 +1,3507 @@
+{
+ "id": "shared",
+ "layer": "shared",
+ "title": "Shared: telemetry, the game window, screen capture, native C and her profile",
+ "tagline": "What every layer may import: files, geometry, telemetry, capture, C kernels, who plays",
+ "summary": "The modules outside the layer packages that any layer may import (tests/test_architecture.py's SHARED set): where files live, how the game's 1366x768 view maps to pixels, the JSON-lines telemetry every process writes and the UI reads, the game window and screen capture, the hand-written C, AVX2 and Direct3D 11 kernels that make 30-frames-a-second perception possible, garbage-collection timing, and the character profile that says who plays. They depend on no layer, so they form the base of the stack.",
+ "details_md": "**What counts as shared.** `tests/test_architecture.py` lists `capture, character, classes, directions, gcstats, native, paths, screen, telemetry, window` as SHARED and checks that every other top-level module belongs to a layer. Each layer may import these besides its allowed lower layers. Three more rules from that test shape this slice: the profiles (`character`, `classes`) import nothing of gamelab but `paths` and each other, so every layer may read them; the elevated key player must not load `native` (it would load a DLL built from the tree into an administrator process); and only `perception/frames.py` calls `capture.shared()`, because only the perception service captures the game.\n\n**Files and geometry.** `paths` names every file; most inter-process signalling is plain files in the git-ignored `gamelab/lab/` (plans in `inbox/`, results in `outbox/`, `STOP`, `ALARM.json`, the `GPU` switch). `screen.Geometry` converts between screen px, look-frame px and map units for the window size in hand, since the game moved from a stretched 1920x1080 window to its own 1366x768 on 2026-10-23. `directions` gives left and right signs. `__init__` pins OpenBLAS to one thread (3 GB per process otherwise).\n\n**Telemetry.** Any code calls `telemetry.emit(topic, **data)`; a process that called `record_to` gets one JSON line per record in `lab/telemetry/<time>-<command>.jsonl`, written every 0.2 s by a background thread so disk stalls never freeze a loop. 24 topics cover what the stack sees (`scene`, `tracks`, `exp`, `drops`), plans (`route`, `chain`, `sweep`, `hunt`), does (`attack`, `moved`, `trip`) and how it runs (`perf`, `gc`, `log`, `event`). The UI follows the newest file live; analysis tools read whole runs. `gcstats` adds GC counts and pauses to the service's console and a `gc` topic.\n\n**Seeing the game.** `window` finds the game, its client rectangle, whether anything covers it, and focuses it without keys; `capture` grabs boxes of that rectangle through DXGI desktop duplication (frames handed over as shown, with their present time) or mss as a fallback.\n\n**The C pieces.** `native.py` compiles each C source with MSVC 2022 on first use into `gamelab/build/<stem>-<hash>.dll` and loads it with ctypes (which releases Python's lock). Each piece replaces a measured hot spot. Where a Python or OpenCV fallback exists it gives that fallback's answers to the bit, except the masked match, which works out OpenCV's score exactly where OpenCV rounds in float32. Two have no fallback in the frame loop: without spawns.c the spawn watch is left out, without exact.c there is no exact finder.\n\n| Source | Replaces | Gain measured |\n|---|---|---|\n| native.c | OpenCV's masked matchTemplate; per-monster re-find tasks; numpy peaks; Python flight | the masked match about 4x OpenCV's (a re-find window 0.45 vs 1.57 ms); with the one-call re-finds 30 fps in a crowd vs 14 |\n| search.c | the monster search's step 1 in numpy/OpenCV | a crowded whole screen 116 -> 20 ms of CPU |\n| locate.c | her plate and body cues in numpy | the body search was 7-80 ms of Python |\n| camreg.c | camera registration costs in numpy | a frame 10-20 -> 0.2-0.4 ms |\n| spawns.c | the spawn watch's blend sums | numpy 13.6 ms a frame (p99 132) |\n| exact.c | nothing (new): an exact-pixel monster finder beside the search | 3.6 ms a frame on one thread (median, offline) |\n| gpumatch.c + .hlsl | the re-finds on the GPU, same answers | off by default: slower at idle clocks |\n\n**Who plays.** `character.active()` resolves the one character a process plays (`--character`/`GAMELAB_CHARACTER`, `lab/character.json`, config.toml, the thief) and builds her profile from `classes/thief.py` or `classes/magician.py`: attacks and their geometry, the `Shape` localization's trackers use, her files (`paths.of`), pet, policy and priors.",
+ "groups": [
+  {
+   "id": "foundation",
+   "title": "Files, geometry and directions",
+   "summary": "Where files live (and per-character and per-size variants), how the game's view maps to pixels, left and right, and the package's OpenBLAS pin.",
+   "modules": [
+    "gamelab/__init__.py",
+    "gamelab/paths.py",
+    "gamelab/screen.py",
+    "gamelab/directions.py"
+   ]
+  },
+  {
+   "id": "telemetry",
+   "title": "Telemetry and GC timing",
+   "summary": "The JSON-lines record of every run, written off the loops and followed live by the UI, and Python's garbage collections timed.",
+   "modules": [
+    "gamelab/telemetry.py",
+    "gamelab/gcstats.py"
+   ]
+  },
+  {
+   "id": "seeing",
+   "title": "The game window and screen capture",
+   "summary": "Finding, sizing, focusing and checking the game window; grabbing its pixels by DXGI desktop duplication or mss.",
+   "modules": [
+    "gamelab/window.py",
+    "gamelab/capture.py"
+   ]
+  },
+  {
+   "id": "native",
+   "title": "gamelab's pieces in C and on the GPU",
+   "summary": "The loader that builds and wraps the DLLs, and each C/HLSL source: masked match and re-finds, the search's step 1, her cues, camera registration, spawn fade-ins, the exact finder, the GPU backend.",
+   "modules": [
+    "gamelab/native.py",
+    "gamelab/native.c",
+    "gamelab/search.c",
+    "gamelab/locate.c",
+    "gamelab/camreg.c",
+    "gamelab/spawns.c",
+    "gamelab/exact.c",
+    "gamelab/gpumatch.c",
+    "gamelab/gpumatch.hlsl"
+   ]
+  },
+  {
+   "id": "profile",
+   "title": "Who plays: her profile",
+   "summary": "Which character a process plays and her profile as data: the thief and the magician.",
+   "modules": [
+    "gamelab/character.py",
+    "gamelab/classes/__init__.py",
+    "gamelab/classes/thief.py",
+    "gamelab/classes/magician.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/__init__.py",
+   "title": "Package init",
+   "tagline": "Pins numpy's BLAS to one thread before numpy is first imported",
+   "summary": "The package's only code: it sets OPENBLAS_NUM_THREADS to 1 (unless already set) as gamelab is imported, before anything imports numpy. It exists because of a memory incident, not for speed.",
+   "details_md": "OpenBLAS (numpy's BLAS, from `environment.yml`) commits a work buffer per thread when numpy loads: about **3 GB a Python process** with this PC's 24 hardware threads, against 18 MB with one. On 2026-10-24 a few such Python processes running at once ran the machine out of commit charge.\n\nNothing in gamelab needs threaded BLAS (the heavy work is OpenCV, the C pieces in `native`, or single small numpy operations), so the package sets `OPENBLAS_NUM_THREADS=1` with `os.environ.setdefault` before numpy is first imported. The conda environment's `sitecustomize.py` does the same, and the babysitter's start lines in `gamelab/README.md` set it on the command line too (`set OPENBLAS_NUM_THREADS=1&& ... -m gamelab perceive`), so it holds even for a process that imports numpy before gamelab.",
+   "lines": 11,
+   "key_items": [
+    {
+     "name": "OPENBLAS_NUM_THREADS",
+     "kind": "constant",
+     "line": 11,
+     "signature": "os.environ.setdefault(\"OPENBLAS_NUM_THREADS\", \"1\")",
+     "summary": "Sets the environment variable before numpy loads, so OpenBLAS makes one thread and commits ~18 MB instead of ~3 GB."
+    }
+   ],
+   "inputs": [
+    "the process environment (an existing OPENBLAS_NUM_THREADS wins)"
+   ],
+   "outputs": [
+    "OPENBLAS_NUM_THREADS=1 in the process environment, inherited by child processes"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "OPENBLAS_NUM_THREADS",
+     "value": "1",
+     "meaning": "BLAS threads numpy may use in every gamelab process"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Pin OpenBLAS to one thread in every gamelab process",
+     "why": "Each process committed about 3 GB with 24 threads, and a few processes ran the PC out of commit charge."
+    }
+   ],
+   "gotchas": [
+    "It only works if gamelab is imported before numpy; scripts that import numpy first rely on sitecustomize.py or the command line setting it."
+   ],
+   "tests": []
+  },
+  {
+   "path": "gamelab/paths.py",
+   "title": "Paths",
+   "tagline": "Where every file lives: config, assets, and the git-ignored lab folder",
+   "summary": "A table of module constants naming every file and folder gamelab uses: the repo, config.toml, the assets in git, and the working files under gamelab/lab (git-ignored). It also answers 'her own files' per character (`of`, `Files`) and per window size (`calibrated`).",
+   "details_md": "`paths.py` holds no logic beyond naming. Everything a process writes for another process or for later lives under `gamelab/lab/` (`LAB`), and most inter-process signalling is plain files there:\n\n| Constant | File | What it is |\n|---|---|---|\n| `INBOX`, `OUTBOX` | `lab/inbox/`, `lab/outbox/` | key plans waiting for the elevated key player, and its results |\n| `STOP` | `lab/STOP` | create it to stop the player |\n| `GPU` | `lab/GPU` | create it to put the re-finds' matches on the GPU (`native.GPU`; `GAMELAB_GPU` wins) |\n| `ALARM` | `lab/ALARM.json` | the Lie Detector was seen; nothing runs until it's cleared |\n| `PLAYER_INFO` | `lab/player.json` | what the running player can do (`splice`, `pid`, `started`) |\n| `TELEMETRY` | `lab/telemetry/` | one JSON-lines file per run (`telemetry`) |\n| `HUNT`, `STOP_HUNT` | `lab/hunt.json`, `lab/stop_hunt.json` | the hunt running now; `gamelab stop` |\n| `RECORDINGS`, `RECENT`, `ALARM_CLIPS`, `LIE_RECORDINGS` | folders | recordings: on request, the rolling recorder's saves, each alarm's clip, each Lie Detector cycle |\n\n**Her own files.** Since the magician arrived (2026-10-27) some files belong to a character: `MINE` maps 14 lower-case names (`calibration`, `tag_template`, `tag_full`, `heading`, `heading_seed`, `heading_shots`, `shot_log`, `probe_log`, `hit_log`, `touches`, `stats`, `pet`, `grounds`, `damage`) to the module constants. `of(character)` returns a `Files` for the character (default: `character.active()`), and `Files.__getattr__` resolves a name: for the thief (folder `\"\"`) the constant itself, exactly as before profiles existed; for another character the same file name under `lab/characters/<folder>/`, and for `heading_seed` `assets/heading_<folder>.npz`. It reads the module's globals at call time, so a test that monkeypatches a constant moves the character's file too. `Files.lab` is her own folder: `lab/` for the thief, `lab/characters/<folder>/` for another (made by whatever saves there first, normally `calibrate`, which L0 runs first: analysis.calibration).\n\n**Per window size.** `calibrated(path, suffix)` names the calibration's files for another client size than 1920x1080: `calibration_1366x768.json` etc. (`screen.Geometry.suffix`), because her name tag and her pictures are drawn at the game's size.",
+   "lines": 118,
+   "key_items": [
+    {
+     "name": "LAB",
+     "kind": "constant",
+     "line": 13,
+     "signature": "LAB = ROOT / \"lab\"",
+     "summary": "The git-ignored working folder every process shares: plans, results, alarms, logs, telemetry, recordings."
+    },
+    {
+     "name": "INBOX",
+     "kind": "constant",
+     "line": 15,
+     "signature": "INBOX = LAB / \"inbox\"",
+     "summary": "Key plans waiting for the elevated key player (control.client writes, control.player reads)."
+    },
+    {
+     "name": "OUTBOX",
+     "kind": "constant",
+     "line": 16,
+     "signature": "OUTBOX = LAB / \"outbox\"",
+     "summary": "The player's results for each plan."
+    },
+    {
+     "name": "STOP",
+     "kind": "constant",
+     "line": 17,
+     "signature": "STOP = LAB / \"STOP\"",
+     "summary": "A file whose existence stops the player."
+    },
+    {
+     "name": "GPU",
+     "kind": "constant",
+     "line": 18,
+     "signature": "GPU = LAB / \"GPU\"",
+     "summary": "The GPU switch file for the re-finds (read by native.gpu_mode): absent means off; containing the text 'ahead' means 'ahead'; any other content (or empty) means 'start'. GAMELAB_GPU wins over it."
+    },
+    {
+     "name": "ALARM",
+     "kind": "constant",
+     "line": 19,
+     "signature": "ALARM = LAB / \"ALARM.json\"",
+     "summary": "Written when the Lie Detector is seen; nothing runs until it's cleared."
+    },
+    {
+     "name": "TELEMETRY",
+     "kind": "constant",
+     "line": 63,
+     "signature": "TELEMETRY = LAB / \"telemetry\"",
+     "summary": "The folder of telemetry files, one per run (telemetry.FOLDER)."
+    },
+    {
+     "name": "CONFIG",
+     "kind": "constant",
+     "line": 8,
+     "signature": "CONFIG = REPO / \"config.toml\"",
+     "summary": "The user's config file at the repo root (capture method, characters, keys...)."
+    },
+    {
+     "name": "MINE",
+     "kind": "constant",
+     "line": 73,
+     "signature": "MINE = {\"calibration\": \"CALIBRATION\", ...}",
+     "summary": "The 14 per-character files: lower-case names mapped to the module constants they stand for."
+    },
+    {
+     "name": "Files",
+     "kind": "class",
+     "line": 79,
+     "signature": "class Files:  # __init__(self, folder: str = \"\")",
+     "summary": "A character's own files: attribute access by MINE's names gives the thief's constant, or the same name under lab/characters/<folder>/."
+    },
+    {
+     "name": "Files.__getattr__",
+     "kind": "method",
+     "line": 86,
+     "signature": "def __getattr__(self, name: str) -> Path",
+     "summary": "Resolves a MINE name at call time from the module's globals (so tests can repoint a constant)."
+    },
+    {
+     "name": "of",
+     "kind": "function",
+     "line": 106,
+     "signature": "def of(character=None) -> Files",
+     "summary": "Her own files: Files(character.perception.files); with no argument the process's active character (imported lazily to avoid a cycle)."
+    },
+    {
+     "name": "calibrated",
+     "kind": "function",
+     "line": 114,
+     "signature": "def calibrated(path: Path, suffix: str) -> Path",
+     "summary": "A calibration file's name for another client size: stem + suffix ('_1366x768') + extension."
+    },
+    {
+     "name": "CHARACTERS",
+     "kind": "constant",
+     "line": 72,
+     "signature": "CHARACTERS = \"characters\"",
+     "summary": "The sub-folder of lab holding the non-thief characters' files."
+    }
+   ],
+   "inputs": [
+    "the location of gamelab/ on disk (`__file__`)",
+    "the active character (gamelab.character.active) when `of()` is called without one"
+   ],
+   "outputs": [
+    "Path constants for every layer",
+    "Files objects for per-character files (perception, behavior, analysis.calibration)"
+   ],
+   "uses": [
+    "gamelab/character.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Per-character files: the thief keeps lab/'s names, others get lab/characters/<id>/ (Files, of)",
+     "why": "The user added a magician and switches between characters; the thief's files had to stay exactly where they were."
+    },
+    {
+     "date": "2026-10-23",
+     "what": "Calibration files per client size (calibrated, screen.Geometry.suffix)",
+     "why": "The game moved to its own 1366x768; name tags and her pictures are drawn at the game's size."
+    },
+    {
+     "date": "2026-10-20",
+     "what": "Shot log moved to shots2.jsonl (OLD_SHOT_LOG kept)",
+     "why": "As logged until then, a kill made every throw in flight count as a hit."
+    }
+   ],
+   "gotchas": [
+    "`of()` imports gamelab.character lazily inside the function: paths is imported by character, so a top-level import would be circular.",
+    "Files resolves through globals() at call time: monkeypatching e.g. paths.LAB in a test moves every character's files with it.",
+    "KEYBINDINGS is a format string ('keybindings-{}.json') relative to LAB, not a Path."
+   ],
+   "tests": [
+    "tests/test_character.py",
+    "tests/test_heading.py",
+    "tests/conftest.py"
+   ]
+  },
+  {
+   "path": "gamelab/screen.py",
+   "title": "Screen geometry",
+   "tagline": "How the game's 1366x768 view maps onto the window and onto look frames",
+   "summary": "The game lays out a 1366x768 view (one game px per map unit) and stretches it to its window's client area. `Geometry` says, for a client size, how screen px, look-frame px and map units relate, and converts the px constants measured on the old 1920x1080 window into the current one. Every layer that reads pixels goes through it.",
+   "details_md": "**Why it exists.** Until 2026-10-23 the game ran in a 1920x1080 client area on a 4K screen: the 1366x768 view stretched 1.40625 times with bilinear filtering, and every template, calibration and pixel constant was measured on that stretched picture. Since then the game runs at its own 1366x768, drawn pixel for pixel (the user: \"run detection on the native resolution, it's both more accurate and less resource consuming\"). Rather than re-measure every constant, a `Geometry` converts them.\n\n**The model.** A `Geometry` is `client` (width, height in screen px) and `look_scale` (how much a look shrinks the client picture). From those:\n- `stretch` = client height / 768: screen px per map unit (1.40625 at 1920x1080, 1 at 1366x768); `stretch_x` the same across (1920/1366 = 1.4056).\n- `frame_scale` = stretch / look_scale: look-frame px per map unit (0.703 at 1920x1080 half size, 1 at 1366x768 full size); `units_per_px` its inverse.\n- `px(n)` and `fpx(n)`: n screen px (or half-size frame px) of the 1920x1080 window converted to this geometry. At 1920x1080 they return n exactly, so old behaviour is unchanged.\n- `to_game(p)` = (p + 0.5) / stretch - 0.5: a screen px's middle in game px, the bilinear stretch undone; `from_game` the reverse.\n- `hud_top`: where monsters and drops stop being searched (the chat box and bars): 0.88 of the height at 1920x1080 as always, else game row 700 of 768 (`HUD_TOP_GAME`, measured on every 1366x768 frame of 2026-10-23 and 24; the old 0.88 would leave 25 rows above the chat box unsearched, where Tree Dungeon's platforms 31 and 32 show).\n- `suffix`: empty at 1920x1080, else `_<width>x<height>` (`_1366x768`): what per-size files are told apart by (paths.calibrated).\n\n**Look scales.** `LOOK_SCALES`: at 1920x1080 a look is half size (960x540, enough for monsters and drops at a quarter of the pixels); at 1366x768 full size (about twice 960x540's pixels at 1.42 times the detail). Any other size: 2.\n\n**Where it travels.** A geometry is made from the frame actually in hand (`of_frame`), and rides along with what is read from it (`perception.eyes.Observation.geo`, `Scene`, `WorldState.geo`), so nothing assumes a size. `STRETCHED`'s numbers (`GAME_SIZE`, `SCREEN_SCALE`, `SCALE`, `UNITS_PER_HALF_PX`) are kept only for the simulator, which draws its world at 1920x1080, and for old screenshots; `tests/test_geometry.py` checks that nothing reading the game uses them or uses a `*_PX` constant unconverted.",
+   "lines": 143,
+   "key_items": [
+    {
+     "name": "Geometry",
+     "kind": "dataclass",
+     "line": 39,
+     "signature": "@dataclass(frozen=True) class Geometry: client: tuple[int, int]; look_scale: int = 2",
+     "summary": "A client size and its look scale; every px <-> map-unit conversion hangs off it."
+    },
+    {
+     "name": "Geometry.stretch",
+     "kind": "method",
+     "line": 46,
+     "signature": "@property def stretch(self) -> float",
+     "summary": "Screen px per map unit: client height / 768 (1.40625 at 1920x1080)."
+    },
+    {
+     "name": "Geometry.frame_scale",
+     "kind": "method",
+     "line": 57,
+     "signature": "@property def frame_scale(self) -> float",
+     "summary": "Look-frame px per map unit: stretch / look_scale (0.703 at 1920x1080 half size, 1 at 1366x768)."
+    },
+    {
+     "name": "Geometry.px",
+     "kind": "method",
+     "line": 89,
+     "signature": "def px(self, n: float) -> float",
+     "summary": "n screen px measured on the 1920x1080 window, in this window's screen px (exactly n at 1920x1080)."
+    },
+    {
+     "name": "Geometry.fpx",
+     "kind": "method",
+     "line": 93,
+     "signature": "def fpx(self, n: float) -> float",
+     "summary": "n px of a half-size 1920x1080 look frame, in this geometry's look-frame px."
+    },
+    {
+     "name": "Geometry.hud_top",
+     "kind": "method",
+     "line": 72,
+     "signature": "@property def hud_top(self) -> float",
+     "summary": "Share of the height where the HUD starts: 0.88 at 1920x1080, 700/768 otherwise."
+    },
+    {
+     "name": "Geometry.to_game",
+     "kind": "method",
+     "line": 110,
+     "signature": "def to_game(self, p: float) -> float",
+     "summary": "A screen position as game px, undoing the bilinear stretch: (p + 0.5) / stretch - 0.5."
+    },
+    {
+     "name": "Geometry.suffix",
+     "kind": "method",
+     "line": 84,
+     "signature": "@property def suffix(self) -> str",
+     "summary": "'' at 1920x1080, else '_<w>x<h>': the per-size file suffix."
+    },
+    {
+     "name": "geometry",
+     "kind": "function",
+     "line": 124,
+     "signature": "def geometry(width: int, height: int, look_scale: int | None = None) -> Geometry",
+     "summary": "Builds a Geometry; look_scale defaults to LOOK_SCALES (2 for unknown sizes)."
+    },
+    {
+     "name": "of_frame",
+     "kind": "function",
+     "line": 130,
+     "signature": "def of_frame(full, look_scale: int | None = None) -> Geometry",
+     "summary": "The geometry of a full-size client-area frame (from its shape)."
+    },
+    {
+     "name": "GAME_VIEW",
+     "kind": "constant",
+     "line": 20,
+     "signature": "GAME_VIEW = (1366, 768)",
+     "summary": "The view the game lays out; one game px is one map unit."
+    },
+    {
+     "name": "LOOK_SCALES",
+     "kind": "constant",
+     "line": 28,
+     "signature": "LOOK_SCALES = {STRETCHED_CLIENT: 2, GAME_VIEW: 1}",
+     "summary": "How much a look shrinks the client picture per client size."
+    },
+    {
+     "name": "HUD_TOP_GAME",
+     "kind": "constant",
+     "line": 35,
+     "signature": "HUD_TOP_GAME = 700",
+     "summary": "The HUD's top border at the game's own size, in game px from the top."
+    },
+    {
+     "name": "STRETCHED",
+     "kind": "constant",
+     "line": 135,
+     "signature": "STRETCHED = geometry(*STRETCHED_CLIENT)",
+     "summary": "The legacy 1920x1080 geometry, kept for the simulator and saved screenshots."
+    }
+   ],
+   "inputs": [
+    "a client size (window.client_rect) or a frame's shape"
+   ],
+   "outputs": [
+    "Geometry objects carried with every Observation, Scene and WorldState",
+    "converted pixel constants for perception and localization"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "GAME_VIEW",
+     "value": "(1366, 768)",
+     "meaning": "the game's own view, in game px = map units"
+    },
+    {
+     "name": "STRETCHED_CLIENT",
+     "value": "(1920, 1080)",
+     "meaning": "the client size every pre-2026-10-23 constant was measured at"
+    },
+    {
+     "name": "LOOK_SCALES",
+     "value": "{1920x1080: 2, 1366x768: 1}",
+     "meaning": "look-frame shrink factor per client size (other sizes: 2)"
+    },
+    {
+     "name": "HUD_TOP",
+     "value": "0.88",
+     "meaning": "HUD top as a share of the height at 1920x1080"
+    },
+    {
+     "name": "HUD_TOP_GAME",
+     "value": "700",
+     "meaning": "HUD top in game px at other sizes (700/768)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-23",
+     "what": "Run the game at its own 1366x768 and convert every constant through a Geometry instead of re-measuring",
+     "why": "Pixel-for-pixel frames are more accurate and cheaper to search; conversions keep 1920x1080 behaviour exact."
+    },
+    {
+     "date": "2026-10-23",
+     "what": "Full-size looks at 1366x768, half-size at 1920x1080",
+     "why": "At 1366x768 full size has about twice 960x540's pixels at 1.42 times the detail; half size would lose detail."
+    }
+   ],
+   "gotchas": [
+    "GAME_SIZE, SCREEN_SCALE, SCALE and UNITS_PER_HALF_PX are the 1920x1080 window's numbers: only the simulator may use them (tests/test_geometry.py enforces it).",
+    "A capture of another size than the eyes were made for is refused by the commands (README, Screen size).",
+    "stretch uses the height; stretch_x differs by 0.05% and is only used where the horizontal ratio matters (perception.exp_number)."
+   ],
+   "tests": [
+    "tests/test_geometry.py",
+    "tests/test_resolution.py"
+   ]
+  },
+  {
+   "path": "gamelab/directions.py",
+   "title": "Directions",
+   "tagline": "Left and right as strings, and their sign along map x",
+   "summary": "Three helpers over maplehelper.engine's LEFT and RIGHT ('left', 'right', also the arrow keys' names): the sign of a direction along map x, the direction of a step, and the opposite direction.",
+   "details_md": "Map x grows to the right, so `sign(RIGHT)` is +1 and `sign(LEFT)` is -1. `toward(dx)` names the direction of a step along x (RIGHT for a positive dx, LEFT otherwise, including 0), and `opposite` flips one. Directions are plain strings everywhere in gamelab (facings in telemetry, arrow keys in key plans), which is why the constants come from `maplehelper.engine` rather than an enum: they double as key names. Used by perception (heading), motion (route, flow), attack (stance), control (actions, mover, navigator), behavior, the simulator and the UI renderer. Keeping these three one-liners in one shared module means every layer agrees on the convention (x grows to the right, a step of 0 counts as LEFT) without importing another layer.",
+   "lines": 19,
+   "key_items": [
+    {
+     "name": "sign",
+     "kind": "function",
+     "line": 7,
+     "signature": "def sign(direction: str) -> int",
+     "summary": "+1 for RIGHT, -1 for LEFT: which way map x goes that way."
+    },
+    {
+     "name": "toward",
+     "kind": "function",
+     "line": 12,
+     "signature": "def toward(dx: float) -> str",
+     "summary": "RIGHT if dx > 0 else LEFT."
+    },
+    {
+     "name": "opposite",
+     "kind": "function",
+     "line": 17,
+     "signature": "def opposite(direction: str) -> str",
+     "summary": "LEFT for RIGHT, RIGHT for anything else."
+    }
+   ],
+   "inputs": [
+    "maplehelper.engine.LEFT / RIGHT"
+   ],
+   "outputs": [
+    "direction strings and signs for every layer"
+   ],
+   "uses": [
+    "maplehelper/engine.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "toward(0) is LEFT.",
+    "opposite of anything that isn't RIGHT is RIGHT (no validation)."
+   ],
+   "tests": [
+    "tests/test_ui.py"
+   ]
+  },
+  {
+   "path": "gamelab/telemetry.py",
+   "title": "Telemetry",
+   "tagline": "Every process's record of what it saw and did, as JSON lines the UI follows",
+   "summary": "Producers anywhere call `emit(topic, **data)`; once a process installs a recorder (`record_to`), each record becomes one JSON line `{\"t\", \"topic\", ...}` appended by a background writer thread to `lab/telemetry/<time>-<name>.jsonl`. The mini-map window and web page follow the newest file live (`newest`, `Follower`); analysis tools read whole files (`read`). Files roll into parts and the folder is pruned to 2 GB.",
+   "details_md": "**Producing.** `emit` is a no-op until a recorder is installed, so tests and library use pay nothing (`recording()` lets callers skip building unseen records; `captured()` collects them in a list for tests). `t` is wall-clock time to the ms (the simulator's clock in a sim run), so a replay keeps the original pace. Telemetry never stops a run: a record that can't be serialised or written stops recording with one warning.\n\n**Writing off the loops.** A `Recorder` makes the line where it's emitted (compact `json.dumps`, numpy values made plain) and queues it; its `telemetry-writer` thread writes and flushes the batch every `FLUSH_S` = 0.2 s. Since 2026-10-26 a disk stall can't freeze the frame loop or a hunt (on 2026-10-25/26 both stood still 0.5-2 s now and then, plausibly synchronous SSD writes). Past `QUEUE_LINES` = 50,000 waiting (about 2 hours of the service) records are dropped and counted. `console_in_background()` does the same for the perception service's stdout/stderr.\n\n**Parts and retention.** Past `MAX_BYTES` = 64 MiB a run continues in `...-<name>-part2.jsonl`, named at least a second after the previous part and headed by the run's `session` record with `continues` and `part`. When a run or part starts, `prune` deletes the oldest files until the rest fit `KEEP_BYTES` = 2 GiB (`watch` writes about 400 MB a day), never the part being written; none goes for age alone, since old telemetry is evidence later fits use.\n\n**Following.** `newest()` finds the file written last. On NTFS `os.scandir`'s time is the directory's copy, updated only when a file is opened or closed, so files it says changed within `RECENT_S` (7 days) are asked `os.stat`. Names aren't compared: they're local time and sort wrong when clocks go back. `Follower.poll()` reads from its last offset, holding back a half-written line.\n\n**The topics** (map units; producers build the records, `ui.state` folds them):\n\n| Topic | Main fields | Written by |\n|---|---|---|\n| `session` | map, command, mode; continues, part; physics | each run and part |\n| `motion` | old/new walk and climb, speed, why | behavior.hunter (from 2026-11-02) |\n| `scene` | her {x, y, platform, facing...}, hp, mp, monsters, loot, view, players | every look; `watch` 10/s |\n| `tracks` | tracks {id, kind, state, x, y, vx, bar, cause, gain...} | `watch`, perception service, 2/s |\n| `exp` | exp, level, gain, kinds, per_minute | each EXP gain |\n| `drops` | pending piles, inventory_full | every look |\n| `glance` | x, y, hp | navigator, during a chain |\n| `route` | dst, moves, from, keep_off, ways, chose | navigator, each plan |\n| `chain` | why, text, legs | navigator, each key plan |\n| `moved` | moves, planned, landed, hit, touch | navigator, after a move |\n| `monsters` | platform, x, vx, heading, reach | navigator |\n| `trip` | dst, result, on, x, walk | navigator, each trip's end |\n| `attack` | key, why, kind, hp, mp, track, side | behavior.attacks, each throw |\n| `no_cast` | why, kind, track, mp, cost | behavior.attacks |\n| `sweep` | dest, candidates, order, budget | behavior.hunt |\n| `grind` | what, loop_s, loop_exp, promised | behavior.grind |\n| `summary` | seconds, kills, exp, throws, casts, touches | behavior.hunt, at the end |\n| `stance` | act, text, aimed | behavior.fight |\n| `tour` | order, safe, grounds / stop, spot | behavior.tour |\n| `hunt` | mode, rule, objective, ground, piles | behavior.hunt |\n| `event` | kind (kill, touch, died, victim, let_go, potion, safety_stop...), text | behavior, navigator, service |\n| `log` | text | every log line |\n| `gc` | collections, pause_ms, longest_ms, frozen | gcstats, once a minute |\n| `perf` | fps, cores, pass_ms, look_ms, wide_ms, age_ms | perception service, every 10 s |\n",
+   "lines": 604,
+   "key_items": [
+    {
+     "name": "emit",
+     "kind": "function",
+     "line": 162,
+     "signature": "def emit(topic: str, **data) -> None",
+     "summary": "Publish one record; no-op without a recorder; any failure stops recording with one warning, never the run."
+    },
+    {
+     "name": "Recorder",
+     "kind": "class",
+     "line": 192,
+     "signature": "class Recorder:  # __init__(self, path, max_bytes=None, background=True, keep=QUEUE_LINES)",
+     "summary": "Appends records to a JSON-lines file via a background thread, rolling into parts past max_bytes."
+    },
+    {
+     "name": "Recorder.__call__",
+     "kind": "method",
+     "line": 221,
+     "signature": "def __call__(self, record: dict) -> None",
+     "summary": "Serialises the record and queues it (or writes at once without a thread); drops and counts past `keep` waiting."
+    },
+    {
+     "name": "Recorder._run",
+     "kind": "method",
+     "line": 241,
+     "signature": "def _run(self) -> None",
+     "summary": "The writer thread: every FLUSH_S (or when hurried) writes what's waiting, until closed and empty."
+    },
+    {
+     "name": "Recorder._next_part",
+     "kind": "method",
+     "line": 281,
+     "signature": "def _next_part(self, t: float | None) -> None",
+     "summary": "Starts the next part file headed by the session record with continues/part, then prunes the folder."
+    },
+    {
+     "name": "Recorder.close",
+     "kind": "method",
+     "line": 298,
+     "signature": "def close(self, timeout: float = 5.0) -> None",
+     "summary": "Drains (5 s at most) and closes; keeps an OSError instead of raising (a full disk once stopped the service through it)."
+    },
+    {
+     "name": "record_to",
+     "kind": "function",
+     "line": 317,
+     "signature": "def record_to(name='run', folder=FOLDER, max_bytes=MAX_BYTES, background=None) -> Path | None",
+     "summary": "Prunes the folder, then installs a Recorder on a new <stamp>-<name>.jsonl; None (with a warning) if it can't write."
+    },
+    {
+     "name": "prune",
+     "kind": "function",
+     "line": 345,
+     "signature": "def prune(folder=FOLDER, keep_days=_DEFAULT, keep_bytes=None, now=None, dry_run=False, spare=None)",
+     "summary": "Deletes the oldest *.jsonl until the rest fit KEEP_BYTES (aged files first if KEEP_DAYS is set); never `spare`."
+    },
+    {
+     "name": "newest",
+     "kind": "function",
+     "line": 535,
+     "signature": "def newest(folder=FOLDER, now=None, match=None, recent_s=RECENT_S) -> Path | None",
+     "summary": "The file written to last, asking os.stat for recently written files to dodge NTFS's stale directory times."
+    },
+    {
+     "name": "Follower",
+     "kind": "class",
+     "line": 512,
+     "signature": "class Follower:  # poll() -> list[dict]",
+     "summary": "Reads the records appended since the last poll, holding back a half-written line."
+    },
+    {
+     "name": "Console",
+     "kind": "class",
+     "line": 398,
+     "signature": "class Console:  # put(stream, text), drain(timeout)",
+     "summary": "Writes console text on its own thread every FLUSH_S so print() never blocks on the disk."
+    },
+    {
+     "name": "console_in_background",
+     "kind": "function",
+     "line": 476,
+     "signature": "def console_in_background() -> Console",
+     "summary": "Swaps sys.stdout/stderr for queued wrappers (once a process; drained at exit). The perception service uses it."
+    },
+    {
+     "name": "captured",
+     "kind": "function",
+     "line": 495,
+     "signature": "@contextmanager def captured() -> Iterator[list[dict]]",
+     "summary": "Tests: collect records in a list instead of a file."
+    },
+    {
+     "name": "FLUSH_S",
+     "kind": "constant",
+     "line": 136,
+     "signature": "FLUSH_S = 0.2",
+     "summary": "How often the writer thread writes; a reader sees a record at most this late."
+    },
+    {
+     "name": "MAX_BYTES",
+     "kind": "constant",
+     "line": 148,
+     "signature": "MAX_BYTES = 64 * 1024 * 1024",
+     "summary": "Size past which a run continues in a new part file."
+    }
+   ],
+   "inputs": [
+    "records from every layer via emit(topic, **data)",
+    "the perception service's and commands' console text (console_in_background)"
+   ],
+   "outputs": [
+    "lab/telemetry/*.jsonl files read by ui.sources (live mini-map, web page), analysis.respawn, analysis.coverage and the replay tools",
+    "list[dict] records via read() and Follower.poll()"
+   ],
+   "uses": [
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/telemetry/<YYYYmmdd-HHMMSS>-<name>.jsonl",
+     "mode": "read-write",
+     "what": "one file per run (and -partN files past 64 MiB): written by Recorder, read by Follower/read/newest"
+    },
+    {
+     "path": "gamelab/lab/telemetry/",
+     "mode": "read-write",
+     "what": "pruned to the newest 2 GiB when a run or part starts"
+    }
+   ],
+   "concurrency": "One `telemetry-writer` daemon thread per Recorder (a Condition woken every FLUSH_S or by flush/close); one `console-writer` daemon thread once console_in_background is called. atexit flushes for 2 s. emit is called from any thread (the frame loop, search threads, a hunt).",
+   "tunables": [
+    {
+     "name": "FLUSH_S",
+     "value": "0.2",
+     "meaning": "s between the writer thread's batches"
+    },
+    {
+     "name": "QUEUE_LINES",
+     "value": "50_000",
+     "meaning": "lines waiting at most before new records are dropped (counted in Recorder.dropped)"
+    },
+    {
+     "name": "BACKGROUND",
+     "value": "True",
+     "meaning": "record_to's recorders write on their own thread (False: in the caller, as before 2026-10-26)"
+    },
+    {
+     "name": "MAX_BYTES",
+     "value": "64 MiB",
+     "meaning": "part size"
+    },
+    {
+     "name": "KEEP_BYTES",
+     "value": "2 GiB",
+     "meaning": "what prune keeps"
+    },
+    {
+     "name": "KEEP_DAYS",
+     "value": "None",
+     "meaning": "no age-based deletion"
+    },
+    {
+     "name": "RECENT_S",
+     "value": "7 days",
+     "meaning": "files newer than this (by the directory) are os.stat'ed by newest"
+    },
+    {
+     "name": "CONSOLE_KEEP",
+     "value": "20_000",
+     "meaning": "console pieces waiting at most"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Write records and the service's console on background threads every 0.2 s",
+     "why": "Hunts and the perception service stood still together for 0.5-2 s now and then; plausibly synchronous SSD writes (not proven)."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "Recorder.close keeps a write error instead of raising",
+     "why": "With D: full the service stopped (11:41-11:42): emit -> stop -> close raised OSError out of the frame loop."
+    },
+    {
+     "date": "",
+     "what": "Runs continue in 64 MiB parts and the folder is pruned to 2 GiB; no deletion by age",
+     "why": "A run of `watch` goes on for days; old telemetry is evidence (the 2026-10-20 terrain and geometry fits used 2026-10-19/20 runs)."
+    },
+    {
+     "date": "",
+     "what": "newest() asks os.stat of recently written files instead of trusting os.scandir",
+     "why": "NTFS's directory copy of a still-open part looked 0 bytes and old, so the web page froze on a finished run for hours."
+    }
+   ],
+   "gotchas": [
+    "emit does nothing until record_to (or captured) installs a sink; check recording() before building expensive records.",
+    "A value json can't hold becomes float() or str() via _plain; an exception inside emit stops all recording for the process.",
+    "Records past QUEUE_LINES are silently dropped (counted), not blocked on.",
+    "Part file names are local time; ordering is by modification time, not by name.",
+    "atexit flush waits 2 s at most; a process ending with os._exit should call drain() first (the service does)."
+   ],
+   "tests": [
+    "tests/test_writers.py",
+    "tests/test_disk.py",
+    "tests/test_ui.py",
+    "tests/test_service.py"
+   ]
+  },
+  {
+   "path": "gamelab/gcstats.py",
+   "title": "GC timing",
+   "tagline": "Python's garbage collections counted and timed, said live",
+   "summary": "Hooks `gc.callbacks` to count each generation's collections and time their pauses, per reader. The perception service ends its 10 s console line with them and every recording process writes a `gc` telemetry record once a minute, so a lag can be told from a collection live. `freeze` moves everything into the permanent generation when a run is made.",
+   "details_md": "**Why.** On 2026-10-26 the user asked whether the hunts' lags were Python's GC and proposed a full port. Measured first: the service's frame loop replayed made 207 collections in 1,622 s (0.0037% of the time, the longest 4.2 ms), a simulated hunt 0.016-0.018%, no full collection in 40 minutes. The lag was the frame loop running out of CPU (fixed by the C pieces, `native`). This module keeps that question answerable live and would show a growing collection (a run's objects piling up).\n\n**How.** `GcStats.callback` is appended to `gc.callbacks` once (`install`). On `start` it stamps `perf_counter`; on `stop` it adds the pause to the totals and to every reader's open window (`_Window`: counts per generation, total pause, longest, since). It takes **no lock**: a collection can start in any thread at any allocation, including inside `take`, and a callback waiting for a lock its own thread holds would hang the process (the 2026-10-26 review hung it so with the collector's threshold at 1 and 50). Instead it copies the windows with `list(dict.values())` and mutates each in place. `take(reader)` swaps in a fresh window (made before taking the lock, which only guards readers from each other) and returns `{collections, pause_ms, longest_ms, seconds, frozen}`. `line()` words it for a console: \"GC 4 (gen 0, 1, 2: 3, 1, 0), 0.6 ms, the longest 0.3\".\n\n**Freeze.** `freeze()` unfreezes, collects, then `gc.freeze()`s every object: the perception service does it as each run is made, so no later collection walks the map's templates, models and modules (47,600-48,200 objects in 14-31 ms on the replay; after it 0.05-0.7 collections a second, the longest 0.99 ms, none of the oldest generation).\n\n**Reporting.** `report_every(emit, seconds=60, reader='telemetry', when=...)` starts one daemon thread per process (`gc-report`) that emits a `gc` record every minute while `when()` is true (`telemetry.to_file`: never into a test's captured records). `__main__` calls it for every command that records telemetry and for `perceive`.",
+   "lines": 133,
+   "key_items": [
+    {
+     "name": "GcStats",
+     "kind": "class",
+     "line": 32,
+     "signature": "class GcStats:  # total, pause, longest, _windows by reader",
+     "summary": "Counts and times collections, keeping a window per reader."
+    },
+    {
+     "name": "GcStats.callback",
+     "kind": "method",
+     "line": 43,
+     "signature": "def callback(self, phase: str, info: dict) -> None",
+     "summary": "gc.callbacks hook: times start->stop and adds to totals and readers' windows, lock-free."
+    },
+    {
+     "name": "GcStats.take",
+     "kind": "method",
+     "line": 64,
+     "signature": "def take(self, reader: str) -> dict",
+     "summary": "What came since `reader` last asked: collections by generation, pause_ms, longest_ms, seconds, frozen."
+    },
+    {
+     "name": "GcStats.line",
+     "kind": "method",
+     "line": 79,
+     "signature": "def line(self, reader: str) -> str",
+     "summary": "take() in words for a console line, or 'GC none'."
+    },
+    {
+     "name": "STATS",
+     "kind": "constant",
+     "line": 89,
+     "signature": "STATS = GcStats()",
+     "summary": "The process's single instance."
+    },
+    {
+     "name": "install",
+     "kind": "function",
+     "line": 94,
+     "signature": "def install() -> GcStats",
+     "summary": "Appends STATS.callback to gc.callbacks once a process."
+    },
+    {
+     "name": "freeze",
+     "kind": "function",
+     "line": 102,
+     "signature": "def freeze() -> tuple[int, float]",
+     "summary": "gc.unfreeze, gc.collect, gc.freeze: (objects frozen, seconds)."
+    },
+    {
+     "name": "report_every",
+     "kind": "function",
+     "line": 113,
+     "signature": "def report_every(emit, seconds=REPORT_S, reader='telemetry', when=lambda: True) -> None",
+     "summary": "Starts the gc-report daemon thread emitting a `gc` record every `seconds` (once a process)."
+    },
+    {
+     "name": "REPORT_S",
+     "kind": "constant",
+     "line": 21,
+     "signature": "REPORT_S = 60.0",
+     "summary": "Seconds between `gc` telemetry records."
+    }
+   ],
+   "inputs": [
+    "gc.callbacks events from the interpreter"
+   ],
+   "outputs": [
+    "`gc` telemetry records once a minute",
+    "the GC part of the perception service's 10 s console line (localization.service)"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "callback runs on whichever thread triggers a collection (holding the GIL); one `gc-report` daemon thread per process when report_every is called.",
+   "tunables": [
+    {
+     "name": "REPORT_S",
+     "value": "60.0",
+     "meaning": "s between `gc` records"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Measure GC rather than port to escape it; keep the measurement live",
+     "why": "207 collections in 1,622 s of the replayed frame loop (0.0037%); the lag was CPU, not GC."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "The callback takes no lock; take() builds its new window before locking",
+     "why": "The review hung the process: a collection inside take() waited on the lock its own thread held."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Freeze everything into the permanent generation as each run is made",
+     "why": "Full collections then skip the map's templates, models and modules."
+    }
+   ],
+   "gotchas": [
+    "Never add a lock inside callback: a collection can start while the same thread holds it.",
+    "report_every starts at most one thread per process, whatever arguments later calls pass."
+   ],
+   "tests": [
+    "tests/test_writers.py",
+    "tests/test_capture.py",
+    "tests/test_guard.py"
+   ]
+  },
+  {
+   "path": "gamelab/window.py",
+   "title": "The game window",
+   "tagline": "Find the game window, its client area, what covers it; focus it; move the pointer",
+   "summary": "Win32 calls through ctypes: the game window's handle and client rectangle (the capture area), whether it is minimized, full screen, on screen or covered by another program's window, resizing its client to an allowed size, bringing it to the front without sending keys, and moving the mouse along a human-like trail. The elevated key player imports it, so it loads only the standard library and maplehelper's input helpers.",
+   "details_md": "**Where the game is.** `find_game(title)` is `FindWindowW`; `client_rect` returns the client area in screen px as an mss-style dict `{left, top, width, height}`: the box every capture takes. `window_rect` is the outer box (on 2026-10-25 23:40 the game drew its picture at that box's corner, which `perception.framecheck` checks for). `full_screen` compares the client area with its monitor's rectangle; `on_screen` checks each corner is on some monitor (after Chrome Remote Desktop resizes the desktop a window can hang off it, where `WindowFromPoint` finds nothing and `shows` would call it covered).\n\n**Is anything over it?** Captures see whatever is on top, so frames of a covered game must not be used or recorded. `shows(hwnd, area)` asks `WindowFromPoint` at the middle and four inset corners (or a grid). That misses windows between the points and click-through layered overlays, so `over` / `overs` walk the z-order upward from the game (`GetWindow(GW_HWNDPREV)`, at most `OVER_MAX` = 2000 steps) and report any visible, non-minimized, non-cloaked (`DWMWA_CLOAKED`) window of another process whose drawn box (`DWMWA_EXTENDED_FRAME_BOUNDS`) meets the client area: 0.1 ms with 39 windows above the game (2026-10-24). Windows of processes in `GAME_FAMILY` (`nexon_client.exe`) count as the game's own: on 2026-10-29 the Nexon launcher's invisible, topmost, click-through overlay made every frame of a night \"covered\". `describe` names a window by class and box, never its title (which can say what's in it). `overs` lists every covering window with its box, and `client_boxes` cuts those boxes to the client area, which the rolling recording notes with a frame instead of dropping it. `pointer_on(hwnd)` says whether the window under the mouse pointer is the game's (a click there would be its).\n\n**Focus.** `bring_to_front(title, wait)` restores a minimized game, attaches to the foreground window's input thread (Windows lets only the foreground's owner hand focus away), calls `BringWindowToTop` + `SetForegroundWindow`, then polls every `FRONT_POLL_S` = 50 ms. `SetForegroundWindow` can fail silently under the foreground lock (2026-10-21 01:01:30: the player refused a plan, \"game not in front (foreground: 'Claude')\"), so with `SWITCH_FALLBACK` it calls `SwitchToThisWindow` once half the wait has passed. It sends no keys and clicks nothing.\n\n**Size.** `resize_client` sets the client to one of `CLIENT_SIZES` (1366x768 or 1920x1080) with `AdjustWindowRectEx` + `SetWindowPos`, keeping the top-left corner. The game runs as administrator, so only the elevated player can (\"access denied\" otherwise, tried 2026-10-23).\n\n**Pointer.** `move_cursor(x, y, wait, played)` follows `maplehelper.mouse_trail.generate_trail` with one whole-pixel `send_mouse_move` per sample, sleeping until each is due, or using the player's plan-aware `wait(due)` which can return a stop or a splice; a final `SetCursorPos` removes `SendInput`'s sub-pixel rounding. `played` collects `[time, x, y]` for the review overlay of the Lie Detector's cursor (2026-11-03). `last_input_age` (GetLastInputInfo) tells behavior.guard how long the session has been idle.",
+   "lines": 400,
+   "key_items": [
+    {
+     "name": "bring_to_front",
+     "kind": "function",
+     "line": 371,
+     "signature": "def bring_to_front(title: str, wait: float = 0.0) -> bool",
+     "summary": "Makes the game the foreground window without keys, waiting up to `wait` s (SwitchToThisWindow from half way)."
+    },
+    {
+     "name": "client_rect",
+     "kind": "function",
+     "line": 143,
+     "signature": "def client_rect(hwnd: int) -> dict",
+     "summary": "The client area in screen px as {left, top, width, height}: what captures grab."
+    },
+    {
+     "name": "find_game",
+     "kind": "function",
+     "line": 135,
+     "signature": "def find_game(title: str) -> int",
+     "summary": "The game window's handle by exact title; raises if there's none."
+    },
+    {
+     "name": "over",
+     "kind": "function",
+     "line": 223,
+     "signature": "def over(hwnd: int, area: dict) -> int | None",
+     "summary": "The first window of another program shown over the client area, found by walking the z-order."
+    },
+    {
+     "name": "_walk",
+     "kind": "function",
+     "line": 257,
+     "signature": "def _walk(hwnd: int, area: dict)",
+     "summary": "Yields each visible, uncloaked window of another (non-launcher) process whose drawn box meets the area."
+    },
+    {
+     "name": "shows",
+     "kind": "function",
+     "line": 201,
+     "signature": "def shows(hwnd, area, inset=8, grid=None) -> bool",
+     "summary": "WindowFromPoint at the middle and corners (or a grid): is the game what's on screen there?"
+    },
+    {
+     "name": "GAME_FAMILY",
+     "kind": "constant",
+     "line": 84,
+     "signature": "GAME_FAMILY = (\"nexon_client.exe\",)",
+     "summary": "Executables whose windows count as the game's own (the launcher's overlay)."
+    },
+    {
+     "name": "SWITCH_FALLBACK",
+     "kind": "constant",
+     "line": 26,
+     "signature": "SWITCH_FALLBACK = True",
+     "summary": "Whether bring_to_front also uses SwitchToThisWindow once SetForegroundWindow has visibly failed."
+    },
+    {
+     "name": "full_screen",
+     "kind": "function",
+     "line": 182,
+     "signature": "def full_screen(hwnd: int, area: dict) -> bool",
+     "summary": "Whether the client area is exactly its monitor's rectangle."
+    },
+    {
+     "name": "on_screen",
+     "kind": "function",
+     "line": 328,
+     "signature": "def on_screen(area: dict) -> bool",
+     "summary": "Whether every corner of the client area is on a monitor."
+    },
+    {
+     "name": "resize_client",
+     "kind": "function",
+     "line": 338,
+     "signature": "def resize_client(hwnd: int, width: int, height: int) -> tuple[int, int]",
+     "summary": "Sets the client size to one of CLIENT_SIZES (elevated only)."
+    },
+    {
+     "name": "move_cursor",
+     "kind": "function",
+     "line": 98,
+     "signature": "def move_cursor(x: int, y: int, wait=None, played: list | None = None)",
+     "summary": "Moves the pointer along a generated human-like trail, no click; can be cut short by the player's wait."
+    },
+    {
+     "name": "last_input_age",
+     "kind": "function",
+     "line": 357,
+     "signature": "def last_input_age() -> float | None",
+     "summary": "Seconds since the last keyboard or mouse input in the session (GetLastInputInfo)."
+    }
+   ],
+   "inputs": [
+    "the game window's title (from config)",
+    "Win32 state: z-order, monitors, cursor, foreground window"
+   ],
+   "outputs": [
+    "the capture area for perception.frames and control.rolling",
+    "cover reports for framecheck and the rolling recording",
+    "focus for commands that act (via __main__ and control.player)",
+    "pointer moves for the Lie Detector answering"
+   ],
+   "uses": [
+    "maplehelper/win32.py",
+    "maplehelper/mouse_trail.py"
+   ],
+   "files_io": [],
+   "concurrency": "No threads of its own; move_cursor sleeps between samples (or defers to the player's wait callback). The process-image cache `_images` is cleared past 512 entries.",
+   "tunables": [
+    {
+     "name": "FRONT_POLL_S",
+     "value": "0.05",
+     "meaning": "s between checks that the game came to the front"
+    },
+    {
+     "name": "SWITCH_FALLBACK",
+     "value": "True",
+     "meaning": "fall back to SwitchToThisWindow from half the wait"
+    },
+    {
+     "name": "OVER_MAX",
+     "value": "2000",
+     "meaning": "windows above the game walked at most"
+    },
+    {
+     "name": "GAME_FAMILY",
+     "value": "('nexon_client.exe',)",
+     "meaning": "processes whose windows are the game's own"
+    },
+    {
+     "name": "CLIENT_SIZES",
+     "value": "((1366, 768), (1920, 1080))",
+     "meaning": "client sizes resize_client accepts"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "SwitchToThisWindow fallback in bring_to_front, on though untried in game",
+     "why": "SetForegroundWindow failed silently and the player refused its plan; the fallback only runs after that failure and sends no keys."
+    },
+    {
+     "date": "2026-10-23",
+     "what": "Only the elevated player resizes the game's client",
+     "why": "A normal program gets 'access denied': the game runs as administrator."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "Treat the Nexon launcher's windows as the game's (GAME_FAMILY)",
+     "why": "Its invisible topmost overlay made every frame of the night 'covered', so clips and saves had none."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "move_cursor records where the pointer went (`played`)",
+     "why": "The review pages overlay the Lie Detector's cursor (the user's request)."
+    }
+   ],
+   "gotchas": [
+    "shows() checks points only: a small window between them or a click-through overlay passes it; use over() before trusting a frame.",
+    "Off the desktop WindowFromPoint finds no window, which shows() would take for a covering window: check on_screen first.",
+    "describe() deliberately omits window titles (they can contain private text).",
+    "Minimized, the game's client area is 432x54, not 0x0: ask minimized() rather than the size."
+   ],
+   "tests": [
+    "tests/test_rolling.py",
+    "tests/test_framecheck.py",
+    "tests/test_mouse_trail.py",
+    "tests/test_gamelab.py",
+    "tests/test_screen_frames.py"
+   ]
+  },
+  {
+   "path": "gamelab/capture.py",
+   "title": "Screen capture",
+   "tagline": "Boxes of the screen as BGRA arrays, via DXGI desktop duplication or mss",
+   "summary": "A `Grabber` takes `Shot`s of the screen: with DXGI desktop duplication (default) it holds the monitor's newest frame on the graphics card with the time it was shown, and copies boxes off the card on request; when that fails it falls back to mss (GDI) for 10 s. One shared grabber per process (`shared`), used only by perception/frames.py, i.e. the perception service; the rolling recorder makes its own mss-only `Grabber(\"mss\")` so it holds no duplication. Pure ctypes COM calls, no extra packages.",
+   "details_md": "**Why DXGI.** mss copies with GDI, which waits for the compositor's next frame: 16.7 ms a grab whatever the box, 17-46 ms after a pause, so a glance of two boxes took 33 ms. Desktop duplication is handed each frame as the monitor shows it, with its present time in QueryPerformanceCounter ticks (the clock `time.monotonic` reads; `qpc_offset` measures the offset rather than assuming 0). Measured with `bench-capture` (on the desktop, the game not running): a look's capture 12.4 ms vs 24.5 with mss, a glance 1.0 ms vs 33.7, the pixels mss's exactly.\n\n**Freshness.** A look must see the result of the keys sent before it, so `Grabber.shot(area, after=t)` asks for a frame shown at or after `t`. `Duplicator.advance` loops on `AcquireNextFrame`, waiting at most `FRESH_WAIT_S` = 20 ms for one; if none comes, nothing on screen changed and the held frame is the screen as it is. (15 ms was shorter than a game frame: 6-18% of looks got a frame shown 1-3 ms before they began.) Waits end on Windows' 15.6 ms timer ticks, so a static screen costs 31 ms, but the game's screen always moves. Frames with no present time (the black first frame after duplicating, or pointer-only updates) don't count; the first real frame is waited for up to `FIRST_FRAME_S` = 0.25 s.\n\n**On the card.** `Dxgi.acquire` copies each new frame into a texture of its own (`_last`) and releases DXGI's at once. `Dxgi.read(boxes)` copies each box into a staging texture (`CopySubresourceRegion`), maps it and hands numpy views to `convert` (or copies): converting straight from the mapped copy took 2.0 ms for a whole RGB frame instead of 3.8. With `[capture] fence = true` (off by default, not tried live, since 2026-10-27) the copy is waited for on an `ID3D11Fence` event for up to `COPY_WAIT_MS` = 100 ms before `Map`, whose own wait spins an NVIDIA driver thread (process CPU 4.96-5.17 ms a frame vs 1.04-1.07 on the event, the frame 0.15-0.2 ms later).\n\n**Failure handling.** `DXGI_ERROR_ACCESS_LOST` (a UAC prompt, a mode change, a full-screen switch) re-duplicates once (180-240 ms). Anything else raises `CaptureError`; `Grabber.failed` closes the duplication and uses mss for `RETRY_S` = 10 s. An area spanning monitors, a rotated monitor, or a box off the monitor also goes to mss. `reopen` and `fall_back` let perception.framecheck force a fresh duplication or mss when a frame doesn't line up with the window.\n\n**One per process.** Only one duplication of a monitor can be open in a process, so `shared()` hands out one Grabber; a `DxgiShot` is only valid until the grabber's next shot (`seq`). Windows also limits duplications across processes (a third failed with 0x887A0022), which is why `tests/test_architecture.py` allows `capture.shared()` only in `perception/frames.py`: the perception service is the one process that captures the game. The elevated key player keeps mss.",
+   "lines": 718,
+   "key_items": [
+    {
+     "name": "Grabber",
+     "kind": "class",
+     "line": 174,
+     "signature": "class Grabber:  # __init__(self, method=None, opener=None, clock=time.monotonic, sleep=time.sleep, fence=None)",
+     "summary": "Shots of the screen by DXGI (falling back to mss by itself) or mss; counts shots and troubles."
+    },
+    {
+     "name": "Grabber.shot",
+     "kind": "method",
+     "line": 200,
+     "signature": "def shot(self, area: Area, after: float | None = None, at: float | None = None) -> Shot",
+     "summary": "The screen at a moment: the newest frame, or one shown at/after `after`, or the newest once it's `at`."
+    },
+    {
+     "name": "shared",
+     "kind": "function",
+     "line": 298,
+     "signature": "def shared() -> Grabber",
+     "summary": "The process's one Grabber (one duplication per monitor per process)."
+    },
+    {
+     "name": "Duplicator.advance",
+     "kind": "method",
+     "line": 334,
+     "signature": "def advance(self, after: float | None = None) -> float",
+     "summary": "Takes the newest frame, waiting FRESH_WAIT_S for one shown after `after`; re-duplicates once on access lost."
+    },
+    {
+     "name": "Dxgi",
+     "kind": "class",
+     "line": 517,
+     "signature": "class Dxgi:  # __init__(self, point, fence=None)",
+     "summary": "One monitor's duplication: the COM objects, a frame texture and a staging texture."
+    },
+    {
+     "name": "Dxgi.acquire",
+     "kind": "method",
+     "line": 663,
+     "signature": "def acquire(self, timeout_ms: int) -> tuple[int, int]",
+     "summary": "AcquireNextFrame; copies a changed frame into its own texture; returns (HRESULT, present ticks or 0)."
+    },
+    {
+     "name": "Dxgi.read",
+     "kind": "method",
+     "line": 693,
+     "signature": "def read(self, boxes: list[Box], convert: Convert | None = None) -> list[np.ndarray]",
+     "summary": "Copies boxes off the card via staging + Map, as BGRA arrays or converted."
+    },
+    {
+     "name": "Dxgi._copied",
+     "kind": "method",
+     "line": 635,
+     "signature": "def _copied(self) -> None",
+     "summary": "With a fence: signal it and wait on its event (COPY_WAIT_MS) so Map doesn't spin."
+    },
+    {
+     "name": "DxgiShot",
+     "kind": "class",
+     "line": 146,
+     "signature": "class DxgiShot(Shot):",
+     "summary": "The frame the duplicator holds; boxes copied from it; invalid after the next shot."
+    },
+    {
+     "name": "MssShot",
+     "kind": "class",
+     "line": 128,
+     "signature": "class MssShot(Shot):",
+     "summary": "mss keeps no frames: each box is a grab of its own."
+    },
+    {
+     "name": "Grabber.failed",
+     "kind": "method",
+     "line": 234,
+     "signature": "def failed(self, e: CaptureError) -> None",
+     "summary": "DXGI failed: close it, mss until RETRY_S from now."
+    },
+    {
+     "name": "FRESH_WAIT_S",
+     "kind": "constant",
+     "line": 49,
+     "signature": "FRESH_WAIT_S = 0.020",
+     "summary": "How long a look waits for a frame shown after it began."
+    },
+    {
+     "name": "RETRY_S",
+     "kind": "constant",
+     "line": 53,
+     "signature": "RETRY_S = 10.0",
+     "summary": "After DXGI failed: mss for this long, then DXGI again."
+    },
+    {
+     "name": "COPY_WAIT_MS",
+     "kind": "constant",
+     "line": 61,
+     "signature": "COPY_WAIT_MS = 100",
+     "summary": "Longest wait on the fence's event before Map."
+    },
+    {
+     "name": "configured_method",
+     "kind": "function",
+     "line": 79,
+     "signature": "def configured_method(path=CONFIG) -> str",
+     "summary": "config.toml's [capture] method: 'dxgi' (default) or 'mss'."
+    }
+   ],
+   "inputs": [
+    "a desktop-px area (window.client_rect)",
+    "config.toml [capture] method and fence",
+    "the monitor's frames from DXGI or GDI"
+   ],
+   "outputs": [
+    "BGRA (or converted RGB) numpy arrays of boxes, with the time the screen showed them, for perception.frames.ScreenFrames",
+    "a summary and fence status line for the perception service's console",
+    "an mss-only Grabber for the rolling recorder (control.rolling), and DXGI-vs-mss timings for analysis.bench (bench-capture)"
+   ],
+   "uses": [
+    "maplehelper/win32.py",
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "[capture] method ('dxgi' or 'mss') and fence (true/false), read once per Grabber"
+    }
+   ],
+   "concurrency": "Grabber.lock (an RLock) serialises shots and box copies; `_SHARED_LOCK` guards the shared instance. COM calls go through ctypes, which releases the GIL; the optional fence wait is WaitForSingleObject on a kernel event.",
+   "tunables": [
+    {
+     "name": "FRESH_WAIT_S",
+     "value": "0.020",
+     "meaning": "wait for a frame shown after a look began"
+    },
+    {
+     "name": "FIRST_FRAME_S",
+     "value": "0.25",
+     "meaning": "wait for the first real frame after duplicating"
+    },
+    {
+     "name": "RETRY_S",
+     "value": "10.0",
+     "meaning": "mss fallback period after a DXGI failure"
+    },
+    {
+     "name": "COPY_WAIT_MS",
+     "value": "100",
+     "meaning": "fence wait before Map"
+    },
+    {
+     "name": "[capture] method",
+     "value": "\"dxgi\"",
+     "meaning": "config.toml: capture backend"
+    },
+    {
+     "name": "[capture] fence",
+     "value": "false",
+     "meaning": "config.toml: wait for the copy on a fence instead of Map's spin"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "FRESH_WAIT_S raised from 15 ms to 20 ms",
+     "why": "15 ms was shorter than a game frame: 6-18% of looks got a frame shown 1-3 ms before they began."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "Only the perception service captures the game (capture.shared only in perception/frames.py)",
+     "why": "Windows limits the duplications of a monitor: with `watch` and `pet` running, two more opened and a third failed (DuplicateOutput 0x887A0022, 2026-10-24). Since 2026-10-25 the commands share the perception service's one duplication."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Optional fence wait for the copy off the card, off by default",
+     "why": "Map's wait spins a driver thread (about 4 ms of CPU a frame); not tried live yet, and the frame comes 0.15-0.2 ms later."
+    },
+    {
+     "date": "",
+     "what": "The elevated key player keeps mss",
+     "why": "It loads as little as it can."
+    }
+   ],
+   "gotchas": [
+    "A DxgiShot's boxes must be copied before the grabber's next shot, else RuntimeError.",
+    "Boxes are physical desktop px: the Grabber makes the process DPI-aware at construction, like mss.",
+    "With nothing changing on screen a fresh-frame wait takes ~31 ms because waits end on 15.6 ms timer ticks.",
+    "A window across two monitors is always grabbed with mss."
+   ],
+   "tests": [
+    "tests/test_capture.py"
+   ]
+  },
+  {
+   "path": "gamelab/native.py",
+   "title": "Native loader",
+   "tagline": "Builds gamelab's C sources into DLLs on first use and wraps them for Python",
+   "summary": "The Python side of gamelab's C pieces: it compiles each .c source with MSVC 2022 into a DLL named for its source's hash, loads it with ctypes, declares every function's signature, and wraps the calls (masked template match, step-1 peaks, a frame's re-finds in one call, her flight, the GPU switch). Every caller still works when a DLL is missing: numpy/OpenCV give the same answers, slower, except that without spawns.c the frame step leaves the spawn watch out and without exact.c there is no exact finder.",
+   "details_md": "**The DLLs.**\n\n| Source | Loader | What it speeds up | Needs AVX2 |\n|---|---|---|---|\n| native.c (+ gpumatch.c, gpumatch.hlsl) | `lib()` | masked colour match, re-finds in one call, step-1 peaks, her flight | masked match only |\n| search.c | `search_lib()` | the monster search's step 1 | yes (`sr_ready`) |\n| locate.c | `locate_lib()` | her name plate and body cues | yes (`lc_ready`) |\n| spawns.c | `spawns_lib()` | the spawn watch's blend sums | yes (`sp_ready`) |\n| exact.c | `exact_lib()` | the exact-pixel monster finder | no (plain C) |\n| camreg.c | `localization/camreg.py` via `native.build` | camera registration costs | runtime choice |\n\n**Building.** `build(source)` returns `gamelab/build/<stem>-<sha1[:12]>.dll`, the hash over the source (plus gpumatch.c/.hlsl for native.c) and the flags, building it if absent: `cmd /d /s /c` runs `vcvars64.bat` from the VS 2022 Build Tools then `cl /nologo /O2 /fp:precise /MT /LD` in a temp dir, with gpumatch.hlsl written as a C string header (`gpumatch_hlsl.h`, compiled at run time by d3dcompiler_47). `/fp:precise` keeps IEEE arithmetic in source order (no fused multiply-adds) so answers match Python's to the bit; `/MT` links the C runtime in. An edited source gets a new DLL, a DLL another process has loaded is never overwritten, and older builds of the same stem are deleted when possible. `python -m gamelab.native` builds them all and says where.\n\n**Loading.** Each `*_lib()` builds and loads once a process under `_lock` (the search's threads ask at once), sets `restype`/`argtypes` from its SIGNATURES table, asks the CPU check where there is one, and on any failure records why (`why`, `search_why`, ...) and returns None for good. `USE = False` turns them all off. ctypes releases Python's lock during each call, which is half the point: numpy and the Python around OpenCV held it.\n\n**The wrappers.** `prepare_masked` makes a template + mask ready once (`Masked`: sums, mask runs, rows as int16, and an NTT transform when it fits a 128x128 plane); only with AVX2, since plain C was 3.4-3.7x slower than OpenCV. `masked_match` / `best_matches` return OpenCV's TM_CCOEFF_NORMED-with-mask scores worked out exactly. `peaks` is step 1's cover test + 8-neighbour peak pick. `Refinds` wraps native.c's `rf_*` contract: a detector's prepared pictures, a thread pool made once, per-track memos; `start`/`next`/`end` let the caller do each job's Python while others are matched. `Map`, `Walls`, `shoe_of` and `fly` lay out a map's platforms for her flight in C (motion.physics). `shrink_area` is cv2.resize's INTER_AREA through search.c's `sr_shrink` (the same bytes; None where the C declines), and `SrUnit`, `SrShape`, `SrGroup` are the ctypes mirrors of search.c's structs that perception.mobs fills.\n\n**The GPU switch.** `gpu_mode()` reads `GAMELAB_GPU` (`0`, `1`, `ahead`) or the file `lab/GPU` (empty: `start`; the text `ahead`: `ahead`), the file because a process started through WMI inherits no environment. `GPU` and `AHEAD` are read at import and passed to the DLL (`gm_on`, `gm_ahead`) when it loads. Off by default: on this machine's RTX 3080 it doesn't pay. `state()`, `search_state()` and `gpu_line()` are what the perception service prints so a DLL that failed to build shows as more than \"fewer frames a second\".",
+   "lines": 784,
+   "key_items": [
+    {
+     "name": "lib",
+     "kind": "function",
+     "line": 181,
+     "signature": "def lib() -> ctypes.CDLL | None",
+     "summary": "native.c's DLL, built and loaded on first use with its signatures set and the GPU switch passed; None (with `why`) if it can't be."
+    },
+    {
+     "name": "build",
+     "kind": "function",
+     "line": 136,
+     "signature": "def build(source: Path | None = None) -> Path",
+     "summary": "Compiles a source with MSVC 2022 Build Tools into build/<stem>-<hash>.dll unless it exists; RuntimeError with the compiler output on failure."
+    },
+    {
+     "name": "search_lib",
+     "kind": "function",
+     "line": 215,
+     "signature": "def search_lib() -> ctypes.CDLL | None",
+     "summary": "search.c's DLL, only where sr_ready says the CPU has AVX2."
+    },
+    {
+     "name": "locate_lib",
+     "kind": "function",
+     "line": 256,
+     "signature": "def locate_lib() -> ctypes.CDLL | None",
+     "summary": "locate.c's DLL (her plate and body cues), AVX2 only."
+    },
+    {
+     "name": "spawns_lib",
+     "kind": "function",
+     "line": 295,
+     "signature": "def spawns_lib() -> ctypes.CDLL | None",
+     "summary": "spawns.c's DLL; without it the frame step leaves the spawn watch out (too slow in numpy)."
+    },
+    {
+     "name": "exact_lib",
+     "kind": "function",
+     "line": 335,
+     "signature": "def exact_lib() -> ctypes.CDLL | None",
+     "summary": "exact.c's DLL (plain C, no AVX2 check); without it the frame step has the search alone."
+    },
+    {
+     "name": "prepare_masked",
+     "kind": "function",
+     "line": 493,
+     "signature": "def prepare_masked(template: np.ndarray, mask: np.ndarray) -> Masked | None",
+     "summary": "Makes a uint8 template and binary mask ready for the C match (mm_prepare); None without AVX2 or for inputs it doesn't take."
+    },
+    {
+     "name": "best_matches",
+     "kind": "function",
+     "line": 551,
+     "signature": "def best_matches(image, templates: list[Masked], stop=inf) -> list[tuple[float, int, int]] | None",
+     "summary": "Each template's best score and place over an image in one call, stopping at the first scoring `stop` or more."
+    },
+    {
+     "name": "peaks",
+     "kind": "function",
+     "line": 397,
+     "signature": "def peaks(res, integral, th, tw, cover, thr) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None",
+     "summary": "Step 1's bookkeeping: zero low-cover windows, then peaks >= thr and >= their 8 neighbours (silhouette_peaks)."
+    },
+    {
+     "name": "Refinds",
+     "kind": "class",
+     "line": 591,
+     "signature": "class Refinds:  # __init__(self, pictures: list[Masked], threads: int, gpu: bool = True)",
+     "summary": "A detector's context for a frame's re-finds in one C call: its pictures, a C thread pool, per-track memos, optionally the GPU backend."
+    },
+    {
+     "name": "Refinds.start",
+     "kind": "method",
+     "line": 614,
+     "signature": "def start(self, frame, jobs, lists, thr, good, keep=False, near_good=None, ahead=None) -> ctypes.Array | None",
+     "summary": "rf_start: begins the call and returns the RfOut array filled as next() hands jobs over; end() must follow."
+    },
+    {
+     "name": "Refinds.ahead",
+     "kind": "method",
+     "line": 638,
+     "signature": "def ahead(self, frame, jobs, lists, token) -> bool",
+     "summary": "rf_ahead: sends a frame's re-finds to the GPU at the frame's start, before the look places her."
+    },
+    {
+     "name": "fly",
+     "kind": "function",
+     "line": 739,
+     "signature": "def fly(m: Map, w: Walls, x, y, vx, vy, arrow, dt, limit, shoe, skip) -> tuple | None",
+     "summary": "motion.body.fly's flight in C: (platform landed on or -1, x, t, vx, x unchanged?, vx unchanged?)."
+    },
+    {
+     "name": "gpu_mode",
+     "kind": "function",
+     "line": 52,
+     "signature": "def gpu_mode(environ=os.environ, path: Path | None = None) -> str",
+     "summary": "'off', 'start' or 'ahead' from GAMELAB_GPU or the lab/GPU file."
+    },
+    {
+     "name": "state",
+     "kind": "function",
+     "line": 423,
+     "signature": "def state() -> str",
+     "summary": "Whether the C is in use and the masked match on AVX2, for the service's console and session record."
+    }
+   ],
+   "inputs": [
+    "gamelab/*.c and gpumatch.hlsl sources",
+    "MSVC 2022 Build Tools (vcvars64.bat)",
+    "GAMELAB_GPU or lab/GPU",
+    "numpy arrays from perception and motion"
+   ],
+   "outputs": [
+    "loaded ctypes DLLs for perception.match, perception.mobs, perception.plate, perception.poses, perception.spawns, perception.exact, localization.camreg, localization.worldstate, motion.physics",
+    "status text for the perception service (state, search_state, gpu_line)"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/native.c",
+    "gamelab/search.c",
+    "gamelab/locate.c",
+    "gamelab/spawns.c",
+    "gamelab/exact.c",
+    "gamelab/gpumatch.c",
+    "gamelab/gpumatch.hlsl"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/build/<source>-<sha1 12>.dll",
+     "mode": "read-write",
+     "what": "built DLLs, one per source hash (git-ignored); older builds of the same stem deleted when not loaded"
+    },
+    {
+     "path": "gamelab/build/native-*/gpumatch_hlsl.h",
+     "mode": "write",
+     "what": "gpumatch.hlsl as a C string, in the temp build folder"
+    },
+    {
+     "path": "gamelab/lab/GPU",
+     "mode": "read",
+     "what": "the GPU switch file (empty or 'ahead')"
+    }
+   ],
+   "concurrency": "A module lock serialises first loads; builds run `cl` in a child cmd process (300 s timeout). Each Refinds context owns a pool of C threads (made once at rf_open) plus, with the GPU on, a device-starter thread; Refinds holds its lock from start() to end(), and `_ctx_lock` for gpu_state() read from the status thread. ctypes releases the GIL during every call.",
+   "tunables": [
+    {
+     "name": "USE",
+     "value": "True",
+     "meaning": "False: no C at all, Python/OpenCV everywhere"
+    },
+    {
+     "name": "GPU / AHEAD",
+     "value": "off by default",
+     "meaning": "from GAMELAB_GPU (0, 1, ahead) or the lab/GPU file"
+    },
+    {
+     "name": "FLAGS",
+     "value": "/nologo /O2 /fp:precise /MT /LD",
+     "meaning": "MSVC flags: bit-exact IEEE, static C runtime"
+    },
+    {
+     "name": "VCVARS",
+     "value": "...\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat",
+     "meaning": "the compiler environment"
+    },
+    {
+     "name": "SR_GROUP",
+     "value": "16",
+     "meaning": "shapes per search group (search.c's GL)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Port the hot inner loops to C instead of porting perception wholesale",
+     "why": "89% of the re-finds' time was OpenCV's masked matchTemplate; the frame loop ran out of CPU (14.6 fps live), not GC."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "The masked match is the C's only on AVX2 CPUs",
+     "why": "Plain C took 3.4-3.7x OpenCV's time; OpenCV stays the fallback."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Each further kernel gets its own DLL built the same way (search.c on 2026-10-27; later locate.c, camreg.c, spawns.c, exact.c)",
+     "why": "search.c uses AVX2 intrinsics throughout, so its DLL loads only where the CPU has AVX2 (sr_ready), and native.c stayed unchanged (README, A cheaper whole screen)."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "The GPU backend off by default, switched by lab/GPU or GAMELAB_GPU",
+     "why": "At the RTX 3080's idle clocks a crowd's frame took 5 ms against 2.1 on the C's 4 threads; a file because WMI-started processes get no environment."
+    }
+   ],
+   "gotchas": [
+    "Failure to load is cached for the process: fix the compiler and restart the process.",
+    "The elevated key player must never import native (it loads a DLL built from the tree): tests/test_architecture.py checks it.",
+    "Masked match scores are exact, OpenCV's are float32: within 9.5e-7 in colour and 2.5e-5 on brightness, so a third-decimal rounding can flip about once in 10,000 sightings.",
+    "Refinds.start must always be followed by end() when it returns non-None (it holds the lock).",
+    "GPU/AHEAD are read at import; changing lab/GPU affects only processes started afterwards."
+   ],
+   "tests": [
+    "tests/test_native.py",
+    "tests/test_native_match.py",
+    "tests/test_refind.py",
+    "tests/test_gpumatch.py",
+    "tests/test_perception.py",
+    "tests/test_body.py"
+   ]
+  },
+  {
+   "path": "gamelab/native.c",
+   "title": "native.c: masked match, re-finds, flight",
+   "tagline": "Exact masked template matching, a frame's re-finds in one threaded call, her flight",
+   "summary": "The main C DLL. It computes OpenCV's masked TM_CCOEFF_NORMED exactly in integers (AVX2 place by place, or all places at once by number-theoretic transform), runs all of a frame's monster re-finds in one call on its own thread pool with per-track memos (and the GPU backend from gpumatch.c behind the same contract), picks step 1's silhouette peaks, and steps her flight 5 ms at a time exactly as the Python physics does.",
+   "details_md": "**The masked match** (`mm_*`, for `perception/match.py`). With n the mask's pixels, the template's per-channel sums ST_c and STT_c (made once by `mm_prepare`), and at each place STI (template x image dot product), S1_c and S2 (the image's sums under the mask):\n\n```\nN = n STI - sum_c ST_c S1_c    A = sum_c (n STT_c - ST_c^2)    B = n S2 - sum_c S1_c^2   (exact int64)\nscore = N / sqrt(A B)  (double, then float32); -1 where A B is 0 (a flat window)\n```\n\nOpenCV sums in float32 through FFTs, so its scores differ in the last bits (within 9.5e-7 colour, 2.5e-5 brightness on a crowd's 1,293 matches; the 0.55/0.6/0.9 threshold decisions identical). The dot products go one of two exact ways: `dots_avx2` does 16 int16 products per madd, 8 places at once sharing each template load, only over the 16-wide chunks the mask covers (at the madd's own pace: 0.42 ns per madd on the Ryzen 9 5900X); or, when places x chunks reach `NTT_LEAST` = 300,000 (a re-find's ~98x102 window around a ~52x56 picture: 912,000), every place at once as a correlation by number-theoretic transform on 128x128 planes modulo 998,244,353 (Montgomery arithmetic, AVX2 lanes, no reordering pass). Templates whose dot products could reach the prime get no transform. The mask's sums come from per-channel prefix sums, a run of mask pixels at a time, 24 places in AVX2 registers. Scratch memory is thread-local and kept between calls. AVX2 is detected at run time (`has_avx2`, `mm_simd`); the build has no /arch flag so the other pieces stay bit-exact.\n\nSpeed: a re-find window 0.45 ms vs OpenCV's 1.57; a step-2 check 0.05 vs 0.58; a drop's strip 0.28 vs 0.68. With the transform, against the same C place by place, a re-find call took 0.31 ms vs 0.61 (median) and a frame's re-finds 6.2-6.5 ms vs 17.3-17.6 (mean).\n\n**A frame's re-finds in one call** (`rf_*`, for `MobDetector.refind_all`). The contract comment above `RfJob` is binding for any backend: each job (a followed monster) has an id (its memo), a near and a full window, and two picture lists (the last match; the animation's likely next frames). In a window the first pictures are tried, one becoming best if it scores at least `thr` and above the best so far as rounded to 3 decimals (Python's `round`, `rf_round3`); then the next pictures until one scores `good`. The near window answers if its best is over `good` and at least `ngood`; else the full window. A memo answers a window whose position, pictures and pixels are byte-identical to last time. Jobs are taken largest first by the pool's threads and by the caller in `rf_next`; `rf_start` / `rf_next` / `rf_end` let Python do each job's own part (kind check, fallback) as answers arrive.\n\n**Step 1 peaks** (`silhouette_peaks`): the cover test from an integral image and the 3x3 peak rule, which in numpy held the GIL (18 ms of a band search's 34). **Her flight** (`fly`): body.air_step's drag, gravity and steering, walls and landing tests in IEEE double in Python's order (min/max written out so even a zero's sign matches), up to `MAX_PLATFORMS` = 4096; the planner flies some 25,000 flights to build a map's moves, about 1 ms each in Python.",
+   "lines": 1803,
+   "key_items": [
+    {
+     "name": "mm_prepare",
+     "kind": "function",
+     "line": 614,
+     "signature": "EXPORT int mm_prepare(const unsigned char *tpl, long long trow, const unsigned char *mask, long long mrow, int mpix, int th, int tw, int cn, void *out, long long size)",
+     "summary": "Makes a template ready: its sums, mask runs, int16 rows, chunk bounds and (if it fits) its NTT transform."
+    },
+    {
+     "name": "mm_match",
+     "kind": "function",
+     "line": 1059,
+     "signature": "EXPORT int mm_match(const unsigned char *img, int ih, int iw, long long irow, int cn, const void *tpl, float *out)",
+     "summary": "Every place's exact masked score of one prepared template over an image."
+    },
+    {
+     "name": "mm_best",
+     "kind": "function",
+     "line": 1075,
+     "signature": "EXPORT int mm_best(const unsigned char *img, int ih, int iw, long long irow, int cn, const void *const *tpls, int n, double stop, float *scores, int *xs, int *ys)",
+     "summary": "Each template's first-highest score and place, the image loaded once, stopping after the first at `stop` or more."
+    },
+    {
+     "name": "Masked",
+     "kind": "class",
+     "line": 356,
+     "signature": "typedef struct { int th, tw, cn, tpad, nruns, flush, wide, t_off; long long spec_off, chunks, n, A, ST[3], STT[3]; } Masked;",
+     "summary": "A prepared template's header; runs, row bounds, int16 rows and the transform follow it in the same buffer."
+    },
+    {
+     "name": "dots_avx2",
+     "kind": "function",
+     "line": 829,
+     "signature": "static void dots_avx2(const Picture *im, const Masked *p, int y, int rw, long long *DOT)",
+     "summary": "Place-by-place dot products with AVX2 madd, 8 places at a time over the mask's chunks."
+    },
+    {
+     "name": "score_at",
+     "kind": "function",
+     "line": 947,
+     "signature": "static float score_at(const Picture *im, const Masked *p, int x, long long dot)",
+     "summary": "N / sqrt(A B) from the exact sums, rounded once to float32; -1 if flat."
+    },
+    {
+     "name": "NTT_LEAST",
+     "kind": "constant",
+     "line": 419,
+     "signature": "#define NTT_LEAST 300000LL",
+     "summary": "Work (places x chunks) from which a template's dot products go by transform."
+    },
+    {
+     "name": "NTT_P",
+     "kind": "constant",
+     "line": 413,
+     "signature": "#define NTT_P 998244353u",
+     "summary": "The transform's prime, 119 * 2^23 + 1."
+    },
+    {
+     "name": "RfJob",
+     "kind": "class",
+     "line": 1188,
+     "signature": "typedef struct { long long id, key; int wnear[4], wfull[4]; int first_at, first_n, next_at, next_n; } RfJob;",
+     "summary": "One monster to re-find: its memo id, windows and picture lists."
+    },
+    {
+     "name": "rf_open_as",
+     "kind": "function",
+     "line": 1567,
+     "signature": "EXPORT void *rf_open_as(const void *const *tpls, int n, int threads, int gpu)",
+     "summary": "A re-find context: the pictures, a thread pool, the memos, and the GPU backend if allowed and switched on."
+    },
+    {
+     "name": "rf_start",
+     "kind": "function",
+     "line": 1644,
+     "signature": "EXPORT int rf_start(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs, int njobs, const int *lists, double thr, double good, double ngood, int keep, RfOut *outs)",
+     "summary": "Validates and starts a frame's call: jobs ordered largest first, the pool woken, the GPU sent the windows."
+    },
+    {
+     "name": "rf_window",
+     "kind": "function",
+     "line": 1344,
+     "signature": "static int rf_window(const RfCtx *c, const RfBatch *b, const RfJob *j, const int *w, int side, RfMemo *m, RfOut *o)",
+     "summary": "One window of a job: the memo, else the first pictures then the next ones, by the contract's rules."
+    },
+    {
+     "name": "rf_next",
+     "kind": "function",
+     "line": 1731,
+     "signature": "EXPORT int rf_next(void *ctx)",
+     "summary": "The index of the next finished job (doing one itself if none is in), -1 when all are handed over."
+    },
+    {
+     "name": "silhouette_peaks",
+     "kind": "function",
+     "line": 35,
+     "signature": "EXPORT int silhouette_peaks(float *res, int rh, int rw, const double *ii, int th, int tw, double size, double cover, float thr, long long *ys, long long *xs, float *vs, int cap)",
+     "summary": "Step 1's cover test and 8-neighbour peaks, numpy's order and dtypes to the bit."
+    },
+    {
+     "name": "fly",
+     "kind": "function",
+     "line": 214,
+     "signature": "EXPORT int fly(double x, double y, double vx, double vy, int arrow, double dt, double limit, const double *shoe, int skip, ...)",
+     "summary": "Her flight stepped dt at a time until landing or `limit`: the platform landed on, x, t and vx."
+    }
+   ],
+   "inputs": [
+    "uint8 frames and templates (1 or 3 channels) from perception.match and perception.mobs",
+    "platforms, walls and her shoe from motion.physics"
+   ],
+   "outputs": [
+    "float32 score planes and best places",
+    "RfOut answers per re-find job",
+    "landing platform, x, t, vx of a flight"
+   ],
+   "uses": [
+    "gamelab/gpumatch.c"
+   ],
+   "files_io": [],
+   "concurrency": "rf_open makes a pool of worker threads (the caller's thread counts as one) synchronised with an SRWLOCK and condition variables; one call per context at a time. Scratch memory is per-thread (__declspec(thread)) and freed in DllMain when a thread ends.",
+   "tunables": [
+    {
+     "name": "NTT_N",
+     "value": "128 (NTT_LOG 7)",
+     "meaning": "transform plane side: windows up to 128 px each way"
+    },
+    {
+     "name": "NTT_LEAST",
+     "value": "300,000",
+     "meaning": "places x chunks from which the transform is used"
+    },
+    {
+     "name": "BLOCK",
+     "value": "8",
+     "meaning": "places a dot-product pass does at once"
+    },
+    {
+     "name": "LANES",
+     "value": "24",
+     "meaning": "places the mask sums do at once"
+    },
+    {
+     "name": "MAX_RUNS",
+     "value": "512",
+     "meaning": "mask runs the AVX2 sums take"
+    },
+    {
+     "name": "RF_MAX_JOBS",
+     "value": "1024",
+     "meaning": "jobs per re-find call"
+    },
+    {
+     "name": "MAX_PLATFORMS",
+     "value": "4096",
+     "meaning": "platforms fly takes"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "Masked match worked out exactly in integers (one rounding at the end)",
+     "why": "Same decisions as OpenCV on every measured call, about 4x faster."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Dot products by number-theoretic transform for large windows (NTT_LEAST 300,000)",
+     "why": "The madd kernel ran at the hardware's pace, so only fewer products could help; the transform was faster in 97% of calls at 300,000-400,000 work."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Two result rows sharing image loads (7% faster) and a Cauchy-Schwarz pruning bound were measured and left out",
+     "why": "The madd kernel already runs at the hardware's pace, so only doing fewer products could help; the code records both as measured and left out (one 7% faster; the bound would have skipped 68% of products in a numpy simulation) without giving more reason."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "A frame's re-finds in one C call with memos and a thread pool",
+     "why": "Each re-find was a Python task taking turns at the GIL; the frame loop reached 30 fps in a crowd (master 14)."
+    }
+   ],
+   "gotchas": [
+    "Built with /fp:precise and no /arch: AVX2 code paths are chosen at run time; do not add /arch:AVX2 or the other pieces stop being bit-exact.",
+    "A flat window scores -1 (OpenCV gives NaN or inf).",
+    "rf_start again only after rf_end; two jobs with the same id in one call make it return -1.",
+    "The memo answers only when the window's pixels are byte-identical to the last call's for that id."
+   ],
+   "tests": [
+    "tests/test_native_match.py",
+    "tests/test_refind.py",
+    "tests/test_perception.py",
+    "tests/test_body.py"
+   ]
+  },
+  {
+   "path": "gamelab/search.c",
+   "title": "search.c: the monster search's step 1",
+   "tagline": "A band's colour tests, silhouette scores and peaks in a few calls",
+   "summary": "Step 1 of the whole-screen monster search (perception/mobs.py) in C with AVX2: shrink the band like OpenCV's INTER_AREA, run every kind's colour test, score each silhouette only where the cover test keeps a window and its score can reach the threshold, pick the peaks and the places step 2 checks. A crowd's whole screen fell from 116 ms of CPU to 20.",
+   "details_md": "**Why.** In numpy/OpenCV step 1 took 116 ms of CPU per crowded screen on one thread, 82 of it OpenCV's `matchTemplate` over 4.07 M windows of which the cover test then kept only 3.6% (the profile of 2026-10-27). On its thread in the service a whole screen took 55-69 ms (median); now 14-17, about 0.4 of a core less in a crowd, and an ask for it is answered in 26-28 ms instead of 61-84.\n\n**The calls** (Python's lock released for each):\n- `sr_shrink`: OpenCV 5.0.0's INTER_AREA resize to step 1's scale, its float32 arithmetic in its order (the same bytes as cv2.resize; tests compare).\n- `sr_colours` / `sr_step1`: every kind's colour test 16 pixels at a time (four hand-made tests: slime, pig, snail, orange mushroom; or the learned gates' table, up to 15 kinds as bits), I4 = count of the kind's pixels in each 2x2 cell (the coarse picture is I4 / 4 exactly), integral images, then each silhouette scored **exactly**: T_int = T x 2^shift, N = n S_I4T - S_I4 S_T, A = n S_TT - S_T^2, B = n S_I4I4 - S_I4^2, score = N / sqrt(A B) rounded once to float32. A window is skipped only where an upper bound of its score (from its colour by rows, then columns, then exact products a few rows at a time, the rows of most template mass first) plus the bound of OpenCV's float32 noise (nk n sqrt(S_I4I4 S_TT)/sqrt(A B) + n0: `mobs.NOISE_K`, `NOISE_ABS`) falls under the threshold, so it can't be a peak in either and stops no neighbour from being one. Peaks follow native.c's rule; a shape is flagged where OpenCV's noise could change master's peaks (ties, neighbours within bounds, a score near the threshold), and Python then works it out as master does.\n- `sr_places`: master's sort of (score, cx, cy, i) tuples and its place picking.\n\nShapes of one size are grouped (`SrGroup`, up to `GL` = 16, one int16 lane each) so their bound tables are checked side by side. A silhouette over 64 x 256 cells, sums past 2^52, or a kind with a colour test the C doesn't know leaves its detector to numpy/OpenCV.",
+   "lines": 1139,
+   "key_items": [
+    {
+     "name": "sr_step1",
+     "kind": "function",
+     "line": 884,
+     "signature": "EXPORT int sr_step1(const unsigned char *rgb, int h, int w, long long row, const unsigned *lut, const SrUnit *units, int nu, const SrShape *shapes, int nshapes, const SrGroup *groups, float thr, double nk, double n0, int *out_n, int *flags, long long *ys, long long *xs, float *vs, float *es, int cap, unsigned char *i4, long long *stats)",
+     "summary": "A band's step 1: colour tests, I4 pictures, bounded exact silhouette scores and peaks; -2 when it can't (the caller then does it)."
+    },
+    {
+     "name": "sr_shrink",
+     "kind": "function",
+     "line": 346,
+     "signature": "EXPORT int sr_shrink(const unsigned char *src, int sh, int sw, long long srow, unsigned char *dst, int dh, int dw, long long drow)",
+     "summary": "OpenCV's INTER_AREA shrink, the same bytes."
+    },
+    {
+     "name": "sr_places",
+     "kind": "function",
+     "line": 1058,
+     "signature": "EXPORT int sr_places(const long long *ys, const long long *xs, const float *vs, const int *out_n, const int *sh, ...)",
+     "summary": "master's _places: spots sorted as Python sorts their tuples, places picked."
+    },
+    {
+     "name": "sr_colours",
+     "kind": "function",
+     "line": 574,
+     "signature": "EXPORT int sr_colours(const unsigned char *rgb, int h, int w, long long row, const unsigned *lut, const SrUnit *units, ...)",
+     "summary": "Every unit's colour test over a picture."
+    },
+    {
+     "name": "sr_ready",
+     "kind": "function",
+     "line": 48,
+     "signature": "EXPORT int sr_ready(void)",
+     "summary": "Whether the CPU and OS support AVX2 (asked before anything else)."
+    },
+    {
+     "name": "group_scores",
+     "kind": "function",
+     "line": 628,
+     "signature": "static void group_scores(const SrGroup *G, const SrShape *shapes, int ch, int cw, const double *pd, const int *ii, ...)",
+     "summary": "Scores a group's shapes at the windows the cover test and bounds keep, with each score's noise bound."
+    },
+    {
+     "name": "shape_peaks",
+     "kind": "function",
+     "line": 823,
+     "signature": "static int shape_peaks(float *res, float *noise, const int *hot, int nhot, int rh, int rw, float thr, long long *pyx, ...)",
+     "summary": "Peaks by master's rule, flagging where OpenCV's noise could decide them."
+    },
+    {
+     "name": "SrShape",
+     "kind": "class",
+     "line": 602,
+     "signature": "typedef struct { int th, tw, tw4, kmin; long long st; double A, scale; const double *rows; const long long *ub; const int *order; int check, unused; double rtt; } SrShape;",
+     "summary": "A silhouette made ready: integer sums, row bounds, row order by mass."
+    },
+    {
+     "name": "SrUnit",
+     "kind": "class",
+     "line": 423,
+     "signature": "typedef struct { int test; unsigned bits; double least; int first, n, gfirst, gn; } SrUnit;",
+     "summary": "A unit of the search: its colour test and its shapes and groups."
+    },
+    {
+     "name": "MAX_UNITS",
+     "kind": "constant",
+     "line": 425,
+     "signature": "#define MAX_UNITS 16",
+     "summary": "Units per call (at most 15 learned kinds as bits in int16 lanes)."
+    },
+    {
+     "name": "MAX_TH",
+     "kind": "constant",
+     "line": 615,
+     "signature": "#define MAX_TH 64",
+     "summary": "A silhouette's rows at most (cells); columns at most 4 x MAX_TH."
+    }
+   ],
+   "inputs": [
+    "a band of a look frame (uint8 RGB) and the detector's units, shapes and groups from perception.mobs"
+   ],
+   "outputs": [
+    "peaks per shape (row, column, score, noise bound) and flags",
+    "the places step 2 checks"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "Called from the whole screen's band threads (3, mobs.SEARCH_THREADS) and the caller's thread for her own band; all scratch memory is per-thread and kept between calls.",
+   "tunables": [
+    {
+     "name": "MAX_UNITS",
+     "value": "16",
+     "meaning": "units per call"
+    },
+    {
+     "name": "GL",
+     "value": "16",
+     "meaning": "shapes per group"
+    },
+    {
+     "name": "MAX_TH",
+     "value": "64",
+     "meaning": "silhouette rows (cells)"
+    },
+    {
+     "name": "MAXP",
+     "value": "64",
+     "meaning": "places a unit at most (MAX_CHECKS)"
+    },
+    {
+     "name": "MAXE",
+     "value": "16",
+     "meaning": "spots a place at most (FINE_TEMPLATES)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Step 1 in C with exact scores and noise-bounded skipping, its own DLL",
+     "why": "The user asked to improve whole-screen latency; OpenCV's matchTemplate over every window was 82 of 116 ms."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "A GPU step 1 was built as a probe, measured and not adopted",
+     "why": "At one whole screen a second it would save about 0.015 of a core, each screen 7-14 ms later at the card's idle clocks."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "After the reviews, shapes where OpenCV's noise could decide a peak are worked out as master does",
+     "why": "As first built, exact scores could make another peak or order than master's on other maps."
+    }
+   ],
+   "gotchas": [
+    "Loaded only where sr_ready reports AVX2; otherwise perception.mobs uses numpy and OpenCV.",
+    "Returns -1 past `cap` peaks and -2 when it can't: the caller must handle both by falling back.",
+    "Score planes are kept zeroed between calls; sr_step1 clears what it wrote."
+   ],
+   "tests": [
+    "tests/test_search_c.py",
+    "tests/test_native_search.py"
+   ]
+  },
+  {
+   "path": "gamelab/locate.c",
+   "title": "locate.c: her plate and body cues",
+   "tagline": "Exact colour counts of her name plate and pixel-by-pixel pose agreement",
+   "summary": "The inner loops of the two cues that place her on screen when her gray name-tag match is unsure: her name plate's exact colours counted at every place of a window (perception/plate.py), and her body's poses checked pixel by pixel (perception/poses.py). Integer counts only, so the numpy fallback gives the same answers.",
+   "details_md": "Ported from the localization prototype of 2026-10-29, whose body search took 7-80 ms of Python and had to run on the 15-a-second search thread (the user: \"port the localization to C ... do that quickly as I can really benefit from it\").\n\n**Her plate** (`lc_plate`): the plate item is drawn bit-exact, so every pixel gets a palette index (the plate's own colours via a perfect multiplicative hash of their 24-bit codes; `NONE` = 255 for anything else; rows from the HUD down are none). At each place the count of the plate's stable pixels (1,395 of its 114x33 box, 40 colours) whose exact colour the frame has is summed 32 places a step, a byte compare per plate pixel. Places in the minimap are zeroed, the best `topk` kept with their neighbourhoods suppressed (cv2.minMaxLoc's order), and at each (the first refined +-1 px) the evidence: plate pixels matched, her letters white, white where her name has none, letters in column bins all shown (`clean`). `lc_plate_counts` gives the counts alone.\n\n**Her body** (`lc_pack` + `lc_agree`): a box of the frame packed one int32 per pixel (thread-local), then for each candidate pose (its pixels at her feet's column and row) and each offset within +-R, the share of its pixels within tolerance on every channel, as drawn or as the post-touch blink darkens her (the better of the two). Eight offsets across at once where the candidate stays in the box. `lc_mass` builds her colours' mass picture against the map's art (1 her colours in the foreground, -0.5 other foreground, 0 the art).",
+   "lines": 450,
+   "key_items": [
+    {
+     "name": "lc_plate",
+     "kind": "function",
+     "line": 233,
+     "signature": "EXPORT int lc_plate(const LcPlate *m, const uint8_t *frame, long long stride, int x0, int y0, int x1, int y1, int hud, ...)",
+     "summary": "A window's plate candidates: exact colour counts at every place, best topk, each one's evidence."
+    },
+    {
+     "name": "lc_plate_counts",
+     "kind": "function",
+     "line": 306,
+     "signature": "EXPORT int lc_plate_counts(const LcPlate *m, const uint8_t *frame, long long stride, int x0, int y0, int x1, int y1, ...)",
+     "summary": "The plate's exact-colour counts at every place of a window."
+    },
+    {
+     "name": "lc_pack",
+     "kind": "function",
+     "line": 326,
+     "signature": "EXPORT int lc_pack(const uint8_t *pic, int h, int w, long long stride)",
+     "summary": "Packs a box of the frame one int32 per pixel into thread-local memory for lc_agree."
+    },
+    {
+     "name": "lc_agree",
+     "kind": "function",
+     "line": 357,
+     "signature": "EXPORT int lc_agree(const int32_t *ys, const int32_t *xs, const uint32_t *col0, const uint32_t *col1, int t0, int t1, ...)",
+     "summary": "Each pose candidate's share of agreeing pixels at each offset within +-R."
+    },
+    {
+     "name": "lc_mass",
+     "kind": "function",
+     "line": 425,
+     "signature": "EXPORT int lc_mass(const uint8_t *pic, int h, int w, long long stride, const int16_t *bg, long long bg_stride, const uint8_t *known, long long known_stride, const uint8_t *lut, int fg, float *out)",
+     "summary": "Her colours' mass picture against the map's art."
+    },
+    {
+     "name": "LcPlate",
+     "kind": "class",
+     "line": 121,
+     "signature": "typedef struct { ... } LcPlate;",
+     "summary": "The plate model as the C reads it (palette hash, stable pixels, letters)."
+    },
+    {
+     "name": "lc_ready",
+     "kind": "function",
+     "line": 34,
+     "signature": "EXPORT int lc_ready(void)",
+     "summary": "Whether the CPU has AVX2."
+    },
+    {
+     "name": "NONE",
+     "kind": "constant",
+     "line": 30,
+     "signature": "#define NONE 255",
+     "summary": "Palette index of a pixel that is none of the plate's colours."
+    }
+   ],
+   "inputs": [
+    "look frames (uint8 RGB) and the plate model / pose bank from perception.plate and perception.poses"
+   ],
+   "outputs": [
+    "plate candidates with evidence; pose agreement shares; mass pictures"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "Called from the perception service's threads (poses runs its anchors on a pool); lc_pack's packed box is thread-local, so lc_pack and lc_agree must run on the same thread.",
+   "tunables": [
+    {
+     "name": "NONE",
+     "value": "255",
+     "meaning": "palette index for any other colour (palette at most 254)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Port the prototype's plate and body cues into perception with their inner loops in C",
+     "why": "The prototype placed her feet within 3 px on 100% of held-out frames against live perception's 71% and 48%; its Python body search took 7-80 ms."
+    }
+   ],
+   "gotchas": [
+    "lc_agree reads the box lc_pack packed on the same thread.",
+    "Loaded only where lc_ready reports AVX2."
+   ],
+   "tests": [
+    "tests/test_plate.py",
+    "tests/test_poses.py"
+   ]
+  },
+  {
+   "path": "gamelab/camreg.c",
+   "title": "camreg.c: camera registration costs",
+   "tagline": "Gray sample rows and truncated differences against the map's art",
+   "summary": "The camera registration's inner loops (localization/camreg.py): a frame's sample rows as gray, block-mean shrinking for a cold search, and the truncated absolute difference cost of each candidate view against the map's static art. Loaded by camreg.py's own `lib()`, built with `native.build`.",
+   "details_md": "`localization/camreg.py` finds the camera's view of each frame by registering its fixed art against the map's own, drawn from the game data (from 2026-10-29), so her place is known whether or not her name tag shows. This file is its hot part; numpy gives the same integers where the DLL isn't built (a frame 0.2-0.4 ms in C against 10-20 in numpy).\n\n- `cr_gray`: each pixel's gray as avg(avg(p0, p2), p1) with avg(a, b) = (a + b + 1) >> 1 (SSE2's pavgb), the same for RGB and BGR frames, so the service's RGB frames and saved BGR pictures register alike.\n- `cr_shrink`: k x k block means, (sum + k^2/2) / k^2, for a cold search's first pass (a frame's play area 0.05 ms, where numpy took 13-15 on the loaded PC).\n- `cr_costs`: for each candidate view (vx, vy: the map point at the frame's top-left), over the sample rows' pixels where both the frame's mask (in play: not the HUD or minimap) and the art's mask (only the map's fixed art drawn) are set, the sum of min(|frame - art|, trunc) and the pixel count.\n\nUnlike the other C pieces, AVX2 is a run-time choice inside one DLL (`cr_simd`, needing SSSE3 too), with plain C otherwise; the tests compare the two.",
+   "lines": 262,
+   "key_items": [
+    {
+     "name": "cr_costs",
+     "kind": "function",
+     "line": 234,
+     "signature": "EXPORT int cr_costs(const unsigned char *g, const unsigned char *gm, int nrows, int gw, const int *rows, ...)",
+     "summary": "Each candidate view's truncated difference sum and pixel count against the art."
+    },
+    {
+     "name": "cr_gray",
+     "kind": "function",
+     "line": 117,
+     "signature": "EXPORT int cr_gray(const unsigned char *frame, int fh, int fw, long long frow, int cn, const int *rows, int nrows, ...)",
+     "summary": "A frame's sample rows as gray (pavgb-style averages)."
+    },
+    {
+     "name": "cr_shrink",
+     "kind": "function",
+     "line": 141,
+     "signature": "EXPORT int cr_shrink(const unsigned char *g, int h, int w, long long grow, int k, unsigned char *out)",
+     "summary": "k x k block means with rounding."
+    },
+    {
+     "name": "cr_simd",
+     "kind": "function",
+     "line": 45,
+     "signature": "EXPORT int cr_simd(int use)",
+     "summary": "Chooses AVX2 (1) or plain C (0) where available; -1 leaves it; returns what's in use."
+    },
+    {
+     "name": "has_avx2",
+     "kind": "function",
+     "line": 28,
+     "signature": "static int has_avx2(void)",
+     "summary": "CPUID/XGETBV check for AVX, SSSE3, OS YMM support and AVX2."
+    }
+   ],
+   "inputs": [
+    "frames (RGB or BGR) and the map's art and masks from localization/camreg.py and localization/mapart.py"
+   ],
+   "outputs": [
+    "per-view costs that camreg.Registration turns into the camera's view"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Register each frame against the map's own art for the camera, with the costs in C",
+     "why": "The view is then known exactly whether or not her name tag shows."
+    }
+   ],
+   "gotchas": [
+    "Built and loaded by gamelab/localization/camreg.py (not by a native.*_lib function), though with native.build and native.USE.",
+    "A pixel whose art position falls outside the art counts as no pixel."
+   ],
+   "tests": [
+    "tests/test_camreg.py"
+   ]
+  },
+  {
+   "path": "gamelab/spawns.c",
+   "title": "spawns.c: spawn fade-in sums",
+   "tagline": "Integer sums of the blend fit of monsters fading in at spawn points",
+   "summary": "The spawn watch (perception/spawns.py) fits each newborn monster's opacity as it fades in over the map's art. This DLL computes the fit's integer sums for every hypothesis (a picture at a window pixel) eight at a time in AVX2 lanes; numpy took 13.6 ms a frame at the median and 132 at p99.",
+   "details_md": "**The model** (spawns.py's top): a newborn of opacity a over the art B is drawn F = B + a (A/255)(S - B), A the game's alpha of each of its picture's pixels and S its colour. With D = F - B and G = A (S - B) for each channel of each sampled pixel, the sums D.G, G.G, D.D and the pixel count n give a = 255 D.G / G.G, the share of D.D explained (D.G)^2 / (G.G D.D), and the residual. |D| <= 255 and |G| <= 65,025, so D.G and D.D per pixel fit int32 but G.G doesn't: the sums go to int64, summed in int32 for `BLOCK` = 32 pixels first.\n\n- `sp_empty`: how many of a window's pixels have a largest channel difference from the art over `levels` (the empty test).\n- `sp_sums`: each hypothesis's sums. Hypotheses come in runs of up to 8 one column apart (the newborn's feet a unit apart along a flat stretch of platform), so after copying the window and its art into planes of their own, a run's 8 hypotheses are 8 lanes of one load per pixel and channel. A run of 1 goes one at a time.\n\nWithout this DLL the frame step leaves the spawn watch out entirely (`worldstate.SPAWNS`): numpy gives the same integers but is too slow for the frame loop.",
+   "lines": 234,
+   "key_items": [
+    {
+     "name": "sp_sums",
+     "kind": "function",
+     "line": 198,
+     "signature": "EXPORT int sp_sums(const uint8_t *frame, int64_t fstride, int fpx, const uint8_t *plate, int64_t pstride, ...)",
+     "summary": "D.G, G.G, D.D and n for every hypothesis, 8 in AVX2 lanes per run."
+    },
+    {
+     "name": "sp_empty",
+     "kind": "function",
+     "line": 86,
+     "signature": "EXPORT int sp_empty(const uint8_t *frame, int64_t fstride, int fpx, const uint8_t *plate, int64_t pstride, int w, int h, ...)",
+     "summary": "Pixels differing from the art by more than `levels` on their largest channel."
+    },
+    {
+     "name": "sp_ready",
+     "kind": "function",
+     "line": 36,
+     "signature": "EXPORT int sp_ready(void)",
+     "summary": "Whether the CPU has AVX2."
+    },
+    {
+     "name": "BLOCK",
+     "kind": "constant",
+     "line": 31,
+     "signature": "#define BLOCK 32",
+     "summary": "Pixels summed in int32 before going to int64 (32 x 3 x 255 x 65025 < 2^31)."
+    },
+    {
+     "name": "MOST_K",
+     "kind": "constant",
+     "line": 32,
+     "signature": "#define MOST_K 8192",
+     "summary": "Pixels a picture at most (D.D's int32 lanes)."
+    },
+    {
+     "name": "PAD",
+     "kind": "constant",
+     "line": 30,
+     "signature": "#define PAD 32",
+     "summary": "Bytes past a plane's end a run's lanes may read."
+    }
+   ],
+   "inputs": [
+    "a window of the frame and the map's art under it; the newborn's picture and alpha (perception.spawns)"
+   ],
+   "outputs": [
+    "integer sums per hypothesis from which spawns.py works out opacity and fit"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "Per-thread scratch planes, kept between calls.",
+   "tunables": [
+    {
+     "name": "BLOCK",
+     "value": "32",
+     "meaning": "int32 accumulation block"
+    },
+    {
+     "name": "MOST_K",
+     "value": "8192",
+     "meaning": "pixels per picture at most"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-01",
+     "what": "Watch every spawn point in view every frame, with the sums in C",
+     "why": "numpy took 13.6 ms a frame at the median and 132 at p99 on the user's own play."
+    }
+   ],
+   "gotchas": [
+    "Loaded only where sp_ready reports AVX2; without it the spawn watch is off in the frame step."
+   ],
+   "tests": [
+    "tests/test_spawns.py"
+   ]
+  },
+  {
+   "path": "gamelab/exact.c",
+   "title": "exact.c: the exact-pixel finder",
+   "tagline": "Monsters found by anchor-pair votes and exact pixel counts",
+   "summary": "The game draws a sprite's opaque pixels unchanged, so at the game's own 1366x768 any visible part of a monster is its picture's pixels exactly. Anchor pairs vote for (picture, offset) places; places with enough votes have their pixels compared; each frame pixel is credited to one find. Plain C, no intrinsics; used by perception/exact.py beside the masked search.",
+   "details_md": "**Anchors** are pairs of side-by-side pixels of a picture, chosen by the caller (rare in the picture, their first colour sparse on the map). `ex_open` copies the pictures' masked pixels and builds a hash table of anchor keys (the six bytes of a pixel pair) plus a 15-bit colour lookup table saying whether a colour starts any anchor: most frame pixels stop there.\n\n**`ex_find`**, per frame box: for each pixel whose colour starts an anchor, the pair's key is looked up; each matching anchor votes for (picture, ox, oy) in a generation-stamped open-addressing table (`VOTE_BITS` = 18: 262,144 entries; ids pack 10 bits of picture and 11 bits each of x and y + `OFF`). A place reaching `min_votes` (perception.exact's `MIN_VOTES` = 6) becomes a candidate; each candidate's pixels are compared exactly (`exact_at`), those with `min_exact` (`MIN_EXACT` = 200) kept, sorted most exact first, then each frame pixel is explained by one find only: going down that list, a find's `fresh` count is its exact pixels no better find already explained, and a find with fewer than `min_exact` fresh pixels is dropped, so a picture and its neighbouring animation frame (sharing most pixels) don't both count. A kept find marks its exact pixels explained; the map is cleared after the call only where it was written. Once three quarters of the vote table is in use, new places get no more entries (a frame that full of matching pairs isn't the game's).\n\n**Measured** (2026-11-04, README \"The exact finder\"): 3.60 ms median, p99 7.2, on one thread on the 22:49 clip (66 pictures, 17,052 anchors). It sees monsters under her body, her pet, effects and the HUD that the masked search misses (near-her detection 38% -> 100% under 25 units). It finds nothing on a fade-in, a shade or JPEG, by design, and runs only at the game's own size.",
+   "lines": 190,
+   "key_items": [
+    {
+     "name": "ex_find",
+     "kind": "function",
+     "line": 111,
+     "signature": "EXPORT int ex_find(void *ctx, const uint8_t *f, int H, int W, long long stride, int x0, int y0, int x1, int y1, int min_votes, int min_exact, int *out, int cap)",
+     "summary": "Finds pictures in a frame box: (picture, ox, oy, exact pixels, fresh pixels) per find, most exact first."
+    },
+    {
+     "name": "ex_open",
+     "kind": "function",
+     "line": 45,
+     "signature": "EXPORT void *ex_open(int npics, const uint8_t **rgbs, const uint8_t **masks, const int *dims, int nanch, const int *anch)",
+     "summary": "Builds the context: pictures' pixels, anchor hash table, colour LUT; NULL past MAX_PICS."
+    },
+    {
+     "name": "ex_close",
+     "kind": "function",
+     "line": 87,
+     "signature": "EXPORT void ex_close(void *ctx)",
+     "summary": "Frees a context."
+    },
+    {
+     "name": "exact_at",
+     "kind": "function",
+     "line": 97,
+     "signature": "static int exact_at(const Pic *P, int ox, int oy, const uint8_t *f, int H, int W, long long stride)",
+     "summary": "Counts a picture's pixels exactly equal in the frame at an offset."
+    },
+    {
+     "name": "Ctx",
+     "kind": "class",
+     "line": 33,
+     "signature": "typedef struct { int npics; Pic *pics; Slot *slots; ...; uint8_t lut[1 << 15]; Vote *votes; ...; uint8_t *explained; ... } Ctx;",
+     "summary": "The finder's state: pictures, anchors, votes, explained-pixel map."
+    },
+    {
+     "name": "VOTE_BITS",
+     "kind": "constant",
+     "line": 19,
+     "signature": "#define VOTE_BITS 18",
+     "summary": "Vote table size: 262,144 (picture, offset) pairs a frame."
+    },
+    {
+     "name": "MAX_PICS",
+     "kind": "constant",
+     "line": 18,
+     "signature": "#define MAX_PICS 1024",
+     "summary": "Pictures at most (10 bits of a vote's id)."
+    },
+    {
+     "name": "OFF",
+     "kind": "constant",
+     "line": 17,
+     "signature": "#define OFF 256",
+     "summary": "How far a picture's left or top may lie off the frame."
+    }
+   ],
+   "inputs": [
+    "RGB frames at the game's own size and the map's monster pictures with anchors (perception.exact)"
+   ],
+   "outputs": [
+    "finds per frame: picture index, offset, exact and fresh pixel counts"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "Not to be called on one context from two threads at once (it keeps votes and the explained map in the context).",
+   "tunables": [
+    {
+     "name": "OFF",
+     "value": "256",
+     "meaning": "off-frame margin"
+    },
+    {
+     "name": "MAX_PICS",
+     "value": "1024",
+     "meaning": "pictures per context"
+    },
+    {
+     "name": "VOTE_BITS",
+     "value": "18",
+     "meaning": "vote table bits"
+    },
+    {
+     "name": "MAX_CANDS",
+     "value": "4096",
+     "meaning": "candidates per frame"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-04",
+     "what": "Add an exact-pixel finder beside the masked search, on the search's thread",
+     "why": "Partly covered monsters scored low in the masked correlation and 88% of misses were refused at one gate; exact pixels need no threshold on how much shows."
+    }
+   ],
+   "gotchas": [
+    "Finds nothing on JPEG frames or fades (pixels not exact) and is only meaningful at 1366x768.",
+    "The explained map is cleared after each call only where it was written (cost per frame, not per screen)."
+   ],
+   "tests": [
+    "tests/test_exact.py"
+   ]
+  },
+  {
+   "path": "gamelab/gpumatch.c",
+   "title": "gpumatch.c: the re-finds on the GPU (host)",
+   "tagline": "A Direct3D 11 backend behind rf_* giving the CPU's answers to the bit",
+   "summary": "Included by native.c: a GPU backend for a frame's re-find matches. The GPU computes each place's exact integer sums and an approximate score; the CPU rescans only the places within 2 x 2^-14 of the best approximate score exactly, so every answer is the CPU's. Off by default (native.GPU) because on this PC it doesn't pay.",
+   "details_md": "**What a GPU can give exactly.** Direct3D 11's shader model 5 has no 64-bit integers and no double square root, so the GPU computes per place STI, S1_c and S2 as uint32 (exact for pictures up to 128x128) and an approximate score s~ in float32, within `GM_EPS` = 2^-14 of the float32 score. Of each window's places only those within 2 GM_EPS of the highest s~ come back, at most `GM_CAND` = 32, with their sums; `gm_answer` scores them as native.c's `score_at` and takes the first highest row by row. More candidates, a picture past 128 px or flat, or any failure: that match is the CPU's (`rf_best`).\n\n**Per call** (`gm_rf_send` at rf_start): every job's full window with every picture of its lists that fits (the near window as a sub-rectangle), windows the memo will answer left out, bytes copied into one upload buffer, three dispatches (prep, match, choose) and the candidates' copy in one submission. `rf_next` waits on the fence's event (no spinning) at most `GM_WAIT_US` = 6 ms; past that the call goes to the CPU's threads at once, and so do the next calls for `GM_REST_US` = 1 s and until the GPU has caught up. A removed device (driver reset) turns it off for the context's life.\n\n**Never stalls a frame.** The device is made on a thread of its own (0.7 s to on, the three shaders compiled at run time by d3dcompiler_47); rf_close never waits for it. Only a hardware adapter (never WARP). d3d11, dxgi and d3dcompiler_47 are loaded at run time, so a machine without them just has no GPU path; built without the SDK headers (or `GM_NO_D3D`) the backend is only off (why 6). Buffers are made once (about 35 MB of video memory).\n\n**Twice as fast** (later on 2026-10-27): window rows in 4 planes for coalesced loads, packed pixels, the device at the lowest GPU thread priority (`GM_PRIORITY` = -7, so the game's frames are drawn first), and `rf_ahead`: at a frame's start each followed monster's full window where the previous frame's camera puts it (2 px wider each side, 6 taller) is sent from a thread-pool callback, only each place's key coming back; rf_start never waits for it (`GM_AHEAD_WAIT_US` = 0) and each pair whose window lies inside one sent is answered from it once in.\n\n**Why off.** The RTX 3080 idles at P8 (210 MHz) between the frame loop's calls: a crowd's frame took 5-5.3 ms there against 2.1-2.2 on the C's 4 threads, and freeing 0.15-0.25 cores made nothing measurably smoother.",
+   "lines": 1681,
+   "key_items": [
+    {
+     "name": "GmCtx",
+     "kind": "class",
+     "line": 159,
+     "signature": "typedef struct GmCtx { volatile LONG state; int why; ...; ID3D11Device *dev; ...; GmWin win[GM_MAX_WINS]; ... } GmCtx;",
+     "summary": "A context's GPU backend: device, shaders, buffers, the call's windows and tasks, stats."
+    },
+    {
+     "name": "gm_rf_send",
+     "kind": "function",
+     "line": 1133,
+     "signature": "static int gm_rf_send(GmCtx *g, const RfBatch *b)",
+     "summary": "Packs a call's windows and tasks and submits prep, match and choose in one go."
+    },
+    {
+     "name": "gm_answer",
+     "kind": "function",
+     "line": 1063,
+     "signature": "static int gm_answer(GmCtx *g, int k, int sub, float *score, int *x, int *y)",
+     "summary": "Scores a region's candidates exactly on the CPU; 0 means the CPU must match it."
+    },
+    {
+     "name": "gm_rf_best",
+     "kind": "function",
+     "line": 1204,
+     "signature": "static int gm_rf_best(GmCtx *g, const RfBatch *b, int i, int side, int pic, float *score, int *x, int *y)",
+     "summary": "rf_window's match answered from the GPU's results where it can."
+    },
+    {
+     "name": "rf_ahead",
+     "kind": "function",
+     "line": 1311,
+     "signature": "EXPORT int rf_ahead(void *ctx, const unsigned char *frame, int fh, int fw, long long frow, int cn, const RfJob *jobs, ...)",
+     "summary": "Sends a frame's re-finds before its look, from the previous frame's camera."
+    },
+    {
+     "name": "rf_gpu",
+     "kind": "function",
+     "line": 1559,
+     "signature": "EXPORT int rf_gpu(void *ctx, long long *stats, int n)",
+     "summary": "The backend's state (0 none, 1 starting, 2 on, 3 off) and stats (GS_*)."
+    },
+    {
+     "name": "gm_on",
+     "kind": "function",
+     "line": 169,
+     "signature": "EXPORT int gm_on(int use)",
+     "summary": "Whether contexts opened from now on get the GPU backend."
+    },
+    {
+     "name": "gm_open",
+     "kind": "function",
+     "line": 674,
+     "signature": "static GmCtx *gm_open(const Masked **tpls, int n, int fault)",
+     "summary": "Packs the pictures and starts the device-making thread."
+    },
+    {
+     "name": "gm_make",
+     "kind": "function",
+     "line": 457,
+     "signature": "static int gm_make(GmCtx *g)",
+     "summary": "Creates the device on a hardware adapter, compiles shaders, makes buffers, sets priority."
+    },
+    {
+     "name": "gm_takes",
+     "kind": "function",
+     "line": 286,
+     "signature": "static int gm_takes(const Masked *p)",
+     "summary": "Whether the GPU matches a picture: at most 128x128, not flat, at most 3 channels."
+    },
+    {
+     "name": "GM_EPS",
+     "kind": "constant",
+     "line": 56,
+     "signature": "#define GM_EPS (1.0f / 16384)",
+     "summary": "How far s~ may be from the float32 score."
+    },
+    {
+     "name": "GM_CAND",
+     "kind": "constant",
+     "line": 55,
+     "signature": "#define GM_CAND 32",
+     "summary": "Candidates a region hands back (more: the CPU's)."
+    },
+    {
+     "name": "GM_WAIT_US",
+     "kind": "constant",
+     "line": 64,
+     "signature": "#define GM_WAIT_US 6000",
+     "summary": "Longest rf_next waits for the GPU before the CPU does the call."
+    },
+    {
+     "name": "GM_PRIORITY",
+     "kind": "constant",
+     "line": 71,
+     "signature": "#define GM_PRIORITY (-7)",
+     "summary": "The device's GPU thread priority: the lowest, so the game draws first."
+    }
+   ],
+   "inputs": [
+    "native.c's RfBatch (jobs, windows, pictures) and the frame's bytes",
+    "gpumatch.hlsl compiled at run time"
+   ],
+   "outputs": [
+    "per-window candidates with exact sums, turned into rf_window answers identical to the CPU's"
+   ],
+   "uses": [
+    "gamelab/gpumatch.hlsl",
+    "gamelab/native.c"
+   ],
+   "files_io": [],
+   "concurrency": "A device-starter thread per context (rf_open doesn't wait); a closer thread releases the device; rf_ahead submits from a Windows thread-pool callback. Results are awaited on an ID3D11Fence event.",
+   "tunables": [
+    {
+     "name": "GM_WAIT_US",
+     "value": "6000",
+     "meaning": "µs rf_next waits for the GPU"
+    },
+    {
+     "name": "GM_REST_US",
+     "value": "1000000",
+     "meaning": "µs the calls stay the CPU's after a late one"
+    },
+    {
+     "name": "GM_CAND",
+     "value": "32",
+     "meaning": "candidates per region"
+    },
+    {
+     "name": "GM_EPS",
+     "value": "2^-14",
+     "meaning": "approximate score error bound"
+    },
+    {
+     "name": "GM_PRIORITY",
+     "value": "-7",
+     "meaning": "GPU thread priority"
+    },
+    {
+     "name": "GM_AHEAD_WAIT_US",
+     "value": "0",
+     "meaning": "µs rf_start waits for a call sent ahead"
+    },
+    {
+     "name": "GM_MAX_TASKS",
+     "value": "1024",
+     "meaning": "(window, picture) pairs per call"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Build a Direct3D 11 backend behind the rf_* contract, answers exact, off by default",
+     "why": "The user asked for it; at the card's idle clocks it was slower than the C (5 vs 2.1 ms)."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Lowest GPU thread priority and sending each frame's matches ahead of its look",
+     "why": "Without priority the game's late draws rose; waiting for the round trip made the step longer."
+    }
+   ],
+   "gotchas": [
+    "Every answer must equal the CPU's: never pick the best by the approximate score alone.",
+    "A device removed turns the GPU off for the context's life; a late call sends the next second's calls to the CPU.",
+    "Built without the Windows SDK's Direct3D headers the GPU path is only 'off' (why 6), the rest of the DLL unchanged."
+   ],
+   "tests": [
+    "tests/test_gpumatch.py"
+   ]
+  },
+  {
+   "path": "gamelab/gpumatch.hlsl",
+   "title": "gpumatch.hlsl: the compute shaders",
+   "tagline": "Three cs_5_0 passes: prep, match, choose",
+   "summary": "The GPU side of the re-find matches: per place of a window and a picture, exact uint32 sums (STI, S1_c, S2) and an approximate float32 score; then each region's candidates near its highest score. Compiled at run time from a C string native.py embeds in the DLL.",
+   "details_md": "**Exactness.** STI is summed in float32 partial sums of at most `CHUNK` = 64 pixels of a mask run: each product is an integer at most 255^2, a partial sum at most 64 x 3 x 255^2 = 12,484,800 < 2^24, so every float32 step is an exact integer, each then added into a uint. S1_c and S2 come from each window row's prefix sums, a mask run at a time. N and B are built in 64-bit integers made of two uints; s~ = N / sqrt(A B) in float32 (-1 where B is 0), within 2^-14 of the float32 score (at most 1.8e-7 measured over 42.7 M places).\n\n**The passes** (one dispatch each, one submission a frame):\n- `prep` (128 threads a group): each window's rows as packed pixels (R | G << 8 | B << 16) and uint4 prefix sums, laid out in `RUN` = 4 planes (column c at plane c % 4) so a warp's loads are side by side; tasks' records cleared.\n- `match` (`GROUP` = 64 threads, RUN = 4 places side by side a thread): the sums, s~, and the highest s~ of the task and of its near sub-rectangle via `InterlockedMax` on an orderable key (`key_of`). Reads prep's output through read-only views (cached). A frame sent ahead writes only each place's key.\n- `choose`: each place within `band` (2 GM_EPS) of its region's highest goes to that region's candidates (at most `kcand`).\n\nAt the RTX 3080's idle clocks (P8, 210 MHz) a crowd's call took 5.15 ms of GPU time as first built and 2.37 after the plane layout and packing (match 2.08, prep 0.21); clocked up 0.34.",
+   "lines": 264,
+   "key_items": [
+    {
+     "name": "match",
+     "kind": "function",
+     "line": 136,
+     "signature": "[numthreads(GROUP, 1, 1)] void match(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)",
+     "summary": "Per place: exact sums, s~, and the region maxima by atomic max on keys."
+    },
+    {
+     "name": "prep",
+     "kind": "function",
+     "line": 74,
+     "signature": "[numthreads(128, 1, 1)] void prep(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)",
+     "summary": "Window rows to packed pixels and prefix sums in 4 planes; task records cleared."
+    },
+    {
+     "name": "choose",
+     "kind": "function",
+     "line": 228,
+     "signature": "[numthreads(GROUP, 1, 1)] void choose(uint3 g : SV_GroupID, uint3 l : SV_GroupThreadID)",
+     "summary": "Places within the band of their region's highest become candidates."
+    },
+    {
+     "name": "Frame",
+     "kind": "class",
+     "line": 33,
+     "signature": "cbuffer Frame : register(b0) { uint ntask, nwin, cn, kcand; float band; uint ahead; uint2 unused; }",
+     "summary": "Per-call constants: counts, channels, candidate cap, band, ahead flag."
+    },
+    {
+     "name": "key_of",
+     "kind": "function",
+     "line": 129,
+     "signature": "uint key_of(float s)",
+     "summary": "Maps a float to a uint that orders as the floats do, for InterlockedMax."
+    },
+    {
+     "name": "CHUNK",
+     "kind": "constant",
+     "line": 30,
+     "signature": "#define CHUNK 64",
+     "summary": "Pixels per float32 partial sum (keeps every step an exact integer)."
+    },
+    {
+     "name": "RUN",
+     "kind": "constant",
+     "line": 31,
+     "signature": "#define RUN 4",
+     "summary": "Places side by side per thread (8 and 1 were slower)."
+    },
+    {
+     "name": "GROUP",
+     "kind": "constant",
+     "line": 29,
+     "signature": "#define GROUP 64",
+     "summary": "Threads per group (gpumatch.c's GM_GROUP)."
+    }
+   ],
+   "inputs": [
+    "pictures, mask runs, window bytes, tasks and groups uploaded by gpumatch.c"
+   ],
+   "outputs": [
+    "per-task records (highest keys, candidate counts) and candidates with their sums, or per-place keys when sent ahead"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "GPU compute: thousands of threads per dispatch; region maxima via InterlockedMax per thread (a groupshared reduction lost updates and was replaced).",
+   "tunables": [
+    {
+     "name": "GROUP",
+     "value": "64",
+     "meaning": "threads a group"
+    },
+    {
+     "name": "CHUNK",
+     "value": "64",
+     "meaning": "pixels per exact float partial sum"
+    },
+    {
+     "name": "RUN",
+     "value": "4",
+     "meaning": "places per thread"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Each thread does its own atomic max instead of a groupshared reduction",
+     "why": "The reduction lost a group's maximum now and then with 4 or 8 places a thread."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Rows laid out in 4 planes, pixels packed, the picture read four at a load",
+     "why": "Halved the GPU time at idle clocks (5.15 -> 2.37 ms a call)."
+    }
+   ],
+   "gotchas": [
+    "Pictures over 128x128 would overflow uint32 sums: gpumatch.c never sends them.",
+    "native.py embeds this file as a C string at build time, so editing it changes the DLL's hash and forces a rebuild."
+   ],
+   "tests": [
+    "tests/test_gpumatch.py"
+   ]
+  },
+  {
+   "path": "gamelab/character.py",
+   "title": "Her profile",
+   "tagline": "Who plays in this process, and the data the stack takes of her",
+   "summary": "Resolves the one character a process plays (`active`) and defines her profile as frozen dataclasses: stats, keys, attacks with their geometry, what localization takes of her attacks (`Shape`), what perception reads of her, pet, policy and planner priors. Data only: it imports nothing of gamelab but paths, so every layer may read it.",
+   "details_md": "**Why.** Until 2026-10-27 gamelab hunted with one character, the thief (BugBaby: Lucky Seven and a claw's throwing stars). Then the user: \"I have another character magician who will use magic claw to grind on this map ... I will switch back and forth ... so the code needs to be generalized\". Magic Claw is another kind of attack (the client's stepped search for an aimed spell, from 50 ahead to 300, nothing stopping it, no flight, from the ground only), with other stats, keys, ammunition (MP) and files.\n\n**Who plays.** `active_id` takes the first that names one: `GAMELAB_CHARACTER` (set by `--character` before any command loads `motion.physics`, which works her walk and jumps out once at import; child processes inherit it), then `lab/character.json` (`gamelab character use <id>`), then config.toml's `[characters] default`, then the thief. Under `GAMELAB_FIXED_STATS` (tests, golden traces, the harness) only the env var counts and stats are the class's fixed copy, config.toml unread. `active()` resolves once and caches, so her physics, her files (`paths.of`) and what lets a command run are one character's. Commands that act in the game play another character only when the env var names her, until her bottom bar is read.\n\n**The profile.** `load(which)` takes her class module (`classes.thief` or `classes.magician`, by the `[characters.<id>]` table's class or the id), its `profile(id)`; for the thief, config.toml's flat `[character]` stats and Lucky Seven's level (`leveled`); for others, the table's stats over the class's fixed ones; then `configured(c, table)`. The main types:\n- `AttackSpec`: key, hits, damage lo/hi, MP, ammo, the timings (lock, release, damage, lands), projectile speed, cycle, miss share, `air`, and a `Geometry` (`star_search`, `search` or `melee`).\n- `Search`: the client's forward search: bands `step` = 20 wide from `start` to `range`, band k's window `row` -/+ (start + step k) // `spread` around 28 over her feet; the first band any body overlaps picks (`band`).\n- `Shape`: what localization's trackers take of her attacks: nearest and farthest a picked monster's middle can be (signed), up/down, the time windows, `order` ('line' or 'band'), the look band, and `kill` (`KillCredit`: her kill bound by the client's search, the magician's).\n- `Perception`: her files folder, bottom bar job and name, heading box, attack score/margin, hit effect size.\n- `Policy`, `Pet`, `Buff`, `Priors`, and `safety_hits` (the safety stop's reserve of the map's largest touches). Some of these are read from the profile itself (behavior.hunter takes `safety_hits`, `pet.hp_warning` and `policy`; control.navigator and attack.magic take `policy.close_quarters`), others only describe constants that live elsewhere (the thief's).\n\n`describe` prints a profile for `gamelab character`; `stats_from` says where a stat came from (the hunter's note when her stat window disagrees).",
+   "lines": 466,
+   "key_items": [
+    {
+     "name": "Character",
+     "kind": "dataclass",
+     "line": 242,
+     "signature": "@dataclass(frozen=True) class Character: id, klass, stats, fixed_stats, skills, keys, timing, ammo, stops, buffs, magic_guard, attacks, pet, policy, priors, shape, perception, placeholders=(), safety_hits=3",
+     "summary": "One character as the stack takes her."
+    },
+    {
+     "name": "active",
+     "kind": "function",
+     "line": 400,
+     "signature": "def active() -> Character",
+     "summary": "The character this process plays, loaded once (motion.physics.CHARACTER and paths.of read it)."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 328,
+     "signature": "def load(which: str | None = None, path=CONFIG, environ=os.environ) -> Character",
+     "summary": "Builds a Character from her class and config.toml (or the class alone under FIXED_STATS)."
+    },
+    {
+     "name": "active_id",
+     "kind": "function",
+     "line": 296,
+     "signature": "def active_id(environ=os.environ, path=CONFIG, chosen: Path | None = None) -> str",
+     "summary": "GAMELAB_CHARACTER, else (unless FIXED_STATS) lab/character.json, config.toml's default, the thief."
+    },
+    {
+     "name": "Shape",
+     "kind": "dataclass",
+     "line": 163,
+     "signature": "@dataclass(frozen=True) class Shape: near, ahead, up, down, hit_after_s, window_s, hide_s, gain_after_key, pick_s, order, look_band, shows_wait_s, kill=None",
+     "summary": "What localization's trackers take of her attacks."
+    },
+    {
+     "name": "AttackSpec",
+     "kind": "dataclass",
+     "line": 122,
+     "signature": "@dataclass(frozen=True) class AttackSpec: id, key, name, verb, skill_id, level, hits, lo, hi, defence, mp, ammo, lock_ms, ..., geometry",
+     "summary": "One attack as data."
+    },
+    {
+     "name": "Search",
+     "kind": "dataclass",
+     "line": 53,
+     "signature": "@dataclass(frozen=True) class Search: start: int; range: int; step: int = 20; spread: int = 4; row: int = 28",
+     "summary": "The client's banded forward target search."
+    },
+    {
+     "name": "Search.band",
+     "kind": "method",
+     "line": 86,
+     "signature": "def band(self, ahead: float, dy: float, half: float, top: float) -> int | None",
+     "summary": "The first band a body overlaps (strictly), or None if the search doesn't pick it."
+    },
+    {
+     "name": "Geometry",
+     "kind": "dataclass",
+     "line": 104,
+     "signature": "@dataclass(frozen=True) class Geometry: kind, search=None, box=None, air=None, line=None, point_blank=None, order='band', mob_count=1",
+     "summary": "What an attack picks and what stops it."
+    },
+    {
+     "name": "KillCredit",
+     "kind": "dataclass",
+     "line": 151,
+     "signature": "@dataclass(frozen=True) class KillCredit: search: Search; tie: int; lands_s: float",
+     "summary": "Which monster her kill was, by the client's search (the magician's)."
+    },
+    {
+     "name": "Perception",
+     "kind": "dataclass",
+     "line": 186,
+     "signature": "@dataclass(frozen=True) class Perception: files, job, name, heading_box, attack_score, attack_margin, hit_effect",
+     "summary": "What perception reads of her."
+    },
+    {
+     "name": "stats",
+     "kind": "function",
+     "line": 365,
+     "signature": "def stats(path=CONFIG, environ=os.environ) -> config.Character",
+     "summary": "The stats motion.physics takes: fixed copy, the thief's [character], or another's tables over her class's."
+    },
+    {
+     "name": "choose",
+     "kind": "function",
+     "line": 424,
+     "signature": "def choose(which: str, chosen: Path | None = None, path=CONFIG) -> Path",
+     "summary": "`gamelab character use <id>`: writes lab/character.json."
+    },
+    {
+     "name": "ENV",
+     "kind": "constant",
+     "line": 37,
+     "signature": "ENV = \"GAMELAB_CHARACTER\"",
+     "summary": "The env var naming who plays (--character sets it)."
+    }
+   ],
+   "inputs": [
+    "GAMELAB_CHARACTER / GAMELAB_FIXED_STATS env vars",
+    "lab/character.json",
+    "config.toml [character], [characters], [characters.<id>]",
+    "the class modules gamelab/classes/thief.py and magician.py"
+   ],
+   "outputs": [
+    "the active Character for motion.physics, localization trackers (Shape), attack.magic, behavior, control.keymap/timeline, paths.of and __main__"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/classes/thief.py",
+    "gamelab/classes/magician.py",
+    "maplehelper/config.py"
+   ],
+   "files_io": [
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "[character], [characters] default and per-character tables"
+    },
+    {
+     "path": "gamelab/lab/character.json",
+     "mode": "read-write",
+     "what": "{\"character\": id}: who plays when nothing names one (choose writes)"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "ENV",
+     "value": "GAMELAB_CHARACTER",
+     "meaning": "env var: who plays"
+    },
+    {
+     "name": "FIXED_STATS",
+     "value": "GAMELAB_FIXED_STATS",
+     "meaning": "env var: class stats only (tests, goldens, harness)"
+    },
+    {
+     "name": "DEFAULT",
+     "value": "config.THIEF",
+     "meaning": "who plays when nothing names one"
+    },
+    {
+     "name": "Search.step / spread / row",
+     "value": "20 / 4 / 28",
+     "meaning": "the client's search defaults (ShotPath.h)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Generalise the stack to several characters, one per process, with profiles as data",
+     "why": "The user switches between the thief and a Magic Claw magician."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "safety_hits per character (the thief 3 for now, the magician 2 for now)",
+     "why": "The user's rule of 2026-10-28 was 'for thief with high evasion this should be 2 hits, 3 for magician', but the thief stays at 3 until her retreat dodges ('3 hits for now', 2026-10-28) and the magician is at 2 ('Stop at 2 touches for now', 2026-10-29: her pet drinks only at ~55%)."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Her kill bound by the client's search (KillCredit) for the magician",
+     "why": "No star flies, so the stars' nearest-ahead box can't say which monster her cast took."
+    }
+   ],
+   "gotchas": [
+    "One character per process, resolved once: --character after motion.physics has loaded as another is an error.",
+    "Under GAMELAB_FIXED_STATS a character id names a class and config.toml is not read.",
+    "The thief's values duplicate module constants elsewhere; tests/test_character.py checks each against the constant it names.",
+    "THIEF_SHAPE is a lazy module attribute (__getattr__) because the class modules import this one."
+   ],
+   "tests": [
+    "tests/test_character.py",
+    "tests/test_kill_credit.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_architecture.py"
+   ]
+  },
+  {
+   "path": "gamelab/classes/__init__.py",
+   "title": "Classes package",
+   "tagline": "Her classes as data: the contract each class module fulfils",
+   "summary": "A docstring-only package. Each class module gives `profile(id)`, `configured(c, table)`, `FIXED_STATS` and `SHAPE`, and imports only gamelab.character and maplehelper.config.",
+   "details_md": "The package documents the contract `gamelab.character.load` relies on:\n- `profile(id)`: a character of the class as she is with nothing given;\n- `configured(c, table)`: config.toml's `[characters.<id>]` over it;\n- `FIXED_STATS`: the stats `GAMELAB_FIXED_STATS` pins (tests and goldens);\n- `SHAPE`: what localization takes of her attacks.\n\nTwo classes exist: `thief` (BugBaby, today's module constants described) and `magician` (Magic Claw: its search the client's, its tables the game data's, every other number a placeholder until the user's answers and live measurements). `tests/test_architecture.py` checks that the profiles import nothing of gamelab but paths, character and classes. A third class would be a new module here giving the same four names, plus an entry in `gamelab.character._classes`.",
+   "lines": 12,
+   "key_items": [
+    {
+     "name": "profile",
+     "kind": "protocol",
+     "line": 3,
+     "signature": "profile(id) -> Character; configured(c, table) -> Character; FIXED_STATS; SHAPE",
+     "summary": "The contract each class module provides to gamelab.character.load."
+    }
+   ],
+   "inputs": [],
+   "outputs": [
+    "the classes namespace (thief, magician) imported by gamelab.character._classes"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Classes as data modules",
+     "why": "Every layer may read them; no class logic beyond building profiles."
+    }
+   ],
+   "gotchas": [],
+   "tests": [
+    "tests/test_architecture.py",
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/classes/thief.py",
+   "title": "The thief",
+   "tagline": "BugBaby: Lucky Seven and the claw's stars, described from the stack's constants",
+   "summary": "The thief's profile. Every value is a module constant elsewhere in the stack (where it's measured and used); here it is described, and tests/test_character.py checks each against the constant named beside it. Her SHAPE is the localization trackers' default (THIEF_SHAPE), equal to their constants.",
+   "details_md": "**Attacks.** `LUCKY_SEVEN` (skill 4001003, level 16: 2 stars of 96-192 each, 14 MP, 2 stars of ammo) and `STAR` (the regular attack: 1 star of 20-140, no MP, a claw swipe up close via `point_blank='claw'`), both with `STAR_SEARCH`: attack.reach's star search from 65 ahead to 400, the v83 line (walls and floors stop it), usable from a jump. Shared timings (`_TIMES`): lock 730 ms, extra margins 60/160 ms, arrow lock 800, star release 530, damage shows 290, star leaves at 520, star speed 690 units/s, cycle 0.84 s, miss share 0.275, hidden 1.8 s. `lucky_seven(level)` scales damage by skills.json's table (`LUCKY_SEVEN_DAMAGE`) relative to level 16 and takes MP from `LUCKY_SEVEN_MP`; `leveled` applies config.toml's `[character] lucky_seven`.\n\n**Shape.** near -10 (behind her), ahead 474 (434 + 40), up/down 70, hit after 1.2 s, window 2.5 s, hide 3.5 s, gain 0.1-0.6 s after the key, pick 0.065 s, order 'line', look band 140 up and 75 down.\n\n**Others.** `PERCEPTION`: her files are lab/'s own names (folder \"\"), job Rogue, name BugBaby, heading box (50, 8, 16). `POLICY`: Lucky Seven or the regular attack ('choice'), finish a low monster with the regular attack (the user's rule), attack the unseen with the regular, claw-edge close quarters. `SAFETY_HITS` = 3 for now (the user's decision of 2026-10-28; back to 2 once her retreat dodges: the simulator lost her on it in 7-8 of 40 runs at 2 hits, 2-5 at 3). `PET` thresholds 70% HP, 5% MP. `PRIORS` the planner's tuned constants. `configured` only takes her bottom bar's job and name from `[characters.thief]`.",
+   "lines": 128,
+   "key_items": [
+    {
+     "name": "profile",
+     "kind": "function",
+     "line": 98,
+     "signature": "def profile(cid: str = config.THIEF) -> Character",
+     "summary": "The thief as the stack has her."
+    },
+    {
+     "name": "LUCKY_SEVEN",
+     "kind": "constant",
+     "line": 36,
+     "signature": "LUCKY_SEVEN = AttackSpec(\"lucky_seven\", \"lucky_seven\", \"Lucky Seven\", \"throwing\", 4001003, level=16, hits=2, lo=96, hi=192, ...)",
+     "summary": "Her skill attack."
+    },
+    {
+     "name": "STAR",
+     "kind": "constant",
+     "line": 47,
+     "signature": "STAR = AttackSpec(\"star\", \"attack\", \"the regular attack\", \"throwing\", None, ...)",
+     "summary": "Her regular attack (claw up close)."
+    },
+    {
+     "name": "STAR_SEARCH",
+     "kind": "constant",
+     "line": 21,
+     "signature": "STAR_SEARCH = Geometry(\"star_search\", search=Search(start=65, range=400), air=\"search\", line=\"v83\", order=\"band\")",
+     "summary": "attack.reach's star search, described."
+    },
+    {
+     "name": "_TIMES",
+     "kind": "constant",
+     "line": 25,
+     "signature": "_TIMES = dict(lock_ms=730, lock_extra_ms=(60, 160), arrow_lock_ms=800, release_ms=530, damage_ms=290, lands_ms=520, speed=690.0, cycle_s=0.84, miss=0.275, hidden_s=1.8, air=True)",
+     "summary": "Timings shared by both attacks."
+    },
+    {
+     "name": "SHAPE",
+     "kind": "constant",
+     "line": 51,
+     "signature": "SHAPE = Shape(near=-10.0, ahead=434.0 + 40.0, up=70.0, down=70.0, ...)",
+     "summary": "The trackers' default Shape (THIEF_SHAPE)."
+    },
+    {
+     "name": "PERCEPTION",
+     "kind": "constant",
+     "line": 64,
+     "signature": "PERCEPTION = Perception(files=\"\", job=\"Rogue\", name=\"BugBaby\", heading_box=(50, 8, 16), ...)",
+     "summary": "What perception reads of her."
+    },
+    {
+     "name": "POLICY",
+     "kind": "constant",
+     "line": 69,
+     "signature": "POLICY = Policy(default_mode=\"choice\", finish_with_regular=True, ...)",
+     "summary": "Her attack mix and rules."
+    },
+    {
+     "name": "SAFETY_HITS",
+     "kind": "constant",
+     "line": 81,
+     "signature": "SAFETY_HITS = 3",
+     "summary": "The safety stop's reserve in the map's largest touches."
+    },
+    {
+     "name": "lucky_seven",
+     "kind": "function",
+     "line": 112,
+     "signature": "def lucky_seven(level: float) -> AttackSpec",
+     "summary": "Lucky Seven at a skill level: damage scaled by the table, MP from the table."
+    },
+    {
+     "name": "leveled",
+     "kind": "function",
+     "line": 120,
+     "signature": "def leveled(c: Character, level: float) -> Character",
+     "summary": "The thief with Lucky Seven at config.toml's level."
+    },
+    {
+     "name": "LUCKY_SEVEN_MP",
+     "kind": "constant",
+     "line": 45,
+     "signature": "LUCKY_SEVEN_MP = (8, 8, 8, 8, 9, ...)",
+     "summary": "skills.json's MP a cast by level."
+    },
+    {
+     "name": "PET",
+     "kind": "constant",
+     "line": 82,
+     "signature": "PET = Pet(hp_warning=0.70, mp_warning=0.05, hp_heal=250.0, mp_heal=100.0)",
+     "summary": "Her pet's auto-potion thresholds and potions."
+    }
+   ],
+   "inputs": [
+    "maplehelper.config (Character defaults, CharacterConfig)",
+    "gamelab.character's dataclasses"
+   ],
+   "outputs": [
+    "the thief's Character for gamelab.character.load",
+    "SHAPE as localization's default"
+   ],
+   "uses": [
+    "gamelab/character.py",
+    "maplehelper/config.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "SAFETY_HITS",
+     "value": "3",
+     "meaning": "touches of reserve for the safety stop"
+    },
+    {
+     "name": "LUCKY_SEVEN level",
+     "value": "16",
+     "meaning": "the level the stars were measured at"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-28",
+     "what": "Thief's safety reserve 3 hits for now",
+     "why": "Her retreat doesn't dodge yet; 2 hits lost her in 7-8 of 40 simulated runs."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "Pet MP potion heal 100 (a Blue Potion)",
+     "why": "Live she drinks 95-100; it was 185 until then."
+    }
+   ],
+   "gotchas": [
+    "Most values here only describe constants that her code reads from their own modules (changing one here changes nothing there; tests/test_character.py fails until both agree). A few are read from the profile itself: SAFETY_HITS and PET.hp_warning (behavior.hunter), POLICY (behavior.hunter, control.navigator, attack.magic) and SHAPE (localization's THIEF_SHAPE)."
+   ],
+   "tests": [
+    "tests/test_character.py"
+   ]
+  },
+  {
+   "path": "gamelab/classes/magician.py",
+   "title": "The magician",
+   "tagline": "Magic Claw's search, game-data tables, and marked placeholders",
+   "summary": "The second character's profile (from 2026-10-27), grinding Tree Dungeon with Magic Claw (2001003). Its search is the client's for an aimed spell and its tables are the game data's; everything else is a marked PLACEHOLDER (mostly the thief's numbers) until the user's answers and live measurements.",
+   "details_md": "**Magic Claw.** From skills.json: 2 hits on 1 monster, magic damage against MDD, MP by level (`MAGIC_CLAW_MP`: 10-20), no ball, no range node; tooltip \"within 300 range in front\". From the client (RustMS, meowdb, ohmi69; the range doc): `SEARCH` = `Search(start=50, range=300)`: 13 bands 20 wide, band k's window 28 -/+ (50 + 20k) // 4 above her feet (16..40 at the first, -44..100 at the last); never behind her nor in its first 50; nothing stops it (`line=None`); from the ground only (`air=None`), both settled by the user on 2026-10-27. Damage is a prior by the v83 magic formula (`MAGIC_CLAW_HIT` = 76-267). Her regular attack is a wand swing in a placeholder box (`WAND_BOX`: 0-65 ahead, 10 down, 60 up).\n\n**Stats.** `FIXED_STATS`: SPEED and JUMP 100, MP 1007, AVOID 18 from her stat window (2026-10-28 and 11-02); SPEED walks her at 125 x (100 + 20)/100 = 150 units/s by the client's formula (measured 149.4 over 66 walks); MP regen a placeholder.\n\n**Shape** (from the search's outer bound with the thief's slack): near 6 (50 - the widest body's half 34 - 10), ahead 374 (300 + 34 + 40), up 110, down 119 (44 floor + the tallest flinching top 65 + 10), order 'band', look band (180, 124), and `KILL` = `KillCredit(SEARCH, tie=0, lands_s=0.515)`: her kill bound to the oldest track in the first band her search picks (fitted on recordings R1+R2; victims stopped walking a median 0.49-0.50 s after the key). Timings are placeholders.\n\n**Policy.** Magic Claw whenever her MP pays (`default_mode='skill'`), never finishing with the regular attack, nothing cast at nothing (`unseen='none'`), close quarters by the danger escape only. Keys (`KEYS`): the user's preset 2, Shift Magic Claw, A Energy Bolt, '-' her chair. `SAFETY_HITS` = 2 (the user, 2026-10-29: \"Stop at 2 touches for now\"). `configured` applies her table's skills (Magic Claw's level and MP), buffs (Magic Guard share of a touch to MP by `MAGIC_GUARD_X`, Magic Armor duration), pet, keys, timing and bottom-bar lines.",
+   "lines": 219,
+   "key_items": [
+    {
+     "name": "profile",
+     "kind": "function",
+     "line": 183,
+     "signature": "def profile(cid: str = \"magician\") -> Character",
+     "summary": "A magician as the design's priors have her; her files under lab/characters/<cid>/."
+    },
+    {
+     "name": "configured",
+     "kind": "function",
+     "line": 200,
+     "signature": "def configured(c: Character, table: config.CharacterConfig) -> Character",
+     "summary": "Her [characters.<id>] tables over the class: skills, Magic Claw's MP, buffs, Magic Guard share, pet, keys."
+    },
+    {
+     "name": "MAGIC_CLAW",
+     "kind": "constant",
+     "line": 107,
+     "signature": "MAGIC_CLAW = AttackSpec(\"magic_claw\", \"magic_claw\", \"Magic Claw\", \"casting\", 2001003, ...)",
+     "summary": "Her skill attack: 2 hits, MDD, MP by level, no flight, ground only."
+    },
+    {
+     "name": "SEARCH",
+     "kind": "constant",
+     "line": 78,
+     "signature": "SEARCH = Search(start=50, range=300)",
+     "summary": "The client's aimed-spell search: 13 bands from 50 to 300 ahead."
+    },
+    {
+     "name": "CAST",
+     "kind": "constant",
+     "line": 81,
+     "signature": "CAST = Geometry(\"search\", search=SEARCH, air=None, line=None, order=\"band\", mob_count=1)",
+     "summary": "Magic Claw's geometry: nothing stops it, never from a jump."
+    },
+    {
+     "name": "SHAPE",
+     "kind": "constant",
+     "line": 136,
+     "signature": "SHAPE = Shape(near=SEARCH.start - WIDEST_HALF - 10.0, ahead=SEARCH.range + WIDEST_HALF + 40.0, ...)",
+     "summary": "What localization takes of her casts (6 to 374 ahead, 110 up, 119 down)."
+    },
+    {
+     "name": "KILL",
+     "kind": "constant",
+     "line": 127,
+     "signature": "KILL = KillCredit(search=SEARCH, tie=0, lands_s=MAGIC_CLAW.lands_ms / 1000)",
+     "summary": "Her kill's monster by the client's search."
+    },
+    {
+     "name": "FIXED_STATS",
+     "kind": "constant",
+     "line": 39,
+     "signature": "FIXED_STATS = config.Character(speed=100.0, jump=100.0, mp=1007.0, lucky_seven=0.0, avoid=18.0, mp_regen=0.32)",
+     "summary": "Her stats from her stat window (MP regen a placeholder)."
+    },
+    {
+     "name": "KEYS",
+     "kind": "constant",
+     "line": 68,
+     "signature": "KEYS = GameKeys(left=..., magic_claw=parse_key(\"shift\"), energy_bolt=parse_key(\"a\"), ...)",
+     "summary": "The user's key preset 2."
+    },
+    {
+     "name": "MAGIC_CLAW_HIT",
+     "kind": "constant",
+     "line": 64,
+     "signature": "MAGIC_CLAW_HIT = (76, 267)",
+     "summary": "A prior of each hit's damage by the v83 magic formula."
+    },
+    {
+     "name": "POLICY",
+     "kind": "constant",
+     "line": 154,
+     "signature": "POLICY = Policy(default_mode=\"skill\", finish_with_regular=False, regular_needs_box=True, unseen=\"none\", close_quarters=\"touch\", mp_floor=0.0)",
+     "summary": "Cast whenever MP pays; never at nothing."
+    },
+    {
+     "name": "SAFETY_HITS",
+     "kind": "constant",
+     "line": 175,
+     "signature": "SAFETY_HITS = 2",
+     "summary": "The safety stop's reserve (the user, 2026-10-29)."
+    },
+    {
+     "name": "PLACEHOLDERS",
+     "kind": "constant",
+     "line": 176,
+     "signature": "PLACEHOLDERS = (\"skill levels\", \"lock and delays\", \"damage\", \"miss\", \"the wand\", \"pet\", \"priors\")",
+     "summary": "What `gamelab character` lists as still placeholder."
+    },
+    {
+     "name": "MAGIC_CLAW_MP",
+     "kind": "constant",
+     "line": 32,
+     "signature": "MAGIC_CLAW_MP = (10, 10, 10, 10, 11, ...)",
+     "summary": "skills.json's MP a cast by level."
+    }
+   ],
+   "inputs": [
+    "maplehelper.config and maplehelper.keys",
+    "gamelab.character's dataclasses",
+    "config.toml [characters.magician] via configured()"
+   ],
+   "outputs": [
+    "the magician's Character for gamelab.character.load"
+   ],
+   "uses": [
+    "gamelab/character.py",
+    "maplehelper/config.py",
+    "maplehelper/keys.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "SEARCH",
+     "value": "start 50, range 300",
+     "meaning": "Magic Claw's search"
+    },
+    {
+     "name": "SAFETY_HITS",
+     "value": "2",
+     "meaning": "safety stop reserve"
+    },
+    {
+     "name": "FIXED_STATS.speed",
+     "value": "100",
+     "meaning": "her SPEED (150 units/s walk)"
+    },
+    {
+     "name": "PET.hp_warning",
+     "value": "0.55",
+     "meaning": "her pet drinks under 55% HP (live)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-27",
+     "what": "Magic Claw: walls and platforms don't block it, and it can't be cast mid-jump",
+     "why": "Settled by the user, not to measure."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "Safety stop at 2 touches for now",
+     "why": "Her pet drinks only at ~55% and 3 Horny touches take 65% of her 628 HP."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Kill credit by the search's first band, tie 0, lands 0.515 s after the key",
+     "why": "Fitted on recordings R1+R2; victims stopped walking a median 0.49-0.50 s after the key."
+    }
+   ],
+   "gotchas": [
+    "Most timings are the thief's numbers marked PLACEHOLDER: Magic Claw's lock, delays and damage are not measured.",
+    "Her files live under lab/characters/magician/ (paths.of), not lab/."
+   ],
+   "tests": [
+    "tests/test_character.py",
+    "tests/test_kill_credit.py",
+    "tests/test_magician_hunt.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "Geometry",
+   "module": "gamelab/screen.py",
+   "line": 39,
+   "summary": "A game window's client size and look scale; made from the frame in hand (of_frame) and carried with Observation, Scene and WorldState so every pixel constant can be converted.",
+   "fields": [
+    {
+     "name": "client",
+     "type": "tuple[int, int]",
+     "meaning": "client area width, height in screen px"
+    },
+    {
+     "name": "look_scale",
+     "type": "int",
+     "meaning": "a look frame is the client shrunk this much (2 at 1920x1080, 1 at 1366x768)"
+    }
+   ]
+  },
+  {
+   "name": "Files",
+   "module": "gamelab/paths.py",
+   "line": 79,
+   "summary": "A character's own files: attribute names from MINE resolve to the thief's paths or to lab/characters/<folder>/.",
+   "fields": [
+    {
+     "name": "folder",
+     "type": "str",
+     "meaning": "'' for the thief, else her folder name (Perception.files)"
+    }
+   ]
+  },
+  {
+   "name": "telemetry record",
+   "module": "gamelab/telemetry.py",
+   "summary": "One JSON line in a telemetry file, made by emit and folded by ui.state; the topic decides the rest of the fields.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "wall-clock seconds (rounded to ms; the simulator's clock in a sim run)"
+    },
+    {
+     "name": "topic",
+     "type": "str",
+     "meaning": "one of session, scene, tracks, exp, drops, route, chain, moved, trip, attack, event, log, gc, perf, ..."
+    },
+    {
+     "name": "...",
+     "type": "JSON",
+     "meaning": "the topic's fields, in map units"
+    }
+   ]
+  },
+  {
+   "name": "Area",
+   "module": "gamelab/capture.py",
+   "line": 71,
+   "summary": "A box of the desktop as mss takes it; window.client_rect makes one for the game's client area and capture grabs it.",
+   "fields": [
+    {
+     "name": "left, top",
+     "type": "int",
+     "meaning": "top-left in physical desktop px"
+    },
+    {
+     "name": "width, height",
+     "type": "int",
+     "meaning": "size in px"
+    }
+   ]
+  },
+  {
+   "name": "Shot",
+   "module": "gamelab/capture.py",
+   "line": 111,
+   "summary": "One moment of the screen to copy boxes of (DxgiShot: the duplicator's held frame; MssShot: a grab per box). perception.frames turns its crops into frames.",
+   "fields": [
+    {
+     "name": "area",
+     "type": "Area",
+     "meaning": "the area the boxes are relative to"
+    },
+    {
+     "name": "t",
+     "type": "float | None",
+     "meaning": "when the screen looked like that (time.monotonic's clock)"
+    },
+    {
+     "name": "crops(boxes, convert)",
+     "type": "method",
+     "meaning": "BGRA arrays of (x, y, w, h) boxes, or what convert makes of each"
+    }
+   ]
+  },
+  {
+   "name": "Masked",
+   "module": "gamelab/native.py",
+   "line": 484,
+   "summary": "A template and mask made ready for the C masked match (mm_prepare's buffer); perception.match keeps one per template.",
+   "fields": [
+    {
+     "name": "buf",
+     "type": "np.ndarray (uint8)",
+     "meaning": "the prepared bytes the C reads"
+    },
+    {
+     "name": "address",
+     "type": "int",
+     "meaning": "buf's address, passed to the C"
+    },
+    {
+     "name": "shape",
+     "type": "tuple[int, int, int]",
+     "meaning": "template height, width, channels"
+    }
+   ]
+  },
+  {
+   "name": "RfJob",
+   "module": "gamelab/native.py",
+   "line": 577,
+   "summary": "One monster to re-find in a frame's one-call re-finds (native.c's contract); built by perception.mobs.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "int64",
+     "meaning": "the track's id: its memo across calls"
+    },
+    {
+     "name": "key",
+     "type": "int64",
+     "meaning": "the caller's number for its picture lists (part of the memo)"
+    },
+    {
+     "name": "wnear, wfull",
+     "type": "int[4]",
+     "meaning": "near and full windows, x0, y0, x1, y1 in frame px"
+    },
+    {
+     "name": "first_at, first_n",
+     "type": "int",
+     "meaning": "its first pictures in the lists array"
+    },
+    {
+     "name": "next_at, next_n",
+     "type": "int",
+     "meaning": "the animation's likely next pictures"
+    }
+   ]
+  },
+  {
+   "name": "RfOut",
+   "module": "gamelab/native.py",
+   "line": 584,
+   "summary": "What rf_* found for one job, read back by MobDetector.refind_all.",
+   "fields": [
+    {
+     "name": "tpl, score, x, y",
+     "type": "[2] each",
+     "meaning": "best picture index (-1 none), float32 score and top-left, for [0] near and [1] full"
+    },
+    {
+     "name": "found",
+     "type": "int",
+     "meaning": "0 none, 1 near, 2 full"
+    },
+    {
+     "name": "looked",
+     "type": "int",
+     "meaning": "bits: near matched/memo, full matched/memo, failed"
+    },
+    {
+     "name": "matches, work, us",
+     "type": "int, int64, double",
+     "meaning": "pictures matched, places x pixels, the job's own time"
+    }
+   ]
+  },
+  {
+   "name": "Character",
+   "module": "gamelab/character.py",
+   "line": 242,
+   "summary": "One character as the stack takes her; character.active() gives the process's, read by physics, localization, attack, behavior, control and paths.of.",
+   "fields": [
+    {
+     "name": "id, klass",
+     "type": "str",
+     "meaning": "her id and class ('thief', 'magician')"
+    },
+    {
+     "name": "stats, fixed_stats",
+     "type": "config.Character",
+     "meaning": "speed, jump, HP, MP...; and the copy FIXED_STATS pins"
+    },
+    {
+     "name": "keys",
+     "type": "config.GameKeys | None",
+     "meaning": "None: the flat [keys]"
+    },
+    {
+     "name": "attacks",
+     "type": "dict[str, AttackSpec]",
+     "meaning": "'skill' and 'regular'"
+    },
+    {
+     "name": "stops",
+     "type": "tuple[str, ...]",
+     "meaning": "her own hunt stops: out_of_darts / out_of_mp"
+    },
+    {
+     "name": "shape",
+     "type": "Shape",
+     "meaning": "what localization takes of her attacks"
+    },
+    {
+     "name": "perception",
+     "type": "Perception",
+     "meaning": "her files, bottom-bar lines, heading box"
+    },
+    {
+     "name": "pet, policy, priors, buffs",
+     "type": "dataclasses",
+     "meaning": "auto-potion, attack rules, planner priors, buffs kept up"
+    },
+    {
+     "name": "safety_hits",
+     "type": "int",
+     "meaning": "the safety stop's reserve of largest touches"
+    },
+    {
+     "name": "placeholders",
+     "type": "tuple[str, ...]",
+     "meaning": "what is still a placeholder"
+    }
+   ]
+  },
+  {
+   "name": "AttackSpec",
+   "module": "gamelab/character.py",
+   "line": 122,
+   "summary": "One attack as data: what it costs, how it's timed, what it picks.",
+   "fields": [
+    {
+     "name": "key",
+     "type": "str",
+     "meaning": "its GameKeys field"
+    },
+    {
+     "name": "hits, lo, hi, defence",
+     "type": "int, float, float, str",
+     "meaning": "hits on its monster, damage range a hit, 'pdd' or 'mdd'"
+    },
+    {
+     "name": "mp, ammo",
+     "type": "float, int",
+     "meaning": "MP and stars a use"
+    },
+    {
+     "name": "lock_ms, release_ms, damage_ms, lands_ms",
+     "type": "int",
+     "meaning": "key -> next action allowed, release, server damage, hit shows"
+    },
+    {
+     "name": "speed",
+     "type": "float | None",
+     "meaning": "projectile units/s (None: no flight)"
+    },
+    {
+     "name": "cycle_s, miss, hidden_s, air",
+     "type": "float, float, float, bool",
+     "meaning": "s between uses, miss share, s a hit monster stays hidden, usable from a jump"
+    },
+    {
+     "name": "geometry",
+     "type": "Geometry",
+     "meaning": "star_search / search / melee, and what stops it"
+    }
+   ]
+  },
+  {
+   "name": "Shape",
+   "module": "gamelab/character.py",
+   "line": 163,
+   "summary": "What localization's trackers (MonsterTracker, Memory, Senses, WorldStep) take of her attacks: which monsters a use went at and when its effects can show.",
+   "fields": [
+    {
+     "name": "near, ahead",
+     "type": "float",
+     "meaning": "signed nearest and farthest a picked monster's middle can be ahead of hers"
+    },
+    {
+     "name": "up, down",
+     "type": "float",
+     "meaning": "how far over and under her feet"
+    },
+    {
+     "name": "hit_after_s, window_s, hide_s",
+     "type": "float",
+     "meaning": "latest hit, kill/hit window, how long a hit monster may hide"
+    },
+    {
+     "name": "gain_after_key, pick_s",
+     "type": "tuple, float",
+     "meaning": "when the EXP gain shows; when the attack picks"
+    },
+    {
+     "name": "order",
+     "type": "str",
+     "meaning": "'line' (first in a star's way) or 'band'"
+    },
+    {
+     "name": "look_band, shows_wait_s",
+     "type": "tuple, float",
+     "meaning": "how far a look searches above/below; wait for a kill to show"
+    },
+    {
+     "name": "kill",
+     "type": "KillCredit | None",
+     "meaning": "her kill bound by the client's search (the magician)"
+    }
+   ]
+  },
+  {
+   "name": "Search",
+   "module": "gamelab/character.py",
+   "line": 53,
+   "summary": "The client's banded forward target search (thief's star search described; Magic Claw's used).",
+   "fields": [
+    {
+     "name": "start, range",
+     "type": "int",
+     "meaning": "first band's near edge and last band's far edge, ahead of her"
+    },
+    {
+     "name": "step, spread, row",
+     "type": "int",
+     "meaning": "band width 20, window divisor 4, centre height 28 over her feet"
+    }
+   ]
+  },
+  {
+   "name": "KillCredit",
+   "module": "gamelab/character.py",
+   "line": 151,
+   "summary": "How her kill is bound to a monster when no star flies (the magician's Magic Claw).",
+   "fields": [
+    {
+     "name": "search",
+     "type": "Search",
+     "meaning": "the search her attack picks by"
+    },
+    {
+     "name": "tie",
+     "type": "int",
+     "meaning": "bands past the first taken as the first (0: the first alone)"
+    },
+    {
+     "name": "lands_s",
+     "type": "float",
+     "meaning": "s after the key her hit shows"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "record-to-minimap",
+   "title": "How a telemetry record reaches the mini-map",
+   "summary": "A command starts recording, any layer emits records, a background thread writes them in batches, and the UI follows the newest file.",
+   "trigger": "A command that records telemetry starts (__main__ calls telemetry.record_to(command) and gcstats.report_every).",
+   "steps": [
+    {
+     "module": "gamelab/telemetry.py",
+     "symbol": "record_to",
+     "text": "Prunes lab/telemetry/ to the newest 2 GiB, then installs a Recorder on <YYYYmmdd-HHMMSS>-<name>.jsonl with its telemetry-writer thread.",
+     "process": "the command (hunt, tour, perceive, ...)"
+    },
+    {
+     "module": "gamelab/telemetry.py",
+     "symbol": "emit",
+     "text": "A layer calls emit('scene', her=..., monsters=...): {t, topic, **data} goes to the sink; nothing happens without a recorder.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/telemetry.py",
+     "symbol": "Recorder.__call__",
+     "text": "The record is serialised compactly (numpy values made plain) and queued; past 50,000 waiting it's dropped and counted.",
+     "process": "the emitting thread"
+    },
+    {
+     "module": "gamelab/telemetry.py",
+     "symbol": "Recorder._run",
+     "text": "Every 0.2 s the writer thread writes the batch under the file lock and flushes; past 64 MiB _next_part opens part N headed by the session record.",
+     "process": "telemetry-writer thread"
+    },
+    {
+     "module": "gamelab/ui/sources.py",
+     "symbol": "_Followed.poll",
+     "text": "The mini-map / web server finds the newest run (telemetry.newest, os.stat for recent files) and reads what was appended (telemetry.Follower.poll), holding back a half-written line.",
+     "process": "the minimap / web process"
+    },
+    {
+     "module": "gamelab/ui/state.py",
+     "symbol": "State.apply",
+     "text": "Each record is folded into the UI's State (latest record per topic, her trail, the log) and drawn.",
+     "process": "the minimap / web process"
+    }
+   ]
+  },
+  {
+   "id": "screen-to-pixels",
+   "title": "How a look's pixels come off the screen",
+   "summary": "The perception service asks the shared Grabber for a frame shown after a moment; DXGI hands frames over on the GPU, boxes are copied off the card; failures fall back to mss.",
+   "trigger": "The perception service's frame loop needs the next frame (ScreenFrames.next(after)).",
+   "steps": [
+    {
+     "module": "gamelab/perception/frames.py",
+     "symbol": "ScreenFrames.next",
+     "text": "Takes the game's client rectangle (window.client_rect) as the Area and asks the process's grabber (capture.shared) for a shot shown after `after`.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/capture.py",
+     "symbol": "Grabber.shot",
+     "text": "Under the grabber's lock: DXGI unless a failure put it on mss for RETRY_S; _duplicator opens (or moves) the duplication of the monitor holding the area's centre, None if it spans monitors.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/capture.py",
+     "symbol": "Duplicator.advance",
+     "text": "Loops AcquireNextFrame: frames with no present time don't count; ACCESS_LOST re-duplicates once; waits up to FRESH_WAIT_S (20 ms) for a frame shown at or after `after`, else the held frame is the screen as it is.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/capture.py",
+     "symbol": "Dxgi.acquire",
+     "text": "Copies the new frame into the duplication's own texture on the GPU and releases DXGI's at once; returns its present time (converted to time.monotonic).",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/capture.py",
+     "symbol": "Dxgi.read",
+     "text": "DxgiShot.crops asks for boxes: each copied to a staging texture, optionally waited for on a fence (Dxgi._copied), mapped, and handed to convert as numpy views.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/capture.py",
+     "symbol": "Grabber.failed",
+     "text": "Any CaptureError closes the duplication and the shot is taken with mss for the next 10 s.",
+     "process": "perception service"
+    }
+   ]
+  },
+  {
+   "id": "refinds-one-call",
+   "title": "A frame's re-finds in one C call",
+   "summary": "Every followed monster is re-found each frame in one native call on the C's own threads, optionally answered from the GPU, with Python's per-job work done as answers arrive.",
+   "trigger": "The frame step (localization.worldstate) asks the monster detector to re-find every track in a new frame.",
+   "steps": [
+    {
+     "module": "gamelab/perception/mobs.py",
+     "symbol": "MobDetector._in_c",
+     "text": "On first use makes native.Refinds(ready pictures, threads): native.lib() builds/loads native.c's DLL if needed; rf_open_as makes the context, the thread pool and, if gm_on, the GPU starter.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/native.py",
+     "symbol": "Refinds.start",
+     "text": "Takes the context's lock and calls rf_start with the frame, the RfJob array, the picture lists, THRESHOLD, REFIND_GOOD and NEAR_GOOD (and the token of a call sent ahead).",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/native.c",
+     "symbol": "rf_start",
+     "text": "Validates the jobs, orders them largest first and wakes the pool; with the GPU on, gpumatch.c's gm_rf_send submits every window and picture in one submission.",
+     "process": "perception service + C pool threads"
+    },
+    {
+     "module": "gamelab/native.c",
+     "symbol": "rf_window",
+     "text": "For each job: the near window first (memo, else first pictures then next ones by the contract), the full window if the near answer isn't good enough.",
+     "process": "C pool threads"
+    },
+    {
+     "module": "gamelab/gpumatch.c",
+     "symbol": "gm_answer",
+     "text": "With the GPU: a window's candidates within 2 GM_EPS of its best approximate score are scored exactly on the CPU; anything else is matched by the CPU (rf_best).",
+     "process": "C pool threads"
+    },
+    {
+     "module": "gamelab/native.c",
+     "symbol": "rf_next",
+     "text": "Hands each finished job's index back; Python checks the kind and starts fallbacks meanwhile, and the caller's thread matches a job itself when none is in.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/native.c",
+     "symbol": "rf_end",
+     "text": "Called once the caller is done: every job finished, memos of ids not in the call dropped (unless keep), the lock released by Refinds.end.",
+     "process": "perception service"
+    }
+   ]
+  },
+  {
+   "id": "who-plays",
+   "title": "Who plays: from --character to her files",
+   "summary": "A process resolves its character once, before physics loads, and every layer then reads the same profile.",
+   "trigger": "python -m gamelab [--character <id>] <command> starts.",
+   "steps": [
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "_play_as",
+     "text": "--character sets GAMELAB_CHARACTER (inherited by children) before motion.physics loads; refuses if physics already loaded as someone else.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/character.py",
+     "symbol": "active_id",
+     "text": "GAMELAB_CHARACTER, else (unless GAMELAB_FIXED_STATS) lab/character.json, else config.toml [characters] default, else the thief.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/character.py",
+     "symbol": "load",
+     "text": "Picks her class module, builds profile(id), applies stats (the thief's [character] and Lucky Seven level; others' tables over fixed stats) and configured(c, table).",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/classes/magician.py",
+     "symbol": "configured",
+     "text": "For the magician: skill levels, Magic Claw's level and MP, buffs and Magic Guard's share, pet, keys and bottom-bar lines from [characters.magician].",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/character.py",
+     "symbol": "active",
+     "text": "Caches the Character for the process: motion.physics takes CHARACTER = active().stats; localization's trackers take its Shape.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/paths.py",
+     "symbol": "of",
+     "text": "Her own files: Files(perception.files): the thief's lab/ names, another's under lab/characters/<id>/.",
+     "process": "the command"
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The re-finds' GPU backend is off by default (lab/GPU or GAMELAB_GPU switch it on): at the RTX 3080's idle clocks it answers later than the C, and the cores it frees made nothing measurably smoother (README, The re-finds' matches on the GPU; The re-finds' GPU, twice as fast).",
+  "Matching on the captured texture itself (zero-copy from DXGI to the GPU backend) is left undone: exact, but for live only (README, The re-finds' GPU, twice as fast).",
+  "capture's `[capture] fence` (waiting for the copy on an ID3D11Fence) is off by default and not tried live yet.",
+  "window.SWITCH_FALLBACK (SwitchToThisWindow) is on but untried in game.",
+  "The magician's lock, delays, damage, miss, wand, pet and priors are placeholders until live measurements (classes/magician.py PLACEHOLDERS).",
+  "The perception service doesn't learn who plays from her bottom bar yet: in-game commands play another character only when GAMELAB_CHARACTER names her (character.py; README, Characters).",
+  "The exact finder has not been measured live or on any map but Tree Dungeon.",
+  "telemetry's background writer was motivated by stalls 'plausibly' from SSD synchronous writes; the cause was not proven."
+ ]
+}

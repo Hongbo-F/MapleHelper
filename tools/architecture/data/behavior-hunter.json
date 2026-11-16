@@ -1,0 +1,2611 @@
+{
+ "id": "behavior-hunter",
+ "layer": "behavior",
+ "title": "Behavior: the Hunter agent and fighting",
+ "tagline": "The agent herself: every look, every throw, every kill counted and placed",
+ "summary": "The Hunter is the in-game character as an agent: it owns her senses (every look), her keys, her looter and the books kept after every look and throw. On it sit the fight loops (clear a spot, kill one monster, shoot what's in the way while travelling), each throw's attack choice, the kill ledger and drop store, and the grind's target-first planner. Higher layers pick objectives; this slice makes the second-by-second decisions and keeps the counts they read.",
+ "details_md": "This slice is the agent itself. A higher layer (the hunt loop, a tour, a grind) picks an objective; the code here makes\nthe second-by-second decisions and keeps the books those layers read.\n\n### Words used here\n- **Look**: one `Scene` from `Senses.look`: where she is on the map, the monsters (each with a feed **track** id),\n  her HP/MP bars, drops, and the events the perception service saw frame by frame since the last look.\n- **The feed**: the perception service's stream of frame states (15 a second); its **tracker** follows each monster\n  frame to frame and binds each EXP gain to the monster her attack took.\n- **Lucky Seven**: the thief's skill, two stars a cast for MP; the **regular attack** is one star, no MP. Up close\n  either key swipes with her claw instead.\n- **Attack lock**: after an attack key the game ignores the next attack or jump for 730 ms (`COMBAT.attack_lock_ms`).\n- **Mark**: a monster she has thrown at, followed look by look by `Attacks`.\n\n### The Hunter is a hub of observers\n`Hunter.__init__` builds everything once per hunting command (`gamelab/__main__.py`'s `_hunter`, or the simulator's\n`Sim.hunter`): her `Senses` (every look), her `Actions` (her keys), a `Looter`, a `Report`, her pet's care, the ledger\ntrio (`Ledger`, `DropStore`, `Wounds`), her `Memory` of monsters, the map's `SpawnClock`, her `Aggro` belief, her\n`Attacks` (each throw's key), the out-of-darts watch and the key-doubt watches. It then hangs 14 listeners on\n`Senses.listeners` and 7 on `Actions.throw_listeners`. Every look goes through `Hunter.look`, and every throw through\n`Actions`, so the books stay right **whoever** looks or throws: a fight, the navigator, the looter or the hunt loop.\n\n### A kill is her EXP going up\nThe one rule everything rests on: a monster vanishing is not a kill (hit monsters flinch and hide under their damage\nnumbers, other players kill monsters too; about half the \"kills\" counted by vanishing weren't hers). A kill is her EXP\nnumber rising, and the gain's size names which kind it can be (`localization.gains`). The `Ledger` places each gain on\na monster of that kind: the one the perception service's tracker bound it to, else one in the path of a throw keyed\n0.1-0.6 s before the gain, else one in a throw's path in the last 2.5 s (one gone from view first); with none it still\ncounts, unplaced (no place, no drops). A placed kill makes an expected pile in the `DropStore`, ends her `Wounds` on\nit, and its body is taken for **dying** (no target) for its death animation.\n\n### A fight is a loop of looks\n`fight.clear` looks, checks her health (the safety stop may end the hunt from inside any look), works out what to fight\n(minus the dying, plus monsters she hit that just went hidden), asks `attack.stance` for one act (throw, jump throw,\njump back, step away, close in, wait), and carries it out with `Actions`: about one throw per attack lock (730 ms plus a\n60 ms margin). `fight.kill` shoots a single target; `FightOnTheWay` is the navigator's escort while travelling and its\nprice of each landing.\n\n### Each throw's key is chosen at the last moment\nJust before an attack key goes down, `Actions` asks `Attacks.key` (in every attack mode but 'regular', unless a key\ndoubt routes it there): which monster the attack will take (the likeliest in its path, not one likely dead), what it\nhas left (a probability distribution, `attack.choice.Left`), and her MP (the bar less casts the frame can't show yet).\nThen `attack.choice.pick`: Lucky Seven, or the regular attack when her MP is under a cast, when nothing is in the way,\nor when the regular attack finishes it about as fast. Right before that, `Hunter._still` reads the feed's newest frame\nand drops the throw if a kill came in since the look it was decided on.\n\n### Two characters\nThe thief throws stars (Lucky Seven). The magician casts Magic Claw, which only goes at a body her search picks, and\nnot again where it showed no effect until new evidence (she or it moves, its bar changes: `Attacks.picks`); her damage\nis learned from the monsters' HP bars into a `damage.Book` kept between runs.\n\n### The target-first planner\n`Targeting` (on by default since 2026-11-04) is the grind's planner: one primary target and the next, chosen by EXP\nover time-to-kill, re-asked at every look and watched frame by frame while her attack lock runs out.\n\n### Safety\nEvery key goes through the key player, whose watchdog stops everything the moment the game's anti-bot Lie Detector\nshows; `Hunter.look` raises `LieDetectorAlarm` then, so a hunt that is only looking stops too. Her HP is checked at\nevery look and glance against a reserve of her profile's `safety_hits` (3 for the thief) of the map's largest touches:\nunder it on two looks 0.6 s apart (sooner by her HP number), the safety stop ends the hunt (`HpWatch`, raised at\n`health_check` and, with `STOP_ON_LOOK`, at the very look it falls due).\n\n### Why it's built this way\nObservers keep every count independent of who drives. Most thresholds come from the live hunts' telemetry (dated in\nthe comments) or from paired simulator runs, and each switch (`LAST_LOOK`, `STOP_ON_LOOK`, `HIDDEN_WALKS`,\n`JITTER_ALL`, ...) keeps the old behaviour one flag away.\n",
+ "groups": [
+  {
+   "id": "agent",
+   "title": "The agent: Hunter",
+   "summary": "The object every hunting command builds: her senses, keys and books, the after-every-look counts and the health checks.",
+   "modules": [
+    "gamelab/behavior/__init__.py",
+    "gamelab/behavior/hunter.py"
+   ]
+  },
+  {
+   "id": "fights",
+   "title": "Fights",
+   "summary": "The fight loops: clear, kill, and the navigator's escort while travelling.",
+   "modules": [
+    "gamelab/behavior/fight.py"
+   ]
+  },
+  {
+   "id": "attack-choice",
+   "title": "Each throw's attack, and her damage",
+   "summary": "What each throw goes at and with which attack, decided at the key; the magician's damage learned.",
+   "modules": [
+    "gamelab/behavior/attacks.py",
+    "gamelab/behavior/damage.py"
+   ]
+  },
+  {
+   "id": "books",
+   "title": "The ledger: kills, wounds, drops",
+   "summary": "Every EXP gain placed on a monster, the monsters she hurt, every pile and how likely it still lies there.",
+   "modules": [
+    "gamelab/behavior/ledger.py"
+   ]
+  },
+  {
+   "id": "planner",
+   "title": "The target-first planner",
+   "summary": "The grind's choice of one target and the next, and the plan against it.",
+   "modules": [
+    "gamelab/behavior/targeting.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/behavior/__init__.py",
+   "title": "The behavior package",
+   "tagline": "Package marker: what the behavior layer is and what it may import",
+   "summary": "Six lines with a docstring only: behavior is 'what to do next', the hunter (the agent), fights, looting and tours, her pet's care and her retreat from the Lie Detector. It may import every layer below (perception, localization, motion, attack, control) and the shared modules.",
+   "details_md": "No code. The layer rule in its docstring is enforced by `tests/test_architecture.py`, which checks that each gamelab package imports only the layers below it. Behavior sits at the top of the decision stack, over attack, control, motion, localization and perception.\n\nBesides this slice's modules (`hunter`, `fight`, `attacks`, `damage`, `ledger`, `targeting`), the package holds the hunt loop and its modes (`hunt`, `grind`, `patrol`, `tour`, `sweep`, `lootchain`, `looting`, `presence`), her upkeep and stops (`pet`, `safety`, `darts`, `retreat`, `guard`, `vitals`, `bootstrap`), the in-game checks (`keycheck`, `statcheck`, `chatcheck`) and the probes (`probe`), plus `walk`.",
+   "lines": 6,
+   "key_items": [],
+   "inputs": [],
+   "outputs": [],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [],
+   "tests": [
+    "tests/test_architecture.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/hunter.py",
+   "title": "Hunter (the agent)",
+   "tagline": "Her senses, keys and books in one object; every look and throw passes through it",
+   "summary": "The agent object that every hunting command builds once. It owns her Senses, Actions, Looter, Report and the bookkeeping (ledger, drops, wounds, memory, aggro, attack choice), and after every look it counts her EXP gains as kills, measures her HP and touches, reads her facing and checks her health. Its health_check raises the stops (safety, out of darts, key doubts) that end or interrupt a hunt.",
+   "details_md": "### What it builds\n`Hunter.__init__` makes the whole agent: `Senses` (with the look band `LOOK_UP`..`LOOK_DOWN`, the perception `feed`\nand her profile's `Shape`), `Actions` (her keys), a `Looter`, a `Report`, `PetCare`, `DropStore` + `Ledger` + `Wounds`,\n`Memory`, `SpawnClock`, `Aggro`, `Attacks`, `DartWatch` (out of darts; the magician gets `MpWatch`, out of MP, instead), `RegularWatch` (her regular attack's key\ndoubted), a casts watch for Lucky Seven, `MoveWatch`, `HpWatch` (the safety stop), `HerStats` (max HP, level, DEF) and\n`Touches` (her measured touches). The attack mode is `attack` (`'choice'`, `'skill'`, `'regular'`); a non-thief\nprofile (the magician) gets her policy's default mode whatever was asked, and only she gets a `damage.Book`.\n\n### The listeners\nLook listeners, in order: `_vitals`, `_heading`, `_others`, `_publish`, `Ledger.on_look`, `DropStore.on_look`,\n`Looter.on_look`, `Wounds.on_look`, `Memory.on_look`, `_misses`, `Attacks.on_look`, `_chat_seen`, `_births`, `_aggro`;\nthen the check `_stop_now`. Throw listeners: `Ledger.on_throw`, `Wounds.on_throw`, `Memory.on_throw`, `Aggro.throw`,\n`Attacks.on_throw`, `_tell_feed`, `_key_pick`. The order matters: the ledger reads the gains `_vitals` just counted.\n\n### `_vitals`: EXP, HP and touches after every look\nWith the feed, a look carries the events since the last one. EXP readings (`feed_reads`) go through the `ExpMeter`;\neach `Gain` names the kinds its size fits (`kinds_of`: None, any kind, for a gain no kill explains); `_gained` counts each kill (`exp_events` for `kill()`, `told` for the ledger,\n`Report.exp_kills`) and restarts the out-of-darts stretch. HP number reads: a drop with nothing unread between is an\nexact touch (`_touched`, written to her touches file, its kind told by its size); a rise of `POTION_RISE_HP` (100) or\nmore is a potion (her pet drinks them). Touch popups (MISS or damage) go to `_touch_told`; one that took HP sets\n`knock_at`, and moves decided within `KNOCK_S` (0.45 s) wait (`fight.knocked_move`). Without a feed, an HP bar drop is a\ntouch. An HP read of 2% or less right after one of 30% or more isn't believed until the next look (`_doubt_hp`).\n\n### `health_check` and the stops\nAsked at every look of a fight, a trip and a hunt-loop pass: potions and pet food (`drink_if_low`), then it raises the\nfirst that's due: `TooStrong`, the safety stop (`HpWatch.due`: HP under her reserve, which `_reserve_check` rebuilds\nfrom the map's kinds, her level, DEF, max HP and measured touches), `OutOfMp` (the magician), `OutOfDarts` (or a\n`KeyDoubt` first with `STARS_CHECKED`), key doubts, `ChatDue`, `StatsDue`. With `STOP_ON_LOOK` the safety stop is also\nraised at whichever look or glance it falls due on (`_stop_now`, `_glanced`), once a hunt has asked and never while\nshe retreats.\n\n### `_still`: the last look before a key\nWith `LAST_LOOK`, once her attack lock has run out, the feed's newest state is read if it is of a frame after her\nkeys' effect (`Senses.fresh_after`; nothing is waited for, and with no such frame the throw goes): her MP\n(`Attacks.glance`), the tracks, MISS popups, and the EXP events not yet drained. A gain naming a kind in the throw's way\n(as a copy of her meter reads it), or the target's track marked killed, drops the throw; the caller decides again.\n\n### Facing and the feed\n`_heading` reads which way the frame shows her facing (not on a rope) and hands it to `Actions.see`. A strong frame\nthat disagrees with her keys makes `_retell` tell the feed again, the other way, the throws since her last arrow, hit or\nagreeing look (`RETELL_S` 2.5 s back at most), so the tracker binds their kills on the right side.\n",
+   "lines": 1839,
+   "key_items": [
+    {
+     "name": "Hunter",
+     "kind": "class",
+     "line": 205,
+     "signature": "class Hunter",
+     "summary": "The agent: her senses, keys, looter, books and health; runs the fights (clear, kill) and makes her navigators."
+    },
+    {
+     "name": "Hunter.__init__",
+     "kind": "method",
+     "line": 210,
+     "signature": "def __init__(self, eyes: Eyes, keys: GameKeys, model: MapModel, *, log=print, low_hp=None, potion_hp=0.5, skill=False, feed=None, her=None, attack=None)",
+     "summary": "Builds every part and wires the 14 look listeners and 7 throw listeners.",
+     "details_md": "`low_hp`: the safety stop's threshold (None: her reserve). `potion_hp`: her own potion key's threshold. `feed`: the perception service's client live, `SyncFeed` in the simulator, None for the eyes' own frames. `her`: max HP, level and DEF given (tests). `attack`: 'choice', 'skill' or 'regular' (None: 'skill' with `skill`, else 'regular')."
+    },
+    {
+     "name": "Hunter.look",
+     "kind": "method",
+     "line": 445,
+     "signature": "def look(self, mobs: bool = True, wide: bool = False, loot: bool = False) -> Scene",
+     "summary": "Every look of every part: checks the Lie Detector alarm, then Senses.look (drops limited to mesos when her item tabs are full).",
+     "details_md": "Raises `client.LieDetectorAlarm` when the alarm is up, so a hunt that only looks also stops and retreats."
+    },
+    {
+     "name": "Hunter.health_check",
+     "kind": "method",
+     "line": 674,
+     "signature": "def health_check(self, s: Scene) -> None",
+     "summary": "Potions and pet food, then raises the first stop that is due: too strong, the safety stop, out of MP, out of darts (or a key check first), key doubts, the chat box or stat window put off."
+    },
+    {
+     "name": "Hunter._vitals",
+     "kind": "method",
+     "line": 1370,
+     "signature": "def _vitals(self, s: Scene) -> None",
+     "summary": "After every look: HP (doubted, exact number, touches), level, unseen kinds, the safety watch, EXP gains into kills, and her touches."
+    },
+    {
+     "name": "Hunter._still",
+     "kind": "method",
+     "line": 1297,
+     "signature": "def _still(self, side: str) -> bool",
+     "summary": "The last look before a throw's key (LAST_LOOK): False drops the throw if a kill came in or its target is dead by its track."
+    },
+    {
+     "name": "Hunter._reserve_check",
+     "kind": "method",
+     "line": 611,
+     "signature": "def _reserve_check(self, t: float | None = None) -> None",
+     "summary": "Rebuilds the safety stop's reserve when its inputs change (map, kinds, level, DEF, max HP, measured touches), says what changed, and finds a map too strong for her."
+    },
+    {
+     "name": "Hunter._touch_told",
+     "kind": "method",
+     "line": 1569,
+     "signature": "def _touch_told(self, s: Scene, touch: dict) -> None",
+     "summary": "A monster touched her (MISS or damage): her last touch and knock, the key watches told, counted, logged, telemetry 'touch'."
+    },
+    {
+     "name": "Hunter._gained",
+     "kind": "method",
+     "line": 1758,
+     "signature": "def _gained(self, g: Gain, s: Scene) -> None",
+     "summary": "One EXP gain: each kill it names counted (exp_events, told, report), the out-of-darts stretch restarted; odd gains logged."
+    },
+    {
+     "name": "Hunter._heading",
+     "kind": "method",
+     "line": 1625,
+     "signature": "def _heading(self, s: Scene) -> None",
+     "summary": "Her facing off the look's frame (not on a rope) for Actions.see; where her keys leave no doubt it teaches her pictures (Eyes.learn_heading); logs and keeps crops where it contradicts her last arrow; a strong contradiction re-tells recent throws to the feed (_retell)."
+    },
+    {
+     "name": "Hunter.navigator",
+     "kind": "method",
+     "line": 461,
+     "signature": "def navigator(self, fighting: bool = False, rng=None) -> Navigator",
+     "summary": "A control.navigator.Navigator for her, with FightOnTheWay as escort when `fighting`, her memory, move watch, danger and rope-top price."
+    },
+    {
+     "name": "Hunter.top_price",
+     "kind": "method",
+     "line": 468,
+     "signature": "def top_price(self, pid: int, kind: str) -> TopPrice | None",
+     "summary": "What her time on a platform is worth and what a touch costs, for the navigator's hang under a rope's top; None until her max HP is read."
+    },
+    {
+     "name": "Hunter._doubted",
+     "kind": "method",
+     "line": 902,
+     "signature": "def _doubted(self, doubt) -> None",
+     "summary": "Her keys doubted (regular attack, casts, moves, pet food): logged, regular presses held; KeyDoubt in the hunt loop, else a page once a run."
+    },
+    {
+     "name": "feed_reads",
+     "kind": "function",
+     "line": 191,
+     "signature": "def feed_reads(events, meter: ExpMeter) -> list[tuple]",
+     "summary": "Her EXP number's readings out of a look's feed events, with the value before the first gain inserted so that gain counts."
+    },
+    {
+     "name": "Hunter._stop_now",
+     "kind": "method",
+     "line": 1052,
+     "signature": "def _stop_now(self, s: Scene) -> None",
+     "summary": "The check after every look's listeners (Senses.checks): `gamelab stop` asking raises StopAsked; with STOP_ON_LOOK the safety stop (or TooStrong) is raised at the very look it falls due, once a hunt has asked after her health and never while she retreats."
+    }
+   ],
+   "inputs": [
+    "Looks (Scene) from Senses: the perception service's feed live, SyncFeed in the simulator; with frame-by-frame events (exp_gain, exp_read, hp_read, hp_drop, touch, touch_fix, spawned, died)",
+    "Glances (the feed's WorldState) during navigator chains, via Senses.glance_checks",
+    "config.toml [keys] (GameKeys) and [character] (MP, Lucky Seven level, via motion.physics.CHARACTER)",
+    "Her profile (gamelab.character: safety hits, pet warning, attacks, policy, Shape)",
+    "The map model (MapModel: spawn kinds, monster HP/EXP/defence, ropes, platforms)",
+    "lab/stop_hunt.json (`gamelab stop`), her stats and touches files",
+    "Her stat window and chat box reads (behavior.statcheck, behavior.chatcheck)"
+   ],
+   "outputs": [
+    "Report (kills by kind, EXP gains, throws, touches, potions, drinks, lowest HP) for tours, the hunt loop and grind",
+    "Stops raised to the hunt loop: SafetyStop, TooStrong, OutOfDarts, OutOfMp, KeyDoubt, ChatDue, StatsDue, StopAsked",
+    "exp_events / told / gains_told for fight.kill and the ledger",
+    "Navigators with the FightOnTheWay escort and the rope-top price",
+    "Each throw told to the feed with its way and aim, for the tracker's kill binding",
+    "Telemetry: 'scene', 'drops', 'exp', 'motion', 'spawn_clock', 'aggro', 'key_pick', and 'event' records (touch, touch_fix, touch_unfit, heading, retold, dropped, no_hit, no_hit_clip, safety, key_doubt, refused, no_darts_said, player, died, potion, exp)"
+   ],
+   "uses": [
+    "maplehelper/config.py",
+    "maplehelper/keys.py",
+    "gamelab/character.py",
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/danger.py",
+    "gamelab/attack/choice.py",
+    "gamelab/attack/reach.py",
+    "gamelab/control/alarm.py",
+    "gamelab/control/client.py",
+    "gamelab/control/actions.py",
+    "gamelab/control/mover.py",
+    "gamelab/control/navigator.py",
+    "gamelab/control/keymap.py",
+    "gamelab/localization/aggro.py",
+    "gamelab/localization/gains.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/senses.py",
+    "gamelab/localization/spawnclock.py",
+    "gamelab/localization/worldstate.py",
+    "gamelab/motion/physics.py",
+    "gamelab/perception/drops.py",
+    "gamelab/perception/exp_number.py",
+    "gamelab/perception/hp_number.py",
+    "gamelab/perception/lv_number.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/heading.py",
+    "gamelab/perception/hud.py",
+    "gamelab/perception/touches.py",
+    "gamelab/behavior/damage.py",
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/attacks.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/darts.py",
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/looting.py",
+    "gamelab/behavior/pet.py",
+    "gamelab/behavior/bootstrap.py",
+    "gamelab/behavior/safety.py",
+    "gamelab/behavior/chatcheck.py",
+    "gamelab/behavior/statcheck.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/touches.jsonl",
+     "mode": "read-write",
+     "what": "her touches as her HP number measured them (safety.Touches; another character's under lab/characters/<folder>/)"
+    },
+    {
+     "path": "lab/her_stats.json",
+     "mode": "read-write",
+     "what": "her DEF, max HP, level and SPEED as read (bootstrap.HerStats)"
+    },
+    {
+     "path": "lab/hits.jsonl",
+     "mode": "write",
+     "what": "how far each touch pushed her while no key was pressed (_log_hit)"
+    },
+    {
+     "path": "lab/heading/",
+     "mode": "write",
+     "what": "crops of her where the frame and her last arrow disagreed, HEADING_SHOTS_MAX at most"
+    },
+    {
+     "path": "lab/shots/hp0_<time>.png",
+     "mode": "write",
+     "what": "frames of HP reads of 0 not believed (5 at most)"
+    },
+    {
+     "path": "lab/stop_hunt.json",
+     "mode": "read",
+     "what": "`gamelab stop` asking the running hunt to stop"
+    },
+    {
+     "path": "lab/recent/<time>-no-hit",
+     "mode": "write",
+     "what": "the rolling recording around attacks that hit nothing, saved by the rolling recorder (control.rolling) when _no_hit asks through control.alarm.keep_recent_after (NO_HIT_CLIPS 30 a run)"
+    }
+   ],
+   "concurrency": "Runs on the hunting command's own thread and starts no thread of its own. `_no_hit` calls control.alarm.keep_recent_after, which starts a daemon thread ('keep-recent') that waits NO_HIT_PAD_S, asks the rolling recorder to save, and answers on that thread (_no_hit_kept). wait_max_hp polls the feed every 0.1 s for up to HP_WAIT_S (5 s). alarm.page's beeps run on the hunter's thread.",
+   "tunables": [
+    {
+     "name": "EXP_MEMORY",
+     "value": "30",
+     "meaning": "s her EXP gains are kept (exp_events) for kill() to match to its target"
+    },
+    {
+     "name": "POTION_EVERY",
+     "value": "3",
+     "meaning": "s at least between two potions of her own potion key"
+    },
+    {
+     "name": "PET_CLEAR",
+     "value": "250",
+     "meaning": "map units: her pet's fullness is read only with no monster this close"
+    },
+    {
+     "name": "HP_ZERO / HP_DOUBT_AFTER",
+     "value": "0.02 / 0.3",
+     "meaning": "an HP read this low right after one this high isn't believed until the next look"
+    },
+    {
+     "name": "HIT_EXACT_S",
+     "value": "1.0",
+     "meaning": "s: a touch's log line has her HP number's drop if it was read this soon before"
+    },
+    {
+     "name": "HP_NUMBER_WAIT_S",
+     "value": "10.0",
+     "meaning": "s of looks without her HP number before it's said once (the stop then goes by her bar)"
+    },
+    {
+     "name": "POTION_RISE_HP",
+     "value": "100",
+     "meaning": "HP: a rise this big between two reads of her HP number counts as a potion drunk"
+    },
+    {
+     "name": "PLAN_DEF_STEP",
+     "value": "5.0",
+     "meaning": "her DEF rounded to this for the positioning model (attack.danger)"
+    },
+    {
+     "name": "STOP_ON_LOOK",
+     "value": "True",
+     "meaning": "the safety stop raised at any look or glance it's due on, not only at health_check"
+    },
+    {
+     "name": "STOP_WAIT_S",
+     "value": "60.0",
+     "meaning": "s a hunt waits on `gamelab stop` while looks have nothing to act on"
+    },
+    {
+     "name": "KNOCK_S",
+     "value": "0.45",
+     "meaning": "s after a touch that took HP during which a jump or step waits (she may still be flying or sliding)"
+    },
+    {
+     "name": "TOP_RATE_ABOVE",
+     "value": "True",
+     "meaning": "her rope hang priced at the grind's EXP rate on the platform above, not the hunt's"
+    },
+    {
+     "name": "ROPE_SLACK",
+     "value": "12",
+     "meaning": "map units: off her platform within this of a rope's x she's on the rope"
+    },
+    {
+     "name": "RETELL_S",
+     "value": "2.5",
+     "meaning": "s back at most that throws are re-told to the feed when the frame says she faced the other way"
+    },
+    {
+     "name": "LAST_LOOK",
+     "value": "True",
+     "meaning": "a throw's last look before its key may drop it (_still)"
+    },
+    {
+     "name": "STARS_CHECKED",
+     "value": "True",
+     "meaning": "out of darts in the hunt loop checks the game's key bindings first"
+    },
+    {
+     "name": "STARS_WAIT_S",
+     "value": "15.0",
+     "meaning": "s that key check may be put off before out of darts' stop is raised anyway"
+    },
+    {
+     "name": "HEADING_SHOTS_MAX",
+     "value": "200",
+     "meaning": "crops of her kept in lab/heading at most"
+    },
+    {
+     "name": "TOLD_KEEP",
+     "value": "12",
+     "meaning": "her last throws told to the feed, kept for _retell"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-23",
+     "what": "No potion key: drink_if_low does nothing (her pet drinks her potions).",
+     "why": "It logged 'drinking a potion' at every look under potion_hp and drank none (83 times in 3 minutes in the simulator)."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "Her pet fed by its fullness, read once with no monster within PET_CLEAR and followed in time.",
+     "why": "Until then it was fed blind every 10 minutes and only while hunting, and was found at fullness 9."
+    },
+    {
+     "date": "2026-10-24",
+     "what": "An HP of 0 right after a high read isn't believed until the next look (_doubt_hp).",
+     "why": "On Tree Dungeon her HP read 0% three times in two minutes while the game showed 592/752, each sending her to rest."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "No resting: HP staying low raises the safety stop instead of handing control back to rest.",
+     "why": "Until 2026-10-26 'HP low' under low_hp stopped the fight and she was sent to rest on the chair (README: No resting)."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "LAST_LOOK: the feed's newest frame is read once the lock has run out, and a throw dropped if a kill came in.",
+     "why": "Live on 2026-10-25 a throw's look was a median 0.57 s old at its key, and 17 throws went out after a gain had shown."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "RETELL_S: throws re-told to the feed when a strong frame shows her facing the other way.",
+     "why": "On the recording of 2026-10-26 00:20 two of 15 kills were bound to a live monster on the side she hadn't thrown at."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "STOP_ON_LOOK: the safety stop raised at the look or glance it is due on.",
+     "why": "In the simulator it came up to 1.4 s late at the next health_check, a touch landing in that time in 3 of 42 runs; now 0 s late in 82 runs."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "keys_doubted marks a remembered key binding doubted when a doubt can't be checked.",
+     "why": "A stale MOVE RIGHT remembered on E, never checked in 12 runs, came back at every start."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "feed_reads inserts the EXP value before the first gain when the meter has never read it.",
+     "why": "Until then the first reading came with her first kill, and that kill's EXP was lost (R1 of 2026-11-02)."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Her walk and climb from her stat window's SPEED by the client's formula.",
+     "why": "The user: \"Just use panel, no need to measure.\""
+    },
+    {
+     "date": "2026-11-02",
+     "what": "TOP_RATE_ABOVE on, with a touch priced as what follows it.",
+     "why": "The user: \"keep the rope rule on\"; EXP was level within the noise against the hunt's rate."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "_key_pick: a 'key_pick' telemetry record of what the game's search would pick at each attack key.",
+     "why": "The user's request on the no-hit recordings; nothing she does reads it."
+    }
+   ],
+   "gotchas": [
+    "health_check raises: every caller of a fight, trip or hunt-loop pass must expect SafetyStop, TooStrong, OutOfDarts, OutOfMp, KeyDoubt, ChatDue and StatsDue; with STOP_ON_LOOK any look or glance can raise the safety stop too (only once a hunt has asked after her health, never while she retreats).",
+    "Hunter.look raises client.LieDetectorAlarm whenever the alarm is up.",
+    "Listener order matters: the ledger reads the gains _vitals has just counted, and memory reads the ledger's kills.",
+    "Report is replaced by a tour at every stop; exp_gains and exp_rises are never reset, so cross-stop counts read those.",
+    "A throw can be dropped at its last look (_still): Actions.throw then returns False and nothing is sent; the caller must look again.",
+    "The danger property rebuilds attack.danger.of_map(model, her) on every read unless a test set one.",
+    "A non-thief profile overrides the asked attack mode with her policy's default, and logs that it did.",
+    "The comment on `aggro` says nothing reads it yet, but behavior.targeting's foes_of reads its chasers."
+   ],
+   "tests": [
+    "tests/test_bootstrap.py",
+    "tests/test_chatbox.py",
+    "tests/test_choice.py",
+    "tests/test_darts.py",
+    "tests/test_fight.py",
+    "tests/test_guard.py",
+    "tests/test_harness.py",
+    "tests/test_heading.py",
+    "tests/test_hunt.py",
+    "tests/test_key_pick.py",
+    "tests/test_keycheck.py",
+    "tests/test_keymap.py",
+    "tests/test_loot.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_panel_speed.py",
+    "tests/test_records.py",
+    "tests/test_retreat.py",
+    "tests/test_rope_hang.py",
+    "tests/test_rope_top.py",
+    "tests/test_safety.py",
+    "tests/test_service.py",
+    "tests/test_sim.py",
+    "tests/test_sim_her.py",
+    "tests/test_statcheck.py",
+    "tests/test_touches.py",
+    "tests/test_window_size.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/fight.py",
+   "title": "Fights",
+   "tagline": "clear a spot, kill one monster, shoot what's in her way while travelling",
+   "summary": "The fight loops. clear() fights the monsters in reach look by look (stance, throw, step, wait) until a kill count, a time limit or nothing left in reach, finishing monsters she has hurt before it ends. kill() shoots one target and keeps the shot log. FightOnTheWay is the navigator's escort while she travels and its price for each landing.",
+   "details_md": "### `clear`: a fight at a spot\nA loop of looks that ends after `seconds` (120), after `max_kills` (10) kills counted as her EXP gains, or when nothing\nhas been in reach for `patience` (1.5 s; `EMPTY_PATIENCE` 0.4 s when there's nothing to fight at all). Each look:\n\n1. `_place_and_check`: if she isn't placed, wait 0.2 s (give up after `UNPLACED_LOOKS` 10, \"lost track of her\");\n   `h.health_check` (may raise the safety stop); leaving the platform the fight started on ends it (\"left platform N\").\n2. `_targets`: the wanted monsters (of `kinds`; on the `ground` platforms or hers; with `far`, any a star reaches;\n   always any within `IN_HER_WAY` 150 on her platform), minus those fading where a kill died (`fade_s`: the kind's\n   death animation, else `FADING` 1.2 s) or taken for dying by the ledger, minus the kills her EXP told of\n   (`_count_kills`); plus monsters she threw at that went out of sight, kept `HIDDEN_FOR` 1.8 s and thrown at while a\n   throw is still worth it (`shots_at` → `Attacks.worth_a_throw`). With `HIDDEN_WALKS` a hidden one heading at her is\n   walked on along its track (`hidden_place`).\n3. `owed` / `finish_act`: a monster she has hurt (`Hunter.wounds`) in reach or a walk of `FINISH_WALK` 150 along her\n   platform is finished before the fight ends.\n4. `_take_stance` asks `attack.stance.stance` for one act: `('throw', side)`, `('jump_throw', side[, JumpPlan])`,\n   `('jump_back', side[, JumpPlan])`, `('back', side, units[, AWAY])`, `('approach', side, units)` or `('wait',)`\n   (a `JumpPlan` carries a jump's timed shot: when its attack key goes, at whom, where she lands). It passes her\n   pace (`pace_of`: her lock, monsters' walks from their tracks), her jumps' coverage (`jump_cover`), the map's danger,\n   move limits and, for the magician, which monsters she'll cast at. For a throw it keeps everything in the attack's\n   path (`_in_path`), since a star hits the first monster in its way, whatever its kind.\n5. `knocked_move`: a jump or step decided within `KNOCK_S` of a knock waits 0.05 s for the next look.\n6. `_carry_out`: `throw_act` (jittered key, `log_jump`, then `Actions.throw` / `jump_throw` / `jump_back`) or\n   `Actions.walk`; with nothing to do, `_idle` sweeps kill spots, loots pending drops, then waits.\n\nWhen it ends, gains its own looks didn't place are counted (`_count_late`) and the kills on her platform are swept\n(`Looter.sweep_after`). `Report.stop` says why it ended.\n\n### Matching a kill to a monster\n`_count_kills` takes the monster the ledger bound the gain to by its track (`_tracked_kill`), else `dead_one` over the\nlast throw's path and her throws of the last `KEYED_KEEP_S` 2.5 s. Its drops go to the end-of-fight sweep if it died on\nher platform, else to `Looter.pending` for the tour.\n\n### `kill`: one target\nThrows at one monster (`attack.stance.decide`) until her EXP has risen since her first throw (`Hunter.take_exp`):\n'killed', 'lost' (unseen `LOST_AFTER` 3 s), 'timeout', 'unreachable' or \"lost track of her\". It keeps the shot log\n`lab/shots2.jsonl`: each throw scored hit, miss or undecided by the target's HP bar (`_score_shots`, `_credit_kill`),\nfrom which a star's reach is measured.\n\n### `FightOnTheWay`: the navigator's escort\nBetween moves of a hunting trip: a short burst at what's in reach (`shoot`: 3 kills, `GUARD_SECONDS` 15, never walking\nafter them), a monster in the way of the next move (`clear_way`), one that could touch her on the chain ahead\n(`clear_for`, `shot_place`, `shoot_from`), and `landings`, which hands the navigator a `judge(leg, last)` function pricing each leg's landing (in seconds)\nagainst the chain's monster tracks: those seen within `STALE_S` 1.5 s fully; with none of those priced, older tracks and\nthe platform's unaccounted spawn points at `UNSEEN_PRICE` 0.25 of that.\n\n### Prices\n`landing_prices` (`OWN_PRICES`): a touch's HP priced in EXP (its share of her max HP, at the user's potion price\n`hunt.HP_PER_MESO` 2 HP a meso and `MESO_EXP` 0.5 EXP a meso), her\nEXP a second (`rate_of`: `Hunter.exp_rate`, else `RATE_PRIOR` 6.85, kept within 4x either way), and the share of her\ntouches that hurt (`HURT_PRIOR` 10 prior touches). `made_rate` blends what she has made with 60 s of the prior: the cost\nof a throw's lock.\n",
+   "lines": 1927,
+   "key_items": [
+    {
+     "name": "clear",
+     "kind": "function",
+     "line": 280,
+     "signature": "def clear(h, kinds=None, ground=None, max_kills=10, seconds=120, patience=1.5, approach=True, finish=False, far=False, finish_wounds=True) -> Report",
+     "summary": "The fight loop: look, check health, work out targets, take a stance, carry it out, until kills, time or patience run out; then sweep her platform's drops."
+    },
+    {
+     "name": "kill",
+     "kind": "function",
+     "line": 1462,
+     "signature": "def kill(h, target: Monster, seconds: float = 30) -> str",
+     "summary": "Shoot one monster until her EXP says it died, then loot it: 'killed', 'lost', 'timeout', 'unreachable' or 'lost track of her'."
+    },
+    {
+     "name": "FightOnTheWay",
+     "kind": "class",
+     "line": 1697,
+     "signature": "class FightOnTheWay",
+     "summary": "The navigator's escort on hunting trips: bursts, the monster in the way, one that could touch her on the chain ahead, and landing prices."
+    },
+    {
+     "name": "FightOnTheWay.landings",
+     "kind": "method",
+     "line": 1884,
+     "signature": "def landings(self, tracks: list)",
+     "summary": "Returns the navigator's judge(leg, last): a leg's landing priced in seconds (and the track making it so) against the chain's monster tracks by attack.stance.landing; None where no kind counts as a danger (the first map)."
+    },
+    {
+     "name": "_targets",
+     "kind": "function",
+     "line": 384,
+     "signature": "def _targets(h, st, s, kinds, ground, far, now) -> tuple[list[Monster], list[Monster], list[Monster]]",
+     "summary": "What there is to fight at a look: wanted minus fading, dying and killed, plus hidden ones still worth a throw."
+    },
+    {
+     "name": "_take_stance",
+     "kind": "function",
+     "line": 766,
+     "signature": "def _take_stance(h, st, s, fight, visible, hidden, approach, ...) -> tuple",
+     "summary": "Asks attack.stance for one act, applies the magician's cast-or-wait, logs changes, keeps the throw's path for kill matching."
+    },
+    {
+     "name": "throw_act",
+     "kind": "function",
+     "line": 962,
+     "signature": "def throw_act(h, s: Scene, act: tuple) -> bool",
+     "summary": "Carries out a throwing stance: jitters a jump's attack key, logs it, sends it via Actions; False if dropped at its last look."
+    },
+    {
+     "name": "_count_kills",
+     "kind": "function",
+     "line": 1338,
+     "signature": "def _count_kills(h, st, s, wanted, gains, now, drops=True) -> list[Monster]",
+     "summary": "Turns her EXP gains into kills of monsters in her throws' paths (or the ledger's tracked one), with drop spots."
+    },
+    {
+     "name": "owed",
+     "kind": "function",
+     "line": 1184,
+     "signature": "def owed(h, s, st=None, hurt_by=None) -> list[Monster]",
+     "summary": "The monsters she has hurt and not killed around her (Hunter.wounds), seen or hidden up to HIDDEN_FOR, still worth a throw."
+    },
+    {
+     "name": "finish_act",
+     "kind": "function",
+     "line": 1215,
+     "signature": "def finish_act(h, s, wounds, around) -> tuple | None",
+     "summary": "What finishing her wounds takes from here: a throw, or a walk of FINISH_WALK at most; None if out of reach."
+    },
+    {
+     "name": "pace_of",
+     "kind": "function",
+     "line": 580,
+     "signature": "def pace_of(h, s: Scene) -> Pace",
+     "summary": "How soon her next attack picks (lock left plus look age) and how monsters walk meanwhile, for the stance; holds her last target as flinching."
+    },
+    {
+     "name": "knocked_move",
+     "kind": "function",
+     "line": 1083,
+     "signature": "def knocked_move(h, s: Scene, act: tuple) -> bool",
+     "summary": "A jump or step decided while a knock may still move her waits for the next look (keys sent mid-knock were lost or went from the wrong place)."
+    },
+    {
+     "name": "landing_prices",
+     "kind": "function",
+     "line": 723,
+     "signature": "def landing_prices(h, danger) -> Prices | None",
+     "summary": "Her own prices for landings and touches: touch HP in EXP, her EXP a second, the share of touches that hurt; None until max HP is read."
+    },
+    {
+     "name": "hidden_place",
+     "kind": "function",
+     "line": 536,
+     "signature": "def hidden_place(h, s: Scene) -> Callable[[Monster, float], Monster] | None",
+     "summary": "Where a monster she threw at that the look missed probably is: walked on along its track if heading at her, else where last seen."
+    },
+    {
+     "name": "_in_path",
+     "kind": "function",
+     "line": 1394,
+     "signature": "def _in_path(s, side, monsters, gap_ms=None, body=None, flinching=()) -> list[Monster]",
+     "summary": "Everything an attack that way can take, whatever its kind: the claw or the star's search from the ground, the attack's area from a jump; none behind a wall."
+    }
+   ],
+   "inputs": [
+    "Scenes from Hunter.look (monsters with tracks, her place, HP)",
+    "attack.stance decisions (stance, decide, pick_target) and attack.reach geometry",
+    "Hunter.ledger (kills, dead, unsure tracks) and Hunter.wounds",
+    "Hunter.attacks: worth_a_throw, chance, refused/refusal for the magician",
+    "Monster bodies, death animations and walk speeds from the map's game data (localization.monsters)",
+    "The navigator's chain tracks (FightOnTheWay.landings) and trips (clear_for, shoot_from)"
+   ],
+   "outputs": [
+    "Keys through Actions: throw, jump_throw, jump_back, walk",
+    "Report counts: kills by kind, throws, lost targets, why it stopped",
+    "DropSpots to the Looter (kill_spots swept after the fight; pending for the tour)",
+    "Telemetry: 'stance', 'jump', 'jump_keys', and 'event' kill records",
+    "lab/shots2.jsonl, the shot log",
+    "Hunter.aim (her running attack's target, for pace_of's flinch hold)"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "maplehelper/game.py",
+    "gamelab/character.py",
+    "gamelab/directions.py",
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/stance.py",
+    "gamelab/control/actions.py",
+    "gamelab/control/navigator.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/tracking.py",
+    "gamelab/localization/unseen.py",
+    "gamelab/motion/physics.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/looting.py",
+    "gamelab/behavior/presence.py",
+    "gamelab/behavior/hunt.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/shots2.jsonl",
+     "mode": "write",
+     "what": "every scored throw of kill(): where she and the target were, what was in front, the bars, hit or not"
+    }
+   ],
+   "concurrency": "Runs on the caller's thread (the hunt loop, a tour, the navigator). It sleeps between looks: 0.2 s unplaced, 0.1 s idle, 0.15 s in kill(), STEADY_WAIT_S 0.05 s after a knock.",
+   "tunables": [
+    {
+     "name": "LOST_AFTER",
+     "value": "3.0",
+     "meaning": "s a kill() target may stay unseen without an EXP gain before it's given up"
+    },
+    {
+     "name": "HIDDEN_FOR",
+     "value": "1.8",
+     "meaning": "s a monster she threw at stays about her once it can't be seen (hit ones flinch under their damage numbers)"
+    },
+    {
+     "name": "EMPTY_PATIENCE",
+     "value": "0.4",
+     "meaning": "s a fight waits when there's nothing to fight at all"
+    },
+    {
+     "name": "FADING",
+     "value": "1.2",
+     "meaning": "s a kill may still be seen fading out, for a kind whose death animation the game data lacks"
+    },
+    {
+     "name": "UNPLACED_LOOKS",
+     "value": "10",
+     "meaning": "looks in a row that can't place her before a fight gives up"
+    },
+    {
+     "name": "IN_HER_WAY",
+     "value": "TOO_CLOSE + 40 (150)",
+     "meaning": "units: any monster this close on her platform is fought, whatever its kind"
+    },
+    {
+     "name": "JUMP_SHOTS",
+     "value": "True",
+     "meaning": "the stance weighs her jumps' attacks (a jump throw at a monster her air attack surely picks)"
+    },
+    {
+     "name": "GUARD_SECONDS / GUARD_PATIENCE",
+     "value": "15 / 0.3",
+     "meaning": "longest and patience of a fight while travelling"
+    },
+    {
+     "name": "MEET_JUMP_SHOTS",
+     "value": "False",
+     "meaning": "a monster on the chain ahead shot first from a jump too (off for the user's call)"
+    },
+    {
+     "name": "FINISH_WALK",
+     "value": "150",
+     "meaning": "units along her platform she'll walk to finish a monster she hurt"
+    },
+    {
+     "name": "KEYED_KEEP_S",
+     "value": "2.5",
+     "meaning": "s her throws are kept with their paths for the kills their gains tell of"
+    },
+    {
+     "name": "TOUCH_NEAR / TOUCH_NEAR_DY",
+     "value": "150 / 80",
+     "meaning": "units: an unsure kill's monster this near stays among those her body keeps clear of"
+    },
+    {
+     "name": "HIDDEN_WALKS",
+     "value": "True",
+     "meaning": "a hidden monster heading at her is walked on along its track"
+    },
+    {
+     "name": "STALE_S",
+     "value": "FADE_S (1.5)",
+     "meaning": "s: a track seen within this prices a landing fully"
+    },
+    {
+     "name": "UNSEEN_PRICE",
+     "value": "0.25",
+     "meaning": "share of a seen monster's price for an older track or a free spawn point"
+    },
+    {
+     "name": "OWN_PRICES",
+     "value": "True",
+     "meaning": "landings priced by her own HP, EXP rate and hurt share, not stance's constants"
+    },
+    {
+     "name": "RATE_PRIOR / RATE_BAND",
+     "value": "6.85 / 4.0",
+     "meaning": "EXP a second prior (the live thief on Tree Dungeon) and the band her rate is clamped to"
+    },
+    {
+     "name": "HURT_PRIOR",
+     "value": "10",
+     "meaning": "prior touches at stance.HURT_SHARE for the share of touches that hurt"
+    },
+    {
+     "name": "MADE_PRIOR_S",
+     "value": "60.0",
+     "meaning": "s of the prior rate blended with what she has made, for a throw's lock cost"
+    },
+    {
+     "name": "JITTER_ALL",
+     "value": "True",
+     "meaning": "every jump attack's key jittered over its window and recorded"
+    },
+    {
+     "name": "FLINCH",
+     "value": "True",
+     "meaning": "her running attack's target held in her pace until her hit shows"
+    },
+    {
+     "name": "MOVE_LIMITS",
+     "value": "True",
+     "meaning": "up close her moves away keep to the stance's move limits where something counts as a danger"
+    },
+    {
+     "name": "STEADY_WAIT_S",
+     "value": "0.05",
+     "meaning": "s before the next look when a jump or step waits out a knock (knocked_move)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "FINISH_WALK: monsters she hurt are finished before a fight ends.",
+     "why": "In the live hunt loops of 2026-10-21 she set off 44 times leaving a hurt monster in reach or a short step away, 23 not killed in the next 20 s."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Kills taken for dying (fade_s by the kind's death animation; ledger.dying) are no target.",
+     "why": "18 casts and 4 regular throws went at a dying monster in 11 minutes live, a tenth of her MP potions."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "MOVE_LIMITS: her moves away keep stance's wall, edge and drop margins where something counts as a danger.",
+     "why": "They kept 50 from every end before."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Landings priced by tracks seen within STALE_S, older ones and free spawn points at UNSEEN_PRICE 0.25.",
+     "why": "Live recordings: 2 of 9 landings near hidden tracks alone had a monster there; in the harness 12% less time within 60 of a monster."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "OWN_PRICES: landings priced by her own max HP, EXP rate and hurt share.",
+     "why": "From the review of 2026-10-31; RATE_BAND added after the independent check of 2026-11-01 (a rate near 0 priced landings without bound)."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "JITTER_ALL: every jump attack keyed with a jitter and recorded.",
+     "why": "The user: \"add a bit jitter to it so we still have some variation and can later on analyze if the jitter can show any pattern\"."
+    },
+    {
+     "date": "2026-11-03",
+     "what": "HIDDEN_WALKS: a hidden monster heading at her walks on along its track.",
+     "why": "The cornered study: live a throw went at a Horny Mushroom's stand-in 116 off while it walked on."
+    },
+    {
+     "date": "",
+     "what": "MADE_PRIOR_S: a throw's lock costs what she has made so far, not her plan's promised rate.",
+     "why": "Live Plan.rate's median was 426 and 537 EXP a minute against 340 and 428 made."
+    },
+    {
+     "date": "",
+     "what": "MEET_JUMP_SHOTS off.",
+     "why": "The harness had fewer landings near monsters and fewer trip touches with it on, but 9 of the 28 Tree goldens parted at it and loop_tree_out_of_darts no longer ended her retreat on a safe place; off for the user's call."
+    }
+   ],
+   "gotchas": [
+    "clear() counts kills by Report.exp_kills, which any look's _vitals bumps; gains seen by looks the fight didn't take (a sweep's) are told apart only at the end (_count_late).",
+    "A fight ends as soon as she is on another platform than the one it started on (knocked off).",
+    "kill() drops EXP events older than 1.5 s whenever its target is still seen: a gain while it's alive was another monster's.",
+    "The shot log dates a hit by the star's release (STAR_DELAY_MS 520) rather than the server's damage (290 ms); no decision reads it.",
+    "The act tuple's shape is the stance's: index 1 is the side, index 2 a JumpPlan for jumps or the units for steps.",
+    "landing_prices imports behavior.hunt lazily (hunt imports fight)."
+   ],
+   "tests": [
+    "tests/test_fight.py",
+    "tests/test_character.py",
+    "tests/test_clawed.py",
+    "tests/test_clearance.py",
+    "tests/test_control.py",
+    "tests/test_darts.py",
+    "tests/test_grind.py",
+    "tests/test_hunt.py",
+    "tests/test_jump_reach.py",
+    "tests/test_key_pick.py",
+    "tests/test_landing.py",
+    "tests/test_loot_chain.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_navigation.py",
+    "tests/test_presence.py",
+    "tests/test_records.py",
+    "tests/test_stance_aside.py",
+    "tests/test_touches.py",
+    "tests/test_unseen.py",
+    "tests/test_rope_hang.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/attacks.py",
+   "title": "Attacks (each throw's attack)",
+   "tagline": "Which monster a throw takes, what it has left, and Lucky Seven or the regular attack",
+   "summary": "Chooses each throw's attack at the moment its key goes out: the monster the attack will take, the HP it has left as a probability distribution, her MP as her bar and her casts say, and then Lucky Seven or the regular attack. It follows every monster she has thrown at (marks) look by look, and runs two failsafes for attacks that hit nothing. For the magician it also refuses casts that would do nothing and learns her damage.",
+   "details_md": "Every throw goes through `Actions`, whose attack key asks `Attacks.key(side)` just before the key goes down (in\nmode 'regular' only once a key doubt routes it here) (the\nfights, the hunt loop, grinding and the navigator's fights alike).\n\n### `key`: the thief's throw\n1. **Target**: `aimed` (a jump shot's own target, set by `fight.throw_act`) if it's not dying and worth a throw, else\n   `target(side)`: the likeliest monster in the ground attack's path in the last look that searched\n   (`ledger.in_path`), never one dying, one a look missed only if `worth_a_throw`; the first less than `DEAD_LIKELY`\n   (0.5) dead by her throws, else the likeliest; with nothing in the path, the mark she last threw at that way (within\n   `SEEN_MARK_S` 1.8 s, or one no look has that's still worth a throw). No target and nothing a star could take that\n   way: no throw at all (`_no_throw`).\n2. **What it has left** (`reckon`): an `attack.choice.Left`: the chance of each amount of damage still\n   needed to kill it, from the game data's HP,\n   less each pending throw's damage distribution with her `miss` share. A look that sees it alive `LANDS_S` (0.6 s)\n   after a throw rules out what that throw would have killed it with; so does a frame `KILL_SHOWN_S` (0.4 s) after the\n   key with no EXP gain that could be its kill. A believable bar (strictly between 0 and 1) resets it.\n3. **Which attack** (`attack.choice.pick`): the regular attack when her MP is under one cast ('MP'), with nothing seen\n   in its way, or when it finishes the monster about as fast ('finish'); else Lucky Seven ('damage'). With\n   `DEAD_CHOICE` the whole reckoning, dead chance included, decides. Then overrides: the regular attack at a monster no\n   look has where a cast's MP isn't worth it ('unseen'); Lucky Seven held or forced by the key checks.\n4. A `Mark` on the target records the pending throw; the choice is logged and sent as an 'attack' record.\n\n### Her MP\nThe bar's share less casts the frame can't show yet. `_believed` keeps her reckoning between the read minus casts\nkeyed after t − `MP_FIRST_S` (0.21 s) and that minus casts keyed back to t − `MP_SHOWS_S` (0.55 s). A 0 read within\n`WARNING_S` (2 s) of a read of `WARNING_STEPS` (9 px of 104) or less is her pet's MP warning, not believed (`_mp_read`).\n`glance` reads it again off the newest frame just before the key.\n\n### After every look (`on_look`)\nMarks are followed (`seen_again`), landed throws applied, placed kills and dead tracks end their marks, marks unseen\n`LOST_S` (3 s) or untouched `FORGET_S` (15 s) are forgotten, throws at monsters no look had are judged\n(`_judge_blind`), and the key-doubt watches judge her presses.\n\n### Failsafes\n`_landing`: after `UNLANDED_THROWS` (2) throws at one monster with no bar and no EXP since, the next taps the arrow\nfirst. `_watch_hits`: `NO_HIT_ATTACKS` (4) attacks with no monster hit, a second after the 4th: tap the arrow and tell\n`Hunter._no_hit` (which keeps a recording).\n\n### The magician (`picks`)\nMagic Claw goes only at a body the last look saw that her search picks. `refused` says why not: 'unseen', 'dead',\n'no effect' (a `Hold` on the mark), 'no effect from here' (a `Spot` held), 'likely dead'. Her casts at a mark are\njudged by the looks that see it again (`_judge`): an effect from `SHOWS_S` on (its bar `PICK_BAR_STEP`/2 lower, a bar\nup where none was, any EXP gain, her MISS popup over it) proves the mark; none by `LANDS_S` (up to `JUDGE_BY_S` 3 s)\nholds the mark and her spot that way until new evidence (her or it moving `HOLD_MOVED` 20 units, a bar change, a gain,\na cast the other way, or `SPOT_HELD_S` 6 s for a spot). Her damage is learned into a `damage.Book` (`_learn_bar`,\n`_learn_kill`).\n",
+   "lines": 1574,
+   "key_items": [
+    {
+     "name": "Attacks",
+     "kind": "class",
+     "line": 334,
+     "signature": "class Attacks",
+     "summary": "Her attack a throw: target, HP reckoned, MP, the choice; kept up from every look and throw."
+    },
+    {
+     "name": "Attacks.key",
+     "kind": "method",
+     "line": 882,
+     "signature": "def key(self, side: str) -> str | None",
+     "summary": "The attack key a throw that way goes out with now (None: no throw); asked by Actions just before the key."
+    },
+    {
+     "name": "Attacks.on_look",
+     "kind": "method",
+     "line": 473,
+     "signature": "def on_look(self, s: Scene) -> None",
+     "summary": "Her MP; marks followed, their bars read, landed throws applied, killed and dead ones ended, forgotten ones dropped; casts and blind throws judged."
+    },
+    {
+     "name": "Attacks.on_throw",
+     "kind": "method",
+     "line": 981,
+     "signature": "def on_throw(self, at: float, side: str) -> None",
+     "summary": "A throw's key time: its pending throw stamped, its cast's MP taken off, the doubt watches and out-of-darts told."
+    },
+    {
+     "name": "Attacks.target",
+     "kind": "method",
+     "line": 1050,
+     "signature": "def target(self, side: str) -> Monster | None",
+     "summary": "The monster a throw that way takes: the likeliest in its path not likely dead, else her last mark that way."
+    },
+    {
+     "name": "Attacks.reckon",
+     "kind": "method",
+     "line": 1266,
+     "signature": "def reckon(self, m: Monster) -> Left | None",
+     "summary": "What a monster has left as a distribution: its mark, pending throws taken off, kills ruled out by KILL_SHOWN_S."
+    },
+    {
+     "name": "Attacks.heard",
+     "kind": "method",
+     "line": 556,
+     "signature": "def heard(self, t: float, gains: list) -> None",
+     "summary": "Her EXP gains up to a frame's time, each with the kinds it can be: what lets reckon rule out kills."
+    },
+    {
+     "name": "Attacks.worth_a_throw",
+     "kind": "method",
+     "line": 1131,
+     "signature": "def worth_a_throw(self, m: Monster, than: float | None = None) -> bool",
+     "summary": "Whether a throw at a monster no look has is worth it: behavior.presence's chance times its worth against MP and lock cost."
+    },
+    {
+     "name": "Attacks.refused",
+     "kind": "method",
+     "line": 599,
+     "signature": "def refused(self, m: Monster) -> str | None",
+     "summary": "(The magician) why her cast won't go at a monster: unseen, dead, no effect, no effect from here, likely dead."
+    },
+    {
+     "name": "Attacks._judge",
+     "kind": "method",
+     "line": 742,
+     "signature": "def _judge(self, mk: Mark, again: Monster, s: Scene) -> None",
+     "summary": "(The magician) her casts at a mark judged at a look: an effect proves it, none holds the mark and her spot."
+    },
+    {
+     "name": "Attacks._believed",
+     "kind": "method",
+     "line": 1438,
+     "signature": "def _believed(self, read: float, t: float) -> float",
+     "summary": "Her MP from a bar read, less casts the frame can't show yet, her reckoning kept within what the bar allows."
+    },
+    {
+     "name": "Attacks._watch_hits",
+     "kind": "method",
+     "line": 1465,
+     "signature": "def _watch_hits(self, s: Scene) -> None",
+     "summary": "The no-hit failsafe: NO_HIT_ATTACKS attacks with no bar change or EXP: retap the arrow and tell the Hunter."
+    },
+    {
+     "name": "Attacks._learn_bar",
+     "kind": "method",
+     "line": 1349,
+     "signature": "def _learn_bar(self, mk: Mark, again: Monster, s: Scene) -> None",
+     "summary": "(The book) a bar read after exactly one throw that surely showed: that throw's damage (exact) or a miss."
+    },
+    {
+     "name": "Attacks.kill_s",
+     "kind": "method",
+     "line": 1292,
+     "signature": "def kill_s(self, m: Monster) -> float",
+     "summary": "Seconds she'd take to kill a monster from what it has left, with the attack she'd throw and her misses."
+    },
+    {
+     "name": "Mark",
+     "kind": "dataclass",
+     "line": 253,
+     "signature": "@dataclass class Mark",
+     "summary": "A monster she has thrown at: as last seen, what it has left, pending throws, casts to judge, a hold."
+    }
+   ],
+   "inputs": [
+    "Every look (on_look: monsters, bars, MP bar, tracks, MISS popups) and every throw's key time (on_throw)",
+    "EXP gains with their kinds (heard: from Hunter._vitals and Hunter._still)",
+    "The feed's newest tracks before a key (newest) and MP glance (glance)",
+    "Monster HP, defence (physical or magic) and EXP from the map's game data (MapModel)",
+    "The ledger's kills and dead tracks; the key-doubt watches (keycheck.RegularWatch)",
+    "Her damage book (behavior.damage, the magician's)"
+   ],
+   "outputs": [
+    "The attack key name for each throw, to Actions (None: no throw)",
+    "For the stance and fights: refused/refusal/no_cast (the magician's), hurt and hidden_hurt (wounds first)",
+    "reckon, left, kill_s, chance, seen_net and worth_a_throw for fights, the hunt loop and Targeting",
+    "Retap requests and no-hit episodes for the Hunter; counts and a summary line for the run's end",
+    "Telemetry 'attack', 'no_cast', 'no_throw'"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/choice.py",
+    "gamelab/attack/reach.py",
+    "gamelab/attack/stance.py",
+    "gamelab/behavior/damage.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/scene.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/behavior/presence.py",
+    "gamelab/behavior/looting.py",
+    "gamelab/behavior/keycheck.py",
+    "gamelab/behavior/fight.py"
+   ],
+   "files_io": [],
+   "concurrency": "None of its own: runs inside Actions' key choice and the look listeners, on the hunt's thread.",
+   "tunables": [
+    {
+     "name": "LANDS_S",
+     "value": "0.6",
+     "meaning": "s after a throw's key by which its damage has shown on the bar if it hit"
+    },
+    {
+     "name": "SHOWS_S",
+     "value": "0.15",
+     "meaning": "s after a throw's key from which its damage may first show"
+    },
+    {
+     "name": "KILL_SHOWN_S",
+     "value": "0.4",
+     "meaning": "s after a key by which a frame shows its kill's EXP gain, if it killed"
+    },
+    {
+     "name": "DEAD_LIKELY",
+     "value": "0.5",
+     "meaning": "a monster this likely dead by her throws isn't a throw's target: the next is"
+    },
+    {
+     "name": "DEAD_CHOICE",
+     "value": "True",
+     "meaning": "the attack chosen on the whole reckoning, dead chance included"
+    },
+    {
+     "name": "MP_FIRST_S / MP_SHOWS_S",
+     "value": "0.21 / 0.55",
+     "meaning": "s after a cast's key its MP first shows on her bar / has shown"
+    },
+    {
+     "name": "WARNING_STEPS / WARNING_S",
+     "value": "9 / 2.0",
+     "meaning": "a 0 MP read within 2 s of a read of 9 px (of 104) or less is her pet's warning"
+    },
+    {
+     "name": "LOST_S / FORGET_S",
+     "value": "3.0 / 15.0",
+     "meaning": "s unseen / since her last throw before a mark is forgotten"
+    },
+    {
+     "name": "HIDDEN_FOR / SEEN_MARK_S",
+     "value": "1.8 / 1.8",
+     "meaning": "HIDDEN_FOR: s of the key-doubt watch and of hidden wounds (no throw goes by it); SEEN_MARK_S: s after her last throw that a mark a look has, out of the throw's way, is still its target"
+    },
+    {
+     "name": "GAINS_KEPT_S",
+     "value": "5.0",
+     "meaning": "s her EXP gains are kept for heard"
+    },
+    {
+     "name": "JUDGE_BY_S",
+     "value": "3.0",
+     "meaning": "s after a cast by which it's judged (the magician)"
+    },
+    {
+     "name": "PICK_BAR_STEP",
+     "value": "0.03",
+     "meaning": "a bar this much lower is damage (half of it for a cast's effect)"
+    },
+    {
+     "name": "HOLD_MOVED",
+     "value": "20.0",
+     "meaning": "units her or its move that's new evidence for a held mark or spot"
+    },
+    {
+     "name": "HELD_LOST_S / SPOT_HELD_S",
+     "value": "6.0 / 6.0",
+     "meaning": "s a held mark is kept unseen / a held spot lasts before one cast tests it"
+    },
+    {
+     "name": "OTHERS_DX / OTHERS_DY",
+     "value": "400 / 250",
+     "meaning": "units: another player this near a monster: nothing learned of her damage there"
+    },
+    {
+     "name": "WAIT_FIRST",
+     "value": "False",
+     "meaning": "a new mark's second cast waits for the first's judging (off: it held back more hits than it saved)"
+    },
+    {
+     "name": "UNLANDED_THROWS",
+     "value": "2",
+     "meaning": "throws at one monster showing nothing before the next taps the arrow"
+    },
+    {
+     "name": "NO_HIT_ATTACKS / NO_HIT_SHOWN_S",
+     "value": "4 / 1.0",
+     "meaning": "attacks with no monster hit, judged 1 s after the last, before the no-hit failsafe"
+    },
+    {
+     "name": "NO_HIT_PAD_S / NO_HIT_CLIPS",
+     "value": "3.0 / 30",
+     "meaning": "s of recording either side of a no-hit episode / episodes recorded a run at most"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "The attack choice (Lucky Seven first, the regular attack to finish or without MP) is the default.",
+     "why": "The user: \"use lucky seven first but for finishing up a low hp monster, use regular attack\"."
+    },
+    {
+     "date": "2026-10-25",
+     "what": "A bar up but read empty still says her damage shows (Left.hit).",
+     "why": "With bars read empty she reckoned a target's HP 86-98 off and threw no regular attack to finish in 518 throws."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "KILL_SHOWN_S and DEAD_CHOICE: a frame 0.4 s after a key with no matching gain rules that kill out.",
+     "why": "232 of 652 throws went out reckoned 50% dead or more, 224 of them at monsters alive at the key."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "LANDS_S 0.85 -> 0.6, SHOWS_S 0.47 -> 0.15: the server's damage time, not the star's flight.",
+     "why": "Live a Horny Mushroom's bar first dropped 0.21-0.55 s after a cast's key; a kill's gain by 0.46 s."
+    },
+    {
+     "date": "2026-10-26",
+     "what": "MP believed between MP_FIRST_S and MP_SHOWS_S; a 0 under her pet's warning not believed.",
+     "why": "11 regular throws went out for 'MP 0' while she still had 20-35 MP."
+    },
+    {
+     "date": "2026-10-29",
+     "what": "The magician's casts only at a body seen that her search picks, held where they showed no effect.",
+     "why": "The user: \"Why you were standing on platform 18 and cast magic claw for nothing, wasting mp?\""
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Every no cast for MP sent as a 'no_cast' record.",
+     "why": "The log says only the 1st, 10th and 100th, so how often her MP refused a cast couldn't be told (P27)."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "Retap after UNLANDED_THROWS and the no-hit failsafe with a recording.",
+     "why": "A frame read her facing wrongly and 85 attacks went into a wall over 71 s."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "The 15 s ignore of the no-hit failsafe dropped.",
+     "why": "The user: \"Drop 15s ignore\"."
+    }
+   ],
+   "gotchas": [
+    "key() has side effects (marks, counts, log lines) and must run once per throw, before the throw listeners; Actions guarantees that order.",
+    "Class-level defaults (e.g. `_corpses: list = []`) exist so tests' stand-ins built without __init__ work; real instances replace them.",
+    "A bar is believable only strictly between 0 and 1; a dying monster's bar reads None.",
+    "Most of rule 3 (holds, spots, carry to a new track) is the magician's only (`picks`); the thief has blind-throw judging instead.",
+    "presence_rate imports fight.RATE_PRIOR lazily; the attack choice itself lives in attack.choice."
+   ],
+   "tests": [
+    "tests/test_choice.py",
+    "tests/test_character.py",
+    "tests/test_damage.py",
+    "tests/test_darts.py",
+    "tests/test_keycheck.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_presence.py",
+    "tests/test_target.py",
+    "tests/test_heading.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/damage.py",
+   "title": "Damage book",
+   "tagline": "Her attack's damage learned from monsters' HP bars and kept between runs",
+   "summary": "Learns the magician's Magic Claw damage from what the monsters' HP bars show after her casts: exact damages, misses and 'at least' from kills, fitted by maximum likelihood to a uniform hit range. The fit replaces her profile's prior once 15 exact reads are in, and is kept in her damage file between runs. The thief has no book: her attacks are as measured.",
+   "details_md": "The magician's Magic Claw prior (the v83 formula on her stat window: each of a cast's two hits 76-267) was far off:\nthe bars of 2026-10-29's grinds showed a cast (both hits) doing 254-298 before defence (p10-p90), so a Green Mushroom\n(303 damage to kill before its MDD of 30) came out of one cast with about a tenth left nearly every time, where the\nprior had 69% of landed casts kill it, reckoned it 50% dead after one, and held her second cast back as 'likely dead'. So her damage is learned from the monsters' HP bars as\nshe hunts and kept between runs.\n\n### What a read is\n`Attacks` adds a `Read` when it can pin one throw's effect:\n- **exact**: a bar read between empty and full after exactly one throw whose damage surely showed since the bar before\n  (and no throw that may or may not have shown): damage = bar drop × HP × (100 + defence)/100, give or take a bar\n  pixel (`BAR_PX` 46 px of fill, at least `TOL_MIN` 3);\n- **miss**: a drop under `MISS_PX` (0.5 px) after a bar was read before;\n- **at least**: a kill placed after exactly one such throw: it did at least what the monster had left.\nNothing is learned with another player near the monster (a bar shows anyone's damage).\n\n### The fit\nA hit's damage is a whole number from lo to hi, uniformly; `hits` per throw. `_cdf` treats one hit as uniform, two as\na triangle, more as a normal. `fit` maximises the likelihood over a 48 × 64 grid of (lo, hi), then a finer 21 × 21 grid\naround the best. Each exact read is an outlier with chance `OUTLIER` (0.05), each kill with `OUTLIER_KILL` (0.15); a\nkill's 'at least' more than `KILL_SLACK` (15%) over the largest exact read is dropped. The fit is used from `MIN_EXACT`\n(15) exact reads; the miss share from `MIN_MISSES` (20) judged throws. Only reads of her level and `LEVELS_BACK` (1)\nunder it count.\n\n### The Book\n`Book` keeps `{attack key: {hits, reads, fit}}` in her damage file, the newest `KEEP` (400) reads each. `add` refits at\nmost every `REFIT_S` (10 s) on a daemon thread and bumps `version` when the fit changes; `Attacks.on_look` sees the new\nversion and takes `Book.attack(prior)` (the prior with lo/hi replaced) and `Book.miss`. It saves every `SAVE_S` (60 s)\nand at exit, writing a temp file then replacing, so the file is never half written.\n",
+   "lines": 277,
+   "key_items": [
+    {
+     "name": "Book",
+     "kind": "class",
+     "line": 140,
+     "signature": "class Book",
+     "summary": "Her attacks' damage learned: reads and fits per attack key, kept in her file between runs."
+    },
+    {
+     "name": "Book.add",
+     "kind": "method",
+     "line": 182,
+     "signature": "def add(self, key: str, hits: int, read: Read) -> None",
+     "summary": "Keeps a read (the newest KEEP) and refits within REFIT_S, on a thread; saves every SAVE_S."
+    },
+    {
+     "name": "fit",
+     "kind": "function",
+     "line": 107,
+     "signature": "def fit(reads: list[Read], hits: int) -> tuple[int, int] | None",
+     "summary": "The (lo, hi) hit damage that makes the reads likeliest, on a coarse then a fine grid; None under MIN_EXACT exact reads."
+    },
+    {
+     "name": "_loglik",
+     "kind": "function",
+     "line": 95,
+     "signature": "def _loglik(lo, hi, hits, d, tol, least, span) -> np.ndarray",
+     "summary": "Log likelihood of each (lo, hi) given exact reads (with tolerance) and kills' at-least values, with outliers."
+    },
+    {
+     "name": "_cdf",
+     "kind": "function",
+     "line": 80,
+     "signature": "def _cdf(x, lo, hi, hits) -> np.ndarray",
+     "summary": "P(a throw's damage <= x): uniform for one hit, triangle for two, normal for more."
+    },
+    {
+     "name": "Book.attack",
+     "kind": "method",
+     "line": 235,
+     "signature": "def attack(self, prior: Attack | None) -> Attack | None",
+     "summary": "The prior attack with its lo and hi as learned (once fitted), else the prior."
+    },
+    {
+     "name": "Book.miss",
+     "kind": "method",
+     "line": 244,
+     "signature": "def miss(self, key: str, default: float) -> float",
+     "summary": "Her throws' share that took nothing, from MIN_MISSES judged throws on."
+    },
+    {
+     "name": "Book._fit",
+     "kind": "method",
+     "line": 209,
+     "signature": "def _fit(self, key: str, hits: int) -> None",
+     "summary": "Refits one attack, bumps version on change, stores the fit's counts and logs a change of more than 5%."
+    },
+    {
+     "name": "Book.save",
+     "kind": "method",
+     "line": 265,
+     "signature": "def save(self, force: bool = False) -> None",
+     "summary": "Writes reads and fits atomically (temp file then replace) if anything changed."
+    },
+    {
+     "name": "Read",
+     "kind": "dataclass",
+     "line": 56,
+     "signature": "@dataclass(frozen=True) class Read",
+     "summary": "One thing a throw showed: exact damage, at least (a kill) or a miss, with its tolerance and her level."
+    }
+   ],
+   "inputs": [
+    "Reads from Attacks._learn_bar and Attacks._learn_kill (the magician's casts)",
+    "Her level as perception reads it (Hunter.level), to keep and filter reads",
+    "Her damage file, lab/damage.json (per character)"
+   ],
+   "outputs": [
+    "Book.attack: her skill with fitted lo/hi for Attacks' reckoning",
+    "Book.miss: her miss share",
+    "Book.said: a log line ('magic_claw: 125-150 a hit as learned ...')",
+    "The damage file, rewritten"
+   ],
+   "uses": [
+    "gamelab/attack/choice.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/damage.json",
+     "mode": "read-write",
+     "what": "each attack's reads and fit (paths.of().damage: another character's under lab/characters/<folder>/)"
+    }
+   ],
+   "concurrency": "Refits on a daemon thread named 'damage-fit', one at a time, at most every REFIT_S per attack (a fit takes 0.1-0.4 s); THREADED False (tests) fits at once. Saves every SAVE_S and at process exit (atexit).",
+   "tunables": [
+    {
+     "name": "BAR_PX",
+     "value": "46",
+     "meaning": "px of a monster's HP bar fill: a read's give or take is one px"
+    },
+    {
+     "name": "TOL_MIN",
+     "value": "3.0",
+     "meaning": "least tolerance of a read, in damage"
+    },
+    {
+     "name": "MISS_PX",
+     "value": "0.5",
+     "meaning": "px: a bar lower by less than this after one throw is a miss"
+    },
+    {
+     "name": "OUTLIER / OUTLIER_KILL",
+     "value": "0.05 / 0.15",
+     "meaning": "chance a read / a kill is anything at all"
+    },
+    {
+     "name": "KILL_SLACK",
+     "value": "0.15",
+     "meaning": "a kill's at-least more than this share over the largest exact read is not used"
+    },
+    {
+     "name": "MIN_EXACT",
+     "value": "15",
+     "meaning": "exact reads before the fit replaces the prior"
+    },
+    {
+     "name": "MIN_MISSES",
+     "value": "20",
+     "meaning": "judged throws before the miss share is used"
+    },
+    {
+     "name": "KEEP",
+     "value": "400",
+     "meaning": "reads kept per attack (the newest)"
+    },
+    {
+     "name": "LEVELS_BACK",
+     "value": "1",
+     "meaning": "reads of her level and this many under it are used"
+    },
+    {
+     "name": "REFIT_S / SAVE_S",
+     "value": "10.0 / 60.0",
+     "meaning": "s between fits / saves at most"
+    },
+    {
+     "name": "GRID",
+     "value": "(48, 64)",
+     "meaning": "the coarse grid's lo and hi steps"
+    },
+    {
+     "name": "THREADED",
+     "value": "True",
+     "meaning": "fits on their own thread"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Her damage learned from the bars as she hunts and kept between runs.",
+     "why": "The user: \"The fitted damage should be dynamically updated as grinding goes, and memorized between runs\"."
+    },
+    {
+     "date": "",
+     "what": "A kill's at-least far over the exact reads is dropped (KILL_SLACK).",
+     "why": "Kills credited to a first cast that a second made had a Horny Mushroom's at-least at its whole 403 and widened the fit to 76-264."
+    }
+   ],
+   "gotchas": [
+    "Only the magician gets a Book (Hunter makes one when her profile has a skill and Magic Claw is bound).",
+    "A new fit takes effect at Attacks' next look, when it sees `version` change.",
+    "After a level up, reads more than LEVELS_BACK under her level stop counting, but the last fit is kept: a refit with under MIN_EXACT reads changes nothing, so the old lo/hi stay until 15 exact reads at the new levels; only the miss share (Book.miss) falls back to the profile's MISS under MIN_MISSES judged throws.",
+    "A read that fails to parse is skipped; a fit that fails keeps the last one and is logged, never ending the hunt."
+   ],
+   "tests": [
+    "tests/test_damage.py",
+    "tests/test_sim_magic.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/ledger.py",
+   "title": "Ledger: kills, wounds and drops",
+   "tagline": "Every EXP gain placed on a monster; her wounds; every pile she knows of",
+   "summary": "The hunt's bookkeeping, kept up from every look and throw. The Ledger turns each EXP gain into a Kill placed on the monster her attack took (the tracker's binding first, else her throws' paths) and keeps which tracks are dead. Wounds lists monsters she hurt and hasn't killed. The DropStore keeps every pile, its worth and how likely it still lies there.",
+   "details_md": "Step 4 of `gamelab/docs/hunt-modes.md`. Three observers kept up from every look (`on_look`) and every throw (`on_throw`), whoever takes them. The hunt loop\nreads the drop store; the fights and the hunt loop read the wounds; almost everything reads which monsters are dead.\n\n### The ledger (`Ledger`)\nEach new EXP gain (`Hunter.exp_gains`, with when it showed and the kind it named: `gains_told`) becomes a `Kill`.\n`_place` puts it on a monster:\n1. the track the perception service's tracker bound the gain to (`_bound`: a track whose gain time is within\n   `TRACK_GAIN_S` 0.02 s), its throw (one keyed 0.1-0.6 s before, `GAIN_AFTER_KEY`) used up: one star, one kill;\n2. else a monster of the named kind in the path of a throw keyed 0.1-0.6 s before the gain;\n3. else one in a path of the last `STAR_WINDOW` (2.5 s) of throws (or that long before the previous look),\n   preferring monsters now gone from view, and with `PLAYER_KILLS` one by another player last;\n4. else unplaced: counted for its kind, no place, no drops (`KIND_ANY` False: no other kind is tried).\n\nA placed kill asks the drop store for an expected pile. For `FOLLOW_S` (3 s) a tracked kill follows its track as it\nwalks on, and moves when the tracker re-binds the gain. `_dead_of` keeps `dead` (track ids dead or dying, kept\n`DEAD_KEEP_S` 15 s), `theirs` (other players' kills) and `unsure` (bound but no death seen yet).\n\n### Who is dying (`dying`)\nA monster is no target while its track is in `dead`, or a kill of hers is bound to it (for its death animation plus\n`BOUND_LASTS_S` 1 s while seen); without tracks, while its kind's death animation (`DIE_S` 0.66 s default) runs from the\nplacing look, if it's the nearest of its kind within `DYING_DX` (40) of where the kill was placed.\n\n### What a throw can take (`in_path`)\nThe monsters an attack from the ground that way can take, likeliest first (`reach.take_chances` by bodies), without\nthose whose star terrain stops (unless the claw reaches them). Used by the ledger, wounds and `Attacks.target`.\n\n### Her wounds (`Wounds`)\nA monster in a recent throw's path whose HP bar shows up or changes by more than `WOUND_HURT` (0.02) is hers. It's\nfollowed until a kill is placed on it, its track dies, it's unseen `WOUND_LOST_S` (3 s), or `WOUND_S` (15 s) pass since\nit was first hurt. `fight.owed` finishes these.\n\n### The drop store (`DropStore`)\nEvery pile she knows of (`Pile`): expected at a placed kill (worth its kind's expected drops), confirmed or emptied by\neach look's loot and each strip of drops perception searched since the last look. Each drop seen goes to its nearest\npile within `LOOT_REACH` (60); unclaimed drops make another's pile. A pile is gone after two empty sightings\n`EMPTY_LOOKS` (1.5 s) apart, at least `SETTLE` (3 s) after its kill; one of hers seen gone that a sighting within\n`REVIVE_S` (30 s) shows again was only missed. How likely it still lies there is `survival` by its age: hers alone for\n`OWN_S` (15 s), then taken at `TAKE_RATE` 0.05 a minute, gone at the expiry pass after `EXPIRE_S` (180 s) +\n`EXPIRE_PASS_S` (60 s); others' by the live curve.\n",
+   "lines": 712,
+   "key_items": [
+    {
+     "name": "Ledger",
+     "kind": "class",
+     "line": 198,
+     "signature": "class Ledger",
+     "summary": "Her kills for the whole hunt: every EXP gain placed where a throw of hers explains it; dead, theirs and unsure tracks."
+    },
+    {
+     "name": "Ledger.on_look",
+     "kind": "method",
+     "line": 235,
+     "signature": "def on_look(self, s: Scene) -> None",
+     "summary": "Each new EXP gain becomes a Kill; dead tracks updated; tracked kills followed; throw paths followed to this look."
+    },
+    {
+     "name": "Ledger._place",
+     "kind": "method",
+     "line": 256,
+     "signature": "def _place(self, s, kind=None, gained=None) -> Kill",
+     "summary": "Places a gain: the tracker's bound track, else the throw keyed 0.1-0.6 s before, else recent throws' paths, else unplaced."
+    },
+    {
+     "name": "Ledger.on_throw",
+     "kind": "method",
+     "line": 227,
+     "signature": "def on_throw(self, when: float, side: str) -> None",
+     "summary": "Keeps each throw with what's in its path (none dying) from the last look with monsters."
+    },
+    {
+     "name": "Ledger._dead_of",
+     "kind": "method",
+     "line": 301,
+     "signature": "def _dead_of(self, s: Scene) -> None",
+     "summary": "The feed's tracks killed or dying into dead, theirs and unsure; kept DEAD_KEEP_S."
+    },
+    {
+     "name": "Ledger._follow",
+     "kind": "method",
+     "line": 326,
+     "signature": "def _follow(self, s: Scene) -> None",
+     "summary": "Tracked kills of the last FOLLOW_S follow their track, or move with the tracker's re-binding."
+    },
+    {
+     "name": "dying",
+     "kind": "function",
+     "line": 467,
+     "signature": "def dying(kills, m, t, seen=(), die=None, dead=()) -> bool",
+     "summary": "Whether a monster is taken for dead or dying: its track dead or bound to her kill, or nearest a fresh kill of its kind."
+    },
+    {
+     "name": "in_path",
+     "kind": "function",
+     "line": 486,
+     "signature": "def in_path(s, side, monsters, sizes=None) -> list[Monster]",
+     "summary": "The monsters a ground attack that way can take, likeliest first, none behind a wall."
+    },
+    {
+     "name": "is_kill",
+     "kind": "function",
+     "line": 438,
+     "signature": "def is_kill(m: Monster, k: Kill) -> bool",
+     "summary": "Whether a placed kill is this monster's: by track, else kind, platform and within TRACK_SLACK."
+    },
+    {
+     "name": "Wounds",
+     "kind": "class",
+     "line": 384,
+     "signature": "class Wounds",
+     "summary": "The monsters she has hurt and not killed."
+    },
+    {
+     "name": "Wounds.on_look",
+     "kind": "method",
+     "line": 403,
+     "signature": "def on_look(self, s: Scene) -> None",
+     "summary": "New wounds from throw paths with a bar new or changed; followed; closed by kills, deaths, time unseen or chased too long."
+    },
+    {
+     "name": "DropStore",
+     "kind": "dataclass",
+     "line": 568,
+     "signature": "@dataclass class DropStore",
+     "summary": "Every pile she knows of, fed by placed kills and every look's drop searches."
+    },
+    {
+     "name": "DropStore._sighting",
+     "kind": "method",
+     "line": 631,
+     "signature": "def _sighting(self, t, seen, in_view, ground) -> None",
+     "summary": "Drops seen: each to its nearest pile within LOOT_REACH; piles emptied twice are gone; missed ones revived; the rest others' piles."
+    },
+    {
+     "name": "Pile.still",
+     "kind": "method",
+     "line": 544,
+     "signature": "def still(self, now: float, dt: float = 0.0) -> float",
+     "summary": "The chance a pile still lies there dt from now, given it did when last seen (survival by age)."
+    },
+    {
+     "name": "survival",
+     "kind": "function",
+     "line": 556,
+     "signature": "def survival(age: float, hers: bool = True) -> float",
+     "summary": "The share of drops still lying at an age: hers or others' curve, straight between points."
+    }
+   ],
+   "inputs": [
+    "Every look (Scene: monsters, the feed's tracks with gain bindings, deaths and causes, drop strips, loot, players)",
+    "Every throw's key time and side (Actions.throw_listeners)",
+    "Her EXP gains and their kinds (Hunter.exp_gains, gains_told)",
+    "What drops are worth on the map (looting.Worth, expected_worth)",
+    "Monster bodies and death animations from the game data"
+   ],
+   "outputs": [
+    "Ledger.kills (Kill records), dead / theirs / unsure track sets, moved (re-bound kills) for memory, fights, attacks and grind",
+    "Wounds.open / seen_within for fight.owed and the hunt loop",
+    "DropStore piles (known, still, value) for the hunt loop, grind, sweeps and Targeting",
+    "dying() and in_path() used by fight and attacks",
+    "Telemetry 'event' kill_moved and pile_revived"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "gamelab/telemetry.py",
+    "gamelab/attack/reach.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/scene.py",
+    "gamelab/behavior/looting.py"
+   ],
+   "files_io": [],
+   "concurrency": "None: plain observers called by Senses and Actions on the hunt's thread.",
+   "tunables": [
+    {
+     "name": "STAR_WINDOW",
+     "value": "2.5",
+     "meaning": "s after a throw's key that an EXP gain can still be its kill, as looks see it"
+    },
+    {
+     "name": "DIE_S",
+     "value": "0.66",
+     "meaning": "s a placed kill's monster is taken for dying when its kind's death animation isn't known"
+    },
+    {
+     "name": "BOUND_LASTS_S",
+     "value": "1.0",
+     "meaning": "s past the death animation a tracked kill still says its track is dying"
+    },
+    {
+     "name": "DYING_DX",
+     "value": "40.0",
+     "meaning": "units from where a kill was placed within which a monster of its kind is the dying one"
+    },
+    {
+     "name": "DEAD_KEEP_S",
+     "value": "15.0",
+     "meaning": "s a dead track is kept after a look last had it so"
+    },
+    {
+     "name": "TRACK_GAIN_S",
+     "value": "0.02",
+     "meaning": "s: a track bound to a gain within this is that kill's"
+    },
+    {
+     "name": "FOLLOW_S",
+     "value": "3.0",
+     "meaning": "s after a kill that its place follows its track"
+    },
+    {
+     "name": "DROP_LANDS / LANDED_S",
+     "value": "2.0 / 0.2",
+     "meaning": "s after a kill its drops lie, and the margin past it for 'dropped nothing'"
+    },
+    {
+     "name": "OWN_S",
+     "value": "15.0",
+     "meaning": "s a kill's drops are its killer's alone (the simulator's figure, not measured)"
+    },
+    {
+     "name": "TAKE_RATE",
+     "value": "0.05",
+     "meaning": "a minute: others taking her drops once past OWN_S (a guess)"
+    },
+    {
+     "name": "EXPIRE_S / EXPIRE_PASS_S",
+     "value": "180.0 / 60.0",
+     "meaning": "s her drops lie at least, then gone at an expiry pass within this"
+    },
+    {
+     "name": "GONE_KEEP_S",
+     "value": "300.0",
+     "meaning": "s a gone pile stays in the store"
+    },
+    {
+     "name": "REVIVE_S",
+     "value": "30.0",
+     "meaning": "s within which a pile of hers seen gone is revived by a sighting"
+    },
+    {
+     "name": "HELD_AGE / HELD_DX",
+     "value": "True / 10.0",
+     "meaning": "a pile holding an older pile's drops (within 10 units) keeps the older age"
+    },
+    {
+     "name": "PLAYER_KILLS",
+     "value": "True",
+     "meaning": "a monster gone by another player is the last candidate for her gain"
+    },
+    {
+     "name": "KIND_ANY",
+     "value": "False",
+     "meaning": "a gain whose kind no throw path holds stays unplaced"
+    },
+    {
+     "name": "WOUND_HURT / WOUND_LOST_S / WOUND_S",
+     "value": "0.02 / 3.0 / 15.0",
+     "meaning": "bar change that makes a wound / s unseen / s since first hurt"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "A placed kill's monster is taken for dying for its kind's death animation (DIE_S, DYING_DX).",
+     "why": "On 2026-10-25 a dying monster stayed drawn 0.6-1.3 s and took 18 casts and 4 throws in 11 minutes."
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Kills bound to the tracker's track (Kill.track) first.",
+     "why": "README: Her kill's monster, followed by its track, its death seen."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Each drop seen goes to its nearest pile only.",
+     "why": "Until then every pile within LOOT_REACH took it: 15-24% of listed pile worth was the same drops counted 2-3 times."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Piles of hers seen gone are revived by a sighting within REVIVE_S.",
+     "why": "A strip's search misses drops under a monster or a player (74 of 962 whole strips in the simulator)."
+    },
+    {
+     "date": "2026-10-31",
+     "what": "survival from live evidence: hers kept OWN_S, then TAKE_RATE, then the expiry pass.",
+     "why": "The raw curve counted pet pickups and misses as takings, and 11% of her drops' worth expired in her store."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "HELD_AGE only while a look still sees a drop where the older pile's lay.",
+     "why": "From the independent check: a pile whose own drops lay until 330 s was given up at 241 s."
+    }
+   ],
+   "gotchas": [
+    "dying() depends on GAMELAB_SCREEN and GAMELAB_TARGET (via _says_dying): with either set to '0', a kill bound to a track keeps it dying while it's among the last 8 kills.",
+    "A kill no throw explains is still a Kill with kind None: counted, unplaced, no pile.",
+    "Gone piles stay GONE_KEEP_S only to bound the store; only counters (gone_tried) read them.",
+    "Track ids are never reused, so dead is a plain id -> time map.",
+    "Wounds.on_look must run after Ledger.on_look (it closes wounds on kills just placed): the Hunter's listener order ensures it.",
+    "A grind with the target-first planner sets DropStore.revive_s to EXPIRE_S (180 s) for its run (behavior.grind), so a pile of hers seen gone and seen again later is hers however late; REVIVE_S (30 s) is put back at its end."
+   ],
+   "tests": [
+    "tests/test_ledger.py",
+    "tests/test_kill_credit.py",
+    "tests/test_choice.py",
+    "tests/test_damage.py",
+    "tests/test_drop_worlds.py",
+    "tests/test_fight.py",
+    "tests/test_grind.py",
+    "tests/test_hunt.py",
+    "tests/test_loot.py",
+    "tests/test_loot_chain.py",
+    "tests/test_magician_hunt.py",
+    "tests/test_spawnclock.py",
+    "tests/test_target.py"
+   ]
+  },
+  {
+   "path": "gamelab/behavior/targeting.py",
+   "title": "Targeting (the target-first planner)",
+   "tagline": "The grind's planner: one primary target, the next, and the plan against it",
+   "summary": "The grind's target-first planner, on by default since 2026-11-04. At each look it builds the character's state and the candidate monsters (with the whole screen, every monster on it), lets attack.target's Chooser pick the primary and the next by EXP over time, and plans against the primary: the stance's act, a walk to a place that works, or a trip. While her attack lock runs out it watches every frame for a monster coming at her or a better newborn, and it decides when drops go first.",
+   "details_md": "The grind's fight on a platform, as the user asked on 2026-11-04: decide which one monster to hit and plan against\nthat. `Targeting` turns each look into `attack.target`'s `Her` and `Foe`s and keeps a `Chooser` (the primary target and\nthe next). Only `behavior.grind` builds one (when `on()`), and it hooks `watch_lock` into `Actions.lock_watch`.\nEverything else about a stop (where she goes next, potions, the safety stop, the Lie Detector) stays the grind's.\n\n### The choice (`decide`)\nAt each pass: `pace_of` (her lock and monsters' walks), `her_at` (her platform, place, facing, danger, stand limits,\njump hits, and with the whole screen the navigator's route times), `foes_of` (the hunt's targets, the look's monsters of the\nkinds she hunts plus any kind on or beside her platform, and with `screen_on` the rest of the screen and those the look\nmissed; a target set aside is left out). Each `Foe` has its kind's EXP,\nits kill time (`Attacks.kill_s`), the chance it's there and alive (`Attacks.chance`, times 1 − her reckoned dead chance;\nthe magician's held ones × `HELD_P` 0.25), its walk (track, or her aggro belief's chase) and a newborn's fade. The\n`Chooser` ranks by EXP over time to an attack plus kill time and keeps the primary unless another beats it by its\nmargin (1.3). On a trip, monsters too close come first.\n\n### The plan (`plan`, `walk_step`, `trip_act`)\nThe stance's own act at the primary; with nothing from where she stands, the walk to the nearest place that works\n(`attack.target.places`, the first whose way the navigator finds clear, at most `WALK_STEP` 100 units at once); off her\nplatform, a trip there. A target with nothing to do against it is set aside for `NO_WAY_S` (0.5 s) so she never idles on one.\n\n### While her lock runs out (`watch_lock`)\nNo key can go, and a look would be the wrong one to decide on, so each frame (`FRAME_S`, 1/15 s) the feed's newest\nstate is read: a monster coming at her that isn't her target, or a newborn that beats the primary by the margin, calls\nthe attack off (`False`) and the next pass decides at once.\n\n### Drops\n`loot_allow`: a pile near its end (`LOOT_DUE_S` 30 s of its 180 s left), any pile when nothing is on the screen\n(`quiet`), or one on her platform already seen or still landing may cost anything (`LOOT_ALL`); others `LOOT_FRESH`\n(3 s) on her way (none while the sweep asks for her platform alone). `pile_first`: a pile goes before the primary only when it would\nexpire first, or it's nearer than a primary she must walk to; never against a monster coming at her.\n\n### Switches\n`GAMELAB_TARGET` (on), `GAMELAB_SCREEN` (on), `GAMELAB_LOOT_CHAIN` (via `lootchain.on`), `GAMELAB_STAY_OR_GO` ('0' by\ndefault: a trip's landings asked, her round weighed against what the screen had lately, `_worth`).\n",
+   "lines": 547,
+   "key_items": [
+    {
+     "name": "Targeting",
+     "kind": "class",
+     "line": 146,
+     "signature": "class Targeting",
+     "summary": "The planner's state in a grind: the chooser, the last choice, set-aside targets, counters and timing."
+    },
+    {
+     "name": "Targeting.decide",
+     "kind": "method",
+     "line": 372,
+     "signature": "def decide(self, s, targets, visible, hidden, trip: bool, free: bool = False) -> list",
+     "summary": "The primary at a look as the hunt's targets (one monster or none); the choice kept for the plan."
+    },
+    {
+     "name": "Targeting.foes_of",
+     "kind": "method",
+     "line": 309,
+     "signature": "def foes_of(self, s, targets, visible, pace, more=()) -> list[tg.Foe]",
+     "summary": "This look's candidates with EXP, kill time, chance there and alive, walk, chase and fade."
+    },
+    {
+     "name": "Targeting.watch_lock",
+     "kind": "method",
+     "line": 180,
+     "signature": "def watch_lock(self) -> bool",
+     "summary": "Her lock waited out frame by frame; False calls the attack off for a monster coming at her or a better newborn."
+    },
+    {
+     "name": "Targeting._changes",
+     "kind": "method",
+     "line": 199,
+     "signature": "def _changes(self, st, events, left: float) -> bool",
+     "summary": "Whether a frame has a newborn that beats the target or a monster coming at her that isn't her target."
+    },
+    {
+     "name": "Targeting.plan",
+     "kind": "method",
+     "line": 490,
+     "signature": "def plan(self, s, act: tuple, approach: bool, acting: bool = True) -> tuple",
+     "summary": "The act for the primary: the stance's, else a walk to its place; a wait sets the target aside NO_WAY_S."
+    },
+    {
+     "name": "Targeting.walk_step",
+     "kind": "method",
+     "line": 461,
+     "signature": "def walk_step(self, s) -> tuple[str, float, float] | None",
+     "summary": "The walk to the nearest place along her platform from which her attack lands on the primary."
+    },
+    {
+     "name": "Targeting.loot_allow",
+     "kind": "method",
+     "line": 259,
+     "signature": "def loot_allow(self, p, s, now: float) -> float",
+     "summary": "The seconds a pile may add to her way: all near its end, with nothing on the screen, or on her platform (seen or still landing); else LOOT_FRESH."
+    },
+    {
+     "name": "Targeting.pile_first",
+     "kind": "method",
+     "line": 270,
+     "signature": "def pile_first(self, p, stop, now: float) -> bool",
+     "summary": "Whether the sweep's first pile goes before the primary."
+    },
+    {
+     "name": "Targeting.peek",
+     "kind": "method",
+     "line": 396,
+     "signature": "def peek(self, s) -> tg.Choice",
+     "summary": "What the choice would be at a trip's look, the chooser's state restored after."
+    },
+    {
+     "name": "Targeting.rather",
+     "kind": "method",
+     "line": 435,
+     "signature": "def rather(self, s, dst: int) -> bool",
+     "summary": "A trip would stand and wait for a monster: whether there's something else to go at meanwhile."
+    },
+    {
+     "name": "Targeting._worth",
+     "kind": "method",
+     "line": 412,
+     "signature": "def _worth(self, c: tg.Choice) -> tg.Choice",
+     "summary": "(Stay or go) what the screen has for her in EXP a second, and lately (decaying over SCREEN_S)."
+    },
+    {
+     "name": "on",
+     "kind": "function",
+     "line": 73,
+     "signature": "def on() -> bool",
+     "summary": "Whether the planner runs (GAMELAB_TARGET, on by default)."
+    },
+    {
+     "name": "screen_on",
+     "kind": "function",
+     "line": 79,
+     "signature": "def screen_on() -> bool",
+     "summary": "Whether every monster on the screen is a candidate (GAMELAB_SCREEN, on by default)."
+    },
+    {
+     "name": "stay_or_go",
+     "kind": "function",
+     "line": 85,
+     "signature": "def stay_or_go() -> tuple[bool, bool]",
+     "summary": "GAMELAB_STAY_OR_GO: landings asked, her round weighed; '0' (neither) by default."
+    }
+   ],
+   "inputs": [
+    "The grind (its hunter, map, danger, tour EXP table, navigator planner, rest of the screen, jump hits)",
+    "Each pass's look (Scene) and fight.pace_of",
+    "The feed's newest state and pending events during her lock (watch_lock)",
+    "Attacks.chance, reckon, kill_s, refused; her aggro belief's chasers",
+    "Drop store piles for loot_allow and pile_first"
+   ],
+   "outputs": [
+    "The primary as the grind's fight target list",
+    "Plan acts: the stance's act, an approach walk, a trip to a platform",
+    "Attack called off (watch_lock returns False)",
+    "Loot permissions for the grind's sweep",
+    "Telemetry 'target' records on change and 'target_end' at the run's end"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "gamelab/telemetry.py",
+    "gamelab/behavior/ledger.py",
+    "gamelab/attack/target.py",
+    "gamelab/attack/stance.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/rate.py",
+    "gamelab/motion/route.py",
+    "gamelab/perception/spawns.py",
+    "gamelab/behavior/fight.py",
+    "gamelab/behavior/lootchain.py"
+   ],
+   "files_io": [],
+   "concurrency": "watch_lock runs inside Actions._lock_for_attack on the hunt's thread, reading the feed's newest state about every FRAME_S (1/15 s) until her lock ends.",
+   "tunables": [
+    {
+     "name": "FRAME_S",
+     "value": "1/15",
+     "meaning": "s between frames watch_lock reads (localization.rate.HZ 15)"
+    },
+    {
+     "name": "HELD_P",
+     "value": "0.25",
+     "meaning": "(the magician) a monster her cast is held at is this much less likely to be hit"
+    },
+    {
+     "name": "LOOT_ALL",
+     "value": "1e6",
+     "meaning": "s: no bound on what a pile may cost"
+    },
+    {
+     "name": "LOOT_FRESH",
+     "value": "3.0",
+     "meaning": "s a far pile may add to her way"
+    },
+    {
+     "name": "LOOT_DUE_S",
+     "value": "30.0",
+     "meaning": "s of a pile's life left from which it comes before the primary"
+    },
+    {
+     "name": "ASKS",
+     "value": "4",
+     "meaning": "targets the plan is asked for at most at a pass (read by the grind)"
+    },
+    {
+     "name": "NO_WAY_S",
+     "value": "0.5",
+     "meaning": "s a target with nothing to do against it is set aside"
+    },
+    {
+     "name": "IDLE_S",
+     "value": "1.5",
+     "meaning": "s with nothing to act on before the grind goes on (read by the grind)"
+    },
+    {
+     "name": "BLOCKED_S",
+     "value": "1.0",
+     "meaning": "s a platform a trip would wait for is kept off if there's another target (a guess)"
+    },
+    {
+     "name": "ROUTE_STEP",
+     "value": "8.0",
+     "meaning": "units her x is rounded to for route times, so searches are kept"
+    },
+    {
+     "name": "KILL_GAP_S",
+     "value": "2.4",
+     "meaning": "s from a kill to her next attack, live, in _worth"
+    },
+    {
+     "name": "SCREEN_S",
+     "value": "60.0",
+     "meaning": "s over which what the screen had for her decays (a guess)"
+    },
+    {
+     "name": "CASTS_TOO",
+     "value": "False",
+     "meaning": "stay-or-go off for the magician"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-04",
+     "what": "The target-first planner, on by default (its second gate not passed).",
+     "why": "The user: \"planner should just decide which mob to hit and plan against that\"."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "Every monster on the screen is a candidate, piles of monsters favoured (GAMELAB_SCREEN).",
+     "why": "The user: the 2nd target was chosen only from those reachable from where she stood."
+    },
+    {
+     "date": "2026-11-04",
+     "what": "Drops: every pile she may take is gone for (LOOT_ALL, LOOT_DUE_S).",
+     "why": "The user: \"you should aim for 100% pick up rate\"."
+    },
+    {
+     "date": "2026-11-05",
+     "what": "Stay or go (GAMELAB_STAY_OR_GO) built, off by default.",
+     "why": "No simulator table could tell it from a do-nothing; it waits for a live trial."
+    }
+   ],
+   "gotchas": [
+    "Only the grind builds Targeting, and wires Actions.lock_watch to watch_lock; elsewhere the lock is waited out blind.",
+    "peek() must not change the chooser: it saves and restores primary and next.",
+    "Off (GAMELAB_TARGET=0), none of this runs and the grind is the one before it, to the digit.",
+    "Not yet run live (README)."
+   ],
+   "tests": [
+    "tests/test_target.py",
+    "tests/test_stay_or_go.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "Report",
+   "module": "gamelab/behavior/fight.py",
+   "line": 131,
+   "summary": "What she did in a fight or a tour stop; the Hunter's `report`, added up by tours and the hunt loop.",
+   "fields": [
+    {
+     "name": "kills",
+     "type": "dict[str, int]",
+     "meaning": "kills by kind"
+    },
+    {
+     "name": "exp_kills",
+     "type": "int",
+     "meaning": "times her EXP went up: every kill of hers"
+    },
+    {
+     "name": "throws",
+     "type": "int",
+     "meaning": "throws carried out"
+    },
+    {
+     "name": "lost",
+     "type": "int",
+     "meaning": "targets that vanished without her EXP going up"
+    },
+    {
+     "name": "touches / misses",
+     "type": "int",
+     "meaning": "monster touches, and of them her MISS evasions"
+    },
+    {
+     "name": "damage_taken",
+     "type": "float",
+     "meaning": "fraction of HP lost overall"
+    },
+    {
+     "name": "potions / drinks",
+     "type": "int",
+     "meaning": "her own potion key's / potions seen in her HP number"
+    },
+    {
+     "name": "lowest_hp",
+     "type": "float | None",
+     "meaning": "her lowest HP number read"
+    },
+    {
+     "name": "loot_runs",
+     "type": "int",
+     "meaning": "loot runs"
+    },
+    {
+     "name": "stop",
+     "type": "str",
+     "meaning": "why it ended ('kill limit', 'nothing left in reach', ...)"
+    }
+   ]
+  },
+  {
+   "name": "FightState",
+   "module": "gamelab/behavior/fight.py",
+   "line": 180,
+   "summary": "What clear() keeps between looks: monsters thrown at (kept while hidden), kills fading, the last throw's path.",
+   "fields": [
+    {
+     "name": "thrown",
+     "type": "list[[Monster, float]]",
+     "meaning": "thrown at, and when last seen"
+    },
+    {
+     "name": "dying",
+     "type": "list[(Monster, float)]",
+     "meaning": "kills seen fading, and when"
+    },
+    {
+     "name": "aimed",
+     "type": "list[Monster]",
+     "meaning": "in the attack's path at the last throw"
+    },
+    {
+     "name": "keyed",
+     "type": "list[(float, list[Monster])]",
+     "meaning": "throws of the last KEYED_KEEP_S with their paths"
+    },
+    {
+     "name": "kill_spots",
+     "type": "list[DropSpot]",
+     "meaning": "where kills on her platform died: swept after"
+    },
+    {
+     "name": "exp_counted",
+     "type": "int",
+     "meaning": "EXP gains already told apart as kills"
+    },
+    {
+     "name": "start_platform",
+     "type": "int | None",
+     "meaning": "leaving it means she was knocked off"
+    },
+    {
+     "name": "moves",
+     "type": "int",
+     "meaning": "moves away since her last throw (stance.MAX_MOVES)"
+    },
+    {
+     "name": "unsure / touch",
+     "type": "list[Monster]",
+     "meaning": "hidden monsters no throw is worth that her body still keeps off; monsters her kills are bound to with no death seen yet, within TOUCH_NEAR of her"
+    }
+   ]
+  },
+  {
+   "name": "KillState",
+   "module": "gamelab/behavior/fight.py",
+   "line": 1435,
+   "summary": "What kill() keeps between looks about its one target, including the shot log's throws in flight.",
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "the target's kind"
+    },
+    {
+     "name": "last / platform",
+     "type": "(float, float) / int | None",
+     "meaning": "where it was last seen"
+    },
+    {
+     "name": "first_throw",
+     "type": "float | None",
+     "meaning": "EXP gains since then can be its kill"
+    },
+    {
+     "name": "gone_since",
+     "type": "float | None",
+     "meaning": "since when it hasn't been seen"
+    },
+    {
+     "name": "flying",
+     "type": "list[dict]",
+     "meaning": "its throws for the shot log"
+    }
+   ]
+  },
+  {
+   "name": "Aim",
+   "module": "gamelab/behavior/fight.py",
+   "line": 1013,
+   "summary": "Her running attack's target (Hunter.aim), held in pace_of so a flinching monster isn't walked on.",
+   "fields": [
+    {
+     "name": "key",
+     "type": "float",
+     "meaning": "her attack key's time"
+    },
+    {
+     "name": "kind / platform / x",
+     "type": "str / int / float",
+     "meaning": "the target as the decision's look had it"
+    },
+    {
+     "name": "walk",
+     "type": "float",
+     "meaning": "its walk, units/s"
+    },
+    {
+     "name": "seen",
+     "type": "float",
+     "meaning": "the decision's look time"
+    },
+    {
+     "name": "bar",
+     "type": "float | None",
+     "meaning": "its bar then (None: unhurt)"
+    }
+   ]
+  },
+  {
+   "name": "Kill",
+   "module": "gamelab/behavior/ledger.py",
+   "line": 171,
+   "summary": "One kill her EXP told of, made by the Ledger; read by fights, attacks, wounds, memory and the grind.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "the look that saw her EXP go up"
+    },
+    {
+     "name": "kind",
+     "type": "str | None",
+     "meaning": "the monster's kind; None: unplaced (no throw explains it)"
+    },
+    {
+     "name": "platform / x / y",
+     "type": "int | None / float / float",
+     "meaning": "where it died"
+    },
+    {
+     "name": "ground",
+     "type": "int | None",
+     "meaning": "the platform the kill is credited to"
+    },
+    {
+     "name": "named",
+     "type": "str | None",
+     "meaning": "the kind the gain's size named"
+    },
+    {
+     "name": "gained",
+     "type": "float | None",
+     "meaning": "when the gain showed (frame time)"
+    },
+    {
+     "name": "track",
+     "type": "int | None",
+     "meaning": "the feed's track it's bound to (0: let go)"
+    },
+    {
+     "name": "pile",
+     "type": "Pile | None",
+     "meaning": "its expected pile in the drop store"
+    }
+   ]
+  },
+  {
+   "name": "Wound",
+   "module": "gamelab/behavior/ledger.py",
+   "line": 376,
+   "summary": "A monster she has hurt and not seen die (Wounds.open), finished by fight.owed.",
+   "fields": [
+    {
+     "name": "m",
+     "type": "Monster",
+     "meaning": "as a look last saw it"
+    },
+    {
+     "name": "since",
+     "type": "float",
+     "meaning": "when a look first saw it hurt by her"
+    },
+    {
+     "name": "seen",
+     "type": "float",
+     "meaning": "when a look last saw it"
+    }
+   ]
+  },
+  {
+   "name": "Pile",
+   "module": "gamelab/behavior/ledger.py",
+   "line": 505,
+   "summary": "Drops lying together (or about to land) on the map, in the DropStore; read by the hunt loop, grind and Targeting.",
+   "fields": [
+    {
+     "name": "x / y / platform",
+     "type": "float / float / int",
+     "meaning": "where"
+    },
+    {
+     "name": "since",
+     "type": "float",
+     "meaning": "its kill (hers) or first sighting"
+    },
+    {
+     "name": "hers",
+     "type": "bool",
+     "meaning": "a kill of hers explains it"
+    },
+    {
+     "name": "status",
+     "type": "str",
+     "meaning": "expected | seen | gone"
+    },
+    {
+     "name": "worth / unseen",
+     "type": "float | None / float",
+     "meaning": "what the last look saw is worth / worth before seen"
+    },
+    {
+     "name": "items / each / xs",
+     "type": "tuples",
+     "meaning": "what each drop is, its worth, where it lies"
+    },
+    {
+     "name": "tries / runs / rushed",
+     "type": "int",
+     "meaning": "times the hunt loop went for it; of those, runs through it with no stand (the grind's loot chain) and trips at once for its worth (hunt rule 6a)"
+    },
+    {
+     "name": "aged",
+     "type": "float | None",
+     "meaning": "an older pile's birth whose drops it holds (HELD_AGE)"
+    }
+   ]
+  },
+  {
+   "name": "Mark",
+   "module": "gamelab/behavior/attacks.py",
+   "line": 253,
+   "summary": "A monster she has thrown at, followed look by look by Attacks: what it has left and the throws not yet landed.",
+   "fields": [
+    {
+     "name": "m / seen",
+     "type": "Monster / float",
+     "meaning": "as last seen, and when"
+    },
+    {
+     "name": "left",
+     "type": "Left",
+     "meaning": "HP left as a distribution, as of throws seen to land"
+    },
+    {
+     "name": "pending",
+     "type": "list[(float, Attack)]",
+     "meaning": "throws since, not yet landed"
+    },
+    {
+     "name": "whole",
+     "type": "bool",
+     "meaning": "left reckoned from its whole HP (no bar read since)"
+    },
+    {
+     "name": "casts / held / proven",
+     "type": "list[Cast] / Hold | None / bool",
+     "meaning": "(the magician) casts to judge, a hold, an effect shown"
+    },
+    {
+     "name": "keyed / read",
+     "type": "list / (float, float) | None",
+     "meaning": "(the book) throws at it and its last bar read"
+    },
+    {
+     "name": "blind / blank / shown",
+     "type": "list[Blind] / int / bool",
+     "meaning": "(the thief) throws while no look had it and what they showed"
+    }
+   ]
+  },
+  {
+   "name": "Cast",
+   "module": "gamelab/behavior/attacks.py",
+   "line": 278,
+   "summary": "(The magician) a cast at a mark waiting to be judged at a later look.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "its attack key's time"
+    },
+    {
+     "name": "bar",
+     "type": "float | None",
+     "meaning": "its target's bar before it"
+    },
+    {
+     "name": "x / platform / ahead",
+     "type": "float / int | None / float",
+     "meaning": "where she was and how far ahead it was"
+    },
+    {
+     "name": "others",
+     "type": "tuple",
+     "meaning": "other monsters that way with their bars (her search may pick one)"
+    },
+    {
+     "name": "side",
+     "type": "str",
+     "meaning": "the way she cast"
+    }
+   ]
+  },
+  {
+   "name": "Hold",
+   "module": "gamelab/behavior/attacks.py",
+   "line": 307,
+   "summary": "(The magician) a mark held after a cast took no effect: no cast at it until new evidence.",
+   "fields": [
+    {
+     "name": "cast / t",
+     "type": "float",
+     "meaning": "the cast's key and the judging look"
+    },
+    {
+     "name": "x / platform",
+     "type": "float / int | None",
+     "meaning": "where she stood"
+    },
+    {
+     "name": "ahead / its / bar",
+     "type": "float / int | None / float | None",
+     "meaning": "where it was and its bar"
+    },
+    {
+     "name": "side",
+     "type": "str",
+     "meaning": "the way she cast"
+    }
+   ]
+  },
+  {
+   "name": "Spot",
+   "module": "gamelab/behavior/attacks.py",
+   "line": 323,
+   "summary": "(The magician) her stand held that way after a cast from it took no effect: no cast that way within HOLD_MOVED.",
+   "fields": [
+    {
+     "name": "side",
+     "type": "str",
+     "meaning": "the held way"
+    },
+    {
+     "name": "platform / x",
+     "type": "int | None / float",
+     "meaning": "where she cast from"
+    },
+    {
+     "name": "t / cast",
+     "type": "float",
+     "meaning": "the judging look and the cast's key"
+    }
+   ]
+  },
+  {
+   "name": "Blind",
+   "module": "gamelab/behavior/attacks.py",
+   "line": 294,
+   "summary": "(The thief) a throw at a mark no look had, judged at the first look LANDS_S after its key.",
+   "fields": [
+    {
+     "name": "t / side",
+     "type": "float / str",
+     "meaning": "its key and way"
+    },
+    {
+     "name": "cast / mp",
+     "type": "float | None",
+     "meaning": "MP share it should take and her MP bar before it"
+    },
+    {
+     "name": "ground",
+     "type": "bool",
+     "meaning": "a throw from the ground"
+    },
+    {
+     "name": "shown",
+     "type": "bool",
+     "meaning": "an effect has shown"
+    }
+   ]
+  },
+  {
+   "name": "Read",
+   "module": "gamelab/behavior/damage.py",
+   "line": 56,
+   "summary": "One thing a throw showed, stored in the damage book: exact damage, at least (a kill), or a miss.",
+   "fields": [
+    {
+     "name": "t",
+     "type": "float",
+     "meaning": "wall clock"
+    },
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "the monster's kind"
+    },
+    {
+     "name": "how",
+     "type": "str",
+     "meaning": "'exact', 'at_least' or 'miss'"
+    },
+    {
+     "name": "value / tol",
+     "type": "float",
+     "meaning": "damage before defence, give or take"
+    },
+    {
+     "name": "level",
+     "type": "int | None",
+     "meaning": "her level then"
+    },
+    {
+     "name": "barred",
+     "type": "bool",
+     "meaning": "a bar was read before it"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "after-every-look",
+   "title": "What happens after every look",
+   "summary": "Whoever takes a look (a fight, the navigator, the looter, the hunt loop), the same listeners run in the same order, so EXP, HP, kills, drops, wounds and the attack reckoning are always current.",
+   "trigger": "Any call of Hunter.look",
+   "steps": [
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter.look",
+     "text": "Checks the Lie Detector alarm (raises if up), then asks Senses for a look, drops limited to mesos if her item tabs are full.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses.look",
+     "text": "Takes the feed's state (or the eyes' frame), places it on the map as a Scene, then calls every listener and every check.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._vitals",
+     "text": "HP doubted or read exactly (touches measured), level, unseen kinds, the safety watch fed; EXP readings through the meter, each gain counted as kills (_gained); touches told.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._heading",
+     "text": "Her facing off the frame to Actions.see; a strong disagreement re-tells recent throws to the feed.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "Ledger.on_look",
+     "text": "New gains become Kills placed on monsters (the tracker's binding first); dead tracks updated; tracked kills followed.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "DropStore.on_look",
+     "text": "Drop strips and the look's loot confirm, empty or revive piles; unclaimed drops make others' piles.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "Wounds.on_look",
+     "text": "Kills close wounds; monsters in recent throws' paths with a bar new or changed become wounds.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/attacks.py",
+     "symbol": "Attacks.on_look",
+     "text": "MP believed, marks followed and reckoned, placed kills end marks, the no-hit watch runs.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._stop_now",
+     "text": "The check after the listeners: `gamelab stop` asked, or the safety stop due, raises here (STOP_ON_LOOK).",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "throw-to-key",
+   "title": "From a fight's look to a thrown key",
+   "summary": "One pass of clear(): the look, what to fight, the stance, and the throw, whose attack key is chosen and checked at the last moment before Actions sends it to the key player.",
+   "trigger": "fight.clear's loop (the hunt loop, a tour stop, or FightOnTheWay)",
+   "steps": [
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "clear",
+     "text": "Looks (Hunter.look) unless the kill count, time or patience is up.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "_place_and_check",
+     "text": "Placed? Then Hunter.health_check, which may raise the safety stop; a new platform ends the fight.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "_targets",
+     "text": "Wanted minus fading/dying/killed, kills counted, plus hidden ones still worth a throw.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "_take_stance",
+     "text": "attack.stance chooses throw / jump throw / jump back / step / approach / wait; a throw's path is kept for kill matching.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "knocked_move",
+     "text": "A jump or step decided while a knock may still move her waits for the next look.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "throw_act",
+     "text": "_carry_out calls it for a throwing act: jitters a jump's attack key, logs it, and calls Actions.throw / jump_throw / jump_back (False back if the throw is dropped at its last look).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions.throw",
+     "text": "Waits out her attack lock (Targeting.watch_lock frame by frame in a grind), then asks `still`.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._still",
+     "text": "Reads the feed's newest frame: a kill come in, or the target dead by its track, drops the throw (False).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/attacks.py",
+     "symbol": "Attacks.key",
+     "text": "Picks the target, reckons what it has left, chooses Lucky Seven or the regular attack (or no throw), records a Mark.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/control/actions.py",
+     "symbol": "Actions._thrown",
+     "text": "Tells the throw listeners the key's time: Ledger.on_throw, Wounds.on_throw, Attacks.on_throw, Hunter._tell_feed; then the plan goes to the key player.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "_carry_out",
+     "text": "Back from throw_act: a throw that went is noted in FightState (its path kept for kill matching) and counted in the Report; a dropped one is decided again at the next look.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "gain-to-kill",
+   "title": "From an EXP gain to a placed kill and an expected pile",
+   "summary": "How her EXP number rising becomes a kill of a particular monster, a pile to pick up, and a body no throw goes at while it dies.",
+   "trigger": "The perception service's step reads her EXP number changing (an 'exp_gain' event)",
+   "steps": [
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "feed_reads",
+     "text": "The look's EXP events as readings for her meter (with the value before the first gain if never read).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._vitals",
+     "text": "ExpMeter.update turns readings into Gains naming the kinds their sizes fit.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter._gained",
+     "text": "Each kill named goes to exp_events (kill()), told (the ledger) and Report.exp_kills; out of darts restarts.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/attacks.py",
+     "symbol": "Attacks.heard",
+     "text": "The gains with their kinds: throws keyed KILL_SHOWN_S before with no matching gain didn't kill.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "Ledger._place",
+     "text": "The gain placed: the tracker's bound track, else the throw 0.1-0.6 s before, else recent paths, else unplaced.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "DropStore.on_kill",
+     "text": "A placed kill expects a pile where it died, worth its kind's expected drops.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/fight.py",
+     "symbol": "_count_kills",
+     "text": "The fight takes the tracked monster (or dead_one in its paths) as dead, counts it, and keeps its drop spot.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/ledger.py",
+     "symbol": "dying",
+     "text": "From then on, that monster's body is no target (dead track, or nearest a fresh kill of its kind) until it fades.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "damage-learned",
+   "title": "The magician's damage learned from the bars",
+   "summary": "How her Magic Claw's damage range is learned from HP bars and fed back into her reckoning, across runs.",
+   "trigger": "A look that reads a bar on a monster she cast at (or a kill placed on it)",
+   "steps": [
+    {
+     "module": "gamelab/behavior/hunter.py",
+     "symbol": "Hunter.__init__",
+     "text": "Only for a non-thief profile with Magic Claw bound: a damage.Book on her damage file.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/attacks.py",
+     "symbol": "Attacks._learn_bar",
+     "text": "Exactly one cast surely shown since the bar before: its damage (bar drop x HP x defence factor) or a miss.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/attacks.py",
+     "symbol": "Attacks._learn_kill",
+     "text": "A kill after exactly one such cast: it did at least what the monster had left.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/damage.py",
+     "symbol": "Book.add",
+     "text": "Keeps the read, refits on a 'damage-fit' thread at most every REFIT_S, saves every SAVE_S.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/damage.py",
+     "symbol": "fit",
+     "text": "Maximum likelihood (lo, hi) on a coarse then fine grid, from 15 exact reads on.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/behavior/attacks.py",
+     "symbol": "Attacks._take_book",
+     "text": "On the next look after the version changes: her skill's lo/hi and miss share from the book.",
+     "process": ""
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The target-first planner (behavior.targeting) has not run live: nothing in it has seen the game yet (README: The target-first planner, Not done).",
+  "Stay or go (GAMELAB_STAY_OR_GO) stays off until a live trial reports: the simulator can't tell it from a do-nothing.",
+  "The shot log and the probes still date a hit by the star's release (520 ms), not the server's damage time (290 ms): to redo.",
+  "Lucky Seven presses that take no MP (31 of 461 casts live, 7%, nearly all ground throws; up close the key swipes with her claw and takes none): measured, no cause found offline, not fixed.",
+  "The dying window is the kind's death animation from the placing look: a dying monster still drawn 1.3 s after its gain gets past it.",
+  "Magic Guard's share of a touch isn't taken off her reserve: nothing reads whether it's up.",
+  "Why a frame read her facing wrong (85 attacks into a wall on 2026-11-04) isn't found; the failsafes only limit it.",
+  "Whether drops are her killer's alone for 15 s (OWN_S) and how often others take hers aren't measured.",
+  "Target flips on one-look misses (A-B-A within 1 s) aren't held: not built.",
+  "A kill placed away from a chasing monster's body (nav_tree_landing_shot_first, seed 8) isn't diagnosed.",
+  "Attacks at the dead rose for the magician with the planner (+1.4 a run): to look at with the first live hour."
+ ]
+}

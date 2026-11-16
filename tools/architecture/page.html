@@ -1,0 +1,1279 @@
+<title>Autonomy Player Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: a sticky top bar with search; a layer tree on the left (a drawer on phones); one view at a time on the right,
+   high level first, every deeper part folded until opened. Each layer keeps one hue everywhere it appears. */
+:root {
+  --bg: #F2F4F7; --surface: #FFFFFF; --sunk: #E8ECF1; --ink: #14202B; --muted: #566472; --faint: #8593A0;
+  --line: #D4DBE3; --accent: #C2501B; --accent-ink: #FFFFFF; --focus: #2D6CB4; --mark: #FFE7A3;
+  --l-runtime: #8A5A3B; --l-behavior: #7454C2; --l-attack: #C23C38; --l-control: #A86E12; --l-motion: #2C8A57;
+  --l-localization: #2D6CB4; --l-perception: #17868A; --l-sim: #AE4A84; --l-analysis: #6F7522; --l-ui: #5464A6;
+  --l-tests: #5B7B56; --l-shared: #66717C; --l-foundation: #446878;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-text: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --r: 8px; --side: 290px; --bar: 56px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0E1318; --surface: #151C23; --sunk: #1B242D; --ink: #E3E9EF; --muted: #9AA8B5; --faint: #6D7B88;
+  --line: #27323C; --accent: #F0844A; --accent-ink: #1A0E06; --focus: #6EA6EA; --mark: #5A4710;
+  --l-runtime: #CC9873; --l-behavior: #A68AEB; --l-attack: #EE7B73; --l-control: #E0AA52; --l-motion: #5CC48A;
+  --l-localization: #6EA6EA; --l-perception: #4CC2C0; --l-sim: #E087BC; --l-analysis: #B9BF59; --l-ui: #929FE2;
+  --l-tests: #9CC296; --l-shared: #A3ADB7; --l-foundation: #8DB2C4; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0E1318; --surface: #151C23; --sunk: #1B242D; --ink: #E3E9EF; --muted: #9AA8B5; --faint: #6D7B88;
+  --line: #27323C; --accent: #F0844A; --accent-ink: #1A0E06; --focus: #6EA6EA; --mark: #5A4710;
+  --l-runtime: #CC9873; --l-behavior: #A68AEB; --l-attack: #EE7B73; --l-control: #E0AA52; --l-motion: #5CC48A;
+  --l-localization: #6EA6EA; --l-perception: #4CC2C0; --l-sim: #E087BC; --l-analysis: #B9BF59; --l-ui: #929FE2;
+  --l-tests: #9CC296; --l-shared: #A3ADB7; --l-foundation: #8DB2C4; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: calc(var(--bar) + 16px); }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font-text); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg); }
+a { color: var(--focus); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.2; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: 30px; font-weight: 700; }
+h2 { font-size: 22px; font-weight: 600; }
+h3 { font-size: 17px; font-weight: 600; }
+h4 { font-size: 14px; font-weight: 600; }
+code, pre, .mono { font-family: var(--font-mono); font-size: 12.5px; }
+code { background: var(--sunk); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre { background: var(--sunk); padding: 12px 14px; border-radius: var(--r); overflow-x: auto; line-height: 1.5; }
+pre code { background: none; padding: 0; overflow-wrap: normal; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.eyebrow { font: 600 11px/1.2 var(--font-text); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+button { font: inherit; color: inherit; }
+
+/* top bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 14px; height: var(--bar); }
+.brand { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; color: var(--ink); }
+.brand b { font: 700 17px var(--font-display); }
+.brand span { color: var(--muted); font-size: 12px; }
+.nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.nav a { padding: 6px 10px; border-radius: 6px; color: var(--muted); font-weight: 500; font-size: 14px; white-space: nowrap; }
+.nav a:hover { background: var(--sunk); text-decoration: none; color: var(--ink); }
+.nav a.on { color: var(--ink); background: var(--sunk); }
+.search { position: relative; margin-left: auto; flex: 0 1 300px; min-width: 120px; }
+.search input { width: 100%; height: 34px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 8px; padding: 0 10px 0 30px; font: inherit; font-size: 14px; }
+.search svg { position: absolute; left: 9px; top: 9px; color: var(--faint); }
+.results { position: absolute; right: 0; top: 40px; width: min(520px, calc(100vw - 32px)); max-height: 70vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(10,20,30,.18); padding: 6px; }
+.results a { display: block; padding: 7px 9px; border-radius: 6px; color: var(--ink); }
+.results a:hover, .results a.sel { background: var(--sunk); text-decoration: none; }
+.results .t { display: flex; gap: 8px; align-items: baseline; }
+.results .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; min-width: 62px; }
+.results .s { font-size: 12.5px; color: var(--muted); padding-left: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-btn { display: none; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; height: 34px; padding: 0 10px; cursor: pointer; }
+
+/* shell */
+.shell { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); gap: 28px; align-items: start; }
+.side { position: sticky; top: calc(var(--bar) + env(safe-area-inset-top, 0px)); max-height: calc(100vh - var(--bar)); overflow: auto;
+  padding-block: 16px 40px; font-size: 13.5px; scrollbar-width: thin; }
+.side details { margin: 0; }
+.side summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; font-weight: 600; }
+.side summary::-webkit-details-marker { display: none; }
+.side summary:hover { background: var(--sunk); }
+.side .dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.side .n { margin-left: auto; color: var(--faint); font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
+.side ul { list-style: none; margin: 2px 0 8px; padding: 0 0 0 17px; border-left: 1px solid var(--line); margin-left: 10px; }
+.side li a { display: block; padding: 3px 8px; border-radius: 5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side li a:hover { background: var(--sunk); color: var(--ink); text-decoration: none; }
+.side li a.on { color: var(--ink); background: var(--sunk); font-weight: 600; }
+.side .grp { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 8px 8px 2px; }
+main { padding-block: 22px 120px; min-width: 0; }
+.wrap { max-width: 920px; }
+.wrap.wide { max-width: 1240px; }
+.prose { max-width: 72ch; }
+.prose p { margin: 0 0 .8em; }
+.prose ul, .prose ol { margin: 0 0 .8em; padding-left: 1.3em; }
+.prose li { margin: .15em 0; }
+.prose table, table.t { border-collapse: collapse; font-size: 13.5px; margin: 0 0 1em; }
+.prose th, .prose td, table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 6px 10px 6px 0; text-align: left; vertical-align: top; }
+.prose th, table.t th { font-weight: 600; font-size: 12px; color: var(--muted); }
+.tbl { overflow-x: auto; max-width: 100%; }
+.stack-gap { display: grid; gap: 26px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* chips */
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1; padding: 4px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); white-space: nowrap; }
+a.chip:hover { text-decoration: none; border-color: var(--focus); }
+.chip i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; font-style: normal; }
+.chip.lazy { border-style: dashed; color: var(--muted); }
+.tag { font: 600 10.5px/1 var(--font-text); letter-spacing: .05em; text-transform: uppercase; padding: 4px 6px; border-radius: 4px;
+  background: var(--sunk); color: var(--muted); white-space: nowrap; }
+.tag.warn { background: color-mix(in srgb, var(--l-attack) 16%, var(--surface)); color: var(--l-attack); }
+.tag.ok { background: color-mix(in srgb, var(--l-motion) 16%, var(--surface)); color: var(--l-motion); }
+
+/* headers */
+.crumbs { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.crumbs a { color: var(--muted); }
+.head { display: grid; gap: 8px; margin-bottom: 22px; }
+.tagline { font-size: 17px; color: var(--muted); margin: 0; }
+.lede { font-size: 16px; max-width: 72ch; margin: 0; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+
+/* folds */
+details.fold { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+details.fold + details.fold { margin-top: 8px; }
+details.fold > summary { list-style: none; cursor: pointer; padding: 11px 14px; display: flex; gap: 10px; align-items: flex-start; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: ""; flex: none; width: 7px; height: 7px; margin-top: 7px; border-right: 2px solid var(--faint);
+  border-bottom: 2px solid var(--faint); transform: rotate(-45deg); transition: transform .15s; }
+details.fold[open] > summary::before { transform: rotate(45deg); margin-top: 5px; }
+details.fold > summary:hover { background: var(--sunk); border-radius: var(--r); }
+details.fold > .body { padding: 2px 16px 16px 31px; display: grid; gap: 14px; min-width: 0; }
+.sum-main { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.sum-title { font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.sum-sub { color: var(--muted); font-size: 13.5px; }
+.sum-meta { color: var(--faint); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+details.plain > summary { list-style: none; cursor: pointer; color: var(--focus); font-weight: 500; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+details.plain > summary::-webkit-details-marker { display: none; }
+details.plain > summary::after { content: "+"; font-weight: 600; }
+details.plain[open] > summary::after { content: "−"; }
+details.plain > .body { margin-top: 10px; }
+
+/* section */
+.sec { display: grid; gap: 12px; }
+.sec > .sec-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.slice { border-top: 3px solid var(--lc, var(--line)); padding-top: 18px; display: grid; gap: 14px; }
+.group-h { display: grid; gap: 2px; margin: 10px 0 4px; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 28px; }
+.kv > div { min-width: 0; }
+.kv ul { margin: 4px 0 0; padding-left: 1.1em; }
+.kv li { margin: 2px 0; }
+
+/* key items */
+.items { display: grid; gap: 6px; }
+.item { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.item > summary { list-style: none; cursor: pointer; padding: 8px 12px; display: grid; gap: 2px; }
+.item > summary::-webkit-details-marker { display: none; }
+.item > summary:hover { background: var(--sunk); border-radius: 7px; }
+.item .nm { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
+.item .nm .ln { color: var(--faint); font-weight: 400; font-size: 12px; }
+.item .ds { font-size: 13.5px; color: var(--muted); }
+.item > .body { padding: 0 12px 12px; display: grid; gap: 8px; }
+.item.target { outline: 2px solid var(--accent); }
+
+/* stack diagram */
+.stack { width: 100%; height: auto; display: block; }
+.stack .box { transition: opacity .15s; }
+.stack .box { cursor: pointer; }
+.stack .box text { pointer-events: none; }
+.stack.hovering .box { opacity: .28; }
+.stack.hovering .box.hot, .stack.hovering .box.dep { opacity: 1; }
+.stack .box.dep rect { stroke-dasharray: 5 3; }
+.stack .box.cur rect { stroke-width: 3px !important; }
+.caption { min-height: 46px; font-size: 13.5px; color: var(--muted); padding: 8px 0 0; }
+.caption b { color: var(--ink); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+
+/* cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.card { display: grid; gap: 6px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; color: var(--ink); min-width: 0; }
+a.card:hover { text-decoration: none; border-color: var(--focus); }
+.card .ct { font-weight: 600; }
+.card .cs { font-size: 13.5px; color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13.5px; color: var(--muted); }
+.stats b { color: var(--ink); font: 600 18px var(--font-display); margin-right: 4px; font-variant-numeric: tabular-nums; }
+
+/* flows */
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: st; }
+.step { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; cursor: pointer; padding: 10px 10px 10px 0; border-radius: 8px; position: relative; }
+.step::before { counter-increment: st; content: counter(st); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  font: 600 12.5px var(--font-display); background: var(--surface); border: 2px solid var(--sc, var(--line)); color: var(--ink); z-index: 1; font-variant-numeric: tabular-nums; }
+.step:not(:last-child)::after { content: ""; position: absolute; left: 13px; top: 38px; bottom: -10px; width: 2px; background: var(--line); }
+.step:hover { background: color-mix(in srgb, var(--sunk) 60%, transparent); }
+.step.on { background: var(--sunk); }
+.step.on::before { background: var(--sc); color: var(--surface); }
+.step .where { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; font-size: 13px; }
+.step .txt { margin-top: 3px; }
+.step .more { margin-top: 8px; font-size: 13.5px; color: var(--muted); display: none; }
+.step.on .more { display: block; }
+.flow-side { position: sticky; top: calc(var(--bar) + 20px); display: grid; gap: 10px; }
+.ctrl { display: flex; gap: 6px; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; padding: 5px 11px; cursor: pointer; font-size: 13.5px; }
+.btn:hover { border-color: var(--focus); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.filter { height: 34px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 0 10px; font: inherit; font-size: 14px; width: min(360px, 100%); }
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.timeline li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.timeline .d { font: 500 13px var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+dl.gloss { margin: 0; display: grid; gap: 0; }
+dl.gloss > div { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+dl.gloss dt { font-weight: 600; }
+dl.gloss dd { margin: 0; }
+mark { background: var(--mark); color: inherit; border-radius: 2px; }
+.empty { color: var(--muted); font-style: italic; }
+.scrim { display: none; }
+.deploy { display: grid; gap: 14px; }
+.lane { display: grid; gap: 8px; }
+.lane-h { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.lane-b { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 10px; }
+.pbox { display: grid; gap: 7px; align-content: start; background: var(--surface); border: 1.5px solid var(--focus); border-radius: 10px; padding: 12px 14px; color: var(--ink); min-width: 0; }
+a.pbox:hover { text-decoration: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent); }
+.pbox.adm { border-color: var(--l-attack); }
+.pbox.out { border-style: dashed; border-color: var(--faint); background: var(--sunk); }
+.pbox-n { font: 600 15.5px var(--font-display); }
+.pbox-c { font-size: 11.5px; justify-self: start; }
+.pbox-in, ul.inside { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.pbox-in li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.pbox-in .rk { min-width: 0; margin: 0; }
+ul.inside { gap: 10px; font-size: 14px; }
+.rk { display: inline-block; min-width: 92px; margin-right: 8px; font: 600 10.5px/1.6 var(--font-text); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.sheet { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px 18px; display: grid; gap: 10px; }
+.sheet + .sheet { margin-top: 12px; }
+.sheet-h { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+.sheet-h h3 { font-size: 19px; }
+dl.facts { margin: 0; display: grid; gap: 0; }
+dl.facts > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; padding: 9px 0; border-top: 1px solid var(--line); }
+dl.facts dt { font-weight: 600; font-size: 13.5px; color: var(--muted); }
+dl.facts dd { margin: 0; min-width: 0; }
+dl.facts ul { margin: 0; padding-left: 1.1em; }
+dl.facts ul.inside { padding-left: 0; }
+.ans-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); }
+.card.ans { align-content: start; }
+.card.ans .ct { font: 600 16px var(--font-display); }
+.card.ans .cs p { margin: 0 0 .4em; }
+.pill { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-size: 13px; cursor: pointer; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+.pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--pc, var(--focus)); }
+.pill.on { border-color: var(--pc, var(--focus)); background: color-mix(in srgb, var(--pc, var(--focus)) 14%, var(--surface)); font-weight: 600; }
+svg.sys { width: 100%; min-width: 760px; height: auto; display: block; }
+.sys-node { cursor: pointer; transition: opacity .15s; }
+.sys-node:hover rect { stroke-width: 2.6px !important; }
+.sys-node.dim { opacity: .45; }
+.sys-edge { transition: opacity .15s; }
+.sys-edge.dim { opacity: .12; }
+.sys-edge.off { opacity: .07; }
+.sys-card { display: grid; gap: 12px; }
+.tag.read { color: var(--l-perception); background: color-mix(in srgb, var(--l-perception) 14%, var(--surface)); }
+ul.tree, ul.tree ul { list-style: none; margin: 0; padding: 0; }
+ul.tree ul { padding-left: 22px; border-left: 1px solid var(--line); margin: 4px 0 4px 8px; }
+ul.tree li { padding: 4px 0; }
+.seq2 { position: relative; }
+.sq-head { display: grid; gap: 14px; position: sticky; top: calc(var(--bar) + env(safe-area-inset-top, 0px)); z-index: 5; background: var(--bg); padding: 6px 0 8px; border-bottom: 1px solid var(--line); }
+.sq-parts { position: relative; height: 42px; }
+.sq-p { position: absolute; top: 0; height: 40px; display: grid; place-items: center; text-align: center; font: 600 11px/1.12 var(--font-display); padding: 2px 3px;
+  border: 1.4px solid var(--focus); border-radius: 7px; background: var(--surface); overflow: hidden; }
+.sq-p.adm { border-color: var(--l-attack); }
+.sq-p.out { border-style: dashed; border-color: var(--faint); background: var(--sunk); }
+.sq-what { align-self: end; }
+ol.sq-rows { list-style: none; margin: 0; padding: 0; }
+.sq-row { display: grid; gap: 14px; cursor: pointer; border-radius: 8px; }
+.sq-row:hover { background: color-mix(in srgb, var(--sunk) 55%, transparent); }
+.sq-row.on { background: var(--sunk); }
+.sq-row.on .sq-txt { font-weight: 500; }
+.sq-lanes { position: relative; min-height: 100%; }
+.sq-lanes .life { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.2px dashed var(--line); }
+.sq-lanes svg { position: relative; display: block; margin-top: 4px; }
+.sq-n { position: absolute; left: 2px; top: 6px; font: 600 10.5px var(--font-text); color: var(--faint); font-variant-numeric: tabular-nums; }
+.sq-txt { padding: 6px 8px 12px 0; min-width: 0; font-size: 14px; }
+.sq-txt .where { margin-bottom: 2px; }
+.seq-wrap { display: grid; grid-template-columns: minmax(0, auto) minmax(300px, 1fr); gap: 20px; align-items: start; }
+.seq-pic { position: sticky; top: calc(var(--bar) + 12px); max-height: calc(100vh - var(--bar) - 24px); overflow: auto; padding: 10px; }
+.seq .sq-row { cursor: pointer; transition: opacity .15s; }
+.seq .sq-row.dimrow { opacity: .3; }
+.step .more.row { display: none; }
+.step.on .more.row { display: flex; }
+
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .side { position: fixed; z-index: 40; top: 0; bottom: 0; left: 0; width: min(320px, 86vw); max-height: none; background: var(--surface);
+    border-right: 1px solid var(--line); padding: calc(16px + env(safe-area-inset-top, 0px)) 14px 40px max(14px, env(safe-area-inset-left, 0px));
+    transform: translateX(-105%); transition: transform .2s; }
+  body.drawer .side { transform: none; }
+  body.drawer .scrim { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(5,10,15,.45); }
+  .menu-btn { display: inline-block; }
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .seq-wrap { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 700px) {
+  .sq-lanes, .sq-parts { display: none; }
+  .sq-head, .sq-row { grid-template-columns: minmax(0, 1fr) !important; }
+  .sq-txt { padding-left: 8px; }
+  .seq-pic { position: static; max-height: none; }
+  .flow-side { position: static; order: -1; }
+}
+@media (max-width: 640px) {
+  .brand span, .nav { display: none; }
+  .search { flex: 1 1 auto; }
+  h1 { font-size: 25px; }
+  dl.gloss > div, .timeline li, dl.facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  details.fold > .body { padding-left: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<!--BODY-->
+<header class="bar">
+  <button class="menu-btn" id="menu-btn" aria-label="Browse the layers">Browse</button>
+  <a class="brand" href="#overview"><b>Autonomy Player</b><span id="brand-sub"></span></a>
+  <nav class="nav" id="nav">
+    <a href="#overview">System</a><a href="#scenarios">Step by step</a><a href="#layers">Code</a><a href="#flows">Flows</a>
+    <a href="#runtime">Commands</a><a href="#glossary">Glossary</a><a href="#timeline">History</a><a href="#tests">Tests</a>
+  </nav>
+  <div class="search">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5.2" stroke="currentColor" stroke-width="1.8"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <input id="q" type="search" placeholder="Search modules, classes, terms ( / )" autocomplete="off" aria-label="Search">
+    <div class="results" id="results" hidden></div>
+  </div>
+</header>
+<div class="scrim" id="scrim"></div>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Layers and modules"></aside>
+  <main id="main"></main>
+</div>
+<script type="application/json" id="arch-data">__ARCH_DATA__</script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script>
+(() => {
+"use strict";
+const D = JSON.parse(document.getElementById("arch-data").textContent);
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const slug = s => String(s).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const fmt = n => Number(n || 0).toLocaleString("en-US");
+const kfmt = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
+
+const MOD = D.modules;
+const LAYER = Object.fromEntries(D.layers.map(l => [l.id, l]));
+const SLICE = Object.fromEntries(D.slices.map(s => [s.id, s]));
+const lc = id => `var(--l-${LAYER[id] ? id : "shared"})`;
+const modHref = (p, item) => "#m-" + slug(p) + (item ? "--" + slug(item) : "");
+const ROUTE_MOD = {}; for (const p in MOD) ROUTE_MOD["m-" + slug(p)] = p;
+const UNMAPPED = Object.fromEntries((D.unmapped || []).map(u => [u.path, u]));
+for (const p in UNMAPPED) ROUTE_MOD["m-" + slug(p)] = p;
+const slicesOf = layer => D.slices.filter(s => s.layer === layer);
+const modTitle = p => MOD[p] ? MOD[p].title : p.replace(/^gamelab\//, "");
+const layerOfPath = p => (MOD[p] && MOD[p].layer) || (UNMAPPED[p] && UNMAPPED[p].layer) || "shared";
+
+/* ---------- markdown, with code spans that name a module or class turned into links ---------- */
+let mdr = null;
+try {
+  if (window.marked && window.marked.Marked) {
+    mdr = new window.marked.Marked({ gfm: true, breaks: false });
+    mdr.use({ renderer: { html(x) { return esc(typeof x === "string" ? x : (x && (x.text || x.raw)) || ""); } } });
+  }
+} catch (e) { mdr = null; }
+function md(s) {
+  if (!s) return "";
+  if (mdr) { try { return mdr.parse(String(s)); } catch (e) { /* fall through */ } }
+  return String(s).split(/\n{2,}/).map(p => "<p>" + esc(p).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>") + "</p>").join("");
+}
+// Index: names a code span might use -> [module path, item name]
+const NAME = new Map();
+function addName(key, val) { if (!key) return; const k = key.toLowerCase(); if (!NAME.has(k)) NAME.set(k, []); const arr = NAME.get(k); if (!arr.some(v => v[0] === val[0] && v[1] === val[1])) arr.push(val); }
+const allPaths = [...Object.keys(MOD), ...Object.keys(UNMAPPED)];
+for (const p of allPaths) {
+  addName(p, [p, ""]);
+  const noPkg = p.replace(/^gamelab\//, "");
+  addName(noPkg, [p, ""]);
+  const dotted = p.replace(/\.py$/, "").replace(/\/__init__$/, "").replace(/\//g, ".");
+  addName(dotted, [p, ""]); addName(dotted.replace(/^gamelab\./, ""), [p, ""]);
+}
+const BASE = new Map(); // "retreat" -> [paths]
+for (const p of allPaths) { const b = p.split("/").pop().replace(/\.py$/, ""); if (b === "__init__") continue; if (!BASE.has(b)) BASE.set(b, []); BASE.get(b).push(p); }
+for (const [p, m] of Object.entries(MOD)) {
+  for (const it of m.key_items || []) {
+    addName(it.name, [p, it.name]);
+    const b = p.split("/").pop().replace(/\.py$/, "");
+    addName(b + "." + it.name, [p, it.name]);
+    if (it.name.includes(".")) addName(it.name.split(".")[0], [p, it.name.split(".")[0]]);
+  }
+}
+function lookup(text) {
+  let t = text.trim().replace(/\(\)$/, "").replace(/\(.*\)$/, "").replace(/:\d+$/, "");
+  if (!t || t.length < 3 || /\s/.test(t)) return null;
+  let hit = NAME.get(t.toLowerCase());
+  if (hit && hit.length === 1) return hit[0];
+  if (hit && hit.length > 1) { const cls = hit.filter(h => MOD[h[0]] && (MOD[h[0]].key_items || []).some(i => i.name === h[1] && (i.kind === "class" || i.kind === "dataclass"))); if (cls.length === 1) return cls[0]; return null; }
+  const parts = t.split(".");
+  if (parts.length >= 2) { // module.symbol, as the README writes it
+    const ps = BASE.get(parts[0]);
+    if (ps && ps.length === 1) { const p = ps[0]; const rest = parts.slice(1).join("."); const m = MOD[p]; const item = m && (m.key_items || []).find(i => i.name === rest || i.name.endsWith("." + rest)); return [p, item ? item.name : ""]; }
+  }
+  if (BASE.has(t) && BASE.get(t).length === 1 && t.length > 3) return [BASE.get(t)[0], ""];
+  return null;
+}
+function enhance(root) {
+  for (const c of $$("code", root)) {
+    if (c.closest("pre") || c.closest("a")) continue;
+    const hit = lookup(c.textContent);
+    if (!hit) continue;
+    const a = document.createElement("a"); a.href = modHref(hit[0], hit[1]); a.title = hit[0] + (hit[1] ? " · " + hit[1] : "");
+    c.replaceWith(a); a.appendChild(c);
+  }
+  for (const t of $$("table", root)) { if (!t.parentElement.classList.contains("tbl")) { const w = document.createElement("div"); w.className = "tbl"; t.replaceWith(w); w.appendChild(t); } }
+}
+
+/* ---------- small renderers ---------- */
+const chipMod = (p, lazy) => `<a class="chip${lazy ? " lazy" : ""}" href="${modHref(p)}" title="${esc(p)}${lazy ? " (imported inside a function)" : ""}"><i style="background:${lc(layerOfPath(p))}"></i>${esc(modTitle(p))}</a>`;
+const layerChip = id => `<a class="chip" href="#layer-${id}"><i style="background:${lc(id)}"></i>${esc(LAYER[id] ? LAYER[id].title : id)}</a>`;
+const list = (arr, f = x => md(x)) => arr && arr.length ? "<ul>" + arr.map(x => "<li>" + f(x).replace(/^<p>|<\/p>\s*$/g, "") + "</li>").join("") + "</ul>" : "";
+const loc = (p, line) => `<span class="mono muted small" title="${esc(p)}${line ? ":" + line : ""}">${esc(p)}${line ? ":" + line : ""}</span>`;
+
+function fold(summaryHtml, bodyHtml, { open = false, id = "", cls = "fold" } = {}) {
+  return `<details class="${cls}"${open ? " open" : ""}${id ? ` id="${id}"` : ""}><summary>${summaryHtml}</summary><div class="body">${bodyHtml}</div></details>`;
+}
+function itemHtml(p, it, open) {
+  const deep = it.details_md ? `<div class="prose">${md(it.details_md)}</div>` : "";
+  const sig = it.signature ? `<pre><code>${esc(it.signature)}</code></pre>` : "";
+  return `<details class="item" id="k-${slug(it.name)}"${open ? " open" : ""}><summary>
+    <div class="nm">${esc(it.name)} <span class="tag">${esc(it.kind || "")}</span>${it.line ? `<span class="ln">line ${it.line}</span>` : ""}</div>
+    <div class="ds">${esc(it.summary || "")}</div></summary>${sig || deep ? `<div class="body">${sig}${deep}</div>` : ""}</details>`;
+}
+function tableHtml(head, rows) {
+  if (!rows.length) return "";
+  return `<div class="tbl"><table class="t"><thead><tr>${head.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function moduleSummaryRow(p) {
+  const m = MOD[p];
+  if (!m) { const u = UNMAPPED[p]; return `<div class="card"><a href="${modHref(p)}">${esc(p)}</a><span class="cs">${u ? u.lines + " lines, not described yet" : ""}</span></div>`; }
+  const body = `<div class="prose">${md(m.summary)}</div>
+    ${(m.key_items || []).length ? `<div><div class="eyebrow">Key pieces</div><div class="items" style="margin-top:6px">${(m.key_items || []).slice(0, 6).map(it => itemHtml(p, it)).join("")}</div></div>` : ""}
+    <div><a href="${modHref(p)}">Everything about ${esc(m.title)} →</a></div>`;
+  return fold(`<div class="sum-main"><div class="sum-title">${esc(m.title)} <span class="mono muted small">${esc(p.replace(/^gamelab\//, ""))}</span></div><div class="sum-sub">${esc(m.tagline)}</div></div><span class="sum-meta">${fmt(m.code.lines)} lines</span>`, body, { id: "f-" + slug(p) });
+}
+
+/* ---------- the layer stack ---------- */
+const STACK = {
+  W: 960, H: 528, boxes: {
+    runtime: [0, 0, 960, 56],
+    behavior: [0, 72, 624, 56], attack: [0, 136, 304, 56], control: [320, 136, 304, 56],
+    motion: [0, 200, 624, 56], localization: [0, 264, 624, 56], perception: [0, 328, 624, 56],
+    sim: [656, 72, 304, 120], analysis: [656, 200, 304, 56], ui: [656, 264, 304, 56], tests: [656, 328, 304, 56],
+    shared: [0, 400, 960, 56], foundation: [0, 472, 960, 56],
+  }
+};
+const STACK_NARROW = {
+  W: 420, H: 556, boxes: {
+    runtime: [0, 0, 420, 46], behavior: [0, 62, 420, 46], attack: [0, 116, 206, 46], control: [214, 116, 206, 46],
+    motion: [0, 170, 420, 46], localization: [0, 224, 420, 46], perception: [0, 278, 420, 46],
+    sim: [0, 340, 206, 46], analysis: [214, 340, 206, 46], ui: [0, 394, 206, 46], tests: [214, 394, 206, 46],
+    shared: [0, 456, 420, 46], foundation: [0, 510, 420, 46],
+  }
+};
+function stackSvg({ mini = false, current = "" } = {}) {
+  const narrow = !mini && window.innerWidth < 640;
+  const { W, H, boxes } = narrow ? STACK_NARROW : STACK;
+  const g = Object.entries(boxes).map(([id, [x, y, w, h]]) => {
+    const L = LAYER[id] || { title: id, blurb: "", stats: {} };
+    const st = L.stats || {};
+    const per = Math.floor((w - 28) / 6.6), rows = Math.max(1, Math.floor((h - 26) / 16));
+    const tl = mini || narrow ? "" : wrapLines(L.blurb, per, rows).map((ln, i) => `<text x="${x + 14}" y="${y + 40 + i * 16}" style="font:12.5px var(--font-text);fill:var(--muted)">${esc(ln)}</text>`).join("");
+    const meta = mini ? "" : narrow ? `<text x="${x + 12}" y="${y + 36}" style="font:11px var(--font-text);fill:var(--faint)">${st.files || 0} files · ${kfmt(st.lines || 0)} lines</text>` : `<text x="${x + w - 12}" y="${y + 21}" text-anchor="end" style="font:11.5px var(--font-text);fill:var(--faint)">${st.files || 0} files · ${kfmt(st.lines || 0)} lines</text>`;
+    return `<g class="box${id === current ? " cur" : ""}" data-layer="${id}" tabindex="0" role="link" aria-label="${esc(L.title)}">
+      <rect x="${x + 1}" y="${y + 1}" width="${w - 2}" height="${h - 2}" rx="8" style="fill:color-mix(in srgb, ${lc(id)} 13%, var(--surface));stroke:${lc(id)};stroke-width:1.5px"/>
+      <text x="${x + (narrow ? 12 : 14)}" y="${y + (mini ? h / 2 + 6 : narrow ? 20 : 22)}" style="font:600 ${mini ? 17 : narrow ? 15 : 14.5}px var(--font-display);fill:var(--ink)">${esc(L.title)}</text>${tl}${meta}</g>`;
+  }).join("");
+  return `<svg class="stack${mini ? " mini" : ""}" viewBox="0 0 ${W} ${H}" role="img" aria-label="The layers of the system">${g}</svg>`;
+}
+function wrapLines(s, per, rows) {
+  const words = String(s || "").split(/\s+/), out = [""];
+  for (const w of words) { const cur = out[out.length - 1]; if ((cur + " " + w).trim().length <= per) out[out.length - 1] = (cur + " " + w).trim(); else out.push(w); }
+  if (out.length > rows) { out.length = rows; out[rows - 1] = trimTo(out[rows - 1] + " …", per); }
+  return out;
+}
+function trimTo(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s; }
+function wireStack(svg, caption) {
+  const edges = D.layer_edges || [];
+  const show = id => {
+    const L = LAYER[id]; if (!L) return;
+    svg.classList.add("hovering");
+    const deps = new Set(L.allowed || []);
+    const actual = edges.filter(e => e.from === id).sort((a, b) => b.count - a.count);
+    for (const b of $$(".box", svg)) { b.classList.toggle("hot", b.dataset.layer === id); b.classList.toggle("dep", deps.has(b.dataset.layer)); }
+    if (caption) {
+      const rule = L.allowed ? (L.allowed.length ? `may import <b>${L.allowed.map(a => LAYER[a] ? LAYER[a].title : a).join(", ")}</b> and Shared (dashed), and nothing above it` : "may import only Shared: nothing of the map, motion or fighting") : "not one of the checked layers";
+      const real = actual.length ? ` · in the code: ${actual.slice(0, 6).map(e => `${LAYER[e.to] ? LAYER[e.to].title : e.to} ×${e.count}`).join(", ")}` : "";
+      caption.innerHTML = `<b>${esc(L.title)}</b>: ${esc(L.blurb)}.<br>${rule}${real}`;
+    }
+  };
+  const clear = () => { svg.classList.remove("hovering"); if (caption) caption.innerHTML = caption.dataset.idle || ""; };
+  for (const b of $$(".box", svg)) {
+    b.addEventListener("mouseenter", () => show(b.dataset.layer));
+    b.addEventListener("focus", () => show(b.dataset.layer));
+    b.addEventListener("mouseleave", clear); b.addEventListener("blur", clear);
+    b.addEventListener("click", () => { location.hash = "layer-" + b.dataset.layer; });
+    b.addEventListener("keydown", e => { if (e.key === "Enter") location.hash = "layer-" + b.dataset.layer; });
+  }
+  if (caption) caption.innerHTML = caption.dataset.idle || "";
+}
+
+/* ---------- sidebar ---------- */
+function renderSide() {
+  const html = D.layers.map(L => {
+    const sl = slicesOf(L.id);
+    if (!sl.length) return "";
+    const n = sl.reduce((a, s) => a + (s.module_paths || []).length, 0);
+    const inner = sl.map(s => `<li class="grp">${esc(shortSlice(s))}</li>` + (s.module_paths || []).map(p => `<li><a href="${modHref(p)}" data-path="${esc(p)}" title="${esc(p)}">${esc(modTitle(p))}</a></li>`).join("")).join("");
+    return `<details data-layer="${L.id}"><summary><span class="dot" style="background:${lc(L.id)}"></span><a href="#layer-${L.id}" style="color:inherit">${esc(L.title)}</a><span class="n">${n}</span></summary><ul>${inner}</ul></details>`;
+  }).join("");
+  $("#side").innerHTML = `<div class="eyebrow" style="padding:0 6px 8px">Layers, top to bottom</div>${html}`;
+}
+function shortSlice(s) { const t = s.title || s.id; const i = t.indexOf(":"); return i > 0 ? t.slice(i + 1).trim() : t; }
+function markSide(path, layer) {
+  for (const a of $$(".side li a")) a.classList.toggle("on", a.dataset.path === path);
+  if (layer) { const d = $(`.side details[data-layer="${layer}"]`); if (d) d.open = true; }
+  const on = $(".side li a.on"); if (on) on.scrollIntoView({ block: "nearest" });
+  for (const a of $$("#nav a")) a.classList.toggle("on", location.hash && a.getAttribute("href") === "#" + currentView);
+}
+
+/* ---------- views ---------- */
+let currentView = "overview";
+function viewLayersOverview() {
+  const t = D.totals;
+  const flows = D.flows || [];
+  const firstFlows = flows.slice(0, 6);
+  return `<div class="stack-gap">
+  <div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>Code</span></div><h1>How the code is organised</h1><p class="tagline">The packages, the layers they form, and what each may import.</p>
+    <div class="stats"><span><b>${fmt(t.files)}</b>source files</span><span><b>${kfmt(t.lines)}</b>lines</span><span><b>${D.slices.length}</b>slices described</span><span><b>${(D.flows || []).length}</b>end-to-end flows</span><span><b>${(D.glossary || []).length}</b>glossary terms</span></div></div>
+  ${D.overview_md ? `<div class="prose">${md(D.overview_md)}</div>` : ""}
+  <section class="sec"><div class="sec-h"><h2>The layers</h2><span class="muted small">hover a layer to see what it may import; click to open it</span></div>
+    <div class="panel"><div id="stack-host">${stackSvg()}</div><div class="caption" id="stack-cap" data-idle="Like a self-driving car's stack: each layer only imports the layers below it, and <code>tests/test_architecture.py</code> fails the build if one doesn't. The side column is offline: the simulator, analysis, the UI and the tests."></div></div>
+  </section>
+  ${firstFlows.length ? `<section class="sec"><div class="sec-h"><h2>Follow it end to end</h2><a href="#flows" class="small">all ${flows.length} flows →</a></div>
+    <div class="cards">${firstFlows.map(flowCard).join("")}</div></section>` : ""}
+  ${(D.processes || []).length ? `<section class="sec"><div class="sec-h"><h2>What runs</h2><a href="#runtime" class="small">processes, files and commands →</a></div>
+    <div class="cards">${D.processes.map(p => `<a class="card" href="#runtime--p-${slug(p.id)}"><div class="row"><span class="ct">${esc(p.name)}</span>${p.elevated ? `<span class="tag warn">admin</span>` : ""}</div><div class="cs">${esc(trimTo(p.summary, 170))}</div></a>`).join("")}</div></section>` : ""}
+  <section class="sec"><div class="sec-h"><h2>Every slice</h2></div>
+    <div class="cards">${D.slices.map(s => `<a class="card" href="#slice-${slug(s.id)}" style="border-top:3px solid ${lc(s.layer)}"><span class="ct">${esc(s.title)}</span><span class="cs">${esc(s.tagline)}</span><span class="sum-meta">${(s.module_paths || []).length} modules</span></a>`).join("")}</div></section>
+  <p class="muted small">Built ${esc(D.generated)} from commit ${esc(D.commit)} (${esc(D.commit_date)}). Imports, importers and line counts are read from the code at build time; the prose was written from the code and <code>gamelab/README.md</code> and checked against the code.${(D.unmapped || []).length ? ` ${D.unmapped.length} files have no description yet.` : ""}</p>
+  </div>`;
+}
+function flowCard(f) {
+  const ls = [...new Set((f.steps || []).map(s => layerOfPath(s.module)))];
+  return `<a class="card" href="#flow-${slug(f.id)}"><span class="ct">${esc(f.title)}</span><span class="cs">${esc(trimTo(f.summary, 180))}</span>
+    <span class="row">${ls.map(l => `<span class="swatch" title="${esc(LAYER[l] ? LAYER[l].title : l)}" style="background:${lc(l)};margin:0"></span>`).join("")}<span class="sum-meta">${(f.steps || []).length} steps</span></span></a>`;
+}
+
+function viewLayer(id) {
+  const L = LAYER[id]; if (!L) return notFound();
+  const sl = slicesOf(id);
+  const rule = L.allowed ? (L.allowed.length ? `May import ${L.allowed.map(layerChip).join(" ")} and Shared.` : "May import only Shared.") : "";
+  const real = (D.layer_edges || []).filter(e => e.from === id).sort((a, b) => b.count - a.count);
+  const usedBy = (D.layer_edges || []).filter(e => e.to === id).sort((a, b) => b.count - a.count);
+  return `<div class="stack-gap">
+    <div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><a href="#layers">Code</a><span>›</span><span>${esc(L.title)}</span></div>
+      <h1><span class="swatch" style="background:${lc(id)};width:16px;height:16px"></span>${esc(L.title)}</h1><p class="tagline">${esc(L.blurb)}</p>
+      <div class="row small">${rule}</div>
+      ${real.length ? `<div class="row small muted">Imports in the code: ${real.map(e => `${layerChip(e.to)}<span class="sum-meta">×${e.count}</span>`).join(" ")}</div>` : ""}
+      ${usedBy.length ? `<div class="row small muted">Imported by: ${usedBy.map(e => `${layerChip(e.from)}<span class="sum-meta">×${e.count}</span>`).join(" ")}</div>` : ""}
+      <div class="row"><button class="btn" data-act="open-all">Open everything</button><button class="btn" data-act="close-all">Fold everything</button></div>
+    </div>
+    ${sl.length ? sl.map(sliceHtml).join("") : `<p class="empty">Nothing described in this layer yet.</p>`}
+    ${unmappedIn(id)}
+  </div>`;
+}
+function unmappedIn(layer) {
+  const u = (D.unmapped || []).filter(x => x.layer === layer);
+  return u.length ? `<section class="sec"><div class="sec-h"><h3>Not described yet</h3></div><div class="row">${u.map(x => chipMod(x.path)).join(" ")}</div></section>` : "";
+}
+function sliceHtml(s) {
+  const grouped = new Set();
+  const groups = (s.groups || []).map(g => {
+    (g.modules || []).forEach(p => grouped.add(p));
+    return `<div class="group-h"><h3>${esc(g.title)}</h3>${g.summary ? `<div class="muted small">${esc(g.summary)}</div>` : ""}</div><div>${(g.modules || []).map(moduleSummaryRow).join("")}</div>`;
+  }).join("");
+  const rest = (s.module_paths || []).filter(p => !grouped.has(p));
+  const types = (s.data_types || []).map(t => fold(`<div class="sum-main"><div class="sum-title"><span class="mono">${esc(t.name)}</span> <a class="small" href="${modHref(t.module, t.name)}">${esc(modTitle(t.module))}</a></div><div class="sum-sub">${esc(t.summary)}</div></div>`,
+    tableHtml(["Field", "Type", "Meaning"], (t.fields || []).map(f => [`<span class="mono">${esc(f.name)}</span>`, `<span class="mono small">${esc(f.type || "")}</span>`, esc(f.meaning || "")])) || `<span class="muted small">${loc(t.module, t.line)}</span>`)).join("");
+  const flows = (s.flows || []).map(f => fold(`<div class="sum-main"><div class="sum-title">${esc(f.title)}</div><div class="sum-sub">${esc(f.summary)}</div></div><span class="sum-meta">${(f.steps || []).length} steps</span>`, stepsStatic(f))).join("");
+  return `<section class="slice" id="slice-${slug(s.id)}" style="--lc:${lc(s.layer)}">
+    <div class="head" style="margin:0"><h2>${esc(s.title)}</h2><p class="tagline">${esc(s.tagline)}</p><div class="prose lede">${md(s.summary)}</div></div>
+    ${s.details_md ? fold(`<div class="sum-main"><div class="sum-title">How it works</div><div class="sum-sub">the slice as a whole: how the parts fit, the main algorithms and decisions</div></div>`, `<div class="prose">${md(s.details_md)}</div>`) : ""}
+    <div>${groups}${rest.length ? `<div class="group-h"><h3>Other modules</h3></div>${rest.map(moduleSummaryRow).join("")}` : ""}</div>
+    ${types ? `<div class="sec"><div class="sec-h"><h3>What gets passed around</h3><span class="muted small">the main data types</span></div>${types}</div>` : ""}
+    ${flows ? `<div class="sec"><div class="sec-h"><h3>Inside this slice, step by step</h3></div>${flows}</div>` : ""}
+    ${(s.not_done || []).length ? fold(`<div class="sum-main"><div class="sum-title">Known limits and open questions</div><div class="sum-sub">${s.not_done.length} noted</div></div>`, `<div class="prose">${list(s.not_done)}</div>`) : ""}
+  </section>`;
+}
+function stepsStatic(f) {
+  return `${f.trigger ? `<div class="small muted">Starts when: ${esc(f.trigger)}</div>` : ""}<ol class="steps">${(f.steps || []).map(s => `<li class="step" style="--sc:${lc(layerOfPath(s.module))}"><div><div class="where"><a href="${modHref(s.module, s.symbol)}">${esc(modTitle(s.module))}</a>${s.symbol ? `<span class="mono small">${esc(s.symbol)}</span>` : ""}${s.process ? `<span class="tag">${esc(s.process)}</span>` : ""}</div><div class="txt">${md(s.text).replace(/^<p>|<\/p>\s*$/g, "")}</div></div></li>`).join("")}</ol>`;
+}
+
+function viewModule(p, item) {
+  const m = MOD[p];
+  if (!m) {
+    const u = UNMAPPED[p]; if (!u) return notFound();
+    return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span>${layerChip(u.layer)}</div><h1>${esc(p.split("/").pop())}</h1>${loc(p)}<p class="muted">Not described yet: ${u.lines} lines.</p></div>${importsHtml(u)}</div>`;
+  }
+  const s = SLICE[m.slice] || {};
+  const flowsIn = (D.flows || []).filter(f => (f.steps || []).some(st => st.module === p));
+  const gloss = (D.glossary || []).filter(g => (g.see || []).includes(p));
+  const io = (m.files_io || []);
+  return `<div class="stack-gap">
+    <div class="head">
+      <div class="crumbs"><a href="#layers">Code</a><span>›</span><a href="#layer-${m.layer}">${esc(LAYER[m.layer] ? LAYER[m.layer].title : m.layer)}</a><span>›</span><a href="#slice-${slug(m.slice)}">${esc(shortSlice(s))}</a></div>
+      <h1>${esc(m.title)}</h1>
+      <div class="row">${loc(p)}<span class="sum-meta">${fmt(m.code.lines)} lines</span>${m.concurrency ? `<span class="tag">runs threads</span>` : ""}${io.length ? `<span class="tag">files</span>` : ""}</div>
+      <p class="tagline">${esc(m.tagline)}</p>
+      <div class="prose lede">${md(m.summary)}</div>
+    </div>
+    ${m.details_md ? `<section class="sec"><div class="sec-h"><h2>How it works</h2></div><div class="prose">${md(m.details_md)}</div></section>` : ""}
+    ${(m.key_items || []).length ? `<section class="sec"><div class="sec-h"><h2>Key pieces</h2><span class="muted small">most important first; open one for its signature and notes</span></div><div class="items">${m.key_items.map(it => itemHtml(p, it, item && slug(it.name) === item)).join("")}</div></section>` : ""}
+    <section class="sec"><div class="sec-h"><h2>In and out</h2></div>
+      <div class="kv">
+        <div><div class="eyebrow">Takes</div>${list(m.inputs) || `<p class="empty small">nothing noted</p>`}</div>
+        <div><div class="eyebrow">Gives</div>${list(m.outputs) || `<p class="empty small">nothing noted</p>`}</div>
+      </div>
+      ${io.length ? `<div><div class="eyebrow">Files it reads and writes</div>${tableHtml(["File", "", "What"], io.map(f => [`<span class="mono small">${esc(f.path)}</span>`, `<span class="tag">${esc(f.mode || "")}</span>`, esc(f.what || "")]))}</div>` : ""}
+      ${m.concurrency ? `<div><div class="eyebrow">Threads and processes</div><div class="prose">${md(m.concurrency)}</div></div>` : ""}
+    </section>
+    ${importsHtml(m.code, m.uses)}
+    ${(m.tunables || []).length ? `<section class="sec"><div class="sec-h"><h2>Tunables</h2><span class="muted small">the constants that shape its behaviour</span></div>${tableHtml(["Name", "Value", "Meaning"], m.tunables.map(t => [`<span class="mono">${esc(t.name)}</span>`, `<span class="mono">${esc(t.value)}</span>`, esc(t.meaning)]))}</section>` : ""}
+    ${(m.decisions || []).length ? `<section class="sec"><div class="sec-h"><h2>Why it's like this</h2><span class="muted small">dated decisions</span></div><ul class="timeline">${[...m.decisions].sort((a, b) => String(a.date).localeCompare(String(b.date))).map(d => `<li><span class="d">${esc(d.date || "—")}</span><div><div>${md(d.what).replace(/^<p>|<\/p>\s*$/g, "")}</div>${d.why ? `<div class="muted small">${md(d.why).replace(/^<p>|<\/p>\s*$/g, "")}</div>` : ""}</div></li>`).join("")}</ul></section>` : ""}
+    ${(m.gotchas || []).length ? `<section class="sec"><div class="sec-h"><h2>Watch out for</h2></div><div class="prose">${list(m.gotchas)}</div></section>` : ""}
+    ${flowsIn.length ? `<section class="sec"><div class="sec-h"><h2>Appears in these flows</h2></div><div class="cards">${flowsIn.map(flowCard).join("")}</div></section>` : ""}
+    ${testsHtml(m)}
+    ${gloss.length ? `<section class="sec"><div class="sec-h"><h2>Terms</h2></div><dl class="gloss">${gloss.map(glossRow).join("")}</dl></section>` : ""}
+  </div>`;
+}
+function testsHtml(m) {
+  const all = [...new Set([...(m.tests || []), ...((m.code && m.code.tested_by) || [])])].sort();
+  if (!all.length) return "";
+  const idx = Object.fromEntries((D.test_index || []).map(t => [t.path, t]));
+  return `<section class="sec"><div class="sec-h"><h2>Tests</h2><span class="muted small">${all.length} files: named in the description or importing it</span></div>
+    <div class="row">${all.map(t => `<a class="chip mono" href="#tests" title="${esc(idx[t] ? idx[t].summary : "")}">${esc(t.replace(/^tests\//, ""))}${idx[t] && idx[t].slow ? " · slow" : ""}</a>`).join("")}</div></section>`;
+}
+function importsHtml(code, uses) {
+  const imp = (code.imports || []), by = (code.imported_by || []);
+  const extra = (uses || []).filter(u => !imp.some(i => i.path === u));
+  if (!imp.length && !by.length && !extra.length) return "";
+  return `<section class="sec"><div class="sec-h"><h2>Connections</h2><span class="muted small">read from the code; dashed = imported inside a function only</span></div>
+    <div class="kv">
+      <div><div class="eyebrow">Imports (${imp.length})</div><div class="row" style="margin-top:6px">${imp.map(i => chipMod(i.path, i.lazy)).join(" ") || `<span class="empty small">none of the repo's modules</span>`}</div></div>
+      <div><div class="eyebrow">Imported by (${by.length})</div><div class="row" style="margin-top:6px">${by.map(i => chipMod(i.path, i.lazy)).join(" ") || `<span class="empty small">nothing: an entry point, or reached through a command</span>`}</div></div>
+    </div>
+    ${extra.length ? `<div><div class="eyebrow">Also works with</div><div class="row" style="margin-top:6px">${extra.filter(u => MOD[u] || UNMAPPED[u]).map(u => chipMod(u)).join(" ")}</div></div>` : ""}
+  </section>`;
+}
+
+function viewFlows() {
+  const flows = D.flows || [];
+  const fromSlices = D.slices.flatMap(s => (s.flows || []).map(f => ({ ...f, _slice: s })));
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>Flows</span></div><h1>Flows</h1>
+    <p class="tagline">Walkthroughs in call order: what happens, in which module, in which process.</p></div>
+    ${flows.length ? `<section class="sec"><div class="sec-h"><h2>Across the system</h2></div><div class="cards">${flows.map(flowCard).join("")}</div></section>` : `<p class="empty">The end-to-end flows aren't written yet.</p>`}
+    ${fromSlices.length ? `<section class="sec"><div class="sec-h"><h2>Inside one slice</h2></div>${fromSlices.map(f => fold(`<div class="sum-main"><div class="sum-title">${esc(f.title)} <span class="swatch" style="background:${lc(f._slice.layer)};margin:0 0 0 4px"></span><span class="muted small">${esc(shortSlice(f._slice))}</span></div><div class="sum-sub">${esc(f.summary)}</div></div><span class="sum-meta">${(f.steps || []).length} steps</span>`, stepsStatic(f))).join("")}</section>` : ""}
+  </div>`;
+}
+let player = null;
+function viewFlow(id) {
+  const f = (D.flows || []).find(x => slug(x.id) === id);
+  if (!f) return notFound();
+  const steps = f.steps || [];
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><a href="#flows">Flows</a></div>
+    <h1>${esc(f.title)}</h1><div class="prose lede">${md(f.summary)}</div>${f.trigger ? `<div class="small muted">Starts when: ${esc(f.trigger)}</div>` : ""}</div>
+    <div class="flow"><ol class="steps" id="steps">${steps.map((s, i) => {
+      const m = MOD[s.module]; const it = m && s.symbol && (m.key_items || []).find(k => k.name === s.symbol || k.name.endsWith("." + s.symbol) || s.symbol.endsWith(k.name));
+      return `<li class="step" data-i="${i}" data-layer="${layerOfPath(s.module)}" style="--sc:${lc(layerOfPath(s.module))}"><div>
+        <div class="where"><a href="${modHref(s.module, it ? it.name : "")}">${esc(modTitle(s.module))}</a>${s.symbol ? `<span class="mono small">${esc(s.symbol)}</span>` : ""}${s.process ? `<span class="tag">${esc(s.process)}</span>` : ""}</div>
+        <div class="txt">${md(s.text).replace(/^<p>|<\/p>\s*$/g, "")}</div>
+        <div class="more">${m ? `${esc(m.tagline)}` : ""}${it ? `<br><span class="mono small">${esc(it.name)}</span>: ${esc(it.summary)}` : ""}${m ? `<br>${loc(s.module, it && it.line)}` : ""}</div></div></li>`;
+    }).join("")}</ol>
+    <div class="flow-side"><div class="panel" style="padding:10px">${stackSvg({ mini: true })}</div>
+      <div class="ctrl"><button class="btn" data-act="prev" aria-label="Previous step">← Back</button><button class="btn primary" data-act="play">Play</button><button class="btn" data-act="next" aria-label="Next step">Next →</button></div>
+      <div class="small muted" id="flow-pos"></div>
+      <div class="small muted">Layers touched: ${[...new Set(steps.map(s => layerOfPath(s.module)))].map(layerChip).join(" ")}</div></div></div></div>`;
+}
+function wireFlow() {
+  const host = $("#steps"); if (!host) return;
+  const steps = $$(".step", host); const svg = $(".flow-side .stack"); let cur = -1;
+  const set = i => {
+    cur = Math.max(0, Math.min(steps.length - 1, i));
+    steps.forEach((s, j) => s.classList.toggle("on", j === cur));
+    const layer = steps[cur].dataset.layer;
+    svg.classList.add("hovering");
+    for (const b of $$(".box", svg)) { b.classList.toggle("hot", b.dataset.layer === layer); b.classList.remove("dep"); }
+    $("#flow-pos").textContent = `Step ${cur + 1} of ${steps.length} · ${LAYER[layer] ? LAYER[layer].title : layer}`;
+    const r = steps[cur].getBoundingClientRect();
+    if (r.top < 70 || r.bottom > innerHeight - 20) steps[cur].scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
+  steps.forEach((s, i) => s.addEventListener("click", e => { if (e.target.closest("a")) return; stop(); set(i); }));
+  const playBtn = $('[data-act="play"]');
+  const stop = () => { if (player) { clearInterval(player); player = null; } playBtn.textContent = "Play"; };
+  playBtn.addEventListener("click", () => {
+    if (player) return stop();
+    if (cur >= steps.length - 1) cur = -1;
+    set(cur + 1); playBtn.textContent = "Pause";
+    player = setInterval(() => { if (cur >= steps.length - 1) return stop(); set(cur + 1); }, 2600);
+  });
+  $('[data-act="next"]').addEventListener("click", () => { stop(); set(cur + 1); });
+  $('[data-act="prev"]').addEventListener("click", () => { stop(); set(cur - 1); });
+  for (const b of $$(".box", svg)) b.addEventListener("click", () => { location.hash = "layer-" + b.dataset.layer; });
+  set(0);
+}
+
+function viewRuntime(sub) {
+  const P = D.processes || [], F = D.lab_files || [], C = D.cli || [];
+  const rt = D.slices.find(s => s.layer === "runtime");
+  const procs = P.map(p => fold(`<div class="sum-main"><div class="sum-title">${esc(p.name)} ${p.elevated ? `<span class="tag warn">runs as administrator</span>` : ""}</div><div class="sum-sub">${esc(p.summary)}</div></div>`,
+    `${p.command ? `<pre><code>${esc(p.command)}</code></pre>` : ""}
+     ${p.lifetime ? `<div><div class="eyebrow">Lifetime</div><div class="prose">${md(p.lifetime)}</div></div>` : ""}
+     ${p.details_md ? `<div class="prose">${md(p.details_md)}</div>` : ""}
+     ${(p.threads || []).length ? `<div><div class="eyebrow">Threads inside it</div><div class="prose">${list(p.threads)}</div></div>` : ""}
+     ${(p.talks_to || []).length ? `<div><div class="eyebrow">Talks to</div>${tableHtml(["Process", "Through", "What"], p.talks_to.map(t => [esc(procName(t.process)), esc(t.via || ""), esc(t.what || "")]))}</div>` : ""}
+     ${(p.modules || []).length ? `<div><div class="eyebrow">Code it runs</div><div class="row" style="margin-top:6px">${p.modules.map(x => chipMod(x)).join(" ")}</div></div>` : ""}`, { id: "p-" + slug(p.id), open: sub === "p-" + slug(p.id) })).join("");
+  const files = tableHtml(["Path", "Format", "Written by", "Read by", "Purpose"], F.map(f => [`<span class="mono small">${esc(f.path)}</span>`, esc(f.format || ""), (f.written_by || []).map(x => chipMod(x)).join(" "), (f.read_by || []).map(x => chipMod(x)).join(" "), esc(f.purpose || "")]));
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>Processes</span></div><h1>What runs, and how it talks</h1>
+    ${rt ? `<p class="tagline">${esc(rt.tagline)}</p><div class="prose lede">${md(rt.summary)}</div>` : ""}</div>
+    ${P.length ? `<section class="sec"><div class="sec-h"><h2>Processes</h2><span class="muted small">${P.length}</span></div>${procGraph(P)}${procs}</section>` : ""}
+    ${rt && rt.details_md ? fold(`<div class="sum-main"><div class="sum-title">How it fits together</div></div>`, `<div class="prose">${md(rt.details_md)}</div>`) : ""}
+    ${F.length ? `<section class="sec" id="lab-files"><div class="sec-h"><h2>The lab folder</h2><span class="muted small">files the processes use to talk, under <code>gamelab/lab/</code></span></div>${files}</section>` : ""}
+    ${C.length ? `<section class="sec" id="cli"><div class="sec-h"><h2>Commands</h2><span class="muted small"><code>python -m gamelab …</code></span></div>
+      <input class="filter" id="cli-filter" type="search" placeholder="Filter ${C.length} commands" aria-label="Filter commands">
+      <div class="row small"><label><input type="checkbox" id="cli-keys"> only commands that send keys</label></div>
+      <div class="tbl"><table class="t" id="cli-table"><thead><tr><th>Command</th><th>What it does</th><th>Keys</th><th>Entry</th></tr></thead><tbody>${C.map(c => `<tr id="cli-${slug(c.command)}" data-keys="${c.sends_keys ? 1 : 0}" data-text="${esc((c.command + " " + c.summary).toLowerCase())}"><td class="mono" style="white-space:nowrap">${esc(c.command)}</td><td>${esc(c.summary)}${c.details_md ? `<details class="plain"><summary>more</summary><div class="body prose small">${md(c.details_md)}</div></details>` : ""}</td><td>${c.sends_keys ? `<span class="tag warn">keys</span>` : ""}</td><td class="mono small">${c.symbol ? `<a href="${modHref(c.entry || "gamelab/__main__.py", c.symbol)}">${esc(c.symbol)}</a>` : ""}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+  </div>`;
+}
+function procName(id) { const p = (D.processes || []).find(x => x.id === id); return p ? p.name : id; }
+function procGraph(P) {
+  // A ring of processes; an edge for every "talks to". Elevated ones are drawn with the warning colour.
+  const n = P.length; if (n < 2) return "";
+  const W = 760, H = 420, cx = W / 2, cy = H / 2 + 6, rx = 290, ry = 160;
+  const pos = Object.fromEntries(P.map((p, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return [p.id, [cx + rx * Math.cos(a), cy + ry * Math.sin(a)]]; }));
+  const edges = []; const seen = new Set();
+  for (const p of P) for (const t of p.talks_to || []) { if (!pos[t.process]) continue; const k = [p.id, t.process].sort().join("|"); if (seen.has(k)) continue; seen.add(k); edges.push([p.id, t.process, t.via || ""]); }
+  const lines = edges.map(([a, b]) => `<line x1="${pos[a][0]}" y1="${pos[a][1]}" x2="${pos[b][0]}" y2="${pos[b][1]}" style="stroke:var(--line);stroke-width:1.6px"/>`).join("");
+  const nodes = P.map(p => { const [x, y] = pos[p.id]; const w = Math.min(200, 26 + p.name.length * 7.2); return `<a href="#runtime--p-${slug(p.id)}"><g><rect x="${x - w / 2}" y="${y - 17}" width="${w}" height="34" rx="17" style="fill:var(--surface);stroke:${p.elevated ? "var(--l-attack)" : "var(--focus)"};stroke-width:1.6px"/><text x="${x}" y="${y + 4.5}" text-anchor="middle" style="font:600 12.5px var(--font-text);fill:var(--ink)">${esc(trimTo(p.name, 26))}</text></g></a>`; }).join("");
+  return `<div class="panel tbl"><svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:560px;height:auto;display:block" role="img" aria-label="Processes and who talks to whom">${lines}${nodes}</svg><div class="small muted">A line joins two processes that talk; red outline: runs as administrator. Open one below for how.</div></div>`;
+}
+
+function glossRow(g) {
+  return `<div id="g-${slug(g.term)}"><dt>${esc(g.term)}</dt><dd><div class="prose">${md(g.meaning)}</div>${(g.see || []).length ? `<div class="row" style="margin-top:4px">${g.see.filter(p => MOD[p] || UNMAPPED[p]).map(p => chipMod(p)).join(" ")}</div>` : ""}</dd></div>`;
+}
+function viewGlossary() {
+  const G = [...(D.glossary || [])].sort((a, b) => a.term.localeCompare(b.term));
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>Glossary</span></div><h1>Glossary</h1><p class="tagline">The game's words and the system's own.</p>
+    <input class="filter" id="g-filter" type="search" placeholder="Filter ${G.length} terms" aria-label="Filter terms"></div>
+    <dl class="gloss" id="gloss">${G.map(glossRow).join("") || `<p class="empty">Not written yet.</p>`}</dl></div>`;
+}
+function viewTimeline() {
+  const T = [...(D.timeline || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>History</span></div><h1>How it came to be</h1><p class="tagline">The milestones that shaped the architecture, oldest first.</p></div>
+    <ul class="timeline">${T.map(t => `<li><span class="d">${esc(t.date)}</span><div><div style="font-weight:600">${esc(t.title || "")}</div><div class="prose">${md(t.what)}</div>${(t.see || []).length ? `<div class="row">${t.see.filter(p => MOD[p] || UNMAPPED[p]).map(p => chipMod(p)).join(" ")}</div>` : ""}</div></li>`).join("") || `<li class="empty">Not written yet.</li>`}</ul></div>`;
+}
+function viewTests() {
+  const s = D.slices.find(x => x.layer === "tests");
+  const T = D.test_index || [];
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>Tests</span></div><h1>${esc(s ? s.title : "Tests")}</h1>${s ? `<p class="tagline">${esc(s.tagline)}</p><div class="prose lede">${md(s.summary)}</div>` : ""}</div>
+    ${s ? sliceHtml(s) : ""}
+    ${T.length ? `<section class="sec"><div class="sec-h"><h2>Every test file</h2><span class="muted small">${T.length}</span></div>
+      <input class="filter" id="t-filter" type="search" placeholder="Filter by file or module" aria-label="Filter tests">
+      <div class="tbl"><table class="t" id="t-table"><thead><tr><th>File</th><th>What it checks</th><th>Covers</th></tr></thead><tbody>${T.map(t => `<tr data-text="${esc((t.path + " " + t.summary + " " + (t.covers || []).join(" ")).toLowerCase())}"><td class="mono small" style="white-space:nowrap">${esc(t.path.replace(/^tests\//, ""))}${t.slow ? ` <span class="tag">slow</span>` : ""}</td><td>${esc(t.summary)}</td><td><div class="row">${(t.covers || []).filter(p => MOD[p] || UNMAPPED[p]).map(p => chipMod(p)).join(" ")}</div></td></tr>`).join("")}</tbody></table></div></section>` : ""}
+  </div>`;
+}
+function notFound() { return `<div class="head"><h1>Not found</h1><p><a href="#overview">Back to the overview</a></p></div>`; }
+
+/* ---------- the running system: entry points, channels, who reads the game, who sends input ---------- */
+const SYS = D.system || {};
+const SP = ((SYS.entrypoints || {}).processes || []);
+const SPROC = Object.fromEntries(SP.map(p => [p.id, p]));
+const OUTSIDE = { game: "MapleStory client", user: "You", windows: "Windows", babysitter: "The babysitter", phone: "Your phone", cloudflare: "Cloudflare tunnel", claude: "Claude" };
+const sysName = id => SPROC[id] ? SPROC[id].name : (OUTSIDE[id] || id);
+const CATS = {
+  input: { label: "Input to the game", color: "var(--l-attack)" },
+  read: { label: "Reads the game", color: "var(--l-perception)" },
+  stream: { label: "Data streams", color: "var(--l-localization)" },
+  files: { label: "Files in lab/", color: "var(--l-control)" },
+  watch: { label: "Watching and alerts", color: "var(--l-ui)" },
+  life: { label: "Start-up and lifecycle", color: "var(--l-runtime)" },
+};
+function tcat(c) {
+  const t = ((c.transport || "") + " " + (c.name || "")).toLowerCase();
+  if (c.to === "game" && /sendinput|input|key|mouse|cursor|focus|foreground|click|resize|setwindowpos/.test(t + " " + (c.carries || "").toLowerCase())) return "input";
+  if (c.from === "game" || /capture|dxgi|screen|pixel|gdi|\bmss\b|window state|findwindow/.test(t)) return "read";
+  if (/pipe|shared memory|ring|stdin|stdout/.test(t)) return "stream";
+  if (/telemetry|sse|http|tunnel|push|toast|notif|ntfy|sound/.test(t)) return "watch";
+  if (/mutex|process list|wmi|pid|spawn|shellexecute|popen/.test(t)) return "life";
+  return "files";
+}
+// Where each process sits: launchers on the left, the game on top, the elevated player on the right, watchers below.
+const POS = {
+  game: [300, 14, 400, 58], helper: [760, 14, 220, 58],
+  user: [14, 150, 150, 50], claude: [14, 220, 150, 50], "grind-loop": [14, 290, 150, 50], babysitter: [14, 360, 150, 50],
+  perceive: [210, 150, 200, 64], hunt: [450, 150, 200, 64], player: [700, 150, 220, 64],
+  "lie-tracker": [190, 290, 120, 50], partwriter: [320, 290, 120, 50],
+  pet: [470, 290, 180, 54], park: [690, 290, 150, 54],
+  minimap: [470, 420, 180, 54],
+  windows: [690, 420, 120, 50], phone: [830, 420, 120, 50], cloudflare: [830, 330, 140, 50],
+};
+const SYS_W = 1000, SYS_H = 490;
+const CORE = ["babysitter", "perceive", "pet", "player", "hunt", "grind-loop", "park", "lie-tracker", "partwriter", "minimap"];
+const SHOWN = new Set([...CORE, "game", "user", "claude", "phone", "cloudflare", "windows"]);
+function sysNodes() {
+  const ids = new Set(Object.keys(SPROC).filter(i => SHOWN.has(i)));
+  for (const c of (SYS.channels || {}).channels || []) [].concat(c.from, c.to).forEach(x => x && SHOWN.has(x) && ids.add(x));
+  ids.add("game");
+  const out = {}; let spare = 0;
+  for (const id of ids) {
+    if (!id) continue;
+    if (POS[id]) out[id] = [...POS[id]];
+    else { const k = spare++; out[id] = [14 + (k % 6) * 165, SYS_H + 10 + Math.floor(k / 6) * 64, 150, 48]; }
+  }
+  return out;
+}
+function sysEdges(mode) {
+  const E = [];
+  const add = (a, b, cat, item, two) => { if (!a || !b || a === b) return; E.push({ a, b, cat, item, two }); };
+  if (mode === "start") {
+    for (const p of SP) for (const s of [].concat(p.started_by || [])) add(s, p.id, "life", { how: p.how_started, what: "starts " + p.name }, false);
+    for (const s of (SYS.entrypoints || {}).spawns || []) add(s.parent, s.child, "life", s, false);
+  } else {
+    for (const c of (SYS.channels || {}).channels || []) for (const f of [].concat(c.from)) for (const t of [].concat(c.to)) add(f, t, tcat(c), c, c.direction === "two-way");
+    for (const r of (SYS.readers || {}).readers || []) add("game", r.process, "read", r, false);
+    for (const s of (SYS.input || {}).senders || []) add(s.process, "game", "input", s, false);
+  }
+  const m = new Map();
+  for (const e of E) {
+    const k = [e.a, e.b].sort().join("|") + "|" + e.cat;
+    if (!m.has(k)) m.set(k, { a: e.a, b: e.b, cat: e.cat, items: [], fwd: false, back: false });
+    const g = m.get(k); g.items.push(e.item);
+    if (e.a === g.a || e.two) g.fwd = true;
+    if (e.a !== g.a || e.two) g.back = true;
+  }
+  return [...m.values()];
+}
+function clipToBox(box, center, toward) {
+  const [, , w, h] = box, dx = toward[0] - center[0], dy = toward[1] - center[1];
+  const tx = dx ? (w / 2 + 3) / Math.abs(dx) : Infinity, ty = dy ? (h / 2 + 3) / Math.abs(dy) : Infinity, t = Math.min(tx, ty, 1);
+  return [center[0] + dx * t, center[1] + dy * t];
+}
+function sysDiagram(mode, focus) {
+  const N = sysNodes(), edges = sysEdges(mode);
+  const H = Math.max(SYS_H, ...Object.values(N).map(b => b[1] + b[3] + 14));
+  const pairCount = {}, pairSeen = {};
+  for (const e of edges) { const k = [e.a, e.b].sort().join("|"); pairCount[k] = (pairCount[k] || 0) + 1; }
+  const lines = edges.filter(e => N[e.a] && N[e.b]).map(e => {
+    const A = N[e.a], B = N[e.b];
+    const ca = [A[0] + A[2] / 2, A[1] + A[3] / 2], cb = [B[0] + B[2] / 2, B[1] + B[3] / 2];
+    const k = [e.a, e.b].sort().join("|"), n = pairCount[k], j = (pairSeen[k] = (pairSeen[k] || 0) + 1) - 1;
+    const off = (j - (n - 1) / 2) * 18;
+    const mx = (ca[0] + cb[0]) / 2, my = (ca[1] + cb[1]) / 2, len = Math.hypot(cb[0] - ca[0], cb[1] - ca[1]) || 1;
+    const sgn = e.a < e.b ? 1 : -1;
+    const nx = -(cb[1] - ca[1]) / len * sgn, ny = (cb[0] - ca[0]) / len * sgn;
+    const ctrl = [mx + nx * off, my + ny * off];
+    const p1 = clipToBox(A, ca, ctrl), p2 = clipToBox(B, cb, ctrl);
+    const col = CATS[e.cat].color;
+    const hot = !focus || e.a === focus || e.b === focus;
+    const tip = e.items.map(it => it.name || it.what || it.how || it.carries || it.api || "").filter(Boolean).slice(0, 8).join("\n");
+    return `<path class="sys-edge${hot ? "" : " dim"}" data-cat="${e.cat}" d="M${p1[0].toFixed(1)},${p1[1].toFixed(1)} Q${ctrl[0].toFixed(1)},${ctrl[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}" style="fill:none;stroke:${col};stroke-width:${Math.min(4.5, 1.4 + e.items.length * 0.45).toFixed(1)}px${e.cat === "life" ? ";stroke-dasharray:6 4" : ""}"${e.fwd ? ` marker-end="url(#ah-${e.cat})"` : ""}${e.back ? ` marker-start="url(#ah-${e.cat})"` : ""}><title>${esc(sysName(e.a))} – ${esc(sysName(e.b))} · ${esc(CATS[e.cat].label)}\n${esc(tip)}</title></path>`;
+  }).join("");
+  const markers = Object.entries(CATS).map(([k, c]) => `<marker id="ah-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1L9 5L1 9z" style="fill:${c.color}"/></marker>`).join("");
+  const nodes = Object.entries(N).map(([id, [x, y, w, h]]) => {
+    const p = SPROC[id], outside = !p, adm = p && p.elevated, isGame = id === "game";
+    const stroke = adm || isGame ? "var(--l-attack)" : outside ? "var(--faint)" : "var(--focus)";
+    const fill = isGame ? "color-mix(in srgb, var(--l-attack) 10%, var(--surface))" : outside ? "var(--sunk)" : "var(--surface)";
+    const sub = isGame ? "runs as administrator" : p ? (adm ? "elevated (UAC)" : (p.kind || "")) : "outside the code";
+    const badges = [p && p.reads_game ? "reads" : "", p && p.sends_input ? "presses" : ""].filter(Boolean).join(" · ");
+    return `<g class="sys-node${focus && focus !== id ? " dim" : ""}${focus === id ? " on" : ""}" data-id="${esc(id)}" tabindex="0" role="button" aria-label="${esc(sysName(id))}">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="9" style="fill:${fill};stroke:${stroke};stroke-width:${adm || isGame || focus === id ? 2.2 : 1.3}px${outside && !isGame ? ";stroke-dasharray:4 3" : ""}"/>
+      <text x="${x + w / 2}" y="${y + h / 2 - 4}" text-anchor="middle" style="font:600 13.5px var(--font-display);fill:var(--ink)">${esc(trimTo(sysName(id), Math.floor(w / 7.6)))}</text>
+      <text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" style="font:11px var(--font-text);fill:var(--muted)">${esc(trimTo(badges ? sub + " · " + badges : sub, Math.floor(w / 5.6)))}</text></g>`;
+  }).join("");
+  return `<svg class="sys" viewBox="0 0 ${SYS_W} ${H}" role="img" aria-label="The processes and how they talk"><defs>${markers}</defs>${lines}${nodes}</svg>`;
+}
+let sysMode = "all", sysFocus = "";
+function evLinks(ev) {
+  return (ev || []).map(e => {
+    const label = `${String(e.path).replace(/^gamelab\//, "")}:${e.line || ""}${e.symbol ? " " + e.symbol : ""}`;
+    const item = e.symbol && MOD[e.path] && (MOD[e.path].key_items || []).some(k => k.name === e.symbol) ? e.symbol : "";
+    return MOD[e.path] ? `<a class="chip mono" href="${modHref(e.path, item)}" title="${esc(e.path)}">${esc(label)}</a>` : `<span class="chip mono">${esc(label)}</span>`;
+  }).join(" ");
+}
+const proofFold = ev => ev && ev.length ? `<details class="plain"><summary>in the code</summary><div class="body row">${evLinks(ev)}</div></details>` : "";
+function sysAnswer(n, q, file, mode, anchor) {
+  const d = SYS[file] || {};
+  const first = String(d.summary_md || "").split(/\n\s*\n/)[0];
+  return `<div class="card ans"><div class="eyebrow">Question ${n}</div><div class="ct">${esc(q)}</div><div class="cs prose">${md(first) || `<span class="empty">not traced yet</span>`}</div>
+    <div class="row"><button class="btn" data-mode="${mode}">Show on the diagram</button><a class="small" href="#overview--${anchor}">details ↓</a></div></div>`;
+}
+function procCard(id) {
+  const p = SPROC[id];
+  const has = (v, x) => [].concat(v).includes(x);
+  const ch = ((SYS.channels || {}).channels || []).filter(c => has(c.from, id) || has(c.to, id));
+  const rd = ((SYS.readers || {}).readers || []).filter(r => r.process === id);
+  const sd = ((SYS.input || {}).senders || []).filter(s => s.process === id);
+  const sp = ((SYS.entrypoints || {}).spawns || []).filter(s => s.parent === id || s.child === id);
+  const head = p ? `<div class="row"><h3>${esc(p.name)}</h3>${p.elevated ? `<span class="tag warn">administrator</span>` : ""}<span class="tag">${esc(p.kind || "")}</span>${p.reads_game ? `<span class="tag read">reads the game</span>` : ""}${p.sends_input ? `<span class="tag warn">sends input</span>` : ""}<button class="btn" data-unfocus style="margin-left:auto">Close</button></div>
+     ${p.command ? `<pre><code>${esc(p.command)}</code></pre>` : ""}
+     <div class="prose">${md(p.summary)}</div>
+     <div class="kv"><div><div class="eyebrow">Started by</div><div>${[].concat(p.started_by || []).map(s => `<a href="#overview" data-focus="${esc(s)}">${esc(sysName(s))}</a>`).join(", ")}</div><div class="muted small">${esc(p.how_started || "")}</div></div>
+       <div><div class="eyebrow">Ends</div><div class="small">${esc(p.stops || "")}</div>${p.single_instance ? `<div class="muted small">One at a time: ${esc(p.single_instance)}</div>` : ""}${p.lifetime ? `<div class="muted small">${esc(p.lifetime)}</div>` : ""}</div></div>
+     ${p.details_md ? `<details class="plain"><summary>more</summary><div class="body prose">${md(p.details_md)}</div></details>` : ""}${proofFold(p.evidence)}`
+    : `<div class="row"><h3>${esc(sysName(id))}</h3><button class="btn" data-unfocus style="margin-left:auto">Close</button></div><p class="muted small">Outside the code.</p>`;
+  const chRows = ch.map(c => [`${esc(sysName([].concat(c.from)[0]))} ${c.direction === "two-way" ? "⇄" : "→"} ${esc([].concat(c.to).map(sysName).join(", "))}`, `<span class="tag" style="color:${CATS[tcat(c)].color}">${esc(c.transport)}</span>`, `<span class="mono small">${esc(c.name || "")}</span>`, esc(c.carries || "") + (c.rate ? `<div class="muted small">${esc(c.rate)}</div>` : "") + proofFold(c.evidence)]);
+  return `<div class="panel sys-card">${head}
+    ${sp.length ? `<div><div class="eyebrow">Starts, or is started as a child</div><ul class="small">${sp.map(s => `<li>${esc(sysName(s.parent))} starts ${esc(sysName(s.child))}: ${esc(s.how)}${s.when ? ` (${esc(s.when)})` : ""}</li>`).join("")}</ul></div>` : ""}
+    ${rd.length ? `<div><div class="eyebrow">Reads from the game</div><ul class="small">${rd.map(r => `<li><b>${esc(r.what)}</b>: ${esc(r.how)}${r.rate ? `, ${esc(r.rate)}` : ""}. ${esc(r.purpose)}</li>`).join("")}</ul></div>` : ""}
+    ${sd.length ? `<div><div class="eyebrow">Sends to the game</div><ul class="small">${sd.map(s => `<li><b>${esc(s.api)}</b>: ${esc(s.what)}. <span class="muted">Only if: ${esc(s.conditions)}</span></li>`).join("")}</ul></div>` : ""}
+    ${ch.length ? `<div><div class="eyebrow">Channels (${ch.length})</div>${tableHtml(["Between", "How", "Name", "What"], chRows)}</div>` : ""}
+  </div>`;
+}
+function launchTree() {
+  const kids = {};
+  const add = (a, b, how) => { if (!a || !b) return; (kids[a] = kids[a] || []); if (!kids[a].some(k => k[0] === b)) kids[a].push([b, how]); };
+  for (const p of SP) for (const s of [].concat(p.started_by || [])) add(s, p.id, p.how_started);
+  for (const s of (SYS.entrypoints || {}).spawns || []) add(s.parent, s.child, s.how + (s.when ? ` (${s.when})` : ""));
+  const roots = Object.keys(kids).filter(k => !SPROC[k]);
+  const node = (id, how, path) => {
+    const p = SPROC[id];
+    const loop = path.includes(id);
+    const ch = loop ? [] : (kids[id] || []);
+    return `<li><a href="#overview" data-focus="${esc(id)}"><b>${esc(sysName(id))}</b></a>${p && p.elevated ? ` <span class="tag warn">admin</span>` : ""}${p && p.command ? ` <code>${esc(p.command)}</code>` : ""}${how ? `<div class="muted small">${esc(how)}</div>` : ""}${ch.length ? `<ul>${ch.map(([c, h]) => node(c, h, [...path, id])).join("")}</ul>` : ""}</li>`;
+  };
+  return `<ul class="tree">${(roots.length ? roots : Object.keys(kids)).map(r => node(r, "", [])).join("")}</ul>`;
+}
+/* ---------- what runs on the PC, in plain words (components.json + entrypoints.json) ---------- */
+const COMP = Object.fromEntries((((SYS.components || {}).processes) || []).map(p => [p.process, p]));
+const RUNS = { "main thread": "main loop", "thread": "thread", "thread pool": "threads", "child process": "child process", "timer": "timer", "callback": "callback" };
+const runsLabel = r => RUNS[String(r || "").toLowerCase()] || (/library/.test(String(r)) ? "runs on its caller's thread" : (r || ""));
+function laneOf(id) {
+  const p = SPROC[id]; const first = [].concat((p && p.started_by) || [])[0];
+  if (!p) return "outside";
+  if (first === "babysitter") return "babysitter";
+  if (first === "user" || first === "claude" || !first) return "hand";
+  return "child";
+}
+const NOT_IN_REPO = new Set(["babysitter", "grind-loop"]);
+const NOCAP = /^(none|no capture|second-hand|viewers|whole frames on demand)/i;
+function gameBadges(id) {
+  const rd = ((SYS.readers || {}).readers || []).filter(r => r.process === id);
+  const sd = ((SYS.input || {}).senders || []).filter(s => s.process === id);
+  const ch = ((SYS.channels || {}).channels || []).filter(c => [].concat(c.from).includes("perceive") && [].concat(c.to).includes(id) && /pipe|shared/i.test(c.transport || ""));
+  const b = [];
+  if (rd.some(r => r.what === "pixels" && !NOCAP.test(r.how || ""))) b.push(`<span class="tag read">captures the screen</span>`);
+  else if (ch.length) b.push(`<span class="tag">sees through the service</span>`);
+  if (sd.some(s => /sendinput/i.test(s.api))) b.push(`<span class="tag warn">presses keys</span>`);
+  else if (sd.some(s => /focus|foreground/i.test(s.api))) b.push(`<span class="tag">can bring the game forward</span>`);
+  return b.join("");
+}
+const LANES = [
+  ["babysitter", "Kept running automatically", "The babysitter starts these and starts them again when they stop."],
+  ["hand", "Started by hand", "You (or Claude, when it drives gamelab) start these from a terminal."],
+  ["child", "Started by another process", "Their parent starts them when it needs them; they don't run on their own."],
+];
+function sentence(c, id) {
+  const from = [].concat(c.from), to = [].concat(c.to);
+  const other = from.includes(id) ? to.map(sysName).join(", ") : from.map(sysName).join(", ");
+  const verb = from.includes(id) ? (c.direction === "two-way" ? "Exchanges with" : "Sends to") : "Gets from";
+  return `<li>${verb} <b>${esc(other)}</b>: ${esc(c.carries || "")} <span class="muted">(${esc(c.transport)}${c.name ? `, <code>${esc(c.name)}</code>` : ""}${c.rate ? `, ${esc(c.rate)}` : ""})</span></li>`;
+}
+const HOUSEKEEPING = /telemetry writer|garbage|gc-report|gc report|console writer|log printer|warm-up|warm up|pruner|heading-pi/i;
+const shortName = n => String(n || "").replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+const shortRate = r => trimTo(String(r || "").split(/[;(]/)[0].trim(), 42);
+function procBox(id) {
+  const p = SPROC[id], c = COMP[id] || {};
+  const comps = c.components || [];
+  const ownAll = comps.filter(k => !/library|caller/i.test(k.runs_as || ""));
+  const chores = ownAll.filter(k => HOUSEKEEPING.test(k.name));
+  const own = ownAll.filter(k => !HOUSEKEEPING.test(k.name));
+  const chips = [
+    c.is_os_process === false ? `<span class="tag">inside another process</span>` : `<span class="tag">its own process</span>`,
+    NOT_IN_REPO.has(id) ? `<span class="tag">outside the repo</span>` : "",
+    p && p.elevated ? `<span class="tag warn">administrator</span>` : "",
+    gameBadges(id),
+  ].join("");
+  return `<a class="pbox${p && p.elevated ? " adm" : ""}" href="#overview--proc-${slug(id)}">
+    <div class="pbox-h"><span class="pbox-n">${esc(sysName(id))}</span></div>
+    ${c.expected_start ? `<div class="small muted">${esc(trimTo(String(c.expected_start).split(/[;:(]/)[0], 110))}</div>` : ""}
+    <div class="row">${chips}</div>
+    ${p && p.command ? `<code class="pbox-c">${esc(p.command)}</code>` : ""}
+    ${own.length ? `<ul class="pbox-in">${own.slice(0, 6).map(k => `<li><span class="rk">${esc(runsLabel(k.runs_as))}</span><span>${esc(shortName(k.name))}${k.rate ? `<span class="muted"> · ${esc(shortRate(k.rate))}</span>` : ""}</span></li>`).join("")}</ul>` : ""}
+    ${own.length > 6 || chores.length || comps.length > ownAll.length ? `<div class="small muted">${[own.length > 6 ? `${own.length - 6} more` : "", chores.length ? `${chores.length} housekeeping thread${chores.length > 1 ? "s" : ""} (${[...new Set(chores.map(k => shortName(k.name).replace(/^the /i, "").split(" ").slice(0, 2).join(" ")))].join(", ")})` : "", comps.length > ownAll.length ? `${comps.length - ownAll.length} parts that run on these threads` : ""].filter(Boolean).join("; ")}</div>` : ""}
+  </a>`;
+}
+function deployHtml(ids) {
+  const lanes = LANES.map(([k, t, d]) => {
+    const mine = ids.filter(i => laneOf(i) === k);
+    mine.sort((a, b) => CORE.indexOf(a) - CORE.indexOf(b));
+    return mine.length ? `<div class="lane"><div class="lane-h"><b>${esc(t)}</b><span class="muted small">${esc(d)}</span></div><div class="lane-b">${mine.map(procBox).join("")}</div></div>` : "";
+  }).join("");
+  const outside = ids === CORE ? ["game", "phone", "cloudflare"] : [];
+  return `<div class="deploy">${lanes}${outside.length ? `<div class="lane"><div class="lane-h"><b>Outside the code</b><span class="muted small">What the processes work with but don't contain.</span></div><div class="lane-b">${outside.map(i => `<div class="pbox out"><div class="pbox-n">${esc(sysName(i))}</div><div class="small muted">${esc(OUTSIDE_SAY[i] || "")}</div></div>`).join("")}</div></div>` : ""}</div>`;
+}
+const OUTSIDE_SAY = {
+  game: "MapleStory itself. It runs as administrator, which is why only an elevated process can press its keys.",
+  user: "You, at the PC.",
+  windows: "Notifications and sounds on the PC.",
+  phone: "Alerts pushed to your phone.",
+  cloudflare: "The tunnel that puts the web page on maple.eirage.com.",
+};
+function procSheet(id) {
+  const p = SPROC[id] || {}, c = COMP[id] || {};
+  const comps = c.components || [];
+  const has = (v, x) => [].concat(v).includes(x);
+  const ch = ((SYS.channels || {}).channels || []).filter(x => has(x.from, id) || has(x.to, id));
+  const rd = ((SYS.readers || {}).readers || []).filter(r => r.process === id);
+  const sd = ((SYS.input || {}).senders || []).filter(s => s.process === id);
+  const kids = ((SYS.entrypoints || {}).spawns || []).filter(s => s.parent === id);
+  const game = [
+    ...rd.map(r => `<li>Reads ${esc(r.what)} ${r.rate ? `${esc(r.rate)} ` : ""}by ${esc(r.how)}, ${esc(r.when)}, for ${esc(r.purpose)}.</li>`),
+    ...sd.map(s => `<li>Sends ${esc(s.what)} with <b>${esc(s.api)}</b>, only if ${esc(s.conditions)}.</li>`),
+  ];
+  return `<section class="sheet" id="proc-${slug(id)}">
+    <div class="sheet-h"><h3>${esc(sysName(id))}</h3><div class="row">${c.is_os_process === false ? `<span class="tag">inside another process</span>` : `<span class="tag">its own OS process</span>`}${NOT_IN_REPO.has(id) ? `<span class="tag">outside the repo</span>` : ""}${p.elevated ? `<span class="tag warn">runs as administrator</span>` : ""}${gameBadges(id)}</div></div>
+    <div class="prose">${md(c.plain_md || p.summary || "")}</div>
+    <dl class="facts">
+      <div><dt>Who starts it</dt><dd>${esc(c.expected_start || [].concat(p.started_by || []).map(sysName).join(", "))}${p.how_started ? `<div class="muted small">${esc(p.how_started)}</div>` : ""}${p.command ? `<div><code>${esc(p.command)}</code></div>` : ""}</dd></div>
+      <div><dt>How long it runs</dt><dd>${esc(p.lifetime || "")}${p.stops ? `<div class="muted small">Ends: ${esc(p.stops)}</div>` : ""}${p.single_instance ? `<div class="muted small">Only one at a time: ${esc(p.single_instance)}</div>` : ""}</dd></div>
+      ${game.length ? `<div><dt>With the game</dt><dd><ul>${game.join("")}</ul></dd></div>` : `<div><dt>With the game</dt><dd class="muted">Doesn't read the game or send it input.</dd></div>`}
+      ${comps.length ? `<div><dt>Inside it</dt><dd><ul class="inside">${comps.map(k => `<li><span class="rk">${esc(runsLabel(k.runs_as))}</span><b>${esc(k.name)}</b>${k.rate ? ` <span class="muted small">${esc(k.rate)}</span>` : ""}<div>${esc(k.does)}</div>${k.started_by ? `<div class="muted small">Started by ${esc(k.started_by)}${k.lives ? `; ${esc(k.lives)}` : ""}</div>` : ""}${(k.talks_to || []).length ? `<div class="muted small">${k.talks_to.map(t => `→ ${esc(t.to)} via ${esc(t.via)}${t.what ? `: ${esc(t.what)}` : ""}`).join("<br>")}</div>` : ""}</li>`).join("")}</ul></dd></div>` : ""}
+      ${kids.length ? `<div><dt>Starts</dt><dd><ul>${kids.map(s => `<li><b>${esc(sysName(s.child))}</b>: ${esc(s.how)}${s.when ? `, ${esc(s.when)}` : ""}</li>`).join("")}</ul></dd></div>` : ""}
+      ${ch.length ? `<div><dt>Talks to</dt><dd><ul>${ch.map(x => sentence(x, id)).join("")}</ul></dd></div>` : ""}
+    </dl>
+    <details class="plain"><summary>where this is in the code</summary><div class="body row">${evLinks([...(p.evidence || []), ...comps.flatMap(k => k.evidence || [])])}</div></details>
+  </section>`;
+}
+
+function viewSystem(sub) {
+  if (!SP.length) return viewLayersOverview();
+  const C = SYS.channels || {}, R = SYS.readers || {}, I = SYS.input || {};
+  const core = CORE.filter(i => SPROC[i]);
+  const rest = SP.map(p => p.id).filter(i => !CORE.includes(i) && SPROC[i].kind !== "external");
+  const chRows = (C.channels || []).map(c => `<tr data-text="${esc((c.from + " " + c.to + " " + c.transport + " " + (c.name || "") + " " + (c.carries || "")).toLowerCase())}"><td style="white-space:nowrap">${esc(sysName([].concat(c.from)[0]))} ${c.direction === "two-way" ? "⇄" : "→"} ${esc([].concat(c.to).map(sysName).join(", "))}</td><td><span class="tag" style="color:${CATS[tcat(c)].color}">${esc(c.transport)}</span></td><td class="mono small">${esc(c.name || "")}</td><td>${esc(c.carries || "")}${c.format ? `<div class="muted small">${esc(c.format)}</div>` : ""}${c.details_md ? `<details class="plain"><summary>more</summary><div class="body prose small">${md(c.details_md)}</div></details>` : ""}${proofFold(c.evidence)}</td><td class="small">${esc(c.rate || "")}</td></tr>`).join("");
+  const rdRows = (R.readers || []).map(r => [`<b>${esc(sysName(r.process))}</b>`, esc(r.what), esc(r.how) + proofFold(r.evidence), esc(r.rate || ""), esc(r.when || ""), esc(r.purpose || "")]);
+  const sdRows = (I.senders || []).map(s => [`<b>${esc(sysName(s.process))}</b>`, esc(s.api), esc(s.what) + proofFold(s.evidence), esc(s.conditions || "")]);
+  const psRows = (I.plan_sources || []).map(s => [esc(sysName(s.process)), MOD[s.module] ? `<a href="${modHref(s.module, s.symbol)}">${esc(modTitle(s.module))}</a>${s.symbol ? ` <span class="mono small">${esc(s.symbol)}</span>` : ""}` : `<span class="mono small">${esc(s.module)}</span>`, s.kind ? `<span class="tag">${esc(s.kind)}</span>` : "", esc(s.what) + proofFold(s.evidence)]);
+  const keySteps = (I.path_steps || []).map(s => `<li class="step" style="--sc:${s.process === "player" || s.process === "game" ? "var(--l-attack)" : "var(--l-control)"}"><div><div class="where"><span class="tag">${esc(sysName(s.process))}</span>${s.path ? (MOD[s.path] ? `<a href="${modHref(s.path, s.symbol)}">${esc(modTitle(s.path))}</a>` : `<span class="mono small">${esc(s.path)}</span>`) : ""}${s.symbol ? `<span class="mono small">${esc(s.symbol)}</span>` : ""}</div><div class="txt">${md(s.text).replace(/^<p>|<\/p>\s*$/g, "")}</div></div></li>`).join("");
+  const filters = [["all", "Everything"], ["read", CATS.read.label], ["input", CATS.input.label], ["start", "Who starts whom"], ["stream", CATS.stream.label], ["files", CATS.files.label], ["watch", CATS.watch.label]];
+  const pc = k => CATS[k] ? CATS[k].color : k === "start" ? CATS.life.color : "var(--focus)";
+  const S = (SYS.sequences || {}).sequences || [];
+  return `<div class="stack-gap">
+  <div class="head"><div class="eyebrow">MapleHelper · gamelab · the running system</div><h1>How the autonomy player runs</h1>
+    <p class="tagline">The programs that run on the PC, who starts each one, what's inside them, and how they work the game between them.</p></div>
+  ${D.system_intro_md ? `<div class="prose lede">${md(D.system_intro_md)}</div>` : ""}
+  <section class="sec" id="deploy"><div class="sec-h"><h2>What runs on the PC while it plays</h2><span class="muted small">grouped by who starts each one; click one for the whole story</span></div>${deployHtml(CORE)}</section>
+  <section class="sec" id="sheets"><div class="sec-h"><h2>Each process, in plain words</h2></div>${core.map(procSheet).join("")}
+    ${rest.length ? fold(`<div class="sum-main"><div class="sum-title">The other programs in the repo</div><div class="sum-sub">${esc(rest.map(sysName).join(", "))}</div></div><span class="sum-meta">${rest.length}</span>`, `${deployHtml(rest)}${rest.map(procSheet).join("")}`) : ""}</section>
+  <section class="sec" id="sys-diagram"><div class="sec-h"><h2>How they talk</h2><span class="muted small">click a box to see only its channels; hover a line for what it carries</span></div>
+    <div class="row" id="sys-filters">${filters.map(([k, l]) => `<button class="pill" data-mode="${k}" style="--pc:${pc(k)}">${esc(l)}</button>`).join("")}</div>
+    <div class="panel tbl" id="sys-host"></div>
+    <div class="small muted">Red outline: runs as administrator. Dashed box: outside this code. Line colour: the kind of channel (the buttons above); thicker: several channels.</div>
+    <div id="sys-detail"></div>
+    ${fold(`<div class="sum-main"><div class="sum-title">Every channel</div><div class="sum-sub">${esc(String(C.summary_md || "").split(/\n\s*\n/)[0]).slice(0, 220)}</div></div><span class="sum-meta">${(C.channels || []).length}</span>`, `${C.summary_md ? `<div class="prose">${md(C.summary_md)}</div>` : ""}<input class="filter" id="ch-filter" type="search" placeholder="Filter channels (pipe, inbox, ALARM, telemetry…)" aria-label="Filter channels"><div class="tbl"><table class="t" id="ch-table"><thead><tr><th>Between</th><th>How</th><th>Name</th><th>What it carries</th><th>How often</th></tr></thead><tbody>${chRows}</tbody></table></div>`, { id: "channels" })}
+  </section>
+  <section class="sec" id="readers"><div class="sec-h"><h2>Who looks at the game</h2></div>
+    ${R.summary_md ? `<div class="prose">${md(R.summary_md)}</div>` : ""}${fold(`<div class="sum-main"><div class="sum-title">Every way the game is read</div></div><span class="sum-meta">${rdRows.length}</span>`, tableHtml(["Process", "Reads", "How", "How often", "When", "For"], rdRows))}
+  </section>
+  <section class="sec" id="input"><div class="sec-h"><h2>Who presses the game's keys</h2></div>
+    ${I.summary_md ? `<div class="prose">${md(I.summary_md)}</div>` : ""}
+    ${keySteps ? `<div class="sec"><h3>The life of one key</h3><ol class="steps">${keySteps}</ol></div>` : ""}
+    ${fold(`<div class="sum-main"><div class="sum-title">Every call that sends input</div><div class="sum-sub">and what's checked before it goes out</div></div><span class="sum-meta">${sdRows.length}</span>`, tableHtml(["Process", "Call", "What", "Only if"], sdRows))}
+    ${psRows.length ? fold(`<div class="sum-main"><div class="sum-title">Where key plans come from</div><div class="sum-sub">every module that makes a plan for the key player, and its kind</div></div><span class="sum-meta">${psRows.length}</span>`, tableHtml(["Process", "Made in", "Kind", "What"], psRows)) : ""}
+  </section>
+  ${S.length ? `<section class="sec"><div class="sec-h"><h2>Step by step</h2><a class="small" href="#scenarios">all scenarios →</a></div><div class="cards">${S.map(s => `<a class="card" href="#scenario-${slug(s.id)}"><span class="ct">${esc(s.title)}</span><span class="cs">${esc(trimTo(s.summary, 160))}</span><span class="sum-meta">${(s.steps || []).length} steps</span></a>`).join("")}</div></section>` : ""}
+  <p class="muted small">Built ${esc(D.generated)} from commit ${esc(D.commit)}. Traced from the code and checked against it by a second pass; "where this is in the code" under each process links to the lines. The code's packages and layers are under <a href="#layers">Code</a>.</p>
+  </div>`;
+}
+
+function drawSystem() {
+  const host = $("#sys-host"); if (!host) return;
+  host.innerHTML = sysDiagram(sysMode === "start" ? "start" : "all", sysFocus);
+  const svg = $("svg", host);
+  if (sysMode !== "all" && sysMode !== "start") for (const p of $$(".sys-edge", svg)) if (p.dataset.cat !== sysMode) p.classList.add("off");
+  for (const g of $$(".sys-node", svg)) {
+    const pick = () => { sysFocus = sysFocus === g.dataset.id ? "" : g.dataset.id; drawSystem(); };
+    g.addEventListener("click", pick); g.addEventListener("keydown", e => { if (e.key === "Enter") pick(); });
+  }
+  for (const b of $$("#sys-filters .pill")) b.classList.toggle("on", b.dataset.mode === sysMode);
+  const det = $("#sys-detail");
+  det.innerHTML = sysFocus ? procCard(sysFocus) : "";
+  enhance(det);
+  for (const a of $$("[data-focus]", det)) a.addEventListener("click", e => { e.preventDefault(); sysFocus = a.dataset.focus; drawSystem(); });
+  for (const b of $$("[data-unfocus]", det)) b.addEventListener("click", () => { sysFocus = ""; drawSystem(); });
+}
+function wireSystem(main, sub) {
+  if (!$("#sys-host", main)) return;
+  for (const b of $$("[data-mode]", main)) b.addEventListener("click", () => { sysMode = b.dataset.mode; drawSystem(); if (!b.closest("#sys-filters")) $("#sys-diagram").scrollIntoView({ block: "start" }); });
+  for (const a of $$("[data-focus]", main)) if (!a.closest("#sys-detail")) a.addEventListener("click", e => { e.preventDefault(); sysFocus = a.dataset.focus; drawSystem(); $("#sys-diagram").scrollIntoView({ block: "start" }); });
+  const f = $("#ch-filter", main);
+  if (f) f.addEventListener("input", () => { const q = f.value.trim().toLowerCase(); for (const r of $$("#ch-table tbody tr", main)) r.hidden = !r.dataset.text.includes(q); });
+  drawSystem();
+  if (sub) { const el = document.getElementById(sub); if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start" })); }
+}
+
+/* ---------- scenarios as sequence diagrams: each step's arrow and its words on one row ---------- */
+const SHORT = { perceive: "Perception service", hunt: "Hunt", player: "Key player", pet: "Pet feeder", park: "Parker", babysitter: "Babysitter",
+  game: "MapleStory", windows: "Windows", user: "You", claude: "Claude", phone: "Phone", cloudflare: "Cloudflare", minimap: "Mini-map / web",
+  "lie-tracker": "Mini-game tracker", partwriter: "Part writer", "grind-loop": "Grind loop", helper: "MapleHelper app", toast: "Windows toast",
+  tools: "Short command", recorder: "Old recorder", keyviewer: "Key viewer" };
+const shortOf = id => SHORT[id] || sysName(id).replace(/^The /, "");
+function laneWidth(n) {
+  const avail = Math.min(1240, window.innerWidth - (window.innerWidth > 1000 ? 360 : 40));
+  return Math.max(58, Math.min(96, Math.floor((avail - 420) / Math.max(1, n))));
+}
+function chanLabel(id) {
+  const c = ((SYS.channels || {}).channels || []).find(x => x.id === id);
+  return c ? String(c.transport || "").split(/[:(;]/)[0].trim() : "";
+}
+function seqHtml(s) {
+  const steps = s.steps || [];
+  const parts = []; for (const st of steps) for (const x of [st.from, st.to]) if (x && !parts.includes(x)) parts.push(x);
+  const LANE = laneWidth(parts.length), W = parts.length * LANE, cx = i => i * LANE + LANE / 2;
+  const lifelines = parts.map((p, i) => `<i class="life" style="left:${cx(i)}px"></i>`).join("");
+  const head = `<div class="sq-head" style="grid-template-columns:${W}px minmax(0,1fr)"><div class="sq-parts" style="width:${W}px">${parts.map((p, i) => {
+    const adm = (SPROC[p] && SPROC[p].elevated) || p === "game";
+    return `<span class="sq-p${adm ? " adm" : ""}${SPROC[p] ? "" : " out"}" style="left:${i * LANE + 3}px;width:${LANE - 6}px" title="${esc(sysName(p))}">${esc(shortOf(p))}</span>`;
+  }).join("")}</div><div class="sq-what eyebrow">What happens</div></div>`;
+  const rows = steps.map((st, k) => {
+    const a = parts.indexOf(st.from), b = parts.indexOf(st.to);
+    const ch = ((SYS.channels || {}).channels || []).find(c => c.id === st.channel);
+    const col = ch ? CATS[tcat(ch)].color : st.to === "game" ? CATS.input.color : st.from === "game" ? CATS.read.color : "var(--muted)";
+    const y = 15;
+    const arrow = a === b
+      ? `<path d="M${cx(a)},${y - 7} h22 v14 h-18" style="fill:none;stroke:${col};stroke-width:1.8px" marker-end="url(#sqh)"/>`
+      : `<line x1="${cx(a)}" y1="${y}" x2="${cx(b) + (b > a ? -5 : 5)}" y2="${y}" style="stroke:${col};stroke-width:2px" marker-end="url(#sqh)"/>`;
+    const dot = `<circle cx="${cx(a)}" cy="${y}" r="3.2" style="fill:${col}"/>`;
+    const cl = chanLabel(st.channel);
+    return `<li class="sq-row" data-k="${k}" style="grid-template-columns:${W}px minmax(0,1fr)">
+      <div class="sq-lanes" style="width:${W}px">${lifelines}<svg width="${W}" height="30" aria-hidden="true">${arrow}${dot}</svg><span class="sq-n">${k + 1}</span></div>
+      <div class="sq-txt"><div class="where small"><b>${esc(shortOf(st.from))}</b> → <b>${esc(shortOf(st.to))}</b>${cl ? ` <span class="muted">· ${esc(trimTo(cl, 50))}</span>` : ""}</div>
+        <div>${md(st.what).replace(/^<p>|<\/p>\s*$/g, "")}</div>${st.evidence && st.evidence.length ? `<details class="plain small"><summary>in the code</summary><div class="body row">${evLinks(st.evidence)}</div></details>` : ""}</div></li>`;
+  }).join("");
+  return `<div class="seq2"><svg width="0" height="0" style="position:absolute"><defs><marker id="sqh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1L9 5L1 9z" style="fill:context-stroke"/></marker></defs></svg>${head}<ol class="sq-rows">${rows}</ol></div>`;
+}
+function viewScenarios(id) {
+  const S = (SYS.sequences || {}).sequences || [];
+  const one = id && S.find(s => slug(s.id) === id);
+  if (one) return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><a href="#scenarios">Step by step</a></div><h1>${esc(one.title)}</h1><div class="prose lede">${md(one.summary)}</div>
+    <div class="ctrl"><button class="btn" data-act="sprev">← Back</button><button class="btn primary" data-act="splay">Play</button><button class="btn" data-act="snext">Next →</button><span class="small muted" id="seq-pos" style="align-self:center">Click a step, or play them in turn.</span></div></div>${seqHtml(one)}</div>`;
+  return `<div class="stack-gap"><div class="head"><div class="crumbs"><a href="#overview">System</a><span>›</span><span>Step by step</span></div><h1>Step by step</h1><p class="tagline">Start-to-finish stories across the processes: who sends what to whom, in order.</p>
+    ${(SYS.sequences || {}).summary_md ? `<div class="prose">${md(SYS.sequences.summary_md)}</div>` : ""}</div>
+    <div class="cards">${S.map(s => `<a class="card" href="#scenario-${slug(s.id)}"><span class="ct">${esc(s.title)}</span><span class="cs">${esc(s.summary)}</span><span class="sum-meta">${(s.steps || []).length} steps</span></a>`).join("") || `<p class="empty">Not traced yet.</p>`}</div></div>`;
+}
+function wireScenario() {
+  const rows = $$(".sq-rows .sq-row"); if (!rows.length) return;
+  let cur = -1, timer = null;
+  const set = i => {
+    cur = Math.max(0, Math.min(rows.length - 1, i));
+    rows.forEach((r, j) => r.classList.toggle("on", j === cur));
+    const p = $("#seq-pos"); if (p) p.textContent = `Step ${cur + 1} of ${rows.length}`;
+    const r = rows[cur].getBoundingClientRect();
+    if (r.top < 120 || r.bottom > innerHeight - 20) rows[cur].scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
+  const pb = $('[data-act="splay"]');
+  const stop = () => { if (timer) { clearInterval(timer); timer = null; player = null; } if (pb) pb.textContent = "Play"; };
+  rows.forEach((r, i) => r.addEventListener("click", e => { if (e.target.closest("a, summary")) return; stop(); set(i); }));
+  if (pb) pb.addEventListener("click", () => { if (timer) return stop(); if (cur >= rows.length - 1) cur = -1; set(cur + 1); pb.textContent = "Pause"; timer = player = setInterval(() => { if (cur >= rows.length - 1) return stop(); set(cur + 1); }, 3000); });
+  const n = $('[data-act="snext"]'), b = $('[data-act="sprev"]');
+  if (n) n.addEventListener("click", () => { stop(); set(cur + 1); });
+  if (b) b.addEventListener("click", () => { stop(); set(cur - 1); });
+}
+
+/* ---------- router ---------- */
+function route() {
+  if (player) { clearInterval(player); player = null; }
+  document.body.classList.remove("drawer");
+  const raw = decodeURIComponent(location.hash.slice(1)) || "overview";
+  const [base, sub] = raw.split("--");
+  let html, path = "", layer = "", after = null;
+  currentView = base;
+  if (base === "overview") { html = viewSystem(sub); after = () => wireSystem($("#main"), sub); }
+  else if (base === "layers") html = viewLayersOverview();
+  else if (base === "scenarios") html = viewScenarios("");
+  else if (base.startsWith("scenario-")) { html = viewScenarios(base.slice(9)); currentView = "scenarios"; after = wireScenario; }
+  else if (base.startsWith("layer-")) { layer = base.slice(6); html = viewLayer(layer); }
+  else if (base.startsWith("slice-")) { const s = D.slices.find(x => slug(x.id) === base.slice(6)); if (s) { layer = s.layer; html = viewLayer(s.layer); after = () => { const el = document.getElementById(base); if (el) el.scrollIntoView(); }; } else html = notFound(); }
+  else if (base.startsWith("m-")) { path = ROUTE_MOD[base] || ""; layer = layerOfPath(path); html = path ? viewModule(path, sub) : notFound(); if (sub) after = () => { const el = document.getElementById("k-" + sub); if (el) { el.open = true; el.classList.add("target"); el.scrollIntoView({ block: "center" }); } }; }
+  else if (base === "flows") html = viewFlows();
+  else if (base.startsWith("flow-")) { html = viewFlow(base.slice(5)); currentView = "flows"; after = wireFlow; }
+  else if (base === "runtime") { html = viewRuntime(sub); layer = "runtime"; if (sub) after = () => { const el = document.getElementById(sub); if (el) { if (el.tagName === "DETAILS") el.open = true; el.scrollIntoView({ block: "start" }); } }; }
+  else if (base === "glossary") { html = viewGlossary(); if (sub) after = () => { const el = document.getElementById(sub); if (el) { el.scrollIntoView({ block: "center" }); el.style.background = "var(--sunk)"; } }; }
+  else if (base === "timeline") html = viewTimeline();
+  else if (base === "tests") html = viewTests();
+  else html = notFound();
+  const main = $("#main");
+  main.innerHTML = `<div class="wrap${base.startsWith("scenario-") ? " wide" : ""}">${html}</div>`;
+  enhance(main);
+  const st = $(".stack:not(.mini)", main); if (st) wireStack(st, $("#stack-cap", main));
+  wireFilters(main);
+  wireFolds(main);
+  markSide(path, layer);
+  window.scrollTo(0, 0);
+  if (after) requestAnimationFrame(after);
+}
+function wireFolds(main) {
+  for (const b of $$('[data-act="open-all"]', main)) b.addEventListener("click", () => $$("details", main).forEach(d => d.open = true));
+  for (const b of $$('[data-act="close-all"]', main)) b.addEventListener("click", () => $$("details", main).forEach(d => d.open = false));
+}
+function wireFilters(main) {
+  const rows = (input, sel, extra) => { if (!input) return; const run = () => { const q = input.value.trim().toLowerCase(); for (const r of $$(sel, main)) r.hidden = !(r.dataset.text || r.textContent.toLowerCase()).includes(q) || (extra && !extra(r)); }; input.addEventListener("input", run); if (extra) extra.trigger = run; return run; };
+  const keys = $("#cli-keys", main);
+  const runCli = rows($("#cli-filter", main), "#cli-table tbody tr", r => !keys || !keys.checked || r.dataset.keys === "1");
+  if (keys && runCli) keys.addEventListener("change", runCli);
+  rows($("#t-filter", main), "#t-table tbody tr");
+  rows($("#g-filter", main), "#gloss > div");
+}
+
+/* ---------- search ---------- */
+const IDX = [];
+for (const [p, m] of Object.entries(MOD)) {
+  IDX.push({ k: "module", t: m.title, s: p + " · " + m.tagline, h: modHref(p), x: (m.title + " " + p + " " + m.tagline).toLowerCase(), w: 3 });
+  for (const it of m.key_items || []) IDX.push({ k: it.kind || "item", t: it.name, s: m.title + " · " + (it.summary || ""), h: modHref(p, it.name), x: (it.name + " " + m.title + " " + (it.summary || "")).toLowerCase(), w: 2 });
+  for (const tu of m.tunables || []) IDX.push({ k: "tunable", t: tu.name + " = " + tu.value, s: m.title + " · " + tu.meaning, h: modHref(p), x: (tu.name + " " + tu.meaning).toLowerCase(), w: 1 });
+}
+for (const s of D.slices) IDX.push({ k: "slice", t: s.title, s: s.tagline, h: "#slice-" + slug(s.id), x: (s.title + " " + s.tagline).toLowerCase(), w: 3 });
+for (const L of D.layers) IDX.push({ k: "layer", t: L.title, s: L.blurb, h: "#layer-" + L.id, x: (L.title + " " + L.blurb).toLowerCase(), w: 4 });
+for (const f of D.flows || []) IDX.push({ k: "flow", t: f.title, s: f.summary, h: "#flow-" + slug(f.id), x: (f.title + " " + f.summary).toLowerCase(), w: 3 });
+for (const g of D.glossary || []) IDX.push({ k: "term", t: g.term, s: g.meaning, h: "#glossary--g-" + slug(g.term), x: (g.term + " " + g.meaning).toLowerCase(), w: 2 });
+for (const c of D.cli || []) IDX.push({ k: "command", t: c.command, s: c.summary, h: "#runtime--cli-" + slug(c.command), x: (c.command + " " + c.summary).toLowerCase(), w: 2 });
+for (const p of D.processes || []) IDX.push({ k: "process", t: p.name, s: p.summary, h: "#runtime--p-" + slug(p.id), x: (p.name + " " + p.summary).toLowerCase(), w: 3 });
+for (const f of D.lab_files || []) IDX.push({ k: "file", t: f.path, s: f.purpose, h: "#runtime--lab-files", x: (f.path + " " + f.purpose).toLowerCase(), w: 1 });
+for (const p of SP) IDX.push({ k: "process", t: p.name, s: (p.command || "") + " · " + (p.summary || ""), h: "#overview--sys-diagram", x: (p.name + " " + p.id + " " + (p.command || "") + " " + (p.summary || "")).toLowerCase(), w: 4, focus: p.id });
+for (const c of (SYS.channels || {}).channels || []) IDX.push({ k: "channel", t: (c.name || c.id), s: sysName([].concat(c.from)[0]) + " → " + [].concat(c.to).map(sysName).join(", ") + " · " + (c.carries || ""), h: "#overview--channels", x: ((c.name || "") + " " + c.id + " " + c.transport + " " + (c.carries || "")).toLowerCase(), w: 2 });
+for (const s of (SYS.sequences || {}).sequences || []) IDX.push({ k: "scenario", t: s.title, s: s.summary, h: "#scenario-" + slug(s.id), x: (s.title + " " + s.summary).toLowerCase(), w: 3 });
+const q = $("#q"), res = $("#results"); let sel = 0, hits = [];
+function search(text) {
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const out = [];
+  for (const e of IDX) {
+    if (!words.every(w => e.x.includes(w))) continue;
+    const tl = e.t.toLowerCase(); const w0 = words.join(" ");
+    const score = (tl === w0 ? 100 : tl.startsWith(w0) ? 50 : tl.includes(w0) ? 25 : 0) + e.w * 5 - Math.min(20, e.t.length / 4);
+    out.push([score, e]);
+  }
+  return out.sort((a, b) => b[0] - a[0]).slice(0, 40).map(x => x[1]);
+}
+function hl(s, words) { let h = esc(s); for (const w of words) { if (w.length < 2) continue; h = h.replace(new RegExp("(" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "ig"), "<mark>$1</mark>"); } return h; }
+function showResults() {
+  const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+  hits = search(q.value); sel = 0;
+  if (!q.value.trim()) { res.hidden = true; return; }
+  res.hidden = false;
+  res.innerHTML = hits.length ? hits.map((e, i) => `<a href="${e.h}" class="${i === sel ? "sel" : ""}"${e.focus ? ` data-focus="${esc(e.focus)}"` : ""}><div class="t"><span class="k">${esc(e.k)}</span><span>${hl(e.t, words)}</span></div><div class="s">${esc(trimTo(e.s, 110))}</div></a>`).join("") : `<div class="empty small" style="padding:8px">Nothing matches “${esc(q.value)}”.</div>`;
+}
+q.addEventListener("input", showResults);
+q.addEventListener("focus", () => { if (q.value.trim()) showResults(); });
+q.addEventListener("keydown", e => {
+  const as = $$("a", res);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (!as.length) return; sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + as.length) % as.length; as.forEach((a, i) => a.classList.toggle("sel", i === sel)); as[sel].scrollIntoView({ block: "nearest" }); }
+  else if (e.key === "Enter") { if (as[sel]) { pickHit(as[sel]); location.hash = as[sel].getAttribute("href").slice(1); res.hidden = true; q.blur(); } }
+  else if (e.key === "Escape") { res.hidden = true; q.blur(); }
+});
+res.addEventListener("click", e => { const a = e.target.closest("a"); if (a) pickHit(a); res.hidden = true; });
+function pickHit(a) { if (a.dataset.focus) { sysFocus = a.dataset.focus; if (location.hash === a.getAttribute("href")) route(); } }
+document.addEventListener("click", e => { if (!e.target.closest(".search")) res.hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement !== q && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); q.focus(); q.select(); } });
+$("#menu-btn").addEventListener("click", () => document.body.classList.toggle("drawer"));
+$("#scrim").addEventListener("click", () => document.body.classList.remove("drawer"));
+$("#brand-sub").textContent = D.commit ? "at " + D.commit : "";
+
+renderSide();
+window.addEventListener("hashchange", route);
+route();
+})();
+</script>

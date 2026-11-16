@@ -1,0 +1,1506 @@
+{
+ "id": "readers",
+ "summary_md": "**The perception service (`perceive`) is THE reader of the game.** It alone captures the game's client area every frame, 15 a second, through DXGI desktop duplication (mss/GDI is its automatic fallback), checks the window before and after each shot, and hands what it saw to everyone else: a state per frame down each client's named pipe, the look frames and full-size frames in shared memory.\n\n**Hunts never capture the screen themselves, service or not.** A command's eyes have `NoScreen` (any shot raises); every look and glance is a service state; the few whole frames a hunt needs (the pick-up log and message bar for OCR, the key-bindings and stat windows, the pet's Character Info) are `full` asks answered by the service. The `--no-feed` mode is gone (2026-10-25); `InlineFeed` (eyes that capture on demand) only runs on saved frames, tests and benches. With the service down a hunt's looks fail, it stands still and starts a service (`ensure`); it still doesn't capture.\n\n**The one other process that grabs pixels during a hunt is the elevated key player** (besides an old `gamelab recorder`, if someone still runs one): its Lie Detector watchdog takes its own mss grab 4 times a second for its whole life, independent of the service (the safety net), and it records the client during a plan only when the plan asks (hunts never ask; `snap`, `calibrate`, `window`, `act`, `do`, `lock`, `combo`, `keys/stats --read --record` do). Inside the service, the rolling recording, the Lie Detector mini-game tracker and the Violetta follower reuse the frame loop's own frames; the recording grabs with mss itself only when the loop gives none for 0.25 s or fewer than 10 a second. The `lie-tracker` child only sees board crops sent down its stdin. The `partwriter` child only gets the recording's packed frames for a save. Hand-run tools (`spot`, `bench-capture`, `bench-look --live`, `python -m maplehelper.ocr`, the repo root's `ocr_bench.py`) take their own shots.\n\n**Window state** (FindWindowW by title, client rect, minimized, foreground title, what's over it) is read by almost everyone: every frame by the service, before every key by the player, at start and on faults by hunts, at every follow by the pet and once a second by its guard, at every real key press by maplehelper's helper, once by the mini-map to place itself, and once or so by short commands (`stop`, `spot`, `window --recover`, the ones that bring the game forward). **The game's files** are read once by hand (`python -m gamedata copy`) into `gamedata/data/copy`; every process that builds eyes or a map model reads that copy (cached as JSON), never the install. No code path reads the game's memory: every OpenProcess asks only limited query rights, for a window's process image name (window._image, the windows over the game), whether a gamelab process is alive or when it started (control.client), or a soak worker's CPU and memory (sim.soak).",
+ "readers": [
+  {
+   "process": "perceive",
+   "what": "pixels",
+   "how": "DXGI desktop duplication of the monitor the game is on (capture.Grabber, the process's one grabber: capture.shared; config.toml says `[capture] method = \"dxgi\"`, also the default, and `fence = true`: each copy off the graphics card waited for on a fence's event), the whole client area copied off the card each frame and converted to RGB (perception.frames.ScreenFrames.next, called by feed.run's frame loop). A look waits up to 20 ms for a frame shown after it was due (FRESH_WAIT_S). If duplication fails (or the client spans two monitors) it falls back to mss/GDI by itself, for RETRY_S (10 s) after a failure; Eyes.recover reopens the duplication, then forces mss, when frames come out offset from the window or stale.",
+   "rate": "15 frames a second (localization.rate.HZ), the same whoever is attached",
+   "purpose": "THE main reader. Each frame gets one pass of the world step (her place and look, HUD numbers, every monster matched to its track, the drops asked for); the state goes to every attached command down its pipe, the look frame into a 16-slot shared-memory ring, full-size frames into a 2-slot ring for `full` asks, and telemetry for the mini-map.",
+   "when": "always, while `python -m gamelab perceive` runs (kept up by the babysitter, or started detached by any command's ServiceClient through service.ensure). Frames are only taken while the game window is fit; otherwise a state saying why goes out every 0.25 s. Not with --frames (saved PNGs, offline).",
+   "evidence": [
+    {
+     "path": "gamelab/capture.py",
+     "line": 298,
+     "symbol": "shared"
+    },
+    {
+     "path": "gamelab/capture.py",
+     "line": 200,
+     "symbol": "Grabber.shot"
+    },
+    {
+     "path": "gamelab/capture.py",
+     "line": 309,
+     "symbol": "Duplicator"
+    },
+    {
+     "path": "gamelab/capture.py",
+     "line": 517,
+     "symbol": "Dxgi"
+    },
+    {
+     "path": "gamelab/capture.py",
+     "line": 234,
+     "symbol": "Grabber.failed"
+    },
+    {
+     "path": "gamelab/capture.py",
+     "line": 79,
+     "symbol": "configured_method"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 122,
+     "symbol": "ScreenFrames"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 158,
+     "symbol": "Grabber.shot"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 263,
+     "symbol": "screen_world"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 274,
+     "symbol": "ScreenFrames"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 606,
+     "symbol": "feed.run"
+    },
+    {
+     "path": "gamelab/localization/feed.py",
+     "line": 188,
+     "symbol": "run"
+    },
+    {
+     "path": "gamelab/localization/feed.py",
+     "line": 212,
+     "symbol": "next"
+    },
+    {
+     "path": "gamelab/localization/rate.py",
+     "line": 20,
+     "symbol": "HZ"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 86,
+     "symbol": "RING_SLOTS"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 796,
+     "symbol": "Service._emit"
+    },
+    {
+     "path": "gamelab/perception/eyes.py",
+     "line": 441,
+     "symbol": "Eyes.recover"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2694,
+     "symbol": "screen_world"
+    },
+    {
+     "path": "config.toml",
+     "line": 69,
+     "symbol": "method"
+    },
+    {
+     "path": "config.toml",
+     "line": 70,
+     "symbol": "fence"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "window state",
+   "how": "Before every shot: FindWindowW by the game's title (window.find_game), GetClientRect + ClientToScreen (window.client_rect), then framecheck.window_problem: IsIconic, the client size against the eyes' geometry, wholly on a monitor (window.on_screen), GetForegroundWindow's title (in front), WindowFromPoint at a grid of 7 x 5 = 35 points over the client (COVER_GRID's 6 x 4 spaces; window.shows: nothing over it). After the shot: client_rect again (moved while captured), the frame's age (stale), and GetWindowRect for the drawn-off check (window.inset). While the rolling recording runs (`cover_check`), a walk up the z-order (GetWindow GW_HWNDPREV, visibility, DWM cloaking and frame bounds, each window's process image) before and after the shot names any other program's window over the client.",
+   "rate": "every frame (15 a second). service.window_geometry (FindWindowW, IsIconic, the client size) only until the first run is built, every 0.25 s while there is none; a later run (a map change) keeps that geometry",
+   "purpose": "Never read a frame the game isn't wholly showing: an unfit frame becomes a state with a Problem (gone, minimized, size, offscreen, window, moved, stale, drawn) that every command reads and waits on. The service never brings the game forward. The z-order walk only feeds the recording's notes of what covered a frame.",
+   "when": "always, with the service; the z-order walk only while its recording is on (not with --no-record)",
+   "evidence": [
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 141,
+     "symbol": "ScreenFrames.next"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 149,
+     "symbol": "find_game"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 151,
+     "symbol": "window_problem"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 164,
+     "symbol": "moved_problem"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 167,
+     "symbol": "drawn_problem"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 156,
+     "symbol": "cover"
+    },
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 235,
+     "symbol": "_overs"
+    },
+    {
+     "path": "gamelab/perception/framecheck.py",
+     "line": 339,
+     "symbol": "window_problem"
+    },
+    {
+     "path": "gamelab/perception/framecheck.py",
+     "line": 94,
+     "symbol": "COVER_GRID"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 664,
+     "symbol": "cover_check"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 303,
+     "symbol": "window_geometry"
+    },
+    {
+     "path": "gamelab/localization/feed.py",
+     "line": 61,
+     "symbol": "NOT_VISIBLE_S"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 135,
+     "symbol": "find_game"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 143,
+     "symbol": "client_rect"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 201,
+     "symbol": "shows"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 236,
+     "symbol": "overs"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 648,
+     "symbol": "geometry"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 714,
+     "symbol": "NOT_VISIBLE_S"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "pixels",
+   "how": "perception.frames.glimpse: FindWindowW, IsIconic (None while minimized), client_rect, then one unchecked shot of the client at whatever size through the same grabber (capture.shared): 1366x768 and 1920x1080 kept as they are, any other size brought to 1920x1080 (lie_detector.to_template), sent down the asking client's pipe (up to 6 MB).",
+   "rate": "on demand, a few times a minute at most",
+   "purpose": "The picture the size fix looks for the Lie Detector on before each Alt+Enter (a hunt's SizeFix, `window --recover`) and the pet's wait checks the HUD on, when the regular frames can't be read.",
+   "when": "only for a `full` ask with any_size while the frames are unfit for a fault Alt+Enter mends (FIX_KINDS: another client size, the game drawing off its client)",
+   "evidence": [
+    {
+     "path": "gamelab/perception/frames.py",
+     "line": 292,
+     "symbol": "glimpse"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 767,
+     "symbol": "Service._answer_fulls"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 787,
+     "symbol": "glimpse"
+    },
+    {
+     "path": "gamelab/perception/framecheck.py",
+     "line": 120,
+     "symbol": "FIX_KINDS"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2701,
+     "symbol": "glimpse"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1120,
+     "symbol": "_lie_detector_look"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "pixels",
+   "how": "No capture of its own while the frame loop delivers: Service._emit hands every frame by reference to control.recording.Recording.saw, which takes up to 15 a second (a token bucket): frames the frame loop found visible (ScreenFrames' window checks, with the z-order walk on), less those whose capture the world step found offset from the window (GAP_KINDS); other failed checks (minimap, HUD, picture, tag) are kept. A frame with another program's window over all of it is kept as a 'covered' gap, one partly covered is kept with the covered boxes noted. An encoder thread keeps zstd-packed differences in a 5-minute in-memory ring.",
+   "rate": "15 frames a second",
+   "purpose": "The rolling recording: what led up to a moment, saved on a Lie Detector alarm (the cycle's before/ part and its lossless alarm clip), on a Truth Booth of unknown cause, and on `save-recent`.",
+   "when": "always while the service runs, unless --no-record, and only while it holds the recorders' mutex (an old `gamelab recorder` running has it wait)",
+   "evidence": [
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 803,
+     "symbol": "Recording.saw"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 146,
+     "symbol": "Recording.saw"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 62,
+     "symbol": "FPS"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 307,
+     "symbol": "Recording.take"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2708,
+     "symbol": "Recording"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 188,
+     "symbol": "MUTEX"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 152,
+     "symbol": "GAP_KINDS"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 174,
+     "symbol": "covered"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "pixels",
+   "how": "Fallback grabs on the recording's own thread: rolling.Recorder.tick checks the window (rolling.GameWindow.check: find_game, IsIconic, client_rect, on_screen, the z-order walk), grabs the client with mss/GDI (rolling.ScreenGrab = capture.Grabber('mss'), so no second DXGI duplication is held), and checks the window again.",
+   "rate": "15 moments a second while it's on",
+   "purpose": "Keep the recording at 10 or more frames a second, at any client size, when the service's frames don't come.",
+   "when": "fallback only: the frame loop has handed over no frame for OWN_AFTER_S (0.25 s: game not on screen, another size, capture stalled), or fewer than FLOOR_FPS (10) a second, until it gives enough again",
+   "evidence": [
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 242,
+     "symbol": "Recording.tick"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 78,
+     "symbol": "OWN_AFTER_S"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 84,
+     "symbol": "FLOOR_FPS"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 259,
+     "symbol": "Recording.floored"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 323,
+     "symbol": "ScreenGrab"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 432,
+     "symbol": "ScreenGrab"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 437,
+     "symbol": "Grabber"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 553,
+     "symbol": "Recorder.tick"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 400,
+     "symbol": "GameWindow.check"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "pixels",
+   "how": "No capture of its own: LieTracking.saw keeps the newest frame from the frame loop; its `lie-target` thread looks for the mini-game's board (LieDetectorSpotter.over_play) on frames of the game's own 1366x768 only (the board's place is known only there) and sends the 750x500 board crop to the tracker child when it is ready for one. It also re-reads the client area's corner on the screen (FindWindowW + window.client_rect) to turn answers into desktop px.",
+   "rate": "up to 15 frames a second kept; the board looked for every 0.25 s before a round and every 1 s in one; the client's corner once a second",
+   "purpose": "Follow the Lie Detector mouse mini-game's target and move the cursor to it through the elevated player.",
+   "when": "only while the Lie Detector alarm file (paths.ALARM) is up, and through a round in progress",
+   "evidence": [
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 805,
+     "symbol": "LieTracking.saw"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 114,
+     "symbol": "LieTracking.saw"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 186,
+     "symbol": "LieTracking.step"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 256,
+     "symbol": "LieTracking._board_up"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 58,
+     "symbol": "BOARD_CHECK_S"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 249,
+     "symbol": "LieTracking._client_corner"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 66,
+     "symbol": "ORIGIN_POLL_S"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2712,
+     "symbol": "LieTracking"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 203,
+     "symbol": ""
+    }
+   ]
+  },
+  {
+   "process": "lie-tracker",
+   "what": "pixels",
+   "how": "Second-hand only: board crops (RGB) pickled down its stdin by the service, one each time it says it's ready (the newest; those in between are skipped). It never captures the screen or looks at a window.",
+   "rate": "as fast as it tracks (about 64 ms a frame on its 6 OpenCV threads, CHILD_THREADS), the newest board crop each time it is ready; at most the service's 15 a second",
+   "purpose": "lie_target's tracker finds the target; each answer goes back up stdout and into lab/lie_target/<time>.jsonl.",
+   "when": "the process is started by the service's `lie-target` thread when the alarm file goes up and stopped 60 s after it has gone with no round on (CHILD_IDLE_S); it is sent crops only during a round (from the board's first sight until it has been gone 3 s)",
+   "evidence": [
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 417,
+     "symbol": "Child"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 423,
+     "symbol": "Popen"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 449,
+     "symbol": "serve"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 63,
+     "symbol": "CHILD_IDLE_S"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 64,
+     "symbol": "CHILD_THREADS"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 193,
+     "symbol": "_start_child"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "pixels",
+   "how": "No capture of its own: VioletaLive.saw queues the frame loop's frames (45 at most, the oldest dropped) for its `violetta` thread, which takes only frames of the game's own 1366x768: before a game it looks for the game's countdown window (LieDetectorSpotter.over_play); during a game (from that window's first sight until it has been gone 3 s, 150 s at most) it runs a YOLO model (perception.violetta.Detector, on the GPU, loaded as the alarm goes up) on every frame; all along it looks for the pass dialog's OK.",
+   "rate": "every frame (15 a second) through the YOLO model during a game; the countdown window looked for every 0.25 s before the game and every 1 s during it; the OK dialog every 0.5 s",
+   "purpose": "The Lie Detector's Violetta game: which slot is the made-up one each round, and its answer and OK clicked through the elevated player.",
+   "when": "while the alarm is up, during a game, and for 90 s after the alarm has gone (AFTER_S)",
+   "evidence": [
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 83,
+     "symbol": "VioletaLive.saw"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 152,
+     "symbol": "VioletaLive.step"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 206,
+     "symbol": "VioletaLive._window_up"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 278,
+     "symbol": "VioletaLive._look_for_ok"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 37,
+     "symbol": "AFTER_S"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 164,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 186,
+     "symbol": "detector"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 40,
+     "symbol": "WINDOW_ROUND_S"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "what": "pixels",
+   "how": "The Lie Detector watchdog's own mss/GDI grab (mss.MSS on its `lie-detector-watch` thread, not DXGI and not the service): find_game, IsIconic and client_rect first, window.shows (WindowFromPoint at the middle and near each corner) to mark a covered frame, the client brought to 1366x768 or 1920x1080, then LieDetectorSpotter scores near each form's usual places, the whole frame every 8th look.",
+   "rate": "4 looks a second (interval 0.25 s)",
+   "purpose": "Seeing the Lie Detector in any form: the alarm Event first (keys stop within about 10 ms), then the alarm file and its screenshot, the phone paged, the cycle logged to lab/lie_detector/<time>/ (scores per look, no pictures since 2026-11-01), and the alarm cleared by itself once it has been answered.",
+   "when": "always, from the player's start (it takes no plan before the first look) to its exit, plan or no plan",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 330,
+     "symbol": "Watchdog"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 388,
+     "symbol": "interval"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 443,
+     "symbol": "Watchdog.run"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 446,
+     "symbol": "MSS"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 464,
+     "symbol": "Watchdog.tick"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 651,
+     "symbol": "Watchdog._grab"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 668,
+     "symbol": "shows"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 674,
+     "symbol": "to_template"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1147,
+     "symbol": "watchdog.start"
+    },
+    {
+     "path": "gamelab/control/lie_recorder.py",
+     "line": 136,
+     "symbol": "Recording.add"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "what": "pixels",
+   "how": "The plan's own recording: mss grabs of the client area (or the plan's crop), scaled, at the plan's capture.fps for its duration_ms while its keys play, up to 900 frames, returned with the result in the outbox.",
+   "rate": "as the plan asks: 10 a second (snap, calibrate, window, find_her), 15 (keys/stats --record), 30 (act, do) or up to 60 (lock, combo: analysis.recordings.record), for 0.1-20 s, 900 frames at most",
+   "purpose": "Tools that want to see what keys did: `snap`, `calibrate`, `window SIZE`, `act`, `do`, `lock`, `combo`, find_her, `keys --read --record`, `stats --read --record`. They capture nothing themselves.",
+   "when": "only when a plan asks (capture.fps > 0). Hunts never do: Actions, the navigator and the mover send plans with fps 0.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 780,
+     "symbol": "client_rect"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 950,
+     "symbol": "MSS"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 955,
+     "symbol": "grab"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 71,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 87,
+     "symbol": "capture"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 276,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 2901,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/control/mover.py",
+     "line": 160,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/analysis/recordings.py",
+     "line": 51,
+     "symbol": "screenshot"
+    },
+    {
+     "path": "gamelab/analysis/calibration.py",
+     "line": 70,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 799,
+     "symbol": "cmd_snap"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 755,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1309,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 72,
+     "symbol": "MAX_FRAMES"
+    },
+    {
+     "path": "gamelab/analysis/recordings.py",
+     "line": 40,
+     "symbol": "fps"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "what": "window state",
+   "how": "FindWindowW by title for each plan; GetForegroundWindow's title before the plan (the game brought forward if the plan says `focus`, else refused 'game not in front') and again before every single event; client_rect to turn plan coordinates into screen px; window.pointer_on (WindowFromPoint under the cursor) before a Lie Detector answer or OK click.",
+   "rate": "per plan, and per key or mouse event",
+   "purpose": "Keys only go to the game while it is in front; clicks only land on the game.",
+   "when": "while a plan plays",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 737,
+     "symbol": "Player.run"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 765,
+     "symbol": "find_game"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 777,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 888,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 917,
+     "symbol": "pointer_on"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 215,
+     "symbol": "pointer_on"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "what": "pixels",
+   "how": "None of its own. Its Eyes have NoScreen (every shot raises; tests/test_architecture.py fails if anything but the service builds ScreenFrames). Each look and glance (Senses.look, Senses.glance) is the newest fitting state from its ServiceClient, pickled down the service's named pipe by a writer thread per client; each look's frame is copied out of the service's shared-memory ring (Feed.look -> ServiceClient.frame_of: what her heading, the monsters' bars and her misses are read off), a glance copies none. InlineFeed, where eyes capture on demand, is only for saved frames, tests and benches; the old --no-feed self-capture was removed on 2026-10-25.",
+   "rate": "every look the hunt loop takes (waiting up to 0.6 s for a frame shown after its keys), and glances at the service's 15 a second while a plan runs",
+   "purpose": "Everything it decides on: her place, HP and MP, the monsters and their tracks, the drops, touches, events.",
+   "when": "always during a hunting command (`hunt kill|clear`, `tour` with its grind, `nav`, `probe run`; `patrol` is offline). With the service down its looks fail (LookLost after 3 s), it stands still, and its client starts a service at most every 10 s; it still never captures.",
+   "evidence": [
+    {
+     "path": "gamelab/perception/eyes.py",
+     "line": 68,
+     "symbol": "NoScreen"
+    },
+    {
+     "path": "gamelab/perception/eyes.py",
+     "line": 180,
+     "symbol": "NoScreen"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 950,
+     "symbol": "_eyes"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1000,
+     "symbol": "_perception"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1039,
+     "symbol": "_hunter"
+    },
+    {
+     "path": "gamelab/localization/senses.py",
+     "line": 202,
+     "symbol": "Senses.look"
+    },
+    {
+     "path": "gamelab/localization/senses.py",
+     "line": 318,
+     "symbol": "Senses.glance"
+    },
+    {
+     "path": "gamelab/localization/senses.py",
+     "line": 195,
+     "symbol": "Senses.feed"
+    },
+    {
+     "path": "gamelab/localization/senses.py",
+     "line": 24,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/localization/feed.py",
+     "line": 363,
+     "symbol": "Feed.look"
+    },
+    {
+     "path": "gamelab/localization/feed.py",
+     "line": 518,
+     "symbol": "InlineFeed"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1147,
+     "symbol": "ServiceClient"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1399,
+     "symbol": "ServiceClient.frame_of"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1198,
+     "symbol": "ServiceClient._run"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 209,
+     "symbol": "ensure"
+    },
+    {
+     "path": "gamelab/localization/feed.py",
+     "line": 371,
+     "symbol": "frame_of"
+    },
+    {
+     "path": "tests/test_architecture.py",
+     "line": 90,
+     "symbol": "test_only_the_perception_service_captures_the_game"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "what": "pixels",
+   "how": "Whole frames on demand, still from the service: Eyes._capture, Eyes.messages and Eyes.chat_line go to eyes.full_frames = ServiceClient.full_frame, a `full` ask up the pipe answered with the service's next frame (put in its 2-slot full-size ring), 1 s at most, BadLook if none. Read with maplehelper.ocr's engine or perception's readers.",
+   "rate": "on demand: the pick-up log when a pick-up fails (drops left lying) and while her Lucky Seven presses take no MP (out of stars?); the message bar every few presses of such a stretch (DartWatch.asks_chat: the game's refusals, a rope); a few frames of the key-bindings window or the stat window per check",
+   "purpose": "What the per-frame state doesn't carry: the pick-up log (OCR), the game's refusals on the message bar (OCR), the KEY BINDINGS window (keycheck), her stat window's W.DEF (statcheck).",
+   "when": "during a hunt, when a check or a pick-up needs it; the size fix's any-size looks only on a size/drawn fault",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 966,
+     "symbol": "full_frames"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1410,
+     "symbol": "ServiceClient.full_frame"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 87,
+     "symbol": "FULL_SLOTS"
+    },
+    {
+     "path": "gamelab/perception/eyes.py",
+     "line": 397,
+     "symbol": "Eyes._capture"
+    },
+    {
+     "path": "gamelab/perception/eyes.py",
+     "line": 332,
+     "symbol": "Eyes.messages"
+    },
+    {
+     "path": "gamelab/perception/eyes.py",
+     "line": 356,
+     "symbol": "Eyes.chat_line"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 1222,
+     "symbol": "Hunter._messages"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 1190,
+     "symbol": "Hunter._chat_line"
+    },
+    {
+     "path": "gamelab/behavior/looting.py",
+     "line": 561,
+     "symbol": "messages"
+    },
+    {
+     "path": "gamelab/behavior/keycheck.py",
+     "line": 1112,
+     "symbol": "KeyCheck._frame"
+    },
+    {
+     "path": "gamelab/behavior/statcheck.py",
+     "line": 455,
+     "symbol": "StatCheck._frame"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 694,
+     "symbol": "_hear_chat"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 696,
+     "symbol": "_messages"
+    },
+    {
+     "path": "gamelab/behavior/darts.py",
+     "line": 311,
+     "symbol": "asks_chat"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "what": "window state",
+   "how": "At its start: FindWindowW, IsIconic (a minimized game restored), client_rect (its size picks the eyes' calibration; the client's place printed), GetForegroundWindow's title (_to_game: it won't start if the game won't come to the front); a client of an uncalibrated size waited on every 1 s for up to 180 s. During: the size fix (SizeFix, refit) reads find_game, IsIconic, client_rect and full_screen (MonitorFromWindow) when a look reports a size or drawn fault. Not-in-front, covered and minimized come from the service's Problem, not its own reads.",
+   "rate": "at its start; then only on a fault",
+   "purpose": "Choose the eyes' geometry, set a wrong client size right with Alt+Enter twice, and know when to bring the game forward (an input, not a read).",
+   "when": "at its start, and on size/drawn faults during",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 86,
+     "symbol": "_game_geometry"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1581,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1143,
+     "symbol": "_fit_start"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 477,
+     "symbol": "SizeFix.__call__"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 209,
+     "symbol": "refit"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 182,
+     "symbol": "full_screen"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1369,
+     "symbol": "ServiceClient.problem"
+    }
+   ]
+  },
+  {
+   "process": "pet",
+   "what": "pixels",
+   "how": "No capture: its PetCare reads her Character Info's pet panel by OCR (maplehelper.ocr's shared engine) on full frames from the service (Eyes._capture -> full_frame), her name off her bottom bar likewise; while the client is unfit, any-size pictures (the service's glimpse) for the HUD's buttons and for the Lie Detector before its one Alt+Enter try (PetWait).",
+   "rate": "a check is a handful of frames (before and after the double-click, after SHOW PET INFO, after Esc) when the fullness isn't known or is low and doubted; otherwise none, the fullness followed in time every --every minutes",
+   "purpose": "The pet's fullness, and that the window opened is hers and closed again.",
+   "when": "on demand in `pet --every` (and in a hunt's pet care); never with the Lie Detector alarm up",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 223,
+     "symbol": "PetCare.tend"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 279,
+     "symbol": "PetCare.check"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 393,
+     "symbol": "PetCare._read"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 397,
+     "symbol": "PetCare._open"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 203,
+     "symbol": "ocr"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 463,
+     "symbol": "PetWait"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1365,
+     "symbol": "cmd_pet"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1384,
+     "symbol": "full_frame"
+    }
+   ]
+  },
+  {
+   "process": "pet",
+   "what": "window state",
+   "how": "Each follow: FindWindowW and IsIconic (the pet is out only while the game is there and not minimized); _pet_unfit and _pet_resized: client_rect, full_screen, whether the size is calibrated, and the service's 'drawn' Problem; with no game at its start, FindWindowW every 5 s until it comes; a minimized game at its start waited on (IsIconic every 0.5 s: _game_geometry, never restored). The guard's pass: the service's newest state (no frame), GetForegroundWindow's title and GetLastInputInfo (window.last_input_age) to tell someone playing her from the player's keys.",
+   "rate": "a follow every --every minutes; every 5 s while waiting for the game or a fit client; the guard once a second",
+   "purpose": "Count only the time her pet is out, wait out an unfit client, and park her on danger (the guard).",
+   "when": "always while `pet --every` runs",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1415,
+     "symbol": "minimized"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1507,
+     "symbol": "_pet_unfit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1535,
+     "symbol": "_pet_resized"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1565,
+     "symbol": "_wait_for_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1445,
+     "symbol": "_guard_pass"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 236,
+     "symbol": "Pass._hands"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 357,
+     "symbol": "last_input_age"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 100,
+     "symbol": "minimized"
+    }
+   ]
+  },
+  {
+   "process": "park",
+   "what": "window state",
+   "how": "GetForegroundWindow's title at its start (nothing sent if the game isn't in front, a note for the guard instead) and IsIconic before its eyes are made (an error if minimized); its looks after are a hunt's, from the service.",
+   "rate": "at its start",
+   "purpose": "Never take the focus or drive her blind.",
+   "when": "each `nav --park` run: started detached by the pet's guard (`nav --park --tell`), or run and waited for by `gamelab stop` with no hunt running, or by hand",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1860,
+     "symbol": "_nav_park"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1871,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1851,
+     "symbol": "_not_minimized"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 427,
+     "symbol": "_park_now"
+    }
+   ]
+  },
+  {
+   "process": "recorder",
+   "what": "pixels",
+   "how": "rolling.Recorder.run's ticks: GameWindow.check (find_game, IsIconic, client_rect, on_screen, window.overs' z-order walk) before and after an mss/GDI grab of the client area (ScreenGrab: capture.Grabber('mss')).",
+   "rate": "10 moments a second (rolling.FPS)",
+   "purpose": "The rolling 5-minute recording as it ran before 2026-10-26.",
+   "when": "only if someone runs `gamelab recorder`; it holds the recorders' mutex, so the service's recording waits meanwhile",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2729,
+     "symbol": "cmd_recorder"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 642,
+     "symbol": "Recorder.run"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 553,
+     "symbol": "Recorder.tick"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 400,
+     "symbol": "GameWindow.check"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 96,
+     "symbol": "FPS"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "what": "pixels",
+   "how": "Their own shots: `spot` one mss grab of the client checked for the Lie Detector; `bench-capture` a DXGI Grabber and an mss Grabber of its own timed against each other (the client, or the screen's top-left 1920x1080 with no game); `bench-look --live` FrontEyes shooting through capture.Grabber(--capture, config.toml's method by default), refusing unless the game is already in front. A DXGI one opens a duplication beside the service's.",
+   "rate": "once, or N timed rounds",
+   "purpose": "Checks and measurements by hand.",
+   "when": "on demand only; they send no keys and never bring the game forward",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 679,
+     "symbol": "cmd_spot"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 688,
+     "symbol": "grab"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2416,
+     "symbol": "cmd_bench_capture"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2431,
+     "symbol": "Grabber"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2250,
+     "symbol": "cmd_bench_look"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2272,
+     "symbol": "Grabber"
+    },
+    {
+     "path": "gamelab/analysis/bench.py",
+     "line": 131,
+     "symbol": "FrontEyes"
+    },
+    {
+     "path": "gamelab/analysis/bench.py",
+     "line": 256,
+     "symbol": "capture_stages"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "what": "pixels",
+   "how": "Viewers of the service, no capture: `watch` reads every state (with --heading the ring frames, with --lie-detector a full frame every 0.5 s, raising the alarm if it sees one); `hunt look` a state and a full frame for her EXP number; `map` one state for her place; `window --recover` the any-size picture for the Lie Detector before each Alt+Enter; `keys --read` and `stats --read` the full frames of the windows they open, through a hunter.",
+   "rate": "watch: 15 states a second, a full frame every 0.5 s; the others a few frames",
+   "purpose": "Showing what perception sees; one-off reads of game windows.",
+   "when": "on demand",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2545,
+     "symbol": "cmd_watch"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2609,
+     "symbol": "full_frame"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1675,
+     "symbol": "_hunt_look"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 762,
+     "symbol": "_window_recover"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1172,
+     "symbol": "cmd_keys"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1281,
+     "symbol": "_keys_recorded"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1815,
+     "symbol": "_perception"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "what": "pixels",
+   "how": "`python -m maplehelper.ocr hud|loot`: GameCapture finds the game window by title (EnumWindows, skipping browsers and terminals), its client box, checks it isn't covered, and grabs the preset region (HUD bar or pick-up log) with mss. The whole picture is grabbed too every 30 s (BARS_EVERY_S) to measure the game's black bars.",
+   "rate": "every --interval s (1 by default)",
+   "purpose": "Trying maplehelper's OCR readers live. gamelab doesn't use GameCapture: it uses only maplehelper.ocr's engine, on frames the service gives it.",
+   "when": "on demand, standalone",
+   "evidence": [
+    {
+     "path": "maplehelper/ocr/__main__.py",
+     "line": 58,
+     "symbol": "GameCapture"
+    },
+    {
+     "path": "maplehelper/ocr/__main__.py",
+     "line": 73,
+     "symbol": "grab"
+    },
+    {
+     "path": "maplehelper/ocr/capture.py",
+     "line": 140,
+     "symbol": "GameCapture"
+    },
+    {
+     "path": "maplehelper/ocr/capture.py",
+     "line": 184,
+     "symbol": "GameCapture.grab"
+    },
+    {
+     "path": "maplehelper/ocr/capture.py",
+     "line": 221,
+     "symbol": "grab"
+    },
+    {
+     "path": "maplehelper/ocr/capture.py",
+     "line": 147,
+     "symbol": "BARS_EVERY_S"
+    }
+   ]
+  },
+  {
+   "process": "helper",
+   "what": "window state",
+   "how": "GetForegroundWindow + GetWindowTextW (maplehelper.win32.foreground_title) on every real key-down its low-level keyboard hook catches. It reads no pixels.",
+   "rate": "per key press",
+   "purpose": "Act on its hotkeys only while the focused window's title holds the game's; otherwise the key passes through untouched.",
+   "when": "always while `python -m maplehelper` runs",
+   "evidence": [
+    {
+     "path": "maplehelper/app.py",
+     "line": 85,
+     "symbol": "KeyboardHook"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 25,
+     "symbol": "Controller.on_key"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 35,
+     "symbol": "_foreground_title"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 163,
+     "symbol": "foreground_title"
+    }
+   ]
+  },
+  {
+   "process": "minimap",
+   "what": "window state",
+   "how": "Once at start: the game's client_rect and mss's list of monitors, to put the tkinter window beside the game, never over it. Everything else it shows is telemetry.",
+   "rate": "once",
+   "purpose": "Captures see whatever is on top, so it must not cover the game.",
+   "when": "at `minimap` start, live (not --web-only, not a replay)",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2065,
+     "symbol": "_beside_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2072,
+     "symbol": "client_rect"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2079,
+     "symbol": "monitors"
+    }
+   ]
+  },
+  {
+   "process": "minimap",
+   "what": "other",
+   "how": "The web server's /tls/ page reads .pcap captures of network traffic from .analysis/captures (or GAMELAB_TLS_ROOT) and decrypts their TLS on request. Offline files written by another capture tool; nothing touches the game.",
+   "rate": "per page request",
+   "purpose": "Analysis: the requests and the x-csauth timeline per captured computer.",
+   "when": "on demand, through the web page",
+   "evidence": [
+    {
+     "path": "gamelab/ui/tls/__init__.py",
+     "line": 34,
+     "symbol": "ROOT"
+    },
+    {
+     "path": "gamelab/ui/tls/__init__.py",
+     "line": 55,
+     "symbol": "handle"
+    },
+    {
+     "path": "gamelab/ui/web.py",
+     "line": 500,
+     "symbol": "handle"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "what": "game files",
+   "how": "`python -m gamedata copy --install <game folder>` copies the install's appdata/Data (.wz packages, .ms packs; Sound left out) into gamedata/data/copy, skipping files whose size and time already match. The other gamedata commands (list, dump, export, pictures, tables) read the copy, offline, by hand.",
+   "rate": "once, by hand (again after a game patch)",
+   "purpose": "The only read of the game's own files; everything after reads the copy.",
+   "when": "on demand, offline",
+   "evidence": [
+    {
+     "path": "gamedata/__main__.py",
+     "line": 25,
+     "symbol": "copy_data"
+    },
+    {
+     "path": "gamedata/__main__.py",
+     "line": 68,
+     "symbol": "cmd_copy"
+    },
+    {
+     "path": "gamedata/paths.py",
+     "line": 7,
+     "symbol": "COPY"
+    },
+    {
+     "path": "gamedata/__main__.py",
+     "line": 45,
+     "symbol": "open_pack"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "what": "game files",
+   "how": "From the copy, never the install: mapdata.load (the map's .img from Map*.wz, Physics.img, String and the monsters' stats; parsed once and cached as JSON in gamedata/data/out/maps), mapdata.load_minimap_picture (the map's miniMap canvas), sprites.detector_for (monster templates drawn from the Mob pack's sprites, built once into a sprites folder).",
+   "rate": "once per run (a map change, or the game first seen); cached after",
+   "purpose": "The map model (platforms, ropes, spawns), the minimap picture her dot is read against, the monster templates.",
+   "when": "whenever the service builds a run",
+   "evidence": [
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 273,
+     "symbol": "mapdata.load"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 276,
+     "symbol": "load_minimap_picture"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 281,
+     "symbol": "detector_for"
+    },
+    {
+     "path": "gamelab/localization/mapdata.py",
+     "line": 592,
+     "symbol": "load"
+    },
+    {
+     "path": "gamelab/localization/mapdata.py",
+     "line": 571,
+     "symbol": "load_minimap_picture"
+    },
+    {
+     "path": "gamelab/perception/sprites.py",
+     "line": 198,
+     "symbol": "detector_for"
+    },
+    {
+     "path": "gamedata/canvas.py",
+     "line": 62,
+     "symbol": "_mob_pack"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "what": "game files",
+   "how": "The same copy at its start: mapdata.load(--map) for its map model and monster stats (EXP, HP, touch damage, speed), the minimap picture (tried 3 times; it stops if the map has one that won't load), and detector_for for its eyes' templates. The pet feeder, the parker, `keys`/`stats --read` and `hunt look` build theirs the same way (_hunter -> _eyes); `watch` and `map` load only the map model (`watch --heading` adds eyes without monster templates).",
+   "rate": "once at its start",
+   "purpose": "Planning moves and fights on the map, and reading the service's states against it.",
+   "when": "at every hunting command's start",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1063,
+     "symbol": "mapdata.load"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 970,
+     "symbol": "_minimap_picture"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 963,
+     "symbol": "detector_for"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2637,
+     "symbol": "_heading_eyes"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "what": "window state",
+   "how": "Short commands read the window, never its pixels unless listed above: `stop` reads GetForegroundWindow's title (no hunt running and the game not in front: a note for the guard instead of a park); `spot` and `bench-capture` FindWindowW + client_rect before their shots; `window --recover` FindWindowW, client_rect and full_screen (MonitorFromWindow) before and after its Alt+Enter try; `bench-look --live` refuses unless the game's title is in front and reads its client size; `watch --heading` the client size for its eyes; and `calibrate`, `snap`, `act`, `do`, `lock`, `combo` bring the game forward before their plan (window.bring_to_front polls GetForegroundWindow's title until it's the game's).",
+   "rate": "once or a few times per run",
+   "purpose": "Not to act blind or steal the focus, and to know the client's size and place for a shot or a fix.",
+   "when": "on demand, each such command's run",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 399,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 686,
+     "symbol": "find_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2423,
+     "symbol": "client_rect"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 775,
+     "symbol": "full_screen"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2262,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2637,
+     "symbol": "_heading_eyes"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 800,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 371,
+     "symbol": "bring_to_front"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "what": "pixels",
+   "how": "`python ocr_bench.py` (a script at the repo's root): with --window, the first visible window whose title holds the text (EnumWindows), its client box (GetClientRect + ClientToScreen) re-read every run, a sub-box of it grabbed with mss; else a box of the primary monitor; or a saved --image. Each grab is timed and read with RapidOCR.",
+   "rate": "--warmup + --runs grabs (10 timed by default), --interval s apart (none by default)",
+   "purpose": "Timing the OCR on the game's HUD or pick-up log, by hand.",
+   "when": "on demand, standalone; it never opens the game's process or sends input",
+   "evidence": [
+    {
+     "path": "ocr_bench.py",
+     "line": 138,
+     "symbol": "find_window"
+    },
+    {
+     "path": "ocr_bench.py",
+     "line": 155,
+     "symbol": "client_box"
+    },
+    {
+     "path": "ocr_bench.py",
+     "line": 186,
+     "symbol": "grab"
+    },
+    {
+     "path": "ocr_bench.py",
+     "line": 285,
+     "symbol": "MSS"
+    },
+    {
+     "path": "ocr_bench.py",
+     "line": 89,
+     "symbol": "--runs"
+    }
+   ]
+  },
+  {
+   "process": "partwriter",
+   "what": "pixels",
+   "how": "Second-hand only: the rolling recording's moments (the frames' zstd-packed bytes as the service's ring holds them) pickled down its stdin by the service's saver (rolling.write_part_apart); it decodes and writes them. It never captures the screen or looks at a window.",
+   "rate": "one process per save",
+   "purpose": "Writing a Lie Detector alarm's before/ part and clip, or a `save-recent`, out of the service's Python lock.",
+   "when": "only while a save of the service's recording is written",
+   "evidence": [
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 1124,
+     "symbol": "write_part_apart"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 1146,
+     "symbol": "Popen"
+    },
+    {
+     "path": "gamelab/control/partwriter.py",
+     "line": 1,
+     "symbol": ""
+    }
+   ]
+  }
+ ]
+}

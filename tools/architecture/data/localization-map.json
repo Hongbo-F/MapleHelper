@@ -1,0 +1,3398 @@
+{
+ "id": "localization-map",
+ "layer": "localization",
+ "title": "Localization: the map, her position and the scene",
+ "tagline": "Where she, the monsters and other players are, in the game's own map units",
+ "summary": "Localization turns what perception saw on screen into places on the map. It reads each map's layout and art straight from the game's data files, works out where the character stands (from her minimap dot refined on screen, or since 2026-10-30 exactly, from the camera registered against the map's art plus a filter over her name tag, plate and body), and places monsters, drops and other players on their platforms. Every look the rest of the stack decides on passes through `Senses`, which hands out a `Scene`: one frame placed on the map.",
+ "details_md": "**Map units.** Everything is measured in the game's world units (\"map units\"): x to the right, y downward. The game lays out a 1366x768 view at one unit per game px and stretches it to its window (1.40625x at 1920x1080).\n\n**The map** (`mapdata`, `mapart`). The map model comes from the game's own WZ files (the client's packed data archives) through the repo's `gamedata` package, kept off git. A *foothold* is one straight line segment of ground in the map data; platforms are footholds chained end to end, plus walls, ropes, portals, spawn points and each monster's EXP, body, speed, touch damage and HP. A platform lying on another is its *twin* and counts as that platform. `mapart` draws the map's fixed art (tiles, objects, backgrounds) as one picture so the camera can be registered against it.\n\n**Her place, two ways.**\n\n| | the dot path (`pose`) | the scene path (`locate`) |\n|---|---|---|\n| where | 1920x1080, the simulator, maps without art, first frames | 1366x768 with her plate model and the map's art (default since 2026-10-30) |\n| her map place | minimap dot (11.4 units a px) snapped to a platform | registered view + her feet on screen |\n| refined by | her tag on a fixed camera, a rope in view, her platform's end | tag template, plate colours, body pose bank, a Kalman filter |\n| accuracy | about 11 units, better when refined | within 3 px on every held-out frame |\n\nOn the scene path `camreg` finds the camera's exact view each frame by matching gray sample rows against the map's art, `locate` finds her with the cheapest cue that works and carries her through frames where none does (counting frames under the Lie Detector (the game's anti-bot check, whose windows cover the play area), her stat window or a portal's light as *covered*, not lost), and her minimap dot stays a coarse check. `her_cues` builds her tag template, plate model and pose bank offline. On both paths `placecheck` rejects a place off the map (outside the map's VR box, the rectangle the camera never shows past).\n\n**Looks** (`senses`, `scene`, `rate`). Perception runs as a separate process (the perception service) and steps its world model on every frame, 15 a second (`rate.HZ`). `Senses.look` returns the newest state that is fresh enough (shown after her last key's effect, at most 0.1 s old), retries looks that fail their checks and raises `LookLost` after 3 s, then runs listeners (EXP and HP bookkeeping, telemetry) and checks (the safety stop). `Senses.place` is how the world step places a frame. A `Scene` converts screen px to map units through the registered view (or her offset), places monsters on platforms and finds drops in strips above the ground.\n\n**Others on the map.** `monsters` places detections on platforms (exact feet snap or the kind's spawn platforms), predicts where a monster can be (walking on, turning 20 units from its platform's ends) and names which monster an EXP gain killed. `unseen` adds the monsters the feed or her memory knows are near but the look missed: the detector is nearly blind close to her. `players` follows other players' minimap dots and says which rival could have taken a kill.\n\nThe rest of the `localization` package (the continuous feed and perception service, the frame-by-frame tracker, the world state, her memory of monsters, EXP gains, aggro, the spawn clock) builds on these modules and is described with the continuous feed. The package may import only perception and the shared modules (`tests/test_architecture.py`).",
+ "groups": [
+  {
+   "id": "the-map",
+   "title": "The map from the game's own data",
+   "summary": "Each map's layout and monster stats (mapdata) and a picture of its fixed art (mapart), read straight from the game's WZ files.",
+   "modules": [
+    "gamelab/localization/__init__.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/mapart.py"
+   ]
+  },
+  {
+   "id": "her-place",
+   "title": "Locating her",
+   "summary": "Her position: from her minimap dot (pose), or exactly from the camera registered against the map's art and her on-screen cues (camreg, locate, calibrated by her_cues); places off the map rejected (placecheck).",
+   "modules": [
+    "gamelab/localization/pose.py",
+    "gamelab/localization/camreg.py",
+    "gamelab/localization/locate.py",
+    "gamelab/localization/her_cues.py",
+    "gamelab/localization/placecheck.py"
+   ]
+  },
+  {
+   "id": "the-look",
+   "title": "Senses and the Scene",
+   "summary": "Every look goes through Senses, which hands out the freshest perception state as a Scene: one frame placed on the map. rate fixes the frame rate.",
+   "modules": [
+    "gamelab/localization/senses.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/rate.py"
+   ]
+  },
+  {
+   "id": "the-others",
+   "title": "Monsters and other players",
+   "summary": "Monsters placed on platforms, matched and predicted (monsters), those known but unseen (unseen), and other players from their minimap dots (players).",
+   "modules": [
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/unseen.py",
+    "gamelab/localization/players.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/localization/__init__.py",
+   "title": "The localization package",
+   "tagline": "Package docstring only: what localization is for and what it may import",
+   "summary": "Seven lines of docstring and no code. It names the package's job (where she, the monsters and the drops are on the map) and its one import rule: localization may import perception and the shared modules, nothing above it, which tests/test_architecture.py enforces.",
+   "details_md": "The docstring lists the package's main parts in the order a look flows through them:\n\n- the map itself, from the game's own data (`mapdata`);\n- her position from her minimap dot, refined by what's on screen (`pose`);\n- monsters placed on their platforms and tracked from look to look (`monsters`);\n- one look placed on the map, with the drops on the ground (`scene`);\n- every look taken through `Senses` (`senses`).\n\nThe package has grown since: the scene locator (`locate`, `camreg`, `mapart`, `her_cues`), the continuous feed (`feed`, `service`, `worldstate`, `tracking`), her memory of monsters and other modules live here too. The layer rule is the important part: `tests/test_architecture.py` maps `\"localization\": {\"perception\"}`, so localization code can use perception and the shared modules (paths, screen geometry, telemetry, native code, the character profile) but never motion, attack, control or behavior.",
+   "lines": 7,
+   "key_items": [],
+   "inputs": [],
+   "outputs": [],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "Nothing is re-exported: import the submodules directly (`from gamelab.localization.senses import Senses`)."
+   ],
+   "tests": [
+    "tests/test_architecture.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/mapdata.py",
+   "title": "Map data (mapdata)",
+   "tagline": "Each map's platforms, walls, ropes, portals, spawns and monster stats, read from the game files",
+   "summary": "Reads a map out of the game's own WZ data (through the repo's `gamedata` package) and builds a `MapModel`: platforms made of footholds chained end to end, walls, ropes and ladders, portals, monster spawn points and per-monster stats (EXP, body size, walk speed, touch damage, hops, HP and defences). Every other module measures in this model's map units, and asks it geometric questions: which platform is under a point, which platforms no monster can touch, how many monsters the server keeps, where a portal's light shines.",
+   "details_md": "**Map units.** The game's world units: x to the right, y downward. The game lays out a 1366x768 view at one game px per unit and stretches it to its window (1.40625x at 1920x1080), so wherever screen px are involved the look's `screen.Geometry` converts.\n\n**Reading** (`load`). The parsed map is cached as JSON in `gamedata/data/out/maps/<id>.json`. If it's missing, or was written before the death-animation key existed, `load` reads the map image (`Map/Map/Map*/Map*_000.wz`), `Physics.img`, the map's name (`String/Map.img`) and, for every monster that spawns there, its `Mob/<id>.img`: name, EXP, body boxes, die1 frame delays, speed stat, touch damage (`PADamage`), whether it has a jump or fly action, the highest its body reaches, `maxHP`, `PDDamage`, `MDDamage`, `eva` and `level` (following a mob's `link` where its own data is empty). Caches written before the touch or HP keys existed are topped up in memory but **not** rewritten, because one cache can serve several checkouts at once. Speeds are the exception: a cache without them gets them added and written back (`_add_speeds`), through a `.part` file and `os.replace` so a reader never sees half of it.\n\n**Platforms** (`_platforms`). Every foothold (`foothold/<layer>/<group>/<id>`) is flattened. Vertical ones are walls. Walkable ones are visited left to right and each chain is followed through its `next` link while the next foothold starts where this one ends. Chains are sorted by their left end's height (top first), then x, and a platform's id is its index. Each `Segment` keeps its foothold group (the client's collisions in the air and what stops a star go by it), `forbidFallDown` (`no_drop`) and its neighbours' ends. `parse` then attaches to each platform its group's walls, every floor of the map and all its peers (for `attack.reach`).\n\n**Twins.** A platform lying on another's footholds, within its ends and `TWIN_DY` (2 units) of its surface all along, is a *twin*: for everything the stack does it is the longer one (`twins`, `place_of`, `places`). West Rocky Mountain II has two (11 on 14, 21 on 22). `platform_under` and `platform_below` only look at `places`, so a twin is never their answer.\n\n**Monsters.** `spawn_points` puts each spawn on the platform under it (within `SPAWN_REACH`, 60). `safe(pid)` is true when no monster spawns on the platform and no spawn platform runs under it within `MONSTER_REACH` (55 units: their bodies stick up that far). Walk speed is `walkSpeed` (125 units/s) x (1 + speed stat / 100): pigs 125, slimes 100, snails 43.75. `mob_cap(users)` is the server's monster cap as OrionAlpha's `LifePool.init` computes it: one monster per `CAP_AREA` (128,000 square units) of the box about the map's footholds and walls (each foothold `CAP_BOX_X` 30 inside across, 300 over its top, 10 under its bottom; clipped to the VR box where the map sets `VRLimit`; grown 10 each side), its height less `CAP_SCREEN_DY` (450) and both sides at least the 800x600 screen (`CAP_SCREEN`), times `mobRate`, 1 to `CAP_MOST` (40); with more than half that many users on the map, more, up to twice. Tree Dungeon II gives 22.\n\n**Portals.** `PORTAL_BOX` is the client's take-a-portal box (25 across, 100 above, 25 below its point), read from HeavenClient. `portal_light` composites a portal's animation frames from `MapHelper.img` into its lit box (alpha over 64) and its dense rows (lit across half its width or more); `portal_lights` places them at each visible or hidden portal of a map, and `locate.Cover` uses them to count a frame where she stands in a portal's light as covered.\n\n**Minimap picture.** `minimap_picture` loads the map's miniMap canvas, which perception matches to find where the minimap is drawn. `render` draws the model to a PNG for a person to look at.",
+   "lines": 868,
+   "key_items": [
+    {
+     "name": "MapModel",
+     "kind": "dataclass",
+     "line": 253,
+     "signature": "@dataclass class MapModel",
+     "summary": "One map as the game data describes it: VR bounds, minimap scale, platforms, walls, ropes, portals, spawns, physics and per-monster tables keyed by monster name.",
+     "details_md": "Platform ids are their index in `platforms`. The `mob_*` dicts hold EXP, `MobBody`, walk speed, touch damage, hops, flies, tallest reach, HP, physical and magic defence, avoid and level; `mob_rate` and `vr_limit` feed `mob_cap`."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 592,
+     "signature": "def load(map_id: int) -> MapModel",
+     "summary": "The map's model, parsed from the game data and cached as JSON next to the other extracts; old caches are topped up in memory for keys added later."
+    },
+    {
+     "name": "parse",
+     "kind": "function",
+     "line": 495,
+     "signature": "def parse(map_id, tree, name, physics, mob_names=None, mob_exp=None, mob_bodies=None, ...) -> MapModel",
+     "summary": "Builds the model from a map image tree and the per-monster tables (keyed by monster id, re-keyed by name), then attaches each platform's walls, the map's floors and its peers."
+    },
+    {
+     "name": "_platforms",
+     "kind": "function",
+     "line": 449,
+     "signature": "def _platforms(footholds: list[dict]) -> tuple[list[Platform], list[Segment]]",
+     "summary": "Joins walkable footholds into platforms (left to right through `next`) and returns the vertical ones as walls; platforms are numbered by their left end's height, then x."
+    },
+    {
+     "name": "Platform",
+     "kind": "dataclass",
+     "line": 90,
+     "signature": "@dataclass class Platform",
+     "summary": "A walkable stretch: footholds joined end to end with no wall between. Gives `left`, `right`, `top`, `bottom`, `y_at(x)`, `covers`, `clamp`, `no_drop` and `drop_ok`."
+    },
+    {
+     "name": "Segment",
+     "kind": "dataclass",
+     "line": 63,
+     "signature": "@dataclass(frozen=True) class Segment",
+     "summary": "One straight foothold or wall with its foothold group, its no-drop flag and its prev/next neighbours."
+    },
+    {
+     "name": "MapModel.twins",
+     "kind": "method",
+     "line": 292,
+     "signature": "@cached_property def twins(self) -> dict[int, int]",
+     "summary": "Platform id -> the platform it lies on, for platforms within TWIN_DY of another's surface along their whole length; chains of twins resolve to the final host."
+    },
+    {
+     "name": "MapModel.platform_under",
+     "kind": "method",
+     "line": 322,
+     "signature": "def platform_under(self, x: float, y: float, reach: float = 40, slack: float = 15) -> Platform | None",
+     "summary": "The platform her feet are on or just above: the closest at or below y within `reach`, allowing her feet FEET_BELOW (8) under its surface and x `slack` off. Never a twin."
+    },
+    {
+     "name": "MapModel.platform_below",
+     "kind": "method",
+     "line": 335,
+     "signature": "def platform_below(self, x: float, y: float) -> Platform | None",
+     "summary": "The first platform she'd land on falling from (x, y): the nearest more than MIN_FALL (2) below."
+    },
+    {
+     "name": "MapModel.safe",
+     "kind": "method",
+     "line": 389,
+     "signature": "def safe(self, pid: int, reach: float = MONSTER_REACH) -> bool",
+     "summary": "No monster can touch her standing on this platform: none spawn on it and no spawn platform runs under it within `reach`."
+    },
+    {
+     "name": "MapModel.mob_cap",
+     "kind": "method",
+     "line": 363,
+     "signature": "def mob_cap(self, users: int = 1) -> int",
+     "summary": "The most monsters the server keeps on the map with `users` players there, OrionAlpha's formula; the simulator's respawn and behavior.patrol fill to it."
+    },
+    {
+     "name": "MapModel.spawn_points",
+     "kind": "method",
+     "line": 422,
+     "signature": "@cached_property def spawn_points(self) -> list[tuple[int, Spawn]]",
+     "summary": "Each spawn point on a platform with that platform's id. Monsters reappear at the point's x, not anywhere in its rx0..rx1 range (live telemetry on Tree Dungeon)."
+    },
+    {
+     "name": "portal_light",
+     "kind": "function",
+     "line": 777,
+     "signature": "def portal_light(image: str = \"\", kind: int = PORTAL_EXIT, copy: Path = COPY) -> tuple[Box, Box]",
+     "summary": "A portal's light about its point: the box of its lit px over all its animation frames, and the box of its dense rows. Cached with lru_cache."
+    },
+    {
+     "name": "minimap_picture",
+     "kind": "function",
+     "line": 582,
+     "signature": "def minimap_picture(map_id: int) -> np.ndarray | None",
+     "summary": "The map's own minimap picture (RGB, game px), or None. Without it her dot is read with the first map's origin."
+    },
+    {
+     "name": "portal_lights",
+     "kind": "function",
+     "line": 822,
+     "signature": "def portal_lights(model: MapModel, copy: Path = COPY) -> list[tuple[Portal, Box, Box]]",
+     "summary": "Every visible or hidden portal of the map with its light's lit box and dense-rows box placed at its point, in map units; what locate.cover gives Cover. Raises if the game data copy lacks the pictures."
+    }
+   ],
+   "inputs": [
+    "The game data copy (gamedata/data/copy): map images, Physics.img, MapHelper.img, String and Mob packages, through gamedata.wz and gamedata.canvas",
+    "A map id from the command or the perception service"
+   ],
+   "outputs": [
+    "MapModel for every layer above: pose, locate, monsters, scene, motion.route, attack.danger, the simulator",
+    "The minimap picture for perception.minimap.MinimapPicture",
+    "Portal light boxes (portal_lights) for locate.cover / locate.Cover",
+    "A PNG drawing of the map (render)"
+   ],
+   "uses": [
+    "gamedata/paths.py",
+    "gamedata/wz.py",
+    "gamedata/canvas.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamedata/data/copy/Map/Map/Map*/Map*_000.wz",
+     "mode": "read",
+     "what": "the map image (footholds, ropes, portals, life, miniMap, info)"
+    },
+    {
+     "path": "gamedata/data/copy/Map/Map_000.wz",
+     "mode": "read",
+     "what": "Physics.img (walkSpeed) and MapHelper.img (portal pictures)"
+    },
+    {
+     "path": "gamedata/data/copy/String/String_000.wz",
+     "mode": "read",
+     "what": "map and monster names"
+    },
+    {
+     "path": "gamedata/data/out/maps/<map id>.json",
+     "mode": "read-write",
+     "what": "the parsed map cache (git-ignored)"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "MONSTER_REACH",
+     "value": "55",
+     "meaning": "map units a monster's body reaches above its platform (what makes a platform unsafe)"
+    },
+    {
+     "name": "FEET_BELOW",
+     "value": "8",
+     "meaning": "map units her feet may sink below a platform's surface and still stand on it"
+    },
+    {
+     "name": "MOB_WALK_SPEED",
+     "value": "125.0",
+     "meaning": "walkSpeed when the map's physics don't say"
+    },
+    {
+     "name": "MIN_FALL",
+     "value": "2",
+     "meaning": "a platform must be this far below to be one she falls onto"
+    },
+    {
+     "name": "TWIN_DY",
+     "value": "MIN_FALL (2)",
+     "meaning": "a platform within this of another's surface all along is its twin"
+    },
+    {
+     "name": "SPAWN_REACH",
+     "value": "60",
+     "meaning": "how far above its platform a spawn point may sit"
+    },
+    {
+     "name": "CAP_AREA",
+     "value": "128000.0",
+     "meaning": "square map units per monster in the server's cap"
+    },
+    {
+     "name": "CAP_MOST",
+     "value": "40",
+     "meaning": "the cap's maximum before the many-users bonus"
+    },
+    {
+     "name": "CAP_BOX_X, CAP_BOX_UP, CAP_BOX_DOWN, CAP_BOX_GROW",
+     "value": "30, 300, 10, 10",
+     "meaning": "how the footholds' box is drawn for the cap"
+    },
+    {
+     "name": "CAP_SCREEN, CAP_SCREEN_DY",
+     "value": "(800, 600), 450",
+     "meaning": "the cap's box is at least a screen big, after its height loses 450"
+    },
+    {
+     "name": "PORTAL_BOX",
+     "value": "(25.0, 100.0, 25.0)",
+     "meaning": "where her feet take a portal: across, above, below its point"
+    },
+    {
+     "name": "PORTAL_SHOWN",
+     "value": "(2, 4, 7)",
+     "meaning": "portal kinds the client draws with a visible light"
+    },
+    {
+     "name": "LIGHT_ALPHA, LIGHT_DENSE",
+     "value": "64, 0.5",
+     "meaning": "a light px is alpha > 64; a dense row is lit across half the width"
+    },
+    {
+     "name": "FRAME_DELAY",
+     "value": "100",
+     "meaning": "ms a frame lasts when the data gives no delay (death animation length)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Portal take rule and box read from HeavenClient's Portal.cpp and Stage.cpp (PORTAL_BOX)",
+     "why": "to know when holding up takes her through a portal; whether the real game takes one in the air isn't known, the simulator does"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "The commands that act load the map's minimap picture and refuse to run if a map has one that won't load (minimap_picture)",
+     "why": "a process without it read her dot with the first map's origin and put her 640 units off on Tree Dungeon (16:46:50)"
+    },
+    {
+     "date": "2026-10-27",
+     "what": "Monsters' magic defence, avoid and level kept with the cache (HP_KEYS)",
+     "why": "a magician's Magic Claw goes by them; caches from before are read for them, not rewritten"
+    },
+    {
+     "date": "2026-10-31",
+     "what": "A portal's light is its lit box plus its dense rows, not the union of its pictures",
+     "why": "the pictures' union (257 px tall) had her feet counted in a light on a platform 156 units above the portal (review of 2026-10-31)"
+    },
+    {
+     "date": "",
+     "what": "Twins: a platform lying within 2 units on another's footholds is that platform for everything",
+     "why": "on West Rocky Mountain II she lands on the twin and walks off onto the long one without a step; as two places, landings and routes went wrong"
+    },
+    {
+     "date": "",
+     "what": "mob_cap follows OrionAlpha's LifePool.init (a replica of the early Korean server)",
+     "why": "the 11-15 monsters counted with her alone on Tree Dungeon were only the parts of the map she saw"
+    }
+   ],
+   "gotchas": [
+    "Platform ids are list indexes sorted by left-end height then x: stable for one map's data, meaningless across maps.",
+    "Code that iterates `platforms` directly still sees twins; `places`, `platform_under` and `platform_below` never do.",
+    "A cache from before a key existed is topped up in memory only; delete the JSON to have it written again.",
+    "A map cached before touch damage was kept and read where there is no game data copy has no touch damage: every place counts as safe (attack.danger), and a warning goes to stderr. Without a cache and without the copy, `load` raises: there is nothing to parse.",
+    "`bounds` can hold None for a map without a VR box: placecheck falls back to the platforms' reach, mapart.views raises.",
+    "The comment on mob_mdd/mob_eva/mob_level says nothing reads them yet; behavior.attacks now reads mob_mdd and sim.world reads mob_level, mob_eva has no reader."
+   ],
+   "tests": [
+    "tests/test_body.py",
+    "tests/test_navigation.py",
+    "tests/test_attack.py",
+    "tests/test_danger.py",
+    "tests/test_gates.py",
+    "tests/test_loot_chain.py",
+    "tests/test_locate.py",
+    "tests/test_grind.py",
+    "tests/test_harness.py",
+    "tests/test_spawnclock.py",
+    "tests/test_spawns.py",
+    "tests/test_geometry.py",
+    "tests/test_minimap_picture.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/mapart.py",
+   "title": "Map art (mapart)",
+   "tagline": "The map's fixed tiles, objects and backgrounds drawn as one picture in map units",
+   "summary": "Draws a map's own art from the game data the way the client does (backgrounds behind, layers 0-7 of objects then tiles, backgrounds in front) into one RGB picture covering every view the camera can take, plus a `static` mask of the pixels that are fixed art only. Camera registration (`camreg`) compares each frame against it; the body cue in `locate` uses it as the background behind her. Cached per map in `gamelab/lab/mapart/<map>.npz`.",
+   "details_md": "**Drawing order** (HeavenClient's `MapBackgrounds` and `MapTilesObjs`): backgrounds with `front` 0, then for each layer 0-7 its objects (sorted by `z`, then as listed) and its tiles (by their picture's `z`, or the tile's `zM` where that's 0), then the front backgrounds. Each picture is placed with its origin on its (x, y); flipped objects and backgrounds are mirrored about their origin. A background repeats every `cx` (`cy`) units across (down) by its type: `TILE_X` = {1, 3, 4, 6, 7}, `TILE_Y` = {2, 3, 5, 6, 7}.\n\n**What isn't static.** Some pieces are drawn but marked not static, so registration ignores the pixels they touch: animated objects (more than one frame, or a frame whose alpha changes, drawn with the first frame), backgrounds that don't move 1:1 with the map (by the client's formula only `rx = ry = -100` does, and not a type 4-7 that moves by itself: `back_moves`), animated backgrounds, and pictures `gamedata` can't decode yet (drawn opaque, of unknown colour). Objects whose every frame is invisible (a0 = a1 = 0, foothold carriers) aren't drawn. `_blend` keeps, per pixel, how much of its colour comes from non-static pieces; a pixel is `static` where that is under `UNSURE` (1/255).\n\n**Extent.** `views(info)` gives the range of the camera's top-left from the VR box; on a map no wider (taller) than the 1366x768 view the camera is centred and fixed that way (`MapArt.fixed`), the same rule as `pose.Camera.corner`. The picture spans from the first view's corner to the last view's corner plus the view.\n\n**Cache.** `load` returns the in-memory copy of the latest map, else reads `lab/mapart/<map>.npz` if its key matches (the code's `VERSION` plus the sizes and modification times of the Obj, Tile and Back WZ files, their `_Canvas` picture files, and the Map WZ files), else draws and saves it through a `.tmp.npz` then replace. Only the latest map's art stays in memory (`_LOADED`: Tree Dungeon's is 14 MB, Ellinia's 56); `forget()` lets it go before another is read.\n\n**Checked against frames** (2026-10-29): at the true view of 634 Tree Dungeon frames the best offset was (0, 0) on every one, 96% of the static play area within 2 gray levels, 99.98% of what nothing is drawn over. What the game draws over the map (monsters, players, NPCs, portals, drops, names, effects, the HUD) isn't drawn here; registration's truncated cost absorbs it.\n\nCLI: `python -m gamelab.localization.mapart MAP_ID [OUT.png]` writes the picture and its static mask (default `lab/shots/mapart_<id>.png`) and prints its extent, views and static share.",
+   "lines": 389,
+   "key_items": [
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 336,
+     "signature": "def load(map_id: int, copy: Path = COPY, cache: Path | None = CACHE) -> MapArt",
+     "summary": "The map's art from memory, the npz cache (if drawn from this game data by this code) or freshly drawn and cached. Raises what reading the game data raises."
+    },
+    {
+     "name": "MapArt",
+     "kind": "dataclass",
+     "line": 72,
+     "signature": "@dataclass class MapArt",
+     "summary": "The art (`rgb`, H x W x 3) in map units from (x0, y0), its `static` mask, `fixed` axes, the camera's view range and what was left out, by why."
+    },
+    {
+     "name": "draw",
+     "kind": "function",
+     "line": 264,
+     "signature": "def draw(map_id: int, copy: Path = COPY) -> MapArt",
+     "summary": "Blends every piece in drawing order over the whole extent, tracking the non-static share per pixel."
+    },
+    {
+     "name": "pieces",
+     "kind": "function",
+     "line": 174,
+     "signature": "def pieces(map_id: int, copy: Path = COPY) -> list[Piece]",
+     "summary": "Every picture the map draws of its own, in the game's order, each marked static or why not."
+    },
+    {
+     "name": "views",
+     "kind": "function",
+     "line": 106,
+     "signature": "def views(info: dict, view: tuple[int, int] = VIEW) -> tuple[tuple[int, int], tuple[int, int]]",
+     "summary": "The camera top-left's range across and down from the VR box (centred where the map is no bigger than the view)."
+    },
+    {
+     "name": "back_moves",
+     "kind": "function",
+     "line": 122,
+     "signature": "def back_moves(rx: float, ry: float, kind: int) -> bool",
+     "summary": "Whether a background moves exactly with the map: rx = ry = -100 and not a self-moving type (4-7)."
+    },
+    {
+     "name": "_blend",
+     "kind": "function",
+     "line": 296,
+     "signature": "def _blend(rgb: np.ndarray, unsure: np.ndarray, p: Piece, c: int, r: int) -> None",
+     "summary": "Alpha-blends one piece and updates how much of each pixel isn't fixed art."
+    },
+    {
+     "name": "MapArt.window",
+     "kind": "method",
+     "line": 92,
+     "signature": "def window(self, vx: int, vy: int, size: tuple[int, int] = VIEW) -> tuple[np.ndarray, np.ndarray]",
+     "summary": "The art and static mask a view with top-left (vx, vy) shows; outside the picture: black, not static."
+    },
+    {
+     "name": "Piece",
+     "kind": "dataclass",
+     "line": 56,
+     "signature": "@dataclass class Piece",
+     "summary": "One picture as the map draws it: kind (back, obj, tile), layer, top-left, RGBA, static flag and why, background repeat and opacity."
+    },
+    {
+     "name": "_key",
+     "kind": "function",
+     "line": 313,
+     "signature": "def _key(map_id: int, copy: Path) -> dict",
+     "summary": "The cache key: VERSION, the map id and the sizes and modification times of the Obj/Tile/Back WZ files, their _Canvas files and the Map WZ files."
+    },
+    {
+     "name": "forget",
+     "kind": "function",
+     "line": 326,
+     "signature": "def forget() -> None",
+     "summary": "Lets go of the latest map's art kept in memory."
+    },
+    {
+     "name": "VERSION",
+     "kind": "constant",
+     "line": 46,
+     "signature": "VERSION = 1",
+     "summary": "What's drawn and how; a cache of another version is drawn again."
+    }
+   ],
+   "inputs": [
+    "The game data copy's Obj, Tile, Back and Map WZ packages, through gamedata.canvas and gamedata.wz",
+    "The map image's info (VR box) via mapdata._image"
+   ],
+   "outputs": [
+    "MapArt for camreg.Registration (the camera), perception.poses.Background (the body cue) and her_cues (calibration)"
+   ],
+   "uses": [
+    "gamedata/paths.py",
+    "gamedata/canvas.py",
+    "gamedata/wz.py",
+    "gamelab/paths.py",
+    "gamelab/localization/mapdata.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamedata/data/copy/Map/{Obj,Tile,Back}/...",
+     "mode": "read",
+     "what": "the map's object, tile and background pictures"
+    },
+    {
+     "path": "gamelab/lab/mapart/<map id>.npz",
+     "mode": "read-write",
+     "what": "the drawn art, static mask and cache key (git-ignored)"
+    },
+    {
+     "path": "gamelab/lab/shots/mapart_<map id>.png",
+     "mode": "write",
+     "what": "the CLI's picture and _static.png mask"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "VERSION",
+     "value": "1",
+     "meaning": "bump when the drawing rules change: caches of another version are redrawn"
+    },
+    {
+     "name": "VIEW",
+     "value": "(1366, 768)",
+     "meaning": "the view the game lays out, one map unit per game px"
+    },
+    {
+     "name": "UNSURE",
+     "value": "1/255",
+     "meaning": "a pixel is static where non-fixed art weighs less than this in its colour"
+    },
+    {
+     "name": "TILE_X, TILE_Y, MOVING",
+     "value": "{1,3,4,6,7}, {2,3,5,6,7}, {4,5,6,7}",
+     "meaning": "background types that repeat across, down, or move by themselves"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Draw the map's art from the game data and register the camera against it (the user: \"the game data I mined has each map's tiles, objects and backgrounds with their positions ... do that\")",
+     "why": "the localization prototype registered against a picture stitched from the morning's recordings, which covered only a third of the map"
+    },
+    {
+     "date": "",
+     "what": "Keep only the latest map's art in memory",
+     "why": "a service visiting map after map would otherwise keep every one's (Ellinia's 56 MB)"
+    }
+   ],
+   "gotchas": [
+    "On many maps backgrounds don't move 1:1 (West Rocky Mountain II's 18 don't; Tree Dungeon's two do), so their pixels are left out and less of the frame is compared.",
+    "The cache key is file sizes and modification times, not contents; a change to the drawing code needs a VERSION bump.",
+    "Drawing a big map the first time can peak at 0.4-0.5 GB (Ellinia, Lith Harbor, Kerning City); locate.build catches the failure and falls back.",
+    "`draw` raises ValueError on a map with no VR box (views)."
+   ],
+   "tests": [
+    "tests/test_camreg.py",
+    "tests/test_locate.py",
+    "tests/test_spawns.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/pose.py",
+   "title": "Pose from the minimap (pose)",
+   "tagline": "Her map position from her minimap dot, refined on screen; the camera model",
+   "summary": "The original way to place her, still used wherever the scene locator isn't (1920x1080, the simulator, maps without drawable art, the first frames of a map). `Localizer` converts her minimap dot to map units and snaps it to a platform; `refine` tightens her x from her name tag on a fixed camera, a rope in view or her platform's visible end. `Camera` predicts which part of the map is on screen so she can be put on screen when her name tag is hidden. Its `Where` is the position type used everywhere.",
+   "details_md": "**Dot to map.** The minimap is the map at 1/2^mag (mag 4 = 1/16), shown 1.40625x larger at 1920x1080, so one minimap px is 16 / 1.40625 = 11.4 map units (16 at 1366x768: `per_px`). `to_map(dot)` = (dot - origin) x per_px - centre, with the map's miniMap `centerX`/`centerY` and `DOT_ORIGIN` (65.1, 91.3) full-size px, fitted at map 10000012 so the dot maps to her feet. `use(geo)` moves the origin to the same game px in another window size; `anchor` refits it from a spot whose map position is known.\n\n**Snapping** (`where_dot`). The dot is good to about 1 px (11 units). Of the platforms covering x (+-15) whose surface is from `FEET_BELOW` (8) above to `DOT_SNAP_REACH` (50) below a point `DOT_SNAP_LIFT` (25) above the dot, it takes the one whose surface is nearest the dot's own height, then clamps x to it and puts y on its line. Only platforms that are places count (`MapModel.places`: never a twin). Once it's chosen, before the clamp, `on_rope_under` catches the rope-top hang: her dot more than `ROPE_TOP_GAP` (17) under the platform's surface, within `ROPE_TOP_X` (16) of a rope hanging from that platform (its top within `ROPE_TOP_DY` 20 of the surface) and above its bottom, and not at standing height on another platform, means she's on the rope: `platform` None.\n\n**Refining x** (`refine`), best source first; each needs her name tag and a platform under her, and must agree with the dot within `DOT_AGREE` (45 units):\n- `camera_x`: on a map no wider than the view the camera can't move across, so her tag's screen x gives her map x exactly (to a px).\n- `rope_x`: ropes are drawn exactly at their map x; every rope seen within `ROPE_MATCH_PX` (40 full-size px) of where the dot predicts gives an estimate, the median wins.\n- `edge_x`: her platform's visible end(s), from the ground extent under her, corrected by `GRASS_OVERHANG` (-24 px: the real ends are 21-27 px past where the grass seems to end), not within `SCREEN_EDGE_PX` (12) of the screen's side.\nThe source is reported as `how` ('camera', 'rope', 'edge' or 'dot').\n\n**Camera.** The game keeps her at a fixed screen spot (`CAMERA_OFFSET` (674, 489) map units from the top-left) except that it never shows past the VR box, where it stops; on a map no wider (taller) than the view it's centred and fixed (`_axis`). `corner(x, y)` gives the view's top-left for her feet at (x, y), `to_screen` maps a point, `fixed` says which axes can't move, and `learn` nudges the offset 20% (`CAMERA_LEARN_RATE`) toward where her tag was seen, in each direction the camera isn't stopped at an edge (`CAMERA_STOPPED` 0.5).",
+   "lines": 263,
+   "key_items": [
+    {
+     "name": "Localizer",
+     "kind": "class",
+     "line": 78,
+     "signature": "class Localizer",
+     "summary": "Her map position from her minimap dot, and back, in a game window of a given geometry."
+    },
+    {
+     "name": "Localizer.where_dot",
+     "kind": "method",
+     "line": 109,
+     "signature": "def where_dot(self, dot: tuple[float, float]) -> Where",
+     "summary": "Dot -> map, snapped to the platform whose surface is nearest the dot's height (or on a rope under it)."
+    },
+    {
+     "name": "Localizer.on_rope_under",
+     "kind": "method",
+     "line": 126,
+     "signature": "def on_rope_under(self, p: Platform, x: float, y: float) -> bool",
+     "summary": "Whether a dot that snaps onto platform p is her hanging on a rope under it instead."
+    },
+    {
+     "name": "Localizer.to_map",
+     "kind": "method",
+     "line": 101,
+     "signature": "def to_map(self, dot: tuple[float, float]) -> tuple[float, float]",
+     "summary": "(dot - origin) x per_px - centre; `to_dot` is its inverse."
+    },
+    {
+     "name": "Localizer.use",
+     "kind": "method",
+     "line": 95,
+     "signature": "def use(self, geo: Geometry) -> None",
+     "summary": "Moves the dot origin to the same game px in a window of another geometry."
+    },
+    {
+     "name": "Localizer.anchor",
+     "kind": "method",
+     "line": 138,
+     "signature": "def anchor(self, dot: tuple[float, float], x: float, y: float) -> None",
+     "summary": "Refits the origin from a dot seen with her feet at a known map point."
+    },
+    {
+     "name": "Where",
+     "kind": "dataclass",
+     "line": 70,
+     "signature": "@dataclass class Where",
+     "summary": "Her position: map x and y (her feet), the platform she stands on (None in the air or on a rope) and the dot it came from."
+    },
+    {
+     "name": "Camera",
+     "kind": "class",
+     "line": 143,
+     "signature": "class Camera",
+     "summary": "Which part of the map is on screen, so she can be placed on screen from her map position when her tag is hidden."
+    },
+    {
+     "name": "Camera.corner",
+     "kind": "method",
+     "line": 157,
+     "signature": "def corner(self, x: float, y: float) -> tuple[float, float]",
+     "summary": "The map point at the screen's top-left with her feet at (x, y): following her between the map's edges, or centred."
+    },
+    {
+     "name": "Camera.learn",
+     "kind": "method",
+     "line": 182,
+     "signature": "def learn(self, at: tuple[float, float], screen: tuple[float, float], rate: float = CAMERA_LEARN_RATE, geo: Geometry = STRETCHED) -> None",
+     "summary": "Nudges the offset toward where her feet were seen on screen, on axes where the camera isn't stopped."
+    },
+    {
+     "name": "refine",
+     "kind": "function",
+     "line": 251,
+     "signature": "def refine(where: Where, s: \"Scene\", model: MapModel, camera: \"Camera | None\" = None) -> tuple[Where, str]",
+     "summary": "Her x along her platform from the best screen source (camera, rope, edge), else the dot's."
+    },
+    {
+     "name": "camera_x",
+     "kind": "function",
+     "line": 203,
+     "signature": "def camera_x(where: Where, s: \"Scene\", camera: \"Camera | None\") -> float | None",
+     "summary": "Her x from her name tag where the camera can't move across: exact to a px."
+    },
+    {
+     "name": "rope_x",
+     "kind": "function",
+     "line": 214,
+     "signature": "def rope_x(where: Where, s: \"Scene\", model: MapModel) -> float | None",
+     "summary": "Her x from ropes in view, the median of each match's estimate."
+    },
+    {
+     "name": "edge_x",
+     "kind": "function",
+     "line": 232,
+     "signature": "def edge_x(where: Where, s: \"Scene\") -> float | None",
+     "summary": "Her x from the visible end(s) of her platform that agree with the dot."
+    },
+    {
+     "name": "DOT_ORIGIN",
+     "kind": "constant",
+     "line": 29,
+     "signature": "DOT_ORIGIN = (65.1, 91.3)",
+     "summary": "Full-size (1920x1080) px where map point (-centerX, -centerY) would put her dot; x refined against ropes in view."
+    }
+   ],
+   "inputs": [
+    "Her minimap dot (full-size px) and the look's geometry from perception.eyes",
+    "Her name tag, ground extent and ropes on screen from the Observation (for refine)",
+    "The MapModel's platforms, ropes, minimap scale and VR bounds"
+   ],
+   "outputs": [
+    "Where (her map position) for Senses, Players, locate (dot reading) and everything downstream",
+    "Her screen place when her tag is hidden (Camera.to_screen), via Senses"
+   ],
+   "uses": [
+    "gamelab/screen.py",
+    "gamelab/localization/mapdata.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "DOT_ORIGIN",
+     "value": "(65.1, 91.3)",
+     "meaning": "full-size px of the dot's origin (fitted at map 10000012)"
+    },
+    {
+     "name": "DOT_SNAP_LIFT, DOT_SNAP_REACH",
+     "value": "25, 50",
+     "meaning": "the dot snaps to a platform at or below a point 25 above it, within 50"
+    },
+    {
+     "name": "ROPE_TOP_X, ROPE_TOP_GAP, ROPE_TOP_DY",
+     "value": "16, 17, 20",
+     "meaning": "the rope-top hang: within 16 of a rope, more than 17 under the platform, the rope's top within 20 of it"
+    },
+    {
+     "name": "STAND_ABOVE",
+     "value": "8",
+     "meaning": "a platform this far under her dot or ROPE_TOP_GAP over it is one she stands on"
+    },
+    {
+     "name": "CAMERA_OFFSET",
+     "value": "(674.0, 489.0)",
+     "meaning": "where the camera keeps her, map units from the screen's top-left"
+    },
+    {
+     "name": "CAMERA_LEARN_RATE",
+     "value": "0.2",
+     "meaning": "how far each look nudges that offset"
+    },
+    {
+     "name": "CAMERA_STOPPED",
+     "value": "0.5",
+     "meaning": "map units of lag before the camera counts as stopped at an edge"
+    },
+    {
+     "name": "GRASS_OVERHANG",
+     "value": "-24",
+     "meaning": "full-size px the drawn ground sticks out past a platform's real end"
+    },
+    {
+     "name": "ROPE_MATCH_PX",
+     "value": "40",
+     "meaning": "full-size px a rope on screen may be from where the dot puts it"
+    },
+    {
+     "name": "SCREEN_EDGE_PX",
+     "value": "12",
+     "meaning": "a platform end this close to the screen's side may be cut off"
+    },
+    {
+     "name": "DOT_AGREE",
+     "value": "45",
+     "meaning": "map units a screen-based x may be from the dot's"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-31",
+     "what": "The dot snaps to the platform whose surface is nearest the dot's own height",
+     "why": "the closest at or below the lifted point took the upper of two platforms 30-35 apart (Tree Dungeon's 30 under 28): a drop that had landed was judged missed and done again (loop-grind seeds 6, 9, 10)"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Her dot well under a platform by a rope hanging from it is her on the rope (on_rope_under)",
+     "why": "a touch near the top of the rope at x 111 left her hanging about 30 under platform 18 but placed on it; her Lucky Seven presses were refused on the rope and the hunt stopped for out of darts three times that night"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "On a map no wider than the view her x comes from her name tag first (camera_x)",
+     "why": "standing in Tree Dungeon's exit portal light the platform's end read her x anywhere from 265 to 293; her tag gave 264.3 on all 20 saved frames"
+    }
+   ],
+   "gotchas": [
+    "DOT_ORIGIN is in 1920x1080 px; `use(geo)` must be called with the look's geometry before converting (Senses and Players do).",
+    "Off a platform (air, rope) `where_dot` returns the dot's own place with platform None: y isn't snapped.",
+    "The rope-top rule catches 5 of the 6 hangs measured (one hung only 14.8 under the top); control.navigator's check of a move her dot never moved on covers the rest.",
+    "`pose.VIEW` is fixed at 1920x1080's height stretch, 1365.3 x 768 map units, whatever the window size (the camera's numbers were fitted with it); mapart and camreg use 1366 x 768."
+   ],
+   "tests": [
+    "tests/test_geometry.py",
+    "tests/test_minimap.py",
+    "tests/test_minimap_picture.py",
+    "tests/test_rope_top.py",
+    "tests/test_rope_hang.py",
+    "tests/test_navigation.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/camreg.py",
+   "title": "Camera registration (camreg)",
+   "tagline": "Finds the camera's exact view each frame by matching the screen against the map's art",
+   "summary": "`Registration.see(frame)` returns the map point at the frame's top-left (`View`), so anything on screen converts exactly to map units (screen = map - view, one unit a px at 1366x768). It compares gray sample rows of the frame against the map's art (`mapart`) at candidate views with a truncated absolute difference, searching outward from a prediction and falling back to a coarse-to-fine search of the whole map. The inner loop is C (`gamelab/camreg.c`, AVX2) with an identical numpy fallback.",
+   "details_md": "**The cost.** The frame is sampled every `ROW_EVERY` (6th) row above the HUD (`HUD_TOP` 700), all columns, as gray = avg(avg(r, b), g) with rounding averages, which is the same for RGB and BGR. For a candidate view the cost is the mean of min(|frame - art|, `TRUNC` = 24) over the compared pixels: those in play (not the minimap box or the quest helper: `EXCLUDE`) and static in the art. Anything that isn't the map (her, monsters, names, chat, effects) costs at most 24 a pixel, so at the true view the cost is about 24 x the share covered (0.5-1.4 on the clips) and a px off it is about 3 more.\n\n**The search** (`see`):\n1. Predict: the last sure view moved on by its last velocity (px a second when frames carry times), clamped to where the camera can be.\n2. Search within `FIRST` (3) px (where the camera moves both ways, a 3x3 and a cross: 17 views; taken only if the best isn't on the window's edge), then `NEAR` (12), then `WIDE` (48). Where the camera moves both ways a big window is searched as a column at the predicted x, a row at the best y, then a 5x5 about that. Each window's cheapest is *settled* (`_settled`): it walks to a cheaper 3x3 neighbour up to `SETTLE` (3) steps.\n3. A view is **sure** with cost <= `COST_OK` (16) and the cheapest view 2+ px away at least `MARGIN_OK` (0.6) dearer.\n4. Otherwise `cold`: the frame and the art in 4x4 block means (`COARSE`), every view a block apart costed on every 2nd block row, the `COLD_BEST` (4) best distinct picks refined at full size over every 4th sample row, the best settled. On a map the camera scrolls both ways a hint (the camera corner her minimap dot implies) limits it to +-`HINT_R` (64) px; the unhinted whole map (80-900 ms there) is searched at most every `COLD_WHOLE_S` (2 s) while the view is lost, and at once on the first lost frame only when no hint was given. Where the camera moves one way only (Tree Dungeon: 4-6 ms) the whole map is searched on every lost frame.\n5. Nothing sure: the prediction is *carried* (`sure` False, `how` \"carried\"), or \"none\" before any view was ever placed.\n\n**Speed.** A tracked frame is 0.2-0.4 ms in C against 10-20 ms in numpy; `cr_shrink` shrinks a frame's play area in 0.05 ms where numpy took 13-15. `lib()` builds and loads the DLL once (`native.build`) under a lock; `why` says why it isn't in use.\n\n**Accuracy** (README, Localization): on three clips (10,068 frames) the view was exact on every frame, against the old live camera's 5 px median. It is never sure on a capture shifted off the client, a black frame or another map's frame (margins 0.004-0.06 against 0.6); with 30% of the play area painted over it was still sure and right on every frame.\n\nCLI: `python -m gamelab.localization.camreg MAP_ID PICTURE.png [...]` prints each picture's view, cost and margin from a cold start.",
+   "lines": 505,
+   "key_items": [
+    {
+     "name": "Registration",
+     "kind": "class",
+     "line": 134,
+     "signature": "class Registration",
+     "summary": "A map's camera, registered frame by frame against its art. Holds the art's gray and mask, the sample rows, the last sure view and its velocity, and counts of how views were found."
+    },
+    {
+     "name": "Registration.see",
+     "kind": "method",
+     "line": 375,
+     "signature": "def see(self, frame: np.ndarray, t: float | None = None, hint: tuple[float, float] | None = None) -> View",
+     "summary": "This frame's view: predicted, searched near/wide, else cold; sure or carried."
+    },
+    {
+     "name": "View",
+     "kind": "dataclass",
+     "line": 113,
+     "signature": "@dataclass(frozen=True) class View",
+     "summary": "A frame's view: (x, y) the map point at its top-left, `sure`, `how` (near, wide, cold, carried, none), cost, margin, share compared and ms."
+    },
+    {
+     "name": "Registration.search",
+     "kind": "method",
+     "line": 246,
+     "signature": "def search(self, g: np.ndarray, vx: int, vy: int, r: int) -> tuple[int, int, float, float, float]",
+     "summary": "The best view within r of (vx, vy), settled: (x, y, cost, margin, share)."
+    },
+    {
+     "name": "Registration.cold",
+     "kind": "method",
+     "line": 274,
+     "signature": "def cold(self, frame: np.ndarray, g: np.ndarray, hint: tuple[float, float] | None = None) -> tuple[int, int, float, float, float]",
+     "summary": "The best of every view the camera can take (within HINT_R of a hint on a map that scrolls both ways): coarse 4x4 blocks first, then the best picks at full size."
+    },
+    {
+     "name": "Registration._settled",
+     "kind": "method",
+     "line": 225,
+     "signature": "def _settled(self, g: np.ndarray, x: int, y: int) -> tuple[int, int, float, float, float]",
+     "summary": "Walks down to a view no 3x3 neighbour beats (SETTLE steps at most) and computes its margin over views 2+ px away."
+    },
+    {
+     "name": "Registration.predict",
+     "kind": "method",
+     "line": 350,
+     "signature": "def predict(self, t: float | None = None) -> tuple[int, int] | None",
+     "summary": "The last sure view moved on as it last moved, clamped to the camera's range."
+    },
+    {
+     "name": "Registration._whole_due",
+     "kind": "method",
+     "line": 359,
+     "signature": "def _whole_due(self, t: float | None, hinted: bool) -> bool",
+     "summary": "Whether a lost frame searches the whole map unhinted: always on one-way maps, else every COLD_WHOLE_S."
+    },
+    {
+     "name": "costs_np",
+     "kind": "function",
+     "line": 464,
+     "signature": "def costs_np(g, gm, rows, art, am, ax0, ay0, vxs, vys, trunc=TRUNC) -> tuple[np.ndarray, np.ndarray]",
+     "summary": "cr_costs in numpy: summed truncated differences and pixel counts per candidate, the same integers as the C."
+    },
+    {
+     "name": "gray_of",
+     "kind": "function",
+     "line": 105,
+     "signature": "def gray_of(rgb: np.ndarray) -> np.ndarray",
+     "summary": "avg(avg(c0, c2), c1) with (a + b + 1) >> 1 averages: SSE2's pavgb, identical for RGB and BGR."
+    },
+    {
+     "name": "shrink",
+     "kind": "function",
+     "line": 445,
+     "signature": "def shrink(gray: np.ndarray, mask: np.ndarray | None, k: int, lib: ctypes.CDLL | None = None) -> tuple[np.ndarray, np.ndarray | None]",
+     "summary": "A gray picture in k x k block means (rounded), and its mask (set where all of a block is)."
+    },
+    {
+     "name": "lib",
+     "kind": "function",
+     "line": 80,
+     "signature": "def lib() -> ctypes.CDLL | None",
+     "summary": "camreg.c's DLL, built and loaded on first use; None with native.USE off or if it can't be built (`why`)."
+    },
+    {
+     "name": "for_map",
+     "kind": "function",
+     "line": 426,
+     "signature": "def for_map(map_id: int, size: tuple[int, int] = (1366, 768)) -> \"Registration | None\"",
+     "summary": "A map's registration at 1366x768; None at any other size or where the art can't be drawn. Only the tests call it: locate.build and her_cues make `Registration(mapart.load(...))` themselves."
+    }
+   ],
+   "inputs": [
+    "1366x768 RGB or BGR frames (3 or 4 channels) with their times, from the perception service's capture",
+    "MapArt from mapart.load",
+    "Optionally a hint: the camera corner her minimap dot implies (locate)"
+   ],
+   "outputs": [
+    "A View per frame for locate.Locator (her place by the scene) and her_cues (calibration)",
+    "EXCLUDE and HUD_TOP for worldstate"
+   ],
+   "uses": [
+    "gamelab/native.py",
+    "gamelab/localization/mapart.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/camreg.c",
+     "mode": "read",
+     "what": "the C source native.build compiles into the costs DLL"
+    },
+    {
+     "path": "gamelab/build/camreg-<hash>.dll",
+     "mode": "write",
+     "what": "the costs DLL native.build compiles from camreg.c with MSVC on first use (named by a hash of the source and flags)"
+    }
+   ],
+   "concurrency": "No threads of its own: it runs in the caller's thread (the perception service's world step, via locate). The DLL is built and loaded once per process behind a threading.Lock.",
+   "tunables": [
+    {
+     "name": "TRUNC",
+     "value": "24",
+     "meaning": "gray levels: the most one pixel's difference costs"
+    },
+    {
+     "name": "ROW_EVERY",
+     "value": "6",
+     "meaning": "every 6th frame row is compared"
+    },
+    {
+     "name": "HUD_TOP",
+     "value": "700",
+     "meaning": "rows from here (the chat box's top at 1366x768) aren't the map"
+    },
+    {
+     "name": "EXCLUDE",
+     "value": "((0, 0, 250, 210), (1130, 40, 1366, 78))",
+     "meaning": "the minimap's and the quest helper's boxes, left out"
+    },
+    {
+     "name": "FIRST, NEAR, WIDE",
+     "value": "3, 12, 48",
+     "meaning": "px about the predicted view searched, in turn"
+    },
+    {
+     "name": "SETTLE",
+     "value": "3",
+     "meaning": "steps a window's cheapest may walk down to a cheaper neighbour"
+    },
+    {
+     "name": "COARSE, COLD_BEST, COLD_EVERY",
+     "value": "4, 4, 4",
+     "meaning": "cold search: block size, picks refined, every Nth sample row"
+    },
+    {
+     "name": "COST_OK",
+     "value": "16.0",
+     "meaning": "the most a sure view costs (two thirds of TRUNC)"
+    },
+    {
+     "name": "MARGIN_OK",
+     "value": "0.6",
+     "meaning": "the least the best view 2+ px away must cost more"
+    },
+    {
+     "name": "HINT_R",
+     "value": "64",
+     "meaning": "px about a hint searched on a map the camera scrolls both ways"
+    },
+    {
+     "name": "COLD_WHOLE_S",
+     "value": "2.0",
+     "meaning": "s between unhinted whole-map searches while lost on such a map"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-29",
+     "what": "Register each frame against the map's art drawn from the game data",
+     "why": "the prototype's stitched panorama covered a third of the map; against the art the view is exact on every clip frame"
+    },
+    {
+     "date": "",
+     "what": "Unhinted whole-map searches limited to every COLD_WHOLE_S on maps that scroll both ways",
+     "why": "80-900 ms a search (West Rocky Mountain II 80, Henesys 340, Ellinia and Lith Harbor 900) against 5-8 ms within HINT_R of a hint"
+    },
+    {
+     "date": "",
+     "what": "Costs in C with a numpy twin that gives the same integers",
+     "why": "0.2-0.4 ms a frame against 10-20; tests hold the two equal"
+    }
+   ],
+   "gotchas": [
+    "Only 1366x768 frames: `sample` raises ValueError otherwise and `for_map` returns None (at 1920x1080 a look frame is the stretched view at half size).",
+    "A carried view keeps moving at the last velocity; it isn't exact, and locate re-anchors the view on her feet then.",
+    "`_cache` (this frame's costs) is reset at each `see`; `counts` tallies near, wide, cold and carried."
+   ],
+   "tests": [
+    "tests/test_camreg.py",
+    "tests/test_locate.py",
+    "tests/test_spawns.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/locate.py",
+   "title": "The scene locator (locate)",
+   "tagline": "Her exact place each frame: the registered camera, three on-screen cues and a Kalman filter",
+   "summary": "`Locator.see(frame, t, dot)` places her to within a few px on every frame at 1366x768: the camera's view from `camreg`, her feet on screen from the cheapest cue that finds her (name tag template, then her name plate's exact colours, then her body against a pose bank), and a filter that carries her through frames where nothing finds her. Her map place is view + screen place. Since 2026-10-30 the perception service places her by it wherever her plate model and the map's art are available.",
+   "details_md": "The localization prototype of 2026-10-29, its plate and body cues ported to C (`gamelab/locate.c`, via `perception.plate` and `perception.poses`). Words: her *tag* is the name label the game draws under her; her *plate* is the decorated frame her name-tag item draws round it, whose exact colours identify her; her *pose bank* holds calibrated pictures of her body in each pose.\n\n**A frame** (`see`):\n1. More than `GAP_S` (0.5 s) since the last frame: `forget`, start afresh. Else `_rate` updates `k`, the frames per prototype frame (1/15 s) that its counts scale by (1 at today's 15 a second).\n2. The camera: `reg.see(frame, t, hint)`, the hint being `Camera.corner` of her dot's map place. Never registered yet: return None (placed the old way).\n3. Predict the filter by dt (`_predict`, then `wall_clamp` against vertical footholds).\n4. Measure (`measure`), cheapest first, each only if the one before failed:\n   - **tag**: her gray tag template in a window sized from the filter's uncertainty (3 sd + 14 across, `WIN_MIN` (24, 36) to 90), then `NEAR` (110, 100) about the prediction; sure at `SURE` 0.85 or the plate model's lower bank level. When lost (never placed, `LOST_N` 4 frames placed by nothing, or her dot's alarm), or once every `FULL_EVERY` (30) frames her tag isn't surely found: the whole play area down to `ROWS_MAX` 700, peaks kept only where her dot agrees.\n   - **plate**: `Plate.near` counts her plate's exact colours about the prediction, refused unless her dot agrees (`PLATE_DOT`); lost, `Plate.verify` checks the gray peaks anywhere.\n   - **body**: `BodyFinder.find` against her pose bank in the box the filter's uncertainty gives; after `SPRITE_WIDE_AFTER` (2) frames placed by nothing, also a box +-40 px across and +-`WIDE_DOT_Y` (60) about her dot, at most every `WIDE_EVERY` (8) frames and not after the tracked search took `WIDE_BUDGET_MS` (12 ms). Places her at `SPRITE_OK` 0.60, surely at 0.80; her lying-down pose (under `PRONE_H` 55 rows) only with her feet within `PRONE_LINE` (8 px) of a platform's line.\n5. Update (`update`, `update_y`). x and its speed are a constant-velocity Kalman filter (`KF1`); y is in one of three modes. *ground*: y on her platform's line, speed capped at `WALK_MAX` (200 units/s); a rise past `TAKEOFF` (2.5 px; `BODY_OFF_LINE` 8 for body-only answers) takes off at the speed that rise implies (`takeoff_v`); feet below it put her on another platform within 4 px, onto a rope at its top, or into a drop; a walk off an end only if tag or plate placed her within `WALK_OFF_SEEN_S` (0.25 s). *air*: gravity (`GRAVITY` 2000) to `FALL_SPEED` 670, landing on the first line crossed; *rope* near a rope when her last three measured places show steady vertical motion (`kin`: |acc| <= `ROPE_ACC` 700, |v| <= `ROPE_VY` 220) or a slowed rise. *rope*: steady y; onto the platform at its top; off when x drifts 8, she is 30 above its top, below its bottom + `ROPE_END` (5), or a fall shows (acc >= `FALL_ACC` 1200). A tag or plate answer 60+ px from the prediction resets the filter there.\n6. **Her minimap dot** is always a coarse check: on a frame no cue placed her, a filter place more than `DOT_BOX` (12, 12) from the dot (its `DOT_LAG_S` 66 ms lag allowed for) is pulled to the box's edge; more than `DOT_ALARM` (45 units) away for `DOT_ALARM_N` (3) frames she's lost, and after `DOT_TO_N` (3) carried frames far from it she's put where it is. An unregistered view is re-anchored by her feet on a line (`v_anchor`, `reanchor`).\n7. Nothing placed her: `Cover` says whether she's *covered* (the Lie Detector, her stat window, a portal's light) rather than *carried*. Only the count and the scene's `how` change.\n8. `output` returns a `Located`; confidence is the cue's score, or when carried 0.5 x 0.8 per prototype frame unseen.\n\n**Where it's used.** `build` makes one only at 1366x768, with `config.toml`'s `[perception] scene` true (default `ON`), her plate model in her lab folder (no pose bank: no body cue) and the map's art drawable; anything building raises is logged and gives None. `Senses._locator` hands it to the eyes; `Eyes.look_at` calls `see` every frame and drops the locator for good if it raises anything but the missing-template RuntimeError.",
+   "lines": 1078,
+   "key_items": [
+    {
+     "name": "Locator",
+     "kind": "class",
+     "line": 360,
+     "signature": "class Locator",
+     "summary": "Her place, frame after frame, on one map: the camera registration, her tag template, plate matcher, optional body finder, a Cover, and the filter's state."
+    },
+    {
+     "name": "Locator.see",
+     "kind": "method",
+     "line": 498,
+     "signature": "def see(self, frame: np.ndarray, t: float, dot: tuple[float, float] | None = None) -> Located | None",
+     "summary": "One frame: camera, predict, measure, update, cover, output. None until the view was ever registered."
+    },
+    {
+     "name": "Locator.measure",
+     "kind": "method",
+     "line": 640,
+     "signature": "def measure(self, frame: np.ndarray, info: dict, dmap) -> tuple | None",
+     "summary": "The cues cheapest first: (how, feet x, feet y, sd, extra) from tag, plate or body, or None."
+    },
+    {
+     "name": "Locator.update",
+     "kind": "method",
+     "line": 756,
+     "signature": "def update(self, meas: tuple | None, dmap, info: dict) -> None",
+     "summary": "Folds a measurement into the filter (init, reset on a 60 px jump, surprise re-seed) and applies her dot's box, pull and alarm."
+    },
+    {
+     "name": "Locator.update_y",
+     "kind": "method",
+     "line": 841,
+     "signature": "def update_y(self, my: float, sd: float, how: str, info: dict, extra: dict | None = None) -> None",
+     "summary": "Her vertical mode transitions: take-off, drop, rope from its top, landing, rope grab, off rope, view re-anchoring."
+    },
+    {
+     "name": "Locator._predict",
+     "kind": "method",
+     "line": 588,
+     "signature": "def _predict(self, dt: float) -> None",
+     "summary": "Moves the filter on: walk capped at WALK_MAX, walk-off only if recently seen, gravity in the air, steady on a rope."
+    },
+    {
+     "name": "KF1",
+     "kind": "class",
+     "line": 178,
+     "signature": "class KF1",
+     "summary": "A 1-D [position, velocity] Kalman filter with white acceleration noise (the prototype's)."
+    },
+    {
+     "name": "Located",
+     "kind": "dataclass",
+     "line": 210,
+     "signature": "@dataclass class Located",
+     "summary": "Her place in one frame by the scene: view, view_sure, feet and tag on screen, map x/y, platform, mode, cue, confidence, frames unseen, body box, facing, timings, what covers her."
+    },
+    {
+     "name": "Cover",
+     "kind": "class",
+     "line": 239,
+     "signature": "class Cover",
+     "summary": "What covers her on a frame no cue placed her in: the Lie Detector (alarm file plus a window or no registered view), her stat window over her, or a portal's light about her body."
+    },
+    {
+     "name": "Cover.__call__",
+     "kind": "method",
+     "line": 333,
+     "signature": "def __call__(self, frame: np.ndarray, t: float, sure: bool, her: tuple | None, feet: tuple[float, float] | None = None) -> str | None",
+     "summary": "LIE_DETECTOR, STAT_WINDOW, PORTAL or None, checked in that order."
+    },
+    {
+     "name": "Locator.dot_agrees",
+     "kind": "method",
+     "line": 623,
+     "signature": "def dot_agrees(self, fx: float, fy: float, tol: tuple[float, float] = DOT_TOL) -> bool",
+     "summary": "Whether feet on screen agree with her minimap dot within DOT_TOL, her dot's lag (DOT_LAG_S at the filter's speed) allowed for."
+    },
+    {
+     "name": "Locator.reanchor",
+     "kind": "method",
+     "line": 947,
+     "signature": "def reanchor(self, my: float, kin, info: dict) -> bool",
+     "summary": "With the view unregistered and her still 'in the air' for STILL_N frames: moves the view to put her feet on the nearest line."
+    },
+    {
+     "name": "build",
+     "kind": "function",
+     "line": 1010,
+     "signature": "def build(model: MapModel, template, lab: Path, geo: Geometry = NATIVE, log=None) -> Locator | None",
+     "summary": "A Locator from her lab folder's models and the map's art, or None where it can't be (never raising)."
+    },
+    {
+     "name": "cover",
+     "kind": "function",
+     "line": 1051,
+     "signature": "def cover(model: MapModel | None = None) -> Cover",
+     "summary": "The Cover for a map: the stat window's calibration if usable and the map's portal lights if the pictures can be had."
+    },
+    {
+     "name": "Locator.line",
+     "kind": "method",
+     "line": 550,
+     "signature": "def line(self) -> str",
+     "summary": "The service's console line: share of frames by tag, plate, body, carried, covered; views registered; ms a frame."
+    }
+   ],
+   "inputs": [
+    "1366x768 RGB frames and their times from Eyes.look_at in the perception service",
+    "Her minimap dot (full-size px), read by the eyes first",
+    "Her tag template (NameTag's full gray one), plate model and pose bank from her lab folder",
+    "The MapModel, its MapArt and camreg.Registration",
+    "The Lie Detector alarm file and her stat window's calibration (for Cover)"
+   ],
+   "outputs": [
+    "Located per frame: Eyes puts it on the Observation (feet, view, view_sure, located) and Senses._by_scene places her by it",
+    "The 10-second console line of the perception service (Locator.line)"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/perception/plate.py",
+    "gamelab/perception/poses.py",
+    "gamelab/perception/stat_window.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/screen.py",
+    "gamelab/native.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/camreg.py",
+    "gamelab/localization/mapart.py"
+   ],
+   "files_io": [
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "[perception] scene: whether her place comes from the scene (default true)"
+    },
+    {
+     "path": "<her lab folder>/plate_1366x768.npz",
+     "mode": "read",
+     "what": "her plate model (required)"
+    },
+    {
+     "path": "<her lab folder>/poses_1366x768.npz",
+     "mode": "read",
+     "what": "her pose bank (optional: the body cue)"
+    },
+    {
+     "path": "gamelab/lab/ALARM.json",
+     "mode": "read",
+     "what": "the Lie Detector alarm, polled at most every COVER_POLL_S"
+    },
+    {
+     "path": "gamelab/lab/stat_window.json",
+     "mode": "read",
+     "what": "her stat window's calibration (Cover)"
+    }
+   ],
+   "concurrency": "Runs once a frame (15 a second: rate.HZ) inside Eyes.look_at, in the perception service's world step, in the caller's thread. Keeps the last 600 frames' timings (TIMES_KEPT) for the console line.",
+   "tunables": [
+    {
+     "name": "SURE",
+     "value": "0.85",
+     "meaning": "her tag's gray match this good is her tag (or the plate model's lower bank level)"
+    },
+    {
+     "name": "ROWS_MAX",
+     "value": "700",
+     "meaning": "her tag is searched down to the HUD's top (NameTag stops at 691)"
+    },
+    {
+     "name": "NEAR, WIN_MIN",
+     "value": "(110, 100), (24, 36)",
+     "meaning": "the tag's second window; the first window's least half-size"
+    },
+    {
+     "name": "LOST_N, FULL_EVERY",
+     "value": "4, 30",
+     "meaning": "frames by nothing before she's lost; whole-area tag search every 30 unsure frames"
+    },
+    {
+     "name": "SPRITE_OK, SPRITE_SURE",
+     "value": "0.60, 0.80",
+     "meaning": "pose agreement that places her, and surely"
+    },
+    {
+     "name": "SPRITE_WIDE_AFTER",
+     "value": "2",
+     "meaning": "frames placed by nothing before the body is searched about her dot"
+    },
+    {
+     "name": "WIDE_EVERY, WIDE_DOT_Y, WIDE_BUDGET_MS",
+     "value": "8, 60, 12.0",
+     "meaning": "the body search across her dot's column when lost"
+    },
+    {
+     "name": "PRONE_H, PRONE_LINE",
+     "value": "55, 8.0",
+     "meaning": "a lying-down pose counts only with her feet within 8 px of a platform's line"
+    },
+    {
+     "name": "SD",
+     "value": "tag 0.5, plate 0.5, body 1.0, body-weak 2.0",
+     "meaning": "each cue's measurement sd (px)"
+    },
+    {
+     "name": "DOT_OFF",
+     "value": "(-0.88, 5.52)",
+     "meaning": "her dot's map place less her feet's"
+    },
+    {
+     "name": "DOT_LAG_S",
+     "value": "0.066",
+     "meaning": "her dot shows where she was this long before"
+    },
+    {
+     "name": "DOT_TOL, DOT_BOX",
+     "value": "(30, 40), (12, 12)",
+     "meaning": "a cue must agree with the dot within DOT_TOL; she must lie within DOT_BOX"
+    },
+    {
+     "name": "DOT_ALARM, DOT_ALARM_N, DOT_TO_N",
+     "value": "45, 3, 3",
+     "meaning": "dot far for 3 frames: lost; 3 carried frames far: put at the dot"
+    },
+    {
+     "name": "GRAVITY, FALL_SPEED, JUMP_SPEED",
+     "value": "2000, 670, 555",
+     "meaning": "the filter's vertical physics (map units/s)"
+    },
+    {
+     "name": "WALK_MAX",
+     "value": "200",
+     "meaning": "her walking speed's most: walkSpeed 125 x (140 + 20) / 100"
+    },
+    {
+     "name": "TAKEOFF, BODY_OFF_LINE",
+     "value": "2.5, 8.0",
+     "meaning": "px off the line that take her into the air (tag/plate, body alone)"
+    },
+    {
+     "name": "WALK_OFF_SEEN_S",
+     "value": "0.25",
+     "meaning": "a walk off a platform's end only if tag or plate placed her this recently"
+    },
+    {
+     "name": "ROPE_ACC, FALL_ACC, ROPE_VY",
+     "value": "700, 1200, 220",
+     "meaning": "vertical acceleration and speed that tell a rope from a fall"
+    },
+    {
+     "name": "GAP_S",
+     "value": "0.5",
+     "meaning": "s without a frame after which she's placed afresh"
+    },
+    {
+     "name": "COVER_POLL_S",
+     "value": "0.5",
+     "meaning": "the alarm file and the Lie Detector's windows looked at once in this long at most"
+    },
+    {
+     "name": "BODY",
+     "value": "(-28.5, -73.0, 29.5, 0.0)",
+     "meaning": "her body's box from her feet, for the portal-light test"
+    },
+    {
+     "name": "DOT_LAG_SLACK",
+     "value": "0.5",
+     "meaning": "dot_agrees allows this share of her move over the dot's lag on top of DOT_TOL"
+    },
+    {
+     "name": "LAND_SNAP",
+     "value": "3.0",
+     "meaning": "platform_near's reach (+1) when she's put on a line"
+    },
+    {
+     "name": "ROPE_END",
+     "value": "5",
+     "meaning": "map units past a rope's bottom her feet may be while on it"
+    },
+    {
+     "name": "STILL_N, REANCHOR_REACH",
+     "value": "4, 30",
+     "meaning": "an unregistered view: 4 still frames 'in the air' move the view to put her on a line within 30 units"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "The perception service places her by the scene (the user, 2026-10-29 ~22:15: \"Please do that [her camera from the map's art] and port the localization to C\")",
+     "why": "the prototype had her feet within 3 px on every held-out frame where the service had 71% of the easy ones and 48% of the hard (811 held-out easy frames, 223 hard)"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Her lying-down pose places her only on a platform's line (the user: \"Do it\")",
+     "why": "behind the HUD in a drop her head matched that pose: her feet put 30-35 px off, drifting to 43"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Frames under the Lie Detector or her stat window count \"covered\", not lost (the user: \"yes please\")",
+     "why": "they were 64% of the carried scenes on the grind of 16:57-17:59"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Frames in a portal's light count covered; the filter and her dot carry her (the user: \"let's do 2 for the portal\")",
+     "why": "standing in Tree Dungeon's out01 RiceBaby was lost on about 18 of 24 frames, the pulsing light over her plate"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "WALK_MAX raised from the prototype's 140 to the client's cap, 200",
+     "why": "140 trimmed her 150 walk at every prediction: the prediction lagged a median 0.61 units, at 200 0.07"
+    },
+    {
+     "date": "",
+     "what": "DOT_TO_N 3 frames, the prototype's 6",
+     "why": "with a chat box over her plate and legs BugBaby's held-out frames more than 45 units off went from 101 to 74"
+    }
+   ],
+   "gotchas": [
+    "Frame counts (LOST_N, FULL_EVERY, WIDE_EVERY, SPRITE_WIDE_AFTER, DOT_ALARM_N, DOT_TO_N, STILL_N) are the prototype's at 15 a second and scale by `k` from the frames' gaps; at the service's 15 a second k is 1 (the docstring's k = 2 is from the 30-a-second days).",
+    "`see` returns None until the camera has registered once; the caller must place her another way meanwhile (Senses: her dot, `how` \"dot\").",
+    "A RuntimeError from the tag template means she isn't on screen: the look is refused, not the locator dropped; any other exception puts the locator away for good.",
+    "Cover only changes counting and `how`: a covered frame is still carried by the filter.",
+    "An alarm file that can't be read counts as up.",
+    "Her feet's offset from her tag's centre comes from the plate model ((+1.5, -16) for RiceBaby's plate, (-2.5, -16) for BugBaby's), not eyes.tag_below_feet's 11."
+   ],
+   "tests": [
+    "tests/test_locate.py",
+    "tests/test_alarm.py",
+    "tests/test_stat_window.py",
+    "tests/test_rate.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/her_cues.py",
+   "title": "Her cues' calibration (her_cues)",
+   "tagline": "Builds her name-tag template, plate model and pose bank from saved frames",
+   "summary": "An offline calibration command that makes the models `locate` needs from a folder of lossless PNG frames: a gray name-tag template cut from her plate, her plate model (`perception.plate.PlateModel`) with her feet's offset, and her pose bank (`perception.poses.PoseBank`). It writes them to her lab folder (or any folder), where `locate.build` and NameTag read them.",
+   "details_md": "Input: a folder of lossless frames (PNG, as the golden clips are) with an `index.jsonl` giving each frame's file and time (`frames_of`; without one, the PNGs by name, 1/15 s apart). Exact colours matter: both models are made of them, so the rolling recorder's JPEGs won't do.\n\n**Steps** (`build`), each logged and summarised in `her_cues.json`:\n1. Her current full gray tag template matched on every frame (`survey`, `gray_peaks` k=4); its sure levels from its own scores (`plate.sure_levels`), her plate's first model from the sure frames (`plate.pick_centres`).\n2. A new tag template cut from that model's median picture (her letters, 2 px around: `plate.tag_template`), the model re-centred on it; every frame matched again, the camera's view of each frame registered against the map's art (`camreg` on `mapart`, sure views only), the plate model made again.\n3. Her feet's offset from the plate's centre: across, the plate's own axis (the middle of its stable columns, `PlateModel.axis`); down, `feet_below`: for each frame with a sure tag and a sure view, the platform line under her within `FEET_RANGE` (-40 to -4 px) of the centre, the commonest whole offset if `FEET_SURE` (half) of them agree.\n4. Her pose bank from frames where the new tag is sure (its bank level, no other peak within `OTHER` 0.3, its centre `EDGE` 8 px above the HUD) and the view is sure: `poses.build_bank` cuts her from the map's art behind her, with her feet on a platform's line (`ON_LINE` 2 units). Her poses' mirror axis is compared with the plate's; a difference of `AXIS_WARN` (1 px) or more is logged as a warning.\n\n`--keep-tag` skips step 2 (the views are then registered in step 1's pass). `--no-bank` makes the plate model alone: no camera, no map art, so no views, no feet offset measured down (the model's default stays) and no pose bank.\n\nBugBaby's build of 10-30 (2,401 frames, 276 s): her old text tag's template scored 0.882 typical on her plate; the one cut from it is 52 x 15 and 0.996 typical; her feet (-2.5, -16) from it; her poses' mirror axis +0.0 px from her plate's.\n\nCLI: `python -m gamelab.localization.her_cues FRAMES_DIR (--out DIR | --lab) [--map 10002073] [--every N] [--no-bank] [--keep-tag]`.",
+   "lines": 274,
+   "key_items": [
+    {
+     "name": "build",
+     "kind": "function",
+     "line": 144,
+     "signature": "def build(folder: Path, map_id: int, out: Path, template: np.ndarray, every: int = 1, bank: bool = True, log=print, cut: bool = True) -> dict",
+     "summary": "The four steps: tag levels and first plate model, a new tag cut from the plate, her feet's offset, her pose bank; saves them under `out` and returns what was made."
+    },
+    {
+     "name": "feet_below",
+     "kind": "function",
+     "line": 96,
+     "signature": "def feet_below(seen, platforms, x_offset: float) -> tuple[float | None, int, int]",
+     "summary": "Her feet's offset down from the plate's centre: the commonest platform-line offset if half the frames agree."
+    },
+    {
+     "name": "survey",
+     "kind": "function",
+     "line": 115,
+     "signature": "def survey(frames, template: np.ndarray, hud: int, reg=None) -> tuple[list, dict]",
+     "summary": "Every frame's gray template peaks and, with a registration, each frame's sure view; frames read once."
+    },
+    {
+     "name": "sure_of",
+     "kind": "function",
+     "line": 80,
+     "signature": "def sure_of(peaks: list, sure: float, hud: int) -> tuple[int, int] | None",
+     "summary": "Her tag's centre where the best peak is sure, no other within OTHER of it, and EDGE above the HUD."
+    },
+    {
+     "name": "sure_tag",
+     "kind": "function",
+     "line": 90,
+     "signature": "def sure_tag(frame: np.ndarray, template: np.ndarray, hud: int, sure: float = plates.BANK_MOST) -> tuple[int, int] | None",
+     "summary": "sure_of on one frame's peaks."
+    },
+    {
+     "name": "frames_of",
+     "kind": "function",
+     "line": 62,
+     "signature": "def frames_of(folder: Path, every: int = 1)",
+     "summary": "(file, t) of a folder's frames in its index order, every Nth."
+    },
+    {
+     "name": "template_files",
+     "kind": "function",
+     "line": 138,
+     "signature": "def template_files(out: Path) -> list[Path]",
+     "summary": "Her tag templates' files: tag_template_1366x768.npy and tag_template_full_1366x768.npy."
+    },
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 244,
+     "signature": "def main(argv: list[str]) -> int",
+     "summary": "The CLI: loads her current template from her calibration, runs build, writes her_cues.json and her_cues.log."
+    }
+   ],
+   "inputs": [
+    "A folder of lossless PNG frames with index.jsonl (golden clips)",
+    "Her current calibrated tag template (paths.of().tag_full or tag_template)",
+    "The map's art and data (for the views and the pose bank)"
+   ],
+   "outputs": [
+    "plate_1366x768.npz, poses_1366x768.npz and two tag templates in her lab folder, read by locate.build and NameTag",
+    "her_cues.json (what was made, from how much) and her_cues.log"
+   ],
+   "uses": [
+    "gamelab/perception/plate.py",
+    "gamelab/perception/poses.py",
+    "gamelab/screen.py",
+    "gamelab/paths.py",
+    "gamelab/localization/camreg.py",
+    "gamelab/localization/mapart.py",
+    "gamelab/localization/mapdata.py"
+   ],
+   "files_io": [
+    {
+     "path": "FRAMES_DIR/*.png, FRAMES_DIR/index.jsonl",
+     "mode": "read",
+     "what": "the calibration frames"
+    },
+    {
+     "path": "<out or her lab folder>/plate_1366x768.npz",
+     "mode": "write",
+     "what": "her plate model"
+    },
+    {
+     "path": "<out or her lab folder>/poses_1366x768.npz",
+     "mode": "write",
+     "what": "her pose bank"
+    },
+    {
+     "path": "<out or her lab folder>/tag_template_1366x768.npy, tag_template_full_1366x768.npy",
+     "mode": "write",
+     "what": "her tag template (the same picture)"
+    },
+    {
+     "path": "<out or her lab folder>/her_cues.json, her_cues.log",
+     "mode": "write",
+     "what": "what was made, and the run's log (appended)"
+    }
+   ],
+   "concurrency": "An offline command, single-threaded. It reads every frame once per template pass (twice, or once with --keep-tag), and again the frames picked for the plate model and the pose bank.",
+   "tunables": [
+    {
+     "name": "OTHER",
+     "value": "0.3",
+     "meaning": "no other template peak within this of the best, for a frame to count for the bank"
+    },
+    {
+     "name": "EDGE",
+     "value": "8",
+     "meaning": "px the tag's centre must be above the HUD's top"
+    },
+    {
+     "name": "ON_LINE",
+     "value": "2.0",
+     "meaning": "map units her feet may be from a platform's line in the bank"
+    },
+    {
+     "name": "FEET_RANGE",
+     "value": "(-40, -4)",
+     "meaning": "screen px below the plate's centre searched for her feet"
+    },
+    {
+     "name": "FEET_SURE",
+     "value": "0.5",
+     "meaning": "share of frames that must agree on the feet offset"
+    },
+    {
+     "name": "AXIS_WARN",
+     "value": "1.0",
+     "meaning": "px between her poses' mirror axis and her plate's that is warned about"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-30",
+     "what": "Her tag template cut from her plate (BugBaby's build of 10-30)",
+     "why": "her old text tag's template scored 0.882 typical on her plate; the cut one 0.996"
+    },
+    {
+     "date": "",
+     "what": "Her feet across from the plate's own axis (its stable columns' middle)",
+     "why": "the build of 10-30 kept the magician's +1.5 for BugBaby and had to be told"
+    },
+    {
+     "date": "",
+     "what": "Her feet down measured from platform lines (16 for her orange-ribbon plate)",
+     "why": "eyes.tag_below_feet's 11 was the old text tag's and put her 5 px low"
+    }
+   ],
+   "gotchas": [
+    "Frames must be lossless PNG: the plate model is exact colours.",
+    "`--lab` replaces the tag templates in her lab folder, which NameTag and the locator read.",
+    "The pose bank needs the map's art (`--map`, default 10002073, Tree Dungeon) to cut her from the background.",
+    "A mirror-axis disagreement is only logged, never applied."
+   ],
+   "tests": [
+    "tests/test_her_cues.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/placecheck.py",
+   "title": "Place check (placecheck)",
+   "tagline": "Rejects a place read off her minimap dot that lies outside the map",
+   "summary": "`off_map(model, where)` says, in words for the log, why a place isn't on the map, or None if it is: outside the VR box (or the platforms' and ropes' reach) by more than `OFF_X` (20 units) left or right or `OFF_Y` (50) above or below. Senses doesn't place such a look; it's asked again and after 3 s raises LookLost.",
+   "details_md": "**Why.** At 16:46:50 on 2026-10-24 every one of a hunt's 1,148 looks put her 92-956 units right of Tree Dungeon's right edge: her dot was read without the map's minimap picture, with the first map's origin, and the hunt sent a plan off a rope every 5 s for two minutes. On that day's other tours there (7,634 looks) she was always 100 units or more inside its sides and 212 or more inside its top and bottom.\n\n**The edges** (`edges`) are the map's VR box (where the camera stops, which the game keeps her inside), or where its platforms and ropes reach if it has none. The margins allow for her dot's accuracy (about 11 units, a minimap pixel); every bad look of 16:46:50 was further out than either.\n\n**Not checked.** A place in the right map but wrong within it (the minimap picture found at a wrong place) passes. Whether there's a platform or a rope under her was weighed and left out: in mid-air off a platform there can be nothing under her for hundreds of units, and a look in mid-fall taken for a bad one would hold the hunt up.\n\nIt is called from `Senses._place_her` and `Senses._by_scene` for both ways of placing her; the frame's own checks are in `perception.framecheck`.",
+   "lines": 44,
+   "key_items": [
+    {
+     "name": "off_map",
+     "kind": "function",
+     "line": 38,
+     "signature": "def off_map(model: MapModel, where: Where) -> str | None",
+     "summary": "Why a place isn't on the map (for the log), or None if it is."
+    },
+    {
+     "name": "edges",
+     "kind": "function",
+     "line": 28,
+     "signature": "def edges(model: MapModel) -> tuple[float, float, float, float]",
+     "summary": "The map's left, top, right, bottom: its VR box, or its platforms' and ropes' reach."
+    },
+    {
+     "name": "OFF_X",
+     "kind": "constant",
+     "line": 24,
+     "signature": "OFF_X = 20",
+     "summary": "Map units past the left/right edges a place may be read at."
+    },
+    {
+     "name": "OFF_Y",
+     "kind": "constant",
+     "line": 25,
+     "signature": "OFF_Y = 50",
+     "summary": "Map units past the top/bottom edges a place may be read at."
+    }
+   ],
+   "inputs": [
+    "A Where from pose.Localizer or locate (via Senses)",
+    "The MapModel's bounds, platforms and ropes"
+   ],
+   "outputs": [
+    "A reason string that Senses turns into a Problem(\"place\", ...) on the scene (`bad`)"
+   ],
+   "uses": [
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/pose.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "OFF_X",
+     "value": "20",
+     "meaning": "map units past the sides a place may be read at"
+    },
+    {
+     "name": "OFF_Y",
+     "value": "50",
+     "meaning": "map units past the top and bottom"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-24",
+     "what": "Looks that put her off the map aren't acted on",
+     "why": "a whole hunt's looks put her 92-956 units off Tree Dungeon's right edge and the hunt sent a plan off a rope every 5 s for two minutes"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "No check for a platform or rope under her",
+     "why": "in mid-air there can be nothing under her for hundreds of units; a mid-fall look taken for a bad one would hold the hunt up"
+    }
+   ],
+   "gotchas": [
+    "Tree Dungeon's VR box is -360..410 across and -2070..460 down: the check is coarse by design."
+   ],
+   "tests": [
+    "tests/test_framecheck.py",
+    "tests/test_worldstate.py",
+    "tests/test_bench.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/senses.py",
+   "title": "Senses (senses)",
+   "tagline": "The one door every look goes through: the freshest perception state, placed and checked",
+   "summary": "`Senses.look()` returns the newest perception state fresh enough to decide on, as a `Scene`, from the feed (the perception service in a live command, `SyncFeed` in the simulator, `InlineFeed` on saved frames). It enforces freshness, retries looks that fail their checks and raises `LookLost` after 3 s, runs listeners and checks after each look, and offers `glance()` for a per-frame dot and HP. For the world step it places observations on the map (`place`), by the scene locator or by her dot.",
+   "details_md": "**Where looks come from.** Since 2026-10-25 every look is the latest state of the continuous feed: perception runs its world step on every frame (15 a second, `rate.HZ`) and Senses picks a state. Without a feed given, an `InlineFeed` runs the world step on the eyes' own frame when a look asks (made lazily, so the world step's own Senses makes none). The old self-looking mode (`--no-feed`) and Senses' own sweep of the screen a slice a look for her memory were removed then; a look at her band now carries the monsters the feed follows off it in `Scene.swept`.\n\n**Freshness** (`fresh_after`): the newest state of a frame shown after the last look's frame, `KEY_EFFECT_S` (68 ms) after her last key (the game acts on a key 66-68 ms after it's sent; `KEYS_WAIT` \"all\"), and at most `MAX_AGE_S` (0.1 s) old. A look for monsters also waits for the frame that would show her last throw's kill (`shows`), when that is at most the character's `shows_wait_s` away (`SHOWS_WAIT_S` 0.45 for the thief), asked `SHOWS_LEAD_S` (0.05 s) before it. `after` asks for a frame shown then or later instead. Once the window fix has set the client right, no look or glance takes a frame shown before the window settled (`settled`).\n\n**When there's nothing to act on.** `feed.look` gives None (no state in time, or the state failed `perception.framecheck` or `placecheck`). Then: the `waits` run, the game is brought forward (unless `hands_off`), a window fault Alt+Enter twice can mend goes to `window_fix` (`_mend`), the failure is logged once per reason and sent as a telemetry event, and after `LOST_S` (3 s) `LookLost` is raised, unless the window fix has yet to make its first try (`_fixing`). Retries are `RETRY_GAP_S` (0.2 s) apart. `regain` stands still, looking every `PAUSE_POLL_S` (0.5 s), until a look passes.\n\n**After a look:** her newest touch is noted, the camera learns from her tag, the feed's players are adopted, `rows` filled if missing, the feed's events up to the look's frame attached (`drain_events`), then every listener (the hunter's EXP and HP bookkeeping, telemetry) and every check (which may raise out of the look: the safety stop).\n\n**Glances** (`glance`): her dot and HP from the newest frame (every frame: `FEED_GLANCE_EVERY_S` 0), the state kept in `glanced` for a running chain of keys to react to, and the `glance_checks` run on it (the hunter's HP watch). No state for `GLANCE_LOST_S` (0.3 s) raises LookLost, which cuts a running chain.\n\n**Touches.** Each state's newest touch is kept (`touch`) and its listeners told; `invulnerable_until` is that touch's popup time plus `INVULNERABLE_S` (1.45 s), ignoring `crowded` ones (a MISS that may be another player's).\n\n**Placing** (`place`, used by the world step): `Scene.of(obs)`, then `_place_her`. With the eyes' locator's answer (`located`), `_by_scene` places her by it: the feet's map place, platform, cue, mode and confidence; not found yet, her dot snapped and put on screen by the view (`how` \"dot\"). Otherwise `Localizer.where_dot`, `off_map`, `refine`, and the camera learns from her tag or puts her on screen. Then `Players.update` with the other dots, only when her own dot was read. `search` asks the eyes for monsters in her band (or the whole screen) and places them.\n\nThe locator (`_locator`) is only built for eyes at 1366x768 with a name tag and a real screen. `_rope_columns` has the eyes search for ropes only `ROPE_PAD` (40 + 12 px) about where her dot puts the map's ropes: 8.6 ms a look against 19 for the whole screen.",
+   "lines": 487,
+   "key_items": [
+    {
+     "name": "Senses",
+     "kind": "class",
+     "line": 131,
+     "signature": "class Senses",
+     "summary": "Every look at the game, placed on the map: eyes, model, band, feed, localizer, camera, players, listeners, checks, glance checks and the failure state."
+    },
+    {
+     "name": "Senses.look",
+     "kind": "method",
+     "line": 202,
+     "signature": "def look(self, mobs: bool = True, wide: bool = False, loot: bool = False, mesos_only: bool = False, after: float | None = None) -> Scene",
+     "summary": "The newest fresh-enough state as a Scene; retries, mends, raises LookLost after LOST_S; then listeners and checks."
+    },
+    {
+     "name": "Senses.fresh_after",
+     "kind": "method",
+     "line": 249,
+     "signature": "def fresh_after(self, keys: bool | None = None) -> float",
+     "summary": "When a look's frame may have been shown at the soonest: after the last look, KEY_EFFECT_S after her last key, MAX_AGE_S before now."
+    },
+    {
+     "name": "Senses.glance",
+     "kind": "method",
+     "line": 318,
+     "signature": "def glance(self) -> tuple[tuple[float, float] | None, float]",
+     "summary": "Her minimap dot and HP from the feed's newest frame; LookLost after GLANCE_LOST_S without a state."
+    },
+    {
+     "name": "Senses.place",
+     "kind": "method",
+     "line": 365,
+     "signature": "def place(self, obs: Observation) -> Scene",
+     "summary": "An Observation placed: her position, then the other players. A look that failed its checks isn't placed."
+    },
+    {
+     "name": "Senses._place_her",
+     "kind": "method",
+     "line": 428,
+     "signature": "def _place_her(self, s: Scene) -> None",
+     "summary": "By the scene where the eyes located her; else dot -> map, off-map check, refine, and the camera learns or places her on screen."
+    },
+    {
+     "name": "Senses._by_scene",
+     "kind": "method",
+     "line": 452,
+     "signature": "def _by_scene(self, s: Scene, loc) -> None",
+     "summary": "Her place from a locate.Located: where, how (tag, plate, body, carried, covered), mode, confidence; her dot until the locator has found her."
+    },
+    {
+     "name": "Senses.search",
+     "kind": "method",
+     "line": 375,
+     "signature": "def search(self, s: Scene, wide: bool = False) -> list[Monster]",
+     "summary": "Monsters in her band (or the whole screen) placed on the map with their HP bars; notes the rows searched."
+    },
+    {
+     "name": "Senses.regain",
+     "kind": "method",
+     "line": 301,
+     "signature": "def regain(self, lost: LookLost, until: float) -> Scene | None",
+     "summary": "After LookLost: stands still, looking every PAUSE_POLL_S, until a look passes or time is up."
+    },
+    {
+     "name": "Senses._failed",
+     "kind": "method",
+     "line": 257,
+     "signature": "def _failed(self, problem: Problem, hold: bool = False) -> None",
+     "summary": "Logs a failed look once per reason, emits a telemetry event, raises LookLost after LOST_S unless held."
+    },
+    {
+     "name": "Senses._locator",
+     "kind": "method",
+     "line": 392,
+     "signature": "def _locator(eyes: Eyes, model: MapModel)",
+     "summary": "The eyes' locate.Locator for this map (built by locate.build), or None for eyes of another size, the simulator's or a command's."
+    },
+    {
+     "name": "Senses.invulnerable_until",
+     "kind": "method",
+     "line": 358,
+     "signature": "def invulnerable_until(self) -> float",
+     "summary": "When she can be touched again: the newest sure touch's popup + INVULNERABLE_S."
+    },
+    {
+     "name": "Senses._rope_columns",
+     "kind": "method",
+     "line": 414,
+     "signature": "def _rope_columns(self, dot: tuple[float, float] | None, tag: tuple[int, int] | None) -> list[tuple[int, int]] | None",
+     "summary": "Where a look searches for ropes: ROPE_PAD about where her dot puts each map rope on screen."
+    },
+    {
+     "name": "KEY_EFFECT_S",
+     "kind": "constant",
+     "line": 99,
+     "signature": "KEY_EFFECT_S = 0.068",
+     "summary": "A look's frame is shown at least this long after her last key: the game acts on a key 66-68 ms after it's sent."
+    },
+    {
+     "name": "LOST_S",
+     "kind": "constant",
+     "line": 123,
+     "signature": "LOST_S = 3.0",
+     "summary": "Seconds of failed looks before LookLost; then a hunt stands still (regain)."
+    }
+   ],
+   "inputs": [
+    "States from the feed (localization.feed: Feed.look, Feed.glance, drain_events, problem)",
+    "When her last key went (Actions.last_key) and when her last throw's kill would show (Attacks.shown_by)",
+    "Observations from the eyes, for place (the world step)"
+   ],
+   "outputs": [
+    "Scene for every behavior and control consumer (fights, the navigator, the mover, the hunt loop)",
+    "Her dot and HP per glance, and the glanced state",
+    "LookLost when there's nothing to act on; 'look' and 'lost' telemetry events"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/telemetry.py",
+    "gamelab/character.py",
+    "gamelab/screen.py",
+    "gamelab/perception/drops.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/terrain.py",
+    "gamelab/perception/touches.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/placecheck.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/pose.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/feed.py",
+    "gamelab/localization/locate.py"
+   ],
+   "files_io": [],
+   "concurrency": "Runs in the thread of whoever looks (a hunting command's process). `look` blocks: it sleeps for a kill to show (up to SHOWS_WAIT_S) and between retries (RETRY_GAP_S). The states come from the perception service process through the feed; `place` runs inside the world step.",
+   "tunables": [
+    {
+     "name": "KEY_EFFECT_S",
+     "value": "0.068",
+     "meaning": "a look's frame is shown this long after her last key at the soonest"
+    },
+    {
+     "name": "MAX_AGE_S",
+     "value": "0.1",
+     "meaning": "a look's frame is at most this old"
+    },
+    {
+     "name": "KEYS_WAIT",
+     "value": "\"all\"",
+     "meaning": "which looks wait for her keys' effect: all, moves (the mover's), none"
+    },
+    {
+     "name": "SHOWS_WAIT_S",
+     "value": "0.45",
+     "meaning": "a look for monsters waits for her last throw's kill to show, if at most this far off"
+    },
+    {
+     "name": "SHOWS_LEAD_S",
+     "value": "0.05",
+     "meaning": "... asked this long before that frame"
+    },
+    {
+     "name": "RETRY_GAP_S",
+     "value": "0.2",
+     "meaning": "s between looks that failed their checks"
+    },
+    {
+     "name": "LOST_S",
+     "value": "3.0",
+     "meaning": "s of failed looks before LookLost"
+    },
+    {
+     "name": "PAUSE_POLL_S",
+     "value": "0.5",
+     "meaning": "a hunt standing still looks this often"
+    },
+    {
+     "name": "GLANCE_LOST_S",
+     "value": "0.3",
+     "meaning": "s of glances without a state before LookLost (cuts a running chain)"
+    },
+    {
+     "name": "FEED_GLANCE_EVERY_S",
+     "value": "0.0",
+     "meaning": "glances come every frame the feed looks at"
+    },
+    {
+     "name": "ROPE_PAD",
+     "value": "ROPE_MATCH_PX + MAX_ROPE_WIDTH (40 + 12)",
+     "meaning": "full-size px about each map rope a look searches for ropes"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-25",
+     "what": "Every look comes from the continuous feed; --no-feed and Senses' own sweep removed (the user: \"We should just remove the --no-feed mode, perception should just always run and the other modules just work based on latest perception result\")",
+     "why": "one process looks at the game all the time; the rest work from its latest result"
+    },
+    {
+     "date": "2026-10-25",
+     "what": "Every look waits for the effect of her last key (KEYS_WAIT \"all\")",
+     "why": "in the simulator (16 seeds of 10 minutes) she was touched on her trips 16.4 times a run against 20.1 (the mover's looks alone) and 22.9 (none), falling 33 times against 44 and 55, EXP a minute level"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "A look for monsters waits for her last throw's kill to show (SHOWS_WAIT_S)",
+     "why": "she's locked until 0.79 s after the key anyway, so a look 0.4 s after it costs no throwing time and has the kill: the next throw goes at the next monster at once"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Her place by the scene where the eyes have a locator (_by_scene)",
+     "why": "the scene locator is exact where the dot is good to 11 units"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Glances every frame (FEED_GLANCE_EVERY_S 0) since the feed runs at 15 a second",
+     "why": "at 15 a second every frame is about the pace glances had at 30 (eyes.GLANCE_EVERY_S, 63 ms); every frame at 30 hadn't paid in the simulator (2026-10-21: 16 missed landings of 290 against 11)"
+    }
+   ],
+   "gotchas": [
+    "Every look waits for the effect of her last key by default: code that wants a look right after a key gets a later frame, never an older one.",
+    "A glance with no state returns no dot and the last HP; only after 0.3 s does it raise.",
+    "A Senses made inside a world step has no feed and makes none unless a look is asked (`feed` is lazy).",
+    "Players found by looks placed here get ids from LOCAL_IDS (1,000,001) when a feed is given, so they don't clash with the feed's.",
+    "`checks` may raise out of any look, wherever it was taken (the hunter's safety stop)."
+   ],
+   "tests": [
+    "tests/test_feed.py",
+    "tests/test_framecheck.py",
+    "tests/test_locate.py",
+    "tests/test_navigation.py",
+    "tests/test_guard.py",
+    "tests/test_window_size.py",
+    "tests/test_touches.py",
+    "tests/test_rate.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/scene.py",
+   "title": "The Scene (scene)",
+   "tagline": "One look placed on the map: her, monsters, drops, players, and px-to-map conversions",
+   "summary": "`Scene` extends perception's `Observation` with everything placed on the map: her `Where`, how it was found and how sure, the monsters (`Monster`), monsters swept off her band, drops (`Loot`), other players, and the feed's events, touches and tracks. Its `map_x`/`screen_x` conversions go through the registered view when there is one, else through the offset from her. It also finds drops on the ground (`drop_strips`, `find_loot`) and writes the 'scene' telemetry record.",
+   "details_md": "**Conversions.** With a registered view (`view`: the map point at the frame's top-left) map = view + px x `units_per_px`. Without, offsets from her: her tag's x (`tag`) and her feet's row (`floor_y`) against her map place; the camera doesn't scale, so offsets from her hold anywhere on screen.\n\n**Placing a monster** (`place`). Its map x and y come from its foot x and feet y on screen. `monster_platform` picks its platform: an exact feet snap (within 12 units of a surface) when the matched template knows its origin and she's grounded or the view is sure, else the nearest platform where its kind spawns. It's kept within that platform's ends.\n\n**Grounded.** With the locator's mode: tag seen, mode 'ground', on a platform. Otherwise: tag seen, on a platform, and at least `GROUNDED_PX` (6 half-size px) of ground under her feet. In the air every monster's y is off by her height above where her dot puts her (up to her 77-unit jump), unless the view is registered.\n\n**Drops.** `level_runs` splits a platform into nearly level stretches (rising or falling 20 units at most). `drop_strips` makes a strip just above each stretch of her platform (every platform in view with `wide`), `STRIP_PAD` (4) past each end, trimmed above the bottom bar and right of the minimap, skipping ones narrower than `MIN_STRIP` (12) or shorter than an item. `whole` marks a strip not cut by the bar or the screen's top: a cut strip finding nothing doesn't say the drop is gone. `find_loot` asks `eyes.items_in` for items in those boxes, places each on its strip's platform, notes `looked`, and `_on_nearest_platform` keeps one per item (within `SAME_ITEM` 4 px) on the platform whose ground is nearest its bottom.\n\n**Fields from the continuous feed:** `events` (EXP gains, hits, deaths since the last look), `touch` (her newest touch), `tracks` (the feed's monster tracks: live, hidden on screen up to HIDE_S, or just dead), `strips` (drop strips, each searched at its own time), `seq` (the service's frame number). `swept` holds monsters perception follows off her band, re-found in this frame, for her memory; fights go by `monsters`. `landing` and `what_if` mark looks at a landing inside a chain and looks made up from another.\n\n**Record.** `record()` is the 'scene' telemetry topic: her place (`how`, `seen`, `grounded`, and `mode`, `conf`, `view_sure` from the locator), HP and MP, monsters, swept, rows searched, loot, `searched`, `wide`, `looked`, the view box, players and the minimap picture's match.",
+   "lines": 297,
+   "key_items": [
+    {
+     "name": "Scene",
+     "kind": "dataclass",
+     "line": 41,
+     "signature": "@dataclass(kw_only=True) class Scene(Observation)",
+     "summary": "A look placed on the map: where, how, mode, confidence, tag_seen, monsters, searched, wide, swept, rows, loot, looked, events, players, touch, misses, tracks, strips, landing, what_if, seq."
+    },
+    {
+     "name": "Scene.of",
+     "kind": "method",
+     "line": 87,
+     "signature": "@classmethod def of(cls, obs: Observation) -> \"Scene\"",
+     "summary": "A Scene with an Observation's fields, nothing placed yet."
+    },
+    {
+     "name": "Scene.place",
+     "kind": "method",
+     "line": 105,
+     "signature": "def place(self, m: Mob, model: MapModel, bar: float | None) -> Monster",
+     "summary": "Puts a monster seen on screen onto the map and its platform, clamped within the platform's ends."
+    },
+    {
+     "name": "Scene.map_x",
+     "kind": "method",
+     "line": 134,
+     "signature": "def map_x(self, screen_x: float) -> float",
+     "summary": "Look-frame x to map x: by the view if registered, else by the offset from her (map_y, screen_x, screen_y alike)."
+    },
+    {
+     "name": "Scene.screen_x",
+     "kind": "method",
+     "line": 122,
+     "signature": "def screen_x(self, map_x: float) -> float",
+     "summary": "Map x to look-frame x."
+    },
+    {
+     "name": "Scene.grounded",
+     "kind": "method",
+     "line": 95,
+     "signature": "@property def grounded(self) -> bool",
+     "summary": "Whether she stands on the ground in this look (by the locator's mode where there is one)."
+    },
+    {
+     "name": "Scene.searched_x",
+     "kind": "method",
+     "line": 148,
+     "signature": "def searched_x(self, y: float) -> tuple[float, float] | None",
+     "summary": "The map x range this look searched for monsters at level y, or None."
+    },
+    {
+     "name": "Scene.record",
+     "kind": "method",
+     "line": 157,
+     "signature": "def record(self) -> dict",
+     "summary": "This look as the 'scene' telemetry record."
+    },
+    {
+     "name": "Scene.room",
+     "kind": "method",
+     "line": 193,
+     "signature": "def room(self, direction: str, margin: float) -> float",
+     "summary": "Map units she can walk that way before her platform's end, less a margin."
+    },
+    {
+     "name": "Loot",
+     "kind": "dataclass",
+     "line": 28,
+     "signature": "@dataclass(frozen=True) class Loot",
+     "summary": "An item or mesos seen on the ground, placed: the perception Item, map x, y and platform."
+    },
+    {
+     "name": "Strip",
+     "kind": "dataclass",
+     "line": 209,
+     "signature": "@dataclass(frozen=True) class Strip",
+     "summary": "Where drops are looked for: a strip above a level stretch of a platform, its key, map range, frame box and whether it is whole."
+    },
+    {
+     "name": "drop_strips",
+     "kind": "function",
+     "line": 227,
+     "signature": "def drop_strips(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False) -> list[Strip]",
+     "summary": "The strips a search for drops looks in: above each level stretch of her platform (or every platform in view)."
+    },
+    {
+     "name": "find_loot",
+     "kind": "function",
+     "line": 255,
+     "signature": "def find_loot(s: Scene, model: MapModel, eyes: Eyes, wide: bool = False, mesos_only: bool = False, strips: list[Strip] | None = None) -> list[Loot]",
+     "summary": "Drops on her platform (or every platform in view), placed on the map; notes where it looked."
+    },
+    {
+     "name": "level_runs",
+     "kind": "function",
+     "line": 286,
+     "signature": "def level_runs(p: Platform, flat: float = 20) -> list[tuple[float, float, float, float]]",
+     "summary": "A platform as stretches of nearly level ground: (x from, x to, highest y, lowest y)."
+    },
+    {
+     "name": "_on_nearest_platform",
+     "kind": "function",
+     "line": 275,
+     "signature": "def _on_nearest_platform(found: list[tuple[float, Loot]], same: float = SAME_ITEM) -> list[Loot]",
+     "summary": "One loot per item, on the platform whose ground is nearest its bottom."
+    }
+   ],
+   "inputs": [
+    "An Observation from perception.eyes (Eyes.look_at)",
+    "Her Where, how and mode from Senses",
+    "Mob detections and HP bars (Senses.search, the world step)",
+    "Items in strips from Eyes.items_in"
+   ],
+   "outputs": [
+    "Scene for behavior and control (fights, the navigator, the hunt loop, looting)",
+    "The 'scene' telemetry record (Scene.record) for the mini-map and analysis.respawn",
+    "Strips and Loot for the world step's drop rotation"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/loot.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/players.py",
+    "gamelab/localization/pose.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "STRIP_PAD",
+     "value": "4",
+     "meaning": "half-size px a drop strip reaches past each end of its ground"
+    },
+    {
+     "name": "MIN_STRIP",
+     "value": "12",
+     "meaning": "narrower strips aren't searched"
+    },
+    {
+     "name": "SAME_ITEM",
+     "value": "4",
+     "meaning": "items this close (px) are one item found in two platforms' strips"
+    },
+    {
+     "name": "GROUNDED_PX",
+     "value": "6",
+     "meaning": "half-size px of ground under her feet that show she stands on it"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "The record says what the look searched (searched, wide, looked, view)",
+     "why": "for analysis.respawn: an empty monster list is otherwise a look that saw none or one that didn't look"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "The record has where it searched for monsters (rows) and the sweep's monsters (swept)",
+     "why": ""
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Conversions go by the registered view; a monster whose template knows its feet snaps to the platform under them wherever the view is registered",
+     "why": "every monster, drop and window placed through it is placed by the registered camera, not by her tag (before: only with her standing)"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Strip.whole: a strip cut by the bottom bar is told apart",
+     "why": "in the review strips cut by the bar found none where the simulator had drops 10 times in 26, whole ones 74 in 962"
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The record carries the perception service's frame number (seq)",
+     "why": "to match a scene to a recording's frames by its index's seq"
+    }
+   ],
+   "gotchas": [
+    "Without a view, conversions need `tag` and `where`; Senses fills `tag` from the camera when her tag is hidden, so `tag` is her screen place once she's placed (`tag_seen` says whether it was really seen).",
+    "`searched` True with empty `monsters` means none were seen; `searched` False means nobody looked.",
+    "Drop strip constants are half-size px of the 1920x1080 window, converted by the look's geometry (`geo.fpx`)."
+   ],
+   "tests": [
+    "tests/test_loot.py",
+    "tests/test_geometry.py",
+    "tests/test_attack.py",
+    "tests/test_navigation.py",
+    "tests/test_spawns.py",
+    "tests/test_locate.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/rate.py",
+   "title": "The frame rate (rate)",
+   "tagline": "HZ = 15: the one rate perception looks at the game, everything once a frame",
+   "summary": "A single constant, `HZ = 15.0` frames a second. Every frame gets one pass of the perception service's world step (her look and the whole screen's search at once, her place, vitals and touches, monsters matched to tracks, their bars and deaths, the drops), so what the stack reads of the game is never more than a frame and a pass old. Whatever counts frames takes its rate from here.",
+   "details_md": "**Who reads it:** `localization.feed.HZ` (and through it `service.HZ` and the simulator's `SyncFeed`), `tracking`, `worldstate`, Senses' glances, `control.recording.FPS`, `control.lie_tracking.FPS`, `control.navigator` and `behavior.targeting`. Change it in this one place.\n\n**History.** 30 a second from 2026-10-26 (the frame loop re-finding followed monsters every frame, the whole screen on a thread of its own every other frame) until 2026-10-30; 15 since, one pass a frame. On the crowd's replay (900 frames, Idle priority on CPUs 12-23) the pass took 0.50 cores at the live rate where the step at 30 took at least 0.75, and every state has its own frame's whole screen, where at 30 the newest whole screen was 70 ms old (median).\n\nWhat used to be counted in frames at 30 a second is counted in time now (`tracking.MIN_SEEN_S`, `worldstate.BAR_EVERY_S`, `perception.deaths.EVERY_S`); the touch rules were measured on recordings at 15 a second, and the locator's counts are the prototype's at 15 (`locate`: k = 1).",
+   "lines": 20,
+   "key_items": [
+    {
+     "name": "HZ",
+     "kind": "constant",
+     "line": 20,
+     "signature": "HZ = 15.0",
+     "summary": "Frames a second the perception service looks at the game (the game shows 60)."
+    }
+   ],
+   "inputs": [],
+   "outputs": [
+    "The frame rate for the feed, the perception service, Senses' glances, the rolling recording and the simulator's feed"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "HZ",
+     "value": "15.0",
+     "meaning": "frames a second; every frame gets one pass of the world step"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "30 frames a second: the frame loop's step re-found the followed monsters in every frame, the whole screen searched on a thread of its own every other frame",
+     "why": "perception at one pace (README, Perception at one pace)"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "15 frames a second, everything once a frame (the user: \"make perception output the 15fps whole screen only, no need for a separate 30fps existing tracking\"; \"I meant everything at 15 fps\")",
+     "why": "0.50 cores against 0.75+ at 30, and every state with its own frame's whole screen"
+    }
+   ],
+   "gotchas": [
+    "Comments written at 30 a second are stale: players' MISS_S comment says two looks are 67 ms (at 15 a second about 133 ms), and locate's docstring says the service's frames count k = 2 of the prototype's (at 15 a second k is 1).",
+    "tests/test_rate.py checks that no other rate is written into perception."
+   ],
+   "tests": [
+    "tests/test_rate.py",
+    "tests/test_feed.py",
+    "tests/test_service.py",
+    "tests/test_tracking.py",
+    "tests/test_worldstate.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/monsters.py",
+   "title": "Monsters on the map (monsters)",
+   "tagline": "Monsters placed on platforms, told apart look to look, and predicted ahead",
+   "summary": "Turns perception's `Mob` detections into `Monster`s on the map's platforms, tells a monster seen again from a new one, and predicts where one can be a moment later (`MonsterTrack`) for the move planner. It holds the monster tables (speed, body, death time) that game data overrides per map, the shared walk-edge rule, and which of the monsters she threw at died when her EXP went up (`dead_one`).",
+   "details_md": "**Which platform** (`monster_platform`). With exact feet (the matched template knows its origin; she's grounded or the view is registered) a monster goes on whatever platform's surface is within `FEET_SNAP` (12 units): such feet were -1.4 to +2.5 off on 15 saved frames, against -8.5 to +16.4 by the template's bottom. Otherwise only platforms where its kind spawns count (or any spawn platform), within 50 units: feet read from a template's bottom were about 20 units off at times and once put pigs on a safe platform above them. Within `PLATFORM_SLACK` (25) of a platform's ends.\n\n**Speeds and bodies.** `speeds(model)` and `bodies(model)` start from the tables (`MONSTER_SPEED`: pig and Orange Mushroom 125, slime 100, snail 43.75 units/s; `MONSTER_HALF`, `MONSTER_TOP`, `MONSTER_FLINCH_TOP`, `MONSTER_DIE_S`) and take the map's game data where it has the kind. `walk_vx` turns perception's heading (facing and pose: a move frame) into a velocity at the kind's game-data speed; a stand or flinch frame is 0. `touch_box` is half its width and its tallest walking or flinching height.\n\n**Walk edges** (`walk_edges`). A walking monster turns `WALK_EDGE` (20 units) along the end foothold from each end of its platform, as the v83 client does; one that jumps walks to the ends. Shared by the danger, flow, tracking and probe code and the simulator.\n\n**Prediction** (`MonsterTrack`). `at(t, p)` walks it on at its velocity and bounces it between the walk edges (a monster never walks off its platform: it turns). `reach(t, p)` is where it can be: seen walking, about `at` with `TURN_SLACK` (25) + 20 units a second of spread, and its full speed past `trust`; heading unknown, its speed either way (only `TURN_SLACK` back against a known heading), capped by `unsure`. `reach_over(t0, t1)` adds the end it turns back at in between.\n\n**Look to look** (`Tracker.update`): each monster is matched to the last look's on the same platform within `MATCH_DX` (90) if that look was under `MATCH_WITHIN` (2 s) ago; heading from the move (over `STILL_DX` 6) and speed measured when the looks are `MIN_SPEED_DT` (0.2 s) apart, clamped to the kind's speed. `WALK_MATCH` and `FACING_HEADING` (matching by where it was walking, heading from its facing) are off. This is the navigator's and the hunt loop's tracker; the perception service follows monsters frame by frame with ids in `localization.tracking`, whose id rides on `Monster.track`.\n\n**Same one, dead one.** `same` is the same kind within `TRACK_SLACK` (85) across and `SAME_DY` (40) up or down. `seen_again` prefers the feed's track id when there is one. `dead_one` names which of her targets her EXP gain was: the first of that kind in the path of the throw keyed `GAIN_AFTER_KEY` (0.1-0.6 s) before the gain, seen or not; else one no longer seen nearest her; else the nearest.",
+   "lines": 420,
+   "key_items": [
+    {
+     "name": "Monster",
+     "kind": "dataclass",
+     "line": 100,
+     "signature": "@dataclass(frozen=True) class Monster",
+     "summary": "A monster seen on screen, placed: its Mob, map x/y (feet), platform, HP bar, facing, pose and the feed's track id."
+    },
+    {
+     "name": "MonsterTrack",
+     "kind": "dataclass",
+     "line": 286,
+     "signature": "@dataclass(frozen=True) class MonsterTrack",
+     "summary": "A monster as the move planner sees it: platform, x at plan time seen_at, speed, heading, body, velocity, kind, touch box, trust and unsure windows, track id."
+    },
+    {
+     "name": "MonsterTrack.at",
+     "kind": "method",
+     "line": 318,
+     "signature": "def at(self, t: float, p: Platform) -> float",
+     "summary": "Where its centre most likely is at plan time t: walking on, turning back at its platform's walk edges."
+    },
+    {
+     "name": "MonsterTrack.reach",
+     "kind": "method",
+     "line": 331,
+     "signature": "def reach(self, t: float, p: Platform) -> tuple[float, float]",
+     "summary": "Where its centre can be at plan time t (never off its platform)."
+    },
+    {
+     "name": "MonsterTrack.reach_over",
+     "kind": "method",
+     "line": 348,
+     "signature": "def reach_over(self, t0: float, t1: float, p: Platform) -> tuple[float, float]",
+     "summary": "Where it can be at any time from t0 to t1, including an end it turns back at in between."
+    },
+    {
+     "name": "Tracker",
+     "kind": "class",
+     "line": 370,
+     "signature": "class Tracker",
+     "summary": "Which way monsters walk and how fast, matching each look's monsters to the last look's."
+    },
+    {
+     "name": "Tracker.update",
+     "kind": "method",
+     "line": 383,
+     "signature": "def update(self, t: float, monsters: list[Monster], seen_at: float = 0.0) -> list[MonsterTrack]",
+     "summary": "MonsterTracks for a look's monsters, with heading and measured speed where the last look matches."
+    },
+    {
+     "name": "monster_platform",
+     "kind": "function",
+     "line": 199,
+     "signature": "def monster_platform(model: MapModel, kind: str, x: float, y: float, reach: float = 50, exact: bool = False) -> Platform | None",
+     "summary": "The platform a monster seen at (x, y) walks on: any surface within FEET_SNAP with exact feet, else its kind's spawn platforms."
+    },
+    {
+     "name": "walk_edges",
+     "kind": "function",
+     "line": 135,
+     "signature": "def walk_edges(p: Platform, jumps: bool = False) -> tuple[float, float]",
+     "summary": "Where a monster's middle turns on a platform: WALK_EDGE along its end footholds (the ends for one that jumps)."
+    },
+    {
+     "name": "walk_vx",
+     "kind": "function",
+     "line": 179,
+     "signature": "def walk_vx(kind: str, facing: int, pose: str, walking: dict[str, float] | None = None) -> float | None",
+     "summary": "A monster's velocity from one detection: its kind's speed the way it faces in a move frame, 0 standing or flinching."
+    },
+    {
+     "name": "seen_again",
+     "kind": "function",
+     "line": 241,
+     "signature": "def seen_again(m: Monster, now: list[Monster]) -> Monster | None",
+     "summary": "The monster in `now` that is `m` seen again: its own track where the feed says, else the nearest `same`."
+    },
+    {
+     "name": "dead_one",
+     "kind": "function",
+     "line": 263,
+     "signature": "def dead_one(aimed, now, her_x, kind=None, keyed=(), gained=None, gain_after_key=GAIN_AFTER_KEY) -> Monster | None",
+     "summary": "Which of the monsters she was throwing at died, by her throws' paths and the gain's time."
+    },
+    {
+     "name": "touch_box",
+     "kind": "function",
+     "line": 158,
+     "signature": "def touch_box(kind: str, body: MobBody | None = None) -> tuple[float, float]",
+     "summary": "Half its width and its tallest height walking or flinching: its box for touches."
+    },
+    {
+     "name": "speeds",
+     "kind": "function",
+     "line": 170,
+     "signature": "def speeds(model: MapModel | None = None) -> dict[str, float]",
+     "summary": "Walking speed per kind: the table, overridden by the map's game data."
+    },
+    {
+     "name": "bodies",
+     "kind": "function",
+     "line": 123,
+     "signature": "def bodies(model: MapModel | None = None) -> dict[str, MobBody]",
+     "summary": "Body per kind: the tables, overridden by the map's game data."
+    }
+   ],
+   "inputs": [
+    "Mob detections (perception.mobs.Mob) via Scene.place",
+    "The MapModel's platforms, spawns and monster tables",
+    "Her throws (keys, paths) and EXP gains, for dead_one"
+   ],
+   "outputs": [
+    "Monster on every Scene",
+    "MonsterTracks for motion.flow, motion.bodies, attack.stance, behavior.fight and control.navigator",
+    "The 'monsters' telemetry record (tracks_record)",
+    "Shared rules (walk_edges, walk_vx) for attack.danger, motion.flow, localization.tracking, behavior.fight, behavior.probe and the simulator"
+   ],
+   "uses": [
+    "gamelab/perception/mobs.py",
+    "gamelab/perception/kinds.py",
+    "gamelab/localization/mapdata.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "TRACK_SLACK, SEARCH_SLACK, SAME_DY",
+     "value": "85, 150, 40",
+     "meaning": "how far a monster may move between looks and be the same; looked for once vanished; up or down"
+    },
+    {
+     "name": "MONSTER_SPEED",
+     "value": "pig 125, orange-mushroom 125, slime 100, snail 43.75",
+     "meaning": "walk speeds (units/s) where the map's data doesn't say"
+    },
+    {
+     "name": "DEFAULT_SPEED",
+     "value": "125.0",
+     "meaning": "a kind neither the table nor the map knows"
+    },
+    {
+     "name": "WALK_EDGE",
+     "value": "20.0",
+     "meaning": "where a walking monster turns, from its platform's ends"
+    },
+    {
+     "name": "TURN_SLACK",
+     "value": "25",
+     "meaning": "units a monster seen walking one way may still come back"
+    },
+    {
+     "name": "GAIN_AFTER_KEY",
+     "value": "(0.1, 0.6)",
+     "meaning": "s after a throw's key that a kill's EXP gain shows"
+    },
+    {
+     "name": "PLATFORM_SLACK",
+     "value": "25",
+     "meaning": "units past a platform's ends a monster may still be on it"
+    },
+    {
+     "name": "FEET_SNAP",
+     "value": "12",
+     "meaning": "units from a surface a monster's exact feet snap to it"
+    },
+    {
+     "name": "MATCH_WITHIN, MATCH_DX, STILL_DX, MIN_SPEED_DT",
+     "value": "2.0, 90, 6, 0.2",
+     "meaning": "the Tracker's matching window and thresholds"
+    },
+    {
+     "name": "WALK_MATCH, FACING_HEADING",
+     "value": "False, False",
+     "meaning": "match by where it walked; heading from its facing (both off)"
+    },
+    {
+     "name": "FLINCH_S",
+     "value": "0.6",
+     "meaning": "s a monster flinches after a hit"
+    },
+    {
+     "name": "SPEED_SAMPLES",
+     "value": "400",
+     "meaning": "measured speeds kept per kind for the summary"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-31",
+     "what": "Monsters turn at the game's 20-unit walk edge, one function for the stack and the simulator (the user: \"align the stack's monster turn point (danger, flow, tracking, probe) with the game's 20-unit walk edge, sharing one function with the simulator\")",
+     "why": "the stack had its body's half width inside each end (28 on Tree Dungeon), 8 short of the game"
+    },
+    {
+     "date": "2026-10-30",
+     "what": "Perception gives a monster's heading only; its speed comes from the game data (the user: \"Perception should only give mob heading, speed should come from data-mined game files\")",
+     "why": "on the user's own play at 15 a second the walking median was 100.0 units/s for Tree Dungeon's kinds, as the data says; facing matched the walk 99.2% of the time"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "A kill is placed on the first monster in the path of the throw keyed 0.1-0.6 s before the gain (dead_one)",
+     "why": "until then one gone from view came first: of 72 kills 15 were placed more than 60 units from where the victim died, 10 piles on the wrong monster"
+    },
+    {
+     "date": "2026-10-24",
+     "what": "MonsterTrack.at turns back at its platform's ends instead of stopping there",
+     "why": "a Horny Mushroom planned to stay at 31's left end touched her 137 units to the right 1.3 s later (simulator)"
+    },
+    {
+     "date": "",
+     "what": "Walk speeds from the game data, not a guessed base of 70",
+     "why": "70 was 1.79 times too slow: 43% of the speeds the tracker measured live sat at its clamp"
+    },
+    {
+     "date": "",
+     "what": "WALK_MATCH and FACING_HEADING off",
+     "why": "the matched template's pose was wrong for 18% of walking and 22% of standing sightings live; facing as heading made keeping clear worse in the simulator (11 of 16 arrived against 13, 28.5 touches against 19.8)"
+    }
+   ],
+   "gotchas": [
+    "Two trackers exist: this Tracker (look to look, for the navigator and the hunt loop) and the perception service's localization.tracking (frame by frame, with ids carried on Monster.track).",
+    "The MONSTER_* tables cover the first map's kinds; the map's game data overrides them (tests/test_attack.py checks the tables against it).",
+    "Predictions never leave the platform, even for kinds that hop; the navigator says so of a map where a threatening one does.",
+    "walk_edges caches per platform object (`_EDGES` by id(p)), checking the object is the same."
+   ],
+   "tests": [
+    "tests/test_tracking.py",
+    "tests/test_attack.py",
+    "tests/test_danger.py",
+    "tests/test_flow.py",
+    "tests/test_fight.py",
+    "tests/test_ledger.py",
+    "tests/test_kill_credit.py",
+    "tests/test_navigation.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/unseen.py",
+   "title": "Unseen monsters (unseen)",
+   "tagline": "Monsters known to be about that this look didn't find, placed where they likely are",
+   "summary": "`unseen(scene, memory, model)` returns the monsters she knows are about but the look missed: the perception service's tracks out of sight on screen (hidden, or live but missed in this frame) and her memory's monsters seen in the last 2 s, each placed where it likely is at the look's time. Her fights, her landings for a pile and her trips treat them as part of the look.",
+   "details_md": "**Why.** The monster detector is nearly blind near her. Live on 2026-10-25 on Tree Dungeon, of the frames in which the service followed a monster on her platform, 7-12% found it within 50 units of her, 20-34% at 50-100, 44-55% beyond; none of 1,317 searched looks had one within 25 units. 22 of her 34 touches came from a monster no look had in the 0.6 s before, and one Horny Mushroom caused 6 of them and a fall.\n\n**Which tracks count** (`hidden`): a track on a platform that is HIDDEN, or (`UNSEEN_LIVE`, since 2026-11-03) LIVE but last seen before this frame, last seen within `TRACK_S` (1.5 s), not `owed` (the likely target of an EXP gain still waiting), and not one a kill of hers is on (`_hers`). Not every hidden track is a monster: the feed keeps one hidden 1.8 s while it waits to put her EXP gain on it, and up to 3.5 s for one killed by others or lost. 1.5 s is where one was still about as likely there as not (79% seen again at 0.5-1.0 s, 38% at 2.0-2.5).\n\n**Her kills** (`_hers`): for each kill recent enough, its own track (the ledger's), else the track of its kind on its platform nearest where it was placed, within `KILL_NEAR` (80 units), seen about when it was killed. One kill, one track.\n\n**Where each is.** A track walks on at its followed velocity (clamped to its kind's speed; under `STILL_VX` 15 units/s it stands), turning back at its platform's ends (`MonsterTrack.at`). A memory entry (at least `memory.SURE` likely, seen within `UNSEEN_S` 2 s) stays where it was seen.\n\n**Not twice** (`_is_one`). A track or memory entry is dropped if a monster the look found (of its kind, on its platform) is within `MATCH_SLACK` (40) + `MATCH_SPEED` (1.3) x its speed x its age (age capped at `MATCH_WALK_S`, 30 s; all three are `memory`'s): it's that one. A memory entry is also checked against the tracks already added. A LIVE track is compared only with found monsters that have no track of their own, since the tracker already matched the frame's sightings within its gate.\n\nFrom 2026-11-04 what she shoots goes by `behavior.presence`: these say what's about, not what's worth a throw.",
+   "lines": 144,
+   "key_items": [
+    {
+     "name": "unseen",
+     "kind": "function",
+     "line": 67,
+     "signature": "def unseen(s: Scene, memory, model: MapModel, within: float = UNSEEN_S, platforms=None, kills=()) -> list[Monster]",
+     "summary": "The monsters about that look s didn't find: the feed's hidden tracks walked on, then her memory's recent ones."
+    },
+    {
+     "name": "hidden",
+     "kind": "function",
+     "line": 101,
+     "signature": "def hidden(s: Scene, kills=(), platforms=None) -> list",
+     "summary": "The feed's tracks out of sight that count as a monster about."
+    },
+    {
+     "name": "_hers",
+     "kind": "function",
+     "line": 116,
+     "signature": "def _hers(tracks, kills, t: float) -> set[int]",
+     "summary": "The ids of tracks her recent kills are on: their own, else the nearest of its kind within KILL_NEAR."
+    },
+    {
+     "name": "_is_one",
+     "kind": "function",
+     "line": 140,
+     "signature": "def _is_one(kind: str, platform: int, x: float, age: float, speed: float, found: list[Monster]) -> bool",
+     "summary": "Whether a monster last at x `age` s ago is one of the found ones, as memory matches a sighting."
+    },
+    {
+     "name": "UNSEEN_S",
+     "kind": "constant",
+     "line": 43,
+     "signature": "UNSEEN_S = 2.0",
+     "summary": "Her memory's monsters seen this long ago at most count as about."
+    },
+    {
+     "name": "TRACK_S",
+     "kind": "constant",
+     "line": 51,
+     "signature": "TRACK_S = 1.5",
+     "summary": "A track out of sight this long at most counts as about."
+    },
+    {
+     "name": "KILL_NEAR",
+     "kind": "constant",
+     "line": 55,
+     "signature": "KILL_NEAR = 80.0",
+     "summary": "Units from where the ledger placed a kill its track may be."
+    },
+    {
+     "name": "UNSEEN_LIVE",
+     "kind": "constant",
+     "line": 64,
+     "signature": "UNSEEN_LIVE = True",
+     "summary": "LIVE tracks the look's frame missed count too."
+    },
+    {
+     "name": "STILL_VX",
+     "kind": "constant",
+     "line": 44,
+     "signature": "STILL_VX = 15.0",
+     "summary": "A track slower than this (units/s) stands where it was last seen."
+    }
+   ],
+   "inputs": [
+    "A Scene with the feed's tracks (Scene.tracks) and the monsters it found (monsters, swept)",
+    "Her memory of the monsters (localization.memory.Memory)",
+    "Her kills from behavior.ledger"
+   ],
+   "outputs": [
+    "Monsters about but unseen for behavior.hunt, behavior.grind, behavior.attacks, behavior.looting; `hidden` for control.navigator; STILL_VX for behavior.fight"
+   ],
+   "uses": [
+    "gamelab/localization/mapdata.py",
+    "gamelab/localization/memory.py",
+    "gamelab/localization/monsters.py",
+    "gamelab/localization/scene.py",
+    "gamelab/localization/tracking.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "UNSEEN_S",
+     "value": "2.0",
+     "meaning": "s her memory's monsters count as about (a guess, as navigator.TRIP_MEMORY_S)"
+    },
+    {
+     "name": "STILL_VX",
+     "value": "15.0",
+     "meaning": "units/s under which a track stands still"
+    },
+    {
+     "name": "TRACK_S",
+     "value": "1.5",
+     "meaning": "s a track out of sight counts as about"
+    },
+    {
+     "name": "KILL_NEAR",
+     "value": "80.0",
+     "meaning": "units a kill's track may be from where the ledger placed it"
+    },
+    {
+     "name": "UNSEEN_LIVE",
+     "value": "True",
+     "meaning": "LIVE tracks missed in the look's frame count (False: HIDDEN ones alone)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-25",
+     "what": "Monsters out of sight count as part of the look",
+     "why": "live, 22 of her 34 touches came from a monster no look had in the 0.6 s before; 26 of 34 had one of its kind seen within 150 units in the 3 s before"
+    },
+    {
+     "date": "2026-10-26",
+     "what": "Only hidden tracks seen within TRACK_S and not her kill's count",
+     "why": "of the live hidden track records 45% ended with the monster seen again, 12% dead by her, 13% dead by others, 26% dropped; in the simulator three quarters of the hidden tracks taken had no monster there"
+    },
+    {
+     "date": "2026-11-03",
+     "what": "LIVE tracks the look's frame missed count too (UNSEEN_LIVE; the cornered study's R1)",
+     "why": "live, 269 of BugBaby's 455 touches came with no monster found within 75 of her in the scene before, and in 135 of those a LIVE track within 75 had been missed in that frame"
+    },
+    {
+     "date": "2026-11-04",
+     "what": "What she shoots goes by behavior.presence, not these lists",
+     "why": "these windows say what's about, not what's worth a throw"
+    }
+   ],
+   "gotchas": [
+    "Returns [] if the look didn't place her.",
+    "A memory entry is placed where it was seen, not walked on: its walking isn't known (a trip's chains allow for it).",
+    "Tracks still `owed` (the likely victim of an EXP gain waiting) are left out."
+   ],
+   "tests": [
+    "tests/test_unseen.py",
+    "tests/test_tracking.py",
+    "tests/test_choice.py",
+    "tests/test_clawed.py"
+   ]
+  },
+  {
+   "path": "gamelab/localization/players.py",
+   "title": "Other players (players)",
+   "tagline": "Other players' minimap dots, placed on the map and followed from look to look",
+   "summary": "The minimap shows every player on the map, so every look sees them all. `Players.update` places each other player's dot as hers is placed (`pose.Localizer`, snapped to the platform under it), matches dots to the players of the look before, and confirms or drops them over a few looks. `near_rival` finds a rival (anyone not in her party) close enough to have killed a monster: kill attribution and pile decisions go by it.",
+   "details_md": "**Placing.** Each marker (`perception.minimap.Marker`: kind and core position, full-size px) is shifted by `other_shift` (their cores are drawn half a game px right of and below hers) and placed with `Localizer.where_dot`, so it lands on a platform the same way hers does.\n\n**Matching** (`update`). Dots are paired with the existing players nearest first, same kind only, within `MATCH_PX` (4 full-size px) plus `MATCH_PX_S` (15 px a second) of time since the last look, capped at `MATCH_MAX_PX` (40; farther it's a new dot: a portal or teleport). A dot is a player once seen in `CONFIRM` (2) looks in a row; a player is dropped once missed in `MISSES` (2) looks in a row **and** for `MISS_S` (1 s), because her marker drawn over theirs as she walks past hides it for about half a second; a dot seen once and missed is dropped at once. `current` returns copies of the confirmed players.\n\n**The feed.** A look from the feed brings the players its own frames followed; `adopt` takes them as they are (ids and all), so a look placed here after it goes on from them. Senses gives its own `Players` ids from `LOCAL_IDS` when a feed is in use, to keep them apart.\n\n**Rivals.** `RIVALS` = stranger, guild, buddy: anyone not in her party (her party's kills near her share their EXP with her). `near_rival(players, x, y)` returns the nearest rival within `REACH_X` (400) across and `REACH_DY` (100) up or down: about a star's reach (434) and a step, a guess since other classes' reach isn't known. `localization.tracking` and `behavior.ledger` use it to tell whose kill a death was; `behavior.hunt` has optional uses (leaving their piles, discounting their ground), both off by the harness's numbers.",
+   "lines": 145,
+   "key_items": [
+    {
+     "name": "Players",
+     "kind": "class",
+     "line": 74,
+     "signature": "class Players",
+     "summary": "The other players on the map, kept up from every look's minimap."
+    },
+    {
+     "name": "Players.update",
+     "kind": "method",
+     "line": 89,
+     "signature": "def update(self, t: float, markers: list[Marker]) -> list[Player]",
+     "summary": "Matches a look's dots to the tracks, confirms new ones, drops ones missed long enough; returns `current`."
+    },
+    {
+     "name": "Players.adopt",
+     "kind": "method",
+     "line": 120,
+     "signature": "def adopt(self, t: float, players: list[\"Player\"]) -> None",
+     "summary": "Takes the players a feed's look brought, so looks placed here go on from them."
+    },
+    {
+     "name": "Players._place",
+     "kind": "method",
+     "line": 126,
+     "signature": "def _place(self, p: Player, m: Marker) -> Player",
+     "summary": "A player where their marker puts them: shifted to where her dot would be, placed and snapped as hers."
+    },
+    {
+     "name": "Player",
+     "kind": "dataclass",
+     "line": 46,
+     "signature": "@dataclass class Player",
+     "summary": "Another player: id, kind, map x/y, platform, dot, first and last seen, looks seen and missed in a row."
+    },
+    {
+     "name": "Player.rival",
+     "kind": "method",
+     "line": 60,
+     "signature": "@property def rival(self) -> bool",
+     "summary": "Whether they hunt against her (not her party)."
+    },
+    {
+     "name": "near_rival",
+     "kind": "function",
+     "line": 141,
+     "signature": "def near_rival(players: list[Player], x: float, y: float, dx: float = REACH_X, dy: float = REACH_DY) -> Player | None",
+     "summary": "The nearest rival close enough to have killed a monster at (x, y), or None."
+    },
+    {
+     "name": "rivals",
+     "kind": "function",
+     "line": 136,
+     "signature": "def rivals(players: list[Player]) -> list[Player]",
+     "summary": "The rivals among players."
+    },
+    {
+     "name": "CONFIRM",
+     "kind": "constant",
+     "line": 21,
+     "signature": "CONFIRM = 2",
+     "summary": "Looks in a row a new dot must be seen in to be a player."
+    },
+    {
+     "name": "MISS_S",
+     "kind": "constant",
+     "line": 26,
+     "signature": "MISS_S = 1.0",
+     "summary": "Seconds a player's dot must also be missing for them to be gone."
+    },
+    {
+     "name": "RIVALS",
+     "kind": "constant",
+     "line": 37,
+     "signature": "RIVALS = (\"stranger\", \"guild\", \"buddy\")",
+     "summary": "The kinds of player who hunt against her."
+    }
+   ],
+   "inputs": [
+    "Other players' minimap markers (perception.minimap.other_dots) on each Observation",
+    "The players a feed's state followed (WorldState.players), via Senses"
+   ],
+   "outputs": [
+    "Scene.players for every look",
+    "near_rival for localization.tracking, localization.memory, behavior.ledger, behavior.hunt, behavior.looting, behavior.patrol",
+    "Player.record for the 'scene' telemetry"
+   ],
+   "uses": [
+    "gamelab/perception/minimap.py",
+    "gamelab/localization/pose.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "CONFIRM",
+     "value": "2",
+     "meaning": "looks in a row a new dot must be seen"
+    },
+    {
+     "name": "MISSES, MISS_S",
+     "value": "2, 1.0",
+     "meaning": "looks in a row and seconds a dot must be missing for the player to go"
+    },
+    {
+     "name": "LOCAL_IDS",
+     "value": "1000001",
+     "meaning": "first id for players found by looks placed here when a feed brings its own"
+    },
+    {
+     "name": "MATCH_PX, MATCH_PX_S, MATCH_MAX_PX",
+     "value": "4.0, 15.0, 40.0",
+     "meaning": "full-size px a dot may move between looks (+ per second, capped)"
+    },
+    {
+     "name": "RIVALS",
+     "value": "stranger, guild, buddy",
+     "meaning": "kinds that hunt against her"
+    },
+    {
+     "name": "REACH_X, REACH_DY",
+     "value": "400.0, 100.0",
+     "meaning": "how far from a rival a monster they killed can be"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "A player stays until missed for 2 looks and 1 s (MISS_S)",
+     "why": "her marker drawn over theirs as she walks past hides it for about half a second; by looks alone they'd go and come back under a new id, and a death by them in between would be nobody's"
+    },
+    {
+     "date": "",
+     "what": "Her party isn't a rival (RIVALS)",
+     "why": "her party's kills near her give her a share of their EXP; in the saved frames of 2026-10-21 a leader of her party stood on the safe platform 32 for five minutes"
+    },
+    {
+     "date": "",
+     "what": "REACH_X 400, REACH_DY 100 for kill attribution",
+     "why": "about a star's reach (434) and a step; a guess, as other players' classes' reach isn't known"
+    }
+   ],
+   "gotchas": [
+    "A look that didn't see her own dot (something over the minimap) keeps the players as they were (Senses.place).",
+    "Matching is greedy, nearest first, same kind only.",
+    "`current` returns copies: later looks don't change a scene's players.",
+    "Whose marker the game draws on top, hers or theirs, isn't known; within 4 game px theirs can hide hers.",
+    "MISS_S's comment (\"with the feed 2 looks are 67 ms\") and the docstring (\"the continuous feed looks 30 times a second\") date from the 30-a-second feed; at 15 a second two looks are about 133 ms, still well under MISS_S."
+   ],
+   "tests": [
+    "tests/test_minimap.py",
+    "tests/test_tracking.py",
+    "tests/test_census.py",
+    "tests/test_stranger_take.py",
+    "tests/test_ledger.py",
+    "tests/test_geometry.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "MapModel",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 253,
+   "summary": "One map from the game data. Built by mapdata.load; read by nearly every module above localization.",
+   "fields": [
+    {
+     "name": "id, name",
+     "type": "int, str",
+     "meaning": "map id and \"street: map\" name"
+    },
+    {
+     "name": "bounds",
+     "type": "tuple[float, float, float, float]",
+     "meaning": "the VR box: left, top, right, bottom (where the camera stops)"
+    },
+    {
+     "name": "minimap",
+     "type": "dict",
+     "meaning": "width, height, centerX, centerY, mag of the minimap"
+    },
+    {
+     "name": "platforms",
+     "type": "list[Platform]",
+     "meaning": "walkable platforms; a platform's id is its index"
+    },
+    {
+     "name": "walls, ropes, portals, spawns",
+     "type": "lists",
+     "meaning": "vertical footholds, ropes and ladders, portals, monster spawn points"
+    },
+    {
+     "name": "physics",
+     "type": "dict",
+     "meaning": "the game's Physics.img"
+    },
+    {
+     "name": "mob_exp, mob_bodies, mob_speeds, mob_damage, mob_hops, mob_flies, mob_tall",
+     "type": "dict[str, ...]",
+     "meaning": "per monster name: EXP, MobBody, walk speed, touch damage, hops, flies, tallest reach"
+    },
+    {
+     "name": "mob_hp, mob_pdd, mob_mdd, mob_eva, mob_level",
+     "type": "dict[str, float]",
+     "meaning": "per monster name: HP, defences, avoid, level"
+    },
+    {
+     "name": "mob_rate, vr_limit",
+     "type": "float, bool",
+     "meaning": "info's mobRate and VRLimit, for mob_cap"
+    }
+   ]
+  },
+  {
+   "name": "Platform",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 90,
+   "summary": "A walkable stretch of footholds joined end to end; its id is its index in MapModel.platforms.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "int",
+     "meaning": "its index"
+    },
+    {
+     "name": "segments",
+     "type": "list[Segment]",
+     "meaning": "its footholds, left to right"
+    },
+    {
+     "name": "walls",
+     "type": "tuple[Segment, ...]",
+     "meaning": "the walls of its foothold group (what stops a star thrown from it)"
+    },
+    {
+     "name": "floors",
+     "type": "tuple[Segment, ...]",
+     "meaning": "every floor of the map"
+    },
+    {
+     "name": "peers",
+     "type": "tuple[Platform, ...]",
+     "meaning": "every platform of the map, by id"
+    }
+   ]
+  },
+  {
+   "name": "Segment",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 63,
+   "summary": "A straight foothold or wall.",
+   "fields": [
+    {
+     "name": "x1, y1, x2, y2",
+     "type": "float",
+     "meaning": "its ends, map units"
+    },
+    {
+     "name": "group",
+     "type": "tuple[int, int] | None",
+     "meaning": "its foothold (layer, group)"
+    },
+    {
+     "name": "no_drop",
+     "type": "bool",
+     "meaning": "the game won't drop her through it (forbidFallDown)"
+    },
+    {
+     "name": "prev, next",
+     "type": "tuple | None",
+     "meaning": "the footholds joined to its start and end"
+    }
+   ]
+  },
+  {
+   "name": "Rope",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 177,
+   "summary": "A rope or ladder.",
+   "fields": [
+    {
+     "name": "x",
+     "type": "float",
+     "meaning": "map x"
+    },
+    {
+     "name": "top, bottom",
+     "type": "float",
+     "meaning": "its upper and lower ends (y)"
+    },
+    {
+     "name": "ladder",
+     "type": "bool",
+     "meaning": "a ladder, not a rope"
+    },
+    {
+     "name": "from_platform",
+     "type": "bool",
+     "meaning": "she can climb onto the platform at its top"
+    }
+   ]
+  },
+  {
+   "name": "Portal",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 187,
+   "summary": "A portal from the map image: what holding up near it does (PORTAL_BOX), where it leads, and which picture its light is drawn with (portal_light). Read through MapModel.portal_near (motion.flow, control.mover: whether holding up could take one), portal_lights (locate.cover), the simulator and the UI's map drawing.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str",
+     "meaning": "its name in the map data (pn), e.g. out00"
+    },
+    {
+     "name": "kind",
+     "type": "int",
+     "meaning": "its type (pt): 2 an exit (PORTAL_EXIT), 0 a spawn point; 2, 4, 7 drawn with a light, 10, 11 hidden"
+    },
+    {
+     "name": "x, y",
+     "type": "float",
+     "meaning": "its point, map units"
+    },
+    {
+     "name": "to_map",
+     "type": "int | None",
+     "meaning": "the map it leads to (None: nowhere, 999999999 in the data)"
+    },
+    {
+     "name": "image",
+     "type": "str",
+     "meaning": "which MapHelper.img picture draws it (\"\": the default)"
+    }
+   ]
+  },
+  {
+   "name": "Spawn",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 243,
+   "summary": "A monster spawn point from the map image's life entries; MapModel.spawn_points puts each on its platform. Read through spawn_points / spawn_platforms / monsters_by_platform by safe(), monster_platform, the spawn clock, targeting and the simulator.",
+   "fields": [
+    {
+     "name": "mob_id",
+     "type": "int",
+     "meaning": "the monster's id"
+    },
+    {
+     "name": "x, y",
+     "type": "float",
+     "meaning": "where it spawns (y is the data's cy where given)"
+    },
+    {
+     "name": "left, right",
+     "type": "float",
+     "meaning": "the data's rx0..rx1 range (monsters reappear at x, not anywhere in it)"
+    },
+    {
+     "name": "name",
+     "type": "str",
+     "meaning": "the monster's name from the game's strings"
+    }
+   ]
+  },
+  {
+   "name": "MobBody",
+   "module": "gamelab/localization/mapdata.py",
+   "line": 230,
+   "summary": "A monster's body from its frames' boxes in the game data; used for touches, reach and death timing.",
+   "fields": [
+    {
+     "name": "top",
+     "type": "float",
+     "meaning": "how tall it is at least while it stands or walks"
+    },
+    {
+     "name": "flinch_top",
+     "type": "float",
+     "meaning": "how tall while it flinches after a hit"
+    },
+    {
+     "name": "half",
+     "type": "float",
+     "meaning": "half its widest stand or move frame"
+    },
+    {
+     "name": "die_s",
+     "type": "float",
+     "meaning": "how long its death animation shows, s"
+    }
+   ]
+  },
+  {
+   "name": "MapArt",
+   "module": "gamelab/localization/mapart.py",
+   "line": 72,
+   "summary": "The map's art in map units and its static mask; made by mapart.load, read by camreg.Registration and the body cue's background.",
+   "fields": [
+    {
+     "name": "map_id, x0, y0",
+     "type": "int",
+     "meaning": "the map and the picture's top-left in map units"
+    },
+    {
+     "name": "rgb",
+     "type": "ndarray H x W x 3",
+     "meaning": "the art, RGB"
+    },
+    {
+     "name": "static",
+     "type": "ndarray H x W bool",
+     "meaning": "where it is the map's fixed art alone"
+    },
+    {
+     "name": "fixed",
+     "type": "tuple[int | None, int | None]",
+     "meaning": "the camera's corner on axes it can't move along"
+    },
+    {
+     "name": "views",
+     "type": "tuple[int, int, int, int]",
+     "meaning": "the views' top-left range: x from..to, y from..to"
+    },
+    {
+     "name": "left_out",
+     "type": "dict",
+     "meaning": "pieces not static, counted by why"
+    }
+   ]
+  },
+  {
+   "name": "View",
+   "module": "gamelab/localization/camreg.py",
+   "line": 113,
+   "summary": "A frame's camera view from Registration.see, consumed by locate.",
+   "fields": [
+    {
+     "name": "x, y",
+     "type": "int",
+     "meaning": "the map point at the frame's top-left"
+    },
+    {
+     "name": "sure",
+     "type": "bool",
+     "meaning": "registered on this frame"
+    },
+    {
+     "name": "how",
+     "type": "str",
+     "meaning": "near, wide, cold, carried or none"
+    },
+    {
+     "name": "cost, margin",
+     "type": "float | None",
+     "meaning": "the best view's cost and its margin over views 2+ px away"
+    },
+    {
+     "name": "share",
+     "type": "float",
+     "meaning": "share of the sampled pixels compared"
+    },
+    {
+     "name": "ms",
+     "type": "float",
+     "meaning": "time taken"
+    }
+   ]
+  },
+  {
+   "name": "Located",
+   "module": "gamelab/localization/locate.py",
+   "line": 210,
+   "summary": "Her place in one frame by the scene. Made by Locator.see inside Eyes.look_at; carried on the Observation and turned into her Where by Senses._by_scene.",
+   "fields": [
+    {
+     "name": "view, view_sure",
+     "type": "tuple[int, int], bool",
+     "meaning": "the frame's view and whether it was registered on this frame"
+    },
+    {
+     "name": "feet",
+     "type": "tuple[float, float] | None",
+     "meaning": "her feet on screen (None: not found yet)"
+    },
+    {
+     "name": "tag",
+     "type": "tuple[int, int] | None",
+     "meaning": "her tag's centre on screen, as matched or where her feet put it"
+    },
+    {
+     "name": "x, y",
+     "type": "float | None",
+     "meaning": "her feet on the map"
+    },
+    {
+     "name": "platform",
+     "type": "Platform | None",
+     "meaning": "the platform she stands on"
+    },
+    {
+     "name": "mode",
+     "type": "str | None",
+     "meaning": "ground, air or rope"
+    },
+    {
+     "name": "how",
+     "type": "str | None",
+     "meaning": "tag, plate, body; None: carried"
+    },
+    {
+     "name": "confidence",
+     "type": "float",
+     "meaning": "the cue's score; carried, 0.5 x 0.8 per prototype frame unseen"
+    },
+    {
+     "name": "unseen",
+     "type": "int",
+     "meaning": "frames in a row nothing placed her"
+    },
+    {
+     "name": "covered",
+     "type": "str | None",
+     "meaning": "the Lie Detector, her stat window or a portal, when carried under it"
+    }
+   ]
+  },
+  {
+   "name": "Where",
+   "module": "gamelab/localization/pose.py",
+   "line": 70,
+   "summary": "Her (or another player's) position on the map; made by Localizer.where_dot, refine or Senses._by_scene.",
+   "fields": [
+    {
+     "name": "x, y",
+     "type": "float",
+     "meaning": "map units, her feet"
+    },
+    {
+     "name": "platform",
+     "type": "Platform | None",
+     "meaning": "the platform she stands on (None: air, rope, unsure)"
+    },
+    {
+     "name": "dot",
+     "type": "tuple[float, float]",
+     "meaning": "the minimap dot it came from, full-size px"
+    }
+   ]
+  },
+  {
+   "name": "Scene",
+   "module": "gamelab/localization/scene.py",
+   "line": 41,
+   "summary": "A look (perception's Observation) placed on the map: what Senses.look returns to every decision-maker.",
+   "fields": [
+    {
+     "name": "where",
+     "type": "Where | None",
+     "meaning": "her map position"
+    },
+    {
+     "name": "how",
+     "type": "str",
+     "meaning": "dot, camera, rope, edge; by the scene tag, plate, body, carried, covered"
+    },
+    {
+     "name": "mode, confidence",
+     "type": "str | None, float | None",
+     "meaning": "by the scene: ground/air/rope and how sure"
+    },
+    {
+     "name": "tag_seen",
+     "type": "bool",
+     "meaning": "her tag as seen (False: placed by the camera)"
+    },
+    {
+     "name": "monsters",
+     "type": "list[Monster]",
+     "meaning": "monsters seen in her band (or the whole screen), placed"
+    },
+    {
+     "name": "searched, wide, rows",
+     "type": "bool, bool, list",
+     "meaning": "whether, how widely and at what map levels monsters were looked for"
+    },
+    {
+     "name": "swept",
+     "type": "list[Monster]",
+     "meaning": "monsters the feed follows off her band, re-found in this frame"
+    },
+    {
+     "name": "loot, looked",
+     "type": "list[Loot], list",
+     "meaning": "drops on the ground and where they were looked for"
+    },
+    {
+     "name": "players",
+     "type": "list[Player]",
+     "meaning": "other players on the map"
+    },
+    {
+     "name": "events, touch, tracks, strips, seq",
+     "type": "feed data",
+     "meaning": "what the feed saw since the last look, her newest touch, its monster tracks, drop strips, frame number"
+    },
+    {
+     "name": "view (inherited)",
+     "type": "tuple[int, int] | None",
+     "meaning": "the registered view: map point at the frame's top-left"
+    }
+   ]
+  },
+  {
+   "name": "Loot",
+   "module": "gamelab/localization/scene.py",
+   "line": 28,
+   "summary": "A drop seen on the ground, placed on the map (find_loot).",
+   "fields": [
+    {
+     "name": "item",
+     "type": "perception.loot.Item",
+     "meaning": "what perception found"
+    },
+    {
+     "name": "x, y",
+     "type": "float",
+     "meaning": "map units"
+    },
+    {
+     "name": "platform",
+     "type": "int",
+     "meaning": "the platform it lies on"
+    }
+   ]
+  },
+  {
+   "name": "Monster",
+   "module": "gamelab/localization/monsters.py",
+   "line": 100,
+   "summary": "A monster seen on screen, placed on the map (Scene.place); on every Scene and in her memory.",
+   "fields": [
+    {
+     "name": "mob",
+     "type": "perception.mobs.Mob",
+     "meaning": "the detection"
+    },
+    {
+     "name": "x, y",
+     "type": "float",
+     "meaning": "map units, its feet"
+    },
+    {
+     "name": "platform",
+     "type": "int | None",
+     "meaning": "the platform it walks on"
+    },
+    {
+     "name": "bar",
+     "type": "float | None",
+     "meaning": "HP bar left (None: unhurt)"
+    },
+    {
+     "name": "facing",
+     "type": "int",
+     "meaning": "1 right, -1 left, 0 unknown"
+    },
+    {
+     "name": "pose",
+     "type": "str",
+     "meaning": "stand, move, hit1 or unknown"
+    },
+    {
+     "name": "track",
+     "type": "int | None",
+     "meaning": "the perception service's track id, when the feed placed it"
+    }
+   ]
+  },
+  {
+   "name": "MonsterTrack",
+   "module": "gamelab/localization/monsters.py",
+   "line": 286,
+   "summary": "A monster as the move planner sees it (Tracker.update, the navigator, unseen); predicts where it can be.",
+   "fields": [
+    {
+     "name": "platform, x",
+     "type": "int, float",
+     "meaning": "where it was at plan time seen_at"
+    },
+    {
+     "name": "speed, heading, vx",
+     "type": "float, int, float | None",
+     "meaning": "how fast it can walk, which way it was seen walking, measured velocity"
+    },
+    {
+     "name": "half, height, top",
+     "type": "float",
+     "meaning": "its body for touches and hops"
+    },
+    {
+     "name": "trust, unsure",
+     "type": "float | None",
+     "meaning": "how long its seen walk is trusted; how long either-way walking is planned for"
+    },
+    {
+     "name": "counts_from, track",
+     "type": "float, int | None",
+     "meaning": "plan time before which its touch doesn't count; the feed's track id"
+    }
+   ]
+  },
+  {
+   "name": "Player",
+   "module": "gamelab/localization/players.py",
+   "line": 46,
+   "summary": "Another player, as their minimap dot places them (Players.update); on Scene.players.",
+   "fields": [
+    {
+     "name": "id, kind",
+     "type": "int, str",
+     "meaning": "id and Marker kind (stranger, party, guild, buddy)"
+    },
+    {
+     "name": "x, y, platform",
+     "type": "float, float, int | None",
+     "meaning": "map place, snapped as hers"
+    },
+    {
+     "name": "dot",
+     "type": "tuple[float, float]",
+     "meaning": "their dot's core, full-size px"
+    },
+    {
+     "name": "first_seen, last_seen",
+     "type": "float",
+     "meaning": "times"
+    },
+    {
+     "name": "seen, missed",
+     "type": "int",
+     "meaning": "looks in a row seen and missed"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "frame-to-her-place",
+   "title": "How a frame becomes her place (the scene path)",
+   "summary": "At 1366x768 with her plate model and the map's art, every frame of the perception service places her by the registered camera and her on-screen cues.",
+   "trigger": "Each frame of the perception service's world step (15 a second)",
+   "steps": [
+    {
+     "module": "gamelab/perception/eyes.py",
+     "symbol": "Eyes.look_at",
+     "text": "Reads her minimap dot and the other players' dots, then asks the eyes' locator for this frame (`_located` -> `Locator.see`).",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/locate.py",
+     "symbol": "Locator.see",
+     "text": "Starts afresh after a 0.5 s gap, updates the frame-rate factor k, and builds the camera hint from her dot's map place.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/camreg.py",
+     "symbol": "Registration.see",
+     "text": "Finds the view: about the predicted one (3, 12, 48 px), else cold (coarse blocks, then full size); sure or carried.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/locate.py",
+     "symbol": "Locator.measure",
+     "text": "Tries her tag template, then her plate's exact colours, then her body against her pose bank; the first that finds her gives her feet on screen.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/locate.py",
+     "symbol": "Locator.update",
+     "text": "Folds the measurement into the filter (x Kalman, y by mode: ground, air, rope) and checks it against her minimap dot's box and alarm.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/locate.py",
+     "symbol": "Cover.__call__",
+     "text": "If nothing placed her: is she under the Lie Detector, her stat window or a portal's light (covered) or just carried?",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/locate.py",
+     "symbol": "Locator.output",
+     "text": "Returns a Located: view, feet, map x/y, platform, mode, cue and confidence; the eyes put it on the Observation.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses._by_scene",
+     "text": "The world step's Senses.place turns it into her Where, rejecting places off the map (placecheck), and records how and how sure.",
+     "process": "perception service"
+    },
+    {
+     "module": "gamelab/localization/scene.py",
+     "symbol": "Scene.map_x",
+     "text": "Every monster, drop and window in the frame is converted to map units through the registered view.",
+     "process": "perception service"
+    }
+   ]
+  },
+  {
+   "id": "dot-to-her-place",
+   "title": "Her place from her minimap dot (where the locator isn't used)",
+   "summary": "At 1920x1080, in the simulator, on maps without drawable art, or before the camera's first registration, her minimap dot places her, refined by what's on screen.",
+   "trigger": "Senses.place on an Observation without a Located",
+   "steps": [
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses._place_her",
+     "text": "Takes her dot from the Observation and the look's geometry.",
+     "process": "perception service (or the simulator's feed)"
+    },
+    {
+     "module": "gamelab/localization/pose.py",
+     "symbol": "Localizer.where_dot",
+     "text": "Dot to map units (11.4 units a minimap px at 1920x1080), snapped to the platform whose surface is nearest the dot's height.",
+     "process": "perception service (or the simulator's feed)"
+    },
+    {
+     "module": "gamelab/localization/pose.py",
+     "symbol": "Localizer.on_rope_under",
+     "text": "Her dot more than 17 under a platform by a rope hanging from it: she's on the rope, no platform.",
+     "process": "perception service (or the simulator's feed)"
+    },
+    {
+     "module": "gamelab/localization/placecheck.py",
+     "symbol": "off_map",
+     "text": "A place more than 20 units left or right of the map's edges, or 50 above or below, isn't placed: the look fails its checks (Problem \"place\").",
+     "process": "perception service (or the simulator's feed)"
+    },
+    {
+     "module": "gamelab/localization/pose.py",
+     "symbol": "refine",
+     "text": "Her x from her tag on a fixed camera, a rope in view, or her platform's visible end, if within 45 units of the dot.",
+     "process": "perception service (or the simulator's feed)"
+    },
+    {
+     "module": "gamelab/localization/pose.py",
+     "symbol": "Camera.learn",
+     "text": "With her tag seen the camera learns where it keeps her; hidden, Camera.to_screen puts her on screen instead.",
+     "process": "perception service (or the simulator's feed)"
+    },
+    {
+     "module": "gamelab/localization/players.py",
+     "symbol": "Players.update",
+     "text": "The other players' dots are placed the same way and matched to the last look's.",
+     "process": "perception service (or the simulator's feed)"
+    }
+   ]
+  },
+  {
+   "id": "a-look",
+   "title": "What happens when the stack asks for a look",
+   "summary": "Senses.look picks the freshest acceptable state from the feed, retries or gives up when there is none, and runs listeners and checks.",
+   "trigger": "Any decision that needs a look: a fight's next throw, the navigator, the hunt loop, the mover",
+   "steps": [
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses.fresh_after",
+     "text": "The soonest a usable frame may have been shown: after the last look, 68 ms after her last key, at most 0.1 s ago.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses.look",
+     "text": "A look for monsters waits (up to 0.45 s for the thief) for the frame that shows her last throw's kill.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/feed.py",
+     "symbol": "Feed.look",
+     "text": "The newest state matching the ask becomes a Scene, with the monsters off her band in `swept`; None if there's none or it failed its checks.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses._failed",
+     "text": "No state: in Senses.look's loop the waits run, the game is brought forward and the window fix tried; _failed logs the problem once per reason and raises LookLost once it has lasted 3 s; otherwise the look is retried 0.2 s later.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/senses.py",
+     "symbol": "Senses.look",
+     "text": "A passed look: the camera learns, the feed's players are adopted, the feed's events attached, then every listener and check (which may raise).",
+     "process": "the hunting command"
+    }
+   ]
+  },
+  {
+   "id": "unseen-monsters",
+   "title": "Monsters about that the look didn't find",
+   "summary": "The hunt's decisions add to a look the monsters the feed or her memory says are near but this frame missed.",
+   "trigger": "behavior.hunt, grind, attacks and looting asking for what's about (unseen); control.navigator asking for hidden tracks",
+   "steps": [
+    {
+     "module": "gamelab/localization/unseen.py",
+     "symbol": "hidden",
+     "text": "The feed's tracks on a platform, hidden or live-but-missed, last seen within 1.5 s, not owed and not one her kill is on.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/unseen.py",
+     "symbol": "_hers",
+     "text": "Each recent kill of hers claims one track: its own, or the nearest of its kind within 80 units seen about then.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/unseen.py",
+     "symbol": "_is_one",
+     "text": "A track or memory entry within 40 + 1.3 x speed x age of a found monster of its kind on its platform is that one, and dropped.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/monsters.py",
+     "symbol": "MonsterTrack.at",
+     "text": "Each remaining track is walked on at its velocity (standing under 15 units/s), turning back at its platform's walk edges.",
+     "process": "the hunting command"
+    },
+    {
+     "module": "gamelab/localization/unseen.py",
+     "symbol": "unseen",
+     "text": "Her memory's entries seen within 2 s are added where they were seen; all returned as Monsters.",
+     "process": "the hunting command"
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "The scene locator only runs at 1366x768 with a calibrated plate model and drawable map art; 1920x1080, the simulator and maps whose art can't be drawn use the minimap-dot path.",
+  "A place in the right map but wrong within it (the minimap picture found at a wrong place) isn't caught by placecheck.",
+  "One rope-top hang in six measured (her dot 14.8 under the top) still reads as standing on the platform.",
+  "Whether the game takes a portal while she is in the air isn't known (the simulator does).",
+  "Other players' reach (REACH_X 400, REACH_DY 100) is a guess; in game, whose minimap marker is drawn on top and the party, guild and buddy colours are unchecked (README, Other players: To check in game).",
+  "FEET_SNAP (a monster's exact feet snapping to a platform) hasn't been checked in game.",
+  "FACING_HEADING stays off until the planner's turn allowance is worked out per second.",
+  "Monsters that hop are still predicted on their own platform; the navigator flags maps where a threatening one hops.",
+  "UNSEEN_S (2 s) and KILL_NEAR's margin past 18-25 units are guesses.",
+  "Pictures gamedata can't decode yet are drawn opaque and left out of the map art's static mask."
+ ]
+}

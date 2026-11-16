@@ -1,0 +1,2287 @@
+{
+ "id": "input",
+ "summary_md": "**One process puts keys and clicks into the game during autonomous play: the elevated key player** (`python -m gamelab player --elevate`, which calls ShellExecute `runas`: one UAC prompt, the player's console started minimized and not activated, `SW_SHOWMINNOACTIVE`). MapleStory runs as administrator, and Windows blocks input from normal programs into an administrator window, so every other gamelab process (the hunt, the pet feeder, a park, the perception service, the short commands) only writes a JSON **plan** into `lab/inbox/` and reads the result from `lab/outbox/`. The player checks the plan, waits for each event's time, checks that the game is still the foreground window and no Lie Detector alarm is up, then calls `maplehelper/win32.py`: `send_key` (SendInput, keyboard, by **scan code**), `send_mouse_move` (SendInput, absolute mouse moves along a generated trail, then one `SetCursorPos`) or `send_mouse_button` (SendInput, left or right button). Every event it injects carries the constant `dwExtraInfo` tag `0x4D484C50` (\"MHLP\", `INJECTED_TAG`). The player also resizes the game window (`SetWindowPos`) when a plan asks, and brings the game to the front for plans that ask for focus (every plan but her retreat's, splices and the Lie Detector's cursor and clicks, and none at all once the alarm is up).\n\n**The original helper app is a separate path** (`python -m maplehelper`): its low-level keyboard hook sees her hotkey, the Controller checks the game is in front, and the Runner's worker thread plays the combo with the same `win32.send_key`, directly from its own process (no plan files, no Lie Detector checks). It reaches the game only if its terminal runs as administrator.\n\n**Focus is changed by unelevated processes too.** `window.bring_to_front` (no `window.focus` exists) restores a minimized game and calls `AttachThreadInput`, `BringWindowToTop` and `SetForegroundWindow` (and `SwitchToThisWindow` halfway through a nonzero wait). Besides the player, it runs in the hunt (`_to_game` once the hunter is built, a minimized game restored as the command's eyes are made, at looks with no state for a 'window' problem, a full frame's retry, before each Alt+Enter), in the pet feeder (its Alt+Enter try, `--read`, a full frame's retry, and `pet` without `--every` restoring a minimized game) and in the short commands (`act`, `do`, `snap`, `calibrate`, `lock`, `combo` directly; `stats --read`, `keys --read` through `_to_game`; `window --recover` through the size fix). Her retreat, a park, `gamelab stop`, the guard, `watch` and the perception service never bring the game forward. The pet feeder's food tap goes out with `focus` set, so the player brings the game forward for it (not with the alarm up). `perception/eyes.py`'s own `Eyes._to_front` is never reached live: every command's eyes read the perception service's frames (`Eyes.full_frames`), and bench-look's `FrontEyes` refuses instead.\n\n**Checked by grep** (`.py`, `.c`, `.ps1`, `.bat`, `.js` under gamelab, maplehelper and tools, tests and `.analysis` aside): the only `SendInput` calls are the three in `maplehelper/win32.py` (lines 74, 99, 108). `send_key` is called only by the player's `_press` and by the helper's Runner (passed in by `maplehelper/app.py`). `send_mouse_button` is called only by `_press`, `send_mouse_move` only by `window.move_cursor`, and `window.move_cursor` only by the player (the simulator's fakes replace these with refusals). `SetCursorPos` appears once (`window.py:128`), and so does the game-window `SetWindowPos` (`window.py:349`). The only `PostThreadMessageW` is the helper telling its own hook thread to quit. There is no `PostMessage`, `SendMessage`, `keybd_event`, `mouse_event`, `SendKeys`, `BlockInput` or `ClipCursor` anywhere. The other `SetForegroundWindow`/`ShowWindow`/`SetWindowPos` calls are the mini-map handling its own window (`gamelab/ui/app.py`); the helper's coach overlay sets its own window click-through and never-active. Nothing but `control/client.py` writes the player's inbox, and the web page's only POST (`/control`) steers a replay.",
+ "senders": [
+  {
+   "process": "player",
+   "api": "SendInput, keyboard: one INPUT per call, wVk 0, wScan from MapVirtualKeyW, KEYEVENTF_SCANCODE (+EXTENDEDKEY, +KEYUP), dwExtraInfo = INJECTED_TAG 0x4D484C50",
+   "what": "Every key of every plan, and every key let go at a plan's end, cut or splice. The player's key thread (press_keys) calls _press, which calls maplehelper.win32.send_key. This is the only gamelab call that puts a key into the game, and the elevated player is the only gamelab process that makes it.",
+   "conditions": "Before a plan: (1) with the player's Alarm event set, any plan whose kind isn't one of alarm.PLAN_KINDS is refused. (2) validate: at most 400 events, times sorted and within 20 s, every key name in the allow-list (allowed_keys: her config.toml bindings plus ALL_KEYS, every key config.toml can name) or lbutton/rbutton. (3) With the Alarm event set, or lab/ALARM.json present for a plan of one of the four kinds, alarm_refusal allows only: pet_food (one tap of her pet food key, over within 200 ms, 3 a minute); retreat (only her arrows, jump, up and down, every key released, until 12 s after the sighting, and cut there); lie_cursor and lie_ok (mouse only, never a key). None of them may resize or record, and a pet_food or retreat plan must start within 200 ms (its lead). Her pet food and move keys for this are config.toml's with lab/alarm_keys.json's over them (alarm.AlarmKeys, re-read when it changes; written by keymap.publish at each acting command's start and when a key check follows her keys). The player itself checks the alarm file only for those four kinds: a plan without a kind is stopped by the client while the file is there (client.send's check_alarm, and client.wait withdraws it if still untaken). (4) The game must be the foreground window, compared by title, after the optional focus step; otherwise the plan is refused with 'game not in front'. Before every key: the wait for its time stops early on a .cancel file, the retreat cutoff, a splice, or the Alarm event (for a plan let through with the alarm up, a private event instead: it plays on). The wait sleeps in steps of 15 ms or less, and the watchdog sets the event as soon as a look sees the Lie Detector. The game must still be in front; if it isn't, the plan stops with 'game left the foreground'. After the plan, every held key is released.",
+   "evidence": [
+    {
+     "path": "maplehelper/win32.py",
+     "line": 65,
+     "symbol": "send_key"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 17,
+     "symbol": "INJECTED_TAG"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 59,
+     "symbol": "MapVirtualKeyW"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 73,
+     "symbol": "KEYBDINPUT"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 74,
+     "symbol": "SendInput"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1024,
+     "symbol": "_press"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1029,
+     "symbol": "send_key"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 922,
+     "symbol": "_press"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 747,
+     "symbol": "PLAN_KINDS"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 750,
+     "symbol": "validate"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 92,
+     "symbol": "ALL_KEYS"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 96,
+     "symbol": "allowed_keys"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 119,
+     "symbol": "allowed"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 202,
+     "symbol": "alarm_refusal"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 777,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 828,
+     "symbol": "cancel"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 839,
+     "symbol": "halt.wait"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 888,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 960,
+     "symbol": "held"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 483,
+     "symbol": "alarm.set"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 46,
+     "symbol": "PLAN_KINDS"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 749,
+     "symbol": "filed"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 235,
+     "symbol": "lead"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 730,
+     "symbol": "AlarmKeys"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 103,
+     "symbol": "AlarmKeys"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1082,
+     "symbol": "keymap.publish"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 793,
+     "symbol": "halt"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 80,
+     "symbol": "check_alarm"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 376,
+     "symbol": "plan_path.unlink"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "api": "SendInput, mouse moves: MOUSEEVENTF_MOVE | ABSOLUTE | VIRTUALDESK, one whole-pixel event per trail sample, dwExtraInfo = INJECTED_TAG",
+   "what": "A plan's [ms, 'mouse', x, y] event (x, y in client px). window.move_cursor reads the pointer (GetCursorPos) and generates a trail with maplehelper.mouse_trail.generate_trail. It sends each sample with win32.send_mouse_move, holding each until its time with the plan's own wait, so a cancel, a splice or the alarm stops the trail partway. Used by the Lie Detector cursor and the answer and OK clicks, the pet's double-click, statcheck's DETAIL click, keycheck's and chatcheck's mouse parking (and the recorded `stats --read --record` and `keys --read --record`), the mover's nudge_mouse, and act's @X,Y, click@ and rclick@.",
+   "conditions": "validate: x and y are ints >= 0. In press_keys: x < the client's width and y < its height, else the event is skipped ('outside the game'). The game must be in front before the event. With the alarm up, only lie_cursor (one move at 0 ms inside LIE_CURSOR_BOX, 308,180 to 1058,680 of the 1366x768 client, with no focus, lead, recording or end wait) or a lie click form goes. pet_food and retreat plans refuse any mouse event.",
+   "evidence": [
+    {
+     "path": "gamelab/window.py",
+     "line": 98,
+     "symbol": "move_cursor"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 111,
+     "symbol": "generate_trail"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 122,
+     "symbol": "wait"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 125,
+     "symbol": "send_mouse_move"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 90,
+     "symbol": "send_mouse_move"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 99,
+     "symbol": "SendInput"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 893,
+     "symbol": "client_area"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 899,
+     "symbol": "move_cursor"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 116,
+     "symbol": "bad mouse position"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 196,
+     "symbol": "LIE_CURSOR_BOX"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 230,
+     "symbol": "no mouse with the alarm up"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 49,
+     "symbol": "LIE_CURSOR_BOX"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "api": "SetCursorPos",
+   "what": "After the last trail sample, window.move_cursor calls SetCursorPos(x, y) so the pointer lands on the exact target pixel; SendInput's absolute coordinates are rounded to 1/65536 of the desktop. This moves the pointer without an input event. It is the only SetCursorPos call in the code, and only the player reaches it.",
+   "conditions": "Only after a trail that ran to its end (not cut by a cancel, splice or the alarm), under the same guards as the mouse moves.",
+   "evidence": [
+    {
+     "path": "gamelab/window.py",
+     "line": 128,
+     "symbol": "SetCursorPos"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 103,
+     "symbol": "SetCursorPos"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 92,
+     "symbol": "SetCursorPos"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "api": "SendInput, mouse buttons: MOUSEEVENTF_LEFTDOWN/LEFTUP or RIGHTDOWN/RIGHTUP at the pointer, dwExtraInfo = INJECTED_TAG",
+   "what": "[ms, 'lbutton'|'rbutton', 'down'|'up'] events: _press calls win32.send_mouse_button. Used by the pet's double-click on her and its SHOW PET INFO click, statcheck's DETAIL click (and `stats --read --record`'s), act's click@X,Y and rclick@X,Y, and the Violetta answer and pass-dialog OK clicks. Nothing else clicks (keycheck and chatcheck only move the mouse).",
+   "conditions": "The same as keys: the alarm, validate, the game in front before each event, and held buttons released at the end. With the alarm up, a button can go only in the lie_cursor click form (a move into one of LIE_ANSWER_BOXES at 0 ms, left button down 1-1500 ms in and up 30-300 ms later, nothing else) or in lie_ok (the same inside LIE_OK_BOX). Both forms are held to that shape whether or not the alarm is up, and for these two kinds the button goes down only if the game is the window under the pointer (window.pointer_on).",
+   "evidence": [
+    {
+     "path": "maplehelper/win32.py",
+     "line": 103,
+     "symbol": "send_mouse_button"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 108,
+     "symbol": "SendInput"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1027,
+     "symbol": "send_mouse_button"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 917,
+     "symbol": "pointer_on"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 147,
+     "symbol": "_lie_click_refusal"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 751,
+     "symbol": "lie_cursor_refusal"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 52,
+     "symbol": "LIE_ANSWER_BOXES"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 57,
+     "symbol": "LIE_OK_BOX"
+    },
+    {
+     "path": "gamelab/control/alarm.py",
+     "line": 58,
+     "symbol": "LIE_CLICK_DOWN_MS"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 434,
+     "symbol": "lbutton"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 823,
+     "symbol": "rbutton"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 409,
+     "symbol": "lbutton"
+    },
+    {
+     "path": "gamelab/behavior/statcheck.py",
+     "line": 597,
+     "symbol": "lbutton"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "api": "Focus: window.bring_to_front(title) with wait 0, which calls ShowWindow(SW_RESTORE) if minimized, AttachThreadInput to the foreground window's thread, BringWindowToTop and SetForegroundWindow",
+   "what": "For a plan with focus true, the player brings the game forward before the plan's first key, then waits 0.5 s. focus true is client.send's default and is sent by Actions.play, the navigator's chains, the mover, Alt+Enter, the pet's food tap and the tools' plans. Because the player passes wait 0, the SwitchToThisWindow fallback never runs here. No key is sent.",
+   "conditions": "Only if plan.focus is true, the alarm event isn't set, the plan didn't come in with the alarm up (so never for a pet_food tap let through then, nor for one of the four kinds while lab/ALARM.json is there), and the game isn't already in front. Never for retreat plans (client.send sets focus false for kind retreat), splices (focus false), or lie_cursor and lie_ok (refused if they ask for focus). Afterwards the alarm is checked again, and the plan is refused if the game still isn't in front.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 772,
+     "symbol": "focus"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 773,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 775,
+     "symbol": "alarm"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 778,
+     "symbol": "game not in front"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 371,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 382,
+     "symbol": "ShowWindow"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 385,
+     "symbol": "AttachThreadInput"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 387,
+     "symbol": "BringWindowToTop"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 388,
+     "symbol": "SetForegroundWindow"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 394,
+     "symbol": "wait"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 91,
+     "symbol": "focus"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 273,
+     "symbol": "focus"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 764,
+     "symbol": "during"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "api": "Window resize: SetWindowPos(SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE), with the window size from AdjustWindowRectEx",
+   "what": "A plan's window_client [w, h] resizes the game window so its client area is 1366x768 or 1920x1080 (window.resize_client), before anything else in the plan, then waits 0.5 s for the game's layout. The resize comes before the foreground check, so it happens even with another window in front; the plan then goes on to the focus step (its focus is true) and is refused if the game still isn't in front. A normal program gets 'access denied' on the administrator game, so only the player does this. The only plan that asks is `python -m gamelab window WxH` (tools). The automatic size fix uses Alt+Enter key plans instead (window_size).",
+   "conditions": "validate: window_client must be one of CLIENT_SIZES, and resize_client raises for any other. Refused with the alarm up ('no window resize or recording with the alarm up'), in any splice, and in the lie kinds.",
+   "evidence": [
+    {
+     "path": "gamelab/window.py",
+     "line": 95,
+     "symbol": "CLIENT_SIZES"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 338,
+     "symbol": "resize_client"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 349,
+     "symbol": "SetWindowPos"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 767,
+     "symbol": "resize_client"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 132,
+     "symbol": "CLIENT_SIZES"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 224,
+     "symbol": "no window resize"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 993,
+     "symbol": "a splice neither resizes"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 755,
+     "symbol": "window_client"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 777,
+     "symbol": "foreground_title"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "api": "Focus from an unelevated process: window.bring_to_front (ShowWindow SW_RESTORE, AttachThreadInput, BringWindowToTop, SetForegroundWindow; SwitchToThisWindow after half of a nonzero wait)",
+   "what": "Unelevated processes do bring the game forward. A hunting command (hunt kill/clear, probe run, nav, nav --walk, tour) builds its hunter first: the eyes are made with restore (`_eyes` -> `_game_geometry(restore=True)`, which brings back a minimized game, as `_fit_start` does too), and a hunt that throws (hunt, tour, probe run) then collapses her chat and reads her stat window, whose plans carry focus. Then `_to_game` brings the game forward, waiting up to 3 s, and the command doesn't go on if the game doesn't come. During the hunt, Senses.look calls ServiceClient.bring_forward whenever a look has no state for a 'window' problem, and full_frame retries once after bringing the game forward. window_size._press brings it forward before every Alt+Enter.",
+   "conditions": "_to_game: none of its own (main() refuses GAME_COMMANDS while the alarm file is up). bring_forward: only in a client that acts (hello.acts), only for a problem of kind 'window' (the game not in front, or another window over it), at most once a second (full_frame resets that), and from Senses.look not while hands_off is true (her retreat or park: Hunter.retreating; or `gamelab stop` asked); full_frame's retry doesn't ask hands_off. window_size._press: not with the game minimized, the alarm up, a plan waiting or playing (client.busy), or another process's try in progress (named mutex Local\\gamelab-window-fix).",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1581,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1588,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1629,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1785,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1916,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1967,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 95,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1154,
+     "symbol": "_game_geometry"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1384,
+     "symbol": "bring_forward"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1388,
+     "symbol": "problem.kind != \"window\""
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1395,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1423,
+     "symbol": "bring_forward"
+    },
+    {
+     "path": "gamelab/localization/senses.py",
+     "line": 226,
+     "symbol": "hands_off"
+    },
+    {
+     "path": "gamelab/localization/senses.py",
+     "line": 227,
+     "symbol": "bring_forward"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 277,
+     "symbol": "hands_off"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 312,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 100,
+     "symbol": "LOCK"
+    },
+    {
+     "path": "gamelab/window.py",
+     "line": 397,
+     "symbol": "SwitchToThisWindow"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1940,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 959,
+     "symbol": "_game_geometry"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1071,
+     "symbol": "_eyes"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1091,
+     "symbol": "chat"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1099,
+     "symbol": "read"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1422,
+     "symbol": "_fronted"
+    },
+    {
+     "path": "gamelab/perception/framecheck.py",
+     "line": 353,
+     "symbol": "Problem"
+    }
+   ]
+  },
+  {
+   "process": "pet",
+   "api": "Focus from an unelevated process: window.bring_to_front, plus plans with focus true that make the player bring the game forward",
+   "what": "The pet feeder brings the game forward itself (a) in PetWait's bounded Alt+Enter try (window_size.refit, then _press with a 3 s wait), (b) for `pet --read` before the double-click read, (c) through ServiceClient.full_frame when a full frame (its panel reads) fails for a 'window' problem (the pet's client acts), and (d) `pet` without `--every` builds its eyes with restore, bringing back a minimized game (`pet --every` waits for it instead). Its food tap (PetCare._feed, then Actions.feed_pet and Actions.play) goes out with focus true, so the elevated player brings the game forward for a feed when the alarm isn't up. The README says the same: only the retreat, a park, a stop and the feeder's start never do this.",
+   "conditions": "The PetWait try needs a fault Alt+Enter mends (framecheck.FIX_KINDS: the client another size, or the game drawing off it) standing for STEADY_S (5 s), the pet due a food, the alarm down, the game seen in play (its HUD), at most one try every 30 min (TRY_EVERY_S), and at most 4 an hour across all processes (window_size.HOURLY). A feed needs a bound pet food key and a low followed fullness. With the alarm up the player never brings the game forward for it.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 536,
+     "symbol": "refit"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 391,
+     "symbol": "feed_pet"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 626,
+     "symbol": "PET_FOOD"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 276,
+     "symbol": "focus"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1402,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1423,
+     "symbol": "bring_forward"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 312,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/README.md",
+     "line": 192,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1391,
+     "symbol": "restore"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 505,
+     "symbol": "FIX_KINDS"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 510,
+     "symbol": "alarm_up"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 512,
+     "symbol": "TRY_EVERY_S"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 514,
+     "symbol": "HOURLY"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "api": "Focus from an unelevated process: window.bring_to_front",
+   "what": "Short commands bring the game forward before they send a plan: calibrate, snap, act, do, lock and combo call bring_to_front directly (one try, no wait); stats --read and keys --read build a hunter first (its eyes restore a minimized game), then go through _to_game; window --recover goes through window_size.refit. Their plans go with focus true (client.submit's default), so the player brings the game forward for them as well, `window WxH` included. `gamelab stop` never does.",
+   "conditions": "main() refuses GAME_COMMANDS (player, calibrate, window, snap, act, do, lock, combo, hunt, nav, tour, and probe run) while the alarm is up, exiting with code 3. stats --read and keys --read check the alarm themselves and send nothing with it up (exit 3).",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 729,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 800,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 865,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 901,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2122,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2137,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 312,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1212,
+     "symbol": "_to_game"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 789,
+     "symbol": "refit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 46,
+     "symbol": "GAME_COMMANDS"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 3549,
+     "symbol": "check_alarm"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 307,
+     "symbol": "alarm_up"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1207,
+     "symbol": "alarm_up"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 65,
+     "symbol": "LIE_DETECTOR_EXIT"
+    }
+   ]
+  },
+  {
+   "process": "minimap",
+   "api": "SetForegroundWindow (to hand focus back); ShowWindow(SW_SHOWNOACTIVATE), SetWindowPos(HWND_TOPMOST) and WS_EX_NOACTIVATE on its own window",
+   "what": "The live mini-map window is created hidden and shown without being activated. If creating it took the focus anyway, it calls SetForegroundWindow on the window that was in front before, which may be the game. It never touches the game's window otherwise.",
+   "conditions": "Live mode only, and only if the foreground window changed while the window was being created.",
+   "evidence": [
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 45,
+     "symbol": "_foreground"
+    },
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 57,
+     "symbol": "_foreground"
+    },
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 58,
+     "symbol": "_hand_focus_back"
+    },
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 126,
+     "symbol": "SetForegroundWindow"
+    },
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 108,
+     "symbol": "WS_EX_NOACTIVATE"
+    },
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 117,
+     "symbol": "ShowWindow"
+    },
+    {
+     "path": "gamelab/ui/app.py",
+     "line": 119,
+     "symbol": "SetWindowPos"
+    }
+   ]
+  },
+  {
+   "process": "helper",
+   "api": "SendInput, keyboard, through the same maplehelper.win32.send_key (scan codes, INJECTED_TAG), called directly from the helper's own process",
+   "what": "`python -m maplehelper`, the original combo app, is a path of its own: KeyboardHook (WH_KEYBOARD_LL) calls Controller.on_key, which calls Runner.trigger (a queue). The combo-runner thread runs Runner._run, which runs combo.script(Ctx); Ctx.down, up and tap call win32.send_key. There is no player and no plan file. It reaches the game only if its terminal is elevated (README.md: 'start the terminal as Administrator').",
+   "conditions": "Only when a hotkey is pressed: the foreground window's title must contain the game's title, and the key must be a configured hotkey. A press during a running combo is dropped, or queued in its last buffer_window ms. The Runner first releases both arrows (a clean start), the abort key stops a combo at its next key down or wait (Ctx raises Aborted), and every held key is released at the end. There is no per-key foreground check, no Lie Detector alarm check, and no allow-list beyond the keys the combo scripts use.",
+   "evidence": [
+    {
+     "path": "maplehelper/app.py",
+     "line": 84,
+     "symbol": "send_key"
+    },
+    {
+     "path": "maplehelper/app.py",
+     "line": 85,
+     "symbol": "KeyboardHook"
+    },
+    {
+     "path": "maplehelper/hook.py",
+     "line": 42,
+     "symbol": "SetWindowsHookExW"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 37,
+     "symbol": "_game_title"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 53,
+     "symbol": "trigger"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 179,
+     "symbol": "trigger"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 189,
+     "symbol": "DROPPED"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 235,
+     "symbol": "script"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 76,
+     "symbol": "_send"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 83,
+     "symbol": "_send"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 240,
+     "symbol": "release_all"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 74,
+     "symbol": "SendInput"
+    },
+    {
+     "path": "README.md",
+     "line": 37,
+     "symbol": ""
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 228,
+     "symbol": "_send"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 75,
+     "symbol": "Aborted"
+    }
+   ]
+  },
+  {
+   "process": "helper",
+   "api": "WH_KEYBOARD_LL hook returning 1 (the key event is swallowed)",
+   "what": "Hides her real presses of the hotkeys and the slow-mode key (with their auto-repeat and releases) from the game. Events tagged INJECTED_TAG are skipped, so the helper's own injected keys and the gamelab player's pass through untouched.",
+   "conditions": "Only with the game in front (the same title check), and only for the configured hotkeys and slow-mode key.",
+   "evidence": [
+    {
+     "path": "maplehelper/hook.py",
+     "line": 59,
+     "symbol": "INJECTED_TAG"
+    },
+    {
+     "path": "maplehelper/hook.py",
+     "line": 63,
+     "symbol": "return 1"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 30,
+     "symbol": "return True"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 49,
+     "symbol": "return True"
+    },
+    {
+     "path": "maplehelper/controller.py",
+     "line": 58,
+     "symbol": "return True"
+    }
+   ]
+  },
+  {
+   "process": "helper",
+   "api": "SetWindowLongPtrW on its own overlay: WS_EX_LAYERED | TRANSPARENT | TOOLWINDOW | NOACTIVATE | TOPMOST",
+   "what": "The helper's coach (a borderless, topmost Tk window showing each combo step over the screen) is made click-through and never-active, so clicks pass to the game and it never takes the game's focus. It sends nothing to the game and never touches the game's window.",
+   "conditions": "Always, from the helper's start (Coach.__init__).",
+   "evidence": [
+    {
+     "path": "maplehelper/coach.py",
+     "line": 47,
+     "symbol": "make_click_through"
+    },
+    {
+     "path": "maplehelper/coach.py",
+     "line": 34,
+     "symbol": "-topmost"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 173,
+     "symbol": "make_click_through"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 177,
+     "symbol": "WS_EX_NOACTIVATE"
+    },
+    {
+     "path": "maplehelper/app.py",
+     "line": 83,
+     "symbol": "Coach"
+    }
+   ]
+  }
+ ],
+ "plan_sources": [
+  {
+   "process": "hunt",
+   "module": "gamelab/control/actions.py",
+   "symbol": "Actions.play",
+   "kind": "",
+   "what": "Her actions as blocking key plans (client.submit, lead 0, focus true, waited for): throw, jump_throw, jump_back, walk, pick_here, drink (potion) and nudge_mouse (two mouse moves; skipped in a retreat). before_play runs first and can raise if `gamelab stop` was asked; hold_back waits out her attack lock. The kind is the Actions' own: none for a hunt, retreat for moves_only().",
+   "evidence": [
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 266,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 270,
+     "symbol": "hold_back"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 272,
+     "symbol": "before_play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 276,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 411,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 460,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 496,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 592,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 601,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 617,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 637,
+     "symbol": "play"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/control/actions.py",
+   "symbol": "Actions.feed_pet",
+   "kind": "pet_food",
+   "what": "One tap of her pet food key, of kind pet_food, which the player still takes with the alarm up (3 a minute). Sent by the hunt's own pet care (Hunter.feed_pet_if_due, which refuses with the alarm up, client.check_alarm, then calls PetCare.tend) and by the pet feeder (next entry), which goes on feeding with the alarm up.",
+   "evidence": [
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 620,
+     "symbol": "feed_pet"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 626,
+     "symbol": "PET_FOOD"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 1267,
+     "symbol": "feed_pet_if_due"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 391,
+     "symbol": "feed_pet"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 1272,
+     "symbol": "check_alarm"
+    }
+   ]
+  },
+  {
+   "process": "pet",
+   "module": "gamelab/behavior/pet.py",
+   "symbol": "PetCare.tend / _feed / _open / _close",
+   "kind": "pet_food",
+   "what": "`pet --every`: a food tap (kind pet_food) when the followed fullness is low, with the alarm up too. With the alarm up and the fullness unknown, it feeds once every FALLBACK_S instead of reading. To read the fullness: a double-click on her (mouse move and lbutton), a click on SHOW PET INFO and Esc. These have no kind and are never sent with the alarm up. The same PetCare runs inside a hunt.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 223,
+     "symbol": "tend"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 391,
+     "symbol": "feed_pet"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 409,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 421,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 445,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 285,
+     "symbol": "alarm_up"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/control/navigator.py",
+   "symbol": "Navigator.follow (send)",
+   "kind": "",
+   "what": "Route chains (runs, jumps, drops, ropes) as one plan each, queued with client.send (focus true, end_ms past the last key, not waited for) so the player starts the next one as this one ends. While a plan runs, her dot and HP are watched about 15 times a second, and a touch, an HP drop or the wrong platform cancels it (client.cancel: the player releases every key). The kind is the navigator's Actions' kind (retreat in her retreat).",
+   "evidence": [
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 2901,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 2902,
+     "symbol": "kind"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 2996,
+     "symbol": "cancel"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3030,
+     "symbol": "cancel"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/control/navigator.py",
+   "symbol": "Navigator._take_over",
+   "kind": "",
+   "what": "A replanned chain takes over from the running plan partway through. If the player says it takes splices (lab/player.json, splice 1, read by client.can_splice), it goes as client.splice: lab/inbox/<running id>.splice with at_ms and the held keys, so no key is released between the two. Otherwise the running plan is cancelled and the new one sent at once.",
+   "evidence": [
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3306,
+     "symbol": "can_splice"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3308,
+     "symbol": "splice"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3311,
+     "symbol": "cancel"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3317,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 186,
+     "symbol": "can_splice"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 255,
+     "symbol": "splice"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/control/navigator.py",
+   "symbol": "Navigator._climb_on / _hang",
+   "kind": "",
+   "what": "Rope moves (climb on, hang down, climb down, hang up) as Actions.play plans.",
+   "evidence": [
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3577,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3586,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3790,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3593,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/navigator.py",
+     "line": 3597,
+     "symbol": "play"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/control/mover.py",
+   "symbol": "Mover._send / Mover._watched / Mover.locate",
+   "kind": "",
+   "what": "One plan per route move. Unwatched moves go through Actions.play. Watched moves go through client.send, polled with client.done and cancelled with MoveCut when `watch` says why. Mover.locate nudges the mouse (Actions.nudge_mouse) when a tooltip hides the minimap.",
+   "evidence": [
+    {
+     "path": "gamelab/control/mover.py",
+     "line": 148,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/mover.py",
+     "line": 160,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/control/mover.py",
+     "line": 165,
+     "symbol": "cancel"
+    },
+    {
+     "path": "gamelab/control/mover.py",
+     "line": 120,
+     "symbol": "nudge_mouse"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/behavior/retreat.py",
+   "symbol": "on_alarm / retreat / _away",
+   "kind": "retreat",
+   "what": "On client.LieDetectorAlarm (raised by a refused plan or a look), the hunt's on_alarm runs her retreat: a Navigator over Actions.moves_only(), whose plans are all of kind retreat (her arrows, jump, up and down; no mouse, pick-up or pet food). client.send sets focus false for them, and the player takes them for 12 s after the sighting and cuts them there. The same retreat runs after a safety stop.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 242,
+     "symbol": "on_alarm"
+    },
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 256,
+     "symbol": "retreat"
+    },
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 281,
+     "symbol": "retreat"
+    },
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 313,
+     "symbol": "moves_only"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 640,
+     "symbol": "moves_only"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 651,
+     "symbol": "RETREAT"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 91,
+     "symbol": "RETREAT"
+    }
+   ]
+  },
+  {
+   "process": "park",
+   "module": "gamelab/behavior/retreat.py",
+   "symbol": "park",
+   "kind": "retreat",
+   "what": "`nav --park` (started by `gamelab stop` with no hunt running, or detached by the pet feeder's guard) drives her to a safe place with the same away() and moves_only() plans, of kind retreat with focus false. If the game isn't in front, it sends nothing and leaves a note.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 395,
+     "symbol": "park"
+    },
+    {
+     "path": "gamelab/behavior/retreat.py",
+     "line": 398,
+     "symbol": "away"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1860,
+     "symbol": "_nav_park"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1871,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1891,
+     "symbol": "park"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 427,
+     "symbol": "_park_now"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1462,
+     "symbol": "start_park"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/behavior/statcheck.py",
+   "symbol": "StatCheck._tap / _window / _detail",
+   "kind": "",
+   "what": "Her stat window opened, read and closed: her stats key, a mouse move, one click on DETAIL, and Esc. This happens at a hunt's start (in _hunter, for hunt, tour and probe run, before _to_game), in the hunt loop when a read put off comes due, and in `stats --read` (tools).",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/statcheck.py",
+     "line": 497,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/statcheck.py",
+     "line": 529,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/statcheck.py",
+     "line": 597,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1099,
+     "symbol": "read"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 838,
+     "symbol": "run"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 322,
+     "symbol": "run"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/behavior/keycheck.py",
+   "symbol": "KeyCheck._window / _close",
+   "kind": "",
+   "what": "The game's KEY BINDINGS window read: a mouse move, \\ to open it, and Esc to close it. In a hunt after a doubt about her keys (Hunter.check_keys), and in `keys --read` (tools).",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/keycheck.py",
+     "line": 1067,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/keycheck.py",
+     "line": 1080,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/keycheck.py",
+     "line": 1148,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 988,
+     "symbol": "run"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1219,
+     "symbol": "_window"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/behavior/chatcheck.py",
+   "symbol": "ChatCheck._mouse_off / _press",
+   "kind": "",
+   "what": "Moving the mouse off the chat box, and a key tap that collapses the chat: at a hunt's start (in _hunter, before _to_game) and in the hunt loop when a collapse put off comes due.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/chatcheck.py",
+     "line": 247,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/behavior/chatcheck.py",
+     "line": 265,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1091,
+     "symbol": "chat"
+    },
+    {
+     "path": "gamelab/behavior/hunter.py",
+     "line": 763,
+     "symbol": "run"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "module": "gamelab/control/window_size.py",
+   "symbol": "_press (refit, SizeFix)",
+   "kind": "",
+   "what": "Alt+Enter as one plan (alt down, enter tapped, alt up; client.submit with focus true and a 10 s timeout): from windowed, one to full screen and, 8 s on, one back (pressed again up to 3 times while one changes nothing), to set a wrong-size or offset client right. Sent by a hunt's SizeFix (at its start, _fit_start, and later from Senses), by the pet's PetWait, and by `window --recover` (tools). Before each one: the alarm, client.busy, the mutex, a minimized game, the game in front after bring_to_front, and a look for the Lie Detector on the service's picture.",
+   "evidence": [
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 288,
+     "symbol": "_press"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 300,
+     "symbol": "alarm_up"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 308,
+     "symbol": "busy"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 314,
+     "symbol": "_look"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 325,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 511,
+     "symbol": "refit"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 536,
+     "symbol": "refit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 789,
+     "symbol": "refit"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 71,
+     "symbol": "ALT_ENTER"
+    },
+    {
+     "path": "gamelab/control/window_size.py",
+     "line": 276,
+     "symbol": "BACK_PRESSES"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1159,
+     "symbol": "fix"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "module": "gamelab/control/lie_tracking.py",
+   "symbol": "LieTracking._move_cursor",
+   "kind": "lie_cursor",
+   "what": "While the alarm is up, the perception service follows the Lie Detector mini-game's target (its tracker child computes it) and hands the player one immediate mouse move inside the board per target (client.move_lie_cursor: [[0, 'mouse', x, y]], focus false, lead 0). The plan is withdrawn or cancelled when the round ends. The service never calls SendInput itself.",
+   "evidence": [
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 337,
+     "symbol": "_move_cursor"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 344,
+     "symbol": "move_lie_cursor"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 105,
+     "symbol": "move_lie_cursor"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 113,
+     "symbol": "LIE_CURSOR"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2712,
+     "symbol": "LieTracking"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "module": "gamelab/control/violetta_live.py",
+   "symbol": "VioletaLive._click_answer",
+   "kind": "lie_cursor",
+   "what": "The Violetta game's detected answer clicked: a move to the button's middle at 0 ms, left button down at 1000 ms and up at 1080 ms (client.click_lie_answer, the click form of kind lie_cursor). It is cancelled once the buttons go dark.",
+   "evidence": [
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 268,
+     "symbol": "_click_answer"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 270,
+     "symbol": "click_lie_answer"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 157,
+     "symbol": "click_lie_answer"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 163,
+     "symbol": "LIE_CURSOR"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 137,
+     "symbol": "_lie_click_events"
+    }
+   ]
+  },
+  {
+   "process": "perceive",
+   "module": "gamelab/control/violetta_live.py",
+   "symbol": "VioletaLive._click",
+   "kind": "lie_ok",
+   "what": "The pass dialog's OK button clicked once the dialog has been seen on 2 looks in a row (looked for every 0.5 s), 3 s apart and at most 3 in any minute (client.click_lie_ok: a move at 0 ms, left button down at 1000 ms and up at 1080 ms, kind lie_ok).",
+   "evidence": [
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 305,
+     "symbol": "_click"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 307,
+     "symbol": "click_lie_ok"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 149,
+     "symbol": "click_lie_ok"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 153,
+     "symbol": "LIE_OK"
+    },
+    {
+     "path": "gamelab/control/violetta_live.py",
+     "line": 292,
+     "symbol": "OK_TRIES"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/__main__.py",
+   "symbol": "cmd_act / parse_steps",
+   "kind": "",
+   "what": "`act`: explore steps in a small language (KEY, KEY*MS, KEY+/KEY-, MS, @X,Y, click@X,Y, rclick@X,Y) become one plan that captures a few full-size frames (client.submit, 2-10 a second; the last saved), or with --record a recorded plan through recordings.record. Any allowed key or button.",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 808,
+     "symbol": "parse_steps"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 862,
+     "symbol": "cmd_act"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 870,
+     "symbol": "record"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 877,
+     "symbol": "submit"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/control/timeline.py",
+   "symbol": "action_events / combo_events / chain",
+   "kind": "",
+   "what": "maplehelper's own combo and move code run on a virtual clock (_Clock, a Ctx whose send only records) into exact key timelines. `do` (one maplehelper.actions move) and `combo` (a combo, --chain in a row) then play these through recordings.record, so the tests press what the helper presses.",
+   "evidence": [
+    {
+     "path": "gamelab/control/timeline.py",
+     "line": 62,
+     "symbol": "_Clock"
+    },
+    {
+     "path": "gamelab/control/timeline.py",
+     "line": 78,
+     "symbol": "combo_events"
+    },
+    {
+     "path": "gamelab/control/timeline.py",
+     "line": 88,
+     "symbol": "action_events"
+    },
+    {
+     "path": "gamelab/control/timeline.py",
+     "line": 96,
+     "symbol": "chain"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 896,
+     "symbol": "action_events"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 903,
+     "symbol": "record"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2144,
+     "symbol": "chain"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2149,
+     "symbol": "record"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/__main__.py",
+   "symbol": "cmd_lock",
+   "kind": "",
+   "what": "`lock`: an attack tap, then a jump tap d ms later, recorded, for each delay.",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2115,
+     "symbol": "cmd_lock"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2125,
+     "symbol": "_tap"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2126,
+     "symbol": "record"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/__main__.py",
+   "symbol": "cmd_window",
+   "kind": "",
+   "what": "`window WxH`: a plan with window_client and no keys. The player resizes the game window (SetWindowPos) and records 200 ms.",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 745,
+     "symbol": "cmd_window"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 755,
+     "symbol": "window_client"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/analysis/recordings.py",
+   "symbol": "record / screenshot",
+   "kind": "",
+   "what": "Recording and capture-only plans: recordings.record (a key timeline plus frames) and recordings.screenshot, calibration.calibrate and _recording_setup (no events, frames only). They still go with focus true, so the player brings the game forward for a screenshot.",
+   "evidence": [
+    {
+     "path": "gamelab/analysis/recordings.py",
+     "line": 38,
+     "symbol": "record"
+    },
+    {
+     "path": "gamelab/analysis/recordings.py",
+     "line": 41,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/analysis/recordings.py",
+     "line": 54,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/analysis/calibration.py",
+     "line": 70,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 848,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/analysis/calibration.py",
+     "line": 136,
+     "symbol": "submit"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/__main__.py",
+   "symbol": "_stats_recorded / _keys_recorded",
+   "kind": "",
+   "what": "`stats --read --record` (the mouse off, her stats key, a click on DETAIL if its panel isn't open, her stats key again and Esc only if still open, each recorded) and `keys --read --record` (a mouse move and \\ to open KEY BINDINGS, Esc to close, recorded), straight through client.submit rather than Actions.",
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 372,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1309,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1340,
+     "symbol": "submit"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 329,
+     "symbol": "_stats_recorded"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 434,
+     "symbol": "recorded"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1281,
+     "symbol": "_keys_recorded"
+    }
+   ]
+  },
+  {
+   "process": "tools",
+   "module": "gamelab/behavior/guard.py",
+   "symbol": "stop",
+   "kind": "",
+   "what": "`gamelab stop` makes no plan of its own. With a hunt running, it writes lab/stop_hunt.json for it (not for a park) and, with the alarm down, puts a .cancel file beside every plan in the inbox (client.cut_running), so the player stops the one playing before its next key. With no hunt running, the alarm down and the game in front, it runs `nav --park` as a child process (subprocess.run) and waits for it; with the game behind, it leaves a note for the guard and sends nothing.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 389,
+     "symbol": "stop"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 407,
+     "symbol": "STOP_HUNT"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 409,
+     "symbol": "cut_running"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 358,
+     "symbol": "cut_running"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 403,
+     "symbol": "_park_now"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 395,
+     "symbol": "hunt is None"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 399,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 429,
+     "symbol": "subprocess.run"
+    }
+   ]
+  },
+  {
+   "process": "helper",
+   "module": "maplehelper/engine.py",
+   "symbol": "Runner._run / Ctx.down / Ctx.up",
+   "kind": "",
+   "what": "The helper's combos (maplehelper/combos.py), played on its own worker thread straight into win32.send_key on a hotkey press. No plan, no inbox, no player.",
+   "evidence": [
+    {
+     "path": "maplehelper/engine.py",
+     "line": 226,
+     "symbol": "_run"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 73,
+     "symbol": "down"
+    },
+    {
+     "path": "maplehelper/engine.py",
+     "line": 82,
+     "symbol": "up"
+    },
+    {
+     "path": "maplehelper/app.py",
+     "line": 84,
+     "symbol": "Runner"
+    }
+   ]
+  }
+ ],
+ "path_steps": [
+  {
+   "process": "hunt",
+   "path": "gamelab/behavior/fight.py",
+   "symbol": "actions.throw",
+   "line": 1051,
+   "text": "The hunt decides from its latest look (the perception service's state) to throw at a monster, and calls Actions.throw.",
+   "evidence": [
+    {
+     "path": "gamelab/behavior/fight.py",
+     "line": 1051,
+     "symbol": "actions.throw"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "path": "gamelab/control/actions.py",
+   "symbol": "play",
+   "line": 411,
+   "text": "Actions.throw turns the decision into plan events: an arrow tap if she must turn first, then a tap of her attack key, as [ms, key, 'down'|'up'] with times from the plan's start. It calls Actions.play.",
+   "evidence": [
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 411,
+     "symbol": "play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 397,
+     "symbol": "throw"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "path": "gamelab/control/actions.py",
+   "symbol": "hold_back",
+   "line": 270,
+   "text": "Actions.play waits out her attack lock (hold_back), asks before_play (it raises if `gamelab stop` came since the look), and calls client.submit(events, lead_ms=0, focus=True, kind=None). Her retreat's Actions send kind 'retreat' instead.",
+   "evidence": [
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 270,
+     "symbol": "hold_back"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 272,
+     "symbol": "before_play"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 276,
+     "symbol": "submit"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "path": "gamelab/control/client.py",
+   "symbol": "check_alarm",
+   "line": 80,
+   "text": "client.send: a plan without a kind is refused while lab/ALARM.json exists (LieDetectorAlarm). The plan becomes {events, capture, focus, kind}, is written as lab/inbox/<HHMMSS_name_xxxx>.tmp and renamed to .json, which is atomic.",
+   "evidence": [
+    {
+     "path": "gamelab/control/client.py",
+     "line": 80,
+     "symbol": "check_alarm"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 71,
+     "symbol": "send"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 91,
+     "symbol": "focus"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 101,
+     "symbol": "replace"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "path": "gamelab/control/client.py",
+   "symbol": "result_path",
+   "line": 374,
+   "text": "client.wait polls lab/outbox/<id>.json every 10 ms. If the plan is still untaken in the inbox when the alarm file appears (and it has no kind), it withdraws it and raises; after the timeout (120 s) it raises 'is the player running?'.",
+   "evidence": [
+    {
+     "path": "gamelab/control/client.py",
+     "line": 374,
+     "symbol": "result_path"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 366,
+     "symbol": "wait"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 375,
+     "symbol": "ALARM"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 380,
+     "symbol": "PlayerError"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "plans",
+   "line": 1185,
+   "text": "The elevated player's _serve loop looks at lab/inbox/*.json every 10 ms (1 ms timers on). It takes no plan before its watchdog's first look at the game, and takes the first by name (names start with HHMMSS, so the oldest that day).",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1185,
+     "symbol": "plans"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1177,
+     "symbol": "precise_timers"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1188,
+     "symbol": "looked"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1189,
+     "symbol": "sleep"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "replace",
+   "line": 1194,
+   "text": "It claims the plan by renaming it to .running; from then on the client can only cancel it (a .cancel file), not withdraw it. It reads the JSON (retrying for 0.5 s if Windows holds the file), takes the plan id from the sanitized file name, and calls Player.run.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1194,
+     "symbol": "replace"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1198,
+     "symbol": "_read_plan"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1199,
+     "symbol": "id"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1200,
+     "symbol": "run"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "validate",
+   "line": 750,
+   "text": "Player.run: with the Alarm event set, any plan outside the four alarm kinds is refused. validate checks shape, time limits and that every key is in the allow-list. lie_cursor and lie_ok plans are held to their exact shapes, and with the alarm (or its file) up the rest goes through alarm_refusal: pet_food, retreat (12 s, moves only), lie_cursor, lie_ok.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 750,
+     "symbol": "validate"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 747,
+     "symbol": "PLAN_KINDS"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 751,
+     "symbol": "lie_cursor_refusal"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 760,
+     "symbol": "_with_alarm"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "bring_to_front",
+   "line": 773,
+   "text": "If the plan asks (window_client), the window is resized first. If plan.focus is set, there's no alarm, and the game isn't in front, the player brings the game forward (SetForegroundWindow and friends) and waits 0.5 s. The alarm is checked again, and the plan is refused if the game isn't the foreground window.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 773,
+     "symbol": "bring_to_front"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 767,
+     "symbol": "resize_client"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 776,
+     "symbol": "LIE_DETECTOR_ERROR"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 778,
+     "symbol": "game not in front"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "presser",
+   "line": 945,
+   "text": "The plan's clock starts at now + lead_ms (0 from Actions), and a 'key-player' thread plays the events while the main thread records frames if asked.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 945,
+     "symbol": "presser"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 787,
+     "symbol": "t0"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 947,
+     "symbol": "start"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "halt.wait",
+   "line": 839,
+   "text": "For each event, wait(due) sleeps on the Alarm event in steps of 15 ms or less, checking between steps for a .cancel file, the retreat cutoff and a splice; the last 20 ms go through _sleep_until (sleeps of at most 10 ms, spinning only the last 4 ms). Meanwhile the player's Watchdog thread looks at the game 4 times a second, and on a Lie Detector sets the Alarm first, so the wait ends at once and the plan stops.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 839,
+     "symbol": "halt.wait"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 822,
+     "symbol": "wait"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 828,
+     "symbol": "cancel"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 841,
+     "symbol": "_sleep_until"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 483,
+     "symbol": "alarm.set"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "foreground_title",
+   "line": 888,
+   "text": "Just before the key, the player checks again that the game is the foreground window. If it isn't, the plan stops ('game left the foreground; stopped pressing keys').",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 888,
+     "symbol": "foreground_title"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 889,
+     "symbol": "game left the foreground"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "_press",
+   "line": 922,
+   "text": "press_keys calls _press(allowed, name, down); for a key, that is maplehelper.win32.send_key(allowed[name], down). (A mouse event goes to window.move_cursor, a button to send_mouse_button.)",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 922,
+     "symbol": "_press"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1029,
+     "symbol": "send_key"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "maplehelper/win32.py",
+   "symbol": "KEYBDINPUT",
+   "line": 73,
+   "text": "send_key builds one KEYBDINPUT: wVk 0, wScan = MapVirtualKeyW(vk) (the scan code games read), KEYEVENTF_SCANCODE (+EXTENDEDKEY, +KEYUP for a release), dwExtraInfo = INJECTED_TAG 0x4D484C50. It calls SendInput(1, ...) and raises WinError unless one event went in.",
+   "evidence": [
+    {
+     "path": "maplehelper/win32.py",
+     "line": 73,
+     "symbol": "KEYBDINPUT"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 59,
+     "symbol": "MapVirtualKeyW"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 74,
+     "symbol": "SendInput"
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 17,
+     "symbol": "INJECTED_TAG"
+    }
+   ]
+  },
+  {
+   "process": "game",
+   "path": "gamelab/control/player.py",
+   "symbol": "",
+   "line": 3,
+   "text": "Windows puts the event into the input stream of the foreground window, the game. The event comes from an elevated process, so Windows' block on input from normal programs into an administrator window doesn't apply. The game reads it as a scan-code key press or release.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 3,
+     "symbol": ""
+    },
+    {
+     "path": "maplehelper/win32.py",
+     "line": 66,
+     "symbol": ""
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "held",
+   "line": 960,
+   "text": "When the plan ends, is cut short or fails, every key it still holds is released (send_key with down=False). The .cancel and .splice files are cleaned up, and the result {sent: [ms, key, down|up] as pressed, problems, client, trail?} is built.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 960,
+     "symbol": "held"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 961,
+     "symbol": "_press"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 971,
+     "symbol": "result"
+    }
+   ]
+  },
+  {
+   "process": "player",
+   "path": "gamelab/control/player.py",
+   "symbol": "_answer",
+   "line": 1206,
+   "text": "_serve answers: lab/outbox/<id>.tmp is written and renamed to .json, and the .running file is deleted. 'ran <id>: ok' (or the error) goes to lab/player.log.",
+   "evidence": [
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1206,
+     "symbol": "_answer"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1099,
+     "symbol": "_answer"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1107,
+     "symbol": "replace"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 1207,
+     "symbol": "_log"
+    }
+   ]
+  },
+  {
+   "process": "hunt",
+   "path": "gamelab/control/client.py",
+   "symbol": "_read_result",
+   "line": 383,
+   "text": "client.wait reads the result (retrying for about 1 s), then deletes it and any leftover .cancel. An error raises PlayerError, or LieDetectorAlarm for a Lie Detector refusal (which starts her retreat in on_alarm). Actions.play keeps the 'sent' times and marks the plan over (ended).",
+   "evidence": [
+    {
+     "path": "gamelab/control/client.py",
+     "line": 383,
+     "symbol": "_read_result"
+    },
+    {
+     "path": "gamelab/control/client.py",
+     "line": 392,
+     "symbol": "LIE_DETECTOR_ERROR"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 277,
+     "symbol": "sent"
+    },
+    {
+     "path": "gamelab/control/actions.py",
+     "line": 279,
+     "symbol": "ended"
+    }
+   ]
+  }
+ ]
+}

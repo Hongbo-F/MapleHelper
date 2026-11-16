@@ -1,0 +1,2992 @@
+{
+  "id": "perception-detectors",
+  "layer": "perception",
+  "title": "Perception: detectors for monsters, loot, events and the Lie Detector",
+  "tagline": "Questions answered about one frame: monsters, drops, deaths, newborns, touches, messages, Lie Detector.",
+  "summary": "These modules turn a frame of the game into answers: which monsters are where and which way they face, which drops lie on the platforms, which followed monster is dying, which spawn point has a monster fading in, whether a monster just touched her (MISS or damage), what the game's message bar and chat box show, and whether a Lie Detector test is on screen. They know nothing about the map: localization places their answers and behavior acts on them. Most run on every frame of the perception service's one pass (15 a second); the Lie Detector spotter runs in the elevated key player's watchdog, 4 times a second.",
+  "details_md": "Every detector here answers one question about pixels and returns frame pixels; `localization` (the `Scene`, `worldstate`, `tracking`) turns those into map units. They are called from three places:\n\n- **The perception service's per-frame pass** (`localization.worldstate.WorldStep.step`, 15 frames a second, one pass reads everything off one frame): the whole-screen monster search (`MobDetector.detect_wide`, on the pass's one-thread pool 'wide' beside her look, followed on that thread by `perception.exact`'s finder, another slice, which adds the partly covered monsters near her that the masked search misses), the spawn watch (`SpawnWatch.look`), the death watch (`DeathWatch.dying` for tracks found weakly or lost lately), the touch watch (`TouchWatch.update`), the chat box (`chatbox.read`, in `Eyes.look_at`) and the drop strips a consumer asked for, then one strip in view by rotation every 0.2 s (worldstate's `DROPS_STRIPS`, `DROPS_EVERY_S`; `LootDetector.detect_each` through `Eyes.items_in`).\n- **The hunt's own questions**, through `Eyes` (perception's door to pixels, another slice): her attack's MISS over her targets (`MissReader`), the message bar's refusals (`ChatReader`), the pickup log's rows (`log_rows`, `says_full`, `says_no_darts`).\n- **The Lie Detector chain**: the elevated key player's watchdog (`control.player.Watchdog`) asks `LieDetectorSpotter` 4 times a second; once the alarm is up, the perception service runs `lie_target.TargetTracker` on the mouse mini-game (in a child process of its own, `control.lie_tracking`) and `violetta` on the Violetta game (on a thread of its own, `control.violetta_live`).\n\n| Detector | Question | How | Cost (measured) |\n|---|---|---|---|\n| `MobDetector` | which monsters, where, facing | colour silhouettes, then masked picture match | a crowd's whole screen 14-17 ms on its thread, about 22 ms of CPU (2026-10-27) |\n| `LootDetector` | which drops on a platform | masked shape match plus a colour check | her platform's strips 6-9 ms, every platform in view 54-111 ms |\n| `DeathWatch` | is this track dying | die1 frames at its feet | 0.83 ms a look |\n| `SpawnWatch` | is a monster fading in at a point | alpha-blend fit over the map's art | 1.19 ms a frame |\n| `TouchWatch` | did a monster touch her | violet popup over her tag | 0.42 ms a frame |\n| `MissReader` | did her attack miss | the orange MISS shape's IoU | about 0.12 ms a box |\n| `ChatReader` | did the game refuse her key | pink line, OCR only when new | under 1 ms; 285 ms per new line |\n| `chatbox.read` | is the chat box expanded | its +/- button and input row | 0.04-0.08 ms |\n| `LieDetectorSpotter` | is a Lie Detector up | templates near each form's place | 11 ms near, 151 ms whole frame |\n| `TargetTracker` | where is the mini-game's target | outline particle filter | 30 ms a frame |\n| `violetta` | where did the made-up Violetta go | YOLO boxes plus the client's shuffle rules | about 10 ms a frame on the GPU |\n\n**Shared techniques.**\n- *The game's own pictures*: monster sprites, item icons and coins, die1 frames, the NoViolet and NoRed popup sprites, all read from the game data copy (`gamedata`) and drawn the way the look frame shows them. At the game's own 1366x768 (since 2026-10-23) a picture's opaque pixels appear exactly, so only alpha-255 pixels are matched: half-transparent ones are partly background.\n- *Masked normalised correlation* (`perception.match`, in C where `gamelab.native` is built), and colour tests to reject look-alikes: hand-made palettes and learned gates in the monster search, `PIXEL_SLACK` for drops, HSV ranges for popups, the game's pink for its own lines.\n- *Measured thresholds*: every number comes from labelled recordings, and the comments say which and where (scripts under D:/MapleHelper-scratch).\n- *C hot paths with the same answers* as the numpy reference (`search.c`, `spawns.c`, `native.c`), which also release Python's lock so thread pools help.\n- *False positives avoided before misses*: the spawn watch's rule has its nearest negative 11.8 times off it, and the spawn and death watches run only on the maps and kinds that were measured.\n\n**Geometry.** Look frames are 1 px a game px at the game's own 1366x768; the older 1920x1080 window gave half-size look frames at 0.703 px a game px, where many numbers were first measured. Detectors take a `scale` (`Geometry.frame_scale`) or bring their pictures to it, and the Lie Detector templates (cut at 1920x1080) have frames stretched up to them.\n\n**Safety.** `LieDetectorSpotter` is loaded by the elevated key player and imports only `gamelab.paths`. The mini-game tracker and the Violetta solver only say where; any cursor move or click goes through the elevated player, which refuses any that isn't inside the board or a button's box (`control.player`'s `alarm_refusal`, the boxes in `control.alarm`).",
+  "groups": [
+    {
+      "id": "monsters",
+      "title": "Monsters on screen",
+      "summary": "The two-step monster search the whole stack relies on: where every monster is, its kind, feet, facing and pose.",
+      "modules": [
+        "gamelab/perception/mobs.py"
+      ]
+    },
+    {
+      "id": "births-deaths",
+      "title": "Monsters fading in and dying",
+      "summary": "The spawn watch sees newborns at their first faint frame; the death watch sees a followed monster's die1 animation.",
+      "modules": [
+        "gamelab/perception/spawns.py",
+        "gamelab/perception/deaths.py"
+      ]
+    },
+    {
+      "id": "loot",
+      "title": "Drops on the ground",
+      "summary": "Which items a map's monsters drop, and the detector that finds them and mesos above the platforms.",
+      "modules": [
+        "gamelab/perception/loot.py",
+        "gamelab/perception/drops.py"
+      ]
+    },
+    {
+      "id": "her-events",
+      "title": "Her touches, her MISSes and the game's words",
+      "summary": "Popups over her and over her targets, the game's message bar and pickup log, and the chat box's state.",
+      "modules": [
+        "gamelab/perception/touches.py",
+        "gamelab/perception/misses.py",
+        "gamelab/perception/messages.py",
+        "gamelab/perception/chatbox.py"
+      ]
+    },
+    {
+      "id": "lie-detector",
+      "title": "The Lie Detector",
+      "summary": "Spotting every form of the anti-bot test, and following its two mini-games while the alarm is up.",
+      "modules": [
+        "gamelab/perception/lie_detector.py",
+        "gamelab/perception/lie_target.py",
+        "gamelab/perception/violetta.py"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "path": "gamelab/perception/mobs.py",
+      "title": "Monster detector (MobDetector)",
+      "tagline": "Finds every monster on screen: colour silhouettes first, then masked picture matches.",
+      "summary": "MobDetector finds monsters in a look frame in two steps: a fast single-channel match of each picture's body-colour silhouette against the frame's body-colour mask, then a full masked colour match of the game's own picture at the best few spots. Each monster found is a `Mob` that knows its kind, which picture matched, where its feet are, which way it faces and its pose. The perception service's pass calls `detect_wide` over the whole play area on every frame (15 a second); its answers feed the monster tracker.",
+      "details_md": "**The pictures.** Templates are PNGs named `<kind>_<anything>.png` (RGBA, the alpha is the mask): screenshot cut-outs in `gamelab/assets/mobs` and the game's own sprites that `perception.sprites` builds from the game data (every stand, move and hit1 frame). Each folder's `index.json` / `cutouts.json` says, per picture, where the monster's feet are (`origin`), which way it faces, its game frame (`move/2`) and body box; `scale.json` says its px per game px. Every picture is also used flipped (the game's sprites face left). At the game's own 1366x768 step 2 matches only the fully opaque pixels (alpha 255): a slime is see-through, and its half-opaque pixels on screen are partly what's behind it.\n\n**Step 1: where to look.** The frame (or a band of rows) is shrunk to `SEARCH_SCALE` (the old 1920x1080 window's half size, 0.703 px per game px, where every step-1 number was measured) and then to 1/`COARSE`. Each kind's body-colour test makes a mask: hand-written for the first map's four kinds (`PALETTES`: pig, slime, snail, orange-mushroom), or a gate learned from the map's background colours (`perception.gates`) for every other kind. A kind is skipped where fewer than `MIN_BODY_PIXELS` have its colour. Each picture's silhouette is matched against the mask (`TM_CCOEFF_NORMED`); windows whose share of body colour is under `MIN_COVER` (0.25) times the silhouette's own share are zeroed first (their normalised score is noise that can reach 1.0), and 3x3 local peaks at `SILHOUETTE_THRESHOLD` (0.35) or more become spots.\n\n**Step 2: is it really one.** At half size the best `MAX_CHECKS` (12) spots per kind, at least `CHECK_SLACK` apart, get the full masked colour match a few px around (a learned kind's place: its best `PER_PLACE`, 3, pictures); `THRESHOLD` (0.6) or more is a monster. On a finer frame (1366x768 at full size, the live case) spots are grouped into places; a place must first pass a gate at step 1's scale (`FINE_GATE` 0.55, trying `GATE_TRIES` pictures for learned kinds), then its best `FINE_TEMPLATES` (6) pictures are matched at full size within `FINE_SLACK` (4) px, because a monster's animation frames differ crisply there. Overlapping finds are suppressed (`match.suppress_overlaps`).\n\n**Kinds that share a body.** Horny and Green Mushroom (one sprite, two caps) and Stump and Dark Stump (one sprite, two colours) have `SAME_SHAPE` (0.9) of their pixels in common: they are searched as one unit with one silhouette, and each kind's picture is checked side by side at a place. An Axe Stump is a Stump plus an axe (`TWIN_COVER` 0.8): a find is re-judged at its feet (`_pick_kind`), where a picture with parts of its own (`OWN_PARTS`, the axe) wins only if those parts alone match `OWN_MATCH` (0.6).\n\n**The whole screen.** `detect_wide` cuts the play area into bands of `WIDE_BAND` rows every `WIDE_STEP`, overlapping by the tallest learned picture, each band getting its own best spots (one pass over the whole screen once lost three slimes to green foliage that took all the slime spots). Bands run at once on a thread pool.\n\n**C, with the same answers.** Step 1 runs in `gamelab/search.c` (`_InC`, switch `SEARCH_C`) with exact integer sums; where OpenCV's float32 noise (bounded by `NOISE_K`) could change which windows peak or their order, those shapes are redone the OpenCV way (`_InC._master`), so the answers are the reference implementation's by construction. Step 2's matches go to `native.c`'s re-find contexts (`_matches`). Without the DLL everything runs in numpy and OpenCV with the same answers.\n\n**Re-finds.** `refind`, `refind_all` and `refind_ahead` look for a followed monster near where it should be (`REFIND_PAD` 16 px, a smaller near window first, a memo of identical pixels, the animation's likely next frames, optionally on the GPU). Since 2026-10-30 the live pass searches the whole screen every frame instead and these are unused there, kept for analysis and tests.\n\n**What it misses.** A monster partly covered near her (her body, her pet, damage numbers, effects) loses masked score with the share still showing: on a clip of 2026-11-02 it was found on 6% of the frames within 25 units of her, most misses refused at `FINE_GATE`. Since 2026-11-04 `perception.exact`'s finder (exact pixels of the same pictures, another slice) runs right after the search on the same thread and adds them.",
+      "lines": 1898,
+      "key_items": [
+        {
+          "name": "MobDetector",
+          "kind": "class",
+          "line": 392,
+          "signature": "class MobDetector",
+          "summary": "The detector: loads every picture (both facings), learns gates for kinds without a hand-made colour test, groups kinds into units, and owns the thread pools and C contexts.",
+          "details_md": "Constructor: `MobDetector(folder=ASSETS, threads=THREADS, meta=None, frame_scale=STRETCHED.frame_scale, search_scale=SEARCH_SCALE, kinds=None, background=None, learned=None, fog_alphas=FOG_ALPHAS)`. A map's detector is made by `sprites.detector_for` at the game's own size. `background` (gates.load_background) is what lets kinds with no hand-made test be looked for at all."
+        },
+        {
+          "name": "MobDetector.detect_wide",
+          "kind": "method",
+          "line": 524,
+          "signature": "def detect_wide(self, frame: np.ndarray, rows: tuple[int, int]) -> list[Mob]",
+          "summary": "Every monster over a tall stretch of the frame, band by band (WIDE_BAND rows every WIDE_STEP), the bands searched at once on a pool; the live per-frame search."
+        },
+        {
+          "name": "MobDetector._detect",
+          "kind": "method",
+          "line": 886,
+          "signature": "def _detect(self, frame: np.ndarray, rows: tuple[int, int] | None, run, only=None) -> list[Mob]",
+          "summary": "One band's search: step 1 (in C where it can), places or spots picked, step 2's masked matches, finds of THRESHOLD or more turned into Mobs, overlaps suppressed."
+        },
+        {
+          "name": "MobDetector.detect",
+          "kind": "method",
+          "line": 520,
+          "signature": "def detect(self, frame: np.ndarray, rows: tuple[int, int] | None = None) -> list[Mob]",
+          "summary": "Monsters in a frame or a band of rows (her band: Eyes.monsters)."
+        },
+        {
+          "name": "Mob",
+          "kind": "dataclass",
+          "line": 255,
+          "signature": "@dataclass(frozen=True) class Mob",
+          "summary": "A monster seen: kind, picture centre and size, score, feet (`ox`, `feet`), facing, pose, frame, picture name, and `fading` (its alpha when the spawn watch found it fading in)."
+        },
+        {
+          "name": "_spots",
+          "kind": "function",
+          "line": 1797,
+          "signature": "def _spots(coarse, cover, template, i) -> list[tuple[float, int, int, int]]",
+          "summary": "Step 1 for one picture in numpy/OpenCV: silhouette matched against the coarse colour mask, low-cover windows zeroed, local peaks at SILHOUETTE_THRESHOLD kept (in C via native.peaks when built)."
+        },
+        {
+          "name": "_InC",
+          "kind": "class",
+          "line": 1108,
+          "signature": "class _InC",
+          "summary": "Step 1 made ready for gamelab/search.c: each silhouette's integer tables, groups of shapes, the learned gates' lookup; shapes whose float32 noise could decide a peak are redone as OpenCV does (`_master`)."
+        },
+        {
+          "name": "_pick_kind",
+          "kind": "function",
+          "line": 1510,
+          "signature": "def _pick_kind(frame, m, twins, templates, slack, aligned=None, cache=None) -> Mob",
+          "summary": "Tells twin kinds apart at a find's feet: a picture with its own parts (an Axe Stump's axe) wins only where those parts match OWN_MATCH; otherwise the best score."
+        },
+        {
+          "name": "MobDetector.refind",
+          "kind": "method",
+          "line": 542,
+          "signature": "def refind(self, frame, box, kind, template='', facing=0, bounds=None, fallback=True, near=None, memo=None) -> Mob | None",
+          "summary": "A monster seen before, looked for again REFIND_PAD px around where it should be: its last picture, then its animation's next frames, then its kind's whole set. Unused by the live pass since 2026-10-30."
+        },
+        {
+          "name": "MobDetector.refind_all",
+          "kind": "method",
+          "line": 638,
+          "signature": "def refind_all(self, frame, asks, bounds=None, threads=1, pool=None, ahead=None) -> list[Mob | None] | None",
+          "summary": "Every re-find of a frame in one C call (native.Refinds), the same answers as `refind` one by one."
+        },
+        {
+          "name": "PALETTES",
+          "kind": "constant",
+          "line": 332,
+          "signature": "PALETTES = {\"pig\": _pig, \"slime\": _slime, \"snail\": _snail, \"orange-mushroom\": _orange_mushroom}",
+          "summary": "The first map's hand-written body-colour tests on r, g, b; every other kind needs a learned gate."
+        },
+        {
+          "name": "THRESHOLD",
+          "kind": "constant",
+          "line": 76,
+          "signature": "THRESHOLD = 0.6",
+          "summary": "The masked colour match a spot needs to count as a monster."
+        },
+        {
+          "name": "near_pad",
+          "kind": "function",
+          "line": 1688,
+          "signature": "def near_pad(speed: float, dt: float) -> int",
+          "summary": "How far around its predicted box a followed monster is looked for first: NEAR_MARGIN + 2 x speed x dt."
+        },
+        {
+          "name": "_next_frames",
+          "kind": "function",
+          "line": 1742,
+          "signature": "def _next_frames(templates, last, most=None) -> list[MobTemplate]",
+          "summary": "The frames a monster most likely shows next (its pose's next two, the other poses' first, the rest), for re-finds at the game's own size."
+        },
+        {
+          "name": "_one_opencv_thread",
+          "kind": "function",
+          "line": 1767,
+          "signature": "def _one_opencv_thread() -> None",
+          "summary": "Pool initializer: OpenCV on one thread (its own threads made the whole screen 141 ms instead of 117)."
+        }
+      ],
+      "inputs": [
+        "a look frame (RGB) from perception.eyes, or the service's full frame at 1366x768, at Geometry.frame_scale px per game px",
+        "a band of rows (her band) or the play area's rows down to the HUD's top",
+        "monster pictures: gamelab/assets/mobs cut-outs and the game's sprites built by perception.sprites (with index.json, cutouts.json, scale.json)",
+        "a map's background colour counts (perception.gates) for kinds with no hand-made colour test",
+        "for a re-find: a followed monster's box, kind, last picture and facing"
+      ],
+      "outputs": [
+        "a list of `Mob` per search to Eyes.monsters / Eyes.monsters_wide and localization.worldstate's pass (then localization.tracking)",
+        "its pictures and their metadata to perception.exact, perception.sprites, analysis.pasted and analysis.bodies",
+        "counters (fallbacks, recalled, redone, noise_over) for benchmarks"
+      ],
+      "uses": [
+        "gamelab/native.py",
+        "gamelab/paths.py",
+        "gamelab/screen.py",
+        "gamelab/perception/match.py",
+        "gamelab/perception/gates.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/assets/mobs/",
+          "mode": "read",
+          "what": "screenshot cut-outs <kind>_*.png and cutouts.json"
+        },
+        {
+          "path": "<sprites folder>/index.json, scale.json",
+          "mode": "read",
+          "what": "the game sprites' feet, facing, frame and scale (built by perception.sprites)"
+        }
+      ],
+      "concurrency": "Two lazily used ThreadPoolExecutors: 'monster-search' with THREADS (6) workers for the numpy/OpenCV path, and 'monster-search-bands' with min(threads, SEARCH_THREADS=3) for the whole screen's bands when step 1 is in C; each worker sets OpenCV to one thread. The C calls (search.c, native.c) release Python's GIL. Per-thread C re-find contexts (threading.local); locks guard lazy C setup and the counters. In the live pass the whole screen runs on worldstate's one-thread pool named 'wide' (`WorldStep._halves`, switch `HALVES`) beside her look.",
+      "tunables": [
+        {
+          "name": "THRESHOLD",
+          "value": "0.6",
+          "meaning": "masked colour match that counts as a monster"
+        },
+        {
+          "name": "SILHOUETTE_THRESHOLD",
+          "value": "0.35",
+          "meaning": "step 1 score for a spot worth checking"
+        },
+        {
+          "name": "MAX_CHECKS",
+          "value": "12",
+          "meaning": "spots checked per kind in step 2"
+        },
+        {
+          "name": "MIN_COVER",
+          "value": "0.25",
+          "meaning": "step 1: a window's body-colour share must be at least this times the silhouette's own"
+        },
+        {
+          "name": "MIN_BODY_PIXELS",
+          "value": "20",
+          "meaning": "a kind is looked for only where this many pixels have its colour"
+        },
+        {
+          "name": "COARSE",
+          "value": "2",
+          "meaning": "step 1 works at 1/COARSE of SEARCH_SCALE"
+        },
+        {
+          "name": "CHECK_SLACK",
+          "value": "6",
+          "meaning": "px step 2 looks around a spot (half-size frames)"
+        },
+        {
+          "name": "FINE_TEMPLATES / FINE_GATE / FINE_SLACK",
+          "value": "6 / 0.55 / 4",
+          "meaning": "at 1366x768: pictures checked per place, the gate at step 1's scale, px around"
+        },
+        {
+          "name": "GATE_TRIES",
+          "value": "2",
+          "meaning": "pictures a learned kind's place is gated with"
+        },
+        {
+          "name": "WIDE_BAND, WIDE_STEP",
+          "value": "120, 90",
+          "meaning": "whole-screen band height and step (half-size px, scaled)"
+        },
+        {
+          "name": "THREADS / SEARCH_THREADS",
+          "value": "6 / 3",
+          "meaning": "matches at once; bands at once with step 1 in C"
+        },
+        {
+          "name": "REFIND_PAD / REFIND_GOOD / NEAR_GOOD",
+          "value": "16 / 0.9 / 0.95",
+          "meaning": "re-find window, score that stops trying next frames, score a near window must reach"
+        },
+        {
+          "name": "SAME_SHAPE / TWIN_COVER",
+          "value": "0.9 / 0.8",
+          "meaning": "shared pixels for one search unit / for twin kinds told apart at their feet"
+        },
+        {
+          "name": "OWN_PARTS / OWN_MATCH",
+          "value": "0.1 / 0.6",
+          "meaning": "a picture's own parts (the axe) and how well they must match"
+        },
+        {
+          "name": "NOISE_K",
+          "value": "32 x 2^-24",
+          "meaning": "bound on OpenCV's float32 noise against the exact score (4x the worst measured)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-24",
+          "what": "Learned kinds' places gated with their first GATE_TRIES (2) pictures, not one.",
+          "why": "A stump's flinch frame's silhouette matched best but scored 0.29-0.46 at the gate; with two tries 56 of 58 stumps in plain view were found instead of 53 (106 ms a whole screen against 91)."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "Kinds without a hand-made colour test get a gate learned from the map's background.",
+          "why": "West Rocky Mountain II's stumps are browns like its rock and Tree Dungeon's mushrooms stand in a green forest: hand-written tests would be hard to write (README, learned gates)."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "Re-finds look in a near window first and recall a window's last answer when its pixels are identical.",
+          "why": "Fewer matches a frame with the reference implementation's answers (README, Fewer re-find matches)."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "Step 1 moved into C (gamelab/search.c) with exact integer sums.",
+          "why": "A crowd's whole screen took 115 ms of CPU on one thread, about 22 after (README, A cheaper whole screen)."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "OpenCV's float32 noise bound NOISE_K measured; shapes it could decide are redone the OpenCV way.",
+          "why": "So the C search's answers equal the reference implementation's by construction, not only on the frames compared."
+        },
+        {
+          "date": "2026-10-30",
+          "what": "The live pass searches the whole screen every frame at 15 a second; re-finds left unused.",
+          "why": "The user: \"make perception output the 15fps whole screen only, no need for a separate 30fps existing tracking\"."
+        }
+      ],
+      "gotchas": [
+        "A Mob's x and y are the picture's centre, not where it stands: use `foot_x` / `feet_y` (a sprite stands on its origin, up to 8.5 map units off its centre; a slime's hop frame ends 10 units above its feet).",
+        "Step 1's frame is cut to a multiple of COARSE: an odd band height (151 rows) once smeared faint colour into blank windows that then scored a perfect 1.0.",
+        "Kinds with neither a hand-made colour test nor the map's background counts aren't looked for at all; a detector given `kinds` may legitimately find nothing.",
+        "`_one_opencv_thread` sets OpenCV's thread count for the whole process, not just the pool's thread.",
+        "The re-find API (refind, refind_all, refind_ahead, native.c's rf_* and the GPU path) is unused by the live pass since 2026-10-30 and left for a later cleanup.",
+        "The search stops at the HUD's top (row 700 at 1366x768): a monster half under the chat bar, its feet below that row, isn't looked for.",
+        "Partly covered monsters near her are mostly missed (6% found within 25 units of her on a 2026-11-02 clip): perception.exact's finder, run after the search, adds them."
+      ],
+      "tests": [
+        "tests/test_perception.py",
+        "tests/test_refind.py",
+        "tests/test_search_c.py",
+        "tests/test_native_search.py",
+        "tests/test_gates.py",
+        "tests/test_sprites.py",
+        "tests/test_pasted.py",
+        "tests/test_gpumatch.py",
+        "tests/test_native_match.py",
+        "tests/test_worldstate.py",
+        "tests/test_feed.py",
+        "tests/test_service.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/loot.py",
+      "title": "Loot detector (LootDetector)",
+      "tagline": "Finds drops and mesos lying in strips just above the platforms.",
+      "summary": "LootDetector matches the game's own item pictures, and the spinning meso coins, in strips just above the platforms in view. A spot is a drop when the masked shape match scores 0.6 and its pixels are within 24 colour levels of the picture's, which rules out backdrops and UI that only share a shape. It also holds the pickup log's two text tests: inventory full (`says_full`) and no throwing stars left (`says_no_darts`).",
+      "details_md": "**The pictures.** `build` draws each item's `iconRaw` from the game data copy (`gamedata.canvas.item_icon`; ids looked up by name in String/Etc.img and Consume.img, because Classic World's ids differ from GMS's) and the bronze and gold coins' spinning frames (the edge-on frame left out). They are drawn at the old 1920x1080 window's 1.40625 px per game px (`gamedata/data/out/loot`) or as they are for the game's own 1366x768 (`loot_x1`, with a `scale.json`). Shrinking averages colour over opaque pixels only (`resample_opaque`), so transparent pixels don't bleed into the edges. Each file is written under a temporary name and renamed (`_put`): the folder is shared by every map, and test workers may build it at once. `ensure` builds only what's missing.\n\n**Matching** (`detect_each`). Callers pass boxes: `localization.scene.find_loot` asks for strips just above each platform (`ABOVE` 30 to `BELOW` 6 half-size px), since drops lie on the ground (a whole-screen search took 1.3 s). Every template is matched in every box at once on a 3-thread pool. Per template: masked `TM_CCOEFF_NORMED` (`match.masked_match`), local maxima in 5x5 at `THRESHOLD` (0.6), then the colour check: the mean absolute difference over the template's solid pixels (covering at least `SOLID_COVER` of a pixel) must be `PIXEL_SLACK` (24) or less. Measured: real drops 12-19 off, scenery and UI that matched a shape 27-57 off. Cost: 6.0 ms for her platform's strips and 54 for every platform in view (README, medians on 30 saved screenshots); with 3 threads on 100 frames of 2026-10-26, 8.6 and 111 ms. At the game's own size the pictures are drawn pixel for pixel, so the shape is matched on grey (one channel, faster), and colours are still checked.\n\n**Recoloured twins.** Ores, gems and potions are one picture recoloured: on grey, an Iron Ore's picture scores 0.998 where a Silver Ore lies. Two held kinds found at one place with shape scores within `SAME_SHAPE` (0.02): the one nearer in colour is kept (`_recoloured`). Items the map's detector doesn't hold but whose pictures are recolours of a held one (`twins_of`, kept in a `twins/` subfolder) are weighed too: a find is dropped where a twin's colours are nearer.\n\n**Text tests.** `FULL_MESSAGE` matches \"You can't get anymore items.\" (seen when her Etc tab filled) and the usual wordings; `NO_DARTS_MESSAGE` matches the usual \"no stars\" wordings, since the game's own line has never been captured.",
+      "lines": 479,
+      "key_items": [
+        {
+          "name": "LootDetector",
+          "kind": "class",
+          "line": 358,
+          "signature": "class LootDetector",
+          "summary": "Loads a map's drop pictures (and their twins), brings them to the look frame's scale, decides grey or colour shape matching, and owns a THREADS pool.",
+          "details_md": "`LootDetector(folder=None, geo=STRETCHED, gray=None, items=None)`: with no folder it builds what's missing for `items` (`ensure`). Eyes makes one on first use with the map's `drop_names`."
+        },
+        {
+          "name": "LootDetector.detect_each",
+          "kind": "method",
+          "line": 399,
+          "signature": "def detect_each(self, frame, boxes, mesos_only=False) -> list[list[Item]]",
+          "summary": "Drops in each of several boxes, every box's templates on the pool together (13 strips: 93 ms one after another, 68 together)."
+        },
+        {
+          "name": "LootDetector._match",
+          "kind": "method",
+          "line": 420,
+          "signature": "def _match(self, area, origin, gray, template) -> list[tuple[Item, float]]",
+          "summary": "One template in one box: masked match peaks at THRESHOLD, kept when the colours are within PIXEL_SLACK and no twin's colours are nearer."
+        },
+        {
+          "name": "Item",
+          "kind": "dataclass",
+          "line": 131,
+          "signature": "@dataclass(frozen=True) class Item",
+          "summary": "An item or mesos on the ground: kind, centre, size, score, and the coin (bronze/gold) for mesos."
+        },
+        {
+          "name": "_recoloured",
+          "kind": "function",
+          "line": 472,
+          "signature": "def _recoloured(hits: list[tuple[Item, float]]) -> list[Item]",
+          "summary": "Of two held kinds found at one place with near-equal shape scores, keeps the one nearer in colour."
+        },
+        {
+          "name": "build",
+          "kind": "function",
+          "line": 199,
+          "signature": "def build(folder=LOOT, stretch=STRETCHED.stretch, items=ITEMS, coins=True) -> list[Path]",
+          "summary": "Writes each item's picture and the coins' frames from the game data copy, drawn `stretch` times larger."
+        },
+        {
+          "name": "ensure",
+          "kind": "function",
+          "line": 306,
+          "signature": "def ensure(folder=None, stretch=STRETCHED.stretch, items=ITEMS) -> Path",
+          "summary": "Builds only the missing pictures and twins; leaves existing ones (another map's detector may be reading them)."
+        },
+        {
+          "name": "twins_of",
+          "kind": "function",
+          "line": 240,
+          "signature": "def twins_of(items, copy=COPY) -> dict[str, list[tuple[str, np.ndarray]]]",
+          "summary": "For each item, the other items whose pictures are the same shape and alpha, recoloured within TWIN_SLACK."
+        },
+        {
+          "name": "detector_for",
+          "kind": "function",
+          "line": 341,
+          "signature": "def detector_for(model, geo=STRETCHED) -> LootDetector",
+          "summary": "A detector for a map's drops (drops.items_for)."
+        },
+        {
+          "name": "resample_opaque",
+          "kind": "function",
+          "line": 151,
+          "signature": "def resample_opaque(rgba, size) -> tuple[np.ndarray, np.ndarray]",
+          "summary": "Resizes a picture averaging colour over its opaque pixels only, plus how much of each pixel it covers."
+        },
+        {
+          "name": "says_full",
+          "kind": "function",
+          "line": 106,
+          "signature": "def says_full(text: str) -> bool",
+          "summary": "Whether a pickup log line says her inventory is full (behavior.looting)."
+        },
+        {
+          "name": "says_no_darts",
+          "kind": "function",
+          "line": 125,
+          "signature": "def says_no_darts(text: str) -> bool",
+          "summary": "Whether a line says she has no throwing stars left (behavior.darts; perception.messages.refusal)."
+        },
+        {
+          "name": "PIXEL_SLACK",
+          "kind": "constant",
+          "line": 68,
+          "signature": "PIXEL_SLACK = 24",
+          "summary": "Mean colour difference per pixel and channel a drop may have from its picture."
+        }
+      ],
+      "inputs": [
+        "a look frame (RGB) and boxes (strips above platforms) from localization.scene.find_loot through Eyes.items_in",
+        "the item names a map's monsters drop (perception.drops.items_for), plus mesos",
+        "the game data copy (gamedata/data/copy: item names, item icons, meso frames) to build pictures",
+        "pickup log text for says_full / says_no_darts"
+      ],
+      "outputs": [
+        "per box, a list of `Item` to localization.scene (Scene.loot), localization.worldstate's drop strips and behavior.looting",
+        "says_full to behavior.looting; says_no_darts to behavior.darts and perception.messages",
+        "ABOVE/BELOW strip sizes and MESOS to localization.scene and behavior"
+      ],
+      "uses": [
+        "gamelab/perception/drops.py",
+        "gamelab/perception/match.py",
+        "gamelab/perception/kinds.py",
+        "gamelab/perception/mobs.py",
+        "gamelab/perception/sprites.py",
+        "gamelab/screen.py",
+        "gamedata/paths.py",
+        "gamedata/canvas.py",
+        "gamedata/wz.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamedata/data/out/loot/",
+          "mode": "read-write",
+          "what": "drop pictures at the 1920x1080 window's scale, and twins/ (kind lists and pictures)"
+        },
+        {
+          "path": "gamedata/data/out/loot_x1/",
+          "mode": "read-write",
+          "what": "drop pictures as the game draws them at 1366x768 (scale.json)"
+        },
+        {
+          "path": "gamedata/data/copy/String/String_000.wz",
+          "mode": "read",
+          "what": "item names to ids (Etc.img, Consume.img)"
+        }
+      ],
+      "concurrency": "One ThreadPoolExecutor of THREADS (3) per detector: every box's templates matched at once (OpenCV and the C let go of the GIL).",
+      "tunables": [
+        {
+          "name": "THRESHOLD",
+          "value": "0.6",
+          "meaning": "masked shape match (drops in saved frames 0.63-0.87)"
+        },
+        {
+          "name": "PIXEL_SLACK",
+          "value": "24",
+          "meaning": "mean colour difference allowed (drops 12-19; look-alikes 27-57)"
+        },
+        {
+          "name": "THREADS",
+          "value": "3",
+          "meaning": "templates matched at once"
+        },
+        {
+          "name": "ABOVE / BELOW",
+          "value": "30 / 6",
+          "meaning": "half-size px above and below a platform's top searched"
+        },
+        {
+          "name": "SOLID_COVER",
+          "value": "0.99",
+          "meaning": "colours are checked only where the picture covers this much of a pixel"
+        },
+        {
+          "name": "MIN_MASK / MIN_SOLID",
+          "value": "20 / 10",
+          "meaning": "pixels a template needs to be used / to check colours only on solid pixels"
+        },
+        {
+          "name": "SAME_SHAPE",
+          "value": "0.02",
+          "meaning": "shape scores this close at one place: the nearer colour wins"
+        },
+        {
+          "name": "TWIN_SLACK",
+          "value": "48",
+          "meaning": "colour distance for an unheld recolour to count as a twin"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "",
+          "what": "Only strips just above platforms are searched.",
+          "why": "Drops lie on the ground; a whole-screen search took 1.3 s."
+        },
+        {
+          "date": "",
+          "what": "A colour check after the shape match.",
+          "why": "The normalised match ignores brightness and tint: the sea and island backdrop matched the Blue Potion's shape at 0.60-0.63 and UI buttons the White Potion's, but never their colours."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "THREADS from 8 to 3.",
+          "why": "On 100 saved frames of 2026-10-26 01:01, 3 threads took 294 ms of CPU for every platform in view against 8's 431, in about the same time, the same drops found."
+        },
+        {
+          "date": "",
+          "what": "Recoloured twins weighed by colour.",
+          "why": "On a Tree Dungeon frame Iron Ore was found as Silver Ore (0.998), Aquamarine as Emerald, Diamond and Opal as Sapphire, a Warrior Potion as a Magic Potion."
+        }
+      ],
+      "gotchas": [
+        "Classic World's item ids differ from GMS's: drops are looked up by name; 'Red Potion' has two ids, one blank, and the first with a picture is used.",
+        "A thin line (the Slime Bubble's string) is half background at half size and was 41 levels off: colours are checked only where the picture covers whole pixels.",
+        "Monsters are drawn in front of drops, so a drop under a monster can be missed.",
+        "`says_no_darts` matches guessed wordings: the game's own line for no stars has never been captured.",
+        "An item kind that can't be a Windows file name is refused (`drops.safe`)."
+      ],
+      "tests": [
+        "tests/test_loot.py",
+        "tests/test_darts.py",
+        "tests/test_native_match.py",
+        "tests/test_native_search.py",
+        "tests/test_pasted.py",
+        "tests/test_rope_top.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/drops.py",
+      "title": "Drop tables (what each monster drops)",
+      "tagline": "Which items to look for on a map, from meowdb's community drop lists.",
+      "summary": "A small data module: each known monster's Etc and Use drops, its reported mesos range and OSMLib's reference drop rates, read from meowdb's MapleStory Classic pages on 2026-10-24. `items_for(map)` tells the loot detector which item names to look for on a map (its monsters' drops plus four potions), with the first map pinned to what was seen there.",
+      "details_md": "`MONSTERS` maps a monster's in-game name to a `MonsterDrops`:\n- `items`: the community list's Etc and Use items with more up-votes than down-votes, leaving out scrolls (three pictures each, a shop pays 1), quest items (they drop only for a player on the quest) and arrows (a thief throws stars);\n- `mesos`: the lowest and highest reported (None for a Red Snail; the Slime's from the first map, seen in game);\n- `rates`: OSMLib's reference rates, used by the simulator's drops (`sim.world.game_drops`) and to weigh what a kill's pile is worth before a look sees it (`behavior.looting.expected_worth`).\n\nSeven monsters are known: Horny Mushroom, Green Mushroom and Slime (Tree Dungeon), Stump, Dark Stump, Axe Stump and Red Snail (West Rocky Mountain II).\n\n`items_for(model)` returns `PINNED`'s list for the first map (Victoria Road: Thicket Around the Beach II, `FIRST_MAP` 10000012: `FIRST_ITEMS`, what was seen where her kills died, plus potions); otherwise every drop of each known monster on the map in spawn order, then `POTIONS` (Red, Orange, White, Blue). `unknown` / `unknown_note` name the monsters with no entry, so the hunter and `watch` say so as they start instead of quietly looking for fewer drops. `safe` refuses item kinds Windows can't use as file names (a kind is also its picture's file name: \"Omok Piece: Slime\" would become an alternate data stream of a file \"omok-piece\").\n\nThe live stack uses the item names (what the loot detector looks for), the mesos ranges (what a bronze or gold coin is worth on a map: `behavior.looting.coins_for`) and the rates as weights only. The rates disagree with live play (her slimes' piles held Squishy Liquid 65% of the time on the first map, where OSMLib gives 40%).",
+      "lines": 178,
+      "key_items": [
+        {
+          "name": "MONSTERS",
+          "kind": "constant",
+          "line": 56,
+          "signature": "MONSTERS = {\"Horny Mushroom\": MonsterDrops(...), ...}",
+          "summary": "Each known monster's drops by in-game name, with the vote counts in comments."
+        },
+        {
+          "name": "MonsterDrops",
+          "kind": "dataclass",
+          "line": 47,
+          "signature": "@dataclass(frozen=True) class MonsterDrops",
+          "summary": "One monster's drops: items, mesos range, reference rates, source."
+        },
+        {
+          "name": "items_for",
+          "kind": "function",
+          "line": 135,
+          "signature": "def items_for(model) -> tuple[str, ...]",
+          "summary": "The items the loot detector looks for on a map: pinned for the first map, else its monsters' drops then the potions."
+        },
+        {
+          "name": "FIRST_ITEMS",
+          "kind": "constant",
+          "line": 128,
+          "signature": "FIRST_ITEMS = (\"Squishy Liquid\", \"Slime Bubble\", ...) + POTIONS",
+          "summary": "The first map's drops as seen in game, pinned."
+        },
+        {
+          "name": "POTIONS",
+          "kind": "constant",
+          "line": 43,
+          "signature": "POTIONS = (\"Red Potion\", \"Orange Potion\", \"White Potion\", \"Blue Potion\")",
+          "summary": "Looked for on every map: monsters at this level drop them."
+        },
+        {
+          "name": "unknown_note",
+          "kind": "function",
+          "line": 154,
+          "signature": "def unknown_note(model) -> str | None",
+          "summary": "What the hunter and `watch` say about monsters whose drops aren't known."
+        },
+        {
+          "name": "safe",
+          "kind": "function",
+          "line": 172,
+          "signature": "def safe(name: str) -> bool",
+          "summary": "Whether an item's kind can be a Windows file name."
+        },
+        {
+          "name": "monsters_of",
+          "kind": "function",
+          "line": 163,
+          "signature": "def monsters_of(model) -> dict[str, int]",
+          "summary": "A map's monsters by name and their spawn point counts, in first-spawn order."
+        }
+      ],
+      "inputs": [
+        "a MapModel's id and spawn points' monster names (localization.mapdata)"
+      ],
+      "outputs": [
+        "item names for perception.loot (detector_for) and localization.senses (Eyes.drop_names)",
+        "mesos ranges for behavior.looting (coins_for: what a coin is worth; expected_worth: an unseen pile)",
+        "reference rates for sim.world.game_drops and behavior.looting.expected_worth (items weighed by them)",
+        "the unknown-monsters note for behavior.hunter and the `watch` command"
+      ],
+      "uses": [
+        "gamelab/perception/kinds.py"
+      ],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "FIRST_MAP",
+          "value": "10000012",
+          "meaning": "Victoria Road: Thicket Around the Beach II, whose drops are pinned"
+        },
+        {
+          "name": "POTIONS",
+          "value": "Red, Orange, White, Blue Potion",
+          "meaning": "looked for on every map"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-24",
+          "what": "Drops read from meowdb's MapleStory Classic pages: the community lists, votes up over down.",
+          "why": "They are this game's players' own sightings; OSMLib's rates are marked 'may not represent MapleStory Classic World rates' and the old MapleSEA list 'historical reference only'."
+        },
+        {
+          "date": "2026-10-24",
+          "what": "Scrolls, quest items and arrows left out.",
+          "why": "A shop pays 1 or nothing for them, and quest items drop only for a player on the quest."
+        }
+      ],
+      "gotchas": [
+        "A monster not in MONSTERS adds nothing: only potions and mesos are looked for from it, and a coin's worth leaves its mesos out (unknown_note says so at start).",
+        "OSMLib's rates are reference rates (\"may not represent MapleStory Classic World rates\"): the simulator draws drops by them and behavior.looting uses them only as weights between a monster's items."
+      ],
+      "tests": [
+        "tests/test_loot.py",
+        "tests/test_hunt.py",
+        "tests/test_sim_tree.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/deaths.py",
+      "title": "Death watch (DeathWatch)",
+      "tagline": "Sees a followed monster die by matching the game's die1 frames at its feet.",
+      "summary": "The game never says which monster died, and the monster detector has no die1 pictures, so a dying monster's track used to linger hidden for seconds. DeathWatch matches the game data's die1 animation frames around the feet of tracks that were found weakly or lost in the last 0.6 s; a match tells the tracker that monster is dying, about a second after the killing key. It watches only Tree Dungeon's Horny and Green Mushrooms, the kinds whose margins were measured.",
+      "details_md": "**Why.** Her EXP rises about 0.2 s after the killing key (the server's), but the monster is still drawn alive and walking until her star lands, 0.85-0.9 s after the key; then it stops and plays die1 (a mushroom: 4 frames of 180, 180, 180 and 300 ms: eyes shut, sinking into its cap, the cap with a sliver of face, the cap alone fading) and is gone about 0.7 s later. Live, the service judged such a track dead a median 1.40 s after die1 began. The watch says which monster really died, so a kill bound to the wrong monster is put right and the throws after it stop, and another player's kill is dead at once instead of after `tracking.HIDE_S` (3.5 s). It comes too late for her next throw, which is decided about 0.45 s after the key from her EXP gain.\n\n**How.** `DeathWatch.of(names_by_id, scale)` reads the die1 frames of the `MEASURED` kinds from the game data in memory (`gamedata.canvas.mob_frames`, about 0.5 s, nothing written) and draws them both ways at the look's scale (`pictures_of`: at 1366x768 only alpha-255 pixels count). Each frame `worldstate.WorldStep._dying` asks about tracks where `wants(score, since)` holds: detected in this frame under `REFOUND_UNDER` (0.9), or lost `RECENT_S` (0.6 s) ago or less, each track at most every `EVERY_S`. `best` matches every die1 picture in one window `PAD` px around the feet (8 masked matches in one C call, `match.best_matches`). `dying` fires on die1/1-3 at `DIE_GOOD` (0.7), or die1/0 (eyes shut, which looks like standing) at `DIE0_GOOD` (0.6) only for a track not found in this frame, and only if no other watched kind's die1 matches better there (`others`). (worldstate also takes deaths from `perception.exact`'s die1 finds, `_died_seen`, before asking the watch.)\n\n**Measured.** On 16.8 minutes of recordings with 166 deaths labelled by eye, 118 of the 142 deaths on a track were seen (83%), a median 0.14 s after die1 began, and the 7 fires on no labelled death were all real deaths. Replayed in the service's frame step: 83 deaths seen, 73 of the 111 labelled and the other 10 real by eye. 0.83 ms a look on one thread.",
+      "lines": 194,
+      "key_items": [
+        {
+          "name": "DeathWatch",
+          "kind": "class",
+          "line": 106,
+          "signature": "class DeathWatch",
+          "summary": "Holds each watched kind's die1 pictures at the look's scale and answers whether a track is dying."
+        },
+        {
+          "name": "DeathWatch.dying",
+          "kind": "method",
+          "line": 159,
+          "signature": "def dying(self, look, kind: str, fx: float, fy: float, refound: float | None) -> bool",
+          "summary": "Whether a monster of `kind` whose feet are at (fx, fy) is seen dying: die1/1-3 at DIE_GOOD, or die1/0 at DIE0_GOOD when not re-found, and no other kind's die1 better."
+        },
+        {
+          "name": "DeathWatch.best",
+          "kind": "method",
+          "line": 135,
+          "signature": "def best(self, frame, kind, fx, fy) -> tuple[float, int] | None",
+          "summary": "The best die1 frame's score and index in one window PAD px around the feet."
+        },
+        {
+          "name": "DeathWatch.others",
+          "kind": "method",
+          "line": 176,
+          "signature": "def others(self, frame, kind, fx, fy, score) -> bool",
+          "summary": "Whether another watched kind's die1 matches better: that kind's death, not this one's (only on a fire)."
+        },
+        {
+          "name": "DeathWatch.of",
+          "kind": "method",
+          "line": 117,
+          "signature": "def of(cls, names_by_id: dict[int, str], scale: float = 1.0) -> DeathWatch",
+          "summary": "The watch for a map's monsters, die1 frames read from the game data, MEASURED kinds only."
+        },
+        {
+          "name": "wants",
+          "kind": "function",
+          "line": 191,
+          "signature": "def wants(score: float | None, since: float) -> bool",
+          "summary": "Whether a track is looked at: found under REFOUND_UNDER, or lost within RECENT_S."
+        },
+        {
+          "name": "pictures_of",
+          "kind": "function",
+          "line": 82,
+          "signature": "def pictures_of(frames: list[dict], scale: float = 1.0) -> list[DiePicture]",
+          "summary": "The die1 frames as the look frame shows them, both ways, with their feet."
+        },
+        {
+          "name": "DiePicture",
+          "kind": "dataclass",
+          "line": 64,
+          "signature": "@dataclass(frozen=True) class DiePicture",
+          "summary": "One die1 frame facing one way: colours, mask, feet."
+        },
+        {
+          "name": "DIE_GOOD",
+          "kind": "constant",
+          "line": 42,
+          "signature": "DIE_GOOD = 0.7",
+          "summary": "die1/1-3 match that means dying."
+        },
+        {
+          "name": "DIE0_GOOD",
+          "kind": "constant",
+          "line": 43,
+          "signature": "DIE0_GOOD = 0.6",
+          "summary": "die1/0 match that means dying, for a track not re-found."
+        },
+        {
+          "name": "MEASURED",
+          "kind": "constant",
+          "line": 60,
+          "signature": "MEASURED = (\"horny-mushroom\", \"green-mushroom\")",
+          "summary": "The only kinds watched: those whose margins were measured."
+        },
+        {
+          "name": "EVERY_S",
+          "kind": "constant",
+          "line": 53,
+          "signature": "EVERY_S = 0.05",
+          "summary": "Seconds at least between two looks at a track (once a frame at 15 a second)."
+        }
+      ],
+      "inputs": [
+        "the look's frame (RGB) and each candidate track's kind, feet (look-frame px) and this frame's detection score, from localization.worldstate",
+        "die1 frames from the game data copy (gamedata.canvas.mob_frames), in memory"
+      ],
+      "outputs": [
+        "dying True/False per asked track -> worldstate's `_dying` -> localization.tracking.MonsterTracker.seen_dying",
+        "counts of fires and of fires given to another kind"
+      ],
+      "uses": [
+        "gamelab/perception/kinds.py",
+        "gamelab/perception/match.py",
+        "gamelab/perception/mobs.py",
+        "gamedata/canvas.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamedata/data/copy/",
+          "mode": "read",
+          "what": "die1 frames through gamedata.canvas.mob_frames (nothing written)"
+        }
+      ],
+      "concurrency": "None of its own: worldstate's `_dying` callback runs it on the pass's thread, inside the tracker's update. Its counts aren't locked (the code's comment dates from when the re-finds' pool called it).",
+      "tunables": [
+        {
+          "name": "DIE_GOOD",
+          "value": "0.7",
+          "meaning": "die1/1-3 score that means dying (live monsters peaked at 0.37-0.48)"
+        },
+        {
+          "name": "DIE0_GOOD",
+          "value": "0.6",
+          "meaning": "die1/0 score, only for a track not re-found (live monsters 0.45-0.53)"
+        },
+        {
+          "name": "REFOUND_UNDER",
+          "value": "0.9",
+          "meaning": "a track found this well in the frame is alive: not looked at"
+        },
+        {
+          "name": "RECENT_S",
+          "value": "0.6",
+          "meaning": "a track lost this recently is looked at"
+        },
+        {
+          "name": "PAD",
+          "value": "16",
+          "meaning": "look-frame px at 1366x768 around the feet (8 lost 8 of 106)"
+        },
+        {
+          "name": "EVERY_S",
+          "value": "0.05",
+          "meaning": "seconds between two looks at one track"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-27",
+          "what": "The death watch added to the frame step to put her kill on the right monster.",
+          "why": "The user, told a kill was credited to the wrong monster: \"I'm surprised that's even wrong, wtf\". The game never says which monster died."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "A fire is dropped where another watched kind's die1 matches better (`others`).",
+          "why": "A walking Horny Mushroom's track, lost where a Green Mushroom died, fired at 0.819 where the green's die1 scored 0.974; 11 of 549 fires were matched better so."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "Only Tree Dungeon's mushrooms watched (MEASURED).",
+          "why": "A live Slime came to 0.58 of die1/0's 0.6; other kinds wait until a recording of them has been replayed."
+        },
+        {
+          "date": "2026-10-30",
+          "what": "EVERY_S counted in seconds (once a frame at 15 a second) and REFOUND_UNDER applied to the whole-screen detection's score.",
+          "why": "The pass moved to 15 frames a second with no re-finds; perception doesn't know the service's rate."
+        }
+      ],
+      "gotchas": [
+        "die1/0 is the standing picture with eyes shut: it would fire on a live standing monster, so it counts only for a track not found in this frame.",
+        "Horny and Green Mushroom die1/0-1 score nearly the same on either's death; `others` compares before firing.",
+        "Another map's kinds aren't watched at all until a recording of them has been replayed and their margins measured."
+      ],
+      "tests": [
+        "tests/test_deaths.py",
+        "tests/test_exact.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/spawns.py",
+      "title": "Spawn watch (SpawnWatch): newborns fading in",
+      "tagline": "Finds monsters fading in at spawn points by fitting an alpha blend over the map's art.",
+      "summary": "A monster the map spawns fades in over 0.817 s, and the colour-based whole-screen search only passes it at alpha 0.6-0.8, a median 7 frames (468 ms) late. SpawnWatch looks at every spawn point in view on every frame and fits the game's alpha blend of the kind's first pictures over the map's own art there; a fit that explains nearly all the difference is a newborn. On Tree Dungeon's clips it found 229 of the 233 newborns whose start shows (a median at their first visible frame, at alpha 0.065) with no false positive, then follows each until the whole screen finds it.",
+      "details_md": "**The physics.** A newborn is drawn as F = B + a A (S - B): the map's art B behind it, its picture S with its own alpha A, and one opacity a over the whole picture, rising linearly at `FADE_PER_S` (1.224 a second). Its feet are on the spawn point (within 2 units across), in its move/0 picture (194 of 206 births) or stand/0, walking from the start.\n\n**Onset at each point** (`SpawnWatch.look`, step 2). For every point whose window is in the play area (partly past the screen's top, left or right edge is fine; under the chat box or the game's windows it isn't: `ONSET_COVERED` False), with no newborn followed within `NEAR_POINT`:\n1. *Empty test*: fewer than `EMPTY_COUNT` (20) pixels more than `EMPTY_LEVELS` (3) off the art: nothing there.\n2. *The fit*: hypotheses are the `ONSET` pictures, both facings, feet within `BAND` (4) units of the point along its platform and `ROWS` (-1, 0, 1), every `STRIDE`-th (3rd) pixel of each picture. With D = F - B and G = A (S - B): a = D.G / G.G, R2 = (D.G)^2 / (G.G D.D), residual = sqrt((D.D - (D.G)^2 / G.G) / n), n the pixels kept times their 3 channels; the sums are integers with alpha 0-255, so the code's a is 255 D.G / G.G. The hypothesis explaining the most energy with `A_LO` <= a <= `A_HI` and `MIN_USED` of its pixels left is kept (`kept`); it is a newborn when a >= `A_MIN` (0.02), 1 - R2 <= `U_MAX` (0.008), residual <= `RES_MAX` (1.5 levels) (`passes`) and a <= `A_START` (0.8).\nHer box (`HER_BOX`), the boxes of the monsters found the frame before (`MOB_BOX`), and art pixels that aren't the fixed art (animated objects: `Art.known`) are left out of the fit.\n\n**Following** (step 1, `_follow`). Each newborn is looked for in every stand, move and hit1 picture, its feet up to `FOLLOW_SPEED` (180 units/s) times the time since it was last found ahead and `BACK` (3) behind, its alpha no more than `DROP_A` (0.08) under its highest (fainter means fading out). It ends when the whole screen finds a monster of its kind within `HANDOVER_DX`/`HANDOVER_DY` of it (`handed`), when the best fit is solid (a > `A_HI`), when it fits only fainter than `DROP_A` under its most (fading out: its place isn't looked at again until that fade is over), or after `LOST_AFTER` (2) unfound frames. A sighting becomes a `Mob` with `fading` set (`Sighting.mob`), so the tracker knows when it turns solid.\n\n**Why the map's art, not a learned background.** A running median of the point came within 3.9 times of the rule as she walked past, and plates kept from unchanged windows gave a false positive; the art is never fooled by her standing on a point and needs no warm-up. It comes from `localization.mapart`, which the camera registration holds anyway.\n\n**Cost.** The sums are integers (alpha 0-255, colours as they are), done in `gamelab/spawns.c` (8 hypotheses one column apart in AVX2 lanes) with the same integers as numpy: 1.19 ms a frame at the median, 1.7 ms more per newborn followed (numpy: 13.6 ms). It only runs at the game's own 1366x768 (a map unit a pixel), with the view registered on the frame, on `MEASURED` maps (Tree Dungeon).",
+      "lines": 706,
+      "key_items": [
+        {
+          "name": "SpawnWatch",
+          "kind": "class",
+          "line": 453,
+          "signature": "class SpawnWatch",
+          "summary": "The map's spawn points, each kind's sampled pictures, the map's art, and the newborns being followed.",
+          "details_md": "`SpawnWatch(points, frames, art, exclude=(), bottom=700, size=(1366, 768), use_c=None)`; made by `SpawnWatch.of` in worldstate's `_spawn_watch` with camreg.EXCLUDE and HUD_TOP."
+        },
+        {
+          "name": "SpawnWatch.look",
+          "kind": "method",
+          "line": 490,
+          "signature": "def look(self, frame, view, t, her=None, others=()) -> list[Sighting]",
+          "summary": "One frame: newborns followed are fitted again (or let go), then every point in view is checked for a new one."
+        },
+        {
+          "name": "SpawnWatch.handed",
+          "kind": "method",
+          "line": 563,
+          "signature": "def handed(self, sightings, found) -> list[Sighting]",
+          "summary": "Drops sightings the whole screen found too (same kind nearby: handed to the tracks); a different kind there keeps the frame's place."
+        },
+        {
+          "name": "SpawnWatch._follow",
+          "kind": "method",
+          "line": 627,
+          "signature": "def _follow(self, frame, view, nb, dt, her_box, mobs)",
+          "summary": "A followed newborn looked for again: 'ok' with its Sighting, 'solid', 'out' (fading out), 'no' or None."
+        },
+        {
+          "name": "Sighting",
+          "kind": "dataclass",
+          "line": 266,
+          "signature": "@dataclass(frozen=True) class Sighting",
+          "summary": "A newborn seen in one frame: point, kind, feet (map units), alpha, R2, residual, picture, first-seen time, onset or followed."
+        },
+        {
+          "name": "Sighting.mob",
+          "kind": "method",
+          "line": 281,
+          "signature": "def mob(self, view: tuple[int, int]) -> Mob",
+          "summary": "The sighting as a whole-screen detection (perception.mobs.Mob) with `fading` = its alpha."
+        },
+        {
+          "name": "scores",
+          "kind": "function",
+          "line": 382,
+          "signature": "def scores(sums) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]",
+          "summary": "Each hypothesis's alpha, energy explained, R2 and residual from its integer sums."
+        },
+        {
+          "name": "kept",
+          "kind": "function",
+          "line": 394,
+          "signature": "def kept(sums, k, a, expl, allowed=None) -> int | None",
+          "summary": "The hypothesis with the most energy explained within A_LO..A_HI and MIN_USED pixels."
+        },
+        {
+          "name": "passes",
+          "kind": "function",
+          "line": 405,
+          "signature": "def passes(a: float, r2: float, res: float) -> bool",
+          "summary": "The rule: a >= A_MIN, 1 - R2 <= U_MAX, residual <= RES_MAX."
+        },
+        {
+          "name": "sums_numpy",
+          "kind": "function",
+          "line": 358,
+          "signature": "def sums_numpy(window, plate, keep, hyps, pics) -> np.ndarray",
+          "summary": "spawns.c's sp_sums in numpy: D.G, G.G, D.D and pixels kept per hypothesis, the same integers."
+        },
+        {
+          "name": "sampled",
+          "kind": "function",
+          "line": 204,
+          "signature": "def sampled(frames, actions=None, names=None, stride=STRIDE) -> Pictures | None",
+          "summary": "A kind's pictures both ways, every stride-th opaque pixel, all sampled to the same count."
+        },
+        {
+          "name": "Art",
+          "kind": "dataclass",
+          "line": 236,
+          "signature": "@dataclass(frozen=True) class Art",
+          "summary": "The map's art behind the monsters in map units, and where it's the fixed art alone (`known`)."
+        },
+        {
+          "name": "Point",
+          "kind": "dataclass",
+          "line": 147,
+          "signature": "@dataclass(frozen=True) class Point",
+          "summary": "A spawn point: kind, x, the floor (platform) its feet stand on."
+        },
+        {
+          "name": "FADE_PER_S",
+          "kind": "constant",
+          "line": 85,
+          "signature": "FADE_PER_S = 1.224",
+          "summary": "Alpha a second a newborn fades in by (0.817 s to solid); used by tracking, spawnclock and targeting."
+        },
+        {
+          "name": "MEASURED",
+          "kind": "constant",
+          "line": 135,
+          "signature": "MEASURED = {10002073: (\"horny-mushroom\", \"green-mushroom\", \"slime\")}",
+          "summary": "The maps watched and their kinds: Tree Dungeon only."
+        }
+      ],
+      "inputs": [
+        "the look frame at 1366x768 (RGB) and the view's top-left in map units, registered on it (localization.locate's camera registration)",
+        "the map's art from localization.mapart through the registration: RGB, origin, and which pixels are fixed art",
+        "spawn points (localization.worldstate.spawn_points: kind, x, platform)",
+        "her feet and the feet of the monsters the tracker matched in the frame before",
+        "stand, move and hit1 frames from the game data (gamedata.canvas.mob_frames)"
+      ],
+      "outputs": [
+        "a list of `Sighting` per frame -> worldstate `_handed` -> `Mob` with `fading` added to the whole screen's detections -> localization.tracking",
+        "FADE_PER_S for localization.tracking, localization.spawnclock and behavior.targeting (when a newborn turns solid)",
+        "counts (points, fits, onsets, handed, lost, ...) for the service's records"
+      ],
+      "uses": [
+        "gamelab/native.py",
+        "gamelab/perception/kinds.py",
+        "gamelab/perception/mobs.py",
+        "gamedata/canvas.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamedata/data/copy/",
+          "mode": "read",
+          "what": "monster frames through gamedata.canvas.mob_frames (in memory)"
+        }
+      ],
+      "concurrency": "None of its own: runs in the world-state pass after her look, while the whole-screen search finishes on worldstate's one-thread pool 'wide'. The C sums (spawns.c via native.spawns_lib) run on the caller's thread.",
+      "tunables": [
+        {
+          "name": "FADE_PER_S",
+          "value": "1.224",
+          "meaning": "alpha a second of a fade-in"
+        },
+        {
+          "name": "EMPTY_LEVELS / EMPTY_COUNT",
+          "value": "3 / 20",
+          "meaning": "the empty test"
+        },
+        {
+          "name": "STRIDE",
+          "value": "3",
+          "meaning": "every 3rd pixel of a picture is sampled"
+        },
+        {
+          "name": "BAND / ROWS",
+          "value": "4 / (-1, 0, 1)",
+          "meaning": "units along the platform and rows tried at the onset"
+        },
+        {
+          "name": "A_MIN / U_MAX / RES_MAX",
+          "value": "0.02 / 0.008 / 1.5",
+          "meaning": "the rule (nearest negative 11.8 times off it)"
+        },
+        {
+          "name": "A_START",
+          "value": "0.8",
+          "meaning": "a newborn is first found at this alpha at most"
+        },
+        {
+          "name": "A_LO, A_HI",
+          "value": "0.015, 0.95",
+          "meaning": "alphas a hypothesis is tried at (over A_HI: solid)"
+        },
+        {
+          "name": "FOLLOW_SPEED / FOLLOW_MOST_S / BACK",
+          "value": "180 / 0.134 / 3",
+          "meaning": "how far a followed newborn may have walked"
+        },
+        {
+          "name": "HANDOVER_DX, HANDOVER_DY",
+          "value": "15, 8",
+          "meaning": "units: the whole screen's monster this near is the newborn"
+        },
+        {
+          "name": "LOST_AFTER",
+          "value": "2",
+          "meaning": "frames a followed newborn may go unfound"
+        },
+        {
+          "name": "HER_BOX / MOB_BOX",
+          "value": "(-40, -85, 40, 28) / (-32, -58, 32, 4)",
+          "meaning": "units about her feet / a monster's feet left out of the fit"
+        },
+        {
+          "name": "ONSET_COVERED",
+          "value": "False",
+          "meaning": "points partly under the chat box or game windows are not looked at"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-01",
+          "what": "Every spawn point in view looked at on every frame, by a fit tuned for no false positive.",
+          "why": "The user: \"Should probably always check instead of only checking when it's due\", and of a looser search anywhere on screen: \"Do you mean false positives? I'd like to avoid that.\""
+        },
+        {
+          "date": "2026-11-01",
+          "what": "The map's own art as the background, not a learned one.",
+          "why": "A running median came within 3.9 times of the rule as she passed and plates kept from unchanged windows gave a false positive; the art needs no warm-up."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "A_START 0.8: a newborn's first sighting at alpha 0.8 at most (the review).",
+          "why": "A solid monster under a faint whole-screen shade (the map-change fade, 5% black) fits nearly as a newborn at a = 1 - the shade."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "Points partly past the screen's top, left or right edge looked at in what shows (the review).",
+          "why": "Until then 13.8% of the point-frames on the clips weren't looked at, two thirds at the screen's top."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "Points reaching under the chat box not looked at (ONSET_COVERED False).",
+          "why": "The rows just above it are drawn over now and then; a solid Slime cut by it came within 3.3 times of the rule."
+        }
+      ],
+      "gotchas": [
+        "Only at the game's own 1366x768 with a registered view, on Tree Dungeon (MEASURED), with spawns.c built: elsewhere worldstate has no watch and newborns are found only when the whole screen sees them.",
+        "A frame not looked at must call `missed()` so followed newborns count a miss.",
+        "Newborns whose start is hidden (under her, players, pets, effects) are mostly missed: 20 of 90 found.",
+        "JPEG recordings can't test it (no newborn is found there): the live frames are lossless.",
+        "A newborn can be hit while it fades (its HP bar shows from alpha about 0.36)."
+      ],
+      "tests": [
+        "tests/test_spawns.py",
+        "tests/test_spawnclock.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/touches.py",
+      "title": "Touch watch (TouchWatch): her MISS and damage popups",
+      "tagline": "Reads the violet popup over her head: a monster touched her, MISS or damage.",
+      "summary": "When a monster touches her the game draws a violet popup above her name tag: MISS (her evasion took it) or the damage she took. TouchWatch finds violet text lines around her tag every frame, follows them, decides which were born on her, reads them against the game's own popup sprites, and waits up to 0.8 s for her HP bar to confirm a number. Each confirmed touch is a `Touch`; the module also defines INVULNERABLE_S, the 1.45 s after a touch when she can't be touched again.",
+      "details_md": "**Before it.** A hit was her HP bar dropping and nothing else: every MISS, about half her touches for a high-evasion thief, went unseen.\n\n**Violet lines** (`lines`). Two HSV ranges: `CORE` (hue 120-142, the popup's blue-violet top) and `ALL` (hue 118-165, the whole violet-magenta fill). Her own orange damage numbers and the pink-red criticals don't pass. The mask is closed, split into connected pieces, pieces merged into lines (gap up to `MERGE_GAP` 14 px), and a line is kept with at least `MIN_CORE` (80) blue-violet px, `MIN_SHARE` (0.25) of its violet, a height of 18-48 and a width up to 120 game px. Only a box around her tag is searched (`ROI`: 170 px either side, 260 above, 25 below).\n\n**Whose** (`_look`). A line within `MATCH_DX`/`MATCH_DY` (plus 40 and `MATCH_VY` px a second: the camera eases) of a popup seen in the last `LOST_S` (0.45 s) is that popup. A new line is hers if centred within `BIRTH_DX` (26) of her tag with its bottom `BIRTH_DY` (165 to 55 px) above the tag's middle (`BIRTH_DY_PLACED` when the tag is hidden and placed by the camera); a little off (`EDGE_DX`, `EDGE_DY`) it is hers once it has lasted `EDGE_FRAMES` (3). A popup of hers born within `REFRACT_S` (1 s) of one already told, near it, is that one found again after her own numbers hid it.\n\n**What it says** (`Reader`). The game's NoViolet0 small digits and Miss and NoViolet1 big digits (Effect.wz BasicEff.img), read from the game data copy as the watch is made (0.4 s), are turned into fill masks and matched with `TM_CCOEFF_NORMED`: MISS at 0.55 or more and 70 px wide or more; digits at a mean of 0.45 or more, 1-3 glyphs. Without the game data it goes by width (`MISS_W` 80: MISS is 98 wide, three digits 56-69).\n\n**Confirming** (`update`, `_born_hers`). A MISS is told in the frame it shows. A number is held for her HP bar: a change over `HP_EPS` within `HP_WAIT_S` (0.8 s) makes it a DAMAGE touch (none of 135 damage touches had none); no change means another player's damage drawn over her, or a skill's flash, kept in `others`.\n\n**Measured.** On 28.6 minutes of hunting (273 touches by eye): 269 found, none false, MISS or damage right on 268. 0.42 ms a frame at the median; the reader 4.7 ms on a touch's first frame. A MISS is told in its first frame; damage a median 0.04 s later (when her bar moves). Constants are in game px (1366x768); the watch scales them by `scale`.\n\n**Around it, in worldstate.** An HP drop with no popup of hers told within `TOUCH_SAME_S` (1 s) is a touch too (`how` HP), and a MISS told off its popup followed by an HP drop within `HP_WAIT_S` becomes damage (a 'touch_fix' event): a damage number half hidden under her own orange numbers can be read as MISS by its width.",
+      "lines": 415,
+      "key_items": [
+        {
+          "name": "TouchWatch",
+          "kind": "class",
+          "line": 281,
+          "signature": "@dataclass class TouchWatch",
+          "summary": "Her touches frame after frame: popups followed, held numbers, recent told popups, HP history, counts."
+        },
+        {
+          "name": "TouchWatch.update",
+          "kind": "method",
+          "line": 295,
+          "signature": "def update(self, frame, tag, tag_seen, hp, t) -> list[Touch]",
+          "summary": "One frame: held numbers settled by her HP bar, then the frame looked at for new popups; returns the touches told."
+        },
+        {
+          "name": "TouchWatch._look",
+          "kind": "method",
+          "line": 324,
+          "signature": "def _look(self, frame, tag, tag_seen, t, out) -> None",
+          "summary": "Violet lines in the ROI matched to followed popups; new ones judged born on her or not."
+        },
+        {
+          "name": "TouchWatch._born_hers",
+          "kind": "method",
+          "line": 374,
+          "signature": "def _born_hers(self, p, frame, ln, t, frames, out) -> bool",
+          "summary": "A new popup of hers: told at once (MISS), held for her HP bar (a number), or recognised as one already told."
+        },
+        {
+          "name": "TouchWatch._classify",
+          "kind": "method",
+          "line": 398,
+          "signature": "def _classify(self, frame, ln, w, frames) -> tuple[str, str, str]",
+          "summary": "MISS, DAMAGE or UNREAD by the sprite reader, else by width."
+        },
+        {
+          "name": "lines",
+          "kind": "function",
+          "line": 156,
+          "signature": "def lines(rgb, x0=0, y0=0, scale=1.0) -> list[list[int]]",
+          "summary": "The violet text lines in a crop: boxes with their blue-violet and violet pixel counts."
+        },
+        {
+          "name": "Reader",
+          "kind": "class",
+          "line": 190,
+          "signature": "class Reader",
+          "summary": "Reads a popup against the game's own NoViolet sprites as fill masks."
+        },
+        {
+          "name": "Reader.read",
+          "kind": "method",
+          "line": 207,
+          "signature": "def read(self, rgb, box, pad=6) -> tuple[str, str, float]",
+          "summary": "(kind, text, score): MISS, DAMAGE with its digits, or UNREAD."
+        },
+        {
+          "name": "Touch",
+          "kind": "dataclass",
+          "line": 110,
+          "signature": "@dataclass class Touch",
+          "summary": "One touch: first-shown time, kind, text, popup box, offset from her tag, how late it was told, popup or HP."
+        },
+        {
+          "name": "INVULNERABLE_S",
+          "kind": "constant",
+          "line": 63,
+          "signature": "INVULNERABLE_S = 1.45",
+          "summary": "Seconds she can't be touched after a touch, MISS or damage, from the popup's first frame."
+        },
+        {
+          "name": "BIRTH_DY",
+          "kind": "constant",
+          "line": 82,
+          "signature": "BIRTH_DY = (-165, -55)",
+          "summary": "Where a popup of hers is born: its bottom this far above her tag's middle."
+        },
+        {
+          "name": "HP_WAIT_S",
+          "kind": "constant",
+          "line": 100,
+          "signature": "HP_WAIT_S = 0.8",
+          "summary": "How long a number waits for her HP bar to move; none, and it's another player's."
+        },
+        {
+          "name": "sprites",
+          "kind": "function",
+          "line": 243,
+          "signature": "def sprites() -> dict[str, np.ndarray]",
+          "summary": "The popup sprites from the game data copy: MISS, small digits s0-s9, big digits b0-b9."
+        }
+      ],
+      "inputs": [
+        "the look frame (RGB), her name tag's middle (seen, or placed by the camera) and her HP bar share, every frame from localization.worldstate",
+        "popup sprites from the game data copy (Effect/Effect_000.wz BasicEff.img NoViolet0, NoViolet1)"
+      ],
+      "outputs": [
+        "a list of `Touch` per frame -> worldstate 'touch' events and WorldState.touch -> localization.senses (touched_since, invulnerable_until), behavior.hunter, control.navigator (a touch cuts a chain)",
+        "INVULNERABLE_S, MISS, DAMAGE, HP, POPUP constants for behavior, control, localization and the simulator"
+      ],
+      "uses": [
+        "gamedata/canvas.py",
+        "gamedata/paths.py",
+        "gamedata/wz.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamedata/data/copy/Effect/Effect_000.wz",
+          "mode": "read",
+          "what": "the NoViolet popup sprites (Reader.of)"
+        }
+      ],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "INVULNERABLE_S",
+          "value": "1.45",
+          "meaning": "invulnerability after any touch (the frames' shortest gap 1.441 s; the sources say 1.5)"
+        },
+        {
+          "name": "CORE / ALL",
+          "value": "(120, 142, 100, 140) / (118, 165, 80, 110)",
+          "meaning": "HSV hue range and least saturation and value of the popup's blue-violet part / whole fill"
+        },
+        {
+          "name": "ROI",
+          "value": "(170, 260, 25)",
+          "meaning": "game px searched either side of her tag, above and below"
+        },
+        {
+          "name": "MIN_CORE / MIN_SHARE",
+          "value": "80 / 0.25",
+          "meaning": "blue-violet px a line needs, and their share of its violet"
+        },
+        {
+          "name": "BIRTH_DX / BIRTH_DY",
+          "value": "26 / (-165, -55)",
+          "meaning": "where a popup of hers is born relative to her tag"
+        },
+        {
+          "name": "EDGE_DX / EDGE_DY / EDGE_FRAMES",
+          "value": "34 / -36 / 3",
+          "meaning": "a popup born a little off is hers once it lasts 3 frames"
+        },
+        {
+          "name": "LOST_S / REFRACT_S",
+          "value": "0.45 / 1.0",
+          "meaning": "a popup unseen this long is gone / one born this soon near a told one is it"
+        },
+        {
+          "name": "MISS_W",
+          "value": "80",
+          "meaning": "a line this wide is MISS by width alone"
+        },
+        {
+          "name": "HP_WAIT_S / HP_EPS",
+          "value": "0.8 / 0.004",
+          "meaning": "a number waits this long for an HP change this big"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-28",
+          "what": "Touches read off the violet popup, MISS or damage, on every frame.",
+          "why": "The user: \"A hit should be indicated by touching the mob, usually the game UI will show a purple-ish MISS or a number with knock back showing the damage taken. After a MISS or HIT the character is invincible for a short period\"."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "INVULNERABLE_S 1.45 s, counted from the popup's first frame, after a MISS as after damage.",
+          "why": "The shortest gap between her touches on the 15 fps recordings was 1.441 s (106 gaps); meowdb and the decompiled v83 client's port say 1.5 s, the same after a miss."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "NEAR_HELD: a number still waiting for her HP bar is a base for re-finds only for lines not read MISS (the review).",
+          "why": "Her MISS 0.5 s after another player's 40 over her had been taken for the 40 found again and never told."
+        }
+      ],
+      "gotchas": [
+        "Pixel constants are game px (1366x768); the watch multiplies by `scale` (Geometry.frame_scale) for other look frames.",
+        "Damage is told late (median 0.04 s, p90 0.13) because a number waits for her HP bar; a pet's potion at once can hide the drop.",
+        "4 of 273 touches are lost: MISSes half under the Lie Detector's window or split by her own orange numbers.",
+        "Another player's popup can be born over her: worldstate marks a popup-only MISS or unread touch 'crowded' when another player's dot is within 60 map units across and up or down (CROWD_DX, CROWD_DY), and Senses.invulnerable_until doesn't count it.",
+        "`hud.touch_popup` was the first form of this check and nothing called it during a hunt."
+      ],
+      "tests": [
+        "tests/test_touches.py",
+        "tests/test_worldstate.py",
+        "tests/test_service.py",
+        "tests/test_harness.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/misses.py",
+      "title": "Her attack's MISS (MissReader)",
+      "tagline": "Finds the orange MISS popup over a monster her attack missed.",
+      "summary": "When her star misses a monster the game draws MISS over it in the same red-to-yellow fill as her damage numbers. MissReader finds that word's shape in small boxes above her presses' targets by the overlap (IoU) of the fill's pixels with the picture's fill; 0.6 or more is a MISS. The key check (behavior.keycheck) counts a press followed by a MISS over its target as a key that worked.",
+      "details_md": "The picture is the game's own Effect.wz BasicEff.img NoRed0/Miss (98x38, its origin at the bottom centre), cut into `gamelab/assets/misses/NoRed0_Miss.png` by `cut_assets`. Colour alone can't tell it: her damage numbers share the fill, and so do Tree Dungeon's orange platform undersides and maple leaves. The shape does. The picture's own mask is its opaque (alpha over 200), saturated (120 and up) fill pixels.\n\n- `fill_mask`: OpenCV hue 27 or less, or 175 or more (red wraps), saturation 110 and value 190 or more (slack for JPEG and the start of the fade).\n- `best`: the frame's fill mask is correlated with the picture's fill mask (`cv2.matchTemplate` `TM_CCORR`: the count of pixels both have at every place), the frame's own count under the picture's box comes from a box filter, and IoU = both / (picture + frame - both). The best place's IoU and its bottom centre (the picture's origin) are returned. A box with fewer fill pixels than `MISS_OK` times the picture's is skipped at once.\n- `find`: pads each box by `SLACK` (6 px: the popup drifts up about 30 px a second and the camera eases) and keeps at most one MISS a box.\n\nMeasured on 26,968 saved frames (about 37 minutes of hunting): 5 MISS popups in 4 places, each read in 2-8 frames at 0.73-0.96; nothing else scored over 0.55. Drawn at 100, 80 and 60% opacity it reads 0.94, 0.80 and 0.24: only a popup's first half second reads. About 0.12 ms a box (README). Another player's MISS is the same picture: keycheck counts one only over her press's target, in its time. The violet MISS over her (a monster touching her) is another set, read by perception.touches.",
+      "lines": 131,
+      "key_items": [
+        {
+          "name": "MissReader",
+          "kind": "class",
+          "line": 63,
+          "signature": "class MissReader",
+          "summary": "Holds the MISS picture's fill mask at the look's scale and finds it in boxes of a frame."
+        },
+        {
+          "name": "MissReader.find",
+          "kind": "method",
+          "line": 86,
+          "signature": "def find(self, frame, boxes) -> list[Popup]",
+          "summary": "The MISS popups in the boxes, each padded by SLACK, one per box at most, IoU MISS_OK and up."
+        },
+        {
+          "name": "MissReader.best",
+          "kind": "method",
+          "line": 102,
+          "signature": "def best(self, rgb) -> tuple[float, float, float] | None",
+          "summary": "The best place of the picture's fill in a crop: bottom centre and IoU."
+        },
+        {
+          "name": "fill_mask",
+          "kind": "function",
+          "line": 55,
+          "signature": "def fill_mask(rgb: np.ndarray) -> np.ndarray",
+          "summary": "The pixels in her damage numbers' red-orange-yellow fill."
+        },
+        {
+          "name": "Popup",
+          "kind": "dataclass",
+          "line": 48,
+          "signature": "@dataclass(frozen=True) class Popup",
+          "summary": "A MISS seen: bottom centre (look-frame px) and IoU."
+        },
+        {
+          "name": "cut_assets",
+          "kind": "function",
+          "line": 119,
+          "signature": "def cut_assets(dest=FOLDER, copy=None) -> Path",
+          "summary": "Cuts NoRed0/Miss from the game data copy into gamelab/assets/misses."
+        },
+        {
+          "name": "MISS_OK",
+          "kind": "constant",
+          "line": 43,
+          "signature": "MISS_OK = 0.6",
+          "summary": "IoU that means MISS (live 0.87-0.96, nothing else over 0.55)."
+        },
+        {
+          "name": "FILL",
+          "kind": "constant",
+          "line": 41,
+          "signature": "FILL = (27, 175, 110, 190)",
+          "summary": "Hue bounds, least saturation and value of the fill."
+        }
+      ],
+      "inputs": [
+        "a look frame (RGB) and boxes around her presses' targets, from behavior.hunter through Eyes.misses: each look's frame (`Hunter._misses`) and, before each throw's key, the feed's newest frame (`Hunter._miss_glance`); Eyes makes one MissReader per frame scale",
+        "gamelab/assets/misses/NoRed0_Miss.png"
+      ],
+      "outputs": [
+        "a list of `Popup` -> behavior.hunter (placed on the map) -> behavior.keycheck (a press with a MISS over its target took effect)"
+      ],
+      "uses": [
+        "gamelab/paths.py",
+        "gamedata/canvas.py",
+        "gamedata/paths.py",
+        "gamedata/wz.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/assets/misses/NoRed0_Miss.png",
+          "mode": "read-write",
+          "what": "the MISS picture: read by MissReader, written by cut_assets"
+        }
+      ],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "MISS_OK",
+          "value": "0.6",
+          "meaning": "IoU of the fill against the picture's that means MISS"
+        },
+        {
+          "name": "FILL",
+          "value": "(27, 175, 110, 190)",
+          "meaning": "hue at most 27 or at least 175, saturation and value at least 110 and 190"
+        },
+        {
+          "name": "SLACK",
+          "value": "6",
+          "meaning": "px a box is padded by"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-28",
+          "what": "Her attack's MISS popup read and counted by the key check.",
+          "why": "The user, asked whether the MISS popup over a monster should be read: \"Yes, read it\"."
+        }
+      ],
+      "gotchas": [
+        "Only about the first half second of a popup reads (at 60% opacity it scores 0.24).",
+        "Another player's MISS over a monster is the same picture: it counts for her only over her press's target, in its time.",
+        "Her hits rarely miss at her levels: 5 popups in 37 minutes of saved frames."
+      ],
+      "tests": [
+        "tests/test_misses.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/messages.py",
+      "title": "The game's words: message bar and pickup log rows",
+      "tagline": "Reads the game's own pink line above the HUD; picks the pickup log's OCR rows.",
+      "summary": "`ChatReader` reads the message bar (the chat's one line above the HUD), where the game says why it refused a key. The game's own lines are pink, so pink pixels tell a game line in under a millisecond and only a new one is OCR'd. `refusal` classifies a line as 'rope' (she's on a rope or ladder) or 'refused' (not enough MP). `log_rows` keeps the pickup log's OCR rows and drops the party window's names.",
+      "details_md": "**Why it exists.** On 2026-10-26 she hung at the top of a rope on Tree Dungeon (on the rope, about 30 units under the platform her dot snapped her onto) and every Lucky Seven press was refused with \"That cannot be used while you're on a rope or ladder.\" Her MP stayed put, and the out-of-darts watch stopped the hunt three times that night with her stars in her bag. Reading the refusal tells \"the game refused the key\" apart from \"no stars left\".\n\n**The bar** is at game px x 290-830, y 703-727 of the 1366x768 window (`CHAT`, kept as fractions of the window so it scales; at 1920x1080 it's computed only, never seen). It shows the last chat line of anyone (the game's lines, notices, megaphones, chat), and a line doesn't fade: it stays until the next one replaces it. The game's own lines are pink (median RGB 244-248, 174-176, 185-188 on all 177 read off saved frames): `game_text` keeps red 200 or more, red - green 40 or more, red - blue 30 or more, and blue not under green - 5. Fewer than `MIN_TEXT` (40) pink pixels means no game line. `ChatReader.read` OCRs the bar (maplehelper.ocr's shared RapidOCR engine, about 285 ms) only when the pink pixels differ from the last read's (`ChatLine.same`: overlap of at least `SAME_SHARE` 0.9 of their union); otherwise it reuses the text. So the same refusal twice in a row can't be told from one left up.\n\n**Refusals** (`refusal`). None for a line naming stars or darts (`loot.says_no_darts`: that's the game saying she has none, not a refusal), 'rope' for `ON_ROPE`, 'refused' for `REFUSED` (not enough MP to use a skill). \"You are lacking the MP Potion that your pet is supposed to use.\" is neither.\n\n**The pickup log** (`log_rows`). Its lines are right-aligned against the window's right edge, stacking up from y 606-616; the party window sits over it and its names stop short of the edge (the leader's star read as \"7\", a snowflake as a CJK sign). Rows not reaching within `LOG_RIGHT` (10/1366 of the width) of the edge are dropped.\n\n`warm()` loads the OCR models on a thread of their own at a hunt's start (1.3 s), so the first read doesn't stall the hunt's own thread.",
+      "lines": 174,
+      "key_items": [
+        {
+          "name": "ChatReader",
+          "kind": "class",
+          "line": 120,
+          "signature": "class ChatReader",
+          "summary": "The message bar off whole frames: its pink px every time, its text by OCR only for a line not read before."
+        },
+        {
+          "name": "ChatReader.read",
+          "kind": "method",
+          "line": 129,
+          "signature": "def read(self, frame: np.ndarray, t: float = 0.0) -> ChatLine",
+          "summary": "The message bar of a whole-window frame shown at t."
+        },
+        {
+          "name": "ChatLine",
+          "kind": "dataclass",
+          "line": 95,
+          "signature": "@dataclass(eq=False) class ChatLine",
+          "summary": "What the bar showed: the game line's text, its pink mask, the frame's time."
+        },
+        {
+          "name": "ChatLine.same",
+          "kind": "method",
+          "line": 107,
+          "signature": "def same(self, other: ChatLine | None) -> bool",
+          "summary": "Whether two reads are the one line (pink px overlap SAME_SHARE of their union)."
+        },
+        {
+          "name": "refusal",
+          "kind": "function",
+          "line": 69,
+          "signature": "def refusal(text: str) -> str | None",
+          "summary": "'rope', 'refused' or None for a game line."
+        },
+        {
+          "name": "game_text",
+          "kind": "function",
+          "line": 80,
+          "signature": "def game_text(bar: np.ndarray) -> np.ndarray",
+          "summary": "The bar's pixels in the game's own pink."
+        },
+        {
+          "name": "log_rows",
+          "kind": "function",
+          "line": 169,
+          "signature": "def log_rows(rows, width: int, x0: int = 0) -> list",
+          "summary": "The pickup log's OCR rows: those reaching within LOG_RIGHT of the window's right edge."
+        },
+        {
+          "name": "warm",
+          "kind": "function",
+          "line": 154,
+          "signature": "def warm() -> threading.Thread | None",
+          "summary": "Loads the shared OCR engine's models on a daemon thread at a hunt's start."
+        },
+        {
+          "name": "CHAT",
+          "kind": "constant",
+          "line": 46,
+          "signature": "CHAT = (290 / 1366, 703 / 768, 830 / 1366, 727 / 768)",
+          "summary": "The message bar as fractions of the window."
+        },
+        {
+          "name": "ON_ROPE",
+          "kind": "constant",
+          "line": 65,
+          "signature": "ON_ROPE = re.compile(r\"on\\W*a\\W*rope|rope\\W*or\\W*ladder|on\\W*a\\W*ladder\", re.I)",
+          "summary": "The rope refusal's wording."
+        },
+        {
+          "name": "REFUSED",
+          "kind": "constant",
+          "line": 66,
+          "signature": "REFUSED = re.compile(...)",
+          "summary": "The not-enough-MP refusal's wording."
+        }
+      ],
+      "inputs": [
+        "the service's whole frame (RGB, the full window) through Eyes.chat_line",
+        "OCR rows (maplehelper.ocr Row) of the pickup log crop through Eyes.messages",
+        "maplehelper.ocr's shared OCR engine"
+      ],
+      "outputs": [
+        "ChatLine (text, pink mask, time) -> behavior.hunter (`Hunter._hear_chat`) and behavior.darts (`DartWatch.hear_chat`): a refusal restarts the out-of-darts stretch, 'rope' gets her off the rope, a line naming stars is logged as the game saying she has none",
+        "pickup log rows -> Eyes.messages -> behavior.looting (full inventory) and behavior.darts",
+        "_shared_ocr reused by perception.stat_window"
+      ],
+      "uses": [
+        "gamelab/perception/loot.py",
+        "maplehelper/ocr/__init__.py"
+      ],
+      "files_io": [],
+      "concurrency": "warm() starts a daemon thread 'ocr-warm' that loads the OCR models; a read meanwhile waits on the engine's lock.",
+      "tunables": [
+        {
+          "name": "CHAT",
+          "value": "x 290-830, y 703-727 at 1366x768",
+          "meaning": "the message bar, as fractions of the window"
+        },
+        {
+          "name": "PINK_RED, PINK_OVER_GREEN, PINK_OVER_BLUE",
+          "value": "200, 40, 30",
+          "meaning": "the game's own pink"
+        },
+        {
+          "name": "MIN_TEXT",
+          "value": "40",
+          "meaning": "pink px for a game line (a line's text: 500-930)"
+        },
+        {
+          "name": "SAME_SHARE",
+          "value": "0.9",
+          "meaning": "pink px overlap that makes two reads one line"
+        },
+        {
+          "name": "LOG_RIGHT",
+          "value": "10/1366",
+          "meaning": "share of the width from the right edge a pickup log row must reach"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-27",
+          "what": "The message bar read for the game's refusals.",
+          "why": "Out of darts had stopped three grinds on 2026-10-26 while she hung on a rope with stars in her bag, every press refused."
+        },
+        {
+          "date": "2026-10-27",
+          "what": "Refusals narrowed to the rope and not-enough-MP lines; until then any \"cannot be used\" was one.",
+          "why": "The unknown no-stars line may be worded so; its presses would have restarted the out-of-darts stretch at every new line (a replay's stop came at 71-249 s instead of 17.7)."
+        }
+      ],
+      "gotchas": [
+        "The bar shows anyone's last chat line and doesn't fade: a megaphone can replace the refusal for seconds.",
+        "The game's line for 'no stars left' has never been seen: a line naming stars or darts is treated as that, never as a refusal.",
+        "The first OCR read loads the models (1.3 s) unless warm() ran."
+      ],
+      "tests": [
+        "tests/test_rope_top.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/chatbox.py",
+      "title": "Chat box state (expanded or collapsed)",
+      "tagline": "Tells whether the chat box is expanded, collapsed or typing, from its +/- button.",
+      "summary": "An expanded chat box covers the bottom-left of the play area, hiding monsters there and her name plate. `read(frame)` tells EXPANDED, COLLAPSED or UNKNOWN from the box's 12x12 +/- button, its input row's white field and its navy 'All' tab (never its text), and whether its input line may have the keyboard (`typing`). behavior.chatcheck uses it to collapse the box at a hunt's start.",
+      "details_md": "Read only on a whole frame of the 1366x768 client (`FRAME`): at other sizes the HUD is drawn scaled and no frame of it was kept, so the answer is UNKNOWN with `readable` False.\n\n1. `glyph`: the button at (818, 709), 12x12 of the game's UI. Its border must be dark (at least `BORDER_LEAST` 36 of its 40 px no brighter than 48), its inside's white px must match the `MINUS` or `PLUS` mask within `GLYPH_OFF` (3) px, and at least `BLUE_SHARE` (0.9) of the rest must be blue. Minus means expanded (clicking it collapses), plus means collapsed. Because the glyph says what clicking does, it holds whatever the box's height, its lines' colours or what's over its upper part (a party invite, a megaphone's backing).\n2. Plus: COLLAPSED, with `typing` if the field is white anyway (the input line open without the box: never seen, assumed).\n3. Minus: also needs the field (x 372-808, y 707-724) white over `FIELD_SHARE` (0.75) and the 'All' tab navy over `TAB_SHARE` (0.6); else UNKNOWN. `marks` counts the field's non-white px; `TYPED_LEAST` (2) or more means text or a caret: `typing`.\n\nMeasured on two recordings (3,615 and 4,507 frames): 515 of 515 expanded frames and 7,606 of 7,607 collapsed ones read right (the one UNKNOWN: the mouse pointer over the button); no false EXPANDED on 107 saved shots and 3,077 Lie Detector frames. 0.04-0.08 ms a frame. The mouse pointer over the field marks it too, which is why behavior.chatcheck moves the mouse off the box once before believing either.",
+      "lines": 150,
+      "key_items": [
+        {
+          "name": "read",
+          "kind": "function",
+          "line": 135,
+          "signature": "def read(frame: np.ndarray | None) -> ChatBox",
+          "summary": "The chat box on a whole client frame: EXPANDED, COLLAPSED or UNKNOWN, with typing and marks."
+        },
+        {
+          "name": "glyph",
+          "kind": "function",
+          "line": 97,
+          "signature": "def glyph(frame: np.ndarray) -> str | None",
+          "summary": "Which glyph the button shows: 'minus', 'plus' or None."
+        },
+        {
+          "name": "ChatBox",
+          "kind": "dataclass",
+          "line": 66,
+          "signature": "@dataclass(frozen=True) class ChatBox",
+          "summary": "state, typing, why, marks, readable."
+        },
+        {
+          "name": "_field",
+          "kind": "function",
+          "line": 117,
+          "signature": "def _field(frame: np.ndarray) -> tuple[float, int]",
+          "summary": "The input field's share of white px and its non-white px."
+        },
+        {
+          "name": "_navy",
+          "kind": "function",
+          "line": 127,
+          "signature": "def _navy(frame: np.ndarray) -> float",
+          "summary": "The share of the 'All' tab that's its navy."
+        },
+        {
+          "name": "BUTTON",
+          "kind": "constant",
+          "line": 43,
+          "signature": "BUTTON = (818, 709)",
+          "summary": "The +/- button's top-left in client px."
+        },
+        {
+          "name": "MINUS",
+          "kind": "constant",
+          "line": 46,
+          "signature": "MINUS = np.zeros((SIDE - 2, SIDE - 2), bool)",
+          "summary": "The minus glyph's white px mask."
+        },
+        {
+          "name": "PLUS",
+          "kind": "constant",
+          "line": 48,
+          "signature": "PLUS = np.zeros((SIDE - 2, SIDE - 2), bool)",
+          "summary": "The plus glyph's white px mask."
+        },
+        {
+          "name": "TYPED_LEAST",
+          "kind": "constant",
+          "line": 59,
+          "signature": "TYPED_LEAST = 2",
+          "summary": "Non-white field px that mean text or a caret."
+        }
+      ],
+      "inputs": [
+        "the whole frame of the 1366x768 client (RGB), on every look (Eyes.look_at), the perception service's frames included"
+      ],
+      "outputs": [
+        "ChatBox -> Observation.chat, WorldState.chat, Scene.chat -> behavior.chatcheck (taps her chat key to collapse the box at a hunt's start)"
+      ],
+      "uses": [],
+      "files_io": [],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "GLYPH_OFF",
+          "value": "3",
+          "meaning": "px of the button's inside allowed off the glyph"
+        },
+        {
+          "name": "BORDER_DARK / BORDER_LEAST",
+          "value": "48 / 36",
+          "meaning": "a border px's brightest channel / border px needed"
+        },
+        {
+          "name": "BLUE_SHARE",
+          "value": "0.9",
+          "meaning": "share of the non-glyph inside that must be blue"
+        },
+        {
+          "name": "FIELD_SHARE",
+          "value": "0.75",
+          "meaning": "share of the field white for the expanded input row"
+        },
+        {
+          "name": "TAB_SHARE",
+          "value": "0.6",
+          "meaning": "share of the tab navy for the expanded input row"
+        },
+        {
+          "name": "TYPED_LEAST",
+          "value": "2",
+          "meaning": "non-white field px that mean typing"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-30",
+          "what": "The chat box read off its button and input row, never its text.",
+          "why": "The user: \"At the start of grind/hunt, you should collapse the chat window if it's open.\" Its key toggles the box, so its state must be known first."
+        },
+        {
+          "date": "2026-10-30",
+          "what": "Typing is TYPED_LEAST (2) non-white px in the field: a caret (12 px) or a lone apostrophe (3) counts, one stray px doesn't.",
+          "why": "The review found the first build's 4 dark px let a typed apostrophe through."
+        }
+      ],
+      "gotchas": [
+        "The mouse pointer over the button hides the glyph (UNKNOWN) and over the field reads as typing.",
+        "Any client size other than 1366x768 is UNKNOWN with readable False.",
+        "It never reads the box's text: a megaphone's colours or the party invite over its upper part don't change the answer."
+      ],
+      "tests": [
+        "tests/test_chatbox.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/lie_detector.py",
+      "title": "Lie Detector spotter (LieDetectorSpotter)",
+      "tagline": "Recognises every form of the Lie Detector test so the hunt stops at once.",
+      "summary": "LieDetectorSpotter scores a frame against templates of each Lie Detector form: the countdown window's yellow title, the mouse mini-game's notice and board, the image quiz's warning and the quiz, and the Truth Booth (its clock and the Maple Administrator's name tag together). The elevated key player's watchdog calls it 4 times a second; a form at or over its threshold raises the alarm, which stops every plan. It also reads the Truth Booth's time left and tells which forms cover the play area.",
+      "details_md": "**Forms.** Scores are each form's match as a fraction of its threshold; 1 or more means seen.\n- *countdown*: a window titled \"LIE DETECTOR\" whose title bar is see-through, so the yellow letter shapes are matched, not raw pixels (`yellow`: red over 180, green over 140, blue under 110, red over blue by more than 110), at `THRESHOLD` 0.6;\n- *`HALF_SIZE`* grey templates matched on the frame at half size: the mini-game's notice (0.9), the mini-game's board (0.8), the quiz's warning (0.7), the quiz (0.7) and the Truth Booth's clock (0.85). The notice comes 10 s before the board and the warning 30 s before the quiz, so the hunt stops and she retreats before the test begins;\n- *truth booth*: the lesser of its clock and the Administrator's name tag (`BOOTH_TAG`, 0.8), because the clock alone is any timed map's.\n\n**Frame sizes.** The templates were cut at 1920x1080. Since 2026-10-23 the game runs at its own 1366x768, where they scored only 0.32-0.64 of their thresholds, so such a frame is stretched to 1920x1080 first (`_stretched`), as the game itself used to stretch its view. A client of any other size is brought to 1920x1080 by its callers with `to_template` (shrunk by area or stretched with Lanczos: the watchdog, perception.frames).\n\n**Where to look.** Each form has always shown at one place, the same pixel on every recording (`PLACES`). `near` matches each form only within `NEAR_MARGIN` (48) px of its places (11 ms of CPU at 1366x768); `scores` matches the whole frame (151 ms). The watchdog uses `near` and every `WHOLE_EVERY` (8)th look `scores`, so a form shown anywhere else is seen within 2 s; it uses `scores` every look during a cycle, on other sizes, and when the capture anchors are off (the game drawing its picture off its client moves every form off its places).\n\n**Clock.** `clock_left` reads the booth's \"Time Left\": four digit slots (`CLOCK_SLOTS`), cream dots matched against `assets/clock_digits.png` at `CLOCK_MATCH` (0.8); a slot with under `CLOCK_INK` dots is blank. The watchdog uses it so a stay already seen isn't taken for a new one.\n\n**Over the play area.** `over_play` names the form whose window lies over the play area (the countdown's window, the mini-game's board, the quiz), as `near` matches it: localization.locate counts her place \"covered\" under it; control.lie_tracking uses 'mini-game' and control.violetta_live 'countdown' to know when their game is up.\n\n**Memory.** Each thread keeps its stretched, halved and grey scratch pictures (`_kept`): fresh ones were 8 MB a look at 1366x768 and 2,000 page faults that Windows' kernel zeroes.\n\nThe elevated key player imports this module, so it imports only gamelab.paths (tests/test_architecture.py checks what the player loads).",
+      "lines": 310,
+      "key_items": [
+        {
+          "name": "LieDetectorSpotter",
+          "kind": "class",
+          "line": 163,
+          "signature": "class LieDetectorSpotter",
+          "summary": "Loads every form's template, the booth tag and the clock digits; works on full-size RGB client frames."
+        },
+        {
+          "name": "LieDetectorSpotter.scores",
+          "kind": "method",
+          "line": 178,
+          "signature": "def scores(self, frame: np.ndarray) -> dict[str, float]",
+          "summary": "Each form's match over the whole frame as a fraction of its threshold."
+        },
+        {
+          "name": "LieDetectorSpotter.near",
+          "kind": "method",
+          "line": 192,
+          "signature": "def near(self, frame: np.ndarray) -> dict[str, float]",
+          "summary": "The same scores, each form matched only near its PLACES (whole frame at an unknown size)."
+        },
+        {
+          "name": "LieDetectorSpotter.clock_left",
+          "kind": "method",
+          "line": 218,
+          "signature": "def clock_left(self, frame: np.ndarray) -> int | None",
+          "summary": "Seconds left on the game's clock (the Truth Booth's), or None."
+        },
+        {
+          "name": "LieDetectorSpotter.over_play",
+          "kind": "method",
+          "line": 250,
+          "signature": "def over_play(self, frame: np.ndarray) -> str | None",
+          "summary": "The first form whose window over the play area is seen at its place."
+        },
+        {
+          "name": "LieDetectorSpotter.seen",
+          "kind": "method",
+          "line": 308,
+          "signature": "def seen(self, frame: np.ndarray) -> bool",
+          "summary": "Whether any form is on screen."
+        },
+        {
+          "name": "to_template",
+          "kind": "function",
+          "line": 128,
+          "signature": "def to_template(frame: np.ndarray) -> np.ndarray",
+          "summary": "A client frame of any size brought to the size the templates are matched at."
+        },
+        {
+          "name": "yellow",
+          "kind": "function",
+          "line": 144,
+          "signature": "def yellow(rgb: np.ndarray) -> np.ndarray",
+          "summary": "1.0 where a pixel is the title's yellow: the countdown's letters are matched as this mask."
+        },
+        {
+          "name": "HALF_SIZE",
+          "kind": "constant",
+          "line": 57,
+          "signature": "HALF_SIZE = {\"mini-game notice\": (..., 0.9), ...}",
+          "summary": "The half-size grey templates and their thresholds."
+        },
+        {
+          "name": "PLACES",
+          "kind": "constant",
+          "line": 70,
+          "signature": "PLACES = {\"countdown\": ((910, 323), (1648, 589)), ...}",
+          "summary": "Where each form has always shown, in 1920x1080 px."
+        },
+        {
+          "name": "WHOLE_EVERY",
+          "kind": "constant",
+          "line": 125,
+          "signature": "WHOLE_EVERY = 8",
+          "summary": "Every this many watchdog looks is of the whole frame."
+        },
+        {
+          "name": "BOOTH_TAG",
+          "kind": "constant",
+          "line": 91,
+          "signature": "BOOTH_TAG = (ASSETS / \"truth_booth_admin.png\", 0.8)",
+          "summary": "The Maple Administrator's name tag: with the clock, the Truth Booth."
+        },
+        {
+          "name": "THRESHOLD",
+          "kind": "constant",
+          "line": 39,
+          "signature": "THRESHOLD = 0.6",
+          "summary": "The countdown title's yellow-letter match."
+        }
+      ],
+      "inputs": [
+        "full-size RGB frames of the game's client: the key player's watchdog grabs (control.player.Watchdog), the perception service's frames (control.lie_tracking, control.violetta_live, perception.frames), localization.locate",
+        "templates in gamelab/assets: lie_detector_*.png, truth_booth_timer.png, truth_booth_admin.png, clock_digits.png"
+      ],
+      "outputs": [
+        "per-form scores -> the watchdog -> control.alarm.raise_alarm (alarm file, phone page, the Lie Detector's recording; the player refuses plans)",
+        "clock_left seconds -> the watchdog's Truth Booth stay",
+        "over_play form name -> localization.locate (her place 'covered'), control.lie_tracking (the board is up), control.violetta_live (the Violetta window is up)"
+      ],
+      "uses": [
+        "gamelab/paths.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/assets/lie_detector_title.png",
+          "mode": "read",
+          "what": "the countdown title's letters"
+        },
+        {
+          "path": "gamelab/assets/lie_detector_notice.png, lie_detector_minigame.png, lie_detector_quiz_warning.png, lie_detector_quiz.png, truth_booth_timer.png, truth_booth_admin.png",
+          "mode": "read",
+          "what": "half-size grey templates"
+        },
+        {
+          "path": "gamelab/assets/clock_digits.png",
+          "mode": "read",
+          "what": "the clock's ten digits side by side"
+        }
+      ],
+      "concurrency": "Safe for several threads: each keeps its own scratch pictures (threading.local). Called from the player's 'lie-detector-watch' daemon thread 4 times a second, and from the perception service's Lie Detector threads.",
+      "tunables": [
+        {
+          "name": "THRESHOLD",
+          "value": "0.6",
+          "meaning": "countdown title match (the real window ~1.0)"
+        },
+        {
+          "name": "HALF_SIZE thresholds",
+          "value": "notice 0.9, board 0.8, warning 0.7, quiz 0.7, booth clock 0.85",
+          "meaning": "per-form match needed"
+        },
+        {
+          "name": "BOOTH_TAG",
+          "value": "0.8",
+          "meaning": "the Administrator's tag match"
+        },
+        {
+          "name": "NEAR_MARGIN",
+          "value": "48",
+          "meaning": "1920x1080 px around each place matched by `near`"
+        },
+        {
+          "name": "WHOLE_EVERY",
+          "value": "8",
+          "meaning": "watchdog looks between whole-frame looks"
+        },
+        {
+          "name": "CLOCK_MATCH / CLOCK_INK",
+          "value": "0.8 / 20",
+          "meaning": "digit match needed / dots for a slot not blank"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-18",
+          "what": "The mini-game's board recognised as a form.",
+          "why": "On 2026-10-18 it wasn't recognised yet, went unanswered, and she was sent to the Truth Booth."
+        },
+        {
+          "date": "2026-10-23",
+          "what": "A 1366x768 frame is stretched to 1920x1080 before matching.",
+          "why": "The game runs at its own 1366x768 since that day, where the templates scored 0.32-0.64 of their thresholds."
+        },
+        {
+          "date": "2026-10-25",
+          "what": "Templates for the mini-game's notice and the quiz's warning and quiz.",
+          "why": "They come 10 s and 30 s before the tests, so the hunt stops and she retreats before the test begins."
+        },
+        {
+          "date": "2026-10-26",
+          "what": "`near` around each form's places, the whole frame every 8th look.",
+          "why": "At 4 looks a second: 0.14 cores against 0.61 with the whole frame every look."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "The Truth Booth needs the Administrator's name tag as well as the clock.",
+          "why": "A Kerning party quest stage scored 1.02 on the clock alone and raised the alarm as the Truth Booth."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "clock_left reads the booth's time left.",
+          "why": "The user: \"When you enter the truth booth you can see how much count down it has, and block the re-sighting\"."
+        }
+      ],
+      "gotchas": [
+        "Templates were cut at 1920x1080: other frame sizes must be brought to it; `near` falls back to `scores` and `over_play` returns None at an unknown size.",
+        "PLACES are fixed pixels: a game picture drawn off its client (seen 2026-10-25 and 26, 18 px left and 85 up) moves every form off them, so the watchdog looks at the whole frame when the capture anchors are off.",
+        "Its docstring says never to answer the test automatically; since 2026-11-02 and 03 the perception service moves the mini-game's cursor (control.lie_tracking) and clicks the Violetta answers (control.violetta_live) through the elevated player.",
+        "The elevated key player loads this module: keep its imports to gamelab.paths (tests/test_architecture.py)."
+      ],
+      "tests": [
+        "tests/test_alarm.py",
+        "tests/test_architecture.py",
+        "tests/test_review_pages.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/lie_target.py",
+      "title": "Mini-game target tracker (TargetTracker)",
+      "tagline": "Follows the Lie Detector mini-game's fading, spinning figure by its outline.",
+      "summary": "In the Lie Detector's mouse mini-game a white figure fades to an embossed rim like the decoys printed on the board, then moves about 95 px a second while spinning at 2 rad/s over a scrolling board. TargetTracker takes the figure's outline as a template while it's white, then runs a 2,000-particle filter on edge-orientation evidence, a decoy check, optical flow off the board's scroll and a must-move rule. It answers where the target is each frame; it moves nothing itself.",
+      "details_md": "**Template.** `target_blob` finds the white target among white blobs of 800+ px: pure white (core over 245) with a tan rim (B - R under -30; a countdown digit's rim is bluish). `template_from` takes the outline of its mask grown by `RIM` (8 px, the embossed rim that stays once the fill fades), sampled every `STEP` (3) px with each point's normal angle. The tracker restarts on every bigger white blob before START (4.6 s after the board's first frame).\n\n**Evidence per frame.**\n- *Outline* (`features`): Sobel gradients, the strong ones (above the 70th percentile) binned into `NB` (8) orientations over 180 degrees; for each template bin a response map by a table of bin distance (`LUT`), spread over `SPREAD` (3) px with one grey dilation (LINE-2D style). A pose's score is its points' mean response at the angle the spin predicts (`SPIN` 2 rad/s); a point off the board counts as the frame's typical score (`typical`: the median over a 32 px grid), neither a hit nor a miss.\n- *Decoy check* (`LAM` 0.3): the same outline at the same angle where the board's scroll puts the pose `BACK_S` (0.2 s) earlier; a printed decoy rides the board, the target moves on its own.\n- *Flow* (`MU` 1.0): DIS optical flow (medium preset) minus the board's scroll (`flow_shift`: the flow's median over the board's own pixels), the green cursor masked, averaged along the rim.\n- *Must move*: a particle moving with the board loses weight (`GAMMA` 3, falling off over `SIG_REL` 50 px/s).\n\n**Filter** (`_filter`). `N` = 2000 particles (x, y, vx, vy, angle offset). Each frame `TURN` (10%) of them, `TURN_EDGE` (30%) within `EDGE_PX` (70) of an edge, take a new direction at the target's usual speed (`TURN_V` 95 px/s) pointing away from a near edge, so a turn is followed in a frame or two. Weights are multiplied by exp(KAPPA (s + MU flow - LAM d)) and the must-move factor; systematic resampling when the effective count falls under N/2. The answer is the weighted mean of the particles within 40 px of the heaviest one.\n\n**Speed.** 30 ms a frame on the 11 recorded rounds (92 before the speed work), against the 66 ms a frame of 15 a second: edge features by table and one dilation, the template turned once per distinct 2-degree angle, and the work spread over a pool as big as OpenCV's thread count beside the optical flow, particles scored in `PARTICLE_RUNS` (3) chunks.\n\n**Accuracy.** Against reference tracks the user approved on all 11 recorded rounds: 3.5 px off on average, 97% of frames within 10 px, none lost.\n\nLive, control.lie_tracking runs it in a child process at below-normal priority on the perception service's frames while the alarm is up, writes each answer to lab/lie_target/<time>.jsonl and hands the target's client position to the elevated player's cursor. `python -m gamelab lie-target` runs it on recorded clips and scores it (`track_clip`, `against_reference`).",
+      "lines": 473,
+      "key_items": [
+        {
+          "name": "TargetTracker",
+          "kind": "class",
+          "line": 311,
+          "signature": "class TargetTracker",
+          "summary": "Fed board frames in order; answers where the target is once it has seen it white.",
+          "details_md": "`TargetTracker(fps=15.0, start_t=None, seed=0, n=N)`: `fps` sets the decoy check's look-back in frames, `start_t` (START's time, when known) limits where the template is taken from."
+        },
+        {
+          "name": "TargetTracker.step",
+          "kind": "method",
+          "line": 337,
+          "signature": "def step(self, board: np.ndarray, t: float) -> dict | None",
+          "summary": "One 750x500 board crop (BGR) at time t: {x, y, angle, score, white}, or None before the target was seen white."
+        },
+        {
+          "name": "TargetTracker._filter",
+          "kind": "method",
+          "line": 361,
+          "signature": "def _filter(self, board, t, resp, shift, prev, flow)",
+          "summary": "Predict (turns, random speed changes), weigh (outline, decoy, flow, must move), estimate, resample."
+        },
+        {
+          "name": "features",
+          "kind": "function",
+          "line": 138,
+          "signature": "def features(board: np.ndarray, thr_pct: float = 70) -> np.ndarray",
+          "summary": "Per orientation bin, a response map of how well nearby edge orientations agree."
+        },
+        {
+          "name": "template_from",
+          "kind": "function",
+          "line": 117,
+          "signature": "def template_from(mask, rim=0) -> tuple[np.ndarray, np.ndarray]",
+          "summary": "Outline points around the centroid and their normal angles, of the mask grown by rim px."
+        },
+        {
+          "name": "target_blob",
+          "kind": "function",
+          "line": 110,
+          "signature": "def target_blob(board: np.ndarray) -> dict | None",
+          "summary": "The white target: pure white in a tan rim, the biggest such blob."
+        },
+        {
+          "name": "flow_shift",
+          "kind": "function",
+          "line": 235,
+          "signature": "def flow_shift(flow, clean) -> np.ndarray",
+          "summary": "The board's scroll between two frames: the optical flow's median over the board's own pixels."
+        },
+        {
+          "name": "typical",
+          "kind": "function",
+          "line": 205,
+          "signature": "def typical(resp, pts, nrm, theta) -> float",
+          "summary": "The frame's typical outline score at an angle, for off-board points."
+        },
+        {
+          "name": "score_at",
+          "kind": "function",
+          "line": 198,
+          "signature": "def score_at(resp, bins, xs, ys, p0, at=None) -> np.ndarray",
+          "summary": "Each pose's outline score, off-board points counting as p0."
+        },
+        {
+          "name": "board_of",
+          "kind": "function",
+          "line": 82,
+          "signature": "def board_of(frame: np.ndarray) -> np.ndarray | None",
+          "summary": "The 750x500 playable board out of a 1366x768 frame."
+        },
+        {
+          "name": "track_clip",
+          "kind": "function",
+          "line": 450,
+          "signature": "def track_clip(folder, first, last=None, fps=15.0, seed=0, start_s=START_S) -> dict[int, dict]",
+          "summary": "The tracker run on a recorded alarm clip."
+        },
+        {
+          "name": "against_reference",
+          "kind": "function",
+          "line": 465,
+          "signature": "def against_reference(answers, ref) -> dict",
+          "summary": "Mean px off, share within 10 and 20 px, worst, against a user-approved track."
+        },
+        {
+          "name": "BOARD_AT_NATIVE",
+          "kind": "constant",
+          "line": 55,
+          "signature": "BOARD_AT_NATIVE = (308, 180, 750, 500)",
+          "summary": "The board's x, y, w, h in the 1366x768 client."
+        },
+        {
+          "name": "N",
+          "kind": "constant",
+          "line": 64,
+          "signature": "N = 2000",
+          "summary": "Particles."
+        },
+        {
+          "name": "_pool",
+          "kind": "function",
+          "line": 271,
+          "signature": "def _pool() -> tuple[ThreadPoolExecutor, int]",
+          "summary": "The process's shared worker threads, as many as OpenCV's."
+        }
+      ],
+      "inputs": [
+        "750x500 board crops (BGR) with their capture times, from control.lie_tracking's child process (the perception service's frames) or recorded alarm clips (clip_frames)"
+      ],
+      "outputs": [
+        "per frame {x, y, angle, score, white} in board px -> control.lie_tracking (client and desktop coordinates, the cursor through the elevated player, lab/lie_target/*.jsonl, telemetry)",
+        "against_reference statistics for `python -m gamelab lie-target`"
+      ],
+      "uses": [],
+      "files_io": [
+        {
+          "path": "<alarm clip folder>/index.jsonl",
+          "mode": "read",
+          "what": "a recorded clip's frame list (clip_frames), and its frame images"
+        }
+      ],
+      "concurrency": "A process-wide ThreadPoolExecutor 'lie-target' with cv2.getNumThreads() workers (6 in the live child process), shared by trackers: edge features and masks run beside the optical flow; the flow off the scroll and the typical scores beside the particle scoring; particles scored in PARTICLE_RUNS (3) chunks (numpy and OpenCV let go of the GIL).",
+      "tunables": [
+        {
+          "name": "N",
+          "value": "2000",
+          "meaning": "particles"
+        },
+        {
+          "name": "KAPPA",
+          "value": "25",
+          "meaning": "weight per unit of score"
+        },
+        {
+          "name": "LAM / BACK_S",
+          "value": "0.3 / 0.2 s",
+          "meaning": "the decoy check's weight and look-back"
+        },
+        {
+          "name": "MU",
+          "value": "1.0",
+          "meaning": "the flow-off-the-scroll weight"
+        },
+        {
+          "name": "GAMMA, SIG_REL",
+          "value": "3.0, 50 px/s",
+          "meaning": "must move: penalty at the board's velocity and its fall-off"
+        },
+        {
+          "name": "TURN, TURN_EDGE, EDGE_PX",
+          "value": "0.1, 0.3, 70",
+          "meaning": "share of particles turning a frame, near an edge, and what 'near' is"
+        },
+        {
+          "name": "TURN_V, TURN_SD",
+          "value": "95, 30 px/s",
+          "meaning": "the target's screen speed"
+        },
+        {
+          "name": "SPIN",
+          "value": "2.0 rad/s",
+          "meaning": "the target's constant spin"
+        },
+        {
+          "name": "RIM / STEP",
+          "value": "8 / 3 px",
+          "meaning": "the template's outline grown by the rim, point spacing"
+        },
+        {
+          "name": "DIS_PRESET",
+          "value": "2 (medium)",
+          "meaning": "optical flow preset"
+        },
+        {
+          "name": "START_S",
+          "value": "4.6",
+          "meaning": "s from the board's first frame to START"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-02",
+          "what": "The target followed by its outline with a particle filter, replacing the player's YOLO shadow.",
+          "why": "The user: \"Let's wire this and remove the old yolo-based live detection\"."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "The board's scroll from the optical flow's median, replacing phase correlation refined by ECC.",
+          "why": "0.1-0.2 px apart on the 11 clips, and ECC took 23 ms a frame."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "The work beside the optical flow on threads as many as OpenCV's.",
+          "why": "The user: \"let's match the thread count as the light flow\": 43 to 30 ms a frame, every answer the same bit for bit."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "DIS medium preset kept.",
+          "why": "fast and ultrafast save 12-14 ms but lose the 10 fps clip (10-14 px off on average)."
+        }
+      ],
+      "gotchas": [
+        "The board's path is a fixed ellipse in time since START, but frame times are capture times that don't match what they show (a frame stamped 139 ms after the last can show 18 ms of motion): the scroll is measured, not predicted.",
+        "Only a 1366x768 frame gives a board (board_of returns None otherwise).",
+        "The one real miss on the references is a faint stretch where a same-shaped decoy sits 60 px away.",
+        "The user's own crosshair isn't the truth: it lags about 0.4 s."
+      ],
+      "tests": [
+        "tests/test_lie_target.py",
+        "tests/test_lie_tracking.py"
+      ]
+    },
+    {
+      "path": "gamelab/perception/violetta.py",
+      "title": "Violetta game solver",
+      "tagline": "YOLO boxes plus the client's shuffle rules: where the made-up Violetta ends up.",
+      "summary": "In the Lie Detector's Violetta game four Violettas are shuffled over four rounds and the player must pick the one wearing make-up. A YOLO11n model finds the Violettas (and the made-up one's face before the shuffles) in each frame; each round is solved by fitting the client's own shuffle animation, taken from its decompile, to the boxes over every start time, duration and permutation. It also spots the answer window (the buttons lit cyan) and the pass dialog's OK button.",
+      "details_md": "**Detection** (`Detector`). Loads `assets/violetta.pt` (YOLO11n through ultralytics and torch, on the GPU if there is one) on first use and runs it on the stage crop (`CROP`: x 465-905, y 285-515 of the 1366x768 client) at `IMGSZ` 448 and `CONF` 0.5. The model was trained only on frames rendered from the game's own pictures (the stage, the sprites, the spotlights blended as the game blends them). Class 0 is a Violetta, class 1 the made-up one showing its face before the shuffles. A box's `size` is its width over `SIZE_W` (75.7 px at size 1.0).\n\n**Before the shuffles.** `slots_of` measures the four slots' x (defaults `SLOTS` 526, 628, 730, 834) from frames with four boxes standing near them; `start_slot` votes the class-1 boxes, by score, into slots.\n\n**The round's model** (the client's decompile, 2026-11-03). A round's motion lasts D in `DS` (3.8-5.0 s: 5000 - (rand % 5) x 300 ms), all four together, in one hop or two (each D/2). A hop of length T is a lift over T/4 to its lane's size, a straight travel over T/2 and a settle over T/4. The lane (drawn size, %) depends on direction and distance (`lane`): one slot left goes in front (116.5), one right behind (82.5), two or more right in front (152.5), two or more left behind (56.5); one that stays lunges in front (140) or behind (70).\n\n**Solving** (`solve_round`). For each candidate start t0 and duration D, `_predict` gives every one of the 24 permutations' predicted x and log-size on every frame; `_support` sums, per prediction, its best box's Gaussian weight (`SX` 16 px, `SL` 0.14 in log-size). The best one-hop permutation is compared with the best chain of two hops, which must beat it by `TWO_MARGIN` (1.03) since two hops fit more. With the answer window's time known, t0 is pinned to window - D - `ROUND_END_S` (0.333 s) within `T0_SLACK` (0.4 s) and only frames from `LOOK_BACK_S` before are scored (round 1 had taken 218 frames and 20 s to solve). The answer is the server's: the client only animates it.\n\n**The UI.** `buttons_lit`: the button row lit cyan over `BUTTONS_LIT` (30%) of its pixels means the answer window is open. `BUTTON_AT` gives the four buttons' middles. `OkDialog`: the pass dialog's template at `OK_AT` within `OK_NEAR` px, at `OK_MATCH` (0.8) or more, returns the OK button's middle.\n\nOffline on the 9 recorded games of 2026-10-26 to 11-03: the made-up one's start slot on all of them and every answered round's slot as answered (28 of 28), though the model never trained on a real frame. control.violetta_live runs it live and clicks through the elevated player.",
+      "lines": 241,
+      "key_items": [
+        {
+          "name": "Detector",
+          "kind": "class",
+          "line": 82,
+          "signature": "class Detector",
+          "summary": "The YOLO model, loaded on first use (ultralytics), run on the stage crop."
+        },
+        {
+          "name": "Detector.detect",
+          "kind": "method",
+          "line": 95,
+          "signature": "def detect(self, frames: list) -> list[list[dict]]",
+          "summary": "Each frame's boxes: x, y (client px), size, score, cls, w, h."
+        },
+        {
+          "name": "solve_round",
+          "kind": "function",
+          "line": 169,
+          "signature": "def solve_round(ts, frames, slots, step=2, window=None)",
+          "summary": "The round's permutation from its frames' boxes, one hop or two, by fitting the client's shuffle rules."
+        },
+        {
+          "name": "_predict",
+          "kind": "function",
+          "line": 136,
+          "signature": "def _predict(slots, t0: float, T: float, ts: np.ndarray)",
+          "summary": "Every permutation's predicted x and log-size per frame for a hop of length T from t0."
+        },
+        {
+          "name": "_support",
+          "kind": "function",
+          "line": 157,
+          "signature": "def _support(px, pls, sx, X, L, W) -> np.ndarray",
+          "summary": "Each permutation's summed support: every prediction's best box per frame."
+        },
+        {
+          "name": "start_slot",
+          "kind": "function",
+          "line": 126,
+          "signature": "def start_slot(frames, slots) -> int | None",
+          "summary": "The made-up one's slot before the shuffles, by the class-1 boxes' votes."
+        },
+        {
+          "name": "slots_of",
+          "kind": "function",
+          "line": 113,
+          "signature": "def slots_of(frames) -> list[float]",
+          "summary": "The four slots' x measured from standing boxes."
+        },
+        {
+          "name": "lane",
+          "kind": "function",
+          "line": 69,
+          "signature": "def lane(i: int, j: int) -> float",
+          "summary": "The size (%) a Violetta is drawn at going from slot i to slot j."
+        },
+        {
+          "name": "buttons_lit",
+          "kind": "function",
+          "line": 213,
+          "signature": "def buttons_lit(frame: np.ndarray) -> bool",
+          "summary": "Whether the answer buttons are lit cyan: the round's answer window."
+        },
+        {
+          "name": "OkDialog",
+          "kind": "class",
+          "line": 221,
+          "signature": "class OkDialog",
+          "summary": "The pass dialog's template matcher: the OK button's middle, or None."
+        },
+        {
+          "name": "DS",
+          "kind": "constant",
+          "line": 40,
+          "signature": "DS = (3.8, 4.1, 4.4, 4.7, 5.0)",
+          "summary": "The round's motion durations the client picks from."
+        },
+        {
+          "name": "CROP",
+          "kind": "constant",
+          "line": 34,
+          "signature": "CROP = (465, 285, 905, 515)",
+          "summary": "The stage window the model sees, client px."
+        },
+        {
+          "name": "BUTTON_AT",
+          "kind": "constant",
+          "line": 59,
+          "signature": "BUTTON_AT = ((527, 505), (631, 505), (735, 505), (839, 505))",
+          "summary": "The four answer buttons' middles for the answer click."
+        }
+      ],
+      "inputs": [
+        "the service's 1366x768 client frames (RGB) while the Lie Detector's alarm is up, from control.violetta_live",
+        "gamelab/assets/violetta.pt (YOLO11n) and gamelab/assets/violetta_ok.png"
+      ],
+      "outputs": [
+        "per-frame boxes {x, y, size, score, cls, w, h} in client px",
+        "the round's permutation and how ('one' or 'two' hops) -> control.violetta_live chains it from the start slot and clicks BUTTON_AT[slot] through the elevated player",
+        "OkDialog's OK button position -> control.violetta_live's click"
+      ],
+      "uses": [
+        "gamelab/paths.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/assets/violetta.pt",
+          "mode": "read",
+          "what": "the YOLO11n model"
+        },
+        {
+          "path": "gamelab/assets/violetta_ok.png",
+          "mode": "read",
+          "what": "the pass dialog's template"
+        }
+      ],
+      "concurrency": "None of its own; ultralytics and torch load lazily and may use the GPU. control.violetta_live calls it from a thread of its own.",
+      "tunables": [
+        {
+          "name": "CONF / IMGSZ",
+          "value": "0.5 / 448",
+          "meaning": "box confidence kept (rounds came out the same from 0.25 to 0.7) / model input size"
+        },
+        {
+          "name": "SIZE_W",
+          "value": "75.7",
+          "meaning": "a box's width at size 1.0"
+        },
+        {
+          "name": "DS",
+          "value": "3.8-5.0 s",
+          "meaning": "a round's motion durations"
+        },
+        {
+          "name": "SX, SL / SX_STAY",
+          "value": "16 px, 0.14 / 22 px",
+          "meaning": "prediction spreads in x and log-size; a staying one's x spread"
+        },
+        {
+          "name": "TWO_MARGIN",
+          "value": "1.03",
+          "meaning": "two hops must beat one by this factor"
+        },
+        {
+          "name": "ROUND_END_S / T0_SLACK / LOOK_BACK_S",
+          "value": "0.333 / 0.4 / 1.0 s",
+          "meaning": "the answer window's lag after the motion, slack on the start, frames scored before"
+        },
+        {
+          "name": "BUTTONS_LIT",
+          "value": "0.3",
+          "meaning": "share of the button row lit cyan"
+        },
+        {
+          "name": "OK_MATCH",
+          "value": "0.8",
+          "meaning": "the pass dialog's match (1.000 on passes, at most 0.58 elsewhere)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-03",
+          "what": "Rounds solved by fitting the client's own shuffle rules, from its decompile, to YOLO boxes.",
+          "why": "The round's answer is the server's and the client only animates it; the rules (durations, hops, lanes, lunges) pin what the boxes can mean."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "Run live when the Violetta game shows, its answers and the pass's OK clicked.",
+          "why": "The user: \"wire in the code to run this live when the violetta mini game shows up in game\", \"at the end of the success, click the ok button of 'you have successfully passed'\"."
+        },
+        {
+          "date": "",
+          "what": "The round solved knowing its answer window's time.",
+          "why": "Round 1 from the window's first sight had been 218 frames and 20 s to solve; the answer window lasts 4 s."
+        }
+      ],
+      "gotchas": [
+        "ultralytics and torch load on first use (Detector.load): the live watcher loads the model as the alarm goes up, before the game's window shows.",
+        "The model never trained on a real frame; it was checked offline on 9 recorded games.",
+        "Coordinates are client px of the 1366x768 game: another client size isn't handled."
+      ],
+      "tests": [
+        "tests/test_violetta.py"
+      ]
+    }
+  ],
+  "data_types": [
+    {
+      "name": "Mob",
+      "module": "gamelab/perception/mobs.py",
+      "line": 255,
+      "summary": "A monster seen on screen, made by MobDetector (and by SpawnWatch's Sighting.mob for newborns); consumed by localization.worldstate and localization.tracking, which place it on the map and follow it.",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "monster kind ('horny-mushroom')"
+        },
+        {
+          "name": "x, y, w, h",
+          "type": "int",
+          "meaning": "the matched picture's centre and size, frame px"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "meaning": "masked match score (a newborn: its fit's R2)"
+        },
+        {
+          "name": "ox, feet",
+          "type": "float | None",
+          "meaning": "where its feet are, if the picture knows its origin"
+        },
+        {
+          "name": "facing",
+          "type": "int",
+          "meaning": "1 right, -1 left, 0 unknown"
+        },
+        {
+          "name": "pose",
+          "type": "str",
+          "meaning": "'stand', 'move', 'hit1' or ''"
+        },
+        {
+          "name": "frame",
+          "type": "str",
+          "meaning": "the game frame that matched ('move/2')"
+        },
+        {
+          "name": "template",
+          "type": "str",
+          "meaning": "the picture's file name"
+        },
+        {
+          "name": "fading",
+          "type": "float | None",
+          "meaning": "its alpha while fading in (spawn watch); None: solid"
+        }
+      ]
+    },
+    {
+      "name": "MobTemplate",
+      "module": "gamelab/perception/mobs.py",
+      "line": 288,
+      "summary": "One monster picture (one pose, one facing) at frame size, with what its folder says of it; built by MobDetector, used by both search steps, the twin checks and perception.exact.",
+      "fields": [
+        {
+          "name": "rgb, mask3",
+          "type": "np.ndarray",
+          "meaning": "colours and the pixels step 2 matches"
+        },
+        {
+          "name": "silhouette",
+          "type": "np.ndarray",
+          "meaning": "body-colour silhouette at 1/COARSE of step 1's scale"
+        },
+        {
+          "name": "origin",
+          "type": "tuple | None",
+          "meaning": "feet from its top-left"
+        },
+        {
+          "name": "facing, frame, pose",
+          "type": "int, str, str",
+          "meaning": "what the game data says of it"
+        },
+        {
+          "name": "box",
+          "type": "tuple | None",
+          "meaning": "body box in map units from its feet"
+        },
+        {
+          "name": "step1",
+          "type": "tuple | None",
+          "meaning": "colours and mask at step 1's scale, on finer frames"
+        }
+      ]
+    },
+    {
+      "name": "Item",
+      "module": "gamelab/perception/loot.py",
+      "line": 131,
+      "summary": "An item or mesos on the ground, made by LootDetector; placed by localization.scene (Scene.loot) and picked up by behavior.looting.",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "MESOS or the item's name as a kind"
+        },
+        {
+          "name": "x, y, w, h",
+          "type": "int",
+          "meaning": "centre and size, frame px"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "meaning": "shape match score"
+        },
+        {
+          "name": "coin",
+          "type": "str | None",
+          "meaning": "for mesos: 'bronze' or 'gold' (its amount picks it)"
+        }
+      ]
+    },
+    {
+      "name": "MonsterDrops",
+      "module": "gamelab/perception/drops.py",
+      "line": 47,
+      "summary": "One monster's drop table from meowdb; read by perception.loot (which items), behavior.looting (mesos ranges, and rates as weights) and sim.world (rates).",
+      "fields": [
+        {
+          "name": "items",
+          "type": "tuple[str, ...]",
+          "meaning": "Etc and Use items it drops, by name"
+        },
+        {
+          "name": "mesos",
+          "type": "tuple[int, int] | None",
+          "meaning": "lowest and highest mesos reported"
+        },
+        {
+          "name": "rates",
+          "type": "dict[str, float]",
+          "meaning": "OSMLib's reference rates: the simulator's drops, and weights for behavior.looting.expected_worth"
+        },
+        {
+          "name": "source",
+          "type": "str",
+          "meaning": "'meowdb'"
+        }
+      ]
+    },
+    {
+      "name": "DiePicture",
+      "module": "gamelab/perception/deaths.py",
+      "line": 64,
+      "summary": "One die1 animation frame facing one way, at the look's scale; held by DeathWatch.",
+      "fields": [
+        {
+          "name": "index",
+          "type": "int",
+          "meaning": "die1 frame number (0 = eyes shut)"
+        },
+        {
+          "name": "rgb, mask3",
+          "type": "np.ndarray",
+          "meaning": "colours and opaque pixels"
+        },
+        {
+          "name": "ox, oy",
+          "type": "int",
+          "meaning": "feet in the picture"
+        }
+      ]
+    },
+    {
+      "name": "Point",
+      "module": "gamelab/perception/spawns.py",
+      "line": 147,
+      "summary": "A spawn point as the spawn watch takes it, made by localization.worldstate.spawn_points from the map model.",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "its monster's kind"
+        },
+        {
+          "name": "x",
+          "type": "float",
+          "meaning": "map units"
+        },
+        {
+          "name": "floor",
+          "type": "Floor",
+          "meaning": "the platform its monsters stand on (left, right, y_at)"
+        },
+        {
+          "name": "platform",
+          "type": "int | None",
+          "meaning": "that platform's id"
+        }
+      ]
+    },
+    {
+      "name": "Art",
+      "module": "gamelab/perception/spawns.py",
+      "line": 236,
+      "summary": "The map's art behind the monsters (from localization.mapart through the camera registration), the background the spawn watch fits against.",
+      "fields": [
+        {
+          "name": "rgb",
+          "type": "np.ndarray",
+          "meaning": "H x W x 3 picture in map units"
+        },
+        {
+          "name": "origin",
+          "type": "tuple[int, int]",
+          "meaning": "map point of its top-left"
+        },
+        {
+          "name": "known",
+          "type": "np.ndarray | None",
+          "meaning": "where it's fixed art (animated objects left out)"
+        }
+      ]
+    },
+    {
+      "name": "Sighting",
+      "module": "gamelab/perception/spawns.py",
+      "line": 266,
+      "summary": "A newborn seen fading in, in one frame; SpawnWatch.look makes it, worldstate hands it over or turns it into a Mob with `fading`.",
+      "fields": [
+        {
+          "name": "point",
+          "type": "int",
+          "meaning": "its spawn point's index"
+        },
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "monster kind"
+        },
+        {
+          "name": "x, y",
+          "type": "float",
+          "meaning": "feet, map units"
+        },
+        {
+          "name": "a",
+          "type": "float",
+          "meaning": "opacity 0-1"
+        },
+        {
+          "name": "r2, res",
+          "type": "float",
+          "meaning": "the fit's share explained and residual (colour levels)"
+        },
+        {
+          "name": "picture",
+          "type": "Picture",
+          "meaning": "the picture that fit"
+        },
+        {
+          "name": "since",
+          "type": "float",
+          "meaning": "its onset's frame time"
+        },
+        {
+          "name": "onset",
+          "type": "bool",
+          "meaning": "found at its point this frame (else followed)"
+        }
+      ]
+    },
+    {
+      "name": "Touch",
+      "module": "gamelab/perception/touches.py",
+      "line": 110,
+      "summary": "One touch of hers, made by TouchWatch (or by worldstate from an HP drop alone); sent as a 'touch' event, kept as WorldState.touch and used by senses, the hunter and the navigator.",
+      "fields": [
+        {
+          "name": "t",
+          "type": "float",
+          "meaning": "time of the frame its popup first showed"
+        },
+        {
+          "name": "kind",
+          "type": "str",
+          "meaning": "MISS, DAMAGE or UNREAD"
+        },
+        {
+          "name": "text",
+          "type": "str",
+          "meaning": "'MISS', the digits read, or ''"
+        },
+        {
+          "name": "box",
+          "type": "tuple",
+          "meaning": "the popup's box, look-frame px"
+        },
+        {
+          "name": "dx, dy",
+          "type": "float",
+          "meaning": "its bottom's middle from her tag"
+        },
+        {
+          "name": "late",
+          "type": "float",
+          "meaning": "how long after t it was told"
+        },
+        {
+          "name": "how",
+          "type": "str",
+          "meaning": "POPUP, or HP for worldstate's HP-only fallback"
+        }
+      ]
+    },
+    {
+      "name": "Popup",
+      "module": "gamelab/perception/misses.py",
+      "line": 48,
+      "summary": "Her attack's MISS seen over a monster, made by MissReader; placed on the map by behavior.hunter for behavior.keycheck.",
+      "fields": [
+        {
+          "name": "x, y",
+          "type": "float",
+          "meaning": "bottom centre, look-frame px"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "meaning": "IoU of the fill with the picture's"
+        }
+      ]
+    },
+    {
+      "name": "ChatLine",
+      "module": "gamelab/perception/messages.py",
+      "line": 95,
+      "summary": "What the message bar showed, made by ChatReader; behavior.hunter and behavior.darts read its refusal.",
+      "fields": [
+        {
+          "name": "text",
+          "type": "str",
+          "meaning": "the game line's text ('' if none or unreadable)"
+        },
+        {
+          "name": "mask",
+          "type": "np.ndarray | None",
+          "meaning": "its pink pixels; None: no game line"
+        },
+        {
+          "name": "t",
+          "type": "float",
+          "meaning": "the frame's time"
+        }
+      ]
+    },
+    {
+      "name": "ChatBox",
+      "module": "gamelab/perception/chatbox.py",
+      "line": 66,
+      "summary": "The chat box's state on a frame, made by chatbox.read in Eyes.look; carried by Observation, WorldState and Scene for behavior.chatcheck.",
+      "fields": [
+        {
+          "name": "state",
+          "type": "str",
+          "meaning": "EXPANDED, COLLAPSED or UNKNOWN"
+        },
+        {
+          "name": "typing",
+          "type": "bool",
+          "meaning": "its input line may have the keyboard"
+        },
+        {
+          "name": "why",
+          "type": "str",
+          "meaning": "why UNKNOWN"
+        },
+        {
+          "name": "marks",
+          "type": "int",
+          "meaning": "non-white px in the expanded field"
+        },
+        {
+          "name": "readable",
+          "type": "bool",
+          "meaning": "False at another client size or with no frame"
+        }
+      ]
+    },
+    {
+      "name": "TargetTracker.step",
+      "module": "gamelab/perception/lie_target.py",
+      "line": 337,
+      "summary": "The mini-game tracker's answer dict per board frame, consumed by control.lie_tracking (recorded and turned into the cursor's position).",
+      "fields": [
+        {
+          "name": "x, y",
+          "type": "float",
+          "meaning": "target centre, board px (750 x 500)"
+        },
+        {
+          "name": "angle",
+          "type": "float",
+          "meaning": "rad, from the spin and the particles' offsets"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "meaning": "weighted outline score"
+        },
+        {
+          "name": "white",
+          "type": "bool",
+          "meaning": "True while the white blob's own centre is given (before START)"
+        }
+      ]
+    },
+    {
+      "name": "Detector.detect",
+      "module": "gamelab/perception/violetta.py",
+      "line": 95,
+      "summary": "A Violetta box dict per detection, made by the YOLO Detector; solve_round, slots_of and start_slot read them.",
+      "fields": [
+        {
+          "name": "x, y",
+          "type": "float",
+          "meaning": "box middle, client px"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "meaning": "width over SIZE_W (1.0 standing)"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "meaning": "model confidence"
+        },
+        {
+          "name": "cls",
+          "type": "int",
+          "meaning": "0 a Violetta, 1 the made-up one's face"
+        },
+        {
+          "name": "w, h",
+          "type": "float",
+          "meaning": "box width and height"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "whole-screen-search",
+      "title": "How every monster on screen is found each frame",
+      "summary": "The perception service's pass searches the whole play area for monsters on every frame, on a thread beside her look; colour silhouettes pick places, masked picture matches confirm them.",
+      "trigger": "Every frame of the perception service's pass (localization.worldstate.WorldStep.step, 15 a second).",
+      "steps": [
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._search_ahead",
+          "text": "At the game's own 1366x768, with the real detector, submits `detect_wide` on the full frame to the pass's one-thread pool 'wide' before her look (then perception.exact's finder on the same thread); otherwise `Eyes.monsters_wide` runs after the look.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/mobs.py",
+          "symbol": "MobDetector.detect_wide",
+          "text": "Cuts the rows above the HUD into bands of WIDE_BAND every WIDE_STEP, overlapping by the tallest learned picture, and searches them at once on the bands pool.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/mobs.py",
+          "symbol": "step1_frame",
+          "text": "Each band is shrunk (area-averaged, in C) to SEARCH_SCALE and cut to a multiple of COARSE.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/mobs.py",
+          "symbol": "_InC.step1",
+          "text": "In search.c: each unit's colour test, silhouettes scored where the cover test keeps a window, peaks at SILHOUETTE_THRESHOLD, then places; shapes OpenCV's noise could decide are redone its way.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/mobs.py",
+          "symbol": "_gated",
+          "text": "Each place passes the gate at step 1's scale if one of its first pictures scores FINE_GATE (0.55).",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/mobs.py",
+          "symbol": "_matches",
+          "text": "Each passing place's best FINE_TEMPLATES pictures are matched at full size FINE_SLACK px around, in native.c; THRESHOLD (0.6) or more becomes a Mob with its feet from the picture's origin (`_seen`).",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/mobs.py",
+          "symbol": "MobDetector._picked",
+          "text": "Overlaps suppressed across bands; a find of a twin kind (Axe Stump vs Stump) re-judged at its feet by `_pick_kind`.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._wide",
+          "text": "The pass waits for the search's answer (the spawn watch ran meanwhile); newborns it hasn't found are added (`_handed`) and so are the exact finder's finds (`_exact_added`); all are placed on the map and go to the tracker (localization.tracking) to be matched to tracks.",
+          "process": "perception service"
+        }
+      ]
+    },
+    {
+      "id": "newborn-onset",
+      "title": "A newborn: from its first faint pixels to a tracked monster",
+      "summary": "The spawn watch fits the game's alpha blend at every spawn point in view, follows each newborn while it fades in, and hands it to the whole screen's detections once the search sees it.",
+      "trigger": "Every frame with her placed and the view registered on it, on Tree Dungeon at 1366x768 (worldstate.SPAWNS).",
+      "steps": [
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._newborns",
+          "text": "Passes the frame, the view's top-left, the time, her feet and the feet of the monsters the tracker matched in the frame before (not fading, not the exact finder's) to the watch; on a frame it can't use (her not placed, no sure view, a bad frame), `missed()`.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/spawns.py",
+          "symbol": "SpawnWatch.look",
+          "text": "First re-fits each newborn already followed (`_follow`): ok, solid, fading out, or a miss (LOST_AFTER 2).",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/spawns.py",
+          "symbol": "SpawnWatch._shown",
+          "text": "For each point, its window's pixels in the play area; points partly under the chat box or game windows are skipped; off-screen parts are filled with the art.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/spawns.py",
+          "symbol": "SpawnWatch._empty",
+          "text": "The empty test: fewer than EMPTY_COUNT pixels off the art by more than EMPTY_LEVELS means nothing there.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/spawns.py",
+          "symbol": "SpawnWatch._sums",
+          "text": "Integer sums D.G, G.G, D.D per hypothesis (ONSET pictures, both facings, BAND and ROWS around the point), in spawns.c or numpy, with her box and other monsters' boxes masked.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/spawns.py",
+          "symbol": "passes",
+          "text": "`scores` gives alpha, R2 and residual; `kept` picks the best hypothesis; a >= A_MIN, 1 - R2 <= U_MAX, residual <= RES_MAX and a <= A_START make an onset Sighting and a newborn to follow.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._handed",
+          "text": "`SpawnWatch.handed` drops newborns the whole screen found too (same kind within HANDOVER_DX/DY); the rest become Mobs with `fading` (Sighting.mob) beside the search's detections.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/localization/tracking.py",
+          "symbol": "MonsterTracker.update",
+          "text": "The tracker follows the newborn as any monster, and uses FADE_PER_S to know when it turns solid.",
+          "process": "perception service"
+        }
+      ]
+    },
+    {
+      "id": "touch-told",
+      "title": "A violet popup over her becomes a touch",
+      "summary": "Each frame the touch watch finds violet lines around her name tag, decides which popup is newly hers, reads MISS or digits, and confirms a number by her HP bar.",
+      "trigger": "Every frame of the pass that passed its checks (worldstate.TOUCHES); new popups are looked for only with her tag known (seen or placed).",
+      "steps": [
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._touched",
+          "text": "Calls `TouchWatch.update` with the frame, her tag (seen or placed), whether it was seen, her HP bar share and the time.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/touches.py",
+          "symbol": "TouchWatch.update",
+          "text": "Settles held numbers first: an HP change over HP_EPS makes a DAMAGE touch; none within HP_WAIT_S means another player's.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/touches.py",
+          "symbol": "lines",
+          "text": "Finds violet text lines (CORE/ALL hue ranges) in the ROI around her tag.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/touches.py",
+          "symbol": "TouchWatch._look",
+          "text": "Matches each line to a popup seen in the last LOST_S; a new one born within BIRTH_DX/BIRTH_DY of her tag is hers (or at the edge once it lasts EDGE_FRAMES).",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/touches.py",
+          "symbol": "TouchWatch._born_hers",
+          "text": "Skips a popup already told within REFRACT_S; else `_classify` reads it with `Reader.read` (MISS or digits; by width without the sprites). MISS is told now; a number is held for her HP bar.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/localization/worldstate.py",
+          "symbol": "WorldStep._tell",
+          "text": "Each Touch becomes a 'touch' event and the state's newest touch ('crowded' if another player's dot is near and only the popup says so).",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/localization/senses.py",
+          "symbol": "Senses.invulnerable_until",
+          "text": "The stack reads it: a new touch (`Senses.touched_since`) cuts the navigator's chain short; `invulnerable_until` (INVULNERABLE_S after the popup, a 'crowded' one left out) lets a chain pass a monster while it lasts; the hunter logs it.",
+          "process": "hunt command"
+        }
+      ]
+    },
+    {
+      "id": "lie-detector-sighting",
+      "title": "A Lie Detector seen: from the watchdog's look to the alarm and the helpers",
+      "summary": "The elevated key player's watchdog checks the screen 4 times a second; a form seen raises the alarm, and the perception service's helpers follow the mini-game's target or the Violetta game while it's up.",
+      "trigger": "The key player's 'lie-detector-watch' thread, every 0.25 s (control.player.Watchdog).",
+      "steps": [
+        {
+          "module": "gamelab/control/player.py",
+          "symbol": "Watchdog._scores",
+          "text": "On a 1366x768 frame with a capture anchor in place, asks the spotter's `near`; every WHOLE_EVERY-th look, during a cycle, or at another size, `scores` of the whole frame.",
+          "process": "key player (elevated)"
+        },
+        {
+          "module": "gamelab/perception/lie_detector.py",
+          "symbol": "LieDetectorSpotter.near",
+          "text": "Stretches the frame to 1920x1080, halves and greys it, matches each form's template within NEAR_MARGIN of its PLACES; the Truth Booth is the lesser of its clock and the Administrator's tag.",
+          "process": "key player (elevated)"
+        },
+        {
+          "module": "gamelab/control/alarm.py",
+          "symbol": "raise_alarm",
+          "text": "A form at 1 or more: the watchdog sets its alarm event first (keys stop within about 10 ms), then `raise_alarm` writes lab/ALARM.json and a screenshot and pages by form; the player refuses every plan but the few kinds the alarm allows.",
+          "process": "key player (elevated)"
+        },
+        {
+          "module": "gamelab/perception/lie_detector.py",
+          "symbol": "LieDetectorSpotter.clock_left",
+          "text": "In the Truth Booth, the clock's seconds left are read so a stay already seen isn't taken for a new one.",
+          "process": "key player (elevated)"
+        },
+        {
+          "module": "gamelab/control/lie_tracking.py",
+          "symbol": "LieTracking._board_up",
+          "text": "While the alarm is up the perception service asks `over_play` for 'mini-game'; the board's crops go to a child process.",
+          "process": "perception service"
+        },
+        {
+          "module": "gamelab/perception/lie_target.py",
+          "symbol": "TargetTracker.step",
+          "text": "The child process follows the target each frame; its client position goes to the elevated player's cursor and to lab/lie_target/*.jsonl.",
+          "process": "lie tracking child process"
+        },
+        {
+          "module": "gamelab/control/violetta_live.py",
+          "symbol": "VioletaLive._window_up",
+          "text": "For the countdown's Violetta game (`over_play` 'countdown'), each frame's boxes (violetta.Detector), the round solved at each answer window (`buttons_lit`, `solve_round`) and its button clicked through the player; the pass's OK by `OkDialog`.",
+          "process": "perception service"
+        }
+      ]
+    }
+  ],
+  "not_done": [
+    "The monster re-find code (MobDetector.refind, refind_all, refind_ahead, native.c's rf_* and the GPU path) has been unused by the live pass since 2026-10-30, left for a later cleanup.",
+    "Monsters partly covered near her (by her body, pet, name plate, numbers, effects) are mostly missed by the masked search: on a clip of 2026-11-02 it found a monster within 25 units of her on 6% of the frames, 700 of its 791 misses refused at FINE_GATE. Since 2026-11-04 perception.exact's finder (another slice) adds them; the masked match at a missed track's predicted box (the design's MISSED_CHECK) stays unbuilt.",
+    "The spawn watch's README notes (2026-11-01) say it had not yet run in game; other maps aren't measured, points under the chat box aren't looked at, and only 20 of 90 newborns whose start is hidden are found (every stand and move picture at the onset would find 12 more for about 3 times the cost).",
+    "The death watch only watches Tree Dungeon's Horny and Green Mushrooms; other kinds wait for a replayed recording to measure their margins.",
+    "Touches: 4 of 273 are lost (MISSes half under the Lie Detector's window or split by her own orange numbers, read as digits); a half-MISS template was deferred.",
+    "The game's message for having no throwing stars has never been captured: says_no_darts matches guessed wordings.",
+    "The chat box is read on every frame, but only at 1366x768, and acted on only at a hunt's start (behavior.chatcheck); an input line open with the box collapsed has never been seen (taken as typing).",
+    "Drops of monsters not in drops.MONSTERS aren't looked for (only potions and mesos).",
+    "The mini-game tracker's one real miss is a faint stretch where a same-shaped decoy sits 60 px away.",
+    "The Violetta model was trained only on rendered frames; it was checked offline on 9 recorded games.",
+    "Monsters and drops are looked for only above the HUD's top (row 700 at 1366x768): a monster half under the chat bar isn't looked for."
+  ]
+}

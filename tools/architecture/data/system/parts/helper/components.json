@@ -1,0 +1,1032 @@
+{
+ "id": "components",
+ "summary_md": "MapleHelper's own programs, apart from gamelab: the original one-button combo app with its on-screen coach (`python -m maplehelper`), its stand-in game window for trying combos without the game (`python -m maplehelper.keyviewer`), the OCR try-out (`python -m maplehelper.ocr`) and the game-data extractor (`python -m gamedata`). Each one is its own OS process that **a person starts by hand in a terminal** (for gamedata's look-ups, possibly Claude in a working session). None is started by the babysitter or by any gamelab process, and none talks to gamelab's processes except through files on disk (and, for the combo app, the keyboard they share).\n\nMuch of the same code also runs **inside gamelab's processes as library code**, never by starting these commands: `maplehelper.win32.send_key` is how gamelab's elevated key player presses every key, `maplehelper.ocr`'s engine reads text for the pet feeder and the hunts, `maplehelper.mouse_trail` draws the key player's pointer paths, and `gamedata`'s package readers load the maps. (`maplehelper/mouse_trail.py` also has a tiny test command that prints a made-up pointer path as CSV; nothing runs it in normal operation.)",
+ "processes": [
+  {
+   "process": "helper",
+   "is_os_process": true,
+   "plain_md": "The original MapleHelper: one-button escape combos for a dart thief, with a coach panel that narrates every step so the person playing (\"she\" in the code and docs) can learn the moves. It is **its own OS process**, a plain `python -m maplehelper` that **you start by hand** in a terminal at the repo root when she wants to play with the combo buttons. Nothing starts it automatically, and nothing in the repo runs it. The babysitter (a PowerShell loop every 5 s outside the repo; the newest copy found is `D:/MapleHelper-scratch/live/babysit3.ps1`) acts only on `gamelab ...` command lines and on test or simulator pythons, so it never starts, stops or counts this app: it does not pause the pet feeder while she plays with it. It does not elevate itself and shows no UAC prompt. MapleStory runs as administrator and Windows blocks key presses from normal programs into admin windows, so for the keys to reach the real game you open the terminal **as Administrator**. Nothing keeps it to one copy.\n\nIt lives until you press **Ctrl+C** in its terminal (or close that terminal). A bad `config.toml` ends it at once with exit code 2. What it does with the game: it reads **no pixels**; at each key press it only reads the title of the window in front, and does nothing unless that title contains `MapleStory`. It hides its hotkeys (F1-F4 and F12 in `config.toml`) from the game and answers them by pressing her keys with **SendInput**: F1-F4 play the four combos, Esc stops one (and still reaches the game), F12 turns slow (demo) mode on or off. Inside it are three threads besides the main one: the keyboard hook, the combo runner and the log printer.\n\n**Beside gamelab.** It talks to no gamelab process; at start-up it reads one file gamelab writes (her key bindings). If the pet feeder (`gamelab pet --every 1`) runs meanwhile, it goes on feeding her pet through gamelab's key player, and its guard takes keyboard input with the game in front that isn't the key player's for her playing by hand, so it makes no moves of its own. The key player presses with this app's own `send_key`, tagged the same way, so this app's hook ignores the key player's keys.",
+   "expected_start": "you, by hand, in a terminal at the repo root (an Administrator terminal for the real game), whenever she wants the combo buttons; never the babysitter, gamelab, Claude or another process",
+   "started_by": [
+    "user"
+   ],
+   "evidence": [
+    {
+     "path": "maplehelper/__main__.py",
+     "line": 3,
+     "symbol": "main"
+    },
+    {
+     "path": "maplehelper/app.py",
+     "line": 62,
+     "symbol": "main"
+    },
+    {
+     "path": "README.md",
+     "line": 27,
+     "symbol": ""
+    },
+    {
+     "path": "README.md",
+     "line": 30,
+     "symbol": ""
+    },
+    {
+     "path": "README.md",
+     "line": 37,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/README.md",
+     "line": 52,
+     "symbol": ""
+    },
+    {
+     "path": "maplehelper/config.py",
+     "line": 194,
+     "symbol": "game_window_title"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 236,
+     "symbol": "_hands"
+    },
+    {
+     "path": "gamelab/behavior/guard.py",
+     "line": 243,
+     "symbol": "last_input_age"
+    },
+    {
+     "path": "gamelab/control/player.py",
+     "line": 55,
+     "symbol": "win32"
+    }
+   ],
+   "components": [
+    {
+     "id": "main",
+     "name": "Start-up and shut-down (app.main)",
+     "runs_as": "main thread",
+     "started_by": "`python -m maplehelper` (maplehelper/__main__.py calls app.main)",
+     "lives": "the whole process: it sets things up, hands the main thread to the coach, and cleans up when the coach's loop returns",
+     "does": "Reads `config.toml` (window title, her keys, the hotkeys, timings). Unless `--config-keys` is given, it swaps in her keys as gamelab last read them off the game's Key Bindings window, from `gamelab/lab/keybindings-thief.json`, read once at start-up; a missing, unreadable, doubted or unusable file leaves `config.toml`'s keys, and the banner says which keys are in use and why. It starts the log printer, makes the process DPI-aware (so the overlay sits right on a scaled screen), builds the coach, sets Windows' timer to 1 ms for the whole run (sleeps accurate to about 1 ms instead of the usual 15), starts the combo runner and the keyboard hook, prints the banner (each hotkey and its combo), then runs the coach. On the way out it unhooks the keyboard, stops the runner and stops the log printer. If Windows refuses the hook, start-up ends with that error.",
+     "rate": "once at start, once at exit",
+     "talks_to": [
+      {
+       "to": "gamelab commands (another process)",
+       "via": "file gamelab/lab/keybindings-thief.json (written by gamelab.control.keymap.remember)",
+       "what": "her current key bindings, read once at start-up"
+      },
+      {
+       "to": "keyboard hook",
+       "via": "KeyboardHook.start waits on a threading.Event until the hook is in; at exit PostThreadMessageW(WM_QUIT) to the hook thread, then join (2 s)",
+       "what": "start; stop"
+      },
+      {
+       "to": "combo runner",
+       "via": "Runner.start; at exit Runner.stop sets the abort Event and puts None on its queue, then join (2 s)",
+       "what": "start; stop"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/app.py",
+       "line": 73,
+       "symbol": "config.load"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 79,
+       "symbol": "config.followed"
+      },
+      {
+       "path": "maplehelper/config.py",
+       "line": 145,
+       "symbol": "followed"
+      },
+      {
+       "path": "gamelab/control/keymap.py",
+       "line": 196,
+       "symbol": "remember"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 82,
+       "symbol": "enable_dpi_awareness"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 181,
+       "symbol": "enable_dpi_awareness"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 33,
+       "symbol": "_error"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 88,
+       "symbol": "precise_timers"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 192,
+       "symbol": "timeBeginPeriod"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 91,
+       "symbol": "_print_banner"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 95,
+       "symbol": "hook.stop"
+      }
+     ]
+    },
+    {
+     "id": "coach",
+     "name": "The coach overlay (Tk main loop)",
+     "runs_as": "main thread",
+     "started_by": "app.main, as its last step (coach.run)",
+     "lives": "until Ctrl+C: then it closes its window and its loop returns",
+     "does": "A borderless, always-on-top panel centred 60 px below the top of the screen. It shows the combo's name and the current step in large text; when a combo ends it shows the whole recipe for 3 s (`recap`), then turns invisible. Clicks pass through it and it never takes focus from the game. It shows over the game only in windowed or borderless mode, not exclusive fullscreen.",
+     "rate": "checks its message queue every 30 ms",
+     "talks_to": [
+      {
+       "to": "combo runner",
+       "via": "queue.SimpleQueue Coach._events (filled by the Narrator)",
+       "what": "each step to show, and the ending with the recipe"
+      },
+      {
+       "to": "keyboard hook",
+       "via": "the same queue (Runner.toggle_slow runs on the hook thread)",
+       "what": "'Slow mode ON/OFF'"
+      },
+      {
+       "to": "Ctrl+C handler",
+       "via": "the flag Coach._quit",
+       "what": "quit now"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/app.py",
+       "line": 93,
+       "symbol": "coach.run"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 22,
+       "symbol": "Coach"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 19,
+       "symbol": "POLL_MS"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 47,
+       "symbol": "make_click_through"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 173,
+       "symbol": "make_click_through"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 63,
+       "symbol": "_poll"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 72,
+       "symbol": "_hide_job"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 17,
+       "symbol": "TOP_MARGIN"
+      },
+      {
+       "path": "maplehelper/config.py",
+       "line": 74,
+       "symbol": "recap"
+      }
+     ]
+    },
+    {
+     "id": "ctrl-c",
+     "name": "The Ctrl+C handler",
+     "runs_as": "callback",
+     "started_by": "app.main installs it with signal.signal, before the combo runner and the hook start",
+     "lives": "the whole process",
+     "does": "Ctrl+C in the terminal only sets the coach's quit flag (safe in a signal handler). Python runs the handler on the main thread the next time the coach's 30 ms poll runs Python code; the poll then closes the window, which ends the program.",
+     "rate": "once, when you press Ctrl+C",
+     "talks_to": [
+      {
+       "to": "coach",
+       "via": "Coach.request_quit sets Coach._quit",
+       "what": "quit"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/app.py",
+       "line": 86,
+       "symbol": "signal.signal"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 57,
+       "symbol": "request_quit"
+      },
+      {
+       "path": "maplehelper/coach.py",
+       "line": 64,
+       "symbol": "_quit"
+      }
+     ]
+    },
+    {
+     "id": "keyboard-hook",
+     "name": "The keyboard hook (thread 'keyboard-hook')",
+     "runs_as": "thread",
+     "started_by": "app.main via KeyboardHook.start, right after the combo runner; start-up waits until the hook is installed and fails if Windows refuses it",
+     "lives": "until app.main posts WM_QUIT to it at exit (it is a daemon thread, so it also dies with the process)",
+     "does": "Installs a system-wide low-level keyboard hook (SetWindowsHookExW, WH_KEYBOARD_LL) and waits in a message loop. Windows then calls it on this thread for every key event on the PC. Keys tagged 'MHLP' are skipped: that tag is on the helper's own SendInput keys and on gamelab's key player's, which uses the same send_key. Every other key goes to the controller; if the controller says so, the key is hidden from every program, the game included. A bug in the controller prints a traceback and lets the key through, so her keyboard never breaks.",
+     "rate": "every key press, release and auto-repeat on the PC; must answer fast or Windows silently removes the hook",
+     "talks_to": [
+      {
+       "to": "controller",
+       "via": "a direct call (Controller.on_key) on this thread",
+       "what": "each real key (virtual-key code, down or up); back: hide it or not"
+      },
+      {
+       "to": "log printer",
+       "via": "logging QueueHandler -> queue.SimpleQueue",
+       "what": "log lines (never printed straight from here, so a stalled console can't stall the hook)"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/hook.py",
+       "line": 13,
+       "symbol": "KeyboardHook"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 24,
+       "symbol": "keyboard-hook"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 42,
+       "symbol": "SetWindowsHookExW"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 51,
+       "symbol": "GetMessageW"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 59,
+       "symbol": "INJECTED_TAG"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 62,
+       "symbol": "_on_key"
+      },
+      {
+       "path": "maplehelper/hook.py",
+       "line": 37,
+       "symbol": "PostThreadMessageW"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1029,
+       "symbol": "send_key"
+      }
+     ]
+    },
+    {
+     "id": "controller",
+     "name": "The key controller (Controller.on_key)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "built by app.main; called by the keyboard hook for each real key",
+     "lives": "the whole process",
+     "does": "Decides what each real key press means. If the window in front isn't the game (its title lacks `game_window_title`, \"MapleStory\"), the key just passes. In the game: Left/Right note which way she faces; Esc stops the running combo and still reaches the game; F12 toggles slow mode; F1-F4 start a combo. F12 and F1-F4 are hidden from the game, with their auto-repeat and release. With `--debug` it logs every key with the focused window's title.",
+     "rate": "every real key press (cheap: a window-title read and a few comparisons)",
+     "talks_to": [
+      {
+       "to": "Windows",
+       "via": "GetForegroundWindow + GetWindowTextW",
+       "what": "the title of the window in front"
+      },
+      {
+       "to": "combo runner",
+       "via": "Runner.trigger / abort / note_facing (each under threading.Lock Runner._lock); Runner.toggle_slow (a plain flag, and 'Slow mode ON/OFF' on the coach for 1.5 s)",
+       "what": "start a combo (put on the queue), stop now (set the abort Event), her facing, slow mode"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/controller.py",
+       "line": 25,
+       "symbol": "on_key"
+      },
+      {
+       "path": "maplehelper/controller.py",
+       "line": 37,
+       "symbol": "_game_title"
+      },
+      {
+       "path": "maplehelper/controller.py",
+       "line": 45,
+       "symbol": "abort"
+      },
+      {
+       "path": "maplehelper/controller.py",
+       "line": 48,
+       "symbol": "toggle_slow"
+      },
+      {
+       "path": "maplehelper/controller.py",
+       "line": 53,
+       "symbol": "trigger"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 210,
+       "symbol": "toggle_slow"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 212,
+       "symbol": "done"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 163,
+       "symbol": "foreground_title"
+      }
+     ]
+    },
+    {
+     "id": "combo-runner",
+     "name": "The combo runner (thread 'combo-runner')",
+     "runs_as": "thread",
+     "started_by": "app.main via Runner.start, before the hook",
+     "lives": "until Runner.stop puts None on its queue at exit (a daemon thread)",
+     "does": "Plays one combo at a time, so the hook never waits. It takes a combo off its queue, releases both arrows, works out how long the combo will take (a dry run of its script), then runs the script: key down, wait, key up, each step narrated to the coach. Esc ends the combo at once (the wait in progress returns early); any key still held is released at the end. A button pressed in a running combo's last 300 ms (`buffer_window`) is queued to start the moment it ends; pressed earlier, it's dropped.",
+     "rate": "only while a combo plays: taps held 40 ms, 750 ms after each throw; with Lucky Seven bound a combo lasts about 0.9 s (Jump-Throw) to 2.1 s (Back Off & Throw), plus 0.9 s before each step that pauses in slow mode",
+     "talks_to": [
+      {
+       "to": "controller (on the hook thread)",
+       "via": "queue.SimpleQueue Runner._queue, threading.Event Runner._abort, threading.Lock Runner._lock",
+       "what": "combos to play; stop now; facing and the queued press"
+      },
+      {
+       "to": "key sender",
+       "via": "a direct call to win32.send_key",
+       "what": "each key down and up"
+      },
+      {
+       "to": "coach",
+       "via": "Narrator (logs the step, then Coach.step/done -> queue Coach._events)",
+       "what": "each step, and the ending with the recipe"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/engine.py",
+       "line": 169,
+       "symbol": "combo-runner"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 247,
+       "symbol": "Runner._work"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 179,
+       "symbol": "Runner.trigger"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 188,
+       "symbol": "buffer_window"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 226,
+       "symbol": "Runner._run"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 70,
+       "symbol": "_abort"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 174,
+       "symbol": "Runner.stop"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 22,
+       "symbol": "Narrator"
+      },
+      {
+       "path": "maplehelper/combos.py",
+       "line": 47,
+       "symbol": "COMBOS"
+      },
+      {
+       "path": "maplehelper/engine.py",
+       "line": 232,
+       "symbol": "expected_ms"
+      },
+      {
+       "path": "maplehelper/config.py",
+       "line": 60,
+       "symbol": "key_press"
+      },
+      {
+       "path": "maplehelper/config.py",
+       "line": 67,
+       "symbol": "throw_gap"
+      },
+      {
+       "path": "maplehelper/config.py",
+       "line": 73,
+       "symbol": "slow_pause"
+      }
+     ]
+    },
+    {
+     "id": "key-sender",
+     "name": "The key sender (win32.send_key)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "called by the combo runner for each key",
+     "lives": "the whole process",
+     "does": "Presses or releases one key with SendInput, by scan code as a real keyboard does (games read scan codes). Each event carries the tag 0x4D484C50 ('MHLP') so the helper's own hook can tell it from her real presses. The keys go to whatever window is in front: the game, or the key viewer. The same function, imported as library code, is also how gamelab's elevated key player presses every key, inside that other process.",
+     "rate": "each key of a combo",
+     "talks_to": [
+      {
+       "to": "game",
+       "via": "SendInput (keyboard, scan codes)",
+       "what": "her jump, attack, Lucky Seven and arrow keys"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/win32.py",
+       "line": 65,
+       "symbol": "send_key"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 17,
+       "symbol": "INJECTED_TAG"
+      },
+      {
+       "path": "maplehelper/win32.py",
+       "line": 74,
+       "symbol": "SendInput"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 84,
+       "symbol": "send_key"
+      },
+      {
+       "path": "gamelab/control/player.py",
+       "line": 1029,
+       "symbol": "send_key"
+      }
+     ]
+    },
+    {
+     "id": "log-printer",
+     "name": "The log printer (logging QueueListener thread)",
+     "runs_as": "thread",
+     "started_by": "app.main (_start_logging), before anything else starts",
+     "lives": "until app.main stops it last, at exit",
+     "does": "Prints the log lines every thread puts on a queue, with the time to the millisecond. Logging goes through a queue because printing straight from the keyboard hook could stall it (for example while text is selected in the console), and Windows removes hooks that stall.",
+     "rate": "as lines arrive: each combo step, queued and dropped presses, every key with --debug",
+     "talks_to": [
+      {
+       "to": "every thread",
+       "via": "logging QueueHandler -> queue.SimpleQueue",
+       "what": "log records"
+      },
+      {
+       "to": "user",
+       "via": "the terminal (stderr)",
+       "what": "the log"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/app.py",
+       "line": 37,
+       "symbol": "_start_logging"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 45,
+       "symbol": "QueueListener"
+      },
+      {
+       "path": "maplehelper/app.py",
+       "line": 97,
+       "symbol": "listener.stop"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "keyviewer",
+   "is_os_process": true,
+   "plain_md": "A stand-in for the game, for trying combos without MapleStory. It is **its own small OS process**, not elevated, that **you start by hand** in a second terminal with `python -m maplehelper.keyviewer` (add `--log FILE` to also write every line to a file), next to a running `python -m maplehelper`. It opens an ordinary 560x460 window titled \"MapleStory Key Viewer\". Because the title contains \"MapleStory\", the helper's hotkeys work while it is in front, and the helper's keys land in it instead of the game. It lists each key press and release with its time in ms from the start of the burst (a pause of over 2.5 s starts a new burst), and shows which keys are held. It lives until you close its window. It never touches the game, has one thread, and nothing starts it automatically.",
+   "expected_start": "you, by hand, in a second terminal at the repo root, when trying a combo without the game",
+   "started_by": [
+    "user"
+   ],
+   "evidence": [
+    {
+     "path": "maplehelper/keyviewer.py",
+     "line": 15,
+     "symbol": "main"
+    },
+    {
+     "path": "maplehelper/keyviewer.py",
+     "line": 12,
+     "symbol": "TITLE"
+    },
+    {
+     "path": "README.md",
+     "line": 43,
+     "symbol": ""
+    }
+   ],
+   "components": [
+    {
+     "id": "window-loop",
+     "name": "The key list window (Tk main loop)",
+     "runs_as": "main thread",
+     "started_by": "`python -m maplehelper.keyviewer` (main)",
+     "lives": "until you close the window",
+     "does": "A Tk window with a 'held:' line and a scrolling list. Its key handlers write one line per press or release: the ms since the burst began, down or up, the key's name. Auto-repeat is ignored. Each key is kept from Tk's own handling, so Alt or F10 never opens a menu. 200 ms after opening it pulls the focus to itself once.",
+     "rate": "each key it receives",
+     "talks_to": [
+      {
+       "to": "helper",
+       "via": "Windows keyboard input to the window in front (the helper's SendInput)",
+       "what": "a combo's key presses and releases"
+      },
+      {
+       "to": "user",
+       "via": "the window, and the --log file (line-buffered)",
+       "what": "the key list with timings"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 21,
+       "symbol": "tk.Tk"
+      },
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 34,
+       "symbol": "record"
+      },
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 45,
+       "symbol": "start"
+      },
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 19,
+       "symbol": "log_file"
+      },
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 59,
+       "symbol": "bind"
+      },
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 61,
+       "symbol": "focus_force"
+      },
+      {
+       "path": "maplehelper/keyviewer.py",
+       "line": 62,
+       "symbol": "mainloop"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "helper-ocr",
+   "is_os_process": true,
+   "plain_md": "The OCR try-out: shows what the text readers make of the game's screen. It is **its own OS process**, not elevated, that **you start by hand**: `python -m maplehelper.ocr hud` reads the bottom bar (HP, MP, EXP, level) once a second, and `python -m maplehelper.ocr loot` reads the pickup messages. With `--image FILE` it reads a saved screenshot instead of the screen. It finds the game window by its title and grabs that region of the screen like a screenshot tool; it never opens the game's process and never sends it input. It prints a new line only when what it reads changes. It runs until Ctrl+C, or after one read with `--once`. Nothing starts it automatically. gamelab uses the same OCR engine as library code inside its own processes (the pet feeder reads the pet's fullness with it; the hunts read the message bar and her stat window with it), never by starting this command.",
+   "expected_start": "you, by hand, in a terminal at the repo root, while the game is open (or on a saved screenshot)",
+   "started_by": [
+    "user"
+   ],
+   "evidence": [
+    {
+     "path": "maplehelper/ocr/__main__.py",
+     "line": 26,
+     "symbol": "main"
+    },
+    {
+     "path": "maplehelper/ocr/capture.py",
+     "line": 140,
+     "symbol": "GameCapture"
+    },
+    {
+     "path": "gamelab/behavior/pet.py",
+     "line": 205,
+     "symbol": "shared"
+    },
+    {
+     "path": "gamelab/perception/messages.py",
+     "line": 145,
+     "symbol": "_shared_ocr"
+    },
+    {
+     "path": "gamelab/perception/stat_window.py",
+     "line": 300,
+     "symbol": "_shared_rows"
+    }
+   ],
+   "components": [
+    {
+     "id": "read-loop",
+     "name": "The read loop",
+     "runs_as": "main thread",
+     "started_by": "`python -m maplehelper.ocr hud|loot` (main), once the OCR models have loaded",
+     "lives": "until Ctrl+C, or one read with --once",
+     "does": "Each turn: grab the region (or use the --image picture), run OCR on it, print the result with the grab and OCR times. With `--save DIR` it also saves each crop whose text changed, as PNG plus its OCR lines (200 at most). When there is no picture it says why: game window not found, minimized, covered or off screen.",
+     "rate": "every --interval s (1 s by default)",
+     "talks_to": [
+      {
+       "to": "screen grabber",
+       "via": "a direct call (GameCapture.grab)",
+       "what": "the region's pixels"
+      },
+      {
+       "to": "OCR engine",
+       "via": "a direct call (engine.read, or LootReader.read)",
+       "what": "the lines of text"
+      },
+      {
+       "to": "user",
+       "via": "the terminal",
+       "what": "what it read, and the timings"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 73,
+       "symbol": "capture.grab"
+      },
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 90,
+       "symbol": "once"
+      },
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 92,
+       "symbol": "interval"
+      },
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 93,
+       "symbol": "KeyboardInterrupt"
+      },
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 222,
+       "symbol": "Saver"
+      }
+     ]
+    },
+    {
+     "id": "screen-grabber",
+     "name": "The screen grabber (GameCapture)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "main, unless --image is given",
+     "lives": "until the loop ends (then closed)",
+     "does": "Finds the game window by its title (EnumWindows, leaving out browsers, terminals and Explorer), follows it when it moves, measures the black bars around the game's picture, and grabs the region with mss (a desktop screenshot).",
+     "rate": "each read",
+     "talks_to": [
+      {
+       "to": "windows",
+       "via": "EnumWindows and window rectangles",
+       "what": "where the game window is"
+      },
+      {
+       "to": "game",
+       "via": "a screen grab (mss)",
+       "what": "the region's pixels"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/ocr/capture.py",
+       "line": 91,
+       "symbol": "EnumWindows"
+      },
+      {
+       "path": "maplehelper/ocr/capture.py",
+       "line": 156,
+       "symbol": "MSS"
+      },
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 58,
+       "symbol": "GameCapture"
+      }
+     ]
+    },
+    {
+     "id": "ocr-engine",
+     "name": "The OCR engine (RapidOCR on onnxruntime)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "main loads its models before the first read",
+     "lives": "the whole process",
+     "does": "Finds and reads the lines of text in a picture. It runs on the CPU with one onnxruntime thread by default; `--threads 0` lets onnxruntime use all cores (its own worker threads), and `--device cuda` runs it on the GPU.",
+     "rate": "each read",
+     "talks_to": [
+      {
+       "to": "read loop",
+       "via": "return value",
+       "what": "the text lines with their positions and scores"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 43,
+       "symbol": "shared"
+      },
+      {
+       "path": "maplehelper/ocr/__main__.py",
+       "line": 47,
+       "symbol": "load"
+      },
+      {
+       "path": "maplehelper/ocr/engine.py",
+       "line": 53,
+       "symbol": "intra_op_num_threads"
+      },
+      {
+       "path": "maplehelper/ocr/engine.py",
+       "line": 147,
+       "symbol": "RapidOCR"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "gamedata",
+   "is_os_process": true,
+   "plain_md": "The game-data tool. It reads the game's own data files (item and monster names, monster stats, maps, skills, movement physics, animation timings) so the rest of the project need not guess them. It is a **short-lived command-line OS process** with one thread, not elevated, that **you run by hand** in a terminal at the repo root: `python -m gamedata copy --install D:\\maplestorycw` once (about 510 MB without Sound) and again after each game patch (unchanged files are skipped), then `python -m gamedata tables`. The look-around subcommands (`list`, `dump`, `export`, `pictures`) are run by hand too, whenever someone (you, or Claude in a working session) wants to look inside the data. It never touches the running game. `copy` copies the install's `appdata\\Data` folder (all but Sound) into `gamedata/data/copy`; every other subcommand reads only that copy and prints, or writes JSON or PNG into `gamedata/data/out` (or `--out`). It ends when its subcommand is done. Nothing starts it automatically (not the babysitter, not gamelab). gamelab's processes import the gamedata package as a library to read the copy and the tables (map layouts, monster pictures, monster touch damage); a map load that finds no copy tells you to run `python -m gamedata copy`.\n\nOne catch: `copy` overwrites a changed file in place, and gamelab reads the packages memory-mapped, so Windows can refuse a package a running gamelab process still has open. At the 2026-11-06 game patch the copy and the tables were refreshed by one-off scripts outside the repo instead (`D:/MapleHelper-scratch/client-update-1106/refresh_copy.py` and `tables_and_art.py`), which write each changed file next to the old one and swap it in, so a running process never reads half a file.",
+   "expected_start": "you (or Claude in a working session), by hand, in a terminal at the repo root: `copy` then `tables` once and again after a game patch; the look-ups whenever someone needs them; never the babysitter or a gamelab process",
+   "started_by": [
+    "user",
+    "claude"
+   ],
+   "evidence": [
+    {
+     "path": "gamedata/__main__.py",
+     "line": 148,
+     "symbol": "main"
+    },
+    {
+     "path": "gamedata/paths.py",
+     "line": 7,
+     "symbol": "COPY"
+    },
+    {
+     "path": "gamedata/paths.py",
+     "line": 8,
+     "symbol": "OUT"
+    },
+    {
+     "path": "gamelab/localization/mapdata.py",
+     "line": 556,
+     "symbol": "FileNotFoundError"
+    },
+    {
+     "path": "gamedata/README.md",
+     "line": 16,
+     "symbol": ""
+    },
+    {
+     "path": "gamedata/__main__.py",
+     "line": 39,
+     "symbol": "copy2"
+    },
+    {
+     "path": "gamedata/wz.py",
+     "line": 209,
+     "symbol": "mmap"
+    },
+    {
+     "path": "gamelab/localization/mapdata.py",
+     "line": 553,
+     "symbol": "Package"
+    }
+   ],
+   "components": [
+    {
+     "id": "command",
+     "name": "The subcommand (main thread)",
+     "runs_as": "main thread",
+     "started_by": "`python -m gamedata <subcommand>` (main picks the cmd_* function)",
+     "lives": "until that subcommand returns",
+     "does": "Runs one of: `copy` (game folder -> gamedata/data/copy), `list` (packages and their image counts), `dump` (print an image's tree), `export` (images as JSON), `pictures` (an image's pictures as PNG), `tables` (the summary tables).",
+     "rate": "once per run",
+     "talks_to": [
+      {
+       "to": "user",
+       "via": "the terminal",
+       "what": "what was copied, listed or written"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamedata/__main__.py",
+       "line": 178,
+       "symbol": "run"
+      },
+      {
+       "path": "gamedata/__main__.py",
+       "line": 78,
+       "symbol": "cmd_list"
+      },
+      {
+       "path": "gamedata/__main__.py",
+       "line": 100,
+       "symbol": "cmd_dump"
+      },
+      {
+       "path": "gamedata/__main__.py",
+       "line": 112,
+       "symbol": "cmd_export"
+      },
+      {
+       "path": "gamedata/__main__.py",
+       "line": 124,
+       "symbol": "cmd_pictures"
+      }
+     ]
+    },
+    {
+     "id": "copier",
+     "name": "The copier (copy_data)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`copy`",
+     "lives": "one pass over the game's Data folder",
+     "does": "Walks the game's `appdata/Data`, skips Sound unless `--sound`, and copies each file whose size or time differs from the copy's. The game folder is only read.",
+     "rate": "once per `copy`",
+     "talks_to": [
+      {
+       "to": "game",
+       "via": "files: the install's appdata/Data (read only)",
+       "what": "the game's data packages"
+      },
+      {
+       "to": "gamelab processes",
+       "via": "files: gamedata/data/copy",
+       "what": "the copy their map and sprite loaders read"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamedata/__main__.py",
+       "line": 68,
+       "symbol": "cmd_copy"
+      },
+      {
+       "path": "gamedata/__main__.py",
+       "line": 25,
+       "symbol": "copy_data"
+      },
+      {
+       "path": "gamedata/__main__.py",
+       "line": 39,
+       "symbol": "copy2"
+      },
+      {
+       "path": "gamelab/localization/mapdata.py",
+       "line": 552,
+       "symbol": "COPY"
+      }
+     ]
+    },
+    {
+     "id": "pack-readers",
+     "name": "The package readers (Package, MsPack)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "every subcommand but `copy` (open_pack)",
+     "lives": "while a subcommand reads",
+     "does": "Read the copy's packages: `.wz` files (memory-mapped read-only; text XOR-masked, no key needed) and the newer `.ms` packs (ChaCha20, keys from the file name and a stored salt). The same classes run inside gamelab's processes when they load a map.",
+     "rate": "on demand",
+     "talks_to": [
+      {
+       "to": "subcommand",
+       "via": "return values",
+       "what": "image trees and pictures"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamedata/__main__.py",
+       "line": 45,
+       "symbol": "open_pack"
+      },
+      {
+       "path": "gamedata/wz.py",
+       "line": 203,
+       "symbol": "Package"
+      },
+      {
+       "path": "gamedata/wz.py",
+       "line": 209,
+       "symbol": "mmap"
+      },
+      {
+       "path": "gamedata/ms.py",
+       "line": 134,
+       "symbol": "MsPack"
+      },
+      {
+       "path": "gamedata/ms.py",
+       "line": 27,
+       "symbol": "chacha20"
+      }
+     ]
+    },
+    {
+     "id": "tables",
+     "name": "The tables builder (tables.build)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`tables`",
+     "lives": "one build",
+     "does": "Builds items, mobs, maps, skills, physics and actions from the copy and writes each as JSON into `gamedata/data/out/tables` (or `--out`).",
+     "rate": "once per `tables`",
+     "talks_to": [
+      {
+       "to": "gamelab processes",
+       "via": "file gamedata/data/out/tables/mobs.json",
+       "what": "monster stats (the safety code's touch damage of a monster kind)"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamedata/__main__.py",
+       "line": 135,
+       "symbol": "cmd_tables"
+      },
+      {
+       "path": "gamedata/tables.py",
+       "line": 162,
+       "symbol": "build"
+      },
+      {
+       "path": "gamedata/paths.py",
+       "line": 9,
+       "symbol": "TABLES"
+      },
+      {
+       "path": "gamelab/behavior/safety.py",
+       "line": 269,
+       "symbol": "MOB_TABLE"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

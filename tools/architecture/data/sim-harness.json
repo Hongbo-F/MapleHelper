@@ -1,0 +1,2506 @@
+{
+  "id": "sim-harness",
+  "layer": "sim",
+  "title": "Simulator: scenarios, the harness, goldens and replay",
+  "tagline": "How offline runs are set up, judged, cached and compared, with no game and no keys",
+  "summary": "This slice is the offline test bench around the simulated game. Scenarios run the real stack against the simulated world and pin what it does as golden traces; the harness hunts many seeded worlds and judges a change against master's cached baseline; soak and latency runs watch memory and the stack's own computing; and the replay kit runs her real recordings through any commit's perception and scores them against hand-checked labels.",
+  "details_md": "Everything here runs with **no game window and no key player**. Inside a simulated run that is enforced, not hoped for: entering `with Sim(...)` calls `fakes.patched`, which points `control.client`'s `submit`/`send`/`wait`/`cancel` (and the Lie Detector alarm calls) at the fake player, makes `maplehelper.win32.send_key`, the game-window functions of `gamelab.window` and `analysis.recordings.record` raise `SimViolation`, and refuses any write under the real `gamelab/lab`. The simulated world itself (`sim/world.py`) and the fakes that stand in for the screen, the clock and the key player (`sim/fakes.py`) belong to the neighbouring slice; this slice is how they are *used* to check the stack.\n\n**Four ways a change is checked offline** (README, Checking a change, from 2026-10-28):\n\n1. **Scenarios and golden traces.** `scenarios.py` holds 48 named set-pieces, all on Tree Dungeon, Forest Up North II (map 10002073): 13 trips (`nav_tree_*`), 34 hunt-loop or grinding runs (`loop_tree_*`) and one tour (`tour_tree_run`). Each builds the stack the way `gamelab/__main__.py` does, inside `with Sim(model, scenario)`, which swaps in a fake clock, a fake player and fake eyes and refuses to run otherwise. A run returns a *trace*: every key plan sent, every cancel and splice, every log line, the result, and what the world saw. Traces are deterministic, so `golden.py record` stores them and `golden.py check` re-runs every scenario and diffs: a refactor that leaves all traces byte-identical hasn't changed what she does. Each scenario also `expects` the behaviour it is there for (a hop, an arrival, a retreat within 10 s), and `tests/test_sim.py` checks those.\n2. **The harness** (`harness.py`). A *policy* (`tour`, `loop`, `loop-grind`, `walk`) hunts for a fixed simulated time on many world seeds, under a *preset* (how noisy and crowded the game is) and any of 60 named `--world` switches (what isn't known of the game, or a rule of the stack switched off to price it). What each run gave is read from the simulated world, not the bot's own reports: EXP a minute, kills, touches, HP lost, deaths, falls, drops picked up, trip and rope statistics, over a hundred keys a seed. `compare` applies *the bar* seed by seed (the pass/fail rule: more EXP a minute on at least 8 of 10 paired seeds and none more than 10% worse, no fewer drops picked up, no more HP lost, no death, fall, portal or hunt stop); `ab` runs the candidate against master's cached results and adds seeds (12, then 24, then 48) only while a *headline* difference (EXP a minute, touches, deaths, falls, stops) is within 2 standard errors of the paired seed-by-seed differences, i.e. can't yet be told from noise.\n3. **The baseline cache** (`baseline.py`). Master's side of a comparison is run once and read after: one file per seed, keyed by the commit's *code* (a hash of its tree under `gamelab/`, `gamedata/`, `maplehelper/` and `config.toml`, Markdown left out) and a hash of the run's arguments, the game data's stamp, the Python and package versions and the resolved `GAMELAB_*` environment. Only deterministic runs are cached.\n4. **Replay** (`replay.py`, `replay_run.py`, `replay_score.py`, from 2026-11-02). The simulator's eyes give no pixels, so a perception change is checked on three lossless recordings of the magician grinding Tree Dungeon (R1-R3). A child process imports a chosen code tree's `gamelab` and runs its perception frame step over the frames exactly as the live service did, fed her throws and the drops the hunt asked for from that night's telemetry. It writes a compact per-frame dump, which is scored against labels kept in git (`tests/fixtures/recordings/<clip>/labels-v3.json`): spawn onsets, births, touches, monsters under her, which monster each kill was, her casts at the dead, other players.\n\n**Long runs.** `soak.py` keeps the stack going for minutes (on saved frames, in the simulator, or against the real perception service in a child process) and fits a line to memory samples to find leaks. `latency.py` runs the harness's hunts while timing, with the real clock, each stretch of the stack's own computing between two calls to the game, without charging it to the fake clock. Neither takes a `--map`: both run on the harness's default, the first map (10000012), whose scenarios are gone.\n\n**Determinism is the backbone.** `golden`, `harness`, `soak` and `latency` each restart themselves with `PYTHONHASHSEED=0` (so Python's set order is the same every run) and `GAMELAB_FIXED_STATS=1` (her stats as measured, not as `config.toml` has them); the replay kit instead runs its child with the clip's `GAMELAB_CHARACTER` and `GAMELAB_GPU=0`; worlds and policies are seeded (`POLICY_SEED = 7`), and outputs are made the same to the byte whatever the number of worker processes. That is what lets a reviewer `spot`-check two seeds instead of re-running a table, and lets master's numbers be cached at all.\n\n**Where things live.** Golden traces and saved harness runs hold map-derived data, so they stay in the git-ignored `gamelab/lab/golden` and `gamelab/lab/harness`. The caches and the recordings are on the scratch drive (`D:/MapleHelper-scratch/baselines`, `D:/MapleHelper-scratch/golden-clips`). Every job that runs frames or many seeds goes through the CPU rules' wrapper (`bg_quiet.cmd` / heavy.sh), 2 workers while the user plays.",
+  "groups": [
+    {
+      "id": "scenarios-goldens",
+      "title": "Scenarios and golden traces",
+      "summary": "The 48 Tree Dungeon set-pieces, the Sim that runs the real stack against the fakes, and the golden traces that pin their exact output.",
+      "modules": [
+        "gamelab/sim/scenarios.py",
+        "gamelab/sim/golden.py"
+      ]
+    },
+    {
+      "id": "harness-baseline",
+      "title": "The harness, the bar and master's cached baseline",
+      "summary": "Seeded hunts under presets and world switches, outcomes read from the world, the bar and `ab`'s paired statistics, and the per-seed cache that keeps master's side.",
+      "modules": [
+        "gamelab/sim/harness.py",
+        "gamelab/sim/baseline.py"
+      ]
+    },
+    {
+      "id": "long-runs",
+      "title": "Soak and latency runs",
+      "summary": "Minutes-long runs that watch memory growth and time the stack's own computing between its calls to the game.",
+      "modules": [
+        "gamelab/sim/soak.py",
+        "gamelab/sim/latency.py"
+      ]
+    },
+    {
+      "id": "replay",
+      "title": "Replaying her recordings",
+      "summary": "Her real frames through any commit's perception frame step, cached per commit, and scored against labels kept in git.",
+      "modules": [
+        "gamelab/sim/replay.py",
+        "gamelab/sim/replay_run.py",
+        "gamelab/sim/replay_score.py"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "path": "gamelab/sim/scenarios.py",
+      "title": "Scenarios",
+      "tagline": "48 Tree Dungeon set-pieces: the real stack against the simulated world",
+      "summary": "Each scenario runs one of gamelab's entry points (a trip, the hunt loop, grinding, a tour, a Lie Detector retreat, the safety stop...) built the way `gamelab/__main__.py` builds it, but with a fake clock, a fake key player and fake eyes over the simulated world. It returns a deterministic trace and declares what it `expects` to show. The harness, the goldens, soak and latency all run through its `Sim` and `run_sim`.",
+      "details_md": "**The registry.** A scenario is a function decorated with `@tree(start, **kw)` (a wrapper of `@scenario`) that registers a `Scenario` in `SCENARIOS` under the function's name. Since 2026-10-31 all are on Tree Dungeon (`TREE`, 10002073). Today 48 are registered: 13 `nav_tree_*` (trips, rope grabs and misses, landings near monsters, the evade step), 34 `loop_tree_*` (the hunt loop and grinding: crowds, the detector's misses, the Lie Detector, the safety stop, out of darts, her keys, the stat window, rope tops, a wall's corner) and `tour_tree_run`.\n\n**What a scenario says.** `start` is (platform, x); `monsters` is `None`, `\"all\"` (the map's spawns), a set of platform ids or an explicit list; `seed`, `hp`, `limit` (900 fake seconds by default, then `SimTimeout`); `noise` and `realism` are the world's knobs (`world.Noise`, `world.Realism`), `her` the character (`world.Her`; by default `her_on(map)`: the thief's `LEVEL_25` from `HER`, level 25, HP 774, MP 623, keys `SIM_KEYS_PET`, or `HERS`' magician `MAGE_32` when the process plays her), `attack` the stack's attack mode, `remembered` her key bindings as last read, `book` her damage book. `expects` is a tuple of (what, trace -> bool) built by small helpers: `ends`, `logs`, `no_log`, `happens` (the world's log), `sends`, `moves`, `check`.\n\n**`Sim`: one run.** It builds the `Clock`, the `World`, a `FakeEyes` for the stack, the `FakePlayer` and a `Trace`, and a second `FakeEyes` for perception: a `SyncFeed` over `WorldStep(Senses(...))` with her Shape and the look band (`reach.LOOK_UP`, `LOOK_DOWN`), ticked by the clock at the game's 60 frames a second (`feed.GAME_HZ`) and taking a frame 15 times a second as the live perception service does. Every look and glance of hers comes from that feed. Entering `with Sim(...)` first imports all of gamelab (`_import_all`) so that `fakes.patched` can point every path under `gamelab/lab` at a temporary folder (`gamelab-sim-*`), replace `time`'s functions with the fake clock's and the client's `submit`/`send`/`wait`/`cancel` (and the alarm calls) with the fake player's, make the real key sender, the game-window functions and the recorder raise `SimViolation`, and guard every write under the real `gamelab/lab`. `guard()` raises `SimViolation` whenever the fakes aren't in place, and `hunter()` wraps `Actions.play` with it, so nothing built here can reach the real player or game.\n\n**`Sim.hunter`** builds `Hunter` as `__main__` does, plus what makes runs repeatable: the damage book's fits made on the spot (not on a thread), her jump-attack jitter from `Random(\"jitter:<seed>\")`, a stub phone push, `FakePetCare`, a listener telling the world which way each throw was meant, and `_judged` hooks that tell the world (changing nothing of hers) each throw's target (`World.aimed_at`) and each live monster her ledger wrote off (`World.live_taken`), for the harness's `at_dead_*` and `live_taken` counts. `navigator()`, `tour()` and `tour_stack()` (potion HP 0.45, a fighting navigator) complete the stack.\n\n**Running.** `run_sim` calls the scenario's function inside the `Sim`; `SimDied`, `SimTimeout`, `PlayerError`, `RuntimeError` and `ValueError` become the result string `error: ...`, a `HuntStop` becomes its label; only `SimViolation` propagates. The trace collects the plans, cancels, splices, log, `world.summary()`, the world's log, the eyes' and frames' counts, the files the run wrote under its temp lab, and the feed's record. `unmet` lists what a trace fails: unless `may_die`, she must end alive and on the map (not through a portal, not fallen out), then each `expects`. `tree()` adds one more check to every hunt: no hanging on a rope throwing (the world's `refused` at most `NO_HANG_REFUSED` = 10).\n\n**Factories for families of runs.** `_loop(minutes)` and `_grind(minutes)` run the hunt loop or grinding and return its report; `lie_detector(after)` sets `FakePlayer.alarm_at` and records where the world has her `RETREAT_S` after the sighting and every key played since (checked by `LIE_DETECTOR_EXPECTS`: on a safe place within 10 s, moves alone, a late retreat refused); `safety_stop`, `darts_stop`, `key_check_run` and `stat_run` do the same for the safety stop, running out of stars, her keys moved in the game's bindings window, and the stat window read.\n\n**Set-ups, not lucky seeds** (2026-10-31): a scenario about a reaction to an event sets the event up (monsters hurt at the start via `Realism.hurt`, points left vacant, the Lie Detector 2 s in) rather than keeping a seed that happens to bring it, so re-rolled world draws can't take the event away. Each docstring records how many of seeds 1-13 (or 1-16) meet its checks.",
+      "lines": 2439,
+      "key_items": [
+        {
+          "name": "Scenario",
+          "kind": "dataclass",
+          "line": 99,
+          "signature": "@dataclass class Scenario: name, fn, start, monsters=None, seed=1, hp=1.0, ..., limit=900.0, noise, realism, think, think_reads, expects=(), may_die=False, map_id, her, attack, remembered, book, doc",
+          "summary": "Everything one run needs: where she starts, which monsters, the world seed and knobs, her character and attack mode, the time limit, and what it expects to show."
+        },
+        {
+          "name": "Sim",
+          "kind": "class",
+          "line": 138,
+          "signature": "class Sim: def __init__(self, model: MapModel, sc: Scenario, pace: float | None = None)",
+          "summary": "One simulated run as a context manager: the world, the fakes, the perception feed and the stack built on them; refuses to run outside its `with`.",
+          "details_md": "`pace` lets simulated time also pass in real time, that many times faster, to watch a run on the mini-map (`python -m gamelab sim NAME --speed 4`). On exit it collects every `.json`/`.jsonl` the run wrote under its temp lab into `files`, resets a held planner (`physics.reset`) and detaches damage books so nothing saves into the vanished folder."
+        },
+        {
+          "name": "Sim.hunter",
+          "kind": "method",
+          "line": 293,
+          "signature": "def hunter(self, **kw) -> Hunter",
+          "summary": "Builds the hunter as `__main__` does, made repeatable (seeded jitter, synchronous damage-book fits, stub push, fake pet care) and guarded at every key plan."
+        },
+        {
+          "name": "Sim._feed",
+          "kind": "method",
+          "line": 174,
+          "signature": "def _feed(self)",
+          "summary": "Perception on the world as live's service looks at the game: a SyncFeed over WorldStep(Senses(...)) on its own FakeEyes, ticked by the clock every 1/60 s."
+        },
+        {
+          "name": "Sim.guard",
+          "kind": "method",
+          "line": 277,
+          "signature": "def guard(self) -> None",
+          "summary": "Raises SimViolation unless inside `with Sim(...)` and the client's submit/send are the fake player's."
+        },
+        {
+          "name": "run_sim",
+          "kind": "function",
+          "line": 384,
+          "signature": "def run_sim(sc: Scenario, model: MapModel | None = None, pace: float | None = None) -> tuple[dict, Sim]",
+          "summary": "Runs a scenario on its real map and returns its trace and the Sim (whose world the harness reads its outcomes from). Expected failures become the result string."
+        },
+        {
+          "name": "unmet",
+          "kind": "function",
+          "line": 406,
+          "signature": "def unmet(trace: dict, sc: Scenario | None = None) -> list[str]",
+          "summary": "What a trace fails of what its scenario is there for: alive and on the map unless `may_die`, then each `expects` check (one that raises counts as failed)."
+        },
+        {
+          "name": "scenario",
+          "kind": "function",
+          "line": 131,
+          "signature": "def scenario(start: tuple[int, float], **kw)",
+          "summary": "Decorator registering a function as a Scenario in SCENARIOS under its name, its docstring as `doc`."
+        },
+        {
+          "name": "tree",
+          "kind": "function",
+          "line": 545,
+          "signature": "def tree(start: tuple[int, float], **kw)",
+          "summary": "The Tree Dungeon decorator: sets `map_id=TREE` and adds the 'no hang on a rope' check to every hunt scenario (not the rope-top ones)."
+        },
+        {
+          "name": "HER",
+          "kind": "constant",
+          "line": 59,
+          "signature": "HER = {MAP_ID: (SIM_KEYS, LEVEL_19), ROCKY: (SIM_KEYS_PET, LEVEL_23), TREE: (SIM_KEYS_PET, LEVEL_25)}",
+          "summary": "Her keys and her world character per map; any other map (the tests' synthetic ones) gets the first map's."
+        },
+        {
+          "name": "HERS",
+          "kind": "constant",
+          "line": 63,
+          "signature": "HERS = {(TREE, \"magician\"): (SIM_KEYS_MAGE, MAGE_32)}",
+          "summary": "Another character by (map, id): the magician on Tree Dungeon as the recordings of 2026-11-02 measured her, Magic Claw on Shift."
+        },
+        {
+          "name": "_import_all",
+          "kind": "function",
+          "line": 359,
+          "signature": "def _import_all() -> None",
+          "summary": "Imports every gamelab module (but `__main__` and `sim`) before a run, so `patched` redirects all their lab paths; a module first imported mid-run would keep the real path and trip the write guard."
+        },
+        {
+          "name": "lie_detector",
+          "kind": "function",
+          "line": 1246,
+          "signature": "def lie_detector(after: float, minutes: float = 5, grind: bool = False)",
+          "summary": "Factory: the hunt loop (or grinding) inside `retreat.on_alarm` with the Lie Detector seen `after` s in; records how the hunt stopped, the retreat, where she is `RETREAT_S` (10 s) later and whether that is safe, every key played since, and whether a retreat plan sent past the player's 12 s window is refused."
+        },
+        {
+          "name": "safety_stop",
+          "kind": "function",
+          "line": 1413,
+          "signature": "def safety_stop(minutes: float = 5, grind: bool = False)",
+          "summary": "Factory: the hunt loop until the safety stop fires; records the stop's numbers, her retreat, whether she ends safe, the pages sent and the keys played after."
+        },
+        {
+          "name": "NO_HANG_REFUSED",
+          "kind": "constant",
+          "line": 542,
+          "signature": "NO_HANG_REFUSED = 10",
+          "summary": "A hunt's attacks the game may refuse her on a rope, all told; past this she hung on a rope throwing and the scenario fails."
+        }
+      ],
+      "inputs": [
+        "the real map's model from the game data extract (`mapdata.load`, cached once per map by `real_map`)",
+        "the scenario's settings, and her world character from `HER`/`HERS` (`world.Her`)",
+        "her magician damage book `her_damage_book.json` when a run plays her (`HER_BOOK`)"
+      ],
+      "outputs": [
+        "a trace dict per run (plans, cancels, splices, log, result, world summary and log, counts, files, feed record) for `golden.py`, tests and `python -m gamelab sim`",
+        "the `Sim` itself (its world, clock, eyes, player) for the harness's outcomes, soak and latency",
+        "`unmet` lists for tests and `golden record`"
+      ],
+      "uses": [
+        "gamelab/sim/fakes.py",
+        "gamelab/sim/world.py",
+        "gamelab/sim/harness.py",
+        "gamelab/telemetry.py",
+        "gamelab/control/client.py",
+        "gamelab/control/notify.py",
+        "gamelab/control/navigator.py",
+        "gamelab/control/timeline.py",
+        "gamelab/control/alarm.py",
+        "gamelab/control/keymap.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/feed.py",
+        "gamelab/localization/senses.py",
+        "gamelab/localization/worldstate.py",
+        "gamelab/attack/danger.py",
+        "gamelab/attack/reach.py",
+        "gamelab/behavior/hunter.py",
+        "gamelab/behavior/tour.py",
+        "gamelab/behavior/hunt.py",
+        "gamelab/behavior/grind.py",
+        "gamelab/behavior/retreat.py",
+        "gamelab/behavior/safety.py",
+        "gamelab/behavior/darts.py",
+        "gamelab/behavior/targeting.py",
+        "gamelab/behavior/ledger.py",
+        "gamelab/classes/thief.py",
+        "gamelab/perception/stat_window.py",
+        "gamelab/motion/physics.py",
+        "gamelab/motion/flow.py",
+        "gamelab/character.py",
+        "gamelab/paths.py",
+        "gamedata/paths.py",
+        "maplehelper/engine.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamedata/data (the map's parsed extract or the game data copy)",
+          "mode": "read",
+          "what": "the real map; scenarios are skipped when it isn't on the computer, and fail when it is there but doesn't load"
+        },
+        {
+          "path": "gamelab/sim/her_damage_book.json",
+          "mode": "read",
+          "what": "the magician's damage book as her stack had learned it at 00:17:48 on 2026-11-02, copied into the run's lab"
+        },
+        {
+          "path": "<temp>/gamelab-sim-*/",
+          "mode": "read-write",
+          "what": "the run's stand-in for gamelab/lab; every file written there is read back into the trace's `files`, then the folder is deleted"
+        }
+      ],
+      "concurrency": "None of its own: one thread on the fake clock. Inside `with Sim(...)`, `time.monotonic`, `sleep`, `time` and `perf_counter` are the fake clock's, and the perception feed is stepped synchronously by the clock (SyncFeed.tick at every 1/60 s it passes). The damage book's fits run inline, not on their usual thread.",
+      "tunables": [
+        {
+          "name": "Scenario.limit",
+          "value": "900.0",
+          "meaning": "fake seconds before a run is stopped with SimTimeout (each scenario sets its own)"
+        },
+        {
+          "name": "NO_HANG_REFUSED",
+          "value": "10",
+          "meaning": "attacks refused on a rope allowed in a hunt scenario before it fails"
+        },
+        {
+          "name": "PLAYED_ROUND_S",
+          "value": "1e-4",
+          "meaning": "the fake player's rounding of played key times, allowed for when counting keys after a Lie Detector sighting"
+        },
+        {
+          "name": "CLAW_EDGE",
+          "value": "105.0",
+          "meaning": "units: a mushroom past this is out of the claw's box (far_claws check of the cornered study)"
+        },
+        {
+          "name": "TOLD_S",
+          "value": "0.1",
+          "meaning": "s: a touch at least this long before her look is one the look knows of (far_claws)"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-27",
+          "what": "Every hunt scenario on Tree Dungeon also checks she didn't hang on a rope throwing (`tree()`, NO_HANG_REFUSED).",
+          "why": "loop_tree_grind, re-recorded, hung at the top of a rope for 86 s with 84 attacks refused and still met all its checks."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "All scenarios moved to Tree Dungeon; the first map's and West Rocky Mountain II's scenarios and traces removed.",
+          "why": "The bot played only Tree Dungeon."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "Set-ups, not lucky seeds: scenarios about a reaction set the event up (hurt monsters, vacant points, the Lie Detector 2 s in).",
+          "why": "Changes to the world's draws (the chase, the server's respawn) re-rolled every run and kept taking the events away: loop_tree_lie_detector's seed had moved 7 times since 2026-10-24, loop_tree_lie_detector_28's 13 times."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "The magician added (`HERS`, `HER_BOOK`) for the harness's `--character magician`.",
+          "why": "Every harness number was the thief's, so none of her fixes could be measured offline (the recordings' roadmap, P41)."
+        }
+      ],
+      "gotchas": [
+        "The README's layer table says 47 scenarios; the code registers 48 (13 nav, 34 loop, 1 tour), and gamelab/lab/golden holds 48 traces.",
+        "A run that dies, times out or hits a player error doesn't raise: its result becomes the string `error: ...`. Only `SimViolation` propagates, so check `unmet`, not exceptions.",
+        "`SimTimeout` is a BaseException on purpose: a loop that recovers from errors with `except Exception` must not swallow it and spin.",
+        "`scenarios` imports `harness` at the top (for its presets and camps) and `harness` imports `scenarios` inside functions: the cycle only works because of that.",
+        "Scenario docstrings carry long seed histories (which of seeds 1-N met the checks after each change); the current seed is the decorator's.",
+        "Ten scenarios (SLOW_SCENARIOS in tests/test_sim.py) run only under `--slow`."
+      ],
+      "tests": [
+        "tests/test_sim.py",
+        "tests/test_sim_tree.py",
+        "tests/test_sim_her.py",
+        "tests/test_sim_magic.py",
+        "tests/test_sim_mobs.py",
+        "tests/test_golden.py",
+        "tests/test_retreat.py",
+        "tests/test_safety.py",
+        "tests/test_keycheck.py",
+        "tests/test_rope_top.py",
+        "tests/test_navigation.py",
+        "tests/test_guard.py",
+        "tests/test_statcheck.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/golden.py",
+      "title": "Golden traces",
+      "tagline": "Record every scenario's trace once; check a change leaves them byte-identical",
+      "summary": "A golden-master check: `record` writes each scenario's trace to `gamelab/lab/golden/<scenario>.json`, `check` runs them again and reports the first difference per part. A refactor whose traces stay byte-identical hasn't changed what she does. Both can run on a pool of processes with output identical to one process.",
+      "details_md": "**Commands.** `python -m gamelab.sim.golden record|check|list [names] [--jobs N] [--folder DIR]`. With no names, every scenario. Scenarios whose map data isn't on the computer are named and left out; if nothing is left, exit 2.\n\n**Same environment every time.** `main` restarts itself in a subprocess unless `PYTHONHASHSEED=0` (so no set of strings iterates in a different order) and `GAMELAB_FIXED_STATS=1` (her stats as measured, so editing `config.toml`'s `[character]` changes nothing). It refuses outright when `GAMELAB_CHARACTER` names anyone but the thief (`_thief_only`): the scenarios are the thief's until the magician's come (the design's S6), and `record` would overwrite the thief's traces with her stats.\n\n**Running on a pool** (`ran`). With `--jobs N`, a `ProcessPoolExecutor` of N workers, each made ready as the command is (`_ready`: scenarios imported, every map loaded), runs each scenario exactly as here and sends back its trace as the JSON `record` writes (`Ran`). The longest go first, judged by their recorded traces' file size, but results are yielded in the order the names were given, each once it and those before it are done; what a worker printed is printed in its place. So `check`'s output is the same to the byte whatever N. The README's timing for Tree Dungeon's 30 scenarios at the time: 411 s in one process, 265 s on 2, 135 s on 4.\n\n**Diffing** (`diff`). Per top-level key of the trace (but `IGNORED`, the docstring), the first item that differs: for lists, the index and both sides shortened to 300 characters (labelled plan, log line, cancel, world event); for a plan, which field parts (sent at, name, events from which event, end_ms); for dicts, each key that differs.\n\n**Exit codes.** `record` exits 1 when a scenario no longer shows what it's there for (`scenarios.unmet`), but still writes the trace. `check` exits 0 only when every scenario asked for ran and matched, 1 on any difference or missing trace, and 2 when nothing could be compared: a check that compared nothing never passes.\n\nThe traces hold map-derived data, so they live in git-ignored `gamelab/lab/golden`. A branch in its own worktree re-records them in its own lab; once merged, `record` is run in the main checkout too.",
+      "lines": 275,
+      "key_items": [
+        {
+          "name": "main",
+          "kind": "function",
+          "line": 211,
+          "signature": "def main(argv: list[str] | None = None) -> int",
+          "summary": "Refuses a non-thief character, restarts itself with PYTHONHASHSEED=0 and fixed stats, loads every map involved, then runs record, check or list."
+        },
+        {
+          "name": "ran",
+          "kind": "function",
+          "line": 87,
+          "signature": "def ran(names: list[str], jobs: int = 1, folder: Path | None = None) -> Iterator[tuple[str, Ran]]",
+          "summary": "Each scenario's run in name order: in this process, or on a pool longest-first with results handed back in order."
+        },
+        {
+          "name": "check",
+          "kind": "function",
+          "line": 128,
+          "signature": "def check(names: list[str], jobs: int = 1, folder: Path | None = None) -> int",
+          "summary": "Runs the scenarios again and compares each with its recorded trace through JSON; prints ok, DIFFERS with the diff lines, or MISSING."
+        },
+        {
+          "name": "record",
+          "kind": "function",
+          "line": 112,
+          "signature": "def record(names: list[str], jobs: int = 1, folder: Path | None = None) -> int",
+          "summary": "Writes each scenario's trace and its counts; exit 1 if one no longer meets its `expects`."
+        },
+        {
+          "name": "diff",
+          "kind": "function",
+          "line": 155,
+          "signature": "def diff(want: dict, got: dict) -> list[str]",
+          "summary": "What differs between two traces, readably: per part, the first item that differs (and for a plan, which field)."
+        },
+        {
+          "name": "Ran",
+          "kind": "dataclass",
+          "line": 46,
+          "signature": "@dataclass class Ran: text, unmet, plans, log, seconds, took, out='', err=''",
+          "summary": "One scenario's run as record and check use it, including what a worker printed."
+        },
+        {
+          "name": "run_one",
+          "kind": "function",
+          "line": 60,
+          "signature": "def run_one(name: str) -> Ran",
+          "summary": "Runs scenario `name` in this process and packs its trace as JSON with its counts and wall time."
+        },
+        {
+          "name": "_ready",
+          "kind": "function",
+          "line": 80,
+          "signature": "def _ready(map_ids: tuple[int, ...]) -> None",
+          "summary": "Pool initializer: a worker made ready as main() makes the command (scenarios imported, maps loaded)."
+        },
+        {
+          "name": "_thief_only",
+          "kind": "function",
+          "line": 199,
+          "signature": "def _thief_only() -> str | None",
+          "summary": "Why the command refuses to run under another GAMELAB_CHARACTER, or None."
+        },
+        {
+          "name": "IGNORED",
+          "kind": "constant",
+          "line": 38,
+          "signature": "IGNORED = (\"doc\",)",
+          "summary": "Trace keys left out of the comparison: a scenario's description may change without its behaviour changing."
+        },
+        {
+          "name": "FOLDER",
+          "kind": "constant",
+          "line": 37,
+          "signature": "FOLDER = LAB / \"golden\"",
+          "summary": "Where the traces live: gamelab/lab/golden, git-ignored."
+        }
+      ],
+      "inputs": [
+        "scenario names (default: all of `scenarios.SCENARIOS`)",
+        "recorded traces in gamelab/lab/golden or `--folder`"
+      ],
+      "outputs": [
+        "trace files (record)",
+        "per-scenario ok / DIFFERS / MISSING lines and an exit code for whoever checks a change"
+      ],
+      "uses": [
+        "gamelab/sim/scenarios.py",
+        "gamelab/paths.py",
+        "gamelab/character.py",
+        "gamelab/motion/physics.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/lab/golden/<scenario>.json",
+          "mode": "read-write",
+          "what": "one golden trace per scenario (written by record, read by check)"
+        }
+      ],
+      "concurrency": "Restarts itself once in a subprocess to fix the environment. With `--jobs N`, a ProcessPoolExecutor of N workers (initializer `_ready`); results are consumed in name order and the pool shut down with pending futures cancelled.",
+      "tunables": [
+        {
+          "name": "--jobs",
+          "value": "1",
+          "meaning": "worker processes; 1 runs in the command's own process as it always did (2 while the user plays, 4 with the game down, per the README)"
+        },
+        {
+          "name": "IGNORED",
+          "value": "(\"doc\",)",
+          "meaning": "trace keys not compared"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-28",
+          "what": "Goldens on a pool (`--jobs`, `--folder`), output identical to one process.",
+          "why": "The user: 'Run the goldens in parallel' (60-70% of workflow agent-hours were spent waiting on tables, replays, tests and goldens)."
+        },
+        {
+          "date": "",
+          "what": "Refuse to run under a non-thief GAMELAB_CHARACTER.",
+          "why": "The scenarios are the thief's until the magician's come (the design's S6); `record` would overwrite the thief's traces with her stats."
+        }
+      ],
+      "gotchas": [
+        "Golden traces are git-ignored (they hold map data): a branch in a worktree re-records in its own lab, and `record` must be run again in the main checkout after the merge.",
+        "`check` with nothing to compare exits 2, never 0.",
+        "`record` writes the trace even when the scenario no longer meets its `expects`; only the exit code (1) says so.",
+        "A change to a scenario's docstring alone never fails `check` (IGNORED)."
+      ],
+      "tests": [
+        "tests/test_golden.py",
+        "tests/test_sim.py",
+        "tests/test_sim_her.py",
+        "tests/test_character.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/harness.py",
+      "title": "The harness",
+      "tagline": "Seeded simulated hunts, outcomes read from the world, the bar and `ab`",
+      "summary": "Runs a hunting policy for a fixed simulated time on many world seeds, under a preset and any of 60 named world switches, and reads about a hundred outcomes from the simulated world itself. `compare` applies the bar seed by seed; `ab` runs this checkout against a base commit's cached seeds, adding seeds only while a headline difference is unsettled; `spot` re-runs a saved seed or two to check it reproduces to the digit.",
+      "details_md": "**Commands.** `python -m gamelab.sim.harness run POLICY [--seeds 10] [--minutes 20] [--preset game] [--jobs N] [--map M] [--world W ...] [--costs coded|measured|measured-1366] [--cache] ...`, plus `cached` (a commit's cached seeds read, nothing run), `ab`, `compare BASE CAND`, `spot RUN [--seeds 3,9]` and `check` (the world's own logs agree with its summary in every scenario). The standard command in the README: `ab loop --map 10002073 --preset crowd --attack choice --costs measured --world zero-walls --world near-misses --world walkers --minutes 5 --jobs 2` (and `loop-grind`).\n\n**One run** (`scenario`, `run_one`). A policy (`POLICIES`: `tour`, `loop` = the hunt loop, `loop-grind`, `walk` = movement only, as the live QA walk) is wrapped in `_safely` (the Lie Detector and safety-stop retreat around it, `HuntStop` ending the hunt) and made into a `scenarios.Scenario` starting at one of the map's ten start places (`STARTS[map]`, the seed modulo their count), every spawn on, `may_die`, `limit = minutes x 60`. The preset gives `world.Noise` and `world.Realism`; each `--world` name then replaces fields of Realism, of her (`HER_FIELDS`), of Noise (`NOISE_FIELDS`), sets a `start`, or lists `stack` switches: module constants of the stack set for the run and put back after (`aim-before`, `hang-2s`, `no-hang`...). Worlds in `LAST_WORLDS` apply after the others whatever the order given. Some worlds are scenes: `s1`-`s7` set her start and the other players' camps as live on 2026-11-05 (README, Where she hunts); `policy-each`/`policy-other` set `POLICY_SEED` from the world seed for the run. `--attack choice|skill|regular` gives the thief `ATTACK_HER` (her Lucky Seven key casting it at its MP, each star's damage drawn); `--grounds 23,...` cuts the policy's hunting grounds to those (`_only`). `run_one` also applies the magician's Magic Claw search when she is played (`magic.apply`), sets the fakes' look costs (`COSTS`), the feed's costs and `route.ROUTES` (`--ways`), records telemetry with `telemetry.captured()`, calls `scenarios.run_sim` and restores everything in a `finally`.\n\n**Outcomes, from the world** (`outcomes` and its helpers). EXP a minute over the horizon; her kills and a rival's; HP lost, touches, hurt and evaded; deaths, falls out of the map, portals; drops picked up as a share and by worth (`looting.worth_for`), cash a minute after potions at the user's reference prices; idle stretches beyond 60 s (`IDLE_GRACE`); time and touches on trips, piles and waits; retouches within 2 s; rope tops; landings near monsters; attacks at monsters dead by then (`DEAD_BEFORE_S` 2.5 s, `DEAD_NEAR` 40 units); jump throws by why chosen; trips and evades; loot visits; the nav log's cuts, replans, misses and falls. `run_one` adds the run's arguments, a coverage tally of her moves (`analysis.coverage.tally`, 3-7 KB a run), the feed's record, turning and attack kinds. A safety stop or out-of-darts stop ends the run's time there and counts against the bar as a death.\n\n**The bar** (`compare`, at least `MIN_PAIRS` = 10 seeds in both runs, paired by seed): EXP a minute better on at least 80% of the paired seeds (8 of 10) and no seed more than 10% worse; at least the base's mean drops share; no more mean HP lost; no death, no fall out of the map, no portal, no stop (counted on every candidate seed, paired or not). It refuses runs on different maps or of different characters.\n\n**`ab`** (`difference`, `ab_next`). The base commit's seeds come from the baseline cache; missing ones are run in the base's own checkout by a filler script (`--fill`, `GAMELAB_BASE_FILL`, else `<baselines>/base.py`) with the environment the base's key resolved. The candidate's seeds run here through `cached_run`. For each headline metric (`HEADLINE`: EXP a minute, touches, deaths, falls, stops) and each `--metric` (a dotted key of the result), the paired differences give a mean, standard error and t, and a verdict: 'zero' (every seed identical), 'too few' (under 2 seeds with values), 'beyond 2 se' or 'within 2 se'. While any is 'within 2 se' or 'too few', it moves to the next of `AB_SEEDS` (12, 24, 48). Then the bar is shown (only shown), and both sides saved.\n\n**Saving and repeatability.** Runs save to `gamelab/lab/harness/<name>.json`, the name built from the options (`_name`). `main` restarts itself with `PYTHONHASHSEED=0`, `GAMELAB_FIXED_STATS=1` and the character (`--character magician` or `GAMELAB_CHARACTER`). Pool workers run at below-normal priority so a perception service beside them keeps its frame rate.",
+      "lines": 2103,
+      "key_items": [
+        {
+          "name": "run_one",
+          "kind": "function",
+          "line": 650,
+          "signature": "def run_one(policy, seed, preset='game', minutes=20.0, think=0.0, costs='coded', ways=None, map_id=FIRST_MAP, world=(), grounds=(), attack=None, think_clock=0.0) -> dict",
+          "summary": "One seeded hunt: sets the run's costs, routes and stack switches, runs the scenario with telemetry captured, puts everything back, and returns the outcomes plus the run's arguments and tallies.",
+          "details_md": "Its signature, bound with defaults minus the seed, is exactly what `baseline.params` keys the cache by, so a new argument must default to 'off' to keep earlier keys."
+        },
+        {
+          "name": "scenario",
+          "kind": "function",
+          "line": 611,
+          "signature": "def scenario(policy, seed, preset='game', minutes=20.0, think=0.0, map_id=FIRST_MAP, world=(), grounds=(), attack=None, think_clock=0.0)",
+          "summary": "Builds the Scenario for one run: the preset's Noise and Realism with each world switch applied (LAST_WORLDS last), her as the map has her, the policy, the start point for the seed."
+        },
+        {
+          "name": "outcomes",
+          "kind": "function",
+          "line": 815,
+          "signature": "def outcomes(world, records: list[dict], horizon: float) -> dict",
+          "summary": "What a run gave, read from the simulated world's logs and the run's telemetry: EXP, kills, touches, HP, drops, deaths, stops, time on trips/piles/waits and dozens more."
+        },
+        {
+          "name": "compare",
+          "kind": "function",
+          "line": 1518,
+          "signature": "def compare(base: list[dict], cand: list[dict]) -> tuple[bool, list[str]]",
+          "summary": "The bar: better EXP a minute on at least 80% of the paired seeds (8 of 10) with none over 10% worse, drops share and HP lost no worse on average, no death, fall, portal or stop on any candidate seed."
+        },
+        {
+          "name": "ab",
+          "kind": "function",
+          "line": 2018,
+          "signature": "def ab(args) -> int",
+          "summary": "This checkout against a base commit's cached seeds, 12 then 24 then 48 only while a headline difference is unsettled; fills the base's missing seeds through the filler script."
+        },
+        {
+          "name": "difference",
+          "kind": "function",
+          "line": 1656,
+          "signature": "def difference(base: list[dict], cand: list[dict], name: str) -> dict",
+          "summary": "A metric seed by seed: n, the means, the mean paired difference, its standard error, t, and the verdict 'zero', 'too few', 'beyond 2 se' or 'within 2 se'."
+        },
+        {
+          "name": "ab_next",
+          "kind": "function",
+          "line": 1683,
+          "signature": "def ab_next(rows: list[dict], seeds: int, steps: tuple[int, ...] = AB_SEEDS) -> tuple[int | None, str]",
+          "summary": "`ab`'s escalation rule: the next seed count while any verdict is OPEN, else stop and say why (or what is still unsettled at the most)."
+        },
+        {
+          "name": "PRESETS",
+          "kind": "constant",
+          "line": 230,
+          "signature": "PRESETS = {\"plain\": ..., \"game\": ..., \"game-drops\": ..., \"game-air\": ..., \"game-sparse\": ..., \"crowd\": ...}",
+          "summary": "Worlds to compare in: plain (the simulator's own), game (the game's errors, 60% of spawns, a rival every 25 s, 60 potions, arrows swallowed after attacks), its variants, and crowd (Tree Dungeon's other players)."
+        },
+        {
+          "name": "WORLDS",
+          "kind": "constant",
+          "line": 290,
+          "signature": "WORLDS = {\"zero-walls\": {\"zero_walls\": True}, ...}",
+          "summary": "60 named switches for what isn't known of the game (or a stack rule to price), each a dict of Realism, Her, Noise, `start` or `stack` fields; saved as suffixes of the run's name."
+        },
+        {
+          "name": "POLICIES",
+          "kind": "constant",
+          "line": 589,
+          "signature": "POLICIES = {\"tour\": _tour, \"loop\": _loop, \"loop-grind\": _loop_grind, \"walk\": _walk}",
+          "summary": "The hunting commands a run can play, each built on the same hunter, navigator and tour, inside the safety and Lie Detector retreat."
+        },
+        {
+          "name": "cached_run",
+          "kind": "function",
+          "line": 1432,
+          "signature": "def cached_run(policy, seeds, preset, minutes, jobs=1, ..., say=print) -> list[dict]",
+          "summary": "run_seeds through the baseline cache: seeds this commit has are read, the rest run and kept as each ends, only while the checkout's code is still as committed."
+        },
+        {
+          "name": "spot",
+          "kind": "function",
+          "line": 1975,
+          "signature": "def spot(results, seeds, jobs=1, say=print) -> bool",
+          "summary": "A reviewer's spot check: a saved run's seeds run again with the arguments each result records (SPOT_KEYS); each the same to the digit, or the keys that differ."
+        },
+        {
+          "name": "COSTS",
+          "kind": "constant",
+          "line": 510,
+          "signature": "COSTS = {\"coded\": {}, \"measured\": {\"LOOK_S\": 0.020, \"LOOK_LAG\": 0.006, \"DETECT_S\": 0.024, \"DETECT_WIDE_S\": 0.084, \"LOOT_S\": 0.008}, ...}",
+          "summary": "What the fakes' looks take on the fake clock: coded (100 ms looks, as before the 2026-10-20 speedups) or as measured offline by bench-look and bench-capture."
+        },
+        {
+          "name": "POLICY_SEED",
+          "kind": "constant",
+          "line": 210,
+          "signature": "POLICY_SEED = 7",
+          "summary": "The policy's own random choices (route weights, sweep order), the same in every run so two policies meet the same monsters until their kills differ; `policy-each`/`policy-other` vary it by seed."
+        },
+        {
+          "name": "main",
+          "kind": "function",
+          "line": 1758,
+          "signature": "def main(argv: list[str] | None = None) -> int",
+          "summary": "Resolves the character, restarts itself with PYTHONHASHSEED=0, fixed stats and that character, then dispatches run, cached, ab, compare, spot or check."
+        }
+      ],
+      "inputs": [
+        "a policy, seeds, minutes, a preset, world switches, map, attack mode, look costs and route ways from the command line",
+        "the simulated world and telemetry records of each run (via `scenarios.run_sim` and `telemetry.captured`)",
+        "saved runs or cache folders for `compare` and `spot`; the base's cached seeds for `ab` and `cached`"
+      ],
+      "outputs": [
+        "one result dict per seed (outcomes plus run arguments, coverage tally, feed record, nav counts)",
+        "a table of the main columns and their means, and saved runs in gamelab/lab/harness for `compare`, `spot` and `python -m gamelab coverage`",
+        "`ab`'s per-step tables (base, candidate, diff, se, t, verdict), why it stopped, and the bar's lines"
+      ],
+      "uses": [
+        "gamelab/sim/scenarios.py",
+        "gamelab/sim/baseline.py",
+        "gamelab/sim/fakes.py",
+        "gamelab/sim/world.py",
+        "gamelab/sim/no_hit_scenes.py",
+        "gamelab/analysis/coverage.py",
+        "gamelab/behavior/hunt.py",
+        "gamelab/behavior/grind.py",
+        "gamelab/behavior/walk.py",
+        "gamelab/behavior/looting.py",
+        "gamelab/behavior/retreat.py",
+        "gamelab/behavior/safety.py",
+        "gamelab/attack/magic.py",
+        "gamelab/localization/feed.py",
+        "gamelab/motion/route.py",
+        "gamelab/motion/physics.py",
+        "gamelab/character.py",
+        "gamelab/telemetry.py",
+        "gamelab/paths.py",
+        "gamelab/attack/reach.py",
+        "gamelab/attack/stance.py",
+        "gamelab/control/navigator.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/lab/harness/<name>.json",
+          "mode": "read-write",
+          "what": "saved runs (a list of per-seed results); `name-base.json` beside for `ab`"
+        },
+        {
+          "path": "D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json",
+          "mode": "read-write",
+          "what": "the baseline cache, through sim.baseline (`--cache`, `cached`, `ab`)"
+        },
+        {
+          "path": "D:/MapleHelper-scratch/baselines/base.py",
+          "mode": "read",
+          "what": "the default filler `ab` runs as a subprocess (`--ref <base sha> -- run ... --seeds N`) to make the base's missing seeds in the base's own checkout (`--fill` or GAMELAB_BASE_FILL name another)"
+        }
+      ],
+      "concurrency": "Restarts itself in a subprocess to fix PYTHONHASHSEED, GAMELAB_FIXED_STATS and the character. With `--jobs N`, a ProcessPoolExecutor of N workers at below-normal priority (`_worker` calls `feed.quiet`); results gathered as completed and returned in seed order. `ab` runs the base's filler as a subprocess. Each run itself is single-threaded on the fake clock.",
+      "tunables": [
+        {
+          "name": "POLICY_SEED",
+          "value": "7",
+          "meaning": "the policy's own random draws, shared by every run"
+        },
+        {
+          "name": "--seeds / --minutes / --preset",
+          "value": "10 / 20.0 / game",
+          "meaning": "a run's defaults"
+        },
+        {
+          "name": "MIN_PAIRS",
+          "value": "10",
+          "meaning": "seeds both runs need before the bar is applied"
+        },
+        {
+          "name": "AB_SEEDS",
+          "value": "(12, 24, 48)",
+          "meaning": "the seed counts `ab` steps through, more only while a difference is unsettled"
+        },
+        {
+          "name": "IDLE_GRACE",
+          "value": "60.0",
+          "meaning": "s without a kill or pick-up that still counts as hunting (stuck_s counts the time beyond)"
+        },
+        {
+          "name": "RETOUCH_S",
+          "value": "2.0",
+          "meaning": "a touch this soon after the one before counts as a re-touch (her invulnerability ending)"
+        },
+        {
+          "name": "DEAD_BEFORE_S, DEAD_NEAR",
+          "value": "2.5, 40.0",
+          "meaning": "an attack decided this soon after a death, this near where the target was seen, is at a dead monster"
+        },
+        {
+          "name": "CHOSEN_KEY_S",
+          "value": "1.5",
+          "meaning": "a chosen jump's attack key comes at most this soon after its record (matching jumps to outcomes)"
+        },
+        {
+          "name": "LANDING_MOVED; LANDING_NEAR, LANDING_CLOSE",
+          "value": "30.0; 105.0, 60.0",
+          "meaning": "a landing counts if it put her on another platform or moved her 30 units along hers; a live monster on the landing platform within 105 (the claw's edge) or 60 is 'near' or 'close'"
+        },
+        {
+          "name": "VISIT_GAP_S, VISIT_BEFORE_S, STOP_LEAST_S",
+          "value": "3.0, 1.0, 0.1",
+          "meaning": "pick-ups 3 s apart at most form one loot visit, starting 1 s before; a stop is a stand of 0.1 s or more"
+        },
+        {
+          "name": "ROPE_TOP_S, ROPE_TOP_DX, GRAB_UNDER",
+          "value": "2.0, 40.0, 20.0",
+          "meaning": "a touch within 2 s and 40 units of a rope she climbed over is a rope-top touch; a grab 20 or more under the top is from below"
+        },
+        {
+          "name": "WALK_PLATFORMS, WALK_TRIP_S",
+          "value": "range(7, 34), 40.0",
+          "meaning": "the `walk` policy's random trips: platforms 7-33, 40 s each, as the live QA walk"
+        },
+        {
+          "name": "_GAME_NOISE",
+          "value": "miss 0.275, walk_jitter 6.0, lag_sd 1.0, tap_lost 0.6, dot_px True, hit_hidden (1.0, 3.0), detect_miss 0.1, heading_unsure 0.014",
+          "meaning": "preset game's errors: 27.5% of stars miss, hit monsters hidden 1-3 s, 10% of looks miss a monster, 60% of short taps lost"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-26",
+          "what": "Rests went (policies loop-avoid and loop-hp50 removed); a run a stop ended counts against the bar as a death does, its time ending with her retreat.",
+          "why": "The rests were removed from the stack; the safety stop now ends the hunt live."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "`run --cache`, `cached`, `ab` and `spot`: master's side cached and read, seeds added only while unsettled, reviewers spot-check.",
+          "why": "The user: 'Smaller simulator tables first; Reviewers spot-check instead of re-running everything; Run the goldens in parallel; Reuse master's baseline numbers'."
+        },
+        {
+          "date": "2026-10-31",
+          "what": "The server's respawn made every world's (`tick-respawn` kept as a name); presets crowd-17 and crowd-slow folded into crowd.",
+          "why": "With the server's respawn the three respawn variants were one."
+        },
+        {
+          "date": "2026-11-01",
+          "what": "`--think-clock`: the stack's computing charged at every read of the clock, so a replan can be late; and `_name` says think/think-clock so such a run no longer saves over the plain one.",
+          "why": "The latency analysis found a replan's own computing could never make it late with `--think` alone; the review of 2026-11-01 found the name clash."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "`--character magician` plays her as the recordings measured her, cached under her own key.",
+          "why": "Every harness number was the thief's, so none of her fixes could be measured offline."
+        },
+        {
+          "date": "2026-11-03",
+          "what": "`near-misses` is the perception of 2026-11-02's misses, in runs; her invulnerability 1.5 s in every world.",
+          "why": "The user's 'yes' to the touch study's two changes as the defaults."
+        },
+        {
+          "date": "2026-11-06",
+          "what": "`--world policy-each` / `policy-other`: the policy's draws by world seed, for a do-nothing's side.",
+          "why": "Every run shares POLICY_SEED, so a paired t lacks that spread; a do-nothing change passed a gate of eight lines whole."
+        },
+        {
+          "date": "",
+          "what": "`ab`'s 'zero' means every seed identical, not a mean difference of 0.",
+          "why": "Until the review a zero mean (e.g. +4 touches on one seed, -4 on another) read 'zero' and stopped `ab` at 12 seeds."
+        }
+      ],
+      "gotchas": [
+        "Outcomes are read from the world, never from the bot's own reports (those miss kills).",
+        "`--think` and `--think-clock` make runs depend on this computer's speed: they can't be combined, aren't deterministic and are never cached.",
+        "The `crowd` preset is Tree Dungeon's alone (PRESET_MAPS); asking for it on another map is refused.",
+        "`--world` order doesn't matter for LAST_WORLDS (they always apply last); `stack` worlds monkeypatch stack constants for the run and restore them after, even on error.",
+        "`compare` and `ab`'s bar refuse runs on different maps or characters; runs saved before those were kept count as the first map's and the thief's.",
+        "An `ab --metric` that no seed's result has on either side is refused (exit 2) with the closest names, rather than read as zero.",
+        "The README still names presets crowd-17 and crowd-slow; the code has only crowd since 2026-10-31.",
+        "The default `--map` is still the first map (10000012), whose scenarios are gone; the standard commands pass `--map 10002073`.",
+        "`--world policy-each`/`policy-other` work by setting this module's `POLICY_SEED` for the run (seed + 0 or seed + 1000); goldens stay at `POLICY_SEED` 7."
+      ],
+      "tests": [
+        "tests/test_harness.py",
+        "tests/test_baseline.py",
+        "tests/test_character.py",
+        "tests/test_drop_worlds.py",
+        "tests/test_sim_tree.py",
+        "tests/test_sim_magic.py",
+        "tests/test_sim_her.py",
+        "tests/test_no_hit_scenes.py",
+        "tests/test_touches.py",
+        "tests/test_evade.py",
+        "tests/test_landing.py",
+        "tests/test_replan.py",
+        "tests/test_retreat.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/baseline.py",
+      "title": "The baseline cache",
+      "tagline": "One file per seed, keyed by the commit's code and everything else a run depends on",
+      "summary": "Keeps the harness's per-seed results so the side of a comparison that doesn't change (master's) is run once and read after. A result is filed under the commit's code identity and a key that hashes the run's arguments, the game data's stamp, Python and package versions and the resolved GAMELAB_* environment. Only deterministic runs from a checkout whose code is exactly as committed are kept.",
+      "details_md": "**Layout.** `<ROOT>/harness/<code>/<key>/seed-NNN.json` (one seed's result, the dict `harness.run_one` returns) and `meta.json` beside them (what the key covers, readably, and the commit that ran it first). `ROOT` is `D:/MapleHelper-scratch/baselines` unless `GAMELAB_BASELINES` says otherwise.\n\n**The code** (`identity`, `code_id`). A commit's code is a SHA-1 of `git ls-tree -r` over `gamelab/`, `gamedata/`, `maplehelper/` and `config.toml` (mode, blob and path of each file) with Markdown lines dropped. So commits that change only tests, READMEs or files elsewhere share one baseline, and `master` or a SHA name the same thing. `identity` returns this only while the checkout's code is as committed: `git status --porcelain --untracked-files=all` over those paths must be empty (git-ignored files like `gamelab/lab`, `gamelab/build`, `gamedata/data` aside). A checkout being edited runs everything and keeps nothing: a hash of the working tree would change with every edit and keep runs nobody reads again.\n\n**The key** (`params`, `covered`, `key`; 16 hex of a SHA-256 over sorted JSON):\n- every argument of `run_one` but the seed, bound with its defaults: those in `CORE` always, any other only when not at its default, so a switch a later commit adds, left off, keeps every earlier key and still pairs base with candidate. Tuples become lists and an int where the default is a float becomes a float (5 and 5.0 minutes are one run);\n- the game data, which isn't in git (`data_stamp`: every file under `gamedata/data` by path, size and mtime);\n- Python's version and the versions of every distribution that could provide a module a run imports (`PACKAGES`: numpy, the four OpenCV wheels, Pillow, mss);\n- the `GAMELAB_*` environment as it resolves (`gamelab_env`): the character played, whether stats are fixed, the GPU mode, and any other `GAMELAB_*` variable as set, but not `NOT_KEYED` (where the cache is and who fills it);\n- `FORMAT` (2).\n\n**Not cached** (`uncacheable`): runs with `think` or `think_clock` set, which charge this computer's computing to the fake clock. Timing benches never are: what they measure is the computer.\n\n**Writing** (`Cache.put`). The folder and `meta.json` are made on first put; each seed's file is written to a temporary name and renamed into place (`_write`), so a run cut short keeps the seeds it finished. The harness keeps a seed only if the checkout is still as committed when that seed ends.\n\n**Filling the base** (`filler_env`). `ab` hands the base's filler the environment its key resolved, with `GAMELAB_CHARACTER` and `GAMELAB_GPU` stated outright, so the base's seeds land where the candidate then reads them even if the candidate's process resolved them another way (a `lab/GPU` file, say).\n\nThe DLLs' compiler isn't in the key: they are built with `/fp:precise` to give Python's answers to the bit, which their tests check. The README's proof: the same run cached and uncached, from master and from the branch, read back the same to the byte; a 12-seed table took 178 s and 245 s without the cache, 2 s each with it.",
+      "lines": 246,
+      "key_items": [
+        {
+          "name": "Cache",
+          "kind": "class",
+          "line": 192,
+          "signature": "class Cache: def __init__(self, code: str, p: dict, repo: Path = REPO, root: Path | None = None, commit: str | None = None)",
+          "summary": "The cached seeds of one run's arguments on one code: `get`, `put`, `seeds`, with its folder `<root>/harness/<code>/<key>`."
+        },
+        {
+          "name": "Cache.put",
+          "kind": "method",
+          "line": 215,
+          "signature": "def put(self, seed: int, result: dict) -> None",
+          "summary": "Writes meta.json once and the seed's file atomically (temp file, then rename)."
+        },
+        {
+          "name": "identity",
+          "kind": "function",
+          "line": 73,
+          "signature": "def identity(repo: Path = REPO) -> tuple[str | None, str]",
+          "summary": "The checkout's code id while its code is exactly as committed (no change, no untracked file under CODE), else None and why."
+        },
+        {
+          "name": "code_id",
+          "kind": "function",
+          "line": 88,
+          "signature": "def code_id(commit: str, repo: Path = REPO) -> str",
+          "summary": "A commit's code: SHA-1 of its ls-tree entries under CODE, Markdown dropped."
+        },
+        {
+          "name": "params",
+          "kind": "function",
+          "line": 97,
+          "signature": "def params(fn, args: tuple = (), kwargs: dict | None = None) -> dict",
+          "summary": "A run's arguments as the key has them: bound with defaults, seed dropped, CORE always, others only off their default, normalized types."
+        },
+        {
+          "name": "covered",
+          "kind": "function",
+          "line": 183,
+          "signature": "def covered(p: dict, repo: Path = REPO) -> dict",
+          "summary": "Everything the key covers, as meta.json shows it: format, params, the data stamp and the environment."
+        },
+        {
+          "name": "gamelab_env",
+          "kind": "function",
+          "line": 152,
+          "signature": "def gamelab_env(environ=None) -> dict",
+          "summary": "The GAMELAB_* environment as it bears on a run: character, fixed stats, GPU mode, and any other GAMELAB_* variable as set."
+        },
+        {
+          "name": "filler_env",
+          "kind": "function",
+          "line": 166,
+          "signature": "def filler_env(env: dict, environ=None) -> dict",
+          "summary": "The environment for the base's filler whose runs' keys resolve to `env`, character and GPU stated outright."
+        },
+        {
+          "name": "data_stamp",
+          "kind": "function",
+          "line": 127,
+          "signature": "def data_stamp(repo: Path = REPO) -> str",
+          "summary": "The game data's stamp: every file under gamedata/data by path, size and mtime (16 hex)."
+        },
+        {
+          "name": "uncacheable",
+          "kind": "function",
+          "line": 119,
+          "signature": "def uncacheable(p: dict) -> str | None",
+          "summary": "Why a run isn't cached (think or think_clock set), or None."
+        },
+        {
+          "name": "CORE",
+          "kind": "constant",
+          "line": 57,
+          "signature": "CORE = (\"policy\", \"preset\", \"minutes\", \"think\", \"costs\", \"ways\", \"map_id\", \"world\", \"grounds\", \"attack\")",
+          "summary": "run_one's arguments always in the key; any other only when off its default."
+        },
+        {
+          "name": "PACKAGES",
+          "kind": "constant",
+          "line": 61,
+          "signature": "PACKAGES = {\"numpy\": (\"numpy\",), \"cv2\": (four OpenCV wheels), \"PIL\": (\"pillow\",), \"mss\": (\"mss\",)}",
+          "summary": "The installed packages a run imports, and every distribution that could provide each; tests fail if a run imports another."
+        },
+        {
+          "name": "FORMAT",
+          "kind": "constant",
+          "line": 52,
+          "signature": "FORMAT = 2",
+          "summary": "The scheme's version: 2 adds package versions and the resolved GAMELAB_* environment (1 had numpy's version alone and the variables as set)."
+        },
+        {
+          "name": "ROOT",
+          "kind": "constant",
+          "line": 53,
+          "signature": "ROOT = Path(os.environ.get(\"GAMELAB_BASELINES\", \"D:/MapleHelper-scratch/baselines\"))",
+          "summary": "Where the caches live (the replay kit's dumps go under it too, in recordings/)."
+        }
+      ],
+      "inputs": [
+        "a run's arguments (from `harness.run_one`'s signature)",
+        "git's view of the checkout (rev-parse, status, ls-tree)",
+        "the game data folder's file stats, installed package versions and the GAMELAB_* environment"
+      ],
+      "outputs": [
+        "cached per-seed results and meta.json for the harness's `--cache`, `cached` and `ab`",
+        "code ids and environment helpers reused by the replay kit's own cache (`replay.key_of`, `replay.tree`)"
+      ],
+      "uses": [
+        "gamelab/character.py",
+        "gamelab/native.py"
+      ],
+      "files_io": [
+        {
+          "path": "D:/MapleHelper-scratch/baselines/harness/<code>/<key>/seed-NNN.json",
+          "mode": "read-write",
+          "what": "one seed's result"
+        },
+        {
+          "path": "D:/MapleHelper-scratch/baselines/harness/<code>/<key>/meta.json",
+          "mode": "write",
+          "what": "what the key covers, the code and the first commit that ran it"
+        },
+        {
+          "path": "gamedata/data/",
+          "mode": "read",
+          "what": "file stats for the data stamp"
+        }
+      ],
+      "concurrency": "Runs `git` as subprocesses. Writes are atomic per file (temp name with the process id, then os.replace), so pool workers and concurrent fills don't corrupt a seed.",
+      "tunables": [
+        {
+          "name": "FORMAT",
+          "value": "2",
+          "meaning": "the key scheme's version"
+        },
+        {
+          "name": "CODE",
+          "value": "(\"gamelab\", \"gamedata\", \"maplehelper\", \"config.toml\")",
+          "meaning": "what the code id hashes and what must be as committed"
+        },
+        {
+          "name": "NOT_CODE",
+          "value": "(\":(exclude,glob)**/*.md\",)",
+          "meaning": "Markdown excluded from the as-committed check"
+        },
+        {
+          "name": "UNCACHED",
+          "value": "{\"think\": 0.0, \"think_clock\": 0.0}",
+          "meaning": "arguments whose other values aren't deterministic"
+        },
+        {
+          "name": "NOT_KEYED",
+          "value": "(\"GAMELAB_BASELINES\", \"GAMELAB_BASE_FILL\")",
+          "meaning": "environment that says where things are, not what a run does"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-28",
+          "what": "A per-seed cache of the harness's results keyed by the commit's code, so master's side is run once.",
+          "why": "The user: 'Reuse master's baseline numbers'; every stage of a workflow re-ran master's side of its comparisons."
+        },
+        {
+          "date": "2026-10-28",
+          "what": "Cache only while the checkout's code is as committed; never hash the working tree.",
+          "why": "A working tree changes with every edit, so it would keep runs nobody reads again; what is asked for again is a commit's."
+        },
+        {
+          "date": "",
+          "what": "FORMAT 2 from the review: package versions of every possible OpenCV wheel and Pillow, and GAMELAB_* as resolved.",
+          "why": "FORMAT 1 split the cache on GAMELAB_BASE_FILL or GAMELAB_GPU=0, failed `ab` with GAMELAB_CHARACTER=thief, and missed OpenCV or Pillow upgrades."
+        }
+      ],
+      "gotchas": [
+        "The data stamp is by path, size and mtime: extracting the game data again changes every key even if the content is the same.",
+        "Any change, staged or not, or any untracked file under gamelab/, gamedata/, maplehelper/ or config.toml, turns the cache off entirely for that checkout.",
+        "A new run_one argument must default to 'off' or every earlier key changes.",
+        "`gamelab_env` uses absolute imports because a copy of this file (baselines/lib/baseline.py) runs inside an older checkout's gamelab."
+      ],
+      "tests": [
+        "tests/test_baseline.py",
+        "tests/test_harness.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/soak.py",
+      "title": "Soak runs",
+      "tagline": "Keep the stack going for minutes and fit a line to its memory",
+      "summary": "Runs the stack offline for a set wall-clock time (on saved frames, in the simulator, or against the real perception service in a child process) while sampling Python's traced allocations and the process's private bytes. After a warm-up it fits a straight line to the samples for growth an hour, and diffs tracemalloc snapshots by part of the code and by line. Not part of pytest.",
+      "details_md": "**Modes** (`python -m gamelab.sim.soak frames|sim|feed [--minutes 10] [--seed 0] [--no-trace]`):\n- `frames` (`soak_frames`): real perception and localization on the saved frames as fast as they go. Each frame is shown for `HOLD` = 30 looks in a row; every 5th look includes the drops on her platform, every 30th the whole screen; after each look the hunter's bookkeeping (ledger, drop store), the monster tracker (`Tracker.update`), telemetry and a glance; a throw every 10th look for the ledger.\n- `sim` (`soak_sim`): the hunt loop in the simulator (`harness.scenario(\"loop\", seed, \"game\", minutes=100_000)`), the next seed if a run ends first. It wraps `Hunt._book` (to reach the hunt at the end) and `Senses.look` (to sample at every look and raise `SimTimeout` when the time is up).\n- `feed` (`soak_feed`): the perception service (`service.serve_saved`) in a spawned child process on the saved frames, at its hunting pace; a `ServiceClient` asks of it as a fight does: a look with her band every 0.1 s, drops every 5th, the whole screen every 30th, a glance between, events drained, a throw every 10th. It also samples the child's private bytes and CPU time, its frames a second after the warm-up, and per-state timings of its pass, look and whole-screen search.\n\n**Measuring** (`Meter`). Every `SAMPLE_S` = 10 s it records (seconds, traced bytes, private bytes). At `WARMUP` = 20% of the run (templates loaded, threads started, caches filled) it takes a tracemalloc snapshot; at the end another. `report` gives, for traced and private bytes, the first and last values after warm-up, min-max, the means of the first and last third (steadier than two samples, since big looks come and go) and the least-squares slope in MB an hour; then growth since warm-up by part of the code (`part_of`: stack, simulator, other) and the `TOP` = 12 lines that grew most; and what the stack holds at the end (kills in the ledger, piles, EXP gains kept, telemetry parts and MB).\n\n**Isolation.** Telemetry goes to a temp folder in parts of `PART_BYTES` = 1 MB so rotation runs too; in `frames` mode the hit log is redirected to a temp file; nothing is written under gamelab/lab, no key is sent and no window touched. `private_bytes` and `cpu_seconds` call Windows' `GetProcessMemoryInfo` and `GetProcessTimes` through ctypes (None elsewhere). Like the harness, `main` restarts itself with PYTHONHASHSEED=0 and fixed stats.\n\n**What it found** (README, 2026-10-20): `frames` for 10 minutes, Python's memory 152.8 MB after warm-up and 153.0 at the end, +0.4 MB an hour; `sim` for 10 minutes covered 5.6 simulated hours, the stack growing only by the ledger's kills (about 100 bytes each) while the simulator's own plan and log lists grew 8.9 MB, which a real run doesn't keep.",
+      "lines": 406,
+      "key_items": [
+        {
+          "name": "Meter",
+          "kind": "class",
+          "line": 46,
+          "signature": "class Meter: def __init__(self, seconds: float)",
+          "summary": "Samples of memory against wall time over a run, with snapshots at the warm-up's end and at the run's end."
+        },
+        {
+          "name": "Meter.sample",
+          "kind": "method",
+          "line": 69,
+          "signature": "def sample(self, force: bool = False) -> None",
+          "summary": "Every SAMPLE_S: notes traced and private bytes; takes the warm-up snapshot once past WARMUP of the run."
+        },
+        {
+          "name": "report",
+          "kind": "function",
+          "line": 167,
+          "signature": "def report(meter: Meter, what: str, held: dict) -> list[str]",
+          "summary": "Growth an hour on the samples' line, growth since warm-up by part and by line, and what the stack holds at the end."
+        },
+        {
+          "name": "soak_frames",
+          "kind": "function",
+          "line": 194,
+          "signature": "def soak_frames(meter: Meter) -> dict",
+          "summary": "Real looks at the saved frames with the hunter's bookkeeping, the tracker and telemetry after each."
+        },
+        {
+          "name": "soak_sim",
+          "kind": "function",
+          "line": 340,
+          "signature": "def soak_sim(meter: Meter, seed: int = 0) -> dict",
+          "summary": "The hunt loop in the simulator for simulated hours, sampled at every look and stopped with SimTimeout when due."
+        },
+        {
+          "name": "soak_feed",
+          "kind": "function",
+          "line": 241,
+          "signature": "def soak_feed(meter: Meter) -> dict",
+          "summary": "The perception service in a child process on saved frames, asked of as a fight does; its memory, frame rate, pass times and CPU followed too."
+        },
+        {
+          "name": "slope",
+          "kind": "function",
+          "line": 137,
+          "signature": "def slope(points: list[tuple[float, float]]) -> float",
+          "summary": "Least-squares slope of (t, y) points: the growth rate."
+        },
+        {
+          "name": "part_of",
+          "kind": "function",
+          "line": 147,
+          "signature": "def part_of(filename: str) -> str",
+          "summary": "Which part of the code an allocation was made in: 'simulator' (gamelab/sim), 'stack' (the rest of gamelab) or 'other'."
+        },
+        {
+          "name": "private_bytes",
+          "kind": "function",
+          "line": 87,
+          "signature": "def private_bytes(pid: int | None = None) -> int | None",
+          "summary": "A process's commit charge via GetProcessMemoryInfo (what OpenCV and numpy take outside tracemalloc)."
+        },
+        {
+          "name": "cpu_seconds",
+          "kind": "function",
+          "line": 113,
+          "signature": "def cpu_seconds(pid: int | None = None) -> float | None",
+          "summary": "A process's kernel plus user CPU time, all threads, via GetProcessTimes."
+        },
+        {
+          "name": "SAMPLE_S",
+          "kind": "constant",
+          "line": 37,
+          "signature": "SAMPLE_S = 10.0",
+          "summary": "Seconds between memory samples."
+        },
+        {
+          "name": "WARMUP",
+          "kind": "constant",
+          "line": 38,
+          "signature": "WARMUP = 0.2",
+          "summary": "Share of the run before growth is counted."
+        },
+        {
+          "name": "main",
+          "kind": "function",
+          "line": 382,
+          "signature": "def main(argv: list[str] | None = None) -> int",
+          "summary": "Restarts with fixed hash seed and stats, starts tracemalloc unless --no-trace, runs the mode and prints the report."
+        }
+      ],
+      "inputs": [
+        "the saved frames in gamelab/lab (`analysis.bench.saved_frames`) and her calibration (frames, feed)",
+        "the real map's model; the simulator through `harness.scenario` (sim)"
+      ],
+      "outputs": [
+        "a printed report: memory trends and growth an hour, what grew by part and line, what the stack holds at the end, and for `feed` the service's rate, waits, pass times and CPU"
+      ],
+      "uses": [
+        "gamelab/sim/harness.py",
+        "gamelab/sim/scenarios.py",
+        "gamelab/sim/fakes.py",
+        "gamelab/telemetry.py",
+        "gamelab/paths.py",
+        "gamelab/analysis/bench.py",
+        "gamelab/analysis/calibration.py",
+        "gamelab/behavior/hunter.py",
+        "gamelab/behavior/hunt.py",
+        "gamelab/control/timeline.py",
+        "gamelab/localization/monsters.py",
+        "gamelab/localization/feed.py",
+        "gamelab/localization/service.py",
+        "gamelab/localization/senses.py",
+        "gamelab/perception/sprites.py",
+        "gamelab/attack/reach.py",
+        "gamelab/motion/physics.py",
+        "maplehelper/engine.py"
+      ],
+      "files_io": [
+        {
+          "path": "gamelab/lab (saved frames, calibration)",
+          "mode": "read",
+          "what": "the frames looked at and her name tag template"
+        },
+        {
+          "path": "<temp>/gamelab-soak-*/telemetry",
+          "mode": "write",
+          "what": "telemetry parts of 1 MB, deleted at the end"
+        },
+        {
+          "path": "<temp>/gamelab-soak-perceive-*/perceive.json",
+          "mode": "read-write",
+          "what": "the child service's info file (feed mode), beside a named pipe gamelab-perceive-soak-<pid>"
+        }
+      ],
+      "concurrency": "`feed` starts the perception service in a 'spawn' multiprocessing child (daemon) and talks to it over a named pipe; the ServiceClient's reader thread calls `on_state` for each state. The asking loop paces itself to one look every 0.1 s with time.sleep. Restarts itself in a subprocess to fix the environment.",
+      "tunables": [
+        {
+          "name": "SAMPLE_S",
+          "value": "10.0",
+          "meaning": "s between samples"
+        },
+        {
+          "name": "WARMUP",
+          "value": "0.2",
+          "meaning": "share of the run before growth is counted"
+        },
+        {
+          "name": "PART_BYTES",
+          "value": "1024 * 1024",
+          "meaning": "telemetry part size, so rotation is exercised"
+        },
+        {
+          "name": "HOLD",
+          "value": "30",
+          "meaning": "looks in a row at each saved frame (frames, feed)"
+        },
+        {
+          "name": "TOP",
+          "value": "12",
+          "meaning": "lines of code shown, by growth"
+        },
+        {
+          "name": "--minutes",
+          "value": "10.0",
+          "meaning": "wall-clock run length"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-20",
+          "what": "Soak runs (`frames`, `sim`) measured: Python's memory flat (+0.4 MB an hour on saved frames); `feed` mode follows the perception service's own process too.",
+          "why": "To see whether what the stack holds in memory keeps growing over long hunts."
+        }
+      ],
+      "gotchas": [
+        "tracemalloc slows it: about 10 looks a second traced against 16 with --no-trace.",
+        "`sim` reports the simulator's own lists of plans and log lines growing (8.9 MB in 5.6 simulated hours); a real run doesn't keep those, so read the 'stack' part.",
+        "The private-bytes swing as big looks come and go (e.g. 197-237 MB) dwarfs a slow creep; only runs of hours would tell one from noise.",
+        "Uses its own `_clock = time.perf_counter` captured at import, since the simulator replaces `time`'s functions while it runs.",
+        "It takes no `--map`: `frames` and `feed` load `scenarios.real_map()`'s default and `sim` runs `harness.scenario`'s default, both the first map (10000012), whose scenarios are gone."
+      ],
+      "tests": [
+        "tests/test_soak.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/latency.py",
+      "title": "Latency of the stack's own computing",
+      "tagline": "Time every stretch of the stack's thinking between two calls to the game",
+      "summary": "Runs the harness's hunts while timing, with the real clock, how long the stack computes between two of its calls to the game (a look, a key plan sent or waited for, a sleep), grouped by the call that ended the stretch. The time is not charged to the fake clock, so the runs are exactly the harness's. In game this time comes on top of the looks' own.",
+      "details_md": "**Command.** `python -m gamelab.sim.latency loop|tour [--seeds 5] [--minutes 10] [--preset game] [--profile FILE]`.\n\n**How it hooks in** (`measure`). The fake clock is told of every call to the game: `fakes.Clock.mark()` when a fake call is over (the stack's computing starts) and `Clock.charge()` when the next one begins (the same hooks `--think` uses to charge computing to the clock). `measure` replaces both on the class for the duration: `marked` starts a `Stretches` timer with the real `perf_counter`, and `charged` stops it and files the stretch under the name of the function that called `charge` (`sys._getframe(1).f_code.co_name`): `_now` (a look of the fakes'), `send` (a key plan), `wait` (waiting for a plan), anything else under `sleep` (a sleep, a look or a glance: her looks wait for the feed's frames through sleeps). If the run's clock does have `think` set, the original hooks are still called, so nothing changes. Then it runs `harness.run_one(policy, seed, preset, minutes)` for seeds 1 to N and restores the hooks in a `finally`.\n\n**The table** (`Stretches.table`). One row per kind of call, sorted by total time: count, median, 90th and 99th percentile and the longest (ms), and the total (s), plus an 'any call' row. The 'a key plan' row is the one that matters most: what a look's answer waits for before her next keys go out. Each seed's EXP a minute, kills and looks are printed beside it, and `--profile` dumps cProfile statistics of the whole runs.\n\n**What it showed** (README): profiled offline on 2026-10-20 with cProfile on top, it drove the speedups of that day. After the physics and attack tracks, the hunt loop on preset game over 5 seeds of 10 minutes (6,094 looks): before a key plan p99 2.7 ms and at most 4.6 ms; the tour before a key plan p99 2.2 ms. The latency analysis of 2026-11-01 led to the harness's `--think-clock`.\n\nTimes are this computer's, with whatever else runs; the simulator's own work (its world moves only inside the calls) and the looks' pixel work (FakeEyes; `bench-look` times that) are not counted.",
+      "lines": 131,
+      "key_items": [
+        {
+          "name": "Stretches",
+          "kind": "class",
+          "line": 30,
+          "signature": "class Stretches: times: dict[str, list[float]]",
+          "summary": "The stack's computing between two calls to the game, timed by what ended it."
+        },
+        {
+          "name": "Stretches.mark",
+          "kind": "method",
+          "line": 37,
+          "signature": "def mark(self) -> None",
+          "summary": "A call to the game is over: start timing the stack's computing."
+        },
+        {
+          "name": "Stretches.charge",
+          "kind": "method",
+          "line": 40,
+          "signature": "def charge(self, caller: str) -> None",
+          "summary": "The next call begins: file the stretch since mark under the caller's kind."
+        },
+        {
+          "name": "Stretches.table",
+          "kind": "method",
+          "line": 45,
+          "signature": "def table(self) -> list[str]",
+          "summary": "Per kind of call: n, median, p90, p99, max (ms) and total (s), then all calls together."
+        },
+        {
+          "name": "measure",
+          "kind": "function",
+          "line": 63,
+          "signature": "def measure(policy: str, seeds: list[int], minutes: float, preset: str = \"game\", profile=None) -> tuple",
+          "summary": "Runs the harness's hunts with fakes.Clock.charge and mark wrapped to time the stretches; returns them and the outcomes."
+        },
+        {
+          "name": "WHAT",
+          "kind": "constant",
+          "line": 26,
+          "signature": "WHAT = {\"_now\": ..., \"send\": \"a key plan\", \"wait\": \"waiting for a plan\", \"sleep\": ...}",
+          "summary": "The fake calls a stretch can end at, and their readable names."
+        },
+        {
+          "name": "main",
+          "kind": "function",
+          "line": 95,
+          "signature": "def main(argv: list[str] | None = None) -> int",
+          "summary": "Restarts with fixed hash seed and stats, runs `measure`, prints the table and each seed's results, optionally dumps a profile."
+        }
+      ],
+      "inputs": [
+        "a policy, seeds, minutes and preset (the harness's POLICIES and PRESETS)",
+        "the fake clock's mark/charge calls during each run"
+      ],
+      "outputs": [
+        "a printed latency table by kind of call, each seed's EXP a minute, kills and looks",
+        "optionally a cProfile stats file (`--profile`)"
+      ],
+      "uses": [
+        "gamelab/sim/harness.py",
+        "gamelab/sim/fakes.py",
+        "gamelab/sim/scenarios.py",
+        "gamelab/paths.py",
+        "gamelab/motion/physics.py"
+      ],
+      "files_io": [
+        {
+          "path": "<--profile FILE>",
+          "mode": "write",
+          "what": "cProfile statistics of the runs (read with python -m pstats)"
+        }
+      ],
+      "concurrency": "Single process: the seeds run one after another (no pool). Restarts itself once in a subprocess to fix PYTHONHASHSEED and GAMELAB_FIXED_STATS.",
+      "tunables": [
+        {
+          "name": "--seeds",
+          "value": "5",
+          "meaning": "world seeds 1 to this"
+        },
+        {
+          "name": "--minutes",
+          "value": "10.0",
+          "meaning": "simulated minutes a seed"
+        },
+        {
+          "name": "--preset",
+          "value": "game",
+          "meaning": "the harness preset the hunts run in"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-10-20",
+          "what": "Time the stack's own computing in simulated hunts, by the call to the game that follows, without charging the fake clock.",
+          "why": "To profile planning, decisions and bookkeeping offline (no game, no keys) while the runs stay the harness's own."
+        }
+      ],
+      "gotchas": [
+        "A stretch ended by any function not in WHAT is counted as 'sleep'.",
+        "It patches `fakes.Clock` at class level for the whole run; it restores it in a `finally`, but nothing else should run in the process meanwhile.",
+        "Numbers depend on the machine and whatever else runs on it; compare only runs made side by side.",
+        "It takes no `--map`: `measure` calls `harness.run_one` with its default map, the first map (10000012, Thicket Around the Beach II), and `main` checks only that map's data is here."
+      ],
+      "tests": [
+        "tests/test_harness.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/replay.py",
+      "title": "The replay kit",
+      "tagline": "Her recordings through any commit's perception, cached per commit and scored",
+      "summary": "Runs a code tree's perception frame step over three lossless recordings of the magician grinding Tree Dungeon (R1-R3, 2026-11-02), feeding it what the live service took from outside (her throws, the drops the hunt asked for) from that night's telemetry. Each run is a child process (`replay_run.py`) per recording; a commit's dumps are cached like the harness's baselines; `score` (in `replay_score.py`) compares dumps against labels in git.",
+      "details_md": "**Why.** The simulator's eyes give no pixels, so a perception change can't be judged there. The kit (ROADMAP item 5, 2026-11-02) replaces hand-built replay scripts with one command set, in the simulator's layer beside the harness (the analysis layer may import neither localization nor sim).\n\n**Commands.** `run [CLIPS] [--root DIR | --commit REF] [--out DIR] [--range A:B] [--unpaced] [--jobs 2]`, `cached [CLIPS] [--commit master] [--where]`, `score [CLIPS] [--dumps DIR] [--base REF] [--labels v3] [--json FILE]`, `check A B` (two dumps the same to the byte, or the first frame and fields where they part), `bench [CLIPS] --base REF [--rounds 1]`, `feed CLIP`. CLIPS are R1, R2, R3 (`CLIPS`, the `Clip`s for folders under `GAMELAB_GOLDEN_CLIPS`, default `D:/MapleHelper-scratch/golden-clips`; 6.6 GB of 1366x768 PNG at 15 a second, kept as fixtures by the user's word). Every job that runs frames goes through the CPU rules' wrapper; a replay takes about a core and a half.\n\n**The clock** (`clock`). Frames are stamped in wall time (summary.json's `from`, local UTC-8, plus index.jsonl's `t`); the perception service's telemetry names frame times on its own `time.monotonic` (a victim's gain, a touch's popup). `clock` finds the one offset that puts the most of those within 2 ms of a frame, over candidates on a 1 ms grid around the median. The README: 1793544509.301 s on all three (R2 106 of 107 within 2 ms). The step then runs on the service's own clock (frame 0 at `t0`), so its events read against the live ones directly.\n\n**The feed** (`feed`). From the tour's telemetry: each `attack` record becomes a throw told when the record went, with its side (the record's own, else the fight's `stance` within `STANCE_S` = 1.2 s before, else her target's side by the last scene), its key `TURN_S` = 0.080 s later when her keys didn't have her facing that way (as `Actions.throw` taps the arrow first), and its aim (kind, x, platform, track). Each tour `scene` that looked at drops becomes an ask on the last frame shown 12 ms before it (her platform's, or every one in view if the look was wide; mesos only if her backpack was full). `how` counts how each was told.\n\n**Trees** (`tree`). `--commit REF` runs a commit: `git archive` of its `gamelab/`, `gamedata/`, `maplehelper/` and `config.toml` under `<cache>/trees/<code 12>-<lab 8>/`, with this checkout's DLLs and this checkout's lab inputs (`LAB_INPUTS`: calibration, name tags, character.json, the stat window's place, plate and pose models, map art), so both sides read the same; made once and marked `.ready`. A tree with no game data of its own reads `MAIN_DATA`.\n\n**Running** (`run_one`, `run_all`). Each recording gets a `replay_run.py` child (`-B`, by path) in an environment with `GAMELAB_CHARACTER` set to the clip's character and `GAMELAB_GPU=0` (`child_env`); `jobs` run at once, polled every 0.5 s; a failure prints the log's tail.\n\n**The cache** (`cached`, `key_of`, `_keep`, `data_stale`). A commit's dumps live under `<GAMELAB_REPLAYS, else baselines ROOT/recordings>/<code 12>/<key 16>/`. The key hashes the runner's own source (so editing `replay_run.py` remakes every commit's dumps), the feed, the lab inputs by content, the child's GAMELAB_* environment as the harness resolves it, Python and package versions, the recording's frames stamp and the range. The game data is checked rather than keyed: `key.json` names every data file the run read, by content, and a dump whose data changed since is stale and made again. A dump that opened a lab file `LAB_INPUTS` doesn't cover isn't kept. Labels aren't in the key: a score takes seconds.\n\n**`bench`.** Pass times only from runs made side by side: base and tree alternated (base, tree, tree, base per round) on the same frames, paced, one at a time; never against a cached dump's times, since the machine changes between them.",
+      "lines": 615,
+      "key_items": [
+        {
+          "name": "Clip",
+          "kind": "dataclass",
+          "line": 103,
+          "signature": "@dataclass(frozen=True) class Clip: name, folder, character='magician'",
+          "summary": "A recording: its folder in golden-clips, who played, a short name; gives its frames, rows, frame-0 wall time, telemetry files and labels."
+        },
+        {
+          "name": "CLIPS",
+          "kind": "constant",
+          "line": 137,
+          "signature": "CLIPS = {R1: ricebaby-grind-20261102-0009, R2: ...-0017-5min, R3: ...-0017-5min-b}",
+          "summary": "The three recordings of RiceBaby (level 31-32) grinding Tree Dungeon on master 40ba190."
+        },
+        {
+          "name": "clock",
+          "kind": "function",
+          "line": 161,
+          "signature": "def clock(clip: Clip) -> dict",
+          "summary": "The offset (wall time minus the service's monotonic) that puts the most named frame times within 2 ms of a frame, searched on a 1 ms grid."
+        },
+        {
+          "name": "feed",
+          "kind": "function",
+          "line": 189,
+          "signature": "def feed(clip: Clip) -> dict",
+          "summary": "What the service took from outside that night, from the run's records: t0, her throws (side, time told, key time, aim) and the drop asks per frame."
+        },
+        {
+          "name": "tree",
+          "kind": "function",
+          "line": 284,
+          "signature": "def tree(ref: str, lab_from: Path = ...) -> tuple[Path, str, str]",
+          "summary": "A commit's code exported once as a runnable tree, with this checkout's DLLs and lab inputs."
+        },
+        {
+          "name": "run_one",
+          "kind": "function",
+          "line": 344,
+          "signature": "def run_one(clip, root, out, start=0, limit=0, paced=True, the_feed=None) -> subprocess.Popen",
+          "summary": "Writes the feed file and starts replay_run.py on one recording with tree `root`."
+        },
+        {
+          "name": "run_all",
+          "kind": "function",
+          "line": 361,
+          "signature": "def run_all(clips, root, out, start, limit, paced, jobs) -> list[Path]",
+          "summary": "Each recording through `root`, `jobs` at once; returns the dumps made."
+        },
+        {
+          "name": "cached",
+          "kind": "function",
+          "line": 412,
+          "signature": "def cached(clips, ref, start, limit, jobs, make=True) -> dict[str, Path]",
+          "summary": "A commit's dumps, read where kept and fresh, else made paced and kept (unless make=False)."
+        },
+        {
+          "name": "key_of",
+          "kind": "function",
+          "line": 381,
+          "signature": "def key_of(clip, code, lab, start, limit, the_feed) -> dict",
+          "summary": "What a cached dump depends on beside its code: runner hash, feed, lab, environment, versions, frames stamp, range."
+        },
+        {
+          "name": "_keep",
+          "kind": "function",
+          "line": 457,
+          "signature": "def _keep(c, where, k, tmp, sha) -> Path | None",
+          "summary": "Moves a fresh dump into its key's folder with key.json (and the data files it read), unless it opened an unkeyed lab file."
+        },
+        {
+          "name": "data_stale",
+          "kind": "function",
+          "line": 391,
+          "signature": "def data_stale(where: Path, data: Path = MAIN_DATA) -> list[str]",
+          "summary": "The game data files a kept dump read that have changed since (all of them if key.json says none)."
+        },
+        {
+          "name": "LAB_INPUTS",
+          "kind": "constant",
+          "line": 93,
+          "signature": "LAB_INPUTS = (\"character.json\", \"calibration*.json\", \"tag_template*.npy\", \"stat_window.json\", \"plate*.npz\", \"poses*.npz\", \"mapart/*.npz\", ...)",
+          "summary": "The git-ignored lab files the frame step reads, keyed by content."
+        },
+        {
+          "name": "bench",
+          "kind": "function",
+          "line": 512,
+          "signature": "def bench(clips, base, root, out, start, limit, rounds) -> int",
+          "summary": "Pass and spawn-watch times of base and tree alternated on the same frames, paced, one at a time: median, p90, p99."
+        },
+        {
+          "name": "check",
+          "kind": "function",
+          "line": 490,
+          "signature": "def check(a: Path, b: Path) -> int",
+          "summary": "Two dumps the same to the byte (0), else the first frame where they part and in which fields (1)."
+        },
+        {
+          "name": "TURN_S",
+          "kind": "constant",
+          "line": 97,
+          "signature": "TURN_S = 0.080",
+          "summary": "A ground throw that turns her first: its key 80 ms after the arrow's tap (50 ms tap plus 30 ms settle)."
+        }
+      ],
+      "inputs": [
+        "the recordings' frames (index.jsonl, PNGs, summary.json) and telemetry (perceive, tour) in golden-clips",
+        "a code tree: this checkout, `--root`, or a commit exported by `tree`",
+        "this checkout's lab inputs and DLLs, the game data"
+      ],
+      "outputs": [
+        "per-recording dumps (`<folder>.jsonl.gz`), side files with timings, feed files and logs, in a run folder or the cache",
+        "byte comparisons of two dumps; side-by-side pass-time benches"
+      ],
+      "uses": [
+        "gamelab/sim/baseline.py",
+        "gamelab/sim/replay_run.py",
+        "gamelab/sim/replay_score.py"
+      ],
+      "files_io": [
+        {
+          "path": "D:/MapleHelper-scratch/golden-clips/<clip>/",
+          "mode": "read",
+          "what": "the recordings' frames and telemetry"
+        },
+        {
+          "path": "tests/fixtures/recordings/<clip>/labels-v3.json",
+          "mode": "read",
+          "what": "the labels (via Clip.labels)"
+        },
+        {
+          "path": "<cache root>/<code 12>/<key 16>/",
+          "mode": "read-write",
+          "what": "a commit's cached dumps, side files, feed, log and key.json"
+        },
+        {
+          "path": "<cache root>/trees/<code 12>-<lab 8>/",
+          "mode": "write",
+          "what": "a commit's exported code with DLLs and lab inputs"
+        },
+        {
+          "path": "<cache root>/runs/<stamp>/, <cache root>/bench/<stamp>/",
+          "mode": "write",
+          "what": "`run`'s and `bench`'s output by default"
+        }
+      ],
+      "concurrency": "Starts one `replay_run.py` child process per recording with subprocess.Popen, up to `--jobs` at once (2 by default), polling every 0.5 s; `git archive` runs as a subprocess. `bench` runs one at a time on purpose.",
+      "tunables": [
+        {
+          "name": "--jobs",
+          "value": "2",
+          "meaning": "recordings at once (the CPU rules' workers while the user plays; 3 when idle)"
+        },
+        {
+          "name": "TURN_S",
+          "value": "0.080",
+          "meaning": "a turning throw's key after its arrow tap"
+        },
+        {
+          "name": "STANCE_S",
+          "value": "1.2",
+          "meaning": "a throw's side from the fight's stance at most this long before its attack record"
+        },
+        {
+          "name": "LABELS_VERSION",
+          "value": "v3",
+          "meaning": "the labels scored against by default"
+        },
+        {
+          "name": "ENV",
+          "value": "{\"GAMELAB_GPU\": \"0\"}",
+          "meaning": "the dumps run with the GPU off (its answers are the same to the bit)"
+        },
+        {
+          "name": "LOCAL",
+          "value": "UTC-8",
+          "meaning": "the recordings' local time zone"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-02",
+          "what": "A replay kit in the sim layer: run any tree's frame step over her recordings, cache a commit's dumps, score against labels in git.",
+          "why": "Each analysis had rebuilt the replay by hand (none telling her throws), and the simulator gives no frames (P41)."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "Labels kept in git under tests/fixtures; frames stay on the scratch drive by path.",
+          "why": "So no cleanup of the scratch drive can lose them."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "The cache key covers the runner's source, the resolved environment, and checks the game data by content (stale dumps remade).",
+          "why": "The review of 2026-11-02: a runner edit or a data change must not reuse old dumps."
+        },
+        {
+          "date": "",
+          "what": "Pass times only from runs side by side, never against a cached dump's times.",
+          "why": "The machine changes between them (the workflows' rule)."
+        }
+      ],
+      "gotchas": [
+        "The recordings (6.6 GB) aren't in git; tests that need them are skipped without them.",
+        "Editing replay_run.py changes every commit's cache key: all dumps are made again.",
+        "MAIN_DATA is hard-coded to D:/MapleHelper/gamedata/data for exported trees, which have no game data.",
+        "A tree from `--commit` gets this checkout's lab inputs, not that commit's: both sides of a comparison read the same calibration.",
+        "`score` never makes the base's dumps; it prints the `cached --commit` command to run through the CPU wrapper."
+      ],
+      "tests": [
+        "tests/test_replay.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/replay_run.py",
+      "title": "Replay runner (child process)",
+      "tagline": "One recording through one tree's perception step, as the live service ran it",
+      "summary": "The child process `replay run` starts per recording. Run as a script by path, it puts the chosen tree first on sys.path so that tree's gamelab is imported, rebuilds what the live perception service built (saved frames as the screen), and steps every frame at its own time, telling the step her throws and drop asks from the feed. It writes a deterministic per-frame dump and a side file of timings and the files it read.",
+      "details_md": "**Importing the right gamelab.** It is never imported. `main` removes its own folder from `sys.path`, inserts `--root` first, turns off bytecode writing, and only then imports gamelab; it exits if `localization.feed` didn't come from the tree. An audit hook (`sys.addaudithook(audit)`) records every file opened under the tree's `gamelab/lab` and under the game data folder (both as named and as its junction resolves), so the parent can key the dump by them. With `--data`, `gamedata.paths` is pointed at another data folder before anything else imports it.\n\n**What it builds** is what `service.screen_world` builds live, with saved frames for the screen: the map's model (`MAP_ID` = 10002073), her name-tag template from her calibration at the game's 1366x768 (`screen.NATIVE`), `SavedEyes` with the map's monster detector and minimap picture, `Senses` with her Shape (from `GAMELAB_CHARACTER`, set by the parent) and the look band (`reach.LOOK_UP`, `LOOK_DOWN`), and `worldstate.WorldStep` on the service's schedule. Then as the service tunes itself with a hunt attached that tells her throws: the hunting schedule (`service.HUNTING`) and `tracker.throws_known = True`. OpenCV on one thread, Windows' timer resolution at 1 ms. Older trees lacking a piece (the spawn watch, the whole-screen search, `HUNTING`, a throw's `aim`) are tolerated with getattr/hasattr.\n\n**The loop.** Each frame is handed over at its own time in the recording (paced: wait for it with the real clock; the next frame read from disk in the slack after the pass, never during one); `--unpaced` runs them back to back. Before each frame, every throw told by then goes to `step.throw` (with its aim where the tree's step takes one). A frame missing from the recording (a gap: the game not in front) is stepped as not visible. Otherwise the frame's drop ask (if any) becomes a `worldstate.Asks`, and `step.step(runner.look(Frame(...)), t, True, asks)` runs. If the frame failed its checks, the eyes' recovery runs at most `RECOVER_EVERY_S` apart on the recording's clock (not the real one), so pacing can't move it.\n\n**The dump** (`_Dump`: gzip JSON lines, gzip header with mtime 0 and no name, written to `.part` then renamed). A head line (format, frames, start, map, character, t0, throws, asks, the feed's hash), one line per frame, and an end line with the step's, tracker's and spawn watch's counts. A frame line, in map units rounded: `i`, `t`; `her` [x, y, platform, how, mode]; `v`/`vs` the view and whether registered; `bad`; `hp`, `mp`, `hpn`, `lv`; `m` the state's monsters (kind letter, place, platform, track, fading, facing, bar, box, score, picture frame); `tr` the tracks (id, state, kind, place, platform, fading, how, bar, gain, cause); `ev` events with plain data; `pl` other players; `sg` the spawn watch's sightings; `wd` the whole screen's detections; `loot` drops asked for; `say` what was logged. 0.28-0.41 MB a recording.\n\n**The side file** (`--side`): per frame [i, late ms, pass ms, look ms, whole-screen ms, spawn-watch ms], the lab files and data files read with content hashes, the wall time taken. Timings never go in the dump, so a dump made twice is the same to the byte where the step is deterministic.",
+      "lines": 329,
+      "key_items": [
+        {
+          "name": "main",
+          "kind": "function",
+          "line": 126,
+          "signature": "def main(argv=None) -> int",
+          "summary": "Puts the tree on sys.path, audits file opens, builds the service's perception on saved frames, steps every frame with the feed's throws and asks, writes the dump and side file."
+        },
+        {
+          "name": "_Dump",
+          "kind": "class",
+          "line": 107,
+          "signature": "class _Dump: def __init__(self, path: Path)",
+          "summary": "A gzip JSON-lines file written whole (.part then rename), gzip header without time or name so the same lines give the same bytes."
+        },
+        {
+          "name": "audit",
+          "kind": "function",
+          "line": 138,
+          "signature": "def audit(event, args)",
+          "summary": "Audit hook: records every lab file and game data file the run opens, for the parent's cache key and staleness check."
+        },
+        {
+          "name": "_plain",
+          "kind": "function",
+          "line": 91,
+          "signature": "def _plain(data: dict) -> dict",
+          "summary": "An event's data as plain JSON values (what the pipe would carry): floats to 4 places, anything else as str."
+        },
+        {
+          "name": "_parse",
+          "kind": "function",
+          "line": 69,
+          "signature": "def _parse(argv)",
+          "summary": "Arguments: --root, --frames, --feed, --out, --side, --start, --limit, --unpaced, --data."
+        },
+        {
+          "name": "FORMAT",
+          "kind": "constant",
+          "line": 64,
+          "signature": "FORMAT = 1",
+          "summary": "The dump format's version, in the head line."
+        },
+        {
+          "name": "MAP_ID",
+          "kind": "constant",
+          "line": 65,
+          "signature": "MAP_ID = 10002073",
+          "summary": "Tree Dungeon, Forest Up North II: the recordings' map."
+        },
+        {
+          "name": "SHORT",
+          "kind": "constant",
+          "line": 66,
+          "signature": "SHORT = {\"horny-mushroom\": \"H\", \"green-mushroom\": \"G\", \"slime\": \"S\"}",
+          "summary": "Monster kinds as single letters in the dump."
+        }
+      ],
+      "inputs": [
+        "--root: the code tree to import",
+        "--frames: the recording's index.jsonl and PNGs",
+        "--feed: t0, throws and asks (from replay.feed)",
+        "the tree's lab inputs and the game data"
+      ],
+      "outputs": [
+        "the dump (`--out`, .jsonl.gz) for replay.check and replay_score",
+        "the side file (`--side`): timings and the lab/data files read, for replay's cache and bench"
+      ],
+      "uses": [
+        "gamelab/character.py",
+        "gamelab/analysis/calibration.py",
+        "gamelab/analysis/bench.py",
+        "gamelab/attack/reach.py",
+        "gamelab/localization/feed.py",
+        "gamelab/localization/mapdata.py",
+        "gamelab/localization/service.py",
+        "gamelab/localization/worldstate.py",
+        "gamelab/localization/senses.py",
+        "gamelab/perception/frames.py",
+        "gamelab/perception/sprites.py",
+        "gamelab/screen.py",
+        "gamedata/paths.py"
+      ],
+      "files_io": [
+        {
+          "path": "<frames>/index.jsonl and PNGs",
+          "mode": "read",
+          "what": "the recording"
+        },
+        {
+          "path": "<feed>.json",
+          "mode": "read",
+          "what": "what the service was told that night"
+        },
+        {
+          "path": "<out>.jsonl.gz (via .part)",
+          "mode": "write",
+          "what": "the dump"
+        },
+        {
+          "path": "<side>.json",
+          "mode": "write",
+          "what": "timings and files read"
+        },
+        {
+          "path": "<tree>/gamelab/lab/, gamedata/data/",
+          "mode": "read",
+          "what": "calibration, name tags, models, map art; the map's game data (all audited)"
+        }
+      ],
+      "concurrency": "A single child process, one thread for the step (cv2.setNumThreads(1)); Windows timers at 1 ms (timeBeginPeriod) for pacing with time.sleep. The parent runs several of these at once.",
+      "tunables": [
+        {
+          "name": "pacing",
+          "value": "frames at their own times (15 a second)",
+          "meaning": "as the service looked live; `--unpaced` runs back to back"
+        },
+        {
+          "name": "start offset",
+          "value": "0.5 s",
+          "meaning": "the paced clock starts half a second after setup"
+        },
+        {
+          "name": "--start / --limit",
+          "value": "0 / 0",
+          "meaning": "the frame range (0 limit: to the end)"
+        },
+        {
+          "name": "RECOVER_EVERY_S",
+          "value": "0.2",
+          "meaning": "least gap between the eyes' recoveries after failed frames, read from the tree's `localization.feed` (0.2 for a tree without it) and applied on the recording's clock"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-02",
+          "what": "The eyes' recoveries after a failed frame come at most RECOVER_EVERY_S apart on the recording's own clock.",
+          "why": "The review: on the real clock pacing would move them onto other frames (on R1-R3 none ran)."
+        },
+        {
+          "date": "2026-11-02",
+          "what": "Each throw carries its aim (kind, x, platform) where the tree's step accepts one, by place alone.",
+          "why": "The live track ids are another tracker's; master's step takes no aim, so its dumps stay as before to the byte."
+        }
+      ],
+      "gotchas": [
+        "Must be run by path, never imported: importing it from this checkout would load this checkout's gamelab, not the tree's (a test checks it imports nothing of gamelab at the top).",
+        "Timings never go in the dump; compare them only through `replay bench`.",
+        "A paced and an unpaced run give the same dump only where nothing in the step reads the real clock; `replay check` tells."
+      ],
+      "tests": [
+        "tests/test_replay.py"
+      ]
+    },
+    {
+      "path": "gamelab/sim/replay_score.py",
+      "title": "Replay scores",
+      "tagline": "A dump against its recording's hand-checked labels, class by class",
+      "summary": "Turns a replay dump into plain numbers per label class: spawn onsets, births found, touches, monsters under her, which monster each kill was, her casts at the dead, and other players. `replay score` prints them per recording and in total, with a base commit's cached dumps scored beside from the same labels.",
+      "details_md": "**Labels.** `tests/fixtures/recordings/<clip>/labels-v3.json` (26-37 KB each, in git; v1 and v2 kept beside): a version, the clip, and `classes`, each with an `about` and `items`. Frames are index.jsonl's `i`, places in map units, kinds as H/G/S.\n\n**The classes** (`score` runs them all on one dump):\n- **onsets** (`score_onsets`): the dump's onsets are its spawn watch's sightings grouped by (point, onset time), each at its first frame (`onsets_of`). `of_record`: labelled onsets the dump has at the same point and frame. `false`: onsets at no labelled birth (the user's zero-false rule: keep it 0). `refinds`: extra onsets of a birth within `REFIND_FRAMES` = 30. R1's `given`: newborns the state gave out as fading monsters.\n- **births** (`score_births`): a birth is `found` by an onset at its point from 3 frames before to `FIND_FRAMES` = 15 after its first visible frame, split into those master's watch found and those it missed (where a fix's gain shows), with frames late and alpha at the first sighting (medians).\n- **touches** (`score_touches`): the dump's 'touch' events matched greedily to labelled frames within `TOUCH_S` = 0.35 s: found, by popup, frames late (at 15 a second), damage number right, and false ones.\n- **under_her** (`score_under_her`): at each labelled frame, or the one either side, a monster of that kind in the state, or a live, hidden or dying track, within `BODY_DX`, `BODY_DY` = 40, 40 of her.\n- **kills** (`score_kills`): her gains' first and last bindings ('victim' events, let-gos removed) against the labelled victim within `KILL_DX`, `KILL_DY` = 40, 25; also the first on the victim's level. `strong` uses labels decided on the frames (`STRONG`: die1, frames, eye); `all` adds master's unchecked final bindings; unsure ones left out.\n- **casts** (`score_casts`, only when the dump's `.feed.json` lies beside it): each throw's target is the track of its kind on its platform nearest its record's x within `CAST_DX` = 45, in the frame shown 20 ms before it was told. A cast at a labelled victim's track within `CAST_DEAD_S` = 1.6 s after its gain is a cast at her dead; `left_out` counts those the state had already killed (dead, or dying with a gain), which the hunt would have skipped.\n- **players** (`score_players`): the state's player count against the minimap's red dots every 15th frame (more, fewer), distinct ids per 5 minutes, and of frames with a red dot by hers, those where the state has a player within `NEAR_PLAYER` (60, 60) of her.\n\n**`main`.** Scores the dumps in `--dumps` and, if `--base` is given (or no dumps), the base's cached dumps (`replay.cached(..., make=False)`: it never makes them, and prints the `cached --commit` command if they aren't all kept). It prints a table per recording and in total (`total` adds counts, leaving out medians and late values) and optionally writes JSON.\n\n**Master's numbers** (README, 40ba190, all three): onsets of record 244 of 244, 0 false; births 165 of 165 seen and 0 of 16 missed found; touches 71 of 71, 46 by popup; monsters under her 4 of 10; kills by v3 first binding right 123 of 151; casts at her dead left out 4 of 19.",
+      "lines": 355,
+      "key_items": [
+        {
+          "name": "score",
+          "kind": "function",
+          "line": 278,
+          "signature": "def score(dump: Path, labels: dict) -> dict",
+          "summary": "Every class's score of one dump against one recording's labels; casts only if the feed file lies beside the dump."
+        },
+        {
+          "name": "score_onsets",
+          "kind": "function",
+          "line": 64,
+          "signature": "def score_onsets(frames, items, births) -> dict",
+          "summary": "Onsets of record (same point and frame), false onsets, re-finds, and R1's newborns given out."
+        },
+        {
+          "name": "score_births",
+          "kind": "function",
+          "line": 89,
+          "signature": "def score_births(frames, births) -> dict",
+          "summary": "Births found by an onset within FIND_FRAMES, split by whether master's watch found them, with median frames late and alpha."
+        },
+        {
+          "name": "score_touches",
+          "kind": "function",
+          "line": 118,
+          "signature": "def score_touches(frames, t0, items) -> dict",
+          "summary": "Touches matched to labels within TOUCH_S: found, by popup, frames late, damage number right, false."
+        },
+        {
+          "name": "score_kills",
+          "kind": "function",
+          "line": 182,
+          "signature": "def score_kills(frames, t0, items) -> dict",
+          "summary": "First and last bindings of her gains against the labelled victims, strong labels and all, and first bindings on the victim's level."
+        },
+        {
+          "name": "score_casts",
+          "kind": "function",
+          "line": 223,
+          "signature": "def score_casts(frames, t0, items, throws) -> dict",
+          "summary": "Her casts at her dead (after a labelled kill's gain, at its track) and how many of them the state had already killed."
+        },
+        {
+          "name": "score_under_her",
+          "kind": "function",
+          "line": 141,
+          "signature": "def score_under_her(frames, items) -> dict",
+          "summary": "Labelled frames where a monster at her body is seen in the state or carried as a track."
+        },
+        {
+          "name": "score_players",
+          "kind": "function",
+          "line": 254,
+          "signature": "def score_players(frames, items) -> dict",
+          "summary": "The state's players against the minimap's red dots, ids per 5 minutes, and a rival under her dot held."
+        },
+        {
+          "name": "onsets_of",
+          "kind": "function",
+          "line": 52,
+          "signature": "def onsets_of(frames: list[dict]) -> list[dict]",
+          "summary": "The dump's onsets: spawn-watch sightings grouped by point and onset time, each at its first frame."
+        },
+        {
+          "name": "bindings_of",
+          "kind": "function",
+          "line": 160,
+          "signature": "def bindings_of(frames: list[dict], t0: float) -> dict",
+          "summary": "Her gains' bindings in a dump (gain time -> [(frame, track, x, y)]) and their let-gos."
+        },
+        {
+          "name": "victim_track",
+          "kind": "function",
+          "line": 211,
+          "signature": "def victim_track(by_i, frame, kind, victim, span=(-3, 26)) -> int | None",
+          "summary": "The dump's track of that kind last at a labelled victim's place around its gain's frame."
+        },
+        {
+          "name": "total",
+          "kind": "function",
+          "line": 308,
+          "signature": "def total(scores: list[dict]) -> dict",
+          "summary": "The recordings' scores added up, medians and late values left out."
+        },
+        {
+          "name": "main",
+          "kind": "function",
+          "line": 319,
+          "signature": "def main(a, clips) -> int",
+          "summary": "`replay score`: tables per recording and in total, the base's cached dumps beside (never made), JSON if asked."
+        },
+        {
+          "name": "FIND_FRAMES",
+          "kind": "constant",
+          "line": 36,
+          "signature": "FIND_FRAMES = 15",
+          "summary": "An onset this many frames after a birth's first visible frame (3 before) finds it."
+        },
+        {
+          "name": "TOUCH_S",
+          "kind": "constant",
+          "line": 38,
+          "signature": "TOUCH_S = 0.35",
+          "summary": "A touch told this near a labelled one's frame is it."
+        }
+      ],
+      "inputs": [
+        "dumps (replay.load: head, frames, end)",
+        "labels-<version>.json per recording",
+        "the feed file beside a dump (for casts)"
+      ],
+      "outputs": [
+        "per-class score dicts per recording and totals, printed as tables and optionally as JSON"
+      ],
+      "uses": [
+        "gamelab/sim/replay.py"
+      ],
+      "files_io": [
+        {
+          "path": "tests/fixtures/recordings/<clip>/labels-<version>.json",
+          "mode": "read",
+          "what": "the labels"
+        },
+        {
+          "path": "<dumps>/<clip>.jsonl.gz, <clip>.feed.json",
+          "mode": "read",
+          "what": "the dump and its feed"
+        },
+        {
+          "path": "<--json FILE>",
+          "mode": "write",
+          "what": "all scores as JSON"
+        }
+      ],
+      "concurrency": "",
+      "tunables": [
+        {
+          "name": "FIND_FRAMES, REFIND_FRAMES",
+          "value": "15, 30",
+          "meaning": "an onset finds a birth up to 15 frames after its first visible frame; onsets at its point up to 30 after are re-finds, not false"
+        },
+        {
+          "name": "TOUCH_S",
+          "value": "0.35",
+          "meaning": "s between a told touch and a labelled one"
+        },
+        {
+          "name": "BODY_DX, BODY_DY",
+          "value": "40.0, 40.0",
+          "meaning": "a monster this near her is under her body"
+        },
+        {
+          "name": "KILL_DX, KILL_DY",
+          "value": "40.0, 25.0",
+          "meaning": "a binding this near the labelled victim is right (KILL_DY also the platform credit)"
+        },
+        {
+          "name": "CAST_DEAD_S",
+          "value": "1.6",
+          "meaning": "s after a kill's gain its monster is still drawn"
+        },
+        {
+          "name": "CAST_DX",
+          "value": "45.0",
+          "meaning": "a cast's target: the track of its kind nearest its record's x, this near"
+        },
+        {
+          "name": "NEAR_PLAYER",
+          "value": "(60.0, 60.0)",
+          "meaning": "a player this near her is the one under her dot"
+        }
+      ],
+      "decisions": [
+        {
+          "date": "2026-11-02",
+          "what": "Labels v3 after the kill-credit review: the 2 kills the eye didn't decide kept as master's binding; red slivers under 4 px within 9 px of her dot count as a rival under her.",
+          "why": "The review found 14 of v2's sampled player frames wrong (a rival mostly under her dot, the case the class is for); v1 and v2 are kept beside (`score --labels v1`)."
+        }
+      ],
+      "gotchas": [
+        "Onsets of record need the same point and the same frame, so a watch that finds a newborn a frame sooner reads as one fewer there; `births.found` is the forgiving measure.",
+        "Casts are scored only when the dump's `.feed.json` lies beside it (`run` and `cached` write it).",
+        "'binding' kill labels (87) are master's own final binding, unchecked: the weakest; 'strong' leaves them out."
+      ],
+      "tests": [
+        "tests/test_replay.py"
+      ]
+    }
+  ],
+  "data_types": [
+    {
+      "name": "Scenario",
+      "module": "gamelab/sim/scenarios.py",
+      "line": 99,
+      "summary": "A named simulated run: made by the `@tree` decorator (or by `harness.scenario` for each seed), consumed by `run_sim`, `unmet`, the goldens and the tests.",
+      "fields": [
+        {
+          "name": "name",
+          "type": "str",
+          "meaning": "the function's name (or the harness's policy:preset:seed[:map][:worlds] name)"
+        },
+        {
+          "name": "fn",
+          "type": "Callable[[Sim], object]",
+          "meaning": "what the run does with the Sim: a trip, a hunt loop, a retreat..."
+        },
+        {
+          "name": "start",
+          "type": "tuple[int, float]",
+          "meaning": "platform id and x she starts at"
+        },
+        {
+          "name": "monsters",
+          "type": "None | 'all' | set | list",
+          "meaning": "no monsters, the map's spawns, the spawns on some platforms, or explicit (name, platform, x[, stand s])"
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "meaning": "the world's random seed (default 1)"
+        },
+        {
+          "name": "hp",
+          "type": "float",
+          "meaning": "her HP share at the start"
+        },
+        {
+          "name": "drops, hanging, facing, inventory_full",
+          "type": "various",
+          "meaning": "drops lying at the start, a rope start at a given foot y, which way she faces, a full backpack"
+        },
+        {
+          "name": "limit",
+          "type": "float",
+          "meaning": "fake seconds before SimTimeout (default 900)"
+        },
+        {
+          "name": "noise, realism",
+          "type": "world.Noise | None, world.Realism | None",
+          "meaning": "the game's errors and how busy and hard the map is"
+        },
+        {
+          "name": "think, think_reads",
+          "type": "float, bool",
+          "meaning": "charge the stack's real computing to the fake clock, at calls or at every clock read"
+        },
+        {
+          "name": "expects",
+          "type": "tuple[(str, Callable[[dict], bool])]",
+          "meaning": "what the scenario is there to show"
+        },
+        {
+          "name": "may_die",
+          "type": "bool",
+          "meaning": "unless set, she must end alive and on the map"
+        },
+        {
+          "name": "map_id, her, attack, remembered, book",
+          "type": "int, world.Her, str, dict, Path",
+          "meaning": "the map, her character, the attack mode, key bindings as last read, her damage book"
+        },
+        {
+          "name": "doc",
+          "type": "str",
+          "meaning": "the docstring (ignored by golden check)"
+        }
+      ]
+    },
+    {
+      "name": "Sim",
+      "module": "gamelab/sim/scenarios.py",
+      "line": 138,
+      "summary": "One run's world, fakes and perception feed; the stack is built through it. The harness reads `sim.world` for outcomes; soak and latency run through it via the harness.",
+      "fields": [
+        {
+          "name": "clock",
+          "type": "fakes.Clock",
+          "meaning": "the fake clock (limit, pace, think, reads), which also ticks the feed's frames"
+        },
+        {
+          "name": "world",
+          "type": "world.World",
+          "meaning": "the simulated game: her body, monsters, kills, drops, logs"
+        },
+        {
+          "name": "eyes",
+          "type": "fakes.FakeEyes",
+          "meaning": "the stack's eyes over the world"
+        },
+        {
+          "name": "frames, feed",
+          "type": "fakes.FakeEyes, localization.feed.SyncFeed",
+          "meaning": "perception's own eyes and the synchronous feed every look and glance comes from"
+        },
+        {
+          "name": "player",
+          "type": "fakes.FakePlayer",
+          "meaning": "plays key plans on the world in place of the client"
+        },
+        {
+          "name": "trace",
+          "type": "fakes.Trace",
+          "meaning": "plans, cancels, splices and log lines"
+        },
+        {
+          "name": "files",
+          "type": "dict[str, list[str]]",
+          "meaning": "the JSON/JSONL files the run wrote under its temp lab"
+        },
+        {
+          "name": "senses, books, pushes",
+          "type": "lists",
+          "meaning": "every hunter's senses (for the feed record), damage books, and stubbed phone pushes"
+        }
+      ]
+    },
+    {
+      "name": "trace",
+      "module": "gamelab/sim/scenarios.py",
+      "line": 398,
+      "summary": "A scenario run's trace (plain JSON), made by `run_sim`; recorded and diffed by golden.py, checked by `unmet` and the tests.",
+      "fields": [
+        {
+          "name": "scenario, doc",
+          "type": "str",
+          "meaning": "the scenario's name and docstring"
+        },
+        {
+          "name": "seconds",
+          "type": "float",
+          "meaning": "simulated seconds the run took"
+        },
+        {
+          "name": "result",
+          "type": "any (plain)",
+          "meaning": "the entry point's result, or 'error: ...' / a hunt stop's label"
+        },
+        {
+          "name": "plans",
+          "type": "list",
+          "meaning": "every key plan sent: [t, name, events, end_ms]"
+        },
+        {
+          "name": "cancels, splices",
+          "type": "list",
+          "meaning": "cancels [t, plan index, withdrawn] and splices"
+        },
+        {
+          "name": "log",
+          "type": "list[str]",
+          "meaning": "every log line, prefixed with the simulated time"
+        },
+        {
+          "name": "world, world_log",
+          "type": "dict, list[str]",
+          "meaning": "the world's summary (kills, picked, exp, dead...) and what it saw happen"
+        },
+        {
+          "name": "eyes, frames",
+          "type": "dict",
+          "meaning": "how often she looked and didn't see her tag or dot; the feed's frame counts"
+        },
+        {
+          "name": "files",
+          "type": "dict",
+          "meaning": "lines written to the run's lab files"
+        },
+        {
+          "name": "feed",
+          "type": "dict",
+          "meaning": "the feed's record: frames, asked, busy_s, step and tracker counts, senses counts"
+        }
+      ]
+    },
+    {
+      "name": "outcomes",
+      "module": "gamelab/sim/harness.py",
+      "line": 815,
+      "summary": "One seed's result: what `outcomes` reads from the world plus what `run_one` adds. Saved as a list per run in gamelab/lab/harness, cached per seed by baseline.Cache, compared by `compare`, `difference` and `spot`.",
+      "fields": [
+        {
+          "name": "policy, seed, preset, minutes, think, costs, ways, map, world, grounds, attack, think_clock, character",
+          "type": "run arguments",
+          "meaning": "what the run was; `spot` re-runs a seed with the SPOT_KEYS among them, and refuses a run whose `character` (present only when not the thief) isn't the process's"
+        },
+        {
+          "name": "exp_per_min, kills, rival",
+          "type": "float, int, int",
+          "meaning": "EXP a minute over the horizon, her kills, another player's"
+        },
+        {
+          "name": "touches, hurt, misses, hp_lost, hp_low",
+          "type": "numbers",
+          "meaning": "touches, those not evaded, evaded, HP lost, lowest HP"
+        },
+        {
+          "name": "died_at, fell_out_at, left_map_at",
+          "type": "float | None",
+          "meaning": "when she died, fell out of the map or went through a portal (each fails the bar)"
+        },
+        {
+          "name": "safety_stops, darts_stops",
+          "type": "int",
+          "meaning": "hunt stops (each fails the bar)"
+        },
+        {
+          "name": "drops_share, value_share, value_per_min, cash_per_min",
+          "type": "float | None",
+          "meaning": "her drops picked up, by count and by worth, and worth a minute less potions"
+        },
+        {
+          "name": "alive_s, longest_idle, stuck_s",
+          "type": "float",
+          "meaning": "seconds hunting, the longest stretch without a kill or pick-up, time beyond 60 s in such stretches"
+        },
+        {
+          "name": "trip_s, pile_s, wait_s and their _hurt/_hp_lost",
+          "type": "float, int",
+          "meaning": "time on trips, on drops, waiting for respawns, and the touches then"
+        },
+        {
+          "name": "nav",
+          "type": "dict",
+          "meaning": "cut_hit, cut_off_path, replans, misses, falls, glances, cut_touch, cut_miss, immune_spent"
+        },
+        {
+          "name": "coverage, feed_record, turning, attack_kinds, landings, rope_tops, loot, idle, picks",
+          "type": "dict",
+          "meaning": "nested tallies; any numeric leaf can be an `ab --metric` by its dotted path"
+        }
+      ]
+    },
+    {
+      "name": "Ran",
+      "module": "gamelab/sim/golden.py",
+      "line": 46,
+      "summary": "One scenario's run as golden's record and check use it, sent back from pool workers.",
+      "fields": [
+        {
+          "name": "text",
+          "type": "str",
+          "meaning": "the trace as `record` writes it (JSON plus newline)"
+        },
+        {
+          "name": "unmet",
+          "type": "list[str]",
+          "meaning": "what the trace no longer shows of its `expects`"
+        },
+        {
+          "name": "plans, log",
+          "type": "int",
+          "meaning": "counts for record's line"
+        },
+        {
+          "name": "seconds, took",
+          "type": "float",
+          "meaning": "simulated seconds and wall seconds"
+        },
+        {
+          "name": "out, err",
+          "type": "str",
+          "meaning": "what a worker printed, printed in its place"
+        }
+      ]
+    },
+    {
+      "name": "Cache",
+      "module": "gamelab/sim/baseline.py",
+      "line": 192,
+      "summary": "The cached seeds of one run's arguments on one code id; made by `harness.cache_of`, read and written by `cached_run`, `_cached` and `ab`.",
+      "fields": [
+        {
+          "name": "code",
+          "type": "str",
+          "meaning": "the commit's code id (code_id)"
+        },
+        {
+          "name": "params",
+          "type": "dict",
+          "meaning": "the run's arguments as keyed (params)"
+        },
+        {
+          "name": "meta",
+          "type": "dict",
+          "meaning": "everything the key covers: format, params, data stamp, environment"
+        },
+        {
+          "name": "key",
+          "type": "str",
+          "meaning": "16 hex of SHA-256 over meta"
+        },
+        {
+          "name": "folder",
+          "type": "Path",
+          "meaning": "<root>/harness/<code>/<key>"
+        },
+        {
+          "name": "commit",
+          "type": "str | None",
+          "meaning": "the commit running them, for meta.json"
+        }
+      ]
+    },
+    {
+      "name": "Meter",
+      "module": "gamelab/sim/soak.py",
+      "line": 46,
+      "summary": "A soak run's memory samples against wall time and its two tracemalloc snapshots; filled by the soak modes, read by `report`.",
+      "fields": [
+        {
+          "name": "seconds, start",
+          "type": "float",
+          "meaning": "the run's length and its start on the real clock"
+        },
+        {
+          "name": "samples",
+          "type": "list[tuple[float, int, int | None]]",
+          "meaning": "(s from start, traced bytes, private bytes)"
+        },
+        {
+          "name": "warm",
+          "type": "tuple[float, Snapshot | None] | None",
+          "meaning": "the warm-up's time and snapshot"
+        },
+        {
+          "name": "end",
+          "type": "Snapshot | None",
+          "meaning": "the snapshot at the end"
+        }
+      ]
+    },
+    {
+      "name": "Stretches",
+      "module": "gamelab/sim/latency.py",
+      "line": 30,
+      "summary": "The stack's computing between two calls to the game, by the call that ended each stretch; filled by `measure`'s wrapped clock hooks.",
+      "fields": [
+        {
+          "name": "times",
+          "type": "dict[str, list[float]]",
+          "meaning": "seconds per stretch, by the ending call's name (_now, send, wait, sleep)"
+        },
+        {
+          "name": "_since",
+          "type": "float | None",
+          "meaning": "when the current stretch began (real perf_counter)"
+        }
+      ]
+    },
+    {
+      "name": "Clip",
+      "module": "gamelab/sim/replay.py",
+      "line": 103,
+      "summary": "One of her recordings (R1-R3) and where its frames, telemetry and labels are; used throughout the replay kit.",
+      "fields": [
+        {
+          "name": "name",
+          "type": "str",
+          "meaning": "R1, R2 or R3"
+        },
+        {
+          "name": "folder",
+          "type": "str",
+          "meaning": "its folder in golden-clips (and in tests/fixtures/recordings)"
+        },
+        {
+          "name": "character",
+          "type": "str",
+          "meaning": "who played: 'magician' (GAMELAB_CHARACTER for the child)"
+        },
+        {
+          "name": "frames, labels, rows(), epoch0(), telemetry(what)",
+          "type": "properties/methods",
+          "meaning": "the frames folder, the labels file, index rows, frame 0's wall time, a telemetry file"
+        }
+      ]
+    },
+    {
+      "name": "feed",
+      "module": "gamelab/sim/replay.py",
+      "line": 189,
+      "summary": "The replay feed dict: what the perception service took from outside while the grind ran, made from the run's records and written beside each dump for replay_run (and for score_casts).",
+      "fields": [
+        {
+          "name": "t0",
+          "type": "float",
+          "meaning": "frame 0's time on the service's clock"
+        },
+        {
+          "name": "clock",
+          "type": "dict",
+          "meaning": "offset, matched, of, epoch0, t0 (from `clock`)"
+        },
+        {
+          "name": "throws",
+          "type": "list[dict]",
+          "meaning": "each throw: t (key time), side, told, kind, x, platform, key, track"
+        },
+        {
+          "name": "asks",
+          "type": "dict[str, dict]",
+          "meaning": "by frame index: loot, loot_wide, mesos_only"
+        },
+        {
+          "name": "how",
+          "type": "dict",
+          "meaning": "counts of how each throw's side was told, turned throws, asks"
+        }
+      ]
+    },
+    {
+      "name": "_Dump",
+      "module": "gamelab/sim/replay_run.py",
+      "line": 107,
+      "summary": "The replay dump file: gzip JSON lines, a head line, one line per frame, an end line. Written by replay_run, read by replay.load, replay.check and replay_score.",
+      "fields": [
+        {
+          "name": "head",
+          "type": "line",
+          "meaning": "format, frames, start, map, character, t0, throws, asks, feed hash, whether a spawn watch exists"
+        },
+        {
+          "name": "i, t",
+          "type": "int, float",
+          "meaning": "the frame's index and time in the recording"
+        },
+        {
+          "name": "her, v, vs, bad",
+          "type": "lists",
+          "meaning": "her place [x, y, platform, how, mode], the view and whether registered, why a frame failed"
+        },
+        {
+          "name": "hp, mp, hpn, lv",
+          "type": "numbers",
+          "meaning": "her bars' shares, HP number, level"
+        },
+        {
+          "name": "m, tr, ev, pl",
+          "type": "lists",
+          "meaning": "the state's monsters, tracks, events and other players"
+        },
+        {
+          "name": "sg, wd, loot, say",
+          "type": "lists",
+          "meaning": "spawn-watch sightings, whole-screen detections, drops asked for, what was logged"
+        },
+        {
+          "name": "end",
+          "type": "line",
+          "meaning": "frames, throws told, the step's, tracker's and spawn watch's counts"
+        }
+      ]
+    },
+    {
+      "name": "labels",
+      "module": "gamelab/sim/replay_score.py",
+      "line": 278,
+      "summary": "A recording's labels (tests/fixtures/recordings/<clip>/labels-v3.json), hand-checked against the frames; read by `score`.",
+      "fields": [
+        {
+          "name": "version, clip, frames, character, map, about",
+          "type": "str/int",
+          "meaning": "what the labels are of and how they were built"
+        },
+        {
+          "name": "classes.onsets",
+          "type": "items",
+          "meaning": "point, kind, frame, x, y, a (alpha), birth, refind (and R1's given)"
+        },
+        {
+          "name": "classes.births",
+          "type": "items",
+          "meaning": "id, point, kind, frame, found (by master's watch), cover, checked, under_her"
+        },
+        {
+          "name": "classes.touches",
+          "type": "items",
+          "meaning": "frame, by, damage, popup, cause, newborn, blind"
+        },
+        {
+          "name": "classes.under_her",
+          "type": "items",
+          "meaning": "frame, kind, note"
+        },
+        {
+          "name": "classes.kills",
+          "type": "items",
+          "meaning": "gain, frame, kind, victim [x, y], how (die1, frames, eye, binding, unsure), first binding"
+        },
+        {
+          "name": "classes.players",
+          "type": "items",
+          "meaning": "[frame, red dots, 1 if one is by her dot], every 15th frame"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "golden-check",
+      "title": "A golden check: does she still do exactly the same?",
+      "summary": "How `python -m gamelab.sim.golden check --jobs 2` re-runs every scenario and compares it to its recorded trace.",
+      "trigger": "A developer after a refactor, or step 2 of the README's order for checking a change.",
+      "steps": [
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "main",
+          "text": "Refuses a non-thief GAMELAB_CHARACTER, restarts itself with PYTHONHASHSEED=0 and GAMELAB_FIXED_STATS=1, drops scenarios whose map data is missing and loads every map involved.",
+          "process": "golden"
+        },
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "ran",
+          "text": "Starts a pool of workers, each made ready by `_ready`; submits scenarios longest first by recorded trace size and yields results back in name order.",
+          "process": "golden workers"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "run_sim",
+          "text": "In a worker: opens `with Sim(...)` (fake clock, fake player, fake eyes, lab paths redirected to a temp folder), runs the scenario's function, turns expected failures into the result string, and assembles the trace.",
+          "process": "golden workers"
+        },
+        {
+          "module": "gamelab/sim/scenarios.py",
+          "symbol": "Sim.hunter",
+          "text": "The scenario's function builds the stack through the Sim, as __main__ would, with seeded jitter and guarded key plans; every look comes from the SyncFeed ticked by the clock.",
+          "process": "golden workers"
+        },
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "check",
+          "text": "Loads each recorded trace, parses the new one through JSON as recorded, and prints ok, DIFFERS with `diff`'s lines, or MISSING. Exit 0 only if every scenario ran and matched; 1 on any difference or missing trace; 2 if nothing could be compared.",
+          "process": "golden"
+        },
+        {
+          "module": "gamelab/sim/golden.py",
+          "symbol": "diff",
+          "text": "For each part of the trace but `IGNORED` (the docstring), the first item that differs, both sides cut to 300 characters (labelled plan, log line, cancel, world event); for a plan, which field parts: sent at, name, events (from which one), end_ms.",
+          "process": "golden"
+        }
+      ]
+    },
+    {
+      "id": "ab-change",
+      "title": "Judging a change with `ab` against master's cached baseline",
+      "summary": "How `harness ab loop --map 10002073 --preset crowd ...` pairs a branch against master seed by seed without re-running master.",
+      "trigger": "Step 3 of the README's order for checking a change: a branch that changes what she does.",
+      "steps": [
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "main",
+          "text": "Resolves the character, restarts with fixed hash seed, stats and character, checks the map and preset, and calls `ab`.",
+          "process": "harness"
+        },
+        {
+          "module": "gamelab/sim/baseline.py",
+          "symbol": "code_id",
+          "text": "The base ref (master) becomes a commit and its code id: a hash of its tree under gamelab/, gamedata/, maplehelper/ and config.toml, Markdown aside.",
+          "process": "harness"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "cache_of",
+          "text": "Binds the run's arguments (`baseline.params`) and builds the base's `Cache` folder from the code and the key (arguments, data stamp, versions, resolved environment).",
+          "process": "harness"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "ab",
+          "text": "For seeds 1-12, reads the base's cached seeds; any missing are made by the filler script in the base's own checkout with `baseline.filler_env`'s environment.",
+          "process": "base filler"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "cached_run",
+          "text": "Runs the candidate's seeds here (on a pool), caching each as it ends while the checkout's code is still as committed.",
+          "process": "harness workers"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "run_one",
+          "text": "Each seed: preset and world switches applied, costs and stack switches set, `scenarios.run_sim` under captured telemetry, everything restored, outcomes read from the world.",
+          "process": "harness workers"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "difference",
+          "text": "For each headline metric and --metric: paired differences, mean, standard error, t, and the verdict.",
+          "process": "harness"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "ab_next",
+          "text": "If any verdict is 'within 2 se' or 'too few', go on to 24 then 48 seeds; otherwise stop and say why.",
+          "process": "harness"
+        },
+        {
+          "module": "gamelab/sim/harness.py",
+          "symbol": "compare",
+          "text": "The bar is shown (not enforced) and both sides saved as NAME and NAME-base in gamelab/lab/harness, for a reviewer's `spot`.",
+          "process": "harness"
+        }
+      ]
+    },
+    {
+      "id": "replay-score",
+      "title": "A perception change replayed on her recordings and scored",
+      "summary": "How `replay run --unpaced --out RUN` then `replay score --dumps RUN --base BASE` judges a perception change against her real frames.",
+      "trigger": "Step 4 of the README's order for checking a change: a perception change for the magician.",
+      "steps": [
+        {
+          "module": "gamelab/sim/replay.py",
+          "symbol": "run_all",
+          "text": "Starts the recordings through the tree (this checkout, `--root`, or a `--commit` export), `--jobs` at once (2 by default), polling every 0.5 s; a failed child's log tail is printed.",
+          "process": "replay"
+        },
+        {
+          "module": "gamelab/sim/replay.py",
+          "symbol": "feed",
+          "text": "For each recording, fits the clock offset (`clock`) and builds the feed from that night's telemetry: her throws with sides, key times and aims, and the drop asks per frame.",
+          "process": "replay"
+        },
+        {
+          "module": "gamelab/sim/replay.py",
+          "symbol": "run_one",
+          "text": "Writes the feed file beside the dump-to-be and starts a `replay_run.py` child by path with GAMELAB_CHARACTER=magician and GAMELAB_GPU=0 (`child_env`).",
+          "process": "replay"
+        },
+        {
+          "module": "gamelab/sim/replay_run.py",
+          "symbol": "main",
+          "text": "Puts the tree first on sys.path, builds the service's perception on the saved frames, and steps each frame at its own time (or back to back with `--unpaced`) with throws told and asks given, writing the dump line by line.",
+          "process": "replay_run child"
+        },
+        {
+          "module": "gamelab/sim/replay_run.py",
+          "symbol": "_Dump",
+          "text": "The dump is renamed into place at the end; the side file records timings and every lab and data file read.",
+          "process": "replay_run child"
+        },
+        {
+          "module": "gamelab/sim/replay_score.py",
+          "symbol": "main",
+          "text": "`replay score --dumps RUN --base BASE`: reads the branch's dumps and the base's cached dumps (`replay.cached(..., make=False)`: never making them) and loads labels-v3 for each recording.",
+          "process": "replay score"
+        },
+        {
+          "module": "gamelab/sim/replay_score.py",
+          "symbol": "score",
+          "text": "Scores onsets, births, touches, monsters under her, kills, casts at her dead and players for each side; `main` prints the tables per recording and the totals side by side.",
+          "process": "replay score"
+        }
+      ]
+    }
+  ],
+  "not_done": [
+    "The simulator's eyes give no frames, so perception changes are checked only on the replay kit's three recordings of the magician (R1-R3, Tree Dungeon, 2026-11-02, master 40ba190).",
+    "The scenarios and goldens are the thief's; the magician's scenarios are still to come (the design's S6), and golden refuses another GAMELAB_CHARACTER meanwhile.",
+    "Preset 'game''s values are guesses: nothing about respawns, other players or potions is measured (harness.py's own comment).",
+    "`--world near-misses-exact` (the frame step's exact finder beside the search, 2026-11-04) is measured on frames but not yet the default.",
+    "Scenarios that check an outcome still check one seed each; the proposal to judge them as a pass rate over seeds against master's, as `ab` does, is written up (D:/MapleHelper-scratch/sim-setups/classification.md) but nothing in the code does it yet.",
+    "Replay labels leave 14 kills out as unsure, and 87 kill labels are master's own final binding, unchecked.",
+    "Soak and latency runs are minutes long and not in pytest; their numbers are this computer's.",
+    "The CPU wrapper every job goes through (bg_quiet.cmd) doesn't pass on its command's exit code; the README notes a fix tried on a copy, the file itself left as it is.",
+    "The replay feed's timings are approximations: a turning throw's key `TURN_S` (80 ms) after its attack record, and the hunt's drop asks put on the frame 12 ms before the scene record that saw them (the tour's records carry no frame number). Both reproduce live's bindings and touches; neither is exact (README, Replaying the recordings)."
+  ]
+}

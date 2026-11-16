@@ -1,0 +1,3139 @@
+{
+ "id": "analysis",
+ "layer": "analysis",
+ "title": "Analysis: measuring combos, movement and how the hunt goes",
+ "tagline": "Offline instruments that measure recordings and telemetry; they never decide anything",
+ "summary": "The analysis layer is gamelab's measuring kit. It records short clips of the game with the keys sent and follows her name tag through them to judge combos and compare her movement with the physics models, and it reads the hunt's telemetry to say how route moves are used, how soon platforms refill, what jump attacks achieve and how her real walk compares with the planned one. A few tools time and check perception on saved frames; almost everything runs offline and sends no keys.",
+ "details_md": "The analysis layer is gamelab's set of measuring instruments. It never decides anything the hunt does: every module\nreads evidence and prints a table, and almost all of it runs offline with no game and no keys. It may import\n`perception`, `motion`, `control` and the shared modules only (`tests/test_architecture.py`), which is why some of\nits inputs (the map model, the camera's model, the shooting band) are handed in by the command that calls it rather\nthan loaded here.\n\n**Two kinds of evidence.**\n\n- **Recordings.** A short capture of the game window with the keys sent: `recordings.record` hands a key timeline to\n  the elevated key player through `control.client.submit`, and keeps the frames, their times and the keys planned\n  and actually sent as `lab/recordings/<name>.npz` plus `<name>.events.json`. The rolling recorder and the Lie\n  Detector recorder (in `control`) keep a different kind: folders of JPEG frames with an `index.jsonl`, which\n  `recordings.Folder` reads into contact sheets and real-time mp4s.\n- **Telemetry.** Every hunt, tour, probe, `watch` and simulated run writes JSON-lines records to `lab/telemetry/`\n  (`scene`, `route`, `chain`, `moved`, `trip`, `jump`, `event`, ...). The perception service writes its own\n  `*-perceive.jsonl` beside them, several scene records a second.\n\n**From a recording to numbers.** `calibration` finds her name tag once and keeps a grayscale template and a crop\naround her. Each frame of a recording is then matched against that template (`track`, OpenCV `TM_CCOEFF_NORMED`,\noptionally to a fifth of a pixel with a parabola through the scores). Because the camera follows her, `scroll`\nmeasures how far the scenery moved (phase correlation of the strip under her, or the median shift of textured\ngrass and dirt patches) so her movement is read in the world, not on screen. On top of that, `analyze` splits a run\nof combos into jumps (back, forward, straight up) and claw throws (toward the front or the wrong way) and checks key\nsend lag and the game's frame pacing, and `physics_check` compares her tracked path against the motion models as an\nRMS error in map units.\n\n**From telemetry to numbers.**\n\n| Module | Question it answers |\n|---|---|\n| `coverage` | Which route moves are planned, taken, missed; where she spends her time; why the never-taken moves lose |\n| `respawn` | How soon a platform she empties has a monster again, how long drops lie, how full platforms are (Kaplan-Meier) |\n| `jumps` | What came of each jump attack (kill, hit, nothing seen) and whether the 2026-11-01 key jitter predicts a hit |\n| `walkfit` | Her real walk and climb against the walk her moves were planned at; late takeoffs; step ratios; wrong arrivals |\n| `bodies` | Where the monster detector puts feet; how much monster x jitters frame to frame; the feed's track velocities |\n\n**Checking perception offline.** `bench` times every stage of a look on saved screenshots (through `SavedEyes`,\nthe real `Eyes` with its captures replaced) or live without touching the window. `pasted` draws the game's own\nmonster and drop sprites onto 1366x768 frames, alpha-blended as the game draws them, at known places, and measures\nhow many the detectors find and how far off. `disk` sizes what `gamelab/lab` holds.\n\n**Screen geometry.** The pixel constants here were measured on the 1920x1080 window: a few in its client (screen)\npx (the calibration crop, `TAG_SLACK`), most in its half-size look frames (the jump lift, the claw-swing box, the\nscroll patches, `bodies.LINK_PX`). Since 2026-10-23 the game also runs at its own 1366x768, shown full size, so the\nmodules convert them with `screen.Geometry` (`px`/`ipx` for screen px, `fpx`/`ifpx` for look-frame px), and a\nrecording keeps its own client size and scale (one saved before 2026-10-23 is the 1920x1080 window at half size).\n\n**Who uses it.** `gamelab/__main__.py` wires the commands: `calibrate`, `snap`, `act`, `do`, `combo`, `lock`,\n`sheet`, `track`, `check` (recordings and calibration), `bench-look`, `bench-capture`, `bench-paste`, `bodies`\n(perception checks), `coverage`, `jitter`, `respawn` (telemetry) and `lab-usage` (`save-recent` borrows\n`disk.size`). `walkfit` and `physics_check` have no `gamelab` command: they run only as\n`python -m gamelab.analysis.walkfit` / `.physics_check`; `jumps` also prints its own outcome table as\n`python -m gamelab.analysis.jumps`, besides the `jitter` command. The simulator harness keeps a\n`coverage.tally` of every run, `sim.soak` and `sim.replay_run` use `bench.SavedEyes` and `calibration.load`, and\n`sim.fakes` replaces `recordings.record` with a refusal so a simulated run can never record the real game.\n\n**Design habits.** Reports state their denominators (\"12 of 77 seen back\"), censor what wasn't watched instead of\nguessing, and say where an outcome comes from: in the simulator a pattern is the simulator's own model, so live runs\nare where results mean something.",
+ "groups": [
+  {
+   "id": "recording-tracking",
+   "title": "Recording the game and following her in it",
+   "summary": "Record key timelines with frames, calibrate where she is, follow her name tag, take out the camera's scroll, and judge combos.",
+   "modules": [
+    "gamelab/analysis/__init__.py",
+    "gamelab/analysis/recordings.py",
+    "gamelab/analysis/calibration.py",
+    "gamelab/analysis/track.py",
+    "gamelab/analysis/scroll.py",
+    "gamelab/analysis/analyze.py"
+   ]
+  },
+  {
+   "id": "movement",
+   "title": "Her movement against the models",
+   "summary": "Her tracked path in recordings against the motion models, and her walk, climb, takeoffs and steps in telemetry against the walk her moves were planned at.",
+   "modules": [
+    "gamelab/analysis/physics_check.py",
+    "gamelab/analysis/walkfit.py"
+   ]
+  },
+  {
+   "id": "hunt-telemetry",
+   "title": "How the hunt goes, from telemetry",
+   "summary": "Route moves planned, taken and missed; respawns, drop life and occupancy; jump attack outcomes and their key jitter.",
+   "modules": [
+    "gamelab/analysis/coverage.py",
+    "gamelab/analysis/respawn.py",
+    "gamelab/analysis/jumps.py"
+   ]
+  },
+  {
+   "id": "perception-checks",
+   "title": "Checking and timing perception offline",
+   "summary": "Time a look stage by stage, check where monsters' feet land and how steady they are, and measure the detectors on the game's own sprites pasted at known places.",
+   "modules": [
+    "gamelab/analysis/bench.py",
+    "gamelab/analysis/bodies.py",
+    "gamelab/analysis/pasted.py"
+   ]
+  },
+  {
+   "id": "lab-disk",
+   "title": "What the lab keeps on disk",
+   "summary": "Sizes of everything under gamelab/lab by kind, and what the pruners would delete next.",
+   "modules": [
+    "gamelab/analysis/disk.py"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "path": "gamelab/analysis/__init__.py",
+   "title": "The analysis package",
+   "tagline": "Package docstring: what analysis measures and which layers it may import",
+   "summary": "The package's only content is its docstring. It names what the layer is for (recording the game, measuring combos and her movement, the calibration that finds her, route coverage) and its import rule.",
+   "details_md": "The docstring says the analysis layer records the game around her and measures combos in the recordings (her path,\njumps, throws, key timing), her movement against the physics models (`physics_check`), the calibration that finds\nher on screen, and how her routes' moves are used in the harness's runs and the live telemetry (`coverage`).\n\nIt also states the import rule: **analysis may import perception, motion, control and the shared modules**. The\nrule is enforced by `tests/test_architecture.py` (`ALLOWED[\"analysis\"] = {\"perception\", \"motion\", \"control\"}`), and\n`sim` is allowed to import analysis. This is why `respawn` is handed the camera's corner function and the shooting\nband by its command instead of importing `localization.pose.Camera` or `attack.reach`, and why `jumps` copies the\njitter windows from `attack.reach` rather than importing them (a test checks they agree).\n\nThe package has no code of its own; nothing is re-exported, so callers import the submodules directly\n(`from gamelab.analysis import coverage`).",
+   "lines": 7,
+   "key_items": [],
+   "inputs": [],
+   "outputs": [
+    "the layer's description and import rule, for readers and tests/test_architecture.py"
+   ],
+   "uses": [],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "Nothing is re-exported: `import gamelab.analysis` alone gives no tools; import each submodule."
+   ],
+   "tests": [
+    "tests/test_architecture.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/recordings.py",
+   "title": "Recordings",
+   "tagline": "Record a key timeline with frames, save and load it, and tile frames into sheets",
+   "summary": "Runs a key timeline through the key player while it captures the game window, and saves the frames, their times and the keys planned and sent under a name in lab/recordings. Also loads them back, makes contact sheets, and reads the JPEG-folder recordings of the rolling and Lie Detector recorders into sheets or real-time videos.",
+   "details_md": "**The named recordings.** A `Recording` holds `frames` (an `(n, h, w, 3)` RGB array), `times` (ms relative to the\nplan's first key event, so frames before the first key have negative times), `planned` and `sent` key events\n(`[ms, key, 'down'|'up']`), and the game window's `client` size and `scale` (how much the frames were shrunk). Its\n`geo` property turns the last two into a `screen.Geometry`, which every measuring module uses to convert its pixel\nconstants.\n\n`record(events, name=, duration_ms=, crop=, scale=, fps=60, lead_ms=100)` caps the frame rate at\n`900_000 / (duration_ms + lead_ms)` because the player caps a plan at 900 frames, then calls `control.client.submit`\n(which writes the plan to `lab/inbox` and waits for the elevated player's answer in `lab/outbox`). The result's\nclient area gives the size; problems the player reports are printed. It saves and returns the recording.\n`screenshot` is the same path with no keys: a 200 ms capture at 10 fps, its last frame.\n\n`save` writes `lab/recordings/<name>.npz` (compressed `frames` and `times`) and `<name>.events.json`\n(`planned`, `sent`, `client`, `scale`). `load` reads both; a recording without its events file gets empty key lists,\nand one saved before 2026-10-23 (no `client`/`scale`) is taken as the 1920x1080 window at half size.\n`file_geometry(path)` gives that geometry for an `.npz` anywhere (used by `bodies`).\n\n`contact_sheet` tiles every `every`-th frame (default 3) into `cols` columns (default 8), each labelled with its\ntime in ms (yellow on a black box), optionally zoomed with nearest-neighbour.\n\n**The JPEG-folder recordings.** The rolling recorder (`control.rolling`, the game 10 times a second, kept for\n`save-recent` and the part before a Lie Detector) and `control.lie_recorder` write a folder of JPEG frames with an\n`index.jsonl`. `load_folder` reads the index into a `Folder`: frames as `(t, file, label)` (label the clock time if\nthe line has `at`) and gaps as `(t, until, why)`. A line it can't parse (half written when the writer stopped) is\nskipped.\n\n- `folder_sheet` picks one frame every `SHEET_EVERY` (10: a second's worth at 10 fps), shrinks each `SHEET_SHRINK`\n  (4) times with OpenCV's area average, and tiles them. It reads only the picked frames, because five minutes of\n  frames are 9 GB as pictures.\n- `folder_video` writes an mp4 that plays in real time at `VIDEO_FPS` (10): each output frame shows the newest\n  frame or gap at or before that moment, a gap as a grey card (`GAP_GREY` 40) saying \"no frame: <why>\", and the\n  clock time at the top left. It uses OpenCV's own `mp4v` (MPEG-4 Part 2) because its build has no H.264; the\n  docstring says that is about 30 dB, with the HUD's text legible. Frames of another size (the window resized\n  mid-recording) are resized to the first's.",
+   "lines": 204,
+   "key_items": [
+    {
+     "name": "Recording",
+     "kind": "dataclass",
+     "line": 23,
+     "signature": "class Recording(name, frames, times, planned=[], sent=[], client=STRETCHED_CLIENT, scale=2)",
+     "summary": "A saved recording: frames, times, the keys planned and sent, and the client size and scale its frames are of."
+    },
+    {
+     "name": "record",
+     "kind": "function",
+     "line": 38,
+     "signature": "def record(events, *, name, duration_ms, crop, scale, fps=60, lead_ms=100) -> Recording",
+     "summary": "Runs a key timeline through the key player while it records, saves the result under `name`, returns it.",
+     "details_md": "Caps fps so the plan stays under the player's 900 frames. This is the one function in the slice that sends keys; `sim.fakes` replaces it with a refusal during simulated runs."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 65,
+     "signature": "def load(name: str) -> Recording",
+     "summary": "Loads a saved recording by name, defaulting missing key events and geometry."
+    },
+    {
+     "name": "save",
+     "kind": "function",
+     "line": 57,
+     "signature": "def save(rec: Recording) -> None",
+     "summary": "Writes `<name>.npz` (frames, times) and `<name>.events.json` (keys, client, scale)."
+    },
+    {
+     "name": "screenshot",
+     "kind": "function",
+     "line": 51,
+     "signature": "def screenshot(name: str, *, scale: int, duration_ms: int = 200, crop=None) -> np.ndarray",
+     "summary": "One picture of the game: the last frame of a short capture that sends no keys."
+    },
+    {
+     "name": "file_geometry",
+     "kind": "function",
+     "line": 75,
+     "signature": "def file_geometry(path: Path) -> Geometry",
+     "summary": "The geometry of a saved `.npz` anywhere, read from its events file beside it."
+    },
+    {
+     "name": "contact_sheet",
+     "kind": "function",
+     "line": 83,
+     "signature": "def contact_sheet(frames, times, path, *, cols=8, every=3, zoom=1, labels=None) -> None",
+     "summary": "Tiles frames into one labelled image so they can be looked at together."
+    },
+    {
+     "name": "Folder",
+     "kind": "dataclass",
+     "line": 112,
+     "signature": "class Folder(folder, frames, gaps)",
+     "summary": "A JPEG-frame recording with an index: its frames (t, file, label) and its gaps (t, until, why)."
+    },
+    {
+     "name": "load_folder",
+     "kind": "function",
+     "line": 122,
+     "signature": "def load_folder(folder) -> Folder",
+     "summary": "Reads a folder's `index.jsonl`, skipping half-written lines."
+    },
+    {
+     "name": "folder_sheet",
+     "kind": "function",
+     "line": 140,
+     "signature": "def folder_sheet(rec, path, *, start=-1e9, end=1e9, every=SHEET_EVERY, shrink=SHEET_SHRINK, cols=8) -> int",
+     "summary": "A contact sheet of a frame a second, shrunk 4x, reading only the frames it shows."
+    },
+    {
+     "name": "folder_video",
+     "kind": "function",
+     "line": 158,
+     "signature": "def folder_video(rec, path, *, start=-1e9, end=1e9, fps=VIDEO_FPS) -> int",
+     "summary": "An mp4 playing the recording in real time, gaps shown as grey cards, clock time on each frame."
+    }
+   ],
+   "inputs": [
+    "a key timeline ([ms, key, down|up]) and a crop/scale from the caller (combo, act, do, lock commands)",
+    "the key player's answer (frames, times, keys sent, client size) via control.client.submit",
+    "saved .npz/.events.json files; JPEG folders with index.jsonl written by control.rolling and control.lie_recorder"
+   ],
+   "outputs": [
+    "Recording objects for track, scroll, analyze and physics_check, and the recording commands; `file_geometry` for bodies (which reads the .npz itself)",
+    "contact sheet PNGs and mp4 videos for people to look at"
+   ],
+   "uses": [
+    "gamelab/control/client.py",
+    "gamelab/paths.py",
+    "gamelab/screen.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/recordings/<name>.npz",
+     "mode": "read-write",
+     "what": "frames and times of a named recording"
+    },
+    {
+     "path": "lab/recordings/<name>.events.json",
+     "mode": "read-write",
+     "what": "keys planned and sent, client size and scale"
+    },
+    {
+     "path": "<folder>/index.jsonl",
+     "mode": "read",
+     "what": "the JPEG-frame recording's index (frames and gaps)"
+    },
+    {
+     "path": "<folder>/<frame files>",
+     "mode": "read",
+     "what": "the JPEG frames, only those a sheet or video shows"
+    },
+    {
+     "path": "<folder>/sheet.png, <folder>/video.mp4",
+     "mode": "write",
+     "what": "what `sheet FOLDER` and `sheet FOLDER --video` write (the path is the caller's)"
+    }
+   ],
+   "concurrency": "record() and screenshot() block while the separate elevated key player process captures; no threads here.",
+   "tunables": [
+    {
+     "name": "SHEET_EVERY",
+     "value": "10",
+     "meaning": "a folder's contact sheet takes every 10th frame: one a second at the recorder's 10 fps"
+    },
+    {
+     "name": "SHEET_SHRINK",
+     "value": "4",
+     "meaning": "each sheet tile is a quarter the size (341x192 at 1366x768)"
+    },
+    {
+     "name": "VIDEO_FPS",
+     "value": "10.0",
+     "meaning": "a folder's video plays in real time at the rolling recording's rate"
+    },
+    {
+     "name": "GAP_GREY",
+     "value": "40",
+     "meaning": "grey level of the card shown for a moment with no frame"
+    },
+    {
+     "name": "record(fps=...)",
+     "value": "60, capped at 900000/(duration_ms+lead_ms)",
+     "meaning": "the player caps a plan at 900 frames"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-23",
+     "what": "A recording keeps the game window's client size and its frames' scale.",
+     "why": "The game could now run at its own 1366x768 (full-size frames) as well as the stretched 1920x1080 (half-size frames); older recordings are taken as 1920x1080 at half size."
+    }
+   ],
+   "gotchas": [
+    "Times are relative to the plan's first key event: frames captured during the lead-in have negative times (track.swings uses them as the no-swing baseline).",
+    "`record` sends keys through the real key player; the simulator's fakes refuse it, so nothing in a simulated run can record the game.",
+    "`folder_video` holds each frame until the next moment's frame or gap, so a long gap shows as a frozen grey card, not as skipped time."
+   ],
+   "tests": [
+    "tests/test_gamelab.py",
+    "tests/test_rolling.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/calibration.py",
+   "title": "Calibration",
+   "tagline": "Find her name tag once, keep its template and the crop recordings take",
+   "summary": "Finds her name tag on screen, saves a grayscale template of it and a recording crop around her, one calibration per client size and per character. Before every recording it finds her again with that template and moves the crop if she has walked away.",
+   "details_md": "Her name tag (white text on a dark box under her feet) is how every recording finds her, so this module keeps the\ntwo things that depend on where and how big it is: **the crop** recordings are taken of, and **the template** that\nfinds her in them.\n\n**`calibrate(tag=None, fresh=False)`**:\n\n1. Takes a full-size (scale 1) 200 ms capture through the key player that sends no keys, and works out the window's\n   `Geometry` from its client size. The recording scale is `geo.look_scale`: 2 at 1920x1080 (half-size frames,\n   \"plenty for tracking, 4x less data\"), 1 at the game's own 1366x768.\n2. Saves that frame for checking by eye (`lab/calibrate.png`, `calibrate_1366x768.png` at the game's size; another\n   character's under `lab/characters/<id>/`).\n3. Unless `fresh`, reuses the saved template (her name tag looks the same on every map) to find her: `match_tag`\n   matches it on a copy shrunk `scale` times and accepts a score of `TAG_MATCH_MIN` (0.7) or better. Otherwise\n   `track.find_name_tag` takes the name-tag-shaped text nearest the middle. If nothing is found it raises, asking\n   for `--tag X,Y`.\n4. `crop_around` places an 800x400 client-pixel crop (at 1920x1080; 569x284 at 1366x768) with her tag at\n   (400, 300) inside it, leaving room above for jumps, clamped inside the window.\n5. Takes a screenshot of that crop at the recording scale, and if the template is new cuts it there with\n   `track.make_template` and saves it; the full-size template is then deleted so `perception.nametag` cuts a fresh\n   one on its next look.\n6. Writes the calibration JSON: crop, scale, tag position and client size.\n\n**Files per size and character.** `files(geo)` returns `paths.calibrated(...)` names: at 1920x1080 the files as\nthey always were (`lab/calibration.json`, `lab/tag_template.npy`, `lab/tag_template_full.npy`), at other sizes the\nsame with a `_1366x768` suffix. `paths.of()` puts another character's in her own folder so hers don't overwrite the\nthief's.\n\n**Re-finding her before each recording.** `crop_on_her(cal, frame, w, h)` matches the template on a fresh full-size\nframe. If her tag is within `TAG_SLACK` (40 client px at 1920x1080, converted) of where calibrate would put it in\nthe stored crop, the stored crop is kept and nothing is said; otherwise a new crop is made around her and the\ncaller is told where she is and whether the stored crop still had her. If the tag isn't found, the stored crop is\nused with a warning. `crop_now` does this on a 100 ms capture. The reason, from the docstring: on 2026-10-21 the\n16 `act --record` runs of a sweep never had her in their crop, because the calibration was from a place she had\nwalked away from.\n\n`load(geo)` reads the saved calibration for a size and raises \"not calibrated at WxH yet\" if there is none.",
+   "lines": 159,
+   "key_items": [
+    {
+     "name": "calibrate",
+     "kind": "function",
+     "line": 59,
+     "signature": "def calibrate(tag: tuple[int, int] | None = None, fresh: bool = False) -> Calibration",
+     "summary": "Finds her (or uses `tag`), picks the crop around her, saves template, crop and pictures for the window's current size."
+    },
+    {
+     "name": "Calibration",
+     "kind": "dataclass",
+     "line": 34,
+     "signature": "class Calibration(crop, scale, template, geo=STRETCHED)",
+     "summary": "The crop (client px x, y, w, h), the recording scale, her name tag template at that scale, and the geometry it is for."
+    },
+    {
+     "name": "crop_on_her",
+     "kind": "function",
+     "line": 111,
+     "signature": "def crop_on_her(cal, frame, width, height) -> tuple[list[int], str]",
+     "summary": "Where to record her now: the stored crop if she is still near its spot, else a new crop around her, plus a note for the user."
+    },
+    {
+     "name": "crop_now",
+     "kind": "function",
+     "line": 134,
+     "signature": "def crop_now(cal: Calibration) -> tuple[list[int], str]",
+     "summary": "crop_on_her on a fresh 100 ms full-size capture that sends no keys."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 152,
+     "signature": "def load(geo: Geometry = STRETCHED) -> Calibration",
+     "summary": "The saved calibration for a window size; raises if that size was never calibrated."
+    },
+    {
+     "name": "match_tag",
+     "kind": "function",
+     "line": 102,
+     "signature": "def match_tag(frame, template, scale=SCALE) -> tuple[tuple[int, int] | None, float]",
+     "summary": "Her tag's centre in a full-size frame where the template scores at least 0.7, and the best score."
+    },
+    {
+     "name": "crop_around",
+     "kind": "function",
+     "line": 93,
+     "signature": "def crop_around(tag, width, height, geo=STRETCHED) -> list[int]",
+     "summary": "The crop with her tag at TAG_IN_CROP, kept inside the client area."
+    },
+    {
+     "name": "files",
+     "kind": "function",
+     "line": 41,
+     "signature": "def files(geo: Geometry = STRETCHED) -> tuple",
+     "summary": "The calibration JSON, the small template and the full-size template paths for a size and the active character."
+    },
+    {
+     "name": "pictures",
+     "kind": "function",
+     "line": 49,
+     "signature": "def pictures(geo: Geometry = STRETCHED) -> tuple[Path, Path]",
+     "summary": "Where calibrate saves the frame it looked at and the crop it picked, for checking by eye."
+    },
+    {
+     "name": "_find_tag",
+     "kind": "function",
+     "line": 140,
+     "signature": "def _find_tag(frame, template, scale=SCALE, looked=LAB / 'calibrate.png') -> tuple[int, int]",
+     "summary": "The saved template's match, else the name tag nearest the middle, else an error."
+    },
+    {
+     "name": "CROP_W",
+     "kind": "constant",
+     "line": 24,
+     "signature": "CROP_W, CROP_H = 800, 400",
+     "summary": "The recording crop in 1920x1080 client px around her (569x284 at 1366x768)."
+    },
+    {
+     "name": "TAG_SLACK",
+     "kind": "constant",
+     "line": 29,
+     "signature": "TAG_SLACK = 40",
+     "summary": "Client px her tag may be off its spot in the stored crop before a new crop is made."
+    }
+   ],
+   "inputs": [
+    "a full-size capture of the game through the key player (no keys)",
+    "her saved name tag template, if any; or `--tag X,Y` from the user"
+   ],
+   "outputs": [
+    "the Calibration (crop, scale, template) for the recording commands (act --record, do, combo, lock) and the track/sheet commands; its template for bench-look, bodies, sim.soak and sim.replay_run (physics_check loads the template file itself)",
+    "calibrate.png and calibrate_crop.png for checking by eye"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/control/client.py",
+    "gamelab/screen.py",
+    "gamelab/analysis/recordings.py",
+    "gamelab/analysis/track.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/calibration.json (calibration_1366x768.json at the game's size)",
+     "mode": "read-write",
+     "what": "crop, scale, tag position and client size"
+    },
+    {
+     "path": "lab/tag_template.npy (_1366x768)",
+     "mode": "read-write",
+     "what": "her name tag, grayscale, at the recording scale"
+    },
+    {
+     "path": "lab/tag_template_full.npy (_1366x768)",
+     "mode": "write",
+     "what": "deleted when a new template is cut, so perception.nametag cuts the full-size one again"
+    },
+    {
+     "path": "lab/calibrate.png, lab/calibrate_crop.png",
+     "mode": "write",
+     "what": "the frame looked at and the crop picked"
+    },
+    {
+     "path": "lab/characters/<id>/...",
+     "mode": "read-write",
+     "what": "the same files for a character other than the thief"
+    }
+   ],
+   "concurrency": "Blocks on the key player's capture (a separate elevated process); no threads.",
+   "tunables": [
+    {
+     "name": "CROP_W, CROP_H",
+     "value": "800, 400",
+     "meaning": "client px recorded around her at 1920x1080"
+    },
+    {
+     "name": "TAG_IN_CROP",
+     "value": "(400, 300)",
+     "meaning": "where her tag sits in the crop: room above for jumps"
+    },
+    {
+     "name": "SCALE",
+     "value": "2",
+     "meaning": "recordings shrunk 2x at 1920x1080 (the look's scale): plenty for tracking, 4x less data"
+    },
+    {
+     "name": "TAG_MATCH_MIN",
+     "value": "0.7",
+     "meaning": "a saved template scoring this well has found her"
+    },
+    {
+     "name": "TAG_SLACK",
+     "value": "40",
+     "meaning": "client px: her tag this close to its spot keeps the stored crop"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "Every recording re-finds her with the template before it starts (crop_on_her / crop_now).",
+     "why": "On 2026-10-21 the 16 `act --record` runs of a sweep were cropped from a calibration she had walked away from, and none had her."
+    },
+    {
+     "date": "",
+     "what": "One calibration per client size (suffix `_1366x768`), cut at that size.",
+     "why": "Her name tag is drawn at the game's size, so 1920x1080 and 1366x768 need their own crop and template."
+    }
+   ],
+   "gotchas": [
+    "`fresh=True` is needed after switching characters or if a rope crossed her tag last time; otherwise the old template keeps being reused, because her tag looks the same on every map.",
+    "A new small template deletes the full-size one; the next look cuts it again from the new one.",
+    "Stand her on flat, textured ground with nothing around when calibrating (README, Use)."
+   ],
+   "tests": [
+    "tests/test_gamelab.py",
+    "tests/test_character.py",
+    "tests/test_resolution.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/track.py",
+   "title": "Tracking her in recordings",
+   "tagline": "Follow her name tag frame by frame; spot jumps and claw swings",
+   "summary": "Follows her through recorded frames by template-matching her name tag, finds name tags without a template, and turns the track into airborne spans (jumps) and claw swings with the side they went. Everything works in the recording's frame pixels, converted by its geometry.",
+   "details_md": "A **track** is one row per frame: `(t ms, x, y, match score)`, where `x, y` is the name tag's **top-left corner**\n(not its centre). The first row is where she stood when the recording started; jumps are measured against it.\n\n**Finding a name tag without a template** (`_tag_boxes`, `find_name_tag`). Pixels whose smallest channel is over\n215 are \"white text\". The mask is dilated sideways with a 3x13 kernel (`LETTER_GAP`) so a name's letters join into\none blob, then OpenCV's connected components gives boxes. A box is a name tag if it is 25-180 px wide, 8-26 px tall,\nat least 2.2 times wider than tall, and the non-white pixels inside it are dark (median of their brightest channel\nunder 110). Her face, gloves, clouds and other bright scenery fail these checks. `find_name_tag` returns the centre\nof the one nearest the middle of the frame, ignoring the bottom tenth (the HUD).\n\n**The template** (`make_template`). From a centre, it takes a band one text line high (12 screen px above and\nbelow, 90 either side, converted by the geometry and divided by the scale), keeps the rows and columns with white\n(over 200) pixels, cuts tightly with a 2 px margin and converts to grayscale. The thin band keeps her glove or a\nrope out. It raises if there are fewer than `10 // scale` columns of text.\n\n**Matching.** `best_match` runs `cv2.matchTemplate(..., TM_CCOEFF_NORMED)` on the grayscale frame and returns the\ntop-left and score. `fine_match` refines it to a fraction of a pixel: `peak(a, b, c)` fits a parabola through the\nscores one pixel either side of the best and returns `0.5 * (a - c) / (a - 2b + c)` (0 if the curve doesn't peak).\nHer tag moves smoothly, so this tracks her to about 0.2 px (0.3 map units in a half-size frame). `track` uses the\nwhole-pixel match; `physics_check` uses the fine one.\n\n**Jumps** (`airborne`). A frame is \"up\" when the tag is at least `lift` (6 half-size px of the 1920x1080 window,\nconverted) above its first-row height. Runs of up frames become `(takeoff, landing)` spans; spans less than\n`merge_ms` (60 ms) apart are merged (a mis-match can split one jump in two), and spans shorter than `min_ms`\n(150 ms) are dropped (a jump lasts about 530 ms). A span still open at the end has landing `None`.\n\n**Claw swings** (`swing_side`, `swings`). The throw effect is bright white or lavender pixels next to her (both the\nregular attack and Lucky Seven). `_bright` counts pixels whose smallest channel is over 170 and whose blue is at\nleast their green, in a box `SWING_SIDE` (70) px wide on each side of the tag, from `SWING_ABOVE` (45) px above it\nto 2 px above. The baseline is the largest count before the first key (frames with t < 0). A frame is a swing frame\nif left+right exceeds that baseline by `SWING_MIN_PIXELS` (40, scaled by the square of the px conversion). Swing\nframes closer than `BURST_GAP_MS` (150 ms) are one swing; its side is whichever count was larger in the burst's\nstrongest frame.",
+   "lines": 171,
+   "key_items": [
+    {
+     "name": "track",
+     "kind": "function",
+     "line": 102,
+     "signature": "def track(frames, times, template) -> list[tuple[float, int, int, float]]",
+     "summary": "(t ms, x, y, score) of the name tag's top-left in every frame."
+    },
+    {
+     "name": "airborne",
+     "kind": "function",
+     "line": 111,
+     "signature": "def airborne(rows, lift=6, min_ms=150, merge_ms=60, geo=STRETCHED) -> list[tuple[float, float | None]]",
+     "summary": "(takeoff, landing) spans where the tag is at least `lift` px above its starting height."
+    },
+    {
+     "name": "swings",
+     "kind": "function",
+     "line": 155,
+     "signature": "def swings(frames, rows, tag_width, geo=STRETCHED) -> list[dict]",
+     "summary": "Claw swings as {'t', 'side': 'L'|'R'}, one per burst of swing frames."
+    },
+    {
+     "name": "fine_match",
+     "kind": "function",
+     "line": 90,
+     "signature": "def fine_match(frame, template) -> tuple[float, float, float]",
+     "summary": "best_match refined to a fraction of a pixel with a parabola through neighbouring scores."
+    },
+    {
+     "name": "best_match",
+     "kind": "function",
+     "line": 77,
+     "signature": "def best_match(frame, template) -> tuple[tuple[int, int], float]",
+     "summary": "Top-left and score of the best TM_CCOEFF_NORMED match of a grayscale template."
+    },
+    {
+     "name": "find_name_tag",
+     "kind": "function",
+     "line": 49,
+     "signature": "def find_name_tag(frame)",
+     "summary": "Centre of the name tag nearest the middle of a full-size frame, ignoring the HUD, or None."
+    },
+    {
+     "name": "make_template",
+     "kind": "function",
+     "line": 59,
+     "signature": "def make_template(frame, centre, scale=2, geo=STRETCHED) -> np.ndarray",
+     "summary": "A tight grayscale template of the name tag text around a centre."
+    },
+    {
+     "name": "_tag_boxes",
+     "kind": "function",
+     "line": 28,
+     "signature": "def _tag_boxes(frame, white_min=215, box_max=110)",
+     "summary": "Boxes of dilated white text on a dark box with name-tag proportions."
+    },
+    {
+     "name": "peak",
+     "kind": "function",
+     "line": 84,
+     "signature": "def peak(a, b, c) -> float",
+     "summary": "Sub-pixel offset of a parabola's peak through three scores a pixel apart (also used by scroll)."
+    },
+    {
+     "name": "swing_side",
+     "kind": "function",
+     "line": 145,
+     "signature": "def swing_side(frame, x, y, tag_width, geo=STRETCHED) -> tuple[int, int]",
+     "summary": "Swing-effect pixel counts to her left and right."
+    },
+    {
+     "name": "TAG_WIDTH",
+     "kind": "constant",
+     "line": 15,
+     "signature": "TAG_WIDTH = (25, 180)",
+     "summary": "Width range of a name tag at full size (with TAG_HEIGHT 8-26 and TAG_ASPECT 2.2)."
+    },
+    {
+     "name": "SWING_MIN_PIXELS",
+     "kind": "constant",
+     "line": 23,
+     "signature": "SWING_MIN_PIXELS = 40",
+     "summary": "Bright pixels over the baseline that make a frame a swing frame."
+    }
+   ],
+   "inputs": [
+    "recording frames and times (recordings.Recording)",
+    "her name tag template (calibration)"
+   ],
+   "outputs": [
+    "tracks for scroll, analyze, the `track`/`sheet --around-her`/`lock` commands",
+    "find_name_tag and make_template for calibration",
+    "fine_match and peak for physics_check and scroll",
+    "best_match for calibration.match_tag (finding her with the saved template)"
+   ],
+   "uses": [
+    "gamelab/screen.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "TAG_WIDTH / TAG_HEIGHT / TAG_ASPECT",
+     "value": "(25, 180) / (8, 26) / 2.2",
+     "meaning": "what a name tag's text blob looks like at full size"
+    },
+    {
+     "name": "LETTER_GAP",
+     "value": "13",
+     "meaning": "px of sideways dilation that joins a name's letters"
+    },
+    {
+     "name": "airborne lift / min_ms / merge_ms",
+     "value": "6 px / 150 ms / 60 ms",
+     "meaning": "height that counts as up; shortest jump kept; gap merged"
+    },
+    {
+     "name": "SWING_ABOVE, SWING_SIDE",
+     "value": "45, 70",
+     "meaning": "the swing-count box beside her tag (half-size px of 1920x1080)"
+    },
+    {
+     "name": "SWING_MIN_PIXELS",
+     "value": "40",
+     "meaning": "bright pixels over the pre-key baseline for a swing frame"
+    },
+    {
+     "name": "BURST_GAP_MS",
+     "value": "150",
+     "meaning": "swing frames closer than this are one swing"
+    }
+   ],
+   "decisions": [],
+   "gotchas": [
+    "Coordinates are the tag's top-left; add half the template's width for her centre (physics_check does, to tell scroll.camera where she is).",
+    "airborne measures height against the first frame: a recording that starts mid-air or ends on another floor reads wrong heights.",
+    "The swing baseline needs frames before the first key (negative times); a recording with no lead-in has a baseline of 0.",
+    "At 1366x768 full size the same constants are converted by Geometry.fpx; tests/test_geometry.py checks a 7 px lift is a jump at half size but not at full size.",
+    "The name-tag finder's sizes (`TAG_WIDTH`, `TAG_HEIGHT`, `LETTER_GAP`) are full-size px used as they are; the template, jump and swing numbers are converted by the recording's geometry."
+   ],
+   "tests": [
+    "tests/test_gamelab.py",
+    "tests/test_geometry.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/scroll.py",
+   "title": "Camera scroll",
+   "tagline": "Measure how far the camera moved so her motion is read in the world",
+   "summary": "The camera follows her, so on-screen movement shrinks or even reverses mid-jump-chain. This module measures the camera's movement from the scenery, so her world position is her screen position plus the camera's. It has a fast strip method (x only) and a sturdier foreground-patch method (x and y).",
+   "details_md": "**Why.** In MapleStory the camera trails the character. A long walk can look like a short one on screen, and a\njump chain's on-screen x can even go backwards. The platform she stands on scrolls 1:1 with the camera, so tracking\nthe scenery gives the camera.\n\n**`camera_x(frames, rows, band=(12, 30))`: the strip under her.** It cuts the horizontal strip from 12 to 30\nhalf-size px below her resting name tag (converted for the recording's geometry), converts it to grayscale floats,\nand runs `cv2.phaseCorrelate` (with a Hanning window) between consecutive frames. Each frame's shift is rounded to\nhalf a pixel (`round(dx * 2) / 2`) because the game scrolls in whole pixels (half pixels at scale 2) and rounding\nstops sub-pixel noise from adding up into drift. Scenery moving left on screen means the camera moved right, so\nthe shift is subtracted. `world_x` adds this cumulative camera x to each row's tag x.\n\n**`camera(frames, her)`: foreground patches.** The strip method fails where her own body or a drifting cloud is in\nthe strip, and clouds move on their own, so estimates taken over the whole scenery drifted. Instead:\n\n1. `foreground` marks platform pixels: grass green (`g > 120`, `g > b + 50`, `g > r + 5`) or dirt brown (a band of\n   red/green values with low blue). These are one map's colours.\n2. `_patch_shifts` walks a grid of `PATCH` (24 px) squares, half a patch apart, and skips patches near her\n   (`HER_BOX`: 40 px either side and 75 above her tag, `HER_BELOW` 22 below), patches that are less than 25%\n   foreground (`PATCH_MIN_FOREGROUND`), and flat ones (std under `PATCH_MIN_STD` 15). Each remaining patch is\n   matched in the next frame within `SEARCH` (10 px) with `TM_CCOEFF_NORMED`; matches under `PATCH_MIN_SCORE`\n   (0.85) are dropped; the rest are refined to sub-pixel with `track.peak`.\n3. For each frame step, the x shifts are binned to half a pixel, the most common bin wins, the patches within 0.75\n   px of it are kept, and their median (x, y) is the camera's step. With fewer than two patches the camera is taken\n   as not having moved.\n\nAll pixel constants are half-size px of the 1920x1080 window; `geo.ifpx`/`fpx` convert them. `physics_check` uses\n`camera` (both axes); the `combo` analysis and the `track` command use `world_x`.",
+   "lines": 109,
+   "key_items": [
+    {
+     "name": "camera",
+     "kind": "function",
+     "line": 93,
+     "signature": "def camera(frames, her, geo=STRETCHED) -> np.ndarray",
+     "summary": "Cumulative camera (x, y) per frame from the median shift of agreeing foreground patches."
+    },
+    {
+     "name": "camera_x",
+     "kind": "function",
+     "line": 15,
+     "signature": "def camera_x(frames, rows, band=(12, 30), geo=STRETCHED) -> list[float]",
+     "summary": "Cumulative camera x from phase correlation of the strip under her resting tag."
+    },
+    {
+     "name": "world_x",
+     "kind": "function",
+     "line": 38,
+     "signature": "def world_x(frames, rows, geo=STRETCHED) -> list[float]",
+     "summary": "Her tag's x plus the camera's: her x in the world, relative to where the camera started."
+    },
+    {
+     "name": "_patch_shifts",
+     "kind": "function",
+     "line": 64,
+     "signature": "def _patch_shifts(prev, cur, mask, her, geo=STRETCHED) -> np.ndarray",
+     "summary": "Sub-pixel (dx, dy) of each textured foreground patch away from her."
+    },
+    {
+     "name": "foreground",
+     "kind": "function",
+     "line": 56,
+     "signature": "def foreground(rgb) -> np.ndarray",
+     "summary": "Where a frame shows platform: this map's grass green or dirt brown."
+    },
+    {
+     "name": "PATCH",
+     "kind": "constant",
+     "line": 48,
+     "signature": "PATCH, SEARCH = 24, 10",
+     "summary": "Patch size and how far each is searched for in the next frame (half-size px)."
+    },
+    {
+     "name": "PATCH_MIN_SCORE",
+     "kind": "constant",
+     "line": 50,
+     "signature": "PATCH_MIN_SCORE = 0.85",
+     "summary": "Least match score for a patch's shift to count."
+    },
+    {
+     "name": "HER_BOX",
+     "kind": "constant",
+     "line": 52,
+     "signature": "HER_BOX = (40, 75)",
+     "summary": "Px either side of and above her tag where patches are her, not scenery."
+    }
+   ],
+   "inputs": [
+    "recording frames, and her place in each: track rows (camera_x, world_x) or her tag's centre per frame (camera)",
+    "the recording's Geometry"
+   ],
+   "outputs": [
+    "camera_x / world_x: her world x for analyze.combos and the `track` command",
+    "camera (x and y per frame) for physics_check"
+   ],
+   "uses": [
+    "gamelab/screen.py",
+    "gamelab/analysis/track.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "camera_x band",
+     "value": "(12, 30)",
+     "meaning": "half-size px below her resting tag: the strip correlated"
+    },
+    {
+     "name": "PATCH, SEARCH",
+     "value": "24, 10",
+     "meaning": "patch size; search radius in the next frame"
+    },
+    {
+     "name": "PATCH_MIN_STD",
+     "value": "15.0",
+     "meaning": "texture a patch needs to be matched"
+    },
+    {
+     "name": "PATCH_MIN_SCORE",
+     "value": "0.85",
+     "meaning": "least match score"
+    },
+    {
+     "name": "PATCH_MIN_FOREGROUND",
+     "value": "0.25",
+     "meaning": "share of a patch that must be grass or dirt"
+    },
+    {
+     "name": "HER_BOX / HER_BELOW",
+     "value": "(40, 75) / 22",
+     "meaning": "the box around her tag whose patches are skipped"
+    },
+    {
+     "name": "agreement",
+     "value": "0.75 px",
+     "meaning": "patches within this of the most common half-pixel shift are averaged"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "The camera from foreground patches (camera) alongside the strip under her (camera_x).",
+     "why": "The strip fails where her body or a drifting cloud is in it; clouds move on their own, so scenery-wide estimates drifted too."
+    }
+   ],
+   "gotchas": [
+    "`foreground` knows one map's grass and dirt colours; on other maps few patches may qualify and the camera is then taken as still.",
+    "camera_x rounds each step to half a pixel; real sub-pixel scrolling would be lost (the game scrolls in whole px).",
+    "README notes do_ledge2's camera (moving at 30 fps) comes out only to about 15%, which is why physics_check sets that recording aside in a second mean."
+   ],
+   "tests": [
+    "tests/test_gamelab.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/analyze.py",
+   "title": "Combo analysis",
+   "tagline": "Which way each jump and throw went, key lag, and frame pacing",
+   "summary": "Splits a recording of back-to-back combos into per-combo results: each jump's direction (back, forward, straight up) and each claw throw's side (toward the front or not). Also measures how late keys went out against the plan and the game's frame pacing. This is the original purpose of gamelab: checking MapleHelper's combo timing.",
+   "details_md": "**`combos(rec, starts, end_ms, facing, template)`.** The `combo` command records several runs of a combo and calls\nthis on each recording:\n\n1. Tracks her tag (`track.track`), turns it into world x (`scroll.world_x`), finds swings (`track.swings`) and\n   airborne spans (`track.airborne`), all with the recording's geometry.\n2. Cuts the timeline into windows from each combo start to the next (the last to `end_ms`).\n3. **Jumps:** for every airborne span whose takeoff falls in the window, `dx` is world x at landing (or the last\n   frame) minus world x `TAKEOFF_LEAD_MS` (20 ms) before the takeoff was seen. If `|dx|` is under `UP_PX` (12\n   half-size px, converted; a normal jump moves about 45-65) it went `up`; otherwise `back` if its sign is away from\n   the way she faced at the first combo (`-directions.sign(facing)`), else `forward`.\n4. **Throws:** swings seen from `SWING_SHIFT_MS` (300 ms) after the window's start to 300 ms after its end belong to\n   it, because a throw's swing shows about 0.5 s after its key. Each is `toward_front` if its side is the side she\n   faced (`'R'` when facing `RIGHT` from `maplehelper.engine`).\n\nThe `combo` command prints each combo's jumps and throws, flags any jump not in the allowed set or any throw the\nwrong way, and totals them across runs (the runs alternate facing so she ends about where she started).\n\n**`send_lag(rec)`**: for each planned/sent key event pair, how late it went out (sent ms minus planned ms): count,\nmax and mean. It \"should be a few ms at most\".\n\n**`frame_pacing(rec)`**: a frame is a new game frame when its mean absolute pixel difference from the previous one\nis over `NEW_FRAME_DIFF` (0.05). It returns the count, median, 95th percentile and largest gap between new frames,\nand lists gaps over `LONG_GAP_MS` (45 ms). The `check` command prints both and notes that long gaps while she stands\nstill are only frames that didn't change.\n\n**What these tools found** (the README's opening lines, gamelab's first purpose): a regular attack locks out jumps and attacks for about 730 ms (the `lock` command measures the jump side of it: an attack, then a jump `d` ms later, and whether `track.airborne` sees her leave the ground), and quick taps right after takeoff were missed about 6% of the time.",
+   "lines": 97,
+   "key_items": [
+    {
+     "name": "combos",
+     "kind": "function",
+     "line": 47,
+     "signature": "def combos(rec, starts, end_ms, facing, template) -> list[ComboResult]",
+     "summary": "Per-combo jumps (with direction) and throws (with side) from one recording."
+    },
+    {
+     "name": "send_lag",
+     "kind": "function",
+     "line": 80,
+     "signature": "def send_lag(rec: Recording) -> dict",
+     "summary": "How late keys went out against the plan: sent, planned, max_ms, mean_ms."
+    },
+    {
+     "name": "frame_pacing",
+     "kind": "function",
+     "line": 87,
+     "signature": "def frame_pacing(rec: Recording) -> dict",
+     "summary": "Gaps between frames where the picture changed: median, p95, max, and the long ones."
+    },
+    {
+     "name": "Jump",
+     "kind": "dataclass",
+     "line": 26,
+     "signature": "class Jump(takeoff, landing, dx, direction)",
+     "summary": "One jump: times, world dx (+ right), and 'back', 'forward' or 'up'."
+    },
+    {
+     "name": "Throw",
+     "kind": "dataclass",
+     "line": 34,
+     "signature": "class Throw(t, side, toward_front)",
+     "summary": "One claw swing: time, 'L' or 'R', and whether it went the way she faced."
+    },
+    {
+     "name": "ComboResult",
+     "kind": "dataclass",
+     "line": 41,
+     "signature": "class ComboResult(start, jumps, throws)",
+     "summary": "What one combo of a chain did."
+    },
+    {
+     "name": "UP_PX",
+     "kind": "constant",
+     "line": 15,
+     "signature": "UP_PX = 12",
+     "summary": "A jump moving less than this (half-size px of 1920x1080) went straight up."
+    },
+    {
+     "name": "SWING_SHIFT_MS",
+     "kind": "constant",
+     "line": 20,
+     "signature": "SWING_SHIFT_MS = 300",
+     "summary": "Throws are looked for this long after a combo's start and end: the swing shows ~0.5 s after its key."
+    }
+   ],
+   "inputs": [
+    "a Recording (frames, times, keys planned and sent)",
+    "combo start times and end, and the facing at the first",
+    "her name tag template (calibration)"
+   ],
+   "outputs": [
+    "ComboResult lists for the `combo` command",
+    "send-lag and frame-pacing dicts for the `check` command"
+   ],
+   "uses": [
+    "maplehelper/engine.py",
+    "gamelab/directions.py",
+    "gamelab/analysis/recordings.py",
+    "gamelab/analysis/scroll.py",
+    "gamelab/analysis/track.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "UP_PX",
+     "value": "12",
+     "meaning": "px of world movement under which a jump went straight up (normal ~45-65)"
+    },
+    {
+     "name": "TAKEOFF_LEAD_MS",
+     "value": "20",
+     "meaning": "a jump's start x is read this long before its takeoff was seen"
+    },
+    {
+     "name": "SWING_SHIFT_MS",
+     "value": "300",
+     "meaning": "shift of the window throws are looked for in"
+    },
+    {
+     "name": "NEW_FRAME_DIFF",
+     "value": "0.05",
+     "meaning": "mean pixel difference that marks a new game frame"
+    },
+    {
+     "name": "LONG_GAP_MS",
+     "value": "45",
+     "meaning": "gaps between new frames longer than this are listed"
+    }
+   ],
+   "decisions": [],
+   "gotchas": [
+    "'back' and 'forward' are relative to the facing at the first combo of the recording, not each combo's own.",
+    "frame_pacing can't tell a dropped game frame from a frame that didn't change (she stood still)."
+   ],
+   "tests": [
+    "tests/test_geometry.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/physics_check.py",
+   "title": "Physics check",
+   "tagline": "Her tracked movement in 18 recordings against the motion models, as RMS error",
+   "summary": "Tracks her in saved recordings to a fraction of a pixel with the camera taken out, replays the same keys through three movement models, and prints each model's RMS error in map units, x and y. With --fit it also fits the engine's lags per recording; with --fixture it saves the tracks as test fixtures.",
+   "details_md": "**Her measured track** (`tracked`). For a recording in `lab/recordings`, every frame is matched with\n`track.fine_match` against her calibrated tag template for the recording's size, and `scroll.camera` measures the\ncamera from foreground patches (her place given as the tag's centre). Her position is `(tag + camera - first\nposition) * units_per_px`, in map units with x right and y down. The keys come from the recording's `sent` events,\nnamed by her key bindings (`her_key_names`, from config.toml [keys] via `control.timeline.her_setup`). Frames whose\ntag score is under `MIN_SCORE` (0.45) are left out (another name tag over hers, a blur). The `recordings` folder is\ngit-ignored, so `load` falls back to `tests/fixtures/tracks/<name>.json` (6 are kept: motion, walk, jb_k165, jb_k190,\njb_k450, held_jump).\n\n**The models**, each given the same key timeline:\n\n- **before** (`steps` with `BEFORE`): what the planner and simulator modelled before `motion.body`: standing, she\n  runs at full speed `run_lag` (0.12 s) after the arrow; let go, she runs on, then brakes evenly; in the air her\n  sideways speed never changes. Constants: walk 149, jump lag 0.055 s, 27 units run on after release of which 13\n  braking.\n- **steps** (`steps` with `NOW`): the same step model with today's constants derived from the thief's shoe (`SHOE =\n  physics.shoe_of(thief.FIXED_STATS)`): its walk, `LAGS.on + vmax / (2 acc)` run lag, `physics.JUMP_LAG`, and\n  `body.stop_distance` / `body.slide` for braking. This is how the simulator moved her until it ran on the engine.\n- **engine** (`engine`): `motion.body.replay` with the median `body.Lags` (66 ms arrow on, 68 off, 65 jump), its\n  path the mean over every phase the game's 30 ms steps can have against the keys (`body.phases()`: 0, 5, ... 25\n  ms). That mean is what the planner's closed forms expect.\n\n`errors` interpolates each model's path at the tracked frame times up to the case's `until` and returns RMS x, RMS y\nand the model's last x. `CASES` gives each recording its compare-until time and any floor she lands on that isn't\nher starting one (e.g. `chain` lands 60.4 units up at 0.6 s). The jump-backs end before they land, because an attack\nthen plays and stops her dead (slides of 1.4-2.9 units where braking would give 7.6-11.7).\n\n**`--fit`** (`fit_lags`): for each step phase, coordinate descent over the engine's `on`, `off` and `jump` lags on\ngrids (5 ms steps for on and jump, 10 ms for off, 20-100/105/120 ms), 3 rounds from the medians, minimising x² + y²\nerror; the best phase and lags win. It shows what's left once the lags' spread is removed.\n\nThe printout is a Markdown table per recording plus means (and medians) over all, and a second mean without\n`SET_ASIDE` (`do_ledge2`: moving camera at 30 fps, camera recovered only to about 15%, and its x errors dominate the\ndifference between models).\n\n**What it found** (README, Motion planning: Fit): with the fixed median lags the engine follows the 18 recordings to 1.94 units RMS in x and 1.67 in y (medians 1.61 and 1.17; without `do_ledge2` 1.82 and 1.57), and with lags and phase fitted to each, 0.89 and 0.75. `tests/test_recordings_physics.py` asserts the engine beats `BEFORE` by more than 1.2 units in both x and y on the six fixtures (1.40 / 1.80 against 2.86 / 3.29).",
+   "lines": 317,
+   "key_items": [
+    {
+     "name": "tracked",
+     "kind": "function",
+     "line": 89,
+     "signature": "def tracked(name, key_names=None) -> Track",
+     "summary": "Her sub-pixel track through a saved recording with the camera taken out, in map units."
+    },
+    {
+     "name": "engine",
+     "kind": "function",
+     "line": 214,
+     "signature": "def engine(events, until, lags, floors=(), shoe=None, phase=None) -> np.ndarray",
+     "summary": "motion.body.replay's path under the keys, averaged over every step phase (or at one phase)."
+    },
+    {
+     "name": "steps",
+     "kind": "function",
+     "line": 152,
+     "signature": "def steps(events, until, m: Steps, *, start=-0.1, dt=0.001, floors=()) -> np.ndarray",
+     "summary": "The old step model's (t, x, y) path at 1 ms resolution: run lag, constant walk, even braking, no air control."
+    },
+    {
+     "name": "errors",
+     "kind": "function",
+     "line": 223,
+     "signature": "def errors(tr, path, until) -> tuple[float, float, float]",
+     "summary": "RMS x and y of a model path against the track, and the model's x at the last frame used."
+    },
+    {
+     "name": "fit_lags",
+     "kind": "function",
+     "line": 232,
+     "signature": "def fit_lags(tr, until, floors=(), rounds=3) -> tuple[body.Lags, float]",
+     "summary": "The engine's lags and step phase fitted to one recording by coordinate descent on grids."
+    },
+    {
+     "name": "Track",
+     "kind": "dataclass",
+     "line": 63,
+     "signature": "class Track(name, events, t, x, y, score)",
+     "summary": "Her path in map units from where she first stood, and the keys (s, action, down)."
+    },
+    {
+     "name": "Steps",
+     "kind": "dataclass",
+     "line": 134,
+     "signature": "class Steps(walk, run_lag, jump_lag, stop_run, land_slide)",
+     "summary": "Constants of the step model."
+    },
+    {
+     "name": "CASES",
+     "kind": "constant",
+     "line": 49,
+     "signature": "CASES = {name: (until_s, floors), ...}",
+     "summary": "The 18 tracked recordings, how long each is compared, and floors landed on."
+    },
+    {
+     "name": "SHOE",
+     "kind": "constant",
+     "line": 146,
+     "signature": "SHOE = physics.shoe_of(thief.FIXED_STATS)",
+     "summary": "The thief's shoe: the recordings are his, whoever the process plays."
+    },
+    {
+     "name": "BEFORE",
+     "kind": "constant",
+     "line": 147,
+     "signature": "BEFORE = Steps(walk=149.0, run_lag=0.12, jump_lag=0.055, stop_run=27.0, land_slide=13.0)",
+     "summary": "The constants the planner and simulator used before motion.body."
+    },
+    {
+     "name": "save_fixture",
+     "kind": "function",
+     "line": 104,
+     "signature": "def save_fixture(tr: Track) -> None",
+     "summary": "Writes a track to tests/fixtures/tracks/<name>.json, small enough for git."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 124,
+     "signature": "def load(name, key_names=None) -> Track",
+     "summary": "The recording's track if it is in lab/recordings, else its fixture."
+    },
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 259,
+     "signature": "def main(argv=None) -> int",
+     "summary": "`python -m gamelab.analysis.physics_check [names] [--fit] [--fixture]`: the table."
+    }
+   ],
+   "inputs": [
+    "saved recordings (lab/recordings) or their fixtures",
+    "her calibrated name tag template for the recording's size",
+    "her key bindings (config.toml [keys])",
+    "motion.body and motion.physics constants"
+   ],
+   "outputs": [
+    "a Markdown table of RMS errors per model per recording, with means and medians",
+    "track fixtures in tests/fixtures/tracks for tests/test_recordings_physics.py"
+   ],
+   "uses": [
+    "gamelab/paths.py",
+    "gamelab/classes/thief.py",
+    "gamelab/motion/body.py",
+    "gamelab/motion/physics.py",
+    "gamelab/analysis/recordings.py",
+    "gamelab/analysis/scroll.py",
+    "gamelab/analysis/track.py",
+    "gamelab/control/timeline.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/recordings/<name>.npz",
+     "mode": "read",
+     "what": "the recordings, when present (git-ignored)"
+    },
+    {
+     "path": "lab/tag_template.npy (per size)",
+     "mode": "read",
+     "what": "her name tag template"
+    },
+    {
+     "path": "tests/fixtures/tracks/<name>.json",
+     "mode": "read-write",
+     "what": "saved tracks (written with --fixture)"
+    },
+    {
+     "path": "config.toml",
+     "mode": "read",
+     "what": "her key bindings, to name the keys sent"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "MIN_SCORE",
+     "value": "0.45",
+     "meaning": "frames whose tag matched worse are left out"
+    },
+    {
+     "name": "SET_ASIDE",
+     "value": "('do_ledge2',)",
+     "meaning": "left out of the second mean (moving camera at 30 fps)"
+    },
+    {
+     "name": "BEFORE",
+     "value": "walk 149, run_lag 0.12, jump_lag 0.055, stop_run 27, land_slide 13",
+     "meaning": "the pre-engine model"
+    },
+    {
+     "name": "fit_lags grids",
+     "value": "on 20-100 ms /5, jump 20-105 /5, off 20-120 /10; 3 rounds",
+     "meaning": "the --fit search"
+    },
+    {
+     "name": "steps dt",
+     "value": "0.001 s",
+     "meaning": "the step model's integration step"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-02",
+     "what": "Both models walk her as the thief's profile does (SHOE from thief.FIXED_STATS, 151.25 at his stat window's SPEED 101; 149 at the profile's 99.2 before).",
+     "why": "The recordings are the thief's; before the review the process's own character was used (a checkout playing the magician gave her 150)."
+    }
+   ],
+   "gotchas": [
+    "Without lab/recordings only the 6 recordings kept as fixtures can be checked; asking for another raises, as it has no fixture to fall back to.",
+    "Jump-back cases are compared only until before landing: the attack that follows stops her dead.",
+    "tests/test_recordings_physics.py notes the engine follows the seven 60 fps walks less well than the 5 ms engine before it (1.64 units RMS in x against 1.17), the long ones ending 1.6-5.6 units short of where she stopped (walk1000 154.9 against 158.1), mostly the release's lag."
+   ],
+   "tests": [
+    "tests/test_recordings_physics.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/walkfit.py",
+   "title": "Walk fit",
+   "tagline": "Her real walk, climb, takeoffs, steps and arrivals against her planned walk",
+   "summary": "Reads any run's telemetry (the hunt's and the perception service's) and measures, per run and per map, her steady walk and climb, how late her takeoffs came, how far her steps went against what was asked, and how many 'arrived' trips ended on the wrong platform, all against the walk the run planned her moves at. Built after a run planned at 125 units/s turned out to walk 148.",
+   "details_md": "**Why it exists.** Every timed hold she makes runs open loop on the planned walk (`motion.physics.WALK_SPEED`), so a\nplanned walk that isn't hers sends every timed walk too far or short. On 2026-11-02 RiceBaby was planned at 125\nunits/s and walked 148: takeoffs came late by about a sixth of the walk before them, steps went 1.19 times what was\nasked, and 15 of an hour's 210 'arrived' trips had her off the end of the destination platform. It went unnoticed\nfrom 10-29 to 11-02, and the scripts that found it were hard-wired to that day's files and to 125. walkfit reads\nthe planned walk from the run's own records instead.\n\n**Reading runs.** `files_of` collects every `*.jsonl` named (folders, and a `telemetry/` folder inside them, as a\ngolden clip has), keeping the largest copy of each file name. Files whose session `command` is `perceive` (or\nnamed `-perceive`) are the perception service's; tour/hunt/nav files are hunts. `_records` pre-filters lines by\ntext (`\"topic\":\"scene\"`) before parsing, for speed. A `Run` holds one hunt file's session, scenes, chains, trips (each\nwith the last look before it), stances and `motion` records, plus the service's scenes and `touch` events within\n5 s of its span (each touch at its own moment: time less `late`). Without service records it uses the hunt's own\nlooks. `--frames` cuts each recording folder's span (from its `index.jsonl`'s first and last `at`) into its own run.\n\n**The measures** (`fit`):\n\n- **walk / climb** (`stretches`): `motion.steady.measure` on her places: stretches on one platform moving one way at\n  a walk, run-up and braking tail (`TAIL_S`) left out, a line fitted, slopes taken out by the v83 rule where the map\n  model loads. Without service scenes, consecutive looks may be up to `GAP_LOOKS_S` (0.6 s) apart. `--raw` gives\n  the older measure (x speed with braking tail, no slopes). Reported: median, quartiles, standard error, n; the\n  ratio to the planned walk; the SPEED it implies (walk / 1.25 - 20) and that minus her stat window's SPEED\n  (`panel`, from 'motion' records, `--speed`, or the session's physics).\n- **takeoffs** (`takeoffs`, `engine_residuals`): chains whose first leg is a walk of `TAKEOFF_LEAST` (20) units or\n  more then a jump, untouched until takeoff; the takeoff is the scene pair where her mode goes ground to air, within\n  `TAKEOFF_S` (4 s). How far past the planned takeoff she left (+ late), the median for all and for walks of\n  `LONG_WALK` (100)+, a line `late = slope x walk + b`, and the residual against the engine (`body.run_time` at the\n  planned walk, `body.run_x` at the measured one) using the planned walk as of each chain (`Run.walk_at`).\n- **steps** (`steps`): 'stepping away left/right N' stances, untouched from 0.3 s before to 1.8 s after, on one\n  platform, on the ground; gone = where she first stood still (moves under 2 units) against N, only steps she\n  actually walked (no next stance record before she stood still, and gone the way asked). Ratio over steps of 30+.\n- **arrived** (`arrivals`): trips that ended 'arrived' and whether her platform was the trip's `dst`, with and\n  without a touch in the 3 s before.\n\n**The planned walk** (`planned_walk`): the session record's `physics` (from 2026-11-02), else `--planned`, else the\n`--character` profile as the code has it now, said to be an assumption. `fit_runs` fits each run, then each map with\nseveral runs; `table` prints one line each with a legend.\n\n**Run it** as `python -m gamelab.analysis.walkfit RUN [RUN ...] [--planned UNITS] [--character ID] [--speed SPEED] [--frames] [--raw] [--json]` (there is no `gamelab` command for it). A RUN is a telemetry folder or files; nothing here sends a key or looks at the game.\n\n**Checked against the analysis that found the problem.** On R1-R3 of 2026-11-02 (`--planned 125 --raw`: they have no physics record) it reproduces that analysis to the digit (docstring): the hour's steady walk 148.2 over 81 walks, 18 of 210 'arrived' trips on another platform (15 with no touch), takeoffs +7.5 units late at the median and +24.9 after walks of 100 or more (108 legs). By the estimator (without `--raw`) the walk is 149.4 over 66, implying SPEED 99.6 against her stat window's 100.",
+   "lines": 558,
+   "key_items": [
+    {
+     "name": "fit",
+     "kind": "function",
+     "line": 382,
+     "signature": "def fit(runs, planned=None, character=None, name=None, speed=None, raw=False) -> dict",
+     "summary": "All measures over one run or a map's runs: walk, climb, takeoff, steps, arrived."
+    },
+    {
+     "name": "Run",
+     "kind": "class",
+     "line": 172,
+     "signature": "class Run(path, perceives, span=None, name=None)",
+     "summary": "One hunt file's records over its span, with the perception service's scenes and touches over it."
+    },
+    {
+     "name": "fit_runs",
+     "kind": "function",
+     "line": 458,
+     "signature": "def fit_runs(args, planned=None, character=None, frames=False, speed=None, raw=False) -> list[dict]",
+     "summary": "A fit per run, then one per map with more than one run."
+    },
+    {
+     "name": "planned_walk",
+     "kind": "function",
+     "line": 362,
+     "signature": "def planned_walk(run, planned=None, character=None) -> tuple[float, float, str]",
+     "summary": "The walk and JUMP a run planned at, and where that came from."
+    },
+    {
+     "name": "takeoffs",
+     "kind": "function",
+     "line": 263,
+     "signature": "def takeoffs(run) -> list[tuple[float, float, int, float]]",
+     "summary": "Walk-then-jump first legs: walk length, how far past the planned takeoff she left, direction, time."
+    },
+    {
+     "name": "engine_residuals",
+     "kind": "function",
+     "line": 290,
+     "signature": "def engine_residuals(rows, planned, measured, jump=100.0, walk_at=None) -> list[float]",
+     "summary": "Each takeoff against the engine walking at her measured speed, keyed for the planned one."
+    },
+    {
+     "name": "steps",
+     "kind": "function",
+     "line": 307,
+     "signature": "def steps(run) -> list[tuple[float, float]]",
+     "summary": "(asked, gone) for the stance's steps away that she actually walked, untouched."
+    },
+    {
+     "name": "arrivals",
+     "kind": "function",
+     "line": 347,
+     "signature": "def arrivals(run) -> list[dict]",
+     "summary": "'arrived' trips with the platform they were for and the one she was on."
+    },
+    {
+     "name": "stretches",
+     "kind": "function",
+     "line": 254,
+     "signature": "def stretches(run, raw=False) -> tuple[list[steady.Walk], list[steady.Ascent]]",
+     "summary": "Her steady walks and climbs via motion.steady.measure."
+    },
+    {
+     "name": "Run.walk_at",
+     "kind": "method",
+     "line": 234,
+     "signature": "def walk_at(self, t, planned) -> float",
+     "summary": "The planned walk as of time t: the last 'motion' record's new walk before t."
+    },
+    {
+     "name": "Run.panel",
+     "kind": "method",
+     "line": 241,
+     "signature": "def panel(self) -> float | None",
+     "summary": "Her stat window's SPEED from the last 'motion' record that read it (why 'panel' or 'kept')."
+    },
+    {
+     "name": "files_of",
+     "kind": "function",
+     "line": 113,
+     "signature": "def files_of(args) -> dict[str, Path]",
+     "summary": "Every telemetry file the RUN arguments name, the largest copy of each name."
+    },
+    {
+     "name": "recording_span",
+     "kind": "function",
+     "line": 152,
+     "signature": "def recording_span(folder) -> tuple[float, float] | None",
+     "summary": "Epoch span of a recording folder's frames, for --frames."
+    },
+    {
+     "name": "table",
+     "kind": "function",
+     "line": 502,
+     "signature": "def table(fits) -> str",
+     "summary": "The fits as one line each, with sources and a legend."
+    },
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 539,
+     "signature": "def main(argv: list[str] | None = None) -> int",
+     "summary": "`python -m gamelab.analysis.walkfit RUN ...`: fit_runs, then the table (or JSON)."
+    }
+   ],
+   "inputs": [
+    "hunt telemetry files (tour/hunt/nav commands): session physics, scene, chain, trip, stance, motion records",
+    "the perception service's *-perceive.jsonl (scenes ~7.5 a second, touch events)",
+    "recording folders' index.jsonl (with --frames)",
+    "the map model (motion.steady.map_model) for slopes"
+   ],
+   "outputs": [
+    "a table (or JSON with --json) per run and per map: walk, climb, takeoff lateness, step ratio, wrong arrivals"
+   ],
+   "uses": [
+    "gamelab/motion/body.py",
+    "gamelab/motion/physics.py",
+    "gamelab/motion/steady.py",
+    "gamelab/character.py"
+   ],
+   "files_io": [
+    {
+     "path": "<RUN>/*.jsonl, <RUN>/telemetry/*.jsonl",
+     "mode": "read",
+     "what": "the hunt's and the perception service's records"
+    },
+    {
+     "path": "<RUN>/*/index.jsonl",
+     "mode": "read",
+     "what": "a recording's frame span (--frames)"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "GAP_LOOKS_S",
+     "value": "0.6",
+     "meaning": "max gap between the run's own looks in one stretch (no service scenes)"
+    },
+    {
+     "name": "TAKEOFF_LEAST",
+     "value": "20.0",
+     "meaning": "least first-leg walk (units) for a takeoff to count"
+    },
+    {
+     "name": "LONG_WALK",
+     "value": "100.0",
+     "meaning": "walks this long or more are reported apart"
+    },
+    {
+     "name": "TAKEOFF_S",
+     "value": "4.0",
+     "meaning": "a chain's takeoff is looked for up to this long after it"
+    },
+    {
+     "name": "STEP_TOUCH_S",
+     "value": "(0.3, 1.8)",
+     "meaning": "a step must be untouched from 0.3 s before to 1.8 s after"
+    },
+    {
+     "name": "STEP_S",
+     "value": "1.8",
+     "meaning": "scenes looked at after a step"
+    },
+    {
+     "name": "STEP_LEAST",
+     "value": "30.0",
+     "meaning": "steps asked shorter than this aren't in the ratio"
+    },
+    {
+     "name": "STILL_UNITS",
+     "value": "2.0",
+     "meaning": "moving less than this between scenes once moving is standing still"
+    },
+    {
+     "name": "TOUCH_BEFORE_S",
+     "value": "3.0",
+     "meaning": "an 'arrived' trip touched this soon before its end was knocked off"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-11-02",
+     "what": "walkfit reads the planned walk from the run's own session record (motion.physics.record).",
+     "why": "RiceBaby planned at 125 walked 148 unnoticed for days; the analysis scripts were hard-wired to one day's files and to 125."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "Only steps she walked count (no stance record before she stood still, gone the way asked).",
+     "why": "Counting every 'stepping away' record as a step counted steps a knock held back, said again look after look: of the 73 so counted over R1's grind and the hour, 15 weren't walked, and one ('left 135') left her 9 units right."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "The walk is measured by motion.steady's estimator; --raw keeps the older measure.",
+     "why": "The estimator leaves her braking tails out and takes Tree Dungeon's slopes out, where the older measure took her x speed with both in."
+    },
+    {
+     "date": "2026-11-02",
+     "what": "walkfit's walk and climb are a check of the client's formula at her stat window's SPEED, not something any hunt follows.",
+     "why": "An online walk check was built and taken out again by the user's \"Just use panel, no need to measure.\": her planner plans by the stat window's SPEED."
+    }
+   ],
+   "gotchas": [
+    "Old runs have no physics record: without --planned the walk is today's profile, said as assumed (README: --planned 125 for the magician, 149 for the thief before the 2026-11-02 walk fix).",
+    "A twin platform (MapModel.twins) reads as 'elsewhere' in arrivals (README, Open).",
+    "A file copied into several clips is read once, its largest copy.",
+    "Nothing here sends a key or looks at the game."
+   ],
+   "tests": [
+    "tests/test_walkfit.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/coverage.py",
+   "title": "Route coverage",
+   "tagline": "Each route move planned, taken and missed, and why the unused ones lose",
+   "summary": "Tallies, from a run's telemetry, how often each move of the map's route graph was planned, taken and missed, where she spent her time and which platforms moves got her onto. Then, for every move never taken, it computes its cost gap to the routes chosen instead and names why it lost. Works on the simulator harness's runs and on live telemetry.",
+   "details_md": "**Run it** as `python -m gamelab coverage [RUN ...] [--live] [--map ID] [--ways N] [--text FILE] [--picture PATH]` (offline, no keys): each RUN a saved harness run (`sim.harness.load`); `--live`, or no RUN, tallies the live telemetry in `lab/telemetry` (but the simulator's `-sim-` files), only the files of the map asked. Its picture: moves taken in green (thicker the more often), planned but never taken in yellow, never planned in red.\n\n**The graph.** `Graph` wraps `motion.route.Planner` for a map: its `moves`, each keyed by `key_of` as\n`\"<kind> <src>-><dst> @<x>\"` (e.g. `jump 32->29 @536`). `step(m)` is a move's planner cost (`m.seconds +\nRISK[kind]`), `cost(moves, x)` a route's cost from x with walks at `WALK_SPEED` (no random weights, no penalties),\n`via(m, src, x, dst)` the quickest route from a place to a platform that makes move m, and `chains(m)` whether\n`motion.flow.Flow` can chain the move from standing at its start in any variant (None for rope climb-downs and rope\njumps, which only the mover makes). `graph_for` caches one Graph per process (0.25 s to build).\n\n**One run** (`tally(records, graph)` → `_Tally`), record by record:\n\n- `scene` and `glance` records give her places; time between looks is added to the look's platform (at most\n  `GAP_S`, 5 s); a change of platform is a visit.\n- `route` records count every move in them as **planned** (replans too). Moves are matched to the graph by kind,\n  platforms and start x within `MATCH_DX` (3 units); routes recorded before 2026-10-21 (no `from`) were on an older\n  graph and are matched loosely to the nearest. Each fully matched route becomes a **plan**: from where (rounded to\n  `PLAN_DX` 5), to which platform, its cost, the quickest cost, and what it kept off / avoided.\n- `moved` records (the navigator's own, from 2026-10-21) give each chain's legs, where she landed, and whether she\n  was hit. Before them, `chain` records and the navigator's log lines are parsed with regexes (`_ALONE`,\n  `_ELSEWHERE`, `_CUT`).\n- `_outcome` decides which leg failed: `stood` turns her places into the platforms she stood on (on a surface within\n  `STAND_DX`/`STAND_DY` 6 units, `STAND_N` 2 times in a row), and `follow` walks them along the chain's platforms.\n  Legs before the failure are **taken** and count as arrivals; the failed leg is **missed** (with where she ended)\n  or a **hit's** (a hit on the way that left her elsewhere); legs after it weren't reached.\n- `trip`, `tour` and `hunt` records give trip results (and trips with no route: timeouts before she set off), the\n  tour's stops and the hunt loop's grounds.\n\nThe result is plain JSON (3-7 KB a run, README); the harness stores one per run and `merge` adds them up,\nre-keying moves to today's graph (`rekey`).\n\n**Why moves lose** (`report`). `map_wide` tries starts every `START_STEP` (60) units along every platform to every\nother platform and finds the least each move adds to the quickest route. `plan_gaps` checks every move against the\nplans actually made: on plans that kept nothing off and avoided nothing, how many could have used it, the least gap,\nhow many had it within `VARIETY` (route.NOISE, 35%) of the chosen route, and how many had it cheaper; on penalised\nplans, whether a cheaper route through it hit what they kept off. `why` then picks, in order: **replanned** (planned\nbut replanned before she got there), **then** (cheaper today but planned on an older graph), **weights** (cheaper:\nthe random 1-1.35 weights drew another), **penalty**, **nowhere**, **cost** (never within 0.05 s of quickest\nanywhere), else **ground** (quickest somewhere, but no trip went there). `drawn` simulates the navigator's random\nweights (`DRAWS` 40 a plan, or `WAY_DRAWS` 8 with `route.ROUTES` > 1 using `route.chances`) to estimate how often\nthey'd send her through a move. On the first map the report adds platform 12 and the 23 -> 17 rope hops.\n\n`picture_rows` gives (move, planned, taken) for `ui.render.coverage_picture`.\n\n**What it found** (README, Route coverage, 2026-10-21, the first map): 204 moves in the graph; the simulator's hunts hardly left the basin (the hunt loop spent 87.5% of its time on platform 36, live 17.4%), and of the moves never taken most lost to where the trips went ('ground': the tour's 72 of 106, the loop's 137 of 159), not to their cost.",
+   "lines": 786,
+   "key_items": [
+    {
+     "name": "tally",
+     "kind": "function",
+     "line": 150,
+     "signature": "def tally(records: list[dict], graph: Graph) -> dict",
+     "summary": "One run's counts from its telemetry records, as plain JSON for merge."
+    },
+    {
+     "name": "_Tally._outcome",
+     "kind": "method",
+     "line": 321,
+     "signature": "def _outcome(self, legs, landed, hit, miss) -> None",
+     "summary": "Counts a chain's legs as taken, missed or a hit's, using where she was seen standing to find the failed leg."
+    },
+    {
+     "name": "Graph",
+     "kind": "class",
+     "line": 77,
+     "signature": "class Graph(model, planner=None)",
+     "summary": "The map's route moves told apart by key, with the planner's own unweighted costs."
+    },
+    {
+     "name": "report",
+     "kind": "function",
+     "line": 596,
+     "signature": "def report(graph, sets, focus=None) -> list[str]",
+     "summary": "The report: per set of runs, moves used, platforms, trips, never-taken moves and why; focus platforms."
+    },
+    {
+     "name": "why",
+     "kind": "function",
+     "line": 572,
+     "signature": "def why(m, counts, gaps, wide, older=False) -> tuple[str, str]",
+     "summary": "Why a move was never taken: replanned, then, weights, penalty, nowhere, cost or ground."
+    },
+    {
+     "name": "plan_gaps",
+     "kind": "function",
+     "line": 488,
+     "signature": "def plan_gaps(graph, plans, moves) -> dict[str, dict]",
+     "summary": "Each move against the plans made: could, close, cheaper, least gap, penalties."
+    },
+    {
+     "name": "map_wide",
+     "kind": "function",
+     "line": 465,
+     "signature": "def map_wide(graph) -> dict[str, tuple]",
+     "summary": "The least each move adds to the quickest route between any two places on the map."
+    },
+    {
+     "name": "drawn",
+     "kind": "function",
+     "line": 531,
+     "signature": "def drawn(graph, plans, moves, draws=None, seed=0) -> tuple[float, int]",
+     "summary": "Expected number of plans the navigator's random weights (or way choice) would send through the moves."
+    },
+    {
+     "name": "merge",
+     "kind": "function",
+     "line": 428,
+     "signature": "def merge(tallies, graph=None) -> dict",
+     "summary": "Runs' tallies added up, moves re-keyed to the given graph."
+    },
+    {
+     "name": "stood",
+     "kind": "function",
+     "line": 377,
+     "signature": "def stood(model, points) -> list[int]",
+     "summary": "Platforms she was seen standing on, in order (on a surface twice in a row)."
+    },
+    {
+     "name": "follow",
+     "kind": "function",
+     "line": 401,
+     "signature": "def follow(plan, seq) -> tuple[int, int | None]",
+     "summary": "How far along a chain's platforms she got, and where she was instead if knocked off it."
+    },
+    {
+     "name": "Graph.via",
+     "kind": "method",
+     "line": 120,
+     "signature": "def via(self, m, src, x, dst) -> float | None",
+     "summary": "Cost of the quickest route from (src, x) to dst that makes move m."
+    },
+    {
+     "name": "Graph.chains",
+     "kind": "method",
+     "line": 127,
+     "signature": "def chains(self, m) -> bool | None",
+     "summary": "Whether flow can chain the move from standing where it starts (None: mover-only kinds)."
+    },
+    {
+     "name": "graph_for",
+     "kind": "function",
+     "line": 141,
+     "signature": "def graph_for(model) -> Graph",
+     "summary": "One Graph per process per map model, reused by every harness run."
+    },
+    {
+     "name": "picture_rows",
+     "kind": "function",
+     "line": 784,
+     "signature": "def picture_rows(graph, t) -> list[tuple[Move, int, int]]",
+     "summary": "(move, planned, taken) rows for ui.render.coverage_picture."
+    }
+   ],
+   "inputs": [
+    "a run's telemetry records (scene, glance, route, chain, moved, log, trip, tour, hunt)",
+    "the map model, loaded by the `coverage` command (this layer doesn't load it)",
+    "saved harness runs' tallies (sim.harness keeps one per run)"
+   ],
+   "outputs": [
+    "per-run tallies stored in harness results",
+    "the coverage report lines",
+    "rows for the coverage picture (by default `lab/shots/coverage_<map>.png`, then `-2`, `-3` for further sets; drawn by ui.render.coverage_picture)"
+   ],
+   "uses": [
+    "gamelab/motion/route.py",
+    "gamelab/motion/flow.py",
+    "gamelab/motion/physics.py"
+   ],
+   "files_io": [],
+   "concurrency": "graph_for keeps one Graph per process (built in 0.25 s); the harness's worker processes each build their own.",
+   "tunables": [
+    {
+     "name": "GAP_S",
+     "value": "5.0",
+     "meaning": "a look's time counts toward its platform up to this long"
+    },
+    {
+     "name": "STAND_DX / STAND_DY / STAND_N",
+     "value": "6 / 6 / 2",
+     "meaning": "on a platform's surface within 6 units, twice in a row, is standing there"
+    },
+    {
+     "name": "MATCH_DX",
+     "value": "3",
+     "meaning": "units: a recorded move is the graph's that starts this near"
+    },
+    {
+     "name": "PLAN_DX",
+     "value": "5",
+     "meaning": "plans from within this of each other are one"
+    },
+    {
+     "name": "NEAR_TIE_S",
+     "value": "0.05",
+     "meaning": "s: a route this near the quickest is a quickest one"
+    },
+    {
+     "name": "VARIETY",
+     "value": "route.NOISE = 0.35",
+     "meaning": "the navigator weighs each move 1 to 1.35 per trip"
+    },
+    {
+     "name": "START_STEP",
+     "value": "60",
+     "meaning": "units between starts tried along each platform for map_wide"
+    },
+    {
+     "name": "DRAWS / WAY_DRAWS",
+     "value": "40 / 8",
+     "meaning": "weight draws per plan for drawn() (8 when choosing among ways)"
+    },
+    {
+     "name": "FOCUS",
+     "value": "{10000012: (12,)}",
+     "meaning": "platforms the report looks at on each map (platform 12 on the first)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "The navigator writes a 'moved' record after each chain or move, and routes say where they were planned from.",
+     "why": "Before, coverage had to guess outcomes from chain records and log lines, and match routes loosely to a newer graph."
+    },
+    {
+     "date": "2026-10-21",
+     "what": "Each harness run keeps a tally of its own telemetry (3-7 KB).",
+     "why": "The tally only reads the telemetry the run captured anyway, so a saved run carries what the report needs; runs saved before 2026-10-21's evening have none and the command leaves them out (README, Route coverage; cmd_coverage)."
+    },
+    {
+     "date": "2026-10-28",
+     "what": "A touch on the way counts as a hit's move, a MISS too; before, a hit was her HP dropping.",
+     "why": "The navigator itself cuts a plan short on a touch, counted as a MISS too, from 2026-10-28 (sim.harness's nav stats: cut_touch); coverage counts such a move as a hit's."
+    }
+   ],
+   "gotchas": [
+    "A chain hit on the way that still ended where it was going counts every move as made, not as a hit's.",
+    "Platform 12 and the 23 -> 17 hop lines are only for the first map (FIRST_MAP 10000012); tests/test_sim_her.py checks they don't appear on Tree Dungeon.",
+    "The live telemetry before 2026-10-21 was planned on older graphs; its gaps read 'then' rather than 'weights'.",
+    "Plans are evaluated before moves because the planner keeps its searches from only 256 starts.",
+    "The `--picture` help text still says `gamelab/lab/coverage_<map>.png`, but the command saves to `lab/shots/` by default (`_shot`)."
+   ],
+   "tests": [
+    "tests/test_coverage.py",
+    "tests/test_sim_her.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/respawn.py",
+   "title": "Respawns and drop life",
+   "tagline": "How soon emptied platforms refill, how long drops lie, how full platforms are",
+   "summary": "From telemetry, measures three things as survival estimates over censored observations (Kaplan-Meier): the time from a kill that empties a platform until a monster is seen there again, how long a drop lies before it vanishes without her picking it up, and how full the spawn platforms are while in view. Its 2026-10-21 results are why behavior.hunt's and sim.world's RESPAWN stayed at 8 s, their comments quoting what it measured.",
+   "details_md": "**Run it** as `python -m gamelab respawn [FILES ...] [--map ID] [--text FILE]` (offline, no keys): by default the live telemetry but the simulator's files, each file only if its session is on the map asked. The command hands in what this layer may not import: `localization.pose.Camera(model.bounds).corner`, the band (`attack.reach.LOOK_UP`, `LOOK_DOWN`), whether a probe run looks wide (`behavior.probe.PROBES`), and the map's cached game data for `spawn_fields`.\n\n**Which looks count** (`looks`, `covers`). A look can say a platform is empty only if it searched for monsters\nwith her standing, and all of the platform was in the searched area: her band (`band` = attack.reach's LOOK_UP above\nher feet to LOOK_DOWN below, a monster's body `BODY` 60 units tall fitting in it) or, for a whole-screen look, the\nscreen above the bottom bar and clear of the minimap, less `EDGE` (40 units) at each side. From 2026-10-21's evening\neach scene record says whether it searched, whether wide, where it looked for drops, the view, and whether she\nstood. For older records these are inferred: a look searched if it saw a monster, if a 'monsters' or 'stance'\nrecord followed it, in a probe's run off a trip, or in `watch`; she stood if her tag was on her platform's surface\n(`STAND_DY` 6) and not within `AIR_S` (1.3 s) of a jump stance. The view comes from the camera model passed in\n(`localization.pose.Camera.corner`).\n\n**(a) Respawn episodes** (`respawns`, `_episode`). A kill (hers from 'kill' events; others' from the feed's 'died'\nevents) starts an episode only if a monster of its kind was seen within `KILL_DX` (60) of it in the `KILL_SEEN_S`\n(3 s) before. From `FADE_S` (1.5 s) after (a dying monster is seen for up to 1.26 s), covering looks must see the\nplatform empty `EMPTY_N` (2) times, `EMPTY_S` (0.5 s) apart. A monster then seen there (or another kill there) ends\nit at the midpoint between that look and the last empty one, if they're at most `MAX_GAP` (2 s) apart; a longer gap\ncensors it at the last empty look ('away'), as does the run's end or `HORIZON` (180 s). A monster first seen with an\nHP bar was hidden under damage numbers and drops the episode. Episodes are also split into **lone** (no other kill\nthere in `LONE_S` 15 s) and **near** (her within `NEAR` 150 units of a spawn point).\n\n**(b) Drop life** (`drops`, `_gone`). Drops are told apart by kind and place (`DROP_DX` 8 units). A drop is born at\na kill of hers within `LOOT_REACH` (60) and `BIRTH_S` (20 s) before it was first seen ('hers'), else when first seen.\nIt's gone when two looks `EMPTY_LOOKS` (1.5 s) apart that looked where it lies, with her standing, inventory not full\n(or it's mesos) and no other drop within `OVERLAP_DX` (15), don't see it. If she passed within `PICK_DX` (25) since\nit was last seen, it's taken as picked up (censored). A later kill by it ends following it ('a kill by it').\n\n**(c) How full** (`occupancy`). For each spawn platform, over covering looks (each weighted by time to the next,\n`OCCUPANCY_GAP_S` 1 s at most): seconds covered, monster-seconds, seconds empty.\n\n**The estimator** (`km`, `quantile`, `summary`). Kaplan-Meier with Greenwood's variance; 95% intervals on the\nlog-log scale (`Z` 1.959964); the median's interval by Brookmeyer and Crowley (as R's survfit gives it). Times and\nshares left at `AT` (5 to 180 s, including MeowDB's 12.56 s) are given only where `MIN_FOLLOWED` (5) were still\nfollowed.\n\n**What it found** (README, 2026-10-21, 72 live files): of 77 episodes 12 were seen back, all within 10.8 s; 80% were\nnot back by 12.56 s, where the simulator refilled within seconds. Spawn points were 26% occupied while in view.\nDrop life was over a minute (95% still lying at 60 s). The constants stayed: RESPAWN 8 s, DROP_LIFE 90 s (hunt) / 180 s (world). `hunt.DROP_LIFE` has since gone: from 2026-10-30 the hunt judges whether a pile still lies by `behavior.ledger.SURVIVAL`, fitted from the perception service's records, not by this report.",
+   "lines": 673,
+   "key_items": [
+    {
+     "name": "Runs.add",
+     "kind": "method",
+     "line": 575,
+     "signature": "def add(self, records, model, corner, band, probe_wide=False) -> None",
+     "summary": "Reads one run's looks and kills and adds its episodes, drops and occupancy."
+    },
+    {
+     "name": "looks",
+     "kind": "function",
+     "line": 178,
+     "signature": "def looks(records, model, corner, band, probe_wide=False) -> list[Look]",
+     "summary": "The run's looks that placed her, with what each searched, as recorded or inferred."
+    },
+    {
+     "name": "covers",
+     "kind": "function",
+     "line": 270,
+     "signature": "def covers(look, p, band) -> bool",
+     "summary": "Whether a look searched all of platform p for monsters with her standing."
+    },
+    {
+     "name": "_episode",
+     "kind": "function",
+     "line": 323,
+     "signature": "def _episode(seq, times, k, p, band, lone, near, after) -> Episode | str",
+     "summary": "A kill's episode on its platform, or why it makes none."
+    },
+    {
+     "name": "respawns",
+     "kind": "function",
+     "line": 295,
+     "signature": "def respawns(seq, dead, model, band) -> tuple[list[Episode], Counter]",
+     "summary": "One run's episodes, each kill marked lone/near, and a count of why the other kills made none."
+    },
+    {
+     "name": "drops",
+     "kind": "function",
+     "line": 393,
+     "signature": "def drops(seq, dead) -> list[DropLife]",
+     "summary": "Every drop followed one by one, and how it ended."
+    },
+    {
+     "name": "occupancy",
+     "kind": "function",
+     "line": 469,
+     "signature": "def occupancy(seq, model, band) -> dict[int, list[float]]",
+     "summary": "Per spawn platform: seconds covered, monster-seconds seen, seconds empty."
+    },
+    {
+     "name": "km",
+     "kind": "function",
+     "line": 489,
+     "signature": "def km(obs: list[tuple[float, bool]]) -> list[tuple[float, float, float]]",
+     "summary": "Kaplan-Meier survival with Greenwood's sum at each event time."
+    },
+    {
+     "name": "quantile",
+     "kind": "function",
+     "line": 525,
+     "signature": "def quantile(curve, q=0.5) -> tuple[float | None, float | None, float | None]",
+     "summary": "Time by which a share q happened, with its Brookmeyer-Crowley 95% interval."
+    },
+    {
+     "name": "summary",
+     "kind": "function",
+     "line": 543,
+     "signature": "def summary(obs) -> dict",
+     "summary": "n, events, median and interval, quartiles, share left at AT, longest followed."
+    },
+    {
+     "name": "report",
+     "kind": "function",
+     "line": 611,
+     "signature": "def report(runs, model, game=None) -> list[str]",
+     "summary": "The report: respawn (all, lone, near, by platform), drop life, how full."
+    },
+    {
+     "name": "kills",
+     "kind": "function",
+     "line": 253,
+     "signature": "def kills(records) -> list[Kill]",
+     "summary": "Her 'kill' events and the feed's 'died' events, parsed by regex."
+    },
+    {
+     "name": "Look",
+     "kind": "dataclass",
+     "line": 122,
+     "signature": "class Look(t, x, y, platform, standing, monsters, loot, searched, wide, looked, view, full=False, recorded=False)",
+     "summary": "One scene record as this report reads it."
+    },
+    {
+     "name": "spawn_fields",
+     "kind": "function",
+     "line": 668,
+     "signature": "def spawn_fields(tree: dict) -> dict",
+     "summary": "The map image's own spawn fields: spawn count, mobTime, mobRate, createMobInterval."
+    },
+    {
+     "name": "MAX_GAP",
+     "kind": "constant",
+     "line": 96,
+     "signature": "MAX_GAP = 2.0",
+     "summary": "Looks covering a platform more than 2 s apart censor its episode."
+    }
+   ],
+   "inputs": [
+    "telemetry records: session, route, trip, stance, drops, scene, event (kill, died)",
+    "the map model and the camera's corner function (localization.pose.Camera), passed in by the `respawn` command",
+    "the shooting band (attack.reach.LOOK_UP, LOOK_DOWN), passed in",
+    "the map's cached game data tree for spawn_fields"
+   ],
+   "outputs": [
+    "report lines with survival estimates, censoring reasons and occupancy per platform"
+   ],
+   "uses": [
+    "gamelab/perception/minimap.py",
+    "gamelab/screen.py"
+   ],
+   "files_io": [],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "EDGE",
+     "value": "40.0",
+     "meaning": "map units inside the screen's sides a platform must be to count as in view"
+    },
+    {
+     "name": "BODY",
+     "value": "60.0",
+     "meaning": "map units a standing monster's body reaches above its platform"
+    },
+    {
+     "name": "AIR_S",
+     "value": "1.3",
+     "meaning": "s after a jump stance during which she isn't standing (inferred looks)"
+    },
+    {
+     "name": "FADE_S",
+     "value": "1.5",
+     "meaning": "s after a kill its monster may still be seen dying"
+    },
+    {
+     "name": "KILL_SEEN_S / KILL_DX",
+     "value": "3.0 / 60.0",
+     "meaning": "a kill counts if its kind was seen this near, this soon before"
+    },
+    {
+     "name": "EMPTY_N / EMPTY_S",
+     "value": "2 / 0.5",
+     "meaning": "empty looks, and their least spread, before a platform counts as emptied"
+    },
+    {
+     "name": "MAX_GAP",
+     "value": "2.0",
+     "meaning": "s between covering looks before an episode is censored"
+    },
+    {
+     "name": "HORIZON",
+     "value": "180.0",
+     "meaning": "s an episode is followed at most"
+    },
+    {
+     "name": "LONE_S / NEAR",
+     "value": "15.0 / 150.0",
+     "meaning": "the lone and near splits"
+    },
+    {
+     "name": "DROP_DX / OVERLAP_DX / PICK_DX",
+     "value": "8 / 15 / 25",
+     "meaning": "same drop; overlapping drop; she picks it up from this near"
+    },
+    {
+     "name": "BIRTH_S / EMPTY_LOOKS",
+     "value": "20.0 / 1.5",
+     "meaning": "a kill this soon before is its birth; two empty looks this far apart make it gone"
+    },
+    {
+     "name": "AT",
+     "value": "(5, 8, 12.56, 20, 30, 60, 90, 180)",
+     "meaning": "s the share left is reported at"
+    },
+    {
+     "name": "MIN_FOLLOWED",
+     "value": "5",
+     "meaning": "a time is given only where this many were still followed"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-21",
+     "what": "Scene records say what they searched, how, where they looked for drops, the view, and whether she stood.",
+     "why": "So the report doesn't have to infer coverage (about 90 bytes a look)."
+    },
+    {
+     "date": "2026-10-21",
+     "what": "A gap of over MAX_GAP between covering looks censors an episode instead of continuing it.",
+     "why": "Found in review: 34 of the 77 live episodes spanned such gaps, of up to 111 s, and the 'past a minute' result rested on that unwatched time."
+    },
+    {
+     "date": "2026-10-21",
+     "what": "RESPAWN (8 s) and DROP_LIFE (90 s hunt, 180 s world) were kept.",
+     "why": "The median isn't reached and the game's mechanism (delay or cap) isn't known; another value would be another guess."
+    },
+    {
+     "date": "2026-10-30",
+     "what": "The hunt stopped leaving a pile at a fixed DROP_LIFE (90 s): behavior.ledger.SURVIVAL says how likely it still lies.",
+     "why": "behavior/hunt.py's `_candidate` docstring; the curve is fitted in behavior/ledger.py from the perception service's records, not by this report."
+    }
+   ],
+   "gotchas": [
+    "Kill events come at the look that saw her EXP rise, so respawn times are a little short (0.53 s at the median in the simulator).",
+    "Drop life is a lower bound: other players' takes look the same as a drop vanishing.",
+    "This layer can't import localization or attack, so the camera and band are handed in by the command.",
+    "Tree Dungeon's respawn (2026-10-29/30: the map's own tick, `sim.world.TICK_S` 7.115 s, filling it to a cap) was measured with scratch scripts on the perception service's telemetry, not by this module."
+   ],
+   "tests": [
+    "tests/test_respawn.py",
+    "tests/test_geometry.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/jumps.py",
+   "title": "Jump attacks and their jitter",
+   "tagline": "What came of each jump attack, and whether its key jitter predicts a hit",
+   "summary": "Reads a run's telemetry and gives each jump attack an outcome: a kill (an EXP gain naming its target came 0.1-0.85 s after the attack key), a hit (the target's HP bar dropped within 1.4 s), or nothing seen. Since 2026-11-01 jump attack keys carry a small random jitter; it tabulates outcomes by jitter bin and runs a stratified permutation test of whether jitter predicts a hit.",
+   "details_md": "**Inputs.** 'jump' records (`behavior.fight.log_jump`, one per jump throw or jump back: `kind` why ('above',\n'reach', 'passing', 'close', ...), `jump` ('up', 'forward', 'back'), `key_ms`, target, platform, x, dx, up, and from\n2026-11-01 `base_ms`, `jitter_ms`, `window`, `turn`, `sure`, `n`), 'attack' records, 'jump_keys' records (whether\nthe keys went, `pressed_ms` as the player pressed them), 'exp' gains, 'scene' looks, and in simulated runs\n'sim_attack' records (the world's own outcome).\n\n**Outcomes** (`outcomes`):\n\n1. `keys_of` lists every attack's key time (an 'attack' record within 0.1 s after a 'jump' gets the jump's `key_ms`\n   added) with its target kind.\n2. `kills_of` credits each EXP gain naming a kind to the latest attack at that kind keyed `KILL_AFTER` (0.1-0.85 s)\n   before it. Live, a kill's gain showed 0.15-0.46 s after the throw's key (the server's), before the star even\n   left.\n3. Otherwise a **hit** if a look within `HIT_S` (1.4 s) after the key saw a monster of the target's kind on its\n   platform within `NEAR` (60 units) of where it was, with an HP bar lower than the last look before the key had\n   it (or newly shown). Else **nothing seen** (a miss, a star stopped, a hit hidden under damage numbers, or a\n   monster already dead).\n\n`service_records` prefers the perception service's own `*-perceive.jsonl` in the same folder when it covers the\nrun: its gains don't lag (the hunter's lagged by more than 0.5 s for 38% of kills live) and its scenes come 10 a\nsecond (the hunter's looks between her keys missed a hit). `table` prints counts by why and jump kind, with\noutcomes, the median attack key and the targets' median height.\n\n**The jitter report** (`jitter_report`, `python -m gamelab jitter`). `jitter_rows` joins each 'jump' record to the\nfirst 'jump_keys' record after it with the same `n` (`_keys_of_jumps`), takes the outcome from 'sim_attack' (the\nfirst jump throw/back keyed within `MATCH_S` 1.5 s) in simulated runs or from `outcomes` otherwise, and computes\n`pressed_jitter` (press minus base) and `otherwise` (pressed more than `PRESS_OFF_MS` 5 ms off the key sent, as when\na turn in the air was keyed differently; not counted).\n\n- `jitter_table` groups by base key, jump kind, turn, and 'shot'/'close'/'unsure' (`_group`), then `BIN_MS` (5 ms)\n  jitter bins: counts of kill, hit, miss, wasted, unmatched, hit %, the share whose room was narrowed, median dx\n  and height.\n- `jitter_test` asks whether jitter predicts a hit with `_perm_p`: the statistic is the hits' jitter minus their\n  group's mean, summed over strata; hits are shuffled within each stratum (`SHUFFLES` 2000, seeded) for a two-sided\n  p. Strata are the jitter's room (`_room`, from the record's `window`), because a narrowed room comes from the\n  target's geometry and would otherwise pass for a jitter effect. Only rooms with both outcomes and more than one\n  jitter value are tested.\n\n`WHOLE_TOP` (-20, 20), `WHOLE_FIRST` (0, 15) and `TOP_KEY_MS` (278, from `physics.APEX_S`) copy attack.reach's\nvalues instead of importing them, because analysis sits below attack; tests check they agree.",
+   "lines": 459,
+   "key_items": [
+    {
+     "name": "outcomes",
+     "kind": "function",
+     "line": 110,
+     "signature": "def outcomes(rows, gains=None, scenes=None) -> list[dict]",
+     "summary": "Each 'jump' record with its attack key time and outcome: kill, hit or nothing seen."
+    },
+    {
+     "name": "jitter_rows",
+     "kind": "function",
+     "line": 221,
+     "signature": "def jitter_rows(rows, gains=None, scenes=None) -> list[dict]",
+     "summary": "Jump records with jitter joined to their 'jump_keys' and outcome (simulator's or the looks')."
+    },
+    {
+     "name": "jitter_test",
+     "kind": "function",
+     "line": 364,
+     "signature": "def jitter_test(rows, shuffles=SHUFFLES, seed=0) -> str",
+     "summary": "Per group and overall: does jitter predict a hit? Stratified permutation p-values."
+    },
+    {
+     "name": "_perm_p",
+     "kind": "function",
+     "line": 345,
+     "signature": "def _perm_p(groups, shuffles, rng) -> tuple[float, float]",
+     "summary": "Stratified permutation test: hits shuffled within each stratum, two-sided p."
+    },
+    {
+     "name": "jitter_table",
+     "kind": "function",
+     "line": 321,
+     "signature": "def jitter_table(rows) -> str",
+     "summary": "Outcomes by base key, jump kind, turn, shot/close/unsure and 5 ms jitter bin."
+    },
+    {
+     "name": "jitter_report",
+     "kind": "function",
+     "line": 404,
+     "signature": "def jitter_report(paths) -> list[str]",
+     "summary": "The `jitter` command's report over telemetry files."
+    },
+    {
+     "name": "kills_of",
+     "kind": "function",
+     "line": 98,
+     "signature": "def kills_of(gains, keys) -> dict[float, float]",
+     "summary": "Each EXP gain credited to the latest attack at its kind keyed 0.1-0.85 s before."
+    },
+    {
+     "name": "keys_of",
+     "kind": "function",
+     "line": 85,
+     "signature": "def keys_of(rows) -> list[tuple[float, str | None]]",
+     "summary": "Every attack's key time and target kind in a run."
+    },
+    {
+     "name": "service_records",
+     "kind": "function",
+     "line": 158,
+     "signature": "def service_records(path, rows) -> tuple[list[dict], list[dict]] | None",
+     "summary": "The perception service's EXP gains and scenes covering the run, from a *-perceive.jsonl beside it."
+    },
+    {
+     "name": "_keys_of_jumps",
+     "kind": "function",
+     "line": 207,
+     "signature": "def _keys_of_jumps(rows) -> dict[int, dict]",
+     "summary": "Each 'jump' record's 'jump_keys' record: the first after it with its n."
+    },
+    {
+     "name": "_room",
+     "kind": "function",
+     "line": 290,
+     "signature": "def _room(row) -> tuple[int, int]",
+     "summary": "The room the jitter was drawn from, relative to the base key."
+    },
+    {
+     "name": "table",
+     "kind": "function",
+     "line": 182,
+     "signature": "def table(jumps, minutes=None) -> str",
+     "summary": "Jump throws by why and kind with outcomes, median key ms and target height."
+    },
+    {
+     "name": "KILL_AFTER",
+     "kind": "constant",
+     "line": 59,
+     "signature": "KILL_AFTER = (0.1, 0.85)",
+     "summary": "s after an attack key that an EXP gain naming its target's kind is its kill."
+    },
+    {
+     "name": "main",
+     "kind": "function",
+     "line": 439,
+     "signature": "def main(argv=None) -> int",
+     "summary": "`python -m gamelab.analysis.jumps [FILES]`: the outcome table, by default on the newest telemetry file."
+    }
+   ],
+   "inputs": [
+    "telemetry records: jump, jump_keys, attack, exp, scene, sim_attack",
+    "the perception service's *-perceive.jsonl in the same folder, when it covers the run"
+   ],
+   "outputs": [
+    "the outcome table (jumps main)",
+    "the jitter table, the permutation tests, and press-vs-sent offsets (jitter command)"
+   ],
+   "uses": [
+    "gamelab/motion/physics.py",
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/telemetry/*.jsonl",
+     "mode": "read",
+     "what": "the run's records (default: the newest non-perceive file)"
+    },
+    {
+     "path": "lab/telemetry/*-perceive.jsonl",
+     "mode": "read",
+     "what": "the service's gains and scenes covering the run"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "KILL_AFTER",
+     "value": "(0.1, 0.85)",
+     "meaning": "s window after the key in which a gain is the kill"
+    },
+    {
+     "name": "HIT_S",
+     "value": "1.4",
+     "meaning": "s after the key a lower bar counts as a hit"
+    },
+    {
+     "name": "NEAR",
+     "value": "60.0",
+     "meaning": "map units: the target seen again (it walks 20-60 by then)"
+    },
+    {
+     "name": "MATCH_S",
+     "value": "1.5",
+     "meaning": "s after a jump record the simulator's first jump attack is its own"
+    },
+    {
+     "name": "SHUFFLES",
+     "value": "2000",
+     "meaning": "permutation test shuffles (seeded)"
+    },
+    {
+     "name": "PRESS_OFF_MS",
+     "value": "5",
+     "meaning": "a press this far off the key sent isn't counted"
+    },
+    {
+     "name": "BIN_MS",
+     "value": "5",
+     "meaning": "jitter bin width"
+    },
+    {
+     "name": "WHOLE_TOP / WHOLE_FIRST / TOP_KEY_MS",
+     "value": "(-20, 20) / (0, 15) / 278",
+     "meaning": "the jitter rooms of the top's key and the soonest's"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "2026-10-26",
+     "what": "A kill is a gain 0.1-0.85 s after the attack key (KILL_AFTER), not any gain up to 1.6 s after the jump record.",
+     "why": "A ground throw's kill 1.4 s on had been taken for a jump's (1 of the 6 jump records of 2026-10-25 23:43)."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "Jump attack keys jittered (soonest 0 to +15 ms, top -20 to +20) and the jitter report added.",
+     "why": "The user: \"add a bit jitter to it so we still have some variation and can later on analyze if the jitter can show any pattern\"."
+    },
+    {
+     "date": "2026-11-01",
+     "what": "The permutation test shuffles within each jitter room; 'jump_keys' joined by n after the jump record; presses off by more than 5 ms excluded.",
+     "why": "The reviews: a narrowed room is the target's geometry and would pass for a jitter effect; joining by n alone let a later hunter's record take an earlier one's."
+    }
+   ],
+   "gotchas": [
+    "In the simulator the outcome follows the simulator's own model of the pick, so a pattern there is the model's; only live grinds can show a real one.",
+    "The soonest key's jitter (0 to +15 ms, sd 4.6) is smaller than the game's own spread of a key, so a pattern there shows only over many attacks.",
+    "Jump records before 2026-11-01 carry no jitter and are skipped by the jitter report."
+   ],
+   "tests": [
+    "tests/test_jump_reach.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/bench.py",
+   "title": "Look benchmark",
+   "tagline": "Time each stage of a look on saved frames or live, touching no window",
+   "summary": "Times every stage of a look (capture, HP bars, name tag, ground, minimap dots, ropes, EXP number, Lie Detector check, monsters) on saved screenshots or on the live game, and times DXGI against mss capture. Its SavedEyes, the real Eyes fed from saved frames, is also how other offline tools look at saved frames.",
+   "details_md": "**Saved frames as a screen.** `load` reads saved screenshots (default `FRAMES`: 17 1920x1080 shots of her on\nThicket Around the Beach II in `gamelab/lab`, with monsters, ropes and drops in view), checks they are all one known\nsize (`screen.LOOK_SCALES`: 1920x1080 or 1366x768), optionally shrinks them (`--shrink 1366x768`, OpenCV area\naverage), and converts each to the BGRA picture a screen capture gives. `SavedScreen` and `SavedShot` stand in for\n`capture.Grabber` and its shots, so `SavedEyes` (a subclass of `perception.eyes.Eyes`) runs exactly the same\nconversion and look code as the game's eyes, with no window touched: `_to_front` does nothing, the client area is the\nframe, and the window checks return none (the frame's own `framecheck` checks still run, unless the frames were\nresampled). It takes the map's minimap picture, without which her dot would be read with the first map's origin and\n`Senses` would refuse every look.\n\n**Live, read-only.** `FrontEyes` raises `BadLook` if the game isn't already in front; it never brings it forward, so\nit can run while someone plays.\n\n**`Timer`** collects named samples (`time`, `add`) and counts; `table` prints n, median, 90th percentile and\nfastest in ms.\n\n**`stages`** times, on what the eyes capture now: the capture (and, live, the frame's age), HP and MP bars, the\nhalf-size look frame, the name tag (near where she was and over the whole play area), the ground under her, her\nminimap dot and other players', ropes over the whole screen and only where the map's ropes can show (counting ropes\nthe narrow search missed), the EXP number box and its read, the player's Lie Detector check, a glance, `Eyes.look`,\nand the monsters in her band, on the whole screen, and each monster's HP bar.\n\n**`run`** times the stages plus caller-supplied whole looks (the `bench-look` command passes `Senses.look` variants\nand the continuous feed's step): on each saved frame `reps` times (default 5), or on `n` live captures (default 100).\nThe first look of each frame or run isn't timed (it loads templates and starts threads).\n\n**`refused`** lists the saved frames whose looks fail their checks (framecheck, or a `Senses.place` refusal) before\ntiming: a look through Senses at a refused frame would retry for `senses.LOST_S` and then stop the command.\n\n**`capture_stages`** (for `bench-capture`) times a look's full capture and a glance (minimap and the HP bar row)\nthrough DXGI and mss on the same screen box, and counts whether the two see identical pixels. The docstring notes\noffline numbers leave out the grab itself: mss waits for the compositor's next frame (16.7 ms), DXGI for the screen's\nnext frame, plus about 2 ms to copy 1920x1080 off the graphics card.",
+   "lines": 284,
+   "key_items": [
+    {
+     "name": "SavedEyes",
+     "kind": "class",
+     "line": 104,
+     "signature": "class SavedEyes(Eyes): __init__(tag_template, detector=None, geo=STRETCHED, minimap_picture=None, check_frames=True)",
+     "summary": "The real Eyes, its captures taken from saved frames shown with `show`; no window is touched."
+    },
+    {
+     "name": "run",
+     "kind": "function",
+     "line": 228,
+     "signature": "def run(eyes, band, looks, frames=None, reps=5, n=100) -> Timer",
+     "summary": "Times every stage and each named whole look, on saved frames or live captures."
+    },
+    {
+     "name": "stages",
+     "kind": "function",
+     "line": 170,
+     "signature": "def stages(eyes, timer, band, spotter) -> None",
+     "summary": "Each part of a look once on the current capture, then Eyes.look and its questions."
+    },
+    {
+     "name": "Timer",
+     "kind": "class",
+     "line": 141,
+     "signature": "class Timer()",
+     "summary": "Named stages timed (samples) and things counted."
+    },
+    {
+     "name": "Timer.table",
+     "kind": "method",
+     "line": 160,
+     "signature": "def table(self) -> list[str]",
+     "summary": "One line per stage: n, median, p90, min in ms; then the counts."
+    },
+    {
+     "name": "FrontEyes",
+     "kind": "class",
+     "line": 131,
+     "signature": "class FrontEyes(Eyes)",
+     "summary": "Eyes on the live game that refuse to capture unless it is already in front."
+    },
+    {
+     "name": "load",
+     "kind": "function",
+     "line": 52,
+     "signature": "def load(paths, shrink=None) -> list[tuple[str, np.ndarray]]",
+     "summary": "Saved screenshots of one known size as BGRA capture pictures, optionally shrunk."
+    },
+    {
+     "name": "refused",
+     "kind": "function",
+     "line": 212,
+     "signature": "def refused(eyes, senses, frames) -> list[str]",
+     "summary": "Saved frames whose looks fail their checks, with why."
+    },
+    {
+     "name": "capture_stages",
+     "kind": "function",
+     "line": 256,
+     "signature": "def capture_stages(area, dxgi, gdi, timer) -> None",
+     "summary": "A look's and a glance's capture through DXGI and mss, and whether they see the same pixels."
+    },
+    {
+     "name": "geometry_of",
+     "kind": "function",
+     "line": 72,
+     "signature": "def geometry_of(frames, look_scale=None) -> Geometry",
+     "summary": "The geometry of loaded frames."
+    },
+    {
+     "name": "saved_frames",
+     "kind": "function",
+     "line": 47,
+     "signature": "def saved_frames() -> list[Path]",
+     "summary": "The default frames that exist in gamelab/lab."
+    },
+    {
+     "name": "SavedShot",
+     "kind": "class",
+     "line": 91,
+     "signature": "class SavedShot(capture.Shot)",
+     "summary": "Boxes of a saved frame, each a picture of its own like a capture's."
+    },
+    {
+     "name": "FRAMES",
+     "kind": "constant",
+     "line": 42,
+     "signature": "FRAMES = ('z2_shoot1.png', ..., 'closeup.png')",
+     "summary": "The 17 default saved screenshots of her on Thicket Around the Beach II."
+    }
+   ],
+   "inputs": [
+    "saved screenshots (default 17 in gamelab/lab)",
+    "or the live game window, only if already in front",
+    "her name tag template, the map's monster detector and minimap picture (from the command)"
+   ],
+   "outputs": [
+    "timing tables for `bench-look` and `bench-capture`",
+    "SavedEyes for `bodies`, sim.soak and sim.replay_run"
+   ],
+   "uses": [
+    "gamelab/capture.py",
+    "gamelab/window.py",
+    "gamelab/paths.py",
+    "gamelab/perception/exp_number.py",
+    "gamelab/perception/eyes.py",
+    "gamelab/perception/framecheck.py",
+    "gamelab/perception/hud.py",
+    "gamelab/perception/lie_detector.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/terrain.py",
+    "gamelab/screen.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/<FRAMES>.png",
+     "mode": "read",
+     "what": "the default saved screenshots"
+    }
+   ],
+   "concurrency": "Live mode captures through capture.Grabber (DXGI or mss). The first look loads templates and starts the eyes' threads, so it isn't timed.",
+   "tunables": [
+    {
+     "name": "run reps",
+     "value": "5",
+     "meaning": "timed looks per saved frame, after one untimed"
+    },
+    {
+     "name": "run n",
+     "value": "100",
+     "meaning": "live captures timed"
+    },
+    {
+     "name": "FRAMES",
+     "value": "17 files",
+     "meaning": "the default saved screenshots"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "Saved frames go through the same capture path as the game's: each becomes the BGRA picture a capture gives.",
+     "why": "So offline timings measure the same conversion and look code; only the grab itself is left out."
+    },
+    {
+     "date": "",
+     "what": "Refused frames are reported up front and the command stops.",
+     "why": "A look through Senses at a refused frame would be taken again for senses.LOST_S and then stop the command (LookLost), as `refused`'s docstring says."
+    }
+   ],
+   "gotchas": [
+    "Frames of mixed sizes are refused: time one size at a time.",
+    "`--shrink` turns off the frames' own checks, because shrinking blurs their 1-px anchors and every frame would fail.",
+    "Live bench-look never brings the game forward; it refuses if the game isn't already in front."
+   ],
+   "tests": [
+    "tests/test_bench.py",
+    "tests/test_resolution.py",
+    "tests/test_capture.py",
+    "tests/test_feed.py",
+    "tests/test_framecheck.py",
+    "tests/test_locate.py",
+    "tests/test_navigation.py",
+    "tests/test_perception.py",
+    "tests/test_screen_frames.py",
+    "tests/test_window_size.py",
+    "tests/test_chatbox.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/bodies.py",
+   "title": "Monster bodies check",
+   "tagline": "Where the detector puts monsters' feet, and how steady their x is",
+   "summary": "Checks the monster detector offline three ways: monster feet against the platform surface on saved screenshots; how much a monster's x strays frame to frame in recordings, whether it faces the way it moves, and whether its matched pose matches what it does; and the continuous feed's track velocities in `watch` telemetry.",
+   "details_md": "**Feet on saved screenshots** (`feet_rows`, `feet_table`). For each monster a placed look put on a platform, the\nfeet's map y minus the platform's surface at that x (+ is below), measured two ways: by the template's bottom (as\nbefore the templates knew where the feet are) and by the template's origin (`mob.feet`). Results are grouped as the\ngame's sprites together and each screenshot cut-out on its own (`is_cutout`: a template name ending in a number).\nScreenshots where she isn't standing are left out (`AIRBORNE`, and looks whose scene isn't grounded): her own height\nthen shifts every monster seen (in `closeup.png` her tag is 9 px above where she stands and every monster reads 5-15\nunits low).\n\n**x frame to frame on recordings** (`recording`). The detector runs on every frame of a recording with the camera\nstill (she stands). `link` follows detections: each live track takes the nearest detection of its kind within\n`LINK_PX` (12 across, 10 down, converted) at most `LINK_GAP` (3) frames later. For tracks of at least `MIN_TRACK`\n(15) detections, `residuals` measures how far each x is from a straight line fitted through the detections within\n`FIT_S` (0.3 s) either side (at least `FIT_MIN` 7), by the template's centre and by its foot x. From the same local\nslope (in units/s):\n\n- **speed**: over `MOVING` (12) units/s, its speed is collected per kind (the game data says 125 units/s for a pig,\n  43.75 for a snail);\n- **facing**: whether its facing agrees with the direction it moves;\n- **pose**: walking (over `WALKING_V` 30) or standing (under `STILL_V` 8) against whether the matched template was a\n  'move' or 'stand' frame, by cut-outs and sprites.\n\n`_spread` reports rms, 95th percentile and max in map units. `_slope` is least squares by hand, because\n`numpy.linalg` killed the process with MKL until 2026-10-24.\n\n**The feed's tracks** (`tracks_lines`). From `watch`'s telemetry 'tracks' records (twice a second): for each live\ntrack seen in two records 0.3-1.5 s apart, its velocity against how far its x actually went: standing ones (under\n8 units/s) should have |vx| under 15; walking ones (over 30) should have vx the same sign and within 30 units/s.\n\n**Why.** The docstring's evidence: in recordings at 30-60 frames a second a monster's x jumped up to 10 units\nbetween frames as the winning template changed from a sprite to a cut-out whose picture is off-centre.\n\n`run` puts it together; the `bodies` command defaults to bench's saved frames and the `stand_snail` and\n`walk_snail` recordings, each recording read at its own geometry (`recordings.file_geometry`).",
+   "lines": 268,
+   "key_items": [
+    {
+     "name": "recording",
+     "kind": "function",
+     "line": 140,
+     "signature": "def recording(frames, times, detector, geo=STRETCHED) -> dict",
+     "summary": "x stray by centre and by feet, facing against motion, pose against motion, walking speed per kind."
+    },
+    {
+     "name": "link",
+     "kind": "function",
+     "line": 97,
+     "signature": "def link(frames, geo=STRETCHED) -> list[list[tuple[int, Mob]]]",
+     "summary": "Detections followed frame to frame by kind and distance."
+    },
+    {
+     "name": "residuals",
+     "kind": "function",
+     "line": 128,
+     "signature": "def residuals(ts, xs) -> list[float]",
+     "summary": "Each x's distance from the straight line through its neighbours within 0.3 s."
+    },
+    {
+     "name": "feet_rows",
+     "kind": "function",
+     "line": 53,
+     "signature": "def feet_rows(scene, model) -> list[dict]",
+     "summary": "Each placed monster's feet against its platform's surface, by template bottom and by origin."
+    },
+    {
+     "name": "run",
+     "kind": "function",
+     "line": 186,
+     "signature": "def run(scenes, model, recordings, detector_for) -> list[str]",
+     "summary": "The report: feet on screenshots, then x, facing, pose and speeds on recordings."
+    },
+    {
+     "name": "tracks_lines",
+     "kind": "function",
+     "line": 237,
+     "signature": "def tracks_lines(records) -> list[str]",
+     "summary": "The feed's track velocities against how their x moved between `watch` records."
+    },
+    {
+     "name": "feet_table",
+     "kind": "function",
+     "line": 69,
+     "signature": "def feet_table(rows) -> list[str]",
+     "summary": "Feet offsets per template kind: mean, sd, min, max."
+    },
+    {
+     "name": "pose_lines",
+     "kind": "function",
+     "line": 220,
+     "signature": "def pose_lines(poses) -> list[str]",
+     "summary": "How often the matched template's pose was what the monster did."
+    },
+    {
+     "name": "_slope",
+     "kind": "function",
+     "line": 121,
+     "signature": "def _slope(ts, xs) -> float",
+     "summary": "Least-squares slope by hand (numpy.linalg crashed with MKL until 2026-10-24)."
+    },
+    {
+     "name": "is_cutout",
+     "kind": "function",
+     "line": 48,
+     "signature": "def is_cutout(mob: Mob) -> bool",
+     "summary": "Whether a screenshot cut-out matched rather than one of the game's sprites (also used by pasted)."
+    },
+    {
+     "name": "LINK_PX",
+     "kind": "constant",
+     "line": 37,
+     "signature": "LINK_PX = (12, 10)",
+     "summary": "A detection in the next frame within this far across and down is the same monster."
+    }
+   ],
+   "inputs": [
+    "placed scenes of saved screenshots (Senses looks through bench.SavedEyes, from the command)",
+    "the map model",
+    "saved recordings (.npz) with a still camera",
+    "a monster detector per geometry",
+    "`watch` telemetry 'tracks' records (--tracks)"
+   ],
+   "outputs": [
+    "report lines for the `bodies` command"
+   ],
+   "uses": [
+    "gamelab/perception/mobs.py",
+    "gamelab/screen.py",
+    "gamelab/analysis/recordings.py"
+   ],
+   "files_io": [
+    {
+     "path": "lab/recordings/stand_snail.npz, walk_snail.npz (or named)",
+     "mode": "read",
+     "what": "recordings with the camera still"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "LINK_PX / LINK_GAP",
+     "value": "(12, 10) / 3",
+     "meaning": "how far and how many frames a detection may jump and stay the same track"
+    },
+    {
+     "name": "FIT_S / FIT_MIN",
+     "value": "0.3 / 7",
+     "meaning": "s either side, and detections needed, for the local straight line"
+    },
+    {
+     "name": "MOVING",
+     "value": "12.0",
+     "meaning": "units/s: slower isn't walking, for facing and speed"
+    },
+    {
+     "name": "WALKING_V, STILL_V",
+     "value": "30.0, 8.0",
+     "meaning": "units/s: walking / standing, for pose"
+    },
+    {
+     "name": "MIN_TRACK",
+     "value": "15",
+     "meaning": "detections a monster needs to count on a recording"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "Least squares by hand (_slope) instead of numpy.linalg.",
+     "why": "numpy.linalg killed the process with MKL until 2026-10-24 (environment.yml); by hand it is as exact, and cheaper."
+    }
+   ],
+   "gotchas": [
+    "Recordings from before 2026-10-23 are 1920x1080 at half size whatever size the screenshots are; each recording gets a detector for its own geometry.",
+    "The recordings must have a still camera (she stands): x stray is measured in frame px with nothing taken out for the camera's scroll."
+   ],
+   "tests": [
+    "tests/test_bodies.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/pasted.py",
+   "title": "Pasted sprites benchmark",
+   "tagline": "Draw the game's own sprites onto frames at known places, then look for them",
+   "summary": "Builds synthetic test scenes: the game's own monster and drop pictures alpha-blended onto real 1366x768 frames at known places, exactly as the game draws them. The detectors then search the scenes at 1366x768 full size and stretched to 1920x1080 half size, and it reports what was found, how far off, at what score, how fast, plus how well a found monster is re-found in its next frame.",
+   "details_md": "**Why.** There were no frames of the game at its own 1366x768 with the first map's monsters on them, and the new\nmaps' saved frames show their monsters in only a few places and poses. Pasting the game's own pictures gives ground\ntruth: every frame of every sprite, both facings, at known feet positions.\n\n**Drawing** (`paste`, `scenes`). `paste` blends an RGBA picture onto a frame pixel for pixel: colour where opaque,\nblended by alpha where see-through, rounded. `scenes` puts `PER_SCENE` (6) pictures on each background, at random\nplaces at least `GAP` (12 game px) apart, below `TOP` (40 px: the title strip and party HP box), above the bottom bar\n(`HUD_TOP`), and clear of the minimap; it tries 200 random places per picture. Monsters drawn facing right are\nflipped (the game's sprites face left), and their feet are computed from the sprite's origin in the INDEX metadata.\n\n**Two sizes.** Each scene is searched as a 1366x768 look sees it (full size) and as the 1920x1080 window showed it\nuntil 2026-10-23: stretched bilinearly (`stretched`) and shrunk to half size (`look_frame`). Positions found in a\nlook frame are mapped back to game px by the pixel's **middle** (`_game`: `(v + 0.5) * upp - 0.5`): by the pixel's\nedge, the first map's feet found at 1920x1080 came out 0.27 units left and 0.19 up on average (160 of them), by its\nmiddle 0.06 left and 0.02 down.\n\n**Monsters** (`monsters`). Every picture of the kinds all detectors know (those with a colour gate), both facings,\ndrawn `each` (2) times in random order. For each detector: a whole-screen search (`detect_wide`) and a fight's band\naround each monster's feet (`detect`); a find counts if it's the nearest of its kind within `FEET_TOL` (10 map units)\nof the drawn feet. Tallied per kind (`Tally`): drawn, found, found in band, found as the frame and facing drawn,\nfound by a cut-out (which says no frame), feet errors, scores, missed names, and extra finds where none of the kind\nwas drawn. The backgrounds alone are searched too ('clean').\n\n**Drops** (`drops`). Every drop picture of the map's kinds (and the coins' frames), each searched in a strip just\nabove where it lies (`ABOVE`/`BELOW` of its bottom, `STRIP_PAD` 40 units either side), as Senses searches a\nplatform. A find counts within `ITEM_TOL` (6) of the picture's middle; coins also check the right coin.\n\n**Re-finds** (`refinds`). For each standing and walking sprite: draw it, find it in the band, then draw instead the\nframe it may show next (`STEPS`: unchanged, its pose's next frame, standing to walking or back, a flinch) with the\nfeet in the same place, and call `MobDetector.refind` around it as the feed does each frame, with and without the\nfallback to the kind's whole template set. `Refound` counts found again, feet within `FEET_NEAR` (1 unit), as the\nframe drawn, fallbacks taken, and times each re-find.\n\n`lines` and `refind_lines` format the `bench-paste` command's report.",
+   "lines": 414,
+   "key_items": [
+    {
+     "name": "monsters",
+     "kind": "function",
+     "line": 168,
+     "signature": "def monsters(backgrounds, detectors, folder, band, each=2, seed=0, kinds=None) -> dict",
+     "summary": "Every monster picture drawn both ways and looked for by each detector: a Tally per kind, clean finds, times."
+    },
+    {
+     "name": "drops",
+     "kind": "function",
+     "line": 227,
+     "signature": "def drops(backgrounds, detectors, folder, each=2, seed=1, kinds=None) -> dict",
+     "summary": "Every drop picture drawn and looked for in a strip above where it lies."
+    },
+    {
+     "name": "refinds",
+     "kind": "function",
+     "line": 308,
+     "signature": "def refinds(backgrounds, detectors, folder, band, seed=3, kinds=None) -> dict",
+     "summary": "Each sprite found, redrawn as its possible next frame, and re-found as the feed would."
+    },
+    {
+     "name": "paste",
+     "kind": "function",
+     "line": 85,
+     "signature": "def paste(frame, rgba, left, top) -> None",
+     "summary": "Alpha-blends a picture onto a frame as the game draws it."
+    },
+    {
+     "name": "scenes",
+     "kind": "function",
+     "line": 120,
+     "signature": "def scenes(backgrounds, todo, rng, per_scene=PER_SCENE) -> list[tuple[np.ndarray, int, list[Drawn]]]",
+     "summary": "Pictures drawn onto backgrounds at random places clear of each other, the minimap and the bottom bar."
+    },
+    {
+     "name": "_game",
+     "kind": "function",
+     "line": 155,
+     "signature": "def _game(v, upp) -> float",
+     "summary": "A look-frame px in game px by its middle: (v + 0.5) * upp - 0.5."
+    },
+    {
+     "name": "Drawn",
+     "kind": "dataclass",
+     "line": 58,
+     "signature": "class Drawn(kind, name, facing, left, top, w, h, feet=None, coin=None)",
+     "summary": "One picture drawn onto a frame, in game px, with its feet for monsters."
+    },
+    {
+     "name": "Tally",
+     "kind": "dataclass",
+     "line": 72,
+     "signature": "class Tally(drawn, found, found_band, as_drawn, by_cutout, errors, scores, missed, extra)",
+     "summary": "What a search made of the pictures drawn, for one size and kind."
+    },
+    {
+     "name": "Refound",
+     "kind": "dataclass",
+     "line": 287,
+     "signature": "class Refound(n, found, feet, as_drawn, fallbacks, hidden, times)",
+     "summary": "What re-finding made of monsters redrawn as their next frame, per detector and step."
+    },
+    {
+     "name": "stretched",
+     "kind": "function",
+     "line": 94,
+     "signature": "def stretched(full, size=STRETCH_TO) -> np.ndarray",
+     "summary": "A 1366x768 frame as the 1920x1080 window showed it (bilinear)."
+    },
+    {
+     "name": "look_frame",
+     "kind": "function",
+     "line": 99,
+     "signature": "def look_frame(full, geo) -> np.ndarray",
+     "summary": "A full-size frame shrunk as a look of that geometry sees it."
+    },
+    {
+     "name": "lines",
+     "kind": "function",
+     "line": 386,
+     "signature": "def lines(result, what='monsters') -> list[str]",
+     "summary": "The report of monsters or drops, one block per detector."
+    },
+    {
+     "name": "FEET_TOL",
+     "kind": "constant",
+     "line": 47,
+     "signature": "FEET_TOL = 10",
+     "summary": "Map units a found monster may be from where it was drawn and count."
+    }
+   ],
+   "inputs": [
+    "background frames of the game at 1366x768 (default tests/fixtures/native)",
+    "the game's native sprite and loot picture folders with their INDEX metadata",
+    "monster and loot detectors for 1366x768 and 1920x1080 (from the command)",
+    "the fight band (LOOK_UP, LOOK_DOWN)"
+   ],
+   "outputs": [
+    "report lines for `bench-paste`: recall, position error, scores, extras, times, re-find rates"
+   ],
+   "uses": [
+    "gamelab/perception/loot.py",
+    "gamelab/perception/minimap.py",
+    "gamelab/perception/mobs.py",
+    "gamelab/screen.py",
+    "gamelab/analysis/bodies.py"
+   ],
+   "files_io": [
+    {
+     "path": "tests/fixtures/native/*.png",
+     "mode": "read",
+     "what": "default background frames (read by the command)"
+    },
+    {
+     "path": "<sprite folder>/*.png and its INDEX",
+     "mode": "read",
+     "what": "the game's own monster pictures and origins"
+    },
+    {
+     "path": "<loot folder>/*.png",
+     "mode": "read",
+     "what": "the game's own drop pictures"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [
+    {
+     "name": "PER_SCENE",
+     "value": "6",
+     "meaning": "pictures drawn on one frame"
+    },
+    {
+     "name": "GAP",
+     "value": "12",
+     "meaning": "game px kept between two pictures"
+    },
+    {
+     "name": "TOP",
+     "value": "40",
+     "meaning": "game px from the top a picture may start"
+    },
+    {
+     "name": "FEET_TOL / ITEM_TOL",
+     "value": "10 / 6",
+     "meaning": "map units a found monster / drop may be off and count"
+    },
+    {
+     "name": "FEET_NEAR",
+     "value": "1",
+     "meaning": "map units: a re-found monster's feet placed right"
+    },
+    {
+     "name": "STRIP_PAD",
+     "value": "40",
+     "meaning": "map units either side of a drop its search strip reaches"
+    },
+    {
+     "name": "each",
+     "value": "2",
+     "meaning": "times each picture is drawn (both facings each time)"
+    }
+   ],
+   "decisions": [
+    {
+     "date": "",
+     "what": "Positions are mapped to game px by a pixel's middle, not its edge (_game).",
+     "why": "By the edge, feet found at 1920x1080 came out 0.27 units left and 0.19 up on average (160); by the middle 0.06 left, 0.02 down."
+    }
+   ],
+   "gotchas": [
+    "Only kinds with a colour gate (mobs.PALETTES or a learned gate) are drawn; a map with none has no monster part.",
+    "Random placement is seeded (seed, seed+1 for drops, seed+2 for re-finds in the command), so reruns give the same scenes.",
+    "A picture that can't be placed in 200 tries is skipped silently."
+   ],
+   "tests": [
+    "tests/test_pasted.py",
+    "tests/test_refind.py",
+    "tests/test_geometry.py",
+    "tests/test_loot.py",
+    "tests/test_gates.py",
+    "tests/test_native_match.py",
+    "tests/test_native_search.py",
+    "tests/test_search_c.py"
+   ]
+  },
+  {
+   "path": "gamelab/analysis/disk.py",
+   "title": "Lab disk usage",
+   "tagline": "What gamelab/lab holds, by kind, and what is due to be pruned",
+   "summary": "Walks gamelab/lab and sizes every file by kind (recordings, Lie Detector recordings, recent recordings, alarm clips, screenshots, telemetry, harness runs, golden traces, inbox/outbox, other). It only reads; it also asks each pruner what it would delete next, as a dry run.",
+   "details_md": "**`usage(lab)`** walks every file under `lab` with `os.walk`. A file's kind is the `FOLDERS` entry of its first\nfolder under lab (`recordings`, `lie_detector`, `recent`, `alarm_clips`, `booth_unknown`, `telemetry`, `harness`,\n`golden`, `inbox`, `outbox`), or \"other\" for anything else (the player's log, learned stats such as `shots.jsonl` and\n`grounds.json`, templates, notes). Files at the top of lab are \"screenshots\" if they end in `.png`. Each kind is a\n`Usage`: file count, bytes, and oldest and newest modification time. A file deleted mid-walk is skipped.\n\n**`report(lab, now)`** gives the lines `python -m gamelab lab-usage` prints: the total, each kind's size, file count\nand date span, then what each pruner would delete now, as dry runs:\n\n- telemetry: `telemetry.prune(..., dry_run=True)`; the newest 2 GB (`telemetry.KEEP_BYTES`) are kept, in parts of\n  `telemetry.MAX_BYTES` (64 MB), and none is deleted for its age; `lab-usage --prune-telemetry` applies it now;\n- Lie Detector recordings: `lie_recorder.prune` with `lie_recorder.KEEP_BYTES` (10 GB) besides the one being written;\n- recent recordings (`save-recent`'s: `rolling.RECENT_KEEP_BYTES`, 20 GB), alarm clips (10 s before each alarm to\n  60 s after: `CLIPS_KEEP_BYTES`, 30 GB) and Truth Booths of unknown cause (the recorder's 5 minutes before each:\n  `UNKNOWN_KEEP_BYTES`, 20 GB): `lie_recorder.prune` with those keep sizes, besides the next one saved.\n\nIt ends by saying the other recordings and screenshots are never deleted for you: they are measurement evidence.\n\n**`size(n)`** formats bytes for people (`512 B`, `3.4 KB`, `1.3 GB`); `save-recent` uses it too.",
+   "lines": 110,
+   "key_items": [
+    {
+     "name": "report",
+     "kind": "function",
+     "line": 63,
+     "signature": "def report(lab=LAB, now=None) -> list[str]",
+     "summary": "The `lab-usage` lines: sizes by kind and what each pruner would delete now."
+    },
+    {
+     "name": "usage",
+     "kind": "function",
+     "line": 45,
+     "signature": "def usage(lab=LAB) -> list[Usage]",
+     "summary": "Every file under lab, by kind, in KINDS order."
+    },
+    {
+     "name": "Usage",
+     "kind": "dataclass",
+     "line": 30,
+     "signature": "class Usage(kind, files=0, bytes=0, oldest=None, newest=None)",
+     "summary": "Files of one kind: count, bytes, oldest and newest write time."
+    },
+    {
+     "name": "size",
+     "kind": "function",
+     "line": 100,
+     "signature": "def size(n: float) -> str",
+     "summary": "Bytes for people: B, KB, MB, GB."
+    },
+    {
+     "name": "FOLDERS",
+     "kind": "constant",
+     "line": 21,
+     "signature": "FOLDERS = {'recordings': 'recordings', ...}",
+     "summary": "lab's folders and the kind each holds."
+    },
+    {
+     "name": "KINDS",
+     "kind": "constant",
+     "line": 25,
+     "signature": "KINDS = ('recordings', ..., 'other')",
+     "summary": "The kinds in report order."
+    }
+   ],
+   "inputs": [
+    "the gamelab/lab folder tree",
+    "the pruners' keep sizes (telemetry, lie_recorder, rolling)"
+   ],
+   "outputs": [
+    "report lines for `lab-usage`; size() for `save-recent`"
+   ],
+   "uses": [
+    "gamelab/telemetry.py",
+    "gamelab/control/lie_recorder.py",
+    "gamelab/control/rolling.py",
+    "gamelab/paths.py"
+   ],
+   "files_io": [
+    {
+     "path": "gamelab/lab/**",
+     "mode": "read",
+     "what": "file sizes and modification times (stat only)"
+    }
+   ],
+   "concurrency": "",
+   "tunables": [],
+   "decisions": [],
+   "gotchas": [
+    "The module docstring says the newest 5 GB of save-recent's saves are kept, but rolling.RECENT_KEEP_BYTES is 20 GB (the user asked for 20 on 2026-10-29); the report reads the constant, so its numbers are right.",
+    "It deletes nothing itself; only the `--prune-telemetry` flag of the command calls telemetry.prune for real."
+   ],
+   "tests": [
+    "tests/test_disk.py"
+   ]
+  }
+ ],
+ "data_types": [
+  {
+   "name": "Recording",
+   "module": "gamelab/analysis/recordings.py",
+   "line": 23,
+   "summary": "A named recording of the game window with the keys sent. Made by recordings.record (via the key player), read back by recordings.load; used by analyze, physics_check and the combo, lock, track, check and sheet commands (track and scroll work on its frames and times).",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str",
+     "meaning": "its name under lab/recordings"
+    },
+    {
+     "name": "frames",
+     "type": "np.ndarray (n, h, w, 3)",
+     "meaning": "RGB frames of the crop, shrunk `scale` times"
+    },
+    {
+     "name": "times",
+     "type": "np.ndarray",
+     "meaning": "ms relative to the plan's first key event"
+    },
+    {
+     "name": "planned",
+     "type": "list",
+     "meaning": "[ms, key, 'down'|'up'] as planned"
+    },
+    {
+     "name": "sent",
+     "type": "list",
+     "meaning": "the same with the times the keys actually went out"
+    },
+    {
+     "name": "client",
+     "type": "tuple",
+     "meaning": "the game window's client size (default 1920x1080)"
+    },
+    {
+     "name": "scale",
+     "type": "int",
+     "meaning": "how much the frames were shrunk (default 2)"
+    }
+   ]
+  },
+  {
+   "name": "Folder",
+   "module": "gamelab/analysis/recordings.py",
+   "line": 112,
+   "summary": "A JPEG-frame recording (control.rolling's or control.lie_recorder's) read from its index.jsonl; turned into sheets and videos by folder_sheet and folder_video.",
+   "fields": [
+    {
+     "name": "folder",
+     "type": "Path",
+     "meaning": "where it lives"
+    },
+    {
+     "name": "frames",
+     "type": "list[tuple[float, Path, str]]",
+     "meaning": "(t s from its start, file, label) in time order"
+    },
+    {
+     "name": "gaps",
+     "type": "list[tuple[float, float, str]]",
+     "meaning": "(t, until, why): moments with no frame"
+    }
+   ]
+  },
+  {
+   "name": "Calibration",
+   "module": "gamelab/analysis/calibration.py",
+   "line": 34,
+   "summary": "Where recordings are cropped and the template that finds her, one per client size and character. Made by calibrate, read back by load; the recording commands use its crop and template, bench-look, bodies, sim.soak and sim.replay_run its template. physics_check reads the template file directly, not this object.",
+   "fields": [
+    {
+     "name": "crop",
+     "type": "list[int]",
+     "meaning": "x, y, width, height in client px"
+    },
+    {
+     "name": "scale",
+     "type": "int",
+     "meaning": "recording downscale (the look's scale)"
+    },
+    {
+     "name": "template",
+     "type": "np.ndarray",
+     "meaning": "her name tag, grayscale, at `scale`"
+    },
+    {
+     "name": "geo",
+     "type": "Geometry",
+     "meaning": "the client size it is for"
+    }
+   ]
+  },
+  {
+   "name": "ComboResult",
+   "module": "gamelab/analysis/analyze.py",
+   "line": 41,
+   "summary": "What one combo in a recorded chain did; analyze.combos makes them, the `combo` command prints them.",
+   "fields": [
+    {
+     "name": "start",
+     "type": "int",
+     "meaning": "the combo's start, ms"
+    },
+    {
+     "name": "jumps",
+     "type": "list[Jump]",
+     "meaning": "takeoff, landing, world dx, direction 'back'|'forward'|'up'"
+    },
+    {
+     "name": "throws",
+     "type": "list[Throw]",
+     "meaning": "time, side 'L'|'R', toward_front"
+    }
+   ]
+  },
+  {
+   "name": "Track",
+   "module": "gamelab/analysis/physics_check.py",
+   "line": 63,
+   "summary": "Her measured path through a recording in map units with the keys sent; made by tracked or read from a fixture, compared against each model by errors.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str",
+     "meaning": "the recording"
+    },
+    {
+     "name": "events",
+     "type": "list[tuple[float, str, bool]]",
+     "meaning": "(s, action, down) keys sent"
+    },
+    {
+     "name": "t, x, y",
+     "type": "np.ndarray",
+     "meaning": "time s; map units from where she first stood (x right, y down)"
+    },
+    {
+     "name": "score",
+     "type": "np.ndarray",
+     "meaning": "name tag match score per frame (used if over 0.45)"
+    }
+   ]
+  },
+  {
+   "name": "tally",
+   "module": "gamelab/analysis/coverage.py",
+   "line": 150,
+   "summary": "One run's coverage counts as a plain JSON dict (3-7 KB). sim.harness stores one per run; coverage.merge adds them up for the report and ui.render's picture.",
+   "fields": [
+    {
+     "name": "moves",
+     "type": "dict[str, [int, int, int, int]]",
+     "meaning": "move key -> planned, taken, missed, a hit's"
+    },
+    {
+     "name": "elsewhere",
+     "type": "dict[str, dict]",
+     "meaning": "move key -> where she ended instead, counts"
+    },
+    {
+     "name": "platforms",
+     "type": "dict[str, [int, float]]",
+     "meaning": "platform -> visits, seconds"
+    },
+    {
+     "name": "arrived",
+     "type": "dict[str, int]",
+     "meaning": "platform -> moves that got her onto it"
+    },
+    {
+     "name": "plans",
+     "type": "list",
+     "meaning": "[src, x, dst, chosen cost, quickest cost, keep_off, avoid, n]"
+    },
+    {
+     "name": "trips / idle / stops / grounds",
+     "type": "dict",
+     "meaning": "trip results, trips with no route, tour stops, hunt-loop grounds"
+    },
+    {
+     "name": "hops / loose / older / unknown",
+     "type": "int / dict",
+     "meaning": "monster hops; loosely matched moves; routes from older graphs; moves not in today's graph"
+    }
+   ]
+  },
+  {
+   "name": "Look",
+   "module": "gamelab/analysis/respawn.py",
+   "line": 122,
+   "summary": "One scene record as the respawn report reads it, with what it searched (recorded or inferred). Made by respawn.looks, consumed by covers, respawns, drops and occupancy.",
+   "fields": [
+    {
+     "name": "t, x, y, platform",
+     "type": "float, float, float, int | None",
+     "meaning": "when and where she was"
+    },
+    {
+     "name": "standing",
+     "type": "bool",
+     "meaning": "on her platform's surface, not in the air"
+    },
+    {
+     "name": "monsters, loot",
+     "type": "list[dict]",
+     "meaning": "what the look saw"
+    },
+    {
+     "name": "searched, wide",
+     "type": "bool",
+     "meaning": "monsters looked for; on the whole screen"
+    },
+    {
+     "name": "looked",
+     "type": "list[tuple[int, float, float]]",
+     "meaning": "where drops were looked for (platform, x from, to)"
+    },
+    {
+     "name": "view",
+     "type": "tuple",
+     "meaning": "the map the screen showed above the bottom bar"
+    },
+    {
+     "name": "full, recorded",
+     "type": "bool",
+     "meaning": "inventory full (only mesos looked for); record said what it searched"
+    }
+   ]
+  },
+  {
+   "name": "Episode",
+   "module": "gamelab/analysis/respawn.py",
+   "line": 149,
+   "summary": "A platform emptied by a kill, until a monster was seen again (event) or it stopped being followed (censored). The survival estimate's observation for respawn.",
+   "fields": [
+    {
+     "name": "platform, kind, t0",
+     "type": "int, str, float",
+     "meaning": "where, what was killed, when"
+    },
+    {
+     "name": "time",
+     "type": "float",
+     "meaning": "s from the kill to the respawn or the last empty look"
+    },
+    {
+     "name": "event",
+     "type": "bool",
+     "meaning": "seen back (True) or censored"
+    },
+    {
+     "name": "width",
+     "type": "float",
+     "meaning": "s between the last empty look and the one that saw one back"
+    },
+    {
+     "name": "lone, near",
+     "type": "bool",
+     "meaning": "no other kill there in 15 s; her within 150 of a spawn point"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "for censored ones: 'away' or 'end'"
+    }
+   ]
+  },
+  {
+   "name": "DropLife",
+   "module": "gamelab/analysis/respawn.py",
+   "line": 164,
+   "summary": "One drop followed from birth until gone or censored; the drop-life estimate's observation.",
+   "fields": [
+    {
+     "name": "platform, kind, x",
+     "type": "int, str, float",
+     "meaning": "where it lay and what it was"
+    },
+    {
+     "name": "born, hers",
+     "type": "float, bool",
+     "meaning": "birth time; born at her kill (else first seen)"
+    },
+    {
+     "name": "time, event",
+     "type": "float, bool",
+     "meaning": "s from birth; gone (True) or censored"
+    },
+    {
+     "name": "why",
+     "type": "str",
+     "meaning": "'gone', 'picked', 'unseen' or 'a kill by it'"
+    }
+   ]
+  },
+  {
+   "name": "Run",
+   "module": "gamelab/analysis/walkfit.py",
+   "line": 172,
+   "summary": "One hunt's telemetry over its span with the perception service's scenes and touches over it; walkfit's unit of measurement.",
+   "fields": [
+    {
+     "name": "t0, t1",
+     "type": "float",
+     "meaning": "the run's span (cut to a recording's with --frames)"
+    },
+    {
+     "name": "map, physics, model",
+     "type": "int, dict, MapModel",
+     "meaning": "the session's map and planned physics; the map model"
+    },
+    {
+     "name": "motions, chains, stances, looks, trips",
+     "type": "list",
+     "meaning": "the hunt's records by topic"
+    },
+    {
+     "name": "scenes, places",
+     "type": "list",
+     "meaning": "her places from the service (or the run's own looks)"
+    },
+    {
+     "name": "touches, by_service",
+     "type": "list[float], bool",
+     "meaning": "touch moments; whether service scenes were found"
+    }
+   ]
+  },
+  {
+   "name": "Usage",
+   "module": "gamelab/analysis/disk.py",
+   "line": 30,
+   "summary": "Files of one kind under gamelab/lab, for the lab-usage report.",
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str",
+     "meaning": "one of KINDS"
+    },
+    {
+     "name": "files, bytes",
+     "type": "int",
+     "meaning": "count and total size"
+    },
+    {
+     "name": "oldest, newest",
+     "type": "float | None",
+     "meaning": "modification times"
+    }
+   ]
+  },
+  {
+   "name": "Timer",
+   "module": "gamelab/analysis/bench.py",
+   "line": 141,
+   "summary": "Named stage timings and counts collected by bench.run and capture_stages, printed by Timer.table.",
+   "fields": [
+    {
+     "name": "samples",
+     "type": "dict[str, list[float]]",
+     "meaning": "seconds per stage"
+    },
+    {
+     "name": "counts",
+     "type": "dict[str, int]",
+     "meaning": "things counted (ropes missed, tags not near, ...)"
+    }
+   ]
+  },
+  {
+   "name": "Drawn",
+   "module": "gamelab/analysis/pasted.py",
+   "line": 58,
+   "summary": "One picture pasted onto a background in pasted.scenes; the ground truth a find is checked against.",
+   "fields": [
+    {
+     "name": "kind, name",
+     "type": "str",
+     "meaning": "monster or drop kind; its picture's file name"
+    },
+    {
+     "name": "facing",
+     "type": "int",
+     "meaning": "1 right (drawn flipped), -1 left, 0 for drops"
+    },
+    {
+     "name": "left, top, w, h",
+     "type": "int",
+     "meaning": "where it was drawn, game px"
+    },
+    {
+     "name": "feet",
+     "type": "tuple | None",
+     "meaning": "monsters: its origin, game px"
+    },
+    {
+     "name": "coin",
+     "type": "str | None",
+     "meaning": "the coin drawn, for mesos"
+    }
+   ]
+  }
+ ],
+ "flows": [
+  {
+   "id": "combo-check",
+   "title": "How a combo test is recorded and judged",
+   "summary": "The `combo` command plays a MapleHelper combo through the key player while recording, then reads which way each jump and throw went from the frames.",
+   "trigger": "python -m gamelab combo NAME --runs N --chain K (sends keys; needs the elevated key player)",
+   "steps": [
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_combo",
+     "text": "Asks `_recording_setup` once for the calibration at the window's current size and the crop to record (a 100 ms capture through the key player, no keys); then, for each run, builds the combo's key timeline, alternating the facing so she ends about where she started.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/calibration.py",
+     "symbol": "crop_on_her",
+     "text": "Finds her tag on that full-size frame with the saved template; keeps the stored crop if the tag is within TAG_SLACK (40 client px at 1920x1080, converted) of its spot, else crops around her.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/recordings.py",
+     "symbol": "record",
+     "text": "Hands the timeline to the key player via control.client.submit; the player presses the keys and captures the crop; frames, times and sent keys come back and are saved under lab/recordings.",
+     "process": "the command and the key player"
+    },
+    {
+     "module": "gamelab/analysis/analyze.py",
+     "symbol": "combos",
+     "text": "Runs the four measures below on the whole recording, then cuts the timeline into windows from each combo start to the next and sorts the jumps and swings into them.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/track.py",
+     "symbol": "track",
+     "text": "Matches her tag template in every frame: (t, x, y, score) rows.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/scroll.py",
+     "symbol": "world_x",
+     "text": "Adds the camera's x (phase correlation of the strip under her) to get her world x.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/track.py",
+     "symbol": "swings",
+     "text": "Finds claw swings and their side; combos gives each to the combo whose window, shifted 300 ms later, holds it, and marks it toward the front or the wrong way.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/track.py",
+     "symbol": "airborne",
+     "text": "Finds jump spans from her tag's height; combos classifies each by world dx: under 12 half-size px (converted) 'up', else 'back' or 'forward' against the first combo's facing.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_combo",
+     "text": "Prints each combo's jumps and throws, flags a jump not allowed for that combo or a throw the wrong way, and totals them over the runs.",
+     "process": "the command"
+    }
+   ]
+  },
+  {
+   "id": "physics-vs-recordings",
+   "title": "How her recorded movement is checked against the models",
+   "summary": "physics_check turns each saved recording into a sub-pixel world track and compares three motion models' paths under the same keys.",
+   "trigger": "python -m gamelab.analysis.physics_check [names] [--fit] [--fixture] (offline)",
+   "steps": [
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "main",
+     "text": "Reads her key bindings (her_key_names, config.toml [keys]) and, for each recording asked (default all 18 of CASES), its track.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "load",
+     "text": "Uses lab/recordings/<name>.npz if present (tracked), else the track fixture in tests/fixtures/tracks (only 6 are kept).",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "tracked",
+     "text": "For a saved recording: her tag in every frame and the camera, turned into map units from where she first stood, with the keys sent.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/track.py",
+     "symbol": "fine_match",
+     "text": "Her tag to a fraction of a pixel in every frame.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/scroll.py",
+     "symbol": "camera",
+     "text": "The camera's (x, y) from agreeing foreground patches, so her position is in the world, in map units.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "steps",
+     "text": "The old step model's path with BEFORE and NOW constants.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "engine",
+     "text": "motion.body.replay's path with the median lags, averaged over the six 5 ms phases of the game's 30 ms step.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "errors",
+     "text": "RMS x and y of each model against the track up to the case's until; printed as a Markdown table with means and medians.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/physics_check.py",
+     "symbol": "fit_lags",
+     "text": "With --fit: the engine's on/off/jump lags and step phase searched per recording, a fitted column added. With --fixture, save_fixture writes each track to tests/fixtures/tracks.",
+     "process": ""
+    }
+   ]
+  },
+  {
+   "id": "telemetry-to-coverage",
+   "title": "How runs become the route coverage report",
+   "summary": "Every harness run tallies its own telemetry; the coverage command merges tallies (and live telemetry) and explains the moves never taken.",
+   "trigger": "sim.harness finishing a run; then python -m gamelab coverage RUN... [--live]",
+   "steps": [
+    {
+     "module": "gamelab/sim/harness.py",
+     "symbol": "run_one",
+     "text": "After each simulated run, stores coverage.tally(records, coverage.graph_for(model)) in the run's result.",
+     "process": "harness worker process"
+    },
+    {
+     "module": "gamelab/analysis/coverage.py",
+     "symbol": "tally",
+     "text": "Reads scene, glance, route, moved (or legacy chain/log), trip, tour and hunt records into counts; _outcome finds which leg of a chain failed from where she stood.",
+     "process": "harness worker process"
+    },
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_coverage",
+     "text": "Loads saved harness runs and, with --live, tallies each live telemetry file of the same map.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/coverage.py",
+     "symbol": "merge",
+     "text": "Adds tallies per set, re-keying moves to today's graph.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/coverage.py",
+     "symbol": "report",
+     "text": "map_wide and plan_gaps measure each unused move's cost gap; why names the reason; drawn estimates what the navigator's random weights would do.",
+     "process": "the command"
+    },
+    {
+     "module": "gamelab/analysis/coverage.py",
+     "symbol": "picture_rows",
+     "text": "Rows for ui.render.coverage_picture, saved by default as lab/shots/coverage_<map>.png (-2, -3 for further sets).",
+     "process": "the command"
+    }
+   ]
+  },
+  {
+   "id": "respawn-estimate",
+   "title": "How telemetry becomes respawn and drop-life estimates",
+   "summary": "The respawn command reads each telemetry file of the map into looks and kills, builds censored observations, and summarises them with Kaplan-Meier.",
+   "trigger": "python -m gamelab respawn [FILES] (offline)",
+   "steps": [
+    {
+     "module": "gamelab/__main__.py",
+     "symbol": "cmd_respawn",
+     "text": "Loads the map, the camera's corner function and the shooting band, and feeds each file of the map to Runs.add.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "Runs.add",
+     "text": "Per file: looks, kills, then the three measures; adds them to the running totals.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "looks",
+     "text": "Each scene record placing her becomes a Look with what it searched, recorded or inferred.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "kills",
+     "text": "Her 'kill' events and the feed's 'died' events (others' kills only where the feed ran) become Kills.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "respawns",
+     "text": "Each kill whose monster was seen just before becomes an Episode (or a reason it doesn't): emptied by two covering looks, ended by a monster seen back, or censored at a gap over 2 s.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "drops",
+     "text": "Each drop becomes a DropLife: gone, picked, unseen, or cut short by a kill by it.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "occupancy",
+     "text": "Seconds covered, monster-seconds and empty seconds per spawn platform.",
+     "process": ""
+    },
+    {
+     "module": "gamelab/analysis/respawn.py",
+     "symbol": "report",
+     "text": "Prints each set of observations through summary (km, quantile and survival: n, median with its 95% interval, quartiles, the share left at 5-180 s where at least 5 were followed), then occupancy per spawn platform.",
+     "process": ""
+    }
+   ]
+  }
+ ],
+ "not_done": [
+  "Respawn on the first map (2026-10-21 data): whether a platform she empties refills by a delay at the spawn point or by a map-wide cap wasn't settled and the median isn't reached, so `behavior.hunt.RESPAWN` stays an unmeasured 8 s until an in-game check (its comment). Tree Dungeon's respawn was measured later (2026-10-29/30: the map's own tick, `sim.world.TICK_S` 7.115 s, filling it to a cap) with scratch scripts on the perception service's telemetry, not with this report.",
+  "This report's drop life is only a lower bound (others' takes look like vanishing), and no hunt left a drop long enough to show the game's own; the README proposed a `watch` session with drops left lying. Her drops' life is now modelled elsewhere (`behavior.ledger.SURVIVAL`: at least 180 s, then gone at the server's next expiry pass; one live pass took drops 198-228 s old), not by this module.",
+  "Coverage: to check in game, the first live run with the new 'moved' and route records, by `coverage --live` (README, Route coverage).",
+  "Jumps: a jitter pattern in simulated runs is the simulator's model; only live grinds can show a real one, and the soonest key's small jitter needs many attacks.",
+  "walkfit: twin platforms read as 'elsewhere' in arrivals; runs before 2026-11-02 have no physics record and need --planned.",
+  "physics_check: the engine (30 ms steps) follows the seven 60 fps walks less well than the 5 ms engine before it did (1.64 units RMS in x against 1.17), the long ones ending 1.6-5.6 units short of where she stopped; most of it is the release's lag, and which lag to trust isn't settled: a recorded walk of a few lengths, let go at a known time, would tell (README, Motion planning: Fit; tests/test_recordings_physics.py).",
+  "scroll.foreground knows only one map's grass and dirt colours.",
+  "bench: offline timings leave out the screen grab itself (mss ~16.7 ms, DXGI ~2 ms copy plus waiting for the next frame); `bench-capture` times those on the live screen."
+ ]
+}

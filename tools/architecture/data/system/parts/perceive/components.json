@@ -1,0 +1,1648 @@
+{
+ "id": "components",
+ "summary_md": "The perception service is the PC's one pair of eyes on the game: an always-on standalone process, not elevated, that the babysitter or any gamelab command that needs it starts automatically (detached, through Windows' WMI service), never the elevated player. Its main thread is the frame loop, 15 frames a second; around it run a dozen helper threads (a pipe listener, a reader and a writer per attached command, a watchdog, the telemetry, console and GC writers, the rolling recording's three threads, the Lie Detector watchers) and a few worker-thread pools for the picture matching. It starts short-lived child processes itself, never you: the mini-game tracker while a Lie Detector alarm is up, a part writer for each save of the rolling recording, and, rarely, the C compiler when its C library isn't built yet.",
+ "processes": [
+  {
+   "process": "perceive",
+   "is_os_process": true,
+   "plain_md": "**What it is.** The one process that looks at the game for everybody. It is its own Windows process (`python -m gamelab perceive`, usually `--map 10002073`), not elevated, at normal priority, and without a window when it is started automatically. Only one runs on the PC: it holds a named Windows lock (the mutex `Local\\gamelab-perceive`), and a second copy prints that one is running and exits at once. (`perceive --frames DIR`, an offline copy that plays saved pictures, has its own lock and pipe and can run beside it.)\n\n**Who starts it, and when.** Normally nobody types it. Two things start it automatically, whichever comes first:\n- the babysitter (a PowerShell loop outside the repo, below) starts one within 5 s whenever no `gamelab perceive` is in the process list: `--map 10002073`, its console appended to `D:/MapleHelper-scratch/live/perceive.log`;\n- any gamelab command that needs to see the game (hunt, tour, nav, probe, pet (the babysitter's `pet --every` too), `nav --park`, map, watch, `hunt look`, `window --recover`, `keys --read`, `stats --read`) starts one itself when it can't reach one and no service holds the lock (`service.ensure`, at most every 10 s, on the command's own map, its console appended to `gamelab/lab/perceive.log`). So a hunt that Claude runs brings the service up by itself. The command waits up to 20 s for it; the first state comes about 2 s after the start.\n\nBoth ask Windows' WMI service to create a hidden `cmd.exe` that runs Python (a command does it through a short `powershell.exe`), so the service is not its starter's child: it keeps running after the command or the babysitter ends, and it gets none of their environment variables (hence the settings on the command line). The elevated player never starts it. You can also run it by hand in a terminal and stop it with Ctrl+C.\n\n**How long it lives.** It is meant to run all the time; with no game window it just waits and says why. It ends on Ctrl+C or `--minutes` (then it closes cleanly: lets the commands go, stops the tracker child, and writes the saves still queued, an alarm's clip cut short, 2 minutes at most), when someone kills it (Task Manager, Stop-Process: no gamelab command does), or when its watchdog ends it with exit code 3 because the frame loop hung for 10 s. It never restarts itself: the babysitter's next loop or a command's next `ensure` starts a fresh one, and the 5 minutes of rolling recording it held in memory are lost.\n\n**What it does with the game.** 15 times a second it copies the game window off the screen (Windows' desktop duplication, DXGI; it never brings the game forward), works out her place, HP, MP and EXP, every monster with its track, and the drops, and hands each result to every attached command through the named pipe `\\\\.\\pipe\\gamelab-perceive` (the pictures through shared memory). It also writes telemetry for the mini-map, keeps the last 5 minutes as a rolling recording, and during a Lie Detector alarm follows the two mini-games. It never presses a key: its few mouse moves and clicks during an alarm are plans it hands to the elevated player.\n\n**The babysitter, as found.** A PowerShell script outside the repo, `D:/MapleHelper-scratch/live/babysit3.ps1` (the README's path under `pconst/finish/` no longer exists): an endless loop every 5 s that also starts and stops the pet feeder around hunts and hands the recording over from the old recorder. Nothing starts the babysitter automatically: no task in Windows' Task Scheduler, nothing in D:/MapleHelper-scratch or C:/Users/Admin/.claude. Its header says to start it once, detached through WMI \"so it outlives Claude Code\", by you or a Claude session. At this check (2026-11-16) neither the babysitter nor a service was running, the babysitter's logs were not on disk, and the last service start on record (`gamelab/lab/perceive.log`, 2026-11-07 06:37) came from a command's `ensure`, the only thing that writes that log.",
+   "expected_start": "automatically, whichever comes first: the babysitter (within 5 s whenever none runs, while the babysitter itself runs) or the first gamelab command that needs to see the game and can't reach one (service.ensure, at most every 10 s; this includes the hunts Claude runs); or you, by hand in a terminal; never the elevated player",
+   "started_by": [
+    "babysitter",
+    "hunt",
+    "pet",
+    "park",
+    "tools",
+    "user",
+    "claude"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2652,
+     "symbol": "cmd_perceive"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 2669,
+     "symbol": "only_one"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 171,
+     "symbol": "only_one"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 209,
+     "symbol": "ensure"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 241,
+     "symbol": "_start_detached"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 1204,
+     "symbol": "_ensure"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 1006,
+     "symbol": "ServiceClient"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 250,
+     "symbol": "settle"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 642,
+     "symbol": "EXIT_STUCK"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 223,
+     "symbol": "log_path"
+    },
+    {
+     "path": "gamelab/__main__.py",
+     "line": 995,
+     "symbol": "PERCEPTION_WAIT_S"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 77,
+     "symbol": "SAVED_MUTEX"
+    },
+    {
+     "path": "gamelab/localization/service.py",
+     "line": 844,
+     "symbol": "close"
+    },
+    {
+     "path": "gamelab/control/recording.py",
+     "line": 379,
+     "symbol": "close"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 976,
+     "symbol": "close"
+    }
+   ],
+   "components": [
+    {
+     "id": "frame-loop",
+     "name": "The frame loop",
+     "runs_as": "main thread",
+     "started_by": "`cmd_perceive` calls `Service.serve` right after start-up; it is the process's main thread",
+     "lives": "as long as the process",
+     "does": "Every 1/15 s: takes the next frame from the screen capture, runs one pass of the world step on it, and hands the result out: the picture into the shared-memory ring, the state to every client's writer queue, the frame to the rolling recording and the Lie Detector watchers, the state to the telemetry publisher. A frame the game drew nothing new on, that nobody asked about, is skipped. Between frames it waits on the inbox the reader threads fill and merges what the commands ask for (drops to search on the next frame, a full-size frame). It builds a new 'run' (that map's templates, new rings, every client told) when the game is first seen and whenever an attached command needs another map: a hunting command always gets its map, any other command only while no hunting command holds the current one. With no game window it sends a 'not visible' state every 0.25 s. Every 10 s it prints a status line (frames a second, who is attached). With `--frames DIR` it plays saved PNGs instead, offline, with no telemetry, recording or Lie Detector watchers.",
+     "rate": "15 frames a second (localization.rate.HZ); a pass takes about 10-60 ms",
+     "talks_to": [
+      {
+       "to": "capture",
+       "via": "a call: ScreenFrames.next(due)",
+       "what": "the next frame of the game, or why there is none"
+      },
+      {
+       "to": "world-step",
+       "via": "a call: WorldStep.step",
+       "what": "one frame in, a WorldState (plain, picklable data) out"
+      },
+      {
+       "to": "client-reader",
+       "via": "the deque Service._inbox under the threading.Condition Service._cond",
+       "what": "asks, throws and full-frame asks in; the loop waits on the Condition until the next frame is due"
+      },
+      {
+       "to": "client-writer",
+       "via": "Writer.put (each client's queue; never waits)",
+       "what": "the state, pickled once for all clients; welcomes and new-run notices"
+      },
+      {
+       "to": "frame-rings",
+       "via": "Ring.put",
+       "what": "the look frame (and full-size frames for 'full' asks)"
+      },
+      {
+       "to": "recording-encoder",
+       "via": "Recording.saw (by reference; never waits)",
+       "what": "the frame, 15 a second at most"
+      },
+      {
+       "to": "lie-target",
+       "via": "Together.saw -> LieTracking.saw",
+       "what": "the newest frame, only while the alarm is up"
+      },
+      {
+       "to": "violetta",
+       "via": "Together.saw -> VioletaLive.saw",
+       "what": "frames while the alarm is up and 90 s after"
+      },
+      {
+       "to": "publisher",
+       "via": "Publisher.state",
+       "what": "each state, for telemetry"
+      },
+      {
+       "to": "watchdog",
+       "via": "the heartbeat Service._beat (set by _went_round)",
+       "what": "'I went round' at every turn"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 2720,
+       "symbol": "svc.serve"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 587,
+       "symbol": "serve"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 606,
+       "symbol": "feed.run"
+      },
+      {
+       "path": "gamelab/localization/feed.py",
+       "line": 188,
+       "symbol": "run"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 725,
+       "symbol": "_poll"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 796,
+       "symbol": "_emit"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 644,
+       "symbol": "_build"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 699,
+       "symbol": "_not_visible"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 821,
+       "symbol": "_say"
+      },
+      {
+       "path": "gamelab/localization/feed.py",
+       "line": 224,
+       "symbol": ""
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 514,
+       "symbol": ""
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 537,
+       "symbol": "_follow"
+      }
+     ]
+    },
+    {
+     "id": "capture",
+     "name": "The screen capture",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "made with each run by `screen_world` (ScreenFrames on the process's one grabber, `capture.shared`)",
+     "lives": "as long as the process (the grabber); the ScreenFrames as long as its run",
+     "does": "Runs on the frame loop's thread. Finds the game window, checks it can be read (wholly on screen, in front, not covered, 1366x768 or 1920x1080, not moved during the shot, not a stale picture), and copies its client area from DXGI desktop duplication; if DXGI fails it uses mss for 10 s and tries again. It never brings the game forward. With the recording on it also asks which other windows are over the game before and after each shot. A frame that fails its checks makes the eyes recover (the duplication made afresh).",
+     "rate": "once a frame, 15 a second",
+     "talks_to": [
+      {
+       "to": "game",
+       "via": "DXGI desktop duplication (mss as fallback); the window's place and state from Windows",
+       "what": "the game's pixels, read only"
+      },
+      {
+       "to": "frame-loop",
+       "via": "the return value",
+       "what": "a Frame: the picture, its time, whether it shows the game and why not"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 274,
+       "symbol": "ScreenFrames"
+      },
+      {
+       "path": "gamelab/perception/frames.py",
+       "line": 122,
+       "symbol": "ScreenFrames"
+      },
+      {
+       "path": "gamelab/perception/frames.py",
+       "line": 141,
+       "symbol": "next"
+      },
+      {
+       "path": "gamelab/capture.py",
+       "line": 174,
+       "symbol": "Grabber"
+      },
+      {
+       "path": "gamelab/capture.py",
+       "line": 200,
+       "symbol": "shot"
+      },
+      {
+       "path": "gamelab/capture.py",
+       "line": 298,
+       "symbol": "shared"
+      }
+     ]
+    },
+    {
+     "id": "world-step",
+     "name": "The world step (one pass a frame)",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "made for each run by `screen_world` (Eyes, Senses, WorldStep for that map)",
+     "lives": "one run: replaced (and closed) when the map changes",
+     "does": "Runs on the frame loop's thread. Turns one frame into a WorldState: her look (her place by her name tag, the mini-map dot and the scene, HP, MP, EXP), the whole screen's search for monsters, each monster matched to its track (id, place, HP bar, death), her touches, and the drops asked for plus a strip of drops in view by rotation. The state is plain data, so it can be pickled down the pipe.",
+     "rate": "once a frame, 15 a second",
+     "talks_to": [
+      {
+       "to": "search-pools",
+       "via": "futures (ThreadPoolExecutor.submit/map); the pass waits for them",
+       "what": "the heavy matching, spread over threads"
+      },
+      {
+       "to": "frame-loop",
+       "via": "the return value",
+       "what": "the WorldState and its events"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 263,
+       "symbol": "screen_world"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 284,
+       "symbol": "WorldStep"
+      },
+      {
+       "path": "gamelab/localization/worldstate.py",
+       "line": 328,
+       "symbol": "WorldStep"
+      },
+      {
+       "path": "gamelab/localization/worldstate.py",
+       "line": 395,
+       "symbol": "step"
+      }
+     ]
+    },
+    {
+     "id": "search-pools",
+     "name": "The pass's worker thread pools",
+     "runs_as": "thread pool",
+     "started_by": "the world step and the detectors, as a run is built or on first use",
+     "lives": "the 'wide' pool and the monster search's and the drops' pools belong to a run (a new run makes new ones, the old ones end with it); the name tag's, the scene's and her poses' pools are made once and kept for the process",
+     "does": "OpenCV and gamelab's C code let go of Python's lock while they match, so the pass spreads its picture matching over threads: the whole screen's monster search on a thread of its own ('wide') beside her look; the monster search's 'monster-search' (6) and 'monster-search-bands' (3) pools; her name tag's 'tag-bands' (4); her place by the scene's 'plate-gray' (4) and 'her-poses' (4); the drops' pool (3); and the C library's own threads for the monsters' re-finds (on the GPU only if the file `gamelab/lab/GPU` exists: a service started through WMI doesn't see the GAMELAB_GPU variable).",
+     "rate": "work every frame",
+     "talks_to": [
+      {
+       "to": "world-step",
+       "via": "futures",
+       "what": "match results, waited for within the same pass"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/worldstate.py",
+       "line": 345,
+       "symbol": "_halves"
+      },
+      {
+       "path": "gamelab/perception/mobs.py",
+       "line": 492,
+       "symbol": "_pool"
+      },
+      {
+       "path": "gamelab/perception/mobs.py",
+       "line": 494,
+       "symbol": "_bands"
+      },
+      {
+       "path": "gamelab/perception/nametag.py",
+       "line": 191,
+       "symbol": "_pool"
+      },
+      {
+       "path": "gamelab/perception/plate.py",
+       "line": 651,
+       "symbol": "_pool"
+      },
+      {
+       "path": "gamelab/perception/poses.py",
+       "line": 349,
+       "symbol": "_pool"
+      },
+      {
+       "path": "gamelab/perception/loot.py",
+       "line": 389,
+       "symbol": "_pool"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 591,
+       "symbol": "Refinds"
+      },
+      {
+       "path": "gamelab/localization/worldstate.py",
+       "line": 466,
+       "symbol": "close"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 74,
+       "symbol": "GPU"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 45,
+       "symbol": "gpu_switch"
+      }
+     ]
+    },
+    {
+     "id": "native-build",
+     "name": "The C library's one-off build (rare)",
+     "runs_as": "child process",
+     "started_by": "the first run's monster detector (`native.lib()` as MobDetector is made), only when no DLL for the current `gamelab/native.c` is built yet",
+     "lives": "until the compiler is done: a few seconds, 300 s at most; the frame loop waits for it",
+     "does": "Builds gamelab's C pieces (used by the monster search) with MSVC 2022's Build Tools, `cmd /d /s /c \"call vcvars64.bat && cl ...\"`, into `gamelab/build/native-<hash>.dll`. The DLL is normally built beforehand (`python -m gamelab.native`), so this runs only after native.c changed and nobody built it; without the compiler the service goes on in Python (the same answers, slower). See the process `native-build`.",
+     "rate": "at most once per change of native.c",
+     "talks_to": [
+      {
+       "to": "frame-loop",
+       "via": "subprocess.run (waited for); the DLL file it leaves",
+       "what": "the built library, or the compiler's error"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/perception/mobs.py",
+       "line": 504,
+       "symbol": "lib"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 181,
+       "symbol": "lib"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 193,
+       "symbol": "build"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 136,
+       "symbol": "build"
+      },
+      {
+       "path": "gamelab/native.py",
+       "line": 157,
+       "symbol": "subprocess.run"
+      }
+     ]
+    },
+    {
+     "id": "frame-rings",
+     "name": "The frame rings in shared memory",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "the frame loop, at each new run (`Service._build`)",
+     "lives": "one run: a new run makes new rings and removes the old",
+     "does": "Two blocks of shared memory per run: the last 16 look frames (about 1 s) and 2 full-size frames for the commands' 'full' asks (the pet's panels, the pick-up log). The frame loop writes each frame into the next slot; a command copies the one its state names, by number, in its own process (a slot already overwritten comes back as lost). The welcome message tells each command the rings' names.",
+     "rate": "a frame written 15 times a second",
+     "talks_to": [
+      {
+       "to": "hunt",
+       "via": "shared memory opened by name (ServiceClient opens the rings from the welcome)",
+       "what": "the frame behind a state, copied out when a look needs its picture"
+      },
+      {
+       "to": "pet",
+       "via": "shared memory",
+       "what": "full-size frames for the pet's panels"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/feed.py",
+       "line": 79,
+       "symbol": "Ring"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 670,
+       "symbol": "Ring"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 671,
+       "symbol": "full_ring"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1297,
+       "symbol": "Ring"
+      }
+     ]
+    },
+    {
+     "id": "pipe-accept",
+     "name": "The pipe listener",
+     "runs_as": "thread",
+     "started_by": "`Service.listen`, at start-up, before the frame loop's first frame",
+     "lives": "as long as the process",
+     "does": "Opens the named pipe `\\\\.\\pipe\\gamelab-perceive` (Python's multiprocessing.connection, with a random key written with the service's pid to `gamelab/lab/perceive.json`, where commands find it) and accepts each command that connects, giving it a reader thread and a writer thread. Thread name `perceive-accept`.",
+     "rate": "once per command that connects",
+     "talks_to": [
+      {
+       "to": "hunt",
+       "via": "named pipe \\\\.\\pipe\\gamelab-perceive; lab/perceive.json",
+       "what": "the connection (also pet, park, map, watch, window...)"
+      },
+      {
+       "to": "client-reader",
+       "via": "a new thread per client, registered in Service.clients under the RLock Service._lock",
+       "what": "the new connection"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 451,
+       "symbol": "listen"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 455,
+       "symbol": "write_info"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 457,
+       "symbol": "_accept"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 459,
+       "symbol": "_accept"
+      }
+     ]
+    },
+    {
+     "id": "client-reader",
+     "name": "One reader per attached command",
+     "runs_as": "thread",
+     "started_by": "the pipe listener, when a command connects",
+     "lives": "until that command says `bye` or its pipe closes (then the client is dropped)",
+     "does": "Reads what the command sends. `hello` (its name, pid, whether it sends keys or hunts, its map) is answered here: with a welcome naming the run's rings, or with a refusal when it hunts on another map while another hunting command holds the current one. A command on another map that isn't refused has the frame loop build a run for its map (a viewer's or the pet's only while no hunting command holds the map). `status` is answered here. `ask` (what to search on the next frame), `throw` (she attacked) and `full` (send a full-size frame) go into the frame loop's inbox. When the command leaves and no hunting command is left, the service moves to the map of the newest command that sends keys. Thread name `perceive-reader-<id>`.",
+     "rate": "as the command asks: a few times a second while it hunts",
+     "talks_to": [
+      {
+       "to": "hunt",
+       "via": "named pipe (pickled tuples up)",
+       "what": "hello, ask, throw, full, status, bye"
+      },
+      {
+       "to": "frame-loop",
+       "via": "the deque Service._inbox + threading.Condition Service._cond (notify wakes the loop)",
+       "what": "asks, throws, full asks"
+      },
+      {
+       "to": "client-writer",
+       "via": "Writer.put(keep=True)",
+       "what": "the welcome, a refusal, a status answer"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 472,
+       "symbol": "_read"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 474,
+       "symbol": "_read"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 489,
+       "symbol": "_inbox"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 495,
+       "symbol": "_hello"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 508,
+       "symbol": ""
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 514,
+       "symbol": ""
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 537,
+       "symbol": "_follow"
+      }
+     ]
+    },
+    {
+     "id": "client-writer",
+     "name": "One writer per attached command",
+     "runs_as": "thread",
+     "started_by": "the client's Writer, made when the command connects",
+     "lives": "until the command is dropped or the pipe breaks",
+     "does": "Sends each frame's state (a few KB, pickled once by the frame loop) down that command's pipe. It holds at most the newest 64 states (about 4 s); older ones are dropped and a `gap` message says how many, so a command that stops reading never holds up the frame loop. Welcomes, new-run notices and full-frame answers are never dropped and go first. Thread name `perceive-writer-<id>`.",
+     "rate": "15 states a second per command",
+     "talks_to": [
+      {
+       "to": "frame-loop",
+       "via": "the Writer's deque + threading.Condition (put never waits)",
+       "what": "states to send"
+      },
+      {
+       "to": "hunt",
+       "via": "named pipe (pickled tuples down)",
+       "what": "state, gap, welcome, epoch (a new run), full, refused"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 334,
+       "symbol": "Writer"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 346,
+       "symbol": "_run"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 369,
+       "symbol": "_run"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 396,
+       "symbol": "Writer"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 816,
+       "symbol": "put"
+      }
+     ]
+    },
+    {
+     "id": "watchdog",
+     "name": "The watchdog",
+     "runs_as": "thread",
+     "started_by": "`Service.serve` at start-up",
+     "lives": "as long as the process",
+     "does": "Once a second it checks when the frame loop last went round. If it hasn't for 10 s (60 s while a new run's templates load), it logs why, flushes the console and telemetry and ends the whole process with exit code 3 (`os._exit`), so that the babysitter or a command's `ensure` starts a fresh service; the pipe and the mutex go with the process. A hang that holds Python's lock stops this thread too. Thread name `perceive-watchdog`.",
+     "rate": "once a second",
+     "talks_to": [
+      {
+       "to": "frame-loop",
+       "via": "reads the heartbeat Service._beat",
+       "what": "when the loop last went round"
+      },
+      {
+       "to": "babysitter",
+       "via": "the process list (the service is gone)",
+       "what": "start another"
+      },
+      {
+       "to": "hunt",
+       "via": "the pipe breaks with the process",
+       "what": "every attached command's client reconnects, and its `ensure` starts a new service"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 594,
+       "symbol": "_watchdog"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 627,
+       "symbol": "_watchdog"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 642,
+       "symbol": "EXIT_STUCK"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 131,
+       "symbol": "STUCK_S"
+      }
+     ]
+    },
+    {
+     "id": "publisher",
+     "name": "The telemetry publisher",
+     "runs_as": "library code on the caller's thread",
+     "started_by": "`cmd_perceive` makes it; the frame loop calls it with each state",
+     "lives": "as long as the process",
+     "does": "Turns the states into telemetry records for the mini-map: a `session` record per run, a `scene` 10 times a second, the `tracks` twice a second, an `event` for each death, EXP gain, kill, HP or level read and touch, an `exp` record per gain, and a `perf` record (the loop's pace) every 10 s with the console line. It only queues them: writing is the telemetry writer's job.",
+     "rate": "scenes 10 a second, tracks 2 a second, perf every 10 s",
+     "talks_to": [
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit (into the Recorder's queue)",
+       "what": "the records"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 2705,
+       "symbol": "Publisher"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1001,
+       "symbol": "Publisher"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1023,
+       "symbol": "session"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1066,
+       "symbol": "scene"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 1124,
+       "symbol": "perf"
+      }
+     ]
+    },
+    {
+     "id": "telemetry-writer",
+     "name": "The telemetry writer",
+     "runs_as": "thread",
+     "started_by": "`telemetry.record_to(\"perceive\")` in `cmd_perceive`, at start-up",
+     "lives": "as long as the process",
+     "does": "Writes the queued records to `gamelab/lab/telemetry/<time>-perceive.jsonl` in batches every 0.2 s, so a slow disk never holds up the frame loop. At most 50,000 lines wait (then new ones are dropped and counted); a new part file every 64 MB; the folder is kept to 2 GB, the oldest files deleted. Thread name `telemetry-writer`.",
+     "rate": "a batch every 0.2 s (about 6 KB a second)",
+     "talks_to": [
+      {
+       "to": "publisher",
+       "via": "the Recorder's deque + threading.Condition",
+       "what": "records to write"
+      },
+      {
+       "to": "minimap",
+       "via": "the file lab/telemetry/<time>-perceive.jsonl (followed live)",
+       "what": "scenes, tracks, events, EXP"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 2703,
+       "symbol": "record_to"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 192,
+       "symbol": "Recorder"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 218,
+       "symbol": "_run"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 241,
+       "symbol": "_run"
+      }
+     ]
+    },
+    {
+     "id": "console-writer",
+     "name": "The console writer",
+     "runs_as": "thread",
+     "started_by": "`telemetry.console_in_background()` in `cmd_perceive`, at start-up",
+     "lives": "as long as the process",
+     "does": "Everything the service prints (its log lines, the 10 s status line) is queued and written to stdout and stderr by this thread every 0.2 s, so a slow disk never holds up the frame loop. Where it lands depends on who started the service: `gamelab/lab/perceive.log` (a command's `ensure`), `D:/MapleHelper-scratch/live/perceive.log` (the babysitter), or your terminal. Thread name `console-writer`.",
+     "rate": "every 0.2 s",
+     "talks_to": [
+      {
+       "to": "user",
+       "via": "the console or its log file",
+       "what": "the service's log and status lines"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 2702,
+       "symbol": "console_in_background"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 398,
+       "symbol": "Console"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 409,
+       "symbol": "_run"
+      },
+      {
+       "path": "gamelab/telemetry.py",
+       "line": 476,
+       "symbol": "console_in_background"
+      },
+      {
+       "path": "gamelab/localization/service.py",
+       "line": 223,
+       "symbol": "log_path"
+      }
+     ]
+    },
+    {
+     "id": "gc-report",
+     "name": "The garbage-collection reporter",
+     "runs_as": "thread",
+     "started_by": "`gcstats.report_every` in `cmd_perceive`, at start-up",
+     "lives": "as long as the process",
+     "does": "Every 60 s puts a `gc` record (Python's garbage collections: counts and pauses) into the telemetry. Thread name `gc-report`.",
+     "rate": "once a minute",
+     "talks_to": [
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "the `gc` record"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 2704,
+       "symbol": "report_every"
+      },
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 113,
+       "symbol": "report_every"
+      },
+      {
+       "path": "gamelab/gcstats.py",
+       "line": 131,
+       "symbol": "gc-report"
+      }
+     ]
+    },
+    {
+     "id": "recording-ticks",
+     "name": "The rolling recording's ticks",
+     "runs_as": "thread",
+     "started_by": "`Recording.start`, called by `Service.serve` at start-up (not with `--no-record`)",
+     "lives": "as long as the process",
+     "does": "First takes the recorders' mutex `Local\\gamelab-rolling-recorder`: while an old `gamelab recorder` holds it, it tries again every 10 s and writes `gamelab/lab/recorder/waiting.json`, which the babysitter reads to stop the old recorder. Then 15 times a second: if the frame loop has given no frame for 0.25 s, or fewer than 10 a second, it grabs the game window itself (mss); and it polls: `save-recent` requests in `lab/recorder/inbox`, a new Lie Detector alarm (`lab/ALARM.json`, every 0.5 s: the 5 minutes before it and its clip are queued to be saved once the cycle is over), and `lab/recorder/status.json` every 5 s. Thread name `perceive-recording`.",
+     "rate": "15 ticks a second",
+     "talks_to": [
+      {
+       "to": "recorder",
+       "via": "the mutex Local\\gamelab-rolling-recorder; lab/recorder/waiting.json",
+       "what": "one recorder at a time on the PC"
+      },
+      {
+       "to": "babysitter",
+       "via": "lab/recorder/waiting.json and status.json",
+       "what": "the service is waiting / is recording"
+      },
+      {
+       "to": "tools",
+       "via": "lab/recorder/inbox (save-recent's requests), status.json (recorder --status)",
+       "what": "save requests"
+      },
+      {
+       "to": "player",
+       "via": "reads lab/ALARM.json (written by the player's watchdog)",
+       "what": "a Lie Detector alarm to save around"
+      },
+      {
+       "to": "rolling-saves",
+       "via": "the queue.Queue Recorder.jobs",
+       "what": "a save to write"
+      },
+      {
+       "to": "recording-encoder",
+       "via": "the shared in-memory ring, under the RLock Recorder._lock",
+       "what": "its own grabbed moments"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 360,
+       "symbol": "start"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 286,
+       "symbol": "_ticks"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 307,
+       "symbol": "take"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 332,
+       "symbol": "_waiting"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 242,
+       "symbol": "tick"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 625,
+       "symbol": "poll"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 671,
+       "symbol": "check_alarm"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 761,
+       "symbol": "read_inbox"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 188,
+       "symbol": "MUTEX"
+      }
+     ]
+    },
+    {
+     "id": "recording-encoder",
+     "name": "The rolling recording's encoder",
+     "runs_as": "thread",
+     "started_by": "`Recording.start`, with the ticks",
+     "lives": "as long as the process",
+     "does": "Takes the frames the frame loop hands over (a token bucket keeps 15 a second; at most 8 wait, past that frames are dropped) and packs each one losslessly as its difference from the frame before (a whole frame every second), compressed, into the in-memory ring of the last 5 minutes (4 GB at most). Frames with another window wholly over the game are kept as gaps. Thread name `perceive-recording-encoder`.",
+     "rate": "up to 15 frames a second, 4-7 ms of CPU each",
+     "talks_to": [
+      {
+       "to": "frame-loop",
+       "via": "the deque Recording._q + threading.Condition Recording._cond (Recording.saw never waits)",
+       "what": "frames, by reference"
+      },
+      {
+       "to": "recording-ticks",
+       "via": "the ring, under the RLock Recorder._lock",
+       "what": "the moments the saves are cut from"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 146,
+       "symbol": "saw"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 189,
+       "symbol": "encode"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 226,
+       "symbol": "_encoder"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 590,
+       "symbol": "add"
+      }
+     ]
+    },
+    {
+     "id": "rolling-saves",
+     "name": "The recording's saver",
+     "runs_as": "thread",
+     "started_by": "`rolling.Recorder`, made by the ticks thread once it holds the recorders' mutex",
+     "lives": "as long as the recording",
+     "does": "Writes saves one after the other from its job queue, at the lowest thread priority: after a Lie Detector cycle, the 5 minutes before it (`before/` in the player's folder for that cycle, JPEG) and its clip (`lab/alarm_clips/`, PNG); a Truth Booth with no test seen (`lab/booth_unknown/`, PNG); `save-recent` parts (`lab/recent/`, JPEG or PNG as asked, answered in `lab/recorder/outbox`). Each part is handed to a part-writer child process; if that can't start, fails or takes over 600 s, it writes the part here on a 'rolling-writer' pool instead. Thread name `rolling-saves`.",
+     "rate": "a few saves an hour at most (each alarm, each save-recent)",
+     "talks_to": [
+      {
+       "to": "partwriter",
+       "via": "subprocess.Popen: stdin (pickled moments) / stdout (one JSON line)",
+       "what": "the part to write, its summary back"
+      },
+      {
+       "to": "tools",
+       "via": "lab/recorder/outbox/<id>.json",
+       "what": "save-recent's answer"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 548,
+       "symbol": "_save_loop"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 802,
+       "symbol": "_save_loop"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 795,
+       "symbol": "_write"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 1124,
+       "symbol": "write_part_apart"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 1167,
+       "symbol": "write_part"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 874,
+       "symbol": ""
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 892,
+       "symbol": ""
+      }
+     ]
+    },
+    {
+     "id": "partwriter-child",
+     "name": "A part-writer child process per save",
+     "runs_as": "child process",
+     "started_by": "the saver thread, once per save (`rolling.write_part_apart`: subprocess.Popen)",
+     "lives": "until its part is written (killed after 600 s at most)",
+     "does": "`python -m gamelab.control.partwriter`, hidden, below-normal priority: decodes and encodes the frames to JPEG or PNG so a save never shares Python's lock with the frame loop. See the process `partwriter`.",
+     "rate": "one per save",
+     "talks_to": [
+      {
+       "to": "rolling-saves",
+       "via": "stdin (pickled) / stdout (JSON)",
+       "what": "frames in, the part's summary out"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 1146,
+       "symbol": "Popen"
+      },
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 1119,
+       "symbol": "APART_TIMEOUT_S"
+      },
+      {
+       "path": "gamelab/control/partwriter.py",
+       "line": 23,
+       "symbol": "main"
+      }
+     ]
+    },
+    {
+     "id": "lie-target",
+     "name": "The Lie Detector mini-game watcher",
+     "runs_as": "thread",
+     "started_by": "`Service.serve` at start-up (through `Together.start`)",
+     "lives": "as long as the process (if it hits an error it turns itself off for good)",
+     "does": "Idle until the Lie Detector alarm: it looks at `lab/ALARM.json` at most every 0.5 s. While the alarm is up it keeps only the newest frame the frame loop hands over, starts the tracker child, looks for the mouse mini-game's board every 0.25 s (every 1 s during a round) and, during a round, sends the board's picture to the child whenever the child says it is ready (frames in between are skipped). Only at the game's own 1366x768 (the board's place is known only there). A round ends when the board has been gone 3 s, the alarm goes, or after 60 s. It stops the child 60 s after the alarm has gone. Thread name `lie-target`.",
+     "rate": "wakes on each frame kept or every 0.25 s; sends a frame each time the child is ready (about 15 a second at best)",
+     "talks_to": [
+      {
+       "to": "frame-loop",
+       "via": "LieTracking._newest + threading.Condition LieTracking._cond (saw never waits)",
+       "what": "the newest frame"
+      },
+      {
+       "to": "lie-tracker",
+       "via": "the child's stdin (pickled begin, frame, end, quit)",
+       "what": "board pictures"
+      },
+      {
+       "to": "lie-target-replies",
+       "via": "the threading.Event LieTracking.ready",
+       "what": "the child is ready for the next frame"
+      },
+      {
+       "to": "lie-target-cursor",
+       "via": "LieTracking._cursor_round under threading.Condition LieTracking._cursor_cond",
+       "what": "the round is on or off (the board seen or not)"
+      },
+      {
+       "to": "player",
+       "via": "reads lab/ALARM.json",
+       "what": "whether the alarm is up"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/__main__.py",
+       "line": 2712,
+       "symbol": "Together"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 144,
+       "symbol": "start"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 169,
+       "symbol": "run"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 186,
+       "symbol": "step"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 114,
+       "symbol": "saw"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 57,
+       "symbol": "ALARM_POLL_S"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 203,
+       "symbol": ""
+      }
+     ]
+    },
+    {
+     "id": "lie-target-replies",
+     "name": "The tracker's reply reader",
+     "runs_as": "thread",
+     "started_by": "the mini-game watcher, each time it starts the tracker child",
+     "lives": "as long as that child (until its stdout closes)",
+     "does": "Reads the child's replies: each answer (the target's centre on the board, in the client area and on the desktop) goes into the telemetry as a `lie_target` record and to the cursor thread as its newest target; then it sets the `ready` Event so the next frame can be sent. Thread name `lie-target-replies`.",
+     "rate": "one reply per frame the child stepped",
+     "talks_to": [
+      {
+       "to": "lie-tracker",
+       "via": "the child's stdout (pickled ready, ended, error)",
+       "what": "answers"
+      },
+      {
+       "to": "lie-target",
+       "via": "threading.Event ready",
+       "what": "send the next frame"
+      },
+      {
+       "to": "lie-target-cursor",
+       "via": "LieTracking._cursor_target under threading.Condition _cursor_cond",
+       "what": "where to move"
+      },
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "`lie_target` and `lie_target_round` records"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 313,
+       "symbol": "_start_child"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 316,
+       "symbol": "_replies"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 318,
+       "symbol": "_replies"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 347,
+       "symbol": "_queue_cursor"
+      }
+     ]
+    },
+    {
+     "id": "lie-target-cursor",
+     "name": "The Lie Detector cursor mover",
+     "runs_as": "thread",
+     "started_by": "the reply reader, at the first answer to move to",
+     "lives": "until the service closes",
+     "does": "Takes the newest target and moves the mouse pointer there through the elevated player: it writes a move-only plan (kind `lie_cursor`) into `lab/inbox` and waits for its result in `lab/outbox`; the player draws the trail. The plan is withdrawn when the board disappears or the round ends. Only the pointer moves, never a button or key; if the player fails, cursor moving stops for good while tracking goes on. Thread name `lie-target-cursor`.",
+     "rate": "one move at a time, the newest target",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "plan files in lab/inbox, results in lab/outbox (client.move_lie_cursor)",
+       "what": "move the pointer to x, y"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 356,
+       "symbol": "_cursor_run"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 363,
+       "symbol": "_cursor_run"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 337,
+       "symbol": "_move_cursor"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 105,
+       "symbol": "move_lie_cursor"
+      }
+     ]
+    },
+    {
+     "id": "lie-tracker-child",
+     "name": "The mini-game tracker child process",
+     "runs_as": "child process",
+     "started_by": "the mini-game watcher, when the alarm goes up (`Child`: subprocess.Popen)",
+     "lives": "until 60 s after the alarm has gone; also ends when the service closes or its pipe breaks",
+     "does": "`python -m gamelab.control.lie_tracking <lab/lie_target> 15`, hidden, below-normal priority: follows the mini-game's target on the board pictures it is sent. See the process `lie-tracker`.",
+     "rate": "only during a Lie Detector alarm",
+     "talks_to": [
+      {
+       "to": "lie-target",
+       "via": "stdin (pickled)",
+       "what": "board pictures in"
+      },
+      {
+       "to": "lie-target-replies",
+       "via": "stdout (pickled)",
+       "what": "answers out"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 417,
+       "symbol": "Child"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 423,
+       "symbol": "Popen"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 63,
+       "symbol": "CHILD_IDLE_S"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 401,
+       "symbol": "_stop_child"
+      }
+     ]
+    },
+    {
+     "id": "violetta",
+     "name": "The Violetta game watcher",
+     "runs_as": "thread",
+     "started_by": "`Service.serve` at start-up (through `Together.start`)",
+     "lives": "as long as the process (turns itself off for good if the model fails to load or it hits an error)",
+     "does": "While the alarm is up and for 90 s after, it queues the frame loop's frames (45 at most, the oldest dropped). From the Violetta game's window's first sight (looked for every 0.25 s, every 1 s during the game) it finds the Violettas on every frame with a YOLO model (on the GPU if there is one); at each answer window it works out where the made-up one went and starts an answer click. Every 0.5 s it also looks for the 'successfully passed' dialog and clicks its OK through the player (3 tries at most, 3 s apart; the click waits on this thread). Only at the game's own 1366x768. Thread name `violetta`.",
+     "rate": "every frame while the alarm is up and 90 s after; idle otherwise",
+     "talks_to": [
+      {
+       "to": "frame-loop",
+       "via": "the deque VioletaLive._queue + threading.Condition VioletaLive._cond",
+       "what": "frames"
+      },
+      {
+       "to": "violetta-load",
+       "via": "starts it; reads VioletaLive.detector once set",
+       "what": "the model"
+      },
+      {
+       "to": "violetta-answer",
+       "via": "starts one per round",
+       "what": "the slot to click"
+      },
+      {
+       "to": "player",
+       "via": "plan files in lab/inbox (client.click_lie_ok, kind lie_ok)",
+       "what": "click the pass's OK"
+      },
+      {
+       "to": "telemetry-writer",
+       "via": "telemetry.emit",
+       "what": "`violetta` records: begin, round, answer, end, ok"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 118,
+       "symbol": "start"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 136,
+       "symbol": "run"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 152,
+       "symbol": "step"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 83,
+       "symbol": "saw"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 278,
+       "symbol": "_look_for_ok"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 149,
+       "symbol": "click_lie_ok"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 164,
+       "symbol": ""
+      }
+     ]
+    },
+    {
+     "id": "violetta-load",
+     "name": "The Violetta model loader",
+     "runs_as": "thread",
+     "started_by": "the Violetta watcher, when the alarm goes up and the model isn't loaded",
+     "lives": "until the model is loaded (seconds)",
+     "does": "Loads the Violetta YOLO model onto the GPU before the game's window shows, so the frame loop and the watcher never wait for it. Thread name `violetta-load`.",
+     "rate": "once per process, at the first alarm",
+     "talks_to": [
+      {
+       "to": "violetta",
+       "via": "sets VioletaLive.detector",
+       "what": "the loaded model"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 157,
+       "symbol": "_load"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 195,
+       "symbol": "_load"
+      }
+     ]
+    },
+    {
+     "id": "violetta-answer",
+     "name": "The Violetta answer clicker",
+     "runs_as": "thread",
+     "started_by": "the Violetta watcher, once per round",
+     "lives": "until its click is done or the answer buttons go dark",
+     "does": "Clicks the chosen answer button through the elevated player (`client.click_lie_answer`: one move and one left click, plan kind `lie_cursor`), withdrawn if the buttons go dark first. Thread name `violetta-answer`.",
+     "rate": "one per round (4 rounds a game)",
+     "talks_to": [
+      {
+       "to": "player",
+       "via": "plan files in lab/inbox, results in lab/outbox",
+       "what": "click slot N's button"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 251,
+       "symbol": "_answer"
+      },
+      {
+       "path": "gamelab/control/violetta_live.py",
+       "line": 265,
+       "symbol": "answering"
+      },
+      {
+       "path": "gamelab/control/client.py",
+       "line": 157,
+       "symbol": "click_lie_answer"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "lie-tracker",
+   "is_os_process": true,
+   "plain_md": "**What it is.** A short-lived helper process of the perception service that follows the Lie Detector mouse mini-game's target: `python -m gamelab.control.lie_tracking <gamelab/lab/lie_target> 15`, its own Windows process, hidden (no window), below-normal priority, not elevated.\n\n**Who starts it, and when.** Never you or the babysitter. The service's mini-game watcher thread starts it as soon as it sees the alarm file `gamelab/lab/ALARM.json` (written by the elevated player's watchdog when it sees a Lie Detector, or by a command that sees one), and stops it 60 s after the alarm has gone (a `quit` message, then a kill if it doesn't end within 5 s). It also ends when the service closes (a `quit`) or dies (its stdin closes). So it exists only for a minute or two per Lie Detector.\n\n**Why apart.** Following the target takes about 52-64 ms a frame with OpenCV on 6 to 12 threads (it uses 6); inside the service, where OpenCV has one thread and the frame loop shares Python's lock, it took 78 ms, more than the 66 ms between frames at 15 a second.\n\n**What it does.** It never looks at the screen or touches the game: board pictures come down its stdin, one each time it says it is ready; it writes each round's answers to `gamelab/lab/lie_target/<time>.jsonl` and sends the target's position back up its stdout. The service then moves the mouse through the elevated player. Its stderr goes nowhere, so its failures show only as `error` replies in the service's log.",
+   "expected_start": "spawned by perceive (its mini-game watcher thread) when the Lie Detector alarm goes up",
+   "started_by": [
+    "perceive"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 417,
+     "symbol": "Child"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 423,
+     "symbol": "Popen"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 186,
+     "symbol": "step"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 63,
+     "symbol": "CHILD_IDLE_S"
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 14,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/control/lie_tracking.py",
+     "line": 401,
+     "symbol": "_stop_child"
+    }
+   ],
+   "components": [
+    {
+     "id": "tracker-loop",
+     "name": "The tracker loop",
+     "runs_as": "main thread",
+     "started_by": "the process's start (`serve`, from its `__main__`)",
+     "lives": "until `quit` or its stdin closes",
+     "does": "Says `ready`, then reads messages one by one: `begin` opens the round's file and makes a fresh target tracker; each `frame` (the board's 750x500 picture) is one step of the tracker, an answer line written and `ready` sent back with it; `end` writes the round's summary line (frames, answers, skipped, median and worst ms) and replies `ended`. An error is replied as `error` and the next message taken.",
+     "rate": "one frame at a time, as sent (about 52-64 ms each)",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "stdin (pickled begin, frame, end, quit) / stdout (pickled ready, ended, error)",
+       "what": "board pictures in, the target's position out"
+      },
+      {
+       "to": "tracker-pool",
+       "via": "futures (lie_target._pool)",
+       "what": "the frame's work spread over threads"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 449,
+       "symbol": "serve"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 462,
+       "symbol": "reply"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 532,
+       "symbol": "serve"
+      }
+     ]
+    },
+    {
+     "id": "tracker-pool",
+     "name": "The tracker's worker threads",
+     "runs_as": "thread pool",
+     "started_by": "the tracker, at its first frame (`lie_target._pool`); OpenCV's own threads at start-up",
+     "lives": "as long as the process",
+     "does": "OpenCV runs on 6 threads here (the service's runs on 1), and the tracker's own pool `lie-target` has as many for the optical flow, the masks and the particle filter's scores, which let go of Python's lock.",
+     "rate": "every frame stepped",
+     "talks_to": [
+      {
+       "to": "tracker-loop",
+       "via": "futures",
+       "what": "partial results of the frame"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 531,
+       "symbol": "CHILD_THREADS"
+      },
+      {
+       "path": "gamelab/control/lie_tracking.py",
+       "line": 64,
+       "symbol": "CHILD_THREADS"
+      },
+      {
+       "path": "gamelab/perception/lie_target.py",
+       "line": 271,
+       "symbol": "_pool"
+      },
+      {
+       "path": "gamelab/perception/lie_target.py",
+       "line": 280,
+       "symbol": "ThreadPoolExecutor"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "process": "partwriter",
+   "is_os_process": true,
+   "plain_md": "**What it is.** A one-shot helper process of the perception service that writes one saved stretch of the rolling recording to disk: `python -m gamelab.control.partwriter`, its own Windows process, hidden, below-normal priority (Idle if the service runs at Idle), its threads at the lowest priority, not elevated.\n\n**Who starts it, and when.** Never you or the babysitter. The service's saver thread starts one per save, one at a time: after a Lie Detector cycle (the 5 minutes before it, then its clip), for a Truth Booth with no test seen, and for each `python -m gamelab save-recent`. It ends as soon as its part is written; the service kills it after 600 s and then writes the part itself, as it does when the child can't start or fails.\n\n**Why apart.** Encoding is heavy: a 120 s save written inside the service made the frame loop drop to 8-10 frames a second (Python's lock); written apart, the loop barely notices.\n\n**What it does.** The service pipes the compressed frames down its stdin; it reads them all, decodes them and encodes them to JPEG (PNG for an alarm's clip, a Truth Booth save and a `save-recent` asked lossless) on 4 threads (2 while a hunting command is attached), writes the folder (the frames, `index.jsonl`, `summary.json`) and prints one JSON line with the summary. It never looks at the screen or touches the game. If the service dies while still sending, it gets a broken stdin, says `error` and exits.",
+   "expected_start": "spawned by perceive (its recording's saver thread), one per save",
+   "started_by": [
+    "perceive"
+   ],
+   "evidence": [
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 1124,
+     "symbol": "write_part_apart"
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 1146,
+     "symbol": "Popen"
+    },
+    {
+     "path": "gamelab/control/partwriter.py",
+     "line": 23,
+     "symbol": "main"
+    },
+    {
+     "path": "gamelab/control/partwriter.py",
+     "line": 33,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/control/partwriter.py",
+     "line": 39,
+     "symbol": ""
+    },
+    {
+     "path": "gamelab/control/rolling.py",
+     "line": 892,
+     "symbol": ""
+    }
+   ],
+   "components": [
+    {
+     "id": "writer-main",
+     "name": "The part writer's main thread",
+     "runs_as": "main thread",
+     "started_by": "the process's start (`partwriter.main`)",
+     "lives": "until the part is written (or it fails)",
+     "does": "Reads a header (the folder, the save's info, fps, png or not, how many threads, how many moments) and then every moment from stdin into memory, writes the part with `rolling.write_part`, and prints `{\"summary\": ...}` (exit 0) or `{\"error\": ...}` (exit 1).",
+     "rate": "once",
+     "talks_to": [
+      {
+       "to": "perceive",
+       "via": "stdin (pickled header and moments) / stdout (one JSON line)",
+       "what": "the frames in, the summary out"
+      },
+      {
+       "to": "writer-pool",
+       "via": "ThreadPoolExecutor.map",
+       "what": "chains of frames to encode"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/partwriter.py",
+       "line": 23,
+       "symbol": "main"
+      },
+      {
+       "path": "gamelab/control/partwriter.py",
+       "line": 31,
+       "symbol": "head"
+      },
+      {
+       "path": "gamelab/control/partwriter.py",
+       "line": 37,
+       "symbol": "write_part"
+      },
+      {
+       "path": "gamelab/control/partwriter.py",
+       "line": 42,
+       "symbol": "summary"
+      }
+     ]
+    },
+    {
+     "id": "writer-pool",
+     "name": "The encoder threads",
+     "runs_as": "thread pool",
+     "started_by": "`rolling.write_part`, inside the main thread's call",
+     "lives": "for the write",
+     "does": "Decodes each chain of frames (a whole frame and its differences) and encodes them to JPEG or PNG, a batch at a time, at the lowest thread priority. 4 threads, or 2 while a hunting command is attached to the service. Pool name `rolling-writer`.",
+     "rate": "all the part's frames, as fast as the CPU allows (300 s of frames took 24-31 s in the service)",
+     "talks_to": [
+      {
+       "to": "writer-main",
+       "via": "futures",
+       "what": "encoded frames, written to the folder by the main thread"
+      }
+     ],
+     "evidence": [
+      {
+       "path": "gamelab/control/rolling.py",
+       "line": 1099,
+       "symbol": "ThreadPoolExecutor"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 90,
+       "symbol": "WRITERS"
+      },
+      {
+       "path": "gamelab/control/recording.py",
+       "line": 91,
+       "symbol": "WRITERS_HUNTING"
+      },
+      {
+       "path": "gamelab/control/partwriter.py",
+       "line": 20,
+       "symbol": "LOWEST"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
