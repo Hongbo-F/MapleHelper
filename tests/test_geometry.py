@@ -168,6 +168,8 @@ PX_ON_PURPOSE = {
     ("localization/senses.py", "ROPE_MATCH_PX"): "ROPE_PAD, a sum of px converted where it's used",
     ("localization/tracking.py", "EDGE_PX"): "View.edge's default, 1920x1080's; worldstate sets it per look",
     ("perception/exact.py", "NEAR_PX"): "the exact finder's: it runs at the game's own size alone",
+    ("perception/lie_target.py", "EDGE_PX"): "the Lie Detector board's own px: its crop is cut at 1366x768 alone",
+    ("perception/lie_target.py", "GRID_PX"): "the Lie Detector board's own px: its crop is cut at 1366x768 alone",
 }
 
 
