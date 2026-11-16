@@ -362,8 +362,9 @@ def _import_all() -> None:
     write guard would then stop the run)."""
     import gamelab
     for info in pkgutil.walk_packages(gamelab.__path__, "gamelab.", onerror=lambda name: None):
-        if info.name == "gamelab.__main__" or info.name.startswith("gamelab.sim"):
-            continue
+        if info.name == "gamelab.__main__" or info.name.startswith(("gamelab.sim", "gamelab.ui.tls.")):
+            continue  # (ui.tls's decryption: the web page's, imported at its first request, never by a run; it needs
+            # `cryptography`, a package outside the baseline's key, baseline.PACKAGES: test_baseline)
         try:
             importlib.import_module(info.name)
         except Exception:  # a module this machine can't load (it can't run in a scenario either)
