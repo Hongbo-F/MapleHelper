@@ -27,7 +27,9 @@ runs normally and talks to it through files. To keep that safe it only ever:
   as any plan and held to the alarm as any, at the moment it asks, the keys held then that it holds kept down,
 - writes results to gamelab/lab/outbox.
 
-Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears, after 24 idle
+One runs at a time on the PC (a named mutex, MUTEX, as the perception service's): a second refuses to start, before it
+touches the inbox, the log or the running one's plans (it would have taken the first one's plans, its claimed one's
+marker among them, for left over). Its code and key list are loaded once at startup. It exits when gamelab/lab/STOP appears, after 24 idle
 hours (not while it records a Lie Detector) or after a Lie Detector, as above: plans are taken again
 only by a player started again, which takes the user's UAC click. Start it with `python -m gamelab
 player --elevate`; stop it with `python -m gamelab stop-player`.
@@ -37,8 +39,10 @@ up), and control.lie_recorder, perception.lie_detector and perception.framecheck
 paths, screen and window) when a Watchdog is created. Plans come from control.client.
 """
 
+import ctypes
 import json
 import os
+import sys
 import threading
 import time
 import traceback
@@ -1025,10 +1029,48 @@ def _press(allowed: dict[str, Key], name: str, down: bool) -> None:
         win32.send_key(allowed[name], down)
 
 
+MUTEX = "Local\\gamelab-player"  # one player at a time on this PC (`only_one`)
+ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS = 5, 183
+
+
+def only_one(name: str = MUTEX):
+    """A named mutex held for as long as this process runs, so only one player runs on the PC: its handle, or None if
+    another player holds it (control.rolling.only_one's way; an elevated player's is refused to one not elevated, which
+    says as much)."""
+    if sys.platform != "win32":
+        return True
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = wintypes.HANDLE
+    k32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = k32.CreateMutexW(None, False, name)
+    error = ctypes.get_last_error()
+    if not handle:
+        if error == ERROR_ACCESS_DENIED:
+            return None
+        raise ctypes.WinError(error)
+    if error == ERROR_ALREADY_EXISTS:
+        k32.CloseHandle(handle)
+        return None
+    return handle
+
+
 def _log(msg: str) -> None:
     """A line in the player's log (paths.PLAYER_LOG)."""
     with open(PLAYER_LOG, "a", encoding="utf-8") as f:
         f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+
+
+_HELD = None  # the mutex `serve` took, held until the process ends
+
+
+def _pid_running() -> str:
+    """The running player's pid as it wrote it (PLAYER_INFO), for its log; '?' if it can't be read."""
+    try:
+        return str(json.loads(PLAYER_INFO.read_text(encoding="utf-8"))["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "?"
 
 
 def _rotate_log(limit: int = LOG_MAX_BYTES) -> None:
@@ -1077,6 +1119,12 @@ def serve() -> None:
     with the alarm up, takes no plan before the watchdog's first look at the game, and stops if the watchdog does."""
     for d in (LAB, INBOX, OUTBOX):
         d.mkdir(parents=True, exist_ok=True)
+    global _HELD
+    _HELD = only_one()
+    if _HELD is None:
+        _log(f"refusing to start: another player is running (pid {_pid_running()}); `python -m gamelab stop-player` "
+             "stops it")
+        return
     _rotate_log()
     STOP.unlink(missing_ok=True)
     if alarm_up():
